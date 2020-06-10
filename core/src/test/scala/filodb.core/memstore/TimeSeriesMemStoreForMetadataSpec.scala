@@ -25,10 +25,12 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
 
   val metadataKeyLabelValues = Map("ignore" -> "ignore")
   val jobQueryResult1 = Map(("job".utf8, "myCoolService".utf8))
-  val jobQueryResult2 = Map(("__name__".utf8, "http_req_total".utf8),
+  val jobQueryResult2 = Map(("job".utf8, "myCoolService".utf8),
     ("id".utf8, "0".utf8),
-    ("instance".utf8, "someHost:8787".utf8),
-    ("job".utf8, "myCoolService".utf8))
+    ("__name__".utf8, "http_req_total".utf8),
+    ("_type_".utf8 -> "schemaID:35859".utf8),
+    ("instance".utf8, "someHost:8787".utf8)
+    )
 
   val now = System.currentTimeMillis()
   val numRawSamples = 1000

@@ -35,6 +35,15 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
   val localPlanner = new SingleClusterPlanner(dataset.ref, schemas, mapperRef, earliestRetainedTimestampFn = 0,
     queryConfig)
 
+  val startSeconds = 1000
+  val endSeconds = 10000
+  val localPartitionStart = 3000
+  val lookbackMs = 300000
+  val step = 100
+
+  def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("local", "local-url",
+    TimeRange(timeRange.startMs, timeRange.endMs)))
+
   it ("should not generate PromQlExec plan when partitions are local") {
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
@@ -58,30 +67,26 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
   }
 
   it ("should generate local & PromQlRemoteExec plan") {
-    val startSeconds = 1000
-    val endSeconds = 10000
-    val localPartitionStart = 3000
-    val lookbackMs = 300000
-    val step = 100
+
+    def twoPartitions(timeRange: TimeRange): List[PartitionAssignment] = List(
+      PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
+        localPartitionStart * 1000 - 1)), PartitionAssignment("local", "local-url",
+        TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
-       if (routingKey.equals(Map("job" -> "app")))
-        List(PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
-          localPartitionStart * 1000 - 1)), PartitionAssignment("local", "local-url",
-          TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+       if (routingKey.equals(Map("job" -> "app"))) twoPartitions(timeRange)
        else Nil
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
-          localPartitionStart * 1000 - 1)), PartitionAssignment("local", "local-url",
-          TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = twoPartitions(timeRange)
+
     }
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
 
-    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds, processMultiPartition = true)
+    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds,
+      processMultiPartition = true)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -123,10 +128,10 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
   it ("should generate only local exec for fixed scalar queries") {
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        partitions(timeRange)
 
       override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        partitions(timeRange)
     }
 
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
@@ -142,17 +147,18 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
   it ("should generate BinaryJoinExec plan when lhs and rhs are in local partition") {
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        partitions(timeRange)
 
       override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        partitions(timeRange)
     }
 
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
       TimeStepParams(1000, 100, 2000))
 
-    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 100, 2000, processMultiPartition = true)
+    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 100, 2000,
+      processMultiPartition = true)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -160,19 +166,23 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
   }
 
   it ("should generate PromQlRemoteExec plan for BinaryJoin when lhs and rhs are in same remote partition") {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
+      TimeRange(timeRange.startMs, timeRange.endMs)))
+
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        partitions(timeRange)
 
       override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        partitions(timeRange)
     }
 
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
       TimeStepParams(1000, 100, 10000))
 
-    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 100, 10000, processMultiPartition = true)
+    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 100, 10000,
+      processMultiPartition = true)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -182,24 +192,39 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
   }
 
   it ("should generate Exec plan for Metadata query") {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] =
+      List(PartitionAssignment("remote", "remote-url",
+      TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
+      PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        partitions(timeRange)
 
       override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+        partitions(timeRange)
     }
 
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     val lp = Parser.metadataQueryToLogicalPlan("http_requests_total{job=\"prometheus\", method=\"GET\"}",
-      TimeStepParams(1000, 100, 2000))
+      TimeStepParams(startSeconds, step, endSeconds))
 
     val promQlQueryParams = PromQlQueryParams(
-      "http_requests_total{job=\"prometheus\", method=\"GET\"}", 1000, 100, 2000, processMultiPartition = true)
+      "http_requests_total{job=\"prometheus\", method=\"GET\"}", startSeconds, step, endSeconds,
+      processMultiPartition = true)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[PartKeysDistConcatExec] shouldEqual (true)
+    execPlan.children(0).isInstanceOf[PartKeysDistConcatExec] shouldEqual(true)
+    execPlan.children(1).isInstanceOf[MetadataRemoteExec] shouldEqual(true)
+
+    execPlan.children(1).asInstanceOf[MetadataRemoteExec].params.startSecs shouldEqual(startSeconds)
+    execPlan.children(1).asInstanceOf[MetadataRemoteExec].params.endSecs shouldEqual(localPartitionStart - 1)
+    execPlan.children(0).asInstanceOf[PartKeysDistConcatExec].children(0).asInstanceOf[PartKeysExec].start shouldEqual
+      (localPartitionStart * 1000)
+    execPlan.children(0).asInstanceOf[PartKeysDistConcatExec].children(0).asInstanceOf[PartKeysExec].end shouldEqual
+      (endSeconds * 1000)
   }
 
   it ("should generate local & PromQlRemoteExec from 3 assignments") {
@@ -228,7 +253,8 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     }
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
-    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds, processMultiPartition = true)
+    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds,
+      processMultiPartition = true)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual (3)
@@ -263,8 +289,8 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     localExec.children.length shouldEqual 2
     localExec.children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
 
-    println("expectedStartMs2:" + expectedStartMs2)
-    localExec.children.head.rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper].start shouldEqual expectedStartMs2
+    localExec.children.head.rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper].start shouldEqual
+      expectedStartMs2
     localExec.children.head.asInstanceOf[MultiSchemaPartitionsExec].
       chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual expectedStartMs2 - lookbackMs
     localExec.children.head.asInstanceOf[MultiSchemaPartitionsExec].

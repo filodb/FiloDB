@@ -138,8 +138,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
       }
       SerializedRangeVector(rv, builder, recSchema, printTree(useNewline = false))
-      // TODO: Raw series resuls are incorrect
-      // TODO: can verbose flag affect stitching
+      // TODO: Handle stitching with verbose flag
     }
     span.finish()
     QueryResult(id, resultSchema, rangeVectors)

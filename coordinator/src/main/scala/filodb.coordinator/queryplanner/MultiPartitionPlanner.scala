@@ -51,28 +51,39 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       queryParams.remoteQueryPath, queryParams.processFailure, processMultiPartition = false, queryParams.verbose)
   }
 
-  // scalastyle:off method.length
+  private def partitionUtil(routingKeys: Seq[(String, Option[scala.Seq[String]])], queryParams: PromQlQueryParams,
+                            logicalPlan: LogicalPlan) = {
+    val routingKeyMap = routingKeys.map(x => (x._1, x._2.get.head)).toMap
+    val offsetMs = LogicalPlanUtils.getOffsetMillis(logicalPlan)
+    val periodicSeriesTimeWithOffset = TimeRange((queryParams.startSecs * 1000) - offsetMs,
+      (queryParams.endSecs * 1000) - offsetMs)
+    val lookBackMs = getLookBackMillis(logicalPlan)
+
+    // Time at which raw data would be retrieved which is used to get partition assignments.
+    // It should have time with offset and lookback as we need raw data at time including offset and lookback.
+    val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackMs,
+      periodicSeriesTimeWithOffset.endMs)
+
+    val partitions = partitionLocationProvider.getPartitions(routingKeyMap, queryTimeRange).
+      sortBy(_.timeRange.startMs)
+
+    (partitions, lookBackMs, offsetMs)
+  }
+
+  /**
+    * Materialize all queries except Binary Join and Metadata
+    */
   def materializeSimpleQuery(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
     val routingKeys = getRoutingKeys(logicalPlan)
     if (routingKeys.forall(_._2.isEmpty)) localPartitionPlanner.materialize(logicalPlan, qContext)
     else {
-      val routingKeyMap = routingKeys.map(x => (x._1, x._2.get.head)).toMap
-      val offsetMs = LogicalPlanUtils.getOffsetMillis(logicalPlan)
       val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-      val isInstantQuery: Boolean = if (queryParams.startSecs == queryParams.endSecs) true else false
-      val periodicSeriesTimeWithOffset = TimeRange((queryParams.startSecs * 1000) - offsetMs,
-        (queryParams.endSecs * 1000) - offsetMs)
-      val lookBackMs = getLookBackMillis(logicalPlan)
       val stepMs = queryParams.stepSecs * 1000
-      // Time at which raw data would be retrieved which is used to get partition assignments.
-      // It should have time with offset and lookback as we need raw data at time including offset and lookback.
-      val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackMs,
-        periodicSeriesTimeWithOffset.endMs)
+      val isInstantQuery: Boolean = if (queryParams.startSecs == queryParams.endSecs) true else false
 
-      val partitions = partitionLocationProvider.getPartitions(routingKeyMap, queryTimeRange).
-        sortBy(_.timeRange.startMs)
-      var prevPartitionStart = periodicSeriesTimeWithOffset.startMs
+      val (partitions, lookBackMs, offsetMs) = partitionUtil(routingKeys, queryParams, logicalPlan)
+      var prevPartitionStart = queryParams.startSecs * 1000
       val execPlans = partitions.zipWithIndex.map { case (p, i) =>
         // First partition should start from query start time
         // No need to calculate time according to step for instant queries
@@ -101,26 +112,14 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       // Sort to move RemoteExec in end as it does not have schema
     }
   }
-  // scalastyle:on method.length
 
   def materializeBinaryJoin(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
     val routingKeys = getRoutingKeys(logicalPlan)
     if (routingKeys.forall(_._2.isEmpty)) localPartitionPlanner.materialize(logicalPlan, qContext)
     else {
-      val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)
       val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-      val periodicSeriesTimeWithOffset = TimeRange((queryParams.startSecs * 1000) - offsetMillis,
-        (queryParams.endSecs * 1000) - offsetMillis)
-      val lookBackTimeMs = getLookBackMillis(logicalPlan)
-      // Time at which raw data would be retrieved which is used to get partition assignments.
-      // It should have time with offset and lookback as we need raw data at time including offset and lookback.
-      val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackTimeMs,
-        periodicSeriesTimeWithOffset.endMs)
-      // Lhs & Rhs in Binary Join can have different values
-      val routingKeyMap = routingKeys.flatMap(x => x._2.get.map(y => (x._1, y))).toMap
-      val partitions = partitionLocationProvider.getPartitions(routingKeyMap, queryTimeRange).
-        sortBy(_.timeRange.startMs)
+      val partitions = partitionUtil(routingKeys, queryParams, logicalPlan)._1
       val partitionName = partitions.head.partitionName
 
       // Binary Join supported only for single partition now
