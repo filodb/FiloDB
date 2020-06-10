@@ -1,5 +1,8 @@
 package filodb.cardbuster
 
+import java.time.Instant
+import java.time.format.DateTimeFormatter
+
 import scala.concurrent.Await
 
 import kamon.Kamon
@@ -37,21 +40,54 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
 
   @transient lazy val deleteFilter = dsSettings.filodbConfig
     .as[Seq[Map[String, String]]]("cardbuster.delete-pk-filters").map(_.toSeq)
+  @transient lazy val startTimeGTE = dsSettings.filodbConfig
+    .as[Option[String]]("cardbuster.delete-startTimeGTE").map { str =>
+    Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str)).toEpochMilli
+  }
+  @transient lazy val startTimeLTE = dsSettings.filodbConfig
+    .as[Option[String]]("cardbuster.delete-startTimeLTE").map { str =>
+    Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str)).toEpochMilli
+  }
+  @transient lazy val endTimeGTE = dsSettings.filodbConfig
+    .as[Option[String]]("cardbuster.delete-endTimeGTE").map { str =>
+    Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str)).toEpochMilli
+  }
+  @transient lazy val endTimeLTE = dsSettings.filodbConfig
+    .as[Option[String]]("cardbuster.delete-endTimeLTE").map { str =>
+    Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str)).toEpochMilli
+  }
 
   def bustIndexRecords(shard: Int): Unit = {
-    BusterContext.log.info(s"Busting cardinality in shard=$shard with filter=$deleteFilter")
-    val toDelete = colStore.scanPartKeys(dataset, shard).map(_.partKey)
-      .filter { pk =>
-        val rawSchemaId = RecordSchema.schemaID(pk, UnsafeUtils.arayOffset)
-        val schema = schemas(rawSchemaId)
-        val pkPairs = schema.partKeySchema.toStringPairs(pk, UnsafeUtils.arayOffset)
-        val willDelete = deleteFilter.exists(filter => filter.forall(pkPairs.contains))
-        if (willDelete) {
-          BusterContext.log.debug(s"Deleting part key ${schema.partKeySchema.stringify(pk)}")
-          numPartKeysDeleting.increment()
+    BusterContext.log.info(s"Busting cardinality in shard=$shard with " +
+      s"filter=$deleteFilter " +
+      s"inDownsampleTables=$inDownsampleTables " +
+      s"startTimeGTE=$startTimeGTE " +
+      s"startTimeLTE=$startTimeLTE " +
+      s"endTimeGTE=$endTimeGTE " +
+      s"endTimeLTE=$endTimeLTE "
+    )
+    val toDelete = colStore.scanPartKeys(dataset, shard)
+      .filter { pkr =>
+        val timeOk = startTimeGTE.forall(pkr.startTime >= _) &&
+                          startTimeLTE.forall(pkr.startTime <= _) &&
+                          endTimeGTE.forall(pkr.endTime >= _) &&
+                          endTimeLTE.forall(pkr.endTime <= _)
+
+        if (timeOk) {
+          val pk = pkr.partKey
+          val rawSchemaId = RecordSchema.schemaID(pk, UnsafeUtils.arayOffset)
+          val schema = schemas(rawSchemaId)
+          val pkPairs = schema.partKeySchema.toStringPairs(pk, UnsafeUtils.arayOffset)
+          val willDelete = deleteFilter.exists(filter => filter.forall(pkPairs.contains))
+          if (willDelete) {
+            BusterContext.log.debug(s"Deleting part key ${schema.partKeySchema.stringify(pk)}")
+            numPartKeysDeleting.increment()
+          }
+          willDelete
+        } else {
+          false
         }
-        willDelete
-      }
+      }.map(_.partKey)
     val fut = colStore.deletePartKeys(dataset, shard, toDelete)
     val numKeysDeleted = Await.result(fut, dsSettings.cassWriteTimeout)
     BusterContext.log.info(s"Deleted keys from shard shard=$shard numKeysDeleted=$numKeysDeleted")
