@@ -73,8 +73,6 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
-    if (shardMapperFunc == null) throw new IllegalStateException("ShardMapper is not available")
-
     val materialized = walkLogicalPlanTree(logicalPlan, qContext)
     match {
       case PlanResult(Seq(justOne), stitch) =>
