@@ -207,4 +207,16 @@ class LogicalPlanSpec extends FunSpec with Matchers {
    res.get(2).labelValueOperators(1).value.shouldEqual(Seq("Inst-1"))
    res.get(2).labelValueOperators(1).operator.shouldEqual("!~")
  }
+
+  it("should have equal hashcode for identical LabelValueOperatorGroups") {
+    val rawSeries1 = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("name", Equals("MetricName")),
+      ColumnFilter("instance", NotEquals("Inst-0"))), Seq("name", "instance"), Some(300000), None)
+    val periodicSeriesWithWindowing1 = PeriodicSeriesWithWindowing(rawSeries1, 1000, 500, 5000, 100, SumOverTime)
+    val res1 = LogicalPlan.getLabelValueOperatorsFromLogicalPlan(periodicSeriesWithWindowing1)
+    val rawSeries2 = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("instance", NotEquals("Inst-0")),
+      ColumnFilter("name", Equals("MetricName"))), Seq("name", "instance"), Some(300000), None)
+    val periodicSeriesWithWindowing2 = PeriodicSeriesWithWindowing(rawSeries2, 1000, 500, 5000, 100, SumOverTime)
+    val res2 = LogicalPlan.getLabelValueOperatorsFromLogicalPlan(periodicSeriesWithWindowing2)
+    res1.get.hashCode() shouldEqual res2.get.hashCode()
+  }
 }
