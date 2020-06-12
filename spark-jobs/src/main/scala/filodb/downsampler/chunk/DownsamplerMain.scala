@@ -7,6 +7,7 @@ import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 
+import filodb.coordinator.KamonShutdownHook
 import filodb.downsampler.DownsamplerContext
 
 /**
@@ -100,10 +101,13 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
     DownsamplerContext.dsLogger.info(s"Cassandra split size: ${splits.size}. We will have this many spark " +
       s"partitions. Tune splitsPerNode which was ${settings.splitsPerNode} if parallelism is low")
 
+    KamonShutdownHook.registerShutdownHook()
+
     spark.sparkContext
       .makeRDD(splits)
       .mapPartitions { splitIter =>
-        Kamon.init() // kamon init should be first thing in worker jvm
+        Kamon.init()
+        KamonShutdownHook.registerShutdownHook()
         import filodb.core.Iterators._
         val rawDataSource = batchDownsampler.rawCassandraColStore
         val batchReadSpan = Kamon.spanBuilder("cassandra-raw-data-read-latency").start()
@@ -117,7 +121,8 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
         batchIter // iterator of batches
       }
       .foreach { rawPartsBatch =>
-        Kamon.init() // kamon init should be first thing in worker jvm
+        Kamon.init()
+        KamonShutdownHook.registerShutdownHook()
         batchDownsampler.downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
       }
 

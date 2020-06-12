@@ -65,12 +65,14 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner], plannerSelecto
 
   private def materializeLabelValues(logicalPlan: LogicalPlan, qContext: QueryContext) = {
     val execPlans = planners.values.toList.distinct.map(_.materialize(logicalPlan, qContext))
-    LabelValuesDistConcatExec(qContext, InProcessPlanDispatcher, execPlans)
+    if (execPlans.size == 1) execPlans.head
+    else LabelValuesDistConcatExec(qContext, InProcessPlanDispatcher, execPlans)
   }
 
   private def materializeSeriesKeysFilters(logicalPlan: LogicalPlan, qContext: QueryContext) = {
     val execPlans = planners.values.toList.distinct.map(_.materialize(logicalPlan, qContext))
-    PartKeysDistConcatExec(qContext, InProcessPlanDispatcher, execPlans)
+    if (execPlans.size == 1) execPlans.head
+    else PartKeysDistConcatExec(qContext, InProcessPlanDispatcher, execPlans)
   }
 }
 
