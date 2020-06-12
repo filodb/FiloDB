@@ -33,7 +33,8 @@ final case class ReduceAggregateExec(queryContext: QueryContext,
     val task = for { schema <- firstSchema }
                yield {
                  val aggregator = RowAggregator(aggrOp, aggrParams, schema)
-                 RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key)
+                 RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key,
+                   querySession.qContext.groupByCardLimit)
                }
     Observable.fromTask(task).flatten
   }
@@ -74,10 +75,12 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
       sourceSchema.fixedVectorLen.filter(_ <= querySession.queryConfig.fastReduceMaxWindows).map { numWindows =>
         RangeVectorAggregator.fastReduce(aggregator, false, source, numWindows)
       }.getOrElse {
-        RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping)
+        RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping,
+          querySession.qContext.groupByCardLimit)
       }
     } else {
-      RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping)
+      RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping,
+        querySession.qContext.groupByCardLimit)
     }
   }
 
@@ -126,11 +129,17 @@ object RangeVectorAggregator extends StrictLogging {
   def mapReduce(rowAgg: RowAggregator,
                 skipMapPhase: Boolean,
                 source: Observable[RangeVector],
-                grouping: RangeVector => RangeVectorKey): Observable[RangeVector] = {
+                grouping: RangeVector => RangeVectorKey,
+                cardinalityLimit: Int = Int.MaxValue): Observable[RangeVector] = {
     // reduce the range vectors using the foldLeft construct. This results in one aggregate per group.
     val task = source.toListL.map { rvs =>
       // now reduce each group and create one result range vector per group
       val groupedResult = mapReduceInternal(rvs, rowAgg, skipMapPhase, grouping)
+
+      // if group-by cardinality breaches the limit, throw exception
+      if (groupedResult.size > cardinalityLimit)
+        throw new BadQueryException(s"This query results in more than $cardinalityLimit group-by cardinality limit. " +
+          s"Try applying more filters")
       groupedResult.map { case (rvk, aggHolder) =>
         val rowIterator = aggHolder.map(_.toRowReader)
         IteratorBackedRangeVector(rvk, rowIterator)
