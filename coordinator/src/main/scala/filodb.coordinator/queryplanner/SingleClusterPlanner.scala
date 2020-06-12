@@ -73,6 +73,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
+
     val materialized = walkLogicalPlanTree(logicalPlan, qContext)
     match {
       case PlanResult(Seq(justOne), stitch) =>
