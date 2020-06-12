@@ -100,6 +100,19 @@ final class QueryActor(memStore: MemStore,
   private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").withTags(TagSet.from(tags))
   private val queryErrors = Kamon.counter("queryactor-query-errors").withTags(TagSet.from(tags))
 
+  /**
+    * Instrumentation adds following metrics on the Query Scheduler
+    *
+    * # Counter
+    * executor_tasks_submitted_total{type="ThreadPoolExecutor",name="query-sched-prometheus"}
+    * # Counter
+    * executor_tasks_completed_total{type="ThreadPoolExecutor",name="query-sched-prometheus"}
+    * # Histogram
+    * executor_threads_active{type="ThreadPoolExecutor",name="query-sched-prometheus"}
+    * # Histogram
+    * executor_queue_size_count{type="ThreadPoolExecutor",name="query-sched-prometheus"}
+    *
+    */
   private def createInstrumentedQueryScheduler(): SchedulerService = {
     val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor")
                                       * sys.runtime.availableProcessors).toInt
@@ -149,7 +162,7 @@ final class QueryActor(memStore: MemStore,
           // Unhandled exception in query, should be rare
           logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
           replyTo ! QueryError(q.queryContext.queryId, ex)
-      }(queryScheduler)
+        }(queryScheduler)
     }
   }
 
