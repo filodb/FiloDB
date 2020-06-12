@@ -29,16 +29,18 @@ trait PlanDispatcher extends java.io.Serializable {
 case class ActorPlanDispatcher(target: ActorRef) extends PlanDispatcher {
 
   def dispatch(plan: ExecPlan)(implicit sched: Scheduler): Task[QueryResponse] = {
-
-   val queryTimeElapsed = System.currentTimeMillis() - plan.queryContext.submitTime
-   val remainingTime = plan.queryContext.queryTimeoutMillis - queryTimeElapsed
+    val queryTimeElapsed = System.currentTimeMillis() - plan.queryContext.submitTime
+    val remainingTime = plan.queryContext.queryTimeoutMillis - queryTimeElapsed
     // Don't send if time left is very small
-   if (remainingTime < 1) throw QueryTimeoutException(remainingTime, this.getClass.getName)
-   val t = Timeout(FiniteDuration(remainingTime, TimeUnit.MILLISECONDS))
-    val fut = (target ? plan)(t).map {
-      case resp: QueryResponse => resp
-      case e =>  throw new IllegalStateException(s"Received bad response $e")
+    if (remainingTime < 1) {
+      Task.raiseError(QueryTimeoutException(remainingTime, this.getClass.getName))
+    } else {
+      val t = Timeout(FiniteDuration(remainingTime, TimeUnit.MILLISECONDS))
+      val fut = (target ? plan)(t).map {
+        case resp: QueryResponse => resp
+        case e =>  throw new IllegalStateException(s"Received bad response $e")
+      }
+      Task.fromFuture(fut)
     }
-    Task.fromFuture(fut)
   }
 }
