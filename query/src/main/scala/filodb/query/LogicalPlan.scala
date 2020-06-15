@@ -1,5 +1,7 @@
 package filodb.query
 
+import filodb.core
+import filodb.core.query.Filter.EqualsRegex
 import filodb.core.query.{ColumnFilter, RangeParams}
 
 //scalastyle:off number.of.types
@@ -395,6 +397,26 @@ object LogicalPlan {
     } match {
       case Nil => None
       case groupSeq: Seq[LabelValueOperatorGroup] => Some(groupSeq)
+    }
+  }
+
+  def getRegex(logicalPlan: LogicalPlan, regexColumn: String): Option[String] = {
+    val filters = LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
+      case lp: RawSeries => lp.filters.filter(x => x.column.equals(regexColumn) && x.filter.isInstanceOf[EqualsRegex])
+
+      case _            => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
+    }
+
+    if (filters.isEmpty) None else Some(filters.head.filter.asInstanceOf[EqualsRegex].value.toString)
+  }
+
+  def updateFilter(logicalPlan: LogicalPlan, column: String, filter: core.query.Filter): LogicalPlan = {
+    LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
+      case lp: RawSeries => val updatedFilter = lp.filters.filterNot(_.column.equals(column)) :+
+                            ColumnFilter(column, filter)
+                            lp.copy(filters = updatedFilter)
+
+      case _            => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
     }
   }
 }

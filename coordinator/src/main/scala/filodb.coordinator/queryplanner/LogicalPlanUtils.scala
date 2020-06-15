@@ -1,7 +1,5 @@
 package filodb.coordinator.queryplanner
 
-import filodb.core.query.{ColumnFilter, Filter}
-import filodb.core.query.Filter.EqualsRegex
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
 import filodb.query._
@@ -145,23 +143,4 @@ object LogicalPlanUtils {
       labels
     }
 
-  def hasRegex(logicalPlan: LogicalPlan, regexColumn: String): Boolean = {
-    val filters = LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
-      case lp: RawSeries => lp.filters.filter(_.column.equals(regexColumn))
-
-      case _            => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
-    }
-
-    if (filters.isEmpty) false else filters.head.filter.isInstanceOf[EqualsRegex]
-  }
-
-  def updateFilter(logicalPlan: LogicalPlan, column: String, filter: Filter): LogicalPlan = {
-   LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
-      case lp: RawSeries => val updatedFilter = lp.filters.filter(_.column.equals(column)) :+
-                              ColumnFilter(column, filter)
-                            lp.copy(filters = updatedFilter)
-
-      case _            => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
-    }
-  }
 }

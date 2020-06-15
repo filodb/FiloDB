@@ -90,8 +90,8 @@ class SingleClusterPlanner(dsRef: DatasetRef,
             topPlan
         }
     }
-    logger.debug(s"Materialized logical plan for dataset=$dsRef :" +
-      s" $logicalPlan to \n${materialized.printTree()}")
+//    logger.debug(s"Materialized logical plan for dataset=$dsRef :" +
+//      s" $logicalPlan to \n${materialized.printTree()}")
     materialized
 
   }
