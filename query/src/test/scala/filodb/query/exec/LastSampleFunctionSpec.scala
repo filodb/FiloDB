@@ -28,7 +28,7 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
       val lastSamplesIter = new SlidingWindowIterator(rv.rows, start, step, end, 0, LastSampleFunction, queryConfig)
       validateLastSamples(samples, lastSamplesIter, start, end, step)
 
-      val chunkedIter = new ChunkedWindowIteratorD(rv, start, step, end, w, chunkedLSFunc, queryConfig)
+      val chunkedIter = new ChunkedWindowIteratorD(rv, start, step, end, w, chunkedLSFunc, querySession)
       validateLastSamples(samples, chunkedIter, start, end, step)
     }
   }
@@ -40,7 +40,7 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
       val lastSamplesIter = new SlidingWindowIterator(rv.rows, start, step, end, 0, LastSampleFunction, queryConfig)
       validateLastSamples(samples, lastSamplesIter, start, end, step)
 
-      val chunkedIter = new ChunkedWindowIteratorD(rv, start, step, end, w, chunkedLSFunc, queryConfig)
+      val chunkedIter = new ChunkedWindowIteratorD(rv, start, step, end, w, chunkedLSFunc, querySession)
       validateLastSamples(samples, chunkedIter, start, end, step)
     }
   }
@@ -53,7 +53,7 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
       val lastSamplesIter = new SlidingWindowIterator(rv.rows, start, step, end, 0, LastSampleFunction, queryConfig)
       validateLastSamples(samples, lastSamplesIter, start, end, step)
 
-      val chunkedIter = new ChunkedWindowIteratorD(rv, start, step, end, w, chunkedLSFunc, queryConfig)
+      val chunkedIter = new ChunkedWindowIteratorD(rv, start, step, end, w, chunkedLSFunc, querySession)
       validateLastSamples(samples, chunkedIter, start, end, step)
     }
   }
@@ -70,7 +70,7 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
                                                     start, step, end, 0, LastSampleFunction, queryConfig)
     validateLastSamples(samplesWithLongGap, lastSamplesIter, start, end, step)
 
-    val chunkedIter = new ChunkedWindowIteratorD(rvWithLongGap, start, step, end, w, chunkedLSFunc, queryConfig)
+    val chunkedIter = new ChunkedWindowIteratorD(rvWithLongGap, start, step, end, w, chunkedLSFunc, querySession)
     validateLastSamples(samplesWithLongGap, chunkedIter, start, end, step)
   }
 
@@ -85,7 +85,7 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
       start, step, end, 0, LastSampleFunction, queryConfig)
     validateLastSamples(samplesWithLongGap, lastSamplesIter, start, end, step)
 
-    val chunkedIter = new ChunkedWindowIteratorD(rvWithLongGap, start, step, end, w, chunkedLSFunc, queryConfig)
+    val chunkedIter = new ChunkedWindowIteratorD(rvWithLongGap, start, step, end, w, chunkedLSFunc, querySession)
     validateLastSamples(samplesWithLongGap, chunkedIter, start, end, step)
   }
 
@@ -100,7 +100,7 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
       start, step, end, 0, LastSampleFunction, queryConfig)
     validateLastSamples(samplesWithLongGap, lastSamplesIter, start, end, step)
 
-    val chunkedIter = new ChunkedWindowIteratorD(rvWithLongGap, start, step, end, w, chunkedLSFunc, queryConfig)
+    val chunkedIter = new ChunkedWindowIteratorD(rvWithLongGap, start, step, end, w, chunkedLSFunc, querySession)
     validateLastSamples(samplesWithLongGap, chunkedIter, start, end, step)
   }
 

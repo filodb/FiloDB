@@ -10,10 +10,10 @@ import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
-import filodb.core.{DatasetRef, Response}
+import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
-import filodb.core.query.ColumnFilter
+import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
@@ -88,25 +88,28 @@ extends MemStore with StrictLogging {
 
   def lookupPartitions(ref: DatasetRef,
                        partMethod: PartitionScanMethod,
-                       chunkMethod: ChunkScanMethod): PartLookupResult = {
+                       chunkMethod: ChunkScanMethod,
+                       querySession: QuerySession): PartLookupResult = {
     val shard = datasets(ref).get(partMethod.shard)
 
     if (shard == UnsafeUtils.ZeroPointer) {
       throw new IllegalArgumentException(s"Shard $shard of dataset $ref is not assigned to " +
         s"this node. Was it was recently reassigned to another node? Prolonged occurrence indicates an issue.")
     }
-    shard.lookupPartitions(partMethod, chunkMethod)
+    shard.lookupPartitions(partMethod, chunkMethod, querySession)
   }
 
   def scanPartitions(ref: DatasetRef,
-                     lookupRes: PartLookupResult): Observable[ReadablePartition] = {
+                     lookupRes: PartLookupResult,
+                     colIds: Seq[Types.ColumnId],
+                     querySession: QuerySession): Observable[ReadablePartition] = {
     val shard = datasets(ref).get(lookupRes.shard)
 
     if (shard == UnsafeUtils.ZeroPointer) {
       throw new IllegalArgumentException(s"Shard $shard of dataset $ref is not assigned to " +
         s"this node. Was it was recently reassigned to another node? Prolonged occurrence indicates an issue.")
     }
-    shard.scanPartitions(lookupRes)
+    shard.scanPartitions(lookupRes, colIds, querySession)
   }
 
   def activeShards(dataset: DatasetRef): Seq[Int] =

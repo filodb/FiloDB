@@ -33,9 +33,11 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              demandPagingParallelism: Int,
                              demandPagingEnabled: Boolean,
                              evictedPkBfCapacity: Int,
+                             // Amount of free blocks to periodically reclaim, as a percent of total number of blocks
+                             ensureHeadroomPercent: Double,
                              // filters on ingested records to log in detail
                              traceFilters: Map[String, String],
-                             maxQueryMatches: Int) {
+                             maxDataPerShardQuery: Long) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
@@ -57,8 +59,9 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "multi-partition-odp" -> multiPartitionODP,
                                "demand-paging-parallelism" -> demandPagingParallelism,
                                "demand-paging-enabled" -> demandPagingEnabled,
-                               "max-query-matches" -> maxQueryMatches,
-                               "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity).asJava)
+                               "max-data-per-shard-query" -> maxDataPerShardQuery,
+                               "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity,
+                               "ensure-headroom-percent" -> ensureHeadroomPercent).asJava)
 }
 
 final case class AssignShardConfig(address: String, shardList: Seq[Int])
@@ -67,17 +70,23 @@ final case class UnassignShardConfig(shardList: Seq[Int])
 
 object StoreConfig {
   // NOTE: there are no defaults for flush interval and shard memory, those should be explicitly calculated
+  // default max-data-per-shard-query was calculated as follows:
+  // 750k TsPartitions * 48 chunksets queried * 2kb per chunkset / 256 shards = 280MB
+
+  // The num-block-pages setting when multiplied by the page size (4KB) defines the
+  // BlockManager block size. When num-block-pages is 100, the effective block size is 400KB.
+
   val defaults = ConfigFactory.parseString("""
                                            |disk-time-to-live = 3 days
                                            |demand-paged-chunk-retention-period = 72 hours
                                            |max-chunks-size = 400
-                                           |max-query-matches = 250000
+                                           |max-data-per-shard-query = 300 MB
                                            |max-blob-buffer-size = 15000
                                            |ingestion-buffer-mem-size = 10M
                                            |max-buffer-pool-size = 10000
                                            |num-partitions-to-evict = 1000
                                            |groups-per-shard = 60
-                                           |num-block-pages = 1000
+                                           |num-block-pages = 100
                                            |failure-retries = 3
                                            |retry-delay = 15 seconds
                                            |part-index-flush-max-delay = 60 seconds
@@ -86,6 +95,7 @@ object StoreConfig {
                                            |demand-paging-parallelism = 10
                                            |demand-paging-enabled = true
                                            |evicted-pk-bloom-filter-capacity = 5000000
+                                           |ensure-headroom-percent = 5.0
                                            |trace-filters = {}
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
@@ -116,8 +126,9 @@ object StoreConfig {
                 config.getInt("demand-paging-parallelism"),
                 config.getBoolean("demand-paging-enabled"),
                 config.getInt("evicted-pk-bloom-filter-capacity"),
+                config.getDouble("ensure-headroom-percent"),
                 config.as[Map[String, String]]("trace-filters"),
-                config.getInt("max-query-matches"))
+                config.getMemorySize("max-data-per-shard-query").toBytes)
   }
 }
 

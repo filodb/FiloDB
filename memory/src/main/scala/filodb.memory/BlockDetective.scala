@@ -12,8 +12,8 @@ object BlockDetective {
   def containsPtr(ptr: BinaryRegion.NativePointer, blocks: Seq[Block]): Seq[Block] =
     blocks.filter { blk => ptr >= blk.address && ptr < (blk.address + blk.capacity) }
 
-  def containsPtr(ptr: BinaryRegion.NativePointer, blocks: java.util.List[Block]): Seq[Block] =
-    containsPtr(ptr, blocks.asScala)
+  def containsPtr(ptr: BinaryRegion.NativePointer, blocks: java.lang.Iterable[Block]): Seq[Block] =
+    containsPtr(ptr, Seq() ++ blocks.asScala)
 
   /**
    * Produces a string report containing reclaim history and ownership changes for

@@ -259,6 +259,8 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
     val timestampCol = 0
     val rawChunksets = rawPartToDownsample.infos(AllChunkScan)
 
+    require(downsamplers.size > 1, s"Number of downsamplers for ${rawPartToDownsample.stringPartition} should be > 1")
+
     // for each chunk
     while (rawChunksets.hasNext) {
       val chunkset = rawChunksets.nextInfoReader

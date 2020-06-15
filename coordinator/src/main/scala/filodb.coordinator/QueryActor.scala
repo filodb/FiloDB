@@ -1,5 +1,7 @@
 package filodb.coordinator
 
+import java.lang.Thread.UncaughtExceptionHandler
+import java.util.concurrent.{ScheduledThreadPoolExecutor, ThreadFactory}
 import java.util.concurrent.atomic.AtomicLong
 
 import scala.util.control.NonFatal
@@ -8,8 +10,10 @@ import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.dispatch.{Envelope, UnboundedStablePriorityMailbox}
 import com.typesafe.config.Config
 import kamon.Kamon
+import kamon.instrumentation.executor.ExecutorInstrumentation
 import kamon.tag.TagSet
 import monix.execution.Scheduler
+import monix.execution.schedulers.SchedulerService
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
 
@@ -17,7 +21,7 @@ import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
 import filodb.core.metadata.Schemas
-import filodb.core.query.QueryContext
+import filodb.core.query.{QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.CorruptVectorException
 import filodb.query._
 import filodb.query.exec.ExecPlan
@@ -88,8 +92,7 @@ final class QueryActor(memStore: MemStore,
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   val queryPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapFunc,
                                               earliestRawTimestampFn, queryConfig, functionalSpreadProvider)
-  val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor") * sys.runtime.availableProcessors)
-  val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName-$dsRef", numSchedThreads.toInt)
+  val queryScheduler = createInstrumentedQueryScheduler()
 
   private val tags = Map("dataset" -> dsRef.toString)
   private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").withTags(TagSet.from(tags))
@@ -97,54 +100,99 @@ final class QueryActor(memStore: MemStore,
   private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").withTags(TagSet.from(tags))
   private val queryErrors = Kamon.counter("queryactor-query-errors").withTags(TagSet.from(tags))
 
+  /**
+    * Instrumentation adds following metrics on the Query Scheduler
+    *
+    * # Counter
+    * executor_tasks_submitted_total{type="ThreadPoolExecutor",name="query-sched-prometheus"}
+    * # Counter
+    * executor_tasks_completed_total{type="ThreadPoolExecutor",name="query-sched-prometheus"}
+    * # Histogram
+    * executor_threads_active{type="ThreadPoolExecutor",name="query-sched-prometheus"}
+    * # Histogram
+    * executor_queue_size_count{type="ThreadPoolExecutor",name="query-sched-prometheus"}
+    *
+    */
+  private def createInstrumentedQueryScheduler(): SchedulerService = {
+    val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor")
+                                      * sys.runtime.availableProcessors).toInt
+    val schedName = s"$QuerySchedName-$dsRef"
+
+    val thFactory = new ThreadFactory {
+      def newThread(r: Runnable) = {
+        val thread = new Thread(r)
+        thread.setName(s"$schedName-${thread.getId}")
+        thread.setDaemon(true)
+        thread.setUncaughtExceptionHandler(
+          new UncaughtExceptionHandler {
+            override def uncaughtException(t: Thread, e: Throwable): Unit =
+              logger.error("Uncaught Exception in Query Scheduler", e)
+          })
+        thread
+      }
+    }
+    // TODO retaining old fixed size pool for now - later change to fork join pool.
+    val executor = new ScheduledThreadPoolExecutor(numSchedThreads, thFactory)
+    Scheduler.apply(ExecutorInstrumentation.instrument(executor, schedName))
+  }
+
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
-    epRequests.increment()
-    Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
-    Kamon.currentSpan().tag("query-id", q.queryContext.queryId)
-    q.execute(memStore, queryConfig)(queryScheduler)
-      .foreach { res =>
-       FiloSchedulers.assertThreadName(QuerySchedName)
-       replyTo ! res
-       res match {
-         case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
-         case e: QueryError =>
-           queryErrors.increment()
-           logger.debug(s"queryId ${q.queryContext.queryId} Normal QueryError returned from query execution: $e")
-           e.t match {
-             case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dsRef, cve)
-             case t: Throwable =>
-           }
-       }
-     }(queryScheduler).recover { case ex =>
-       // Unhandled exception in query, should be rare
-       logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
-       replyTo ! QueryError(q.queryContext.queryId, ex)
-     }(queryScheduler)
+    if (checkTimeout(q.queryContext, replyTo)) {
+      epRequests.increment()
+      Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
+      Kamon.currentSpan().tag("query-id", q.queryContext.queryId)
+      val querySession = QuerySession(q.queryContext, queryConfig)
+      q.execute(memStore, querySession)(queryScheduler)
+        .foreach { res =>
+          FiloSchedulers.assertThreadName(QuerySchedName)
+          querySession.close()
+          replyTo ! res
+          res match {
+            case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
+            case e: QueryError =>
+              queryErrors.increment()
+              logger.debug(s"queryId ${q.queryContext.queryId} Normal QueryError returned from query execution: $e")
+              e.t match {
+                case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dsRef, cve)
+                case t: Throwable =>
+              }
+          }
+        }(queryScheduler).recover { case ex =>
+          querySession.close()
+          // Unhandled exception in query, should be rare
+          logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
+          replyTo ! QueryError(q.queryContext.queryId, ex)
+        }(queryScheduler)
+    }
   }
 
   private def processLogicalPlan2Query(q: LogicalPlan2Query, replyTo: ActorRef) = {
-    // This is for CLI use only. Always prefer clients to materialize logical plan
-    lpRequests.increment()
-    try {
-      val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
-      self forward execPlan
-    } catch {
-      case NonFatal(ex) =>
-        if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
-          logger.error(s"Exception while materializing logical plan", ex)
-        replyTo ! QueryError("unknown", ex)
+    if (checkTimeout(q.qContext, replyTo)) {
+      // This is for CLI use only. Always prefer clients to materialize logical plan
+      lpRequests.increment()
+      try {
+        val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
+        self forward execPlan
+      } catch {
+        case NonFatal(ex) =>
+          if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
+            logger.error(s"Exception while materializing logical plan", ex)
+          replyTo ! QueryError("unknown", ex)
+      }
     }
   }
 
   private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef): Unit = {
-    try {
-      val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
-      replyTo ! execPlan
-    } catch {
-      case NonFatal(ex) =>
-        if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
-          logger.error(s"Exception while materializing logical plan", ex)
-        replyTo ! QueryError("unknown", ex)
+    if (checkTimeout(q.qContext, replyTo)) {
+      try {
+        val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
+        replyTo ! execPlan
+      } catch {
+        case NonFatal(ex) =>
+          if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
+            logger.error(s"Exception while materializing logical plan", ex)
+          replyTo ! QueryError("unknown", ex)
+      }
     }
   }
 
@@ -158,6 +206,16 @@ final class QueryActor(memStore: MemStore,
       if (destNode != ActorRef.noSender) { destNode.forward(g) }
       else                               { originator ! BadArgument(s"Shard ${g.shard} is not assigned") }
     }
+  }
+
+  def checkTimeout(queryContext: QueryContext, replyTo: ActorRef): Boolean = {
+    // timeout can occur here if there is a build up in actor mailbox queue and delayed delivery
+    val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
+    if (queryTimeElapsed >= queryContext.queryTimeoutMillis) {
+      replyTo ! QueryError(s"Query timeout, $queryTimeElapsed ms > ${queryContext.queryTimeoutMillis}",
+                           QueryTimeoutException(queryTimeElapsed, this.getClass.getName))
+      false
+    } else true
   }
 
   def receive: Receive = {

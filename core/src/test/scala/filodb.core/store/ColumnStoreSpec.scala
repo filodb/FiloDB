@@ -12,7 +12,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.core._
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query.{ColumnFilter, Filter, QuerySession}
 
 // TODO: figure out what to do with this..  most of the tests are really irrelevant
 trait ColumnStoreSpec extends FlatSpec with Matchers
@@ -151,9 +151,11 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
     val filter = ColumnFilter("MonthYear", Filter.Equals(197902))
     val method = FilteredPartitionScan(paramSet.head, Seq(filter))
-    val lookupRes = memStore.lookupPartitions(dataset2.ref, method, AllChunkScan)
+    val lookupRes = memStore.lookupPartitions(dataset2.ref, method, AllChunkScan,
+      querySession = QuerySession.forTestingOnly)
     val rangeVectorObs = memStore.rangeVectors(dataset2.ref, lookupRes, schema2.colIDs("NumArticles").get,
-                                               schema2, false)
+                                               schema2, false,
+                                               QuerySession.forTestingOnly)
     val rangeVectors = rangeVectorObs.toListL.runAsync.futureValue
 
     rangeVectors should have length (1)

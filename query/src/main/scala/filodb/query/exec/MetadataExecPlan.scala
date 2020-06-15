@@ -36,7 +36,7 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
     */
   protected def compose(childResponses: Observable[(QueryResponse, Int)],
                         firstSchema: Task[ResultSchema],
-                        queryConfig: QueryConfig): Observable[RangeVector] = {
+                        querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
       case (QueryResult(_, _, result), _) => result
@@ -68,7 +68,7 @@ final case class LabelValuesDistConcatExec(queryContext: QueryContext,
     */
   protected def compose(childResponses: Observable[(QueryResponse, Int)],
                         firstSchema: Task[ResultSchema],
-                        queryConfig: QueryConfig): Observable[RangeVector] = {
+                        querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
       case (QueryResult(_, _, result), _) => result
@@ -108,7 +108,7 @@ final case class PartKeysExec(queryContext: QueryContext,
   override def enforceLimit: Boolean = false
 
   def doExecute(source: ChunkSource,
-                queryConfig: QueryConfig)
+                querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
     val rvs = source match {
       case memStore: MemStore =>
@@ -140,7 +140,7 @@ final case class  LabelValuesExec(queryContext: QueryContext,
   override def enforceLimit: Boolean = false
 
   def doExecute(source: ChunkSource,
-                queryConfig: QueryConfig)
+                querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
     val parentSpan = Kamon.currentSpan()
     val rvs = if (source.isInstanceOf[MemStore]) {

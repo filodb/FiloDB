@@ -19,11 +19,11 @@ import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
-import filodb.core.query.QueryContext
+import filodb.core.query.{QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryConfig, QueryError => QError, QueryResult => QueryResult2}
+import filodb.query.{QueryError => QError, QueryResult => QueryResult2}
 import filodb.timeseries.TestTimeseriesProducer
 
 //scalastyle:off regex
@@ -42,14 +42,17 @@ class QueryInMemoryBenchmark extends StrictLogging {
   import client.QueryCommands._
   import NodeClusterActor._
 
-  val numShards = 2
+  import filodb.standalone.SimpleProfiler
+  val prof = new SimpleProfiler(5, 60, 50)
+
+  val numShards = 32
   val numSamples = 720   // 2 hours * 3600 / 10 sec interval
   val numSeries = 100
   val startTime = System.currentTimeMillis - (3600*1000)
   val numQueries = 500       // Please make sure this number matches the OperationsPerInvocation below
   val queryIntervalMin = 55  // # minutes between start and stop
   val queryStep = 150        // # of seconds between each query sample "step"
-  val spread = 1
+  val spread = 5
 
   // TODO: move setup and ingestion to another trait
   val system = ActorSystem("test", ConfigFactory.load("filodb-defaults.conf"))
@@ -70,8 +73,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
 
   val storeConf = StoreConfig(ConfigFactory.parseString("""
                   | flush-interval = 1h
-                  | shard-mem-size = 512MB
-                  | ingestion-buffer-mem-size = 50MB
+                  | shard-mem-size = 96MB
+                  | ingestion-buffer-mem-size = 30MB
                   | groups-per-shard = 4
                   | demand-paging-enabled = false
                   """.stripMargin))
@@ -104,6 +107,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   Thread sleep 2000
   cluster.memStore.asInstanceOf[TimeSeriesMemStore].refreshIndexForTesting(dataset.ref) // commit lucene index
   println(s"Ingestion ended")
+  prof.start()
 
   // Stuff for directly executing queries ourselves
   val engine = new SingleClusterPlanner(dataset.ref, Schemas(dataset.schema), shardMapper, 0,
@@ -124,12 +128,17 @@ class QueryInMemoryBenchmark extends StrictLogging {
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>
-    LogicalPlan2Query(dataset.ref, plan, QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 20000))
+    LogicalPlan2Query(dataset.ref, plan, QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, spread))), 20000))
   }
+
+  var queriesSucceeded = 0
+  var queriesFailed = 0
 
   @TearDown
   def shutdownFiloActors(): Unit = {
     cluster.shutdown()
+    println(s"Succeeded: $queriesSucceeded   Failed: $queriesFailed")
+    prof.stop()
   }
 
   // Window = 5 min and step=2.5 min, so 50% overlap
@@ -139,10 +148,12 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(500)
   def someOverlapQueries(): Unit = {
     val futures = (0 until numQueries).map { n =>
-      val f = asyncAsk(coordinator, queryCommands(n % queryCommands.length))
+      val qCmd = queryCommands(n % queryCommands.length)
+      val time = System.currentTimeMillis
+      val f = asyncAsk(coordinator, qCmd.copy(qContext = qCmd.qContext.copy(queryId = n.toString, submitTime = time)))
       f.onSuccess {
-        case q: QueryResult2 =>
-        case e: QError       => throw new RuntimeException(s"Query error $e")
+        case q: QueryResult2 => queriesSucceeded += 1
+        case e: QError       => queriesFailed += 1
       }
       f
     }
@@ -164,8 +175,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
     val futures = (0 until numQueries).map { n =>
       val f = asyncAsk(coordinator, queryCommands2(n % queryCommands2.length))
       f.onSuccess {
-        case q: QueryResult2 =>
-        case e: QError       => throw new RuntimeException(s"Query error $e")
+        case q: QueryResult2 => queriesSucceeded += 1
+        case e: QError       => queriesFailed += 1
       }
       f
     }
@@ -186,8 +197,10 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(500)
   def singleThreadedRawQuery(): Long = {
+    val querySession = QuerySession(QueryContext(), queryConfig)
+
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      execPlan.execute(cluster.memStore, queryConfig)(querySched)
+      execPlan.execute(cluster.memStore, querySession)(querySched)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)
@@ -203,7 +216,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(500)
   def singleThreadedMinOverTimeQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      minEP.execute(cluster.memStore, queryConfig)(querySched)
+      val querySession = QuerySession(QueryContext(), queryConfig)
+      minEP.execute(cluster.memStore, querySession)(querySched)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)
@@ -219,7 +233,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(500)
   def singleThreadedSumRateCCQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      sumRateEP.execute(cluster.memStore, queryConfig)(querySched)
+      val querySession = QuerySession(QueryContext(), queryConfig)
+      sumRateEP.execute(cluster.memStore, querySession)(querySched)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)

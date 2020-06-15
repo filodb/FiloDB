@@ -5,11 +5,12 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.Schemas
+import filodb.core.query.{EmptyQueryConfig, QueryConfig, QuerySession}
 import filodb.core.store._
-import filodb.query.{EmptyQueryConfig, QueryConfig, QueryResponse}
+import filodb.query.QueryResponse
 
 /**
   * Dispatcher which will make a No-Op style call to ExecPlan#excecute().
@@ -30,7 +31,8 @@ case object InProcessPlanDispatcher extends PlanDispatcher {
     // kamon uses thread-locals.
     Kamon.runWithSpan(Kamon.currentSpan(), false) {
       // translate implicit ExecutionContext to monix.Scheduler
-      plan.execute(source, queryConfig)
+      val querySession = QuerySession(plan.queryContext, queryConfig)
+      plan.execute(source, querySession)
     }
   }
 
@@ -41,12 +43,15 @@ case object InProcessPlanDispatcher extends PlanDispatcher {
   */
 case class UnsupportedChunkSource() extends ChunkSource {
   def scanPartitions(ref: DatasetRef,
-                     iter: PartLookupResult): Observable[ReadablePartition] =
+                     iter: PartLookupResult,
+                     colIds: Seq[Types.ColumnId],
+                     querySession: QuerySession): Observable[ReadablePartition] =
     throw new UnsupportedOperationException("This operation is not supported")
 
   def lookupPartitions(ref: DatasetRef,
                        partMethod: PartitionScanMethod,
-                       chunkMethod: ChunkScanMethod): PartLookupResult =
+                       chunkMethod: ChunkScanMethod,
+                       querySession: QuerySession): PartLookupResult =
     throw new UnsupportedOperationException("This operation is not supported")
 
   override def groupsInDataset(dataset: DatasetRef): Int =

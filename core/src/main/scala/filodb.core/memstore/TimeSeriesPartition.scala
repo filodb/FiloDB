@@ -387,8 +387,10 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   //def dataChunkPointer(id: ChunkID, columnID: Int): BinaryVector.BinaryVectorPtr = infoGet(id).vectorPtr(columnID)
 
   final def removeChunksAt(id: ChunkID): Unit = {
-    chunkmapWithExclusive(chunkmapDoRemove(id))
-    shardStats.chunkIdsEvicted.increment()
+    // Remove all chunks at and lower than the given chunk. Doing so prevents a hole from
+    // emerging in the middle which ODP can't easily cope with.
+    val amt = chunkmapWithExclusive(chunkmapDoRemoveFloor(id))
+    shardStats.chunkIdsEvicted.increment(amt)
   }
 
   final def hasChunksAt(id: ChunkID): Boolean = chunkmapContains(id)

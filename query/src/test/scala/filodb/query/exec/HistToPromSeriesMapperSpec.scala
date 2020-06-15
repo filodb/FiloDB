@@ -10,11 +10,11 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.{ZeroCopyUTF8String => ZCUTF8}
 import filodb.memory.format.vectors.HistogramWithBuckets
-import filodb.query.QueryConfig
 
 class HistToPromSeriesMapperSpec extends FunSpec with Matchers with ScalaFutures {
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = new QueryConfig(config.getConfig("query"))
+  val querySession = QuerySession(QueryContext(), queryConfig)
 
   import monix.execution.Scheduler.Implicits.global
 
@@ -36,7 +36,7 @@ class HistToPromSeriesMapperSpec extends FunSpec with Matchers with ScalaFutures
     mapper.schema(sourceSchema).columns shouldEqual Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
                                                         ColumnInfo("value", ColumnType.DoubleColumn))
 
-    val destObs = mapper.apply(sourceObs, queryConfig, 1000, sourceSchema, Nil)
+    val destObs = mapper.apply(sourceObs, querySession, 1000, sourceSchema, Nil)
     val destRvs = destObs.toListL.runAsync.futureValue
 
     // Should be 8 time series since there are 8 buckets
@@ -71,7 +71,7 @@ class HistToPromSeriesMapperSpec extends FunSpec with Matchers with ScalaFutures
     mapper.schema(sourceSchema).columns shouldEqual Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
                                                         ColumnInfo("value", ColumnType.DoubleColumn))
 
-    val destObs = mapper.apply(sourceObs, queryConfig, 1000, sourceSchema, Nil)
+    val destObs = mapper.apply(sourceObs, querySession, 1000, sourceSchema, Nil)
     val destRvs = destObs.toListL.runAsync.futureValue
 
     // Should be 10 time series since there are up to 10 buckets

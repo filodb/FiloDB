@@ -12,7 +12,7 @@ import scalaxy.loops._
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.PartKeyLuceneIndex
-import filodb.core.metadata.Schemas.promCounter
+import filodb.core.metadata.Schemas.untyped
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.memory.{BinaryRegionConsumer, MemFactory}
 import filodb.timeseries.TestTimeseriesProducer
@@ -23,17 +23,25 @@ class PartKeyIndexBenchmark {
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
 
   val ref = DatasetRef("prometheus")
-  val partKeyIndex = new PartKeyLuceneIndex(ref, promCounter.partition, 0, 1.hour)
+  val partKeyIndex = new PartKeyLuceneIndex(ref, untyped.partition, 0, 1.hour)
   val numSeries = 1000000
-  val partKeyData = TestTimeseriesProducer.timeSeriesData(0, numSeries) take numSeries
+  val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory)
+  val untypedData = TestTimeseriesProducer.timeSeriesData(0, numSeries) take numSeries
+  untypedData.foreach(_.addToBuilder(ingestBuilder))
+
   val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory)
-  partKeyData.foreach(_.addToBuilder(partKeyBuilder))
+
+  val converter = new BinaryRegionConsumer {
+    def onNext(base: Any, offset: Long): Unit = untyped.comparator.buildPartKeyFromIngest(base, offset, partKeyBuilder)
+  }
+  // Build part keys from the ingestion records
+  ingestBuilder.allContainers.head.consumeRecords(converter)
 
   var partId = 1
   val now = System.currentTimeMillis()
   val consumer = new BinaryRegionConsumer {
     def onNext(base: Any, offset: Long): Unit = {
-      val partKey = promCounter.partition.binSchema.asByteArray(base, offset)
+      val partKey = untyped.partition.binSchema.asByteArray(base, offset)
       partKeyIndex.addPartKey(partKey, partId, now)()
       partId += 1
     }
@@ -45,9 +53,10 @@ class PartKeyIndexBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def partIdsLookupWithEqualsFilters(): Unit = {
-    for ( i <- 0 to 20 optimized) {
+    for ( i <- 0 until 8 optimized) {
       partKeyIndex.partIdsFromFilters(
-        Seq(ColumnFilter("job", Filter.Equals(s"App-$i")),
+        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
+            ColumnFilter("_ws_", Filter.Equals("demo")),
             ColumnFilter("host", Filter.EqualsRegex("H0")),
             ColumnFilter("__name__", Filter.Equals("heap_usage"))),
         now,
@@ -58,10 +67,26 @@ class PartKeyIndexBenchmark {
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  def partIdsLookupWithSuffixRegexFilters(): Unit = {
-    for ( i <- 0 to 20 optimized) {
+  def emptyPartIdsLookupWithEqualsFilters(): Unit = {
+    for ( i <- 0 until 8 optimized) {
       partKeyIndex.partIdsFromFilters(
-        Seq(ColumnFilter("job", Filter.Equals(s"App-$i")),
+        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-${i + 200}")),
+          ColumnFilter("_ws_", Filter.Equals("demo")),
+          ColumnFilter("host", Filter.EqualsRegex("H0")),
+          ColumnFilter("__name__", Filter.Equals("heap_usage"))),
+        now,
+        now + 1000)
+    }
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def partIdsLookupWithSuffixRegexFilters(): Unit = {
+    for ( i <- 0 until 8 optimized) {
+      partKeyIndex.partIdsFromFilters(
+        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
+          ColumnFilter("_ws_", Filter.Equals("demo")),
           ColumnFilter("__name__", Filter.Equals("heap_usage")),
           ColumnFilter("instance", Filter.EqualsRegex("Instance-2.*"))),
         now,
@@ -73,9 +98,10 @@ class PartKeyIndexBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def partIdsLookupWithPrefixRegexFilters(): Unit = {
-    for ( i <- 0 to 20 optimized) {
+    for ( i <- 0 until 8 optimized) {
       partKeyIndex.partIdsFromFilters(
-        Seq(ColumnFilter("job", Filter.Equals(s"App-$i")),
+        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
+          ColumnFilter("_ws_", Filter.Equals("demo")),
           ColumnFilter("__name__", Filter.Equals("heap_usage")),
           ColumnFilter("instance", Filter.EqualsRegex(".*2"))),
         now,
@@ -87,8 +113,10 @@ class PartKeyIndexBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def startTimeLookupWithPartId(): Unit = {
-    for ( i <- 0 to 20 optimized) {
-      partKeyIndex.startTimeFromPartId(i)
+    for ( i <- 0 until 8 optimized) {
+      val pIds = debox.Buffer.empty[Int]
+      for ( j <- i * 1000 to i * 1000 + 1000 optimized) { pIds += j }
+      partKeyIndex.startTimeFromPartIds(pIds.iterator())
     }
   }
 

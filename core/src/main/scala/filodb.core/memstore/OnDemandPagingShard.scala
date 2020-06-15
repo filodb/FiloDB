@@ -1,5 +1,7 @@
 package filodb.core.memstore
 
+import java.util
+
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext
 
@@ -10,14 +12,13 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.{Observable, OverflowStrategy}
 
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, Types}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
 import filodb.core.metadata.Schemas
+import filodb.core.query.QuerySession
 import filodb.core.store._
-import filodb.memory.BinaryRegionLarge
 import filodb.memory.MemFactory
-import filodb.memory.format.UnsafeUtils
 
 /**
  * Extends TimeSeriesShard with on-demand paging functionality by populating in-memory partitions with chunks from
@@ -50,6 +51,21 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
     .tag("shard", shardNum)
     .start()
 
+  val assumedResolution = 20000 // for now hard-code and assume 30ms as reporting interval
+
+  private def capDataScannedPerShardCheck(lookup: PartLookupResult): Unit = {
+    lookup.firstSchemaId.foreach { schId =>
+      lookup.chunkMethod match {
+        case TimeRangeChunkScan(st, end) =>
+          val numMatches = lookup.partsInMemory.length + lookup.partIdsNotInMemory.length
+          schemas.ensureQueriedDataSizeWithinLimit(schId, numMatches,
+            storeConfig.flushInterval.toMillis,
+            assumedResolution, end - st, storeConfig.maxDataPerShardQuery)
+        case _ =>
+      }
+    }
+  }
+
   // NOTE: the current implementation is as follows
   //  1. Fetch partitions from memStore
   //  2. Determine, one at a time, what chunks are missing and could be fetched from disk
@@ -57,7 +73,12 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
   //  4. upload to memory and return partition
   // Definitely room for improvement, such as fetching multiple partitions at once, more parallelism, etc.
   //scalastyle:off
-  override def scanPartitions(partLookupRes: PartLookupResult): Observable[ReadablePartition] = {
+  override def scanPartitions(partLookupRes: PartLookupResult,
+                              colIds: Seq[Types.ColumnId],
+                              querySession: QuerySession): Observable[ReadablePartition] = {
+
+    capDataScannedPerShardCheck(partLookupRes)
+
     // For now, always read every data column.
     // 1. We don't have a good way to update just some columns of a chunkset for ODP
     // 2. Timestamp column almost always needed
@@ -113,6 +134,13 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
       } else {
         Observable.fromTask(odpPartTask(partIdsNotInMemory, partKeyBytesToPage, pagingMethods,
                                         partLookupRes.chunkMethod)).flatMap { odpParts =>
+          assertThreadName(QuerySchedName)
+          logger.debug(s"Finished creating full ODP partitions ${odpParts.map(_.partID)}")
+          if(logger.underlying.isDebugEnabled) {
+            partKeyBytesToPage.zip(pagingMethods).foreach { case (pk, method) =>
+              logger.debug(s"Paging in chunks for partId=${getPartition(pk).get.partID} chunkMethod=$method")
+            }
+          }
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
             Observable.fromIterable(partKeyBytesToPage.zip(pagingMethods))
@@ -122,6 +150,7 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
                   .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
                   .defaultIfEmpty(getPartition(partBytes).get)
                   .headL
+                  // headL since we are fetching a SinglePartition above
               }
               .doOnTerminate(ex => span.finish())
           } else {
@@ -139,13 +168,12 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
   // 3. Deal with partitions no longer in memory but still indexed in Lucene.
   //    Basically we need to create TSPartitions for them in the ingest thread -- if there's enough memory
   private def odpPartTask(partIdsNotInMemory: Buffer[Int], partKeyBytesToPage: ArrayBuffer[Array[Byte]],
-                          methods: ArrayBuffer[ChunkScanMethod], chunkMethod: ChunkScanMethod) =
+                          pagingMethods: ArrayBuffer[ChunkScanMethod], chunkMethod: ChunkScanMethod) =
   if (partIdsNotInMemory.nonEmpty) {
-    createODPPartitionsTask(partIdsNotInMemory, { case (bytes, offset) =>
-      val partKeyBytes = if (offset == UnsafeUtils.arayOffset) bytes
-                         else BinaryRegionLarge.asNewByteArray(bytes, offset)
-      partKeyBytesToPage += partKeyBytes
-      methods += chunkMethod
+    createODPPartitionsTask(partIdsNotInMemory, { case (pId, pkBytes) =>
+      partKeyBytesToPage += pkBytes
+      pagingMethods += chunkMethod
+      logger.debug(s"Finished creating part for full odp. Now need to page partId=$pId chunkMethod=$chunkMethod")
       shardStats.partitionsRestored.increment()
     }).executeOn(ingestSched).asyncBoundary
     // asyncBoundary above will cause subsequent map operations to run on designated scheduler for task or observable
@@ -159,7 +187,7 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
    * to create TSPartitions for partIDs found in Lucene but not in in-memory data structures
    * It runs in ingestion thread so it can correctly verify which ones to actually create or not
    */
-  private def createODPPartitionsTask(partIDs: Buffer[Int], callback: (Array[Byte], Int) => Unit):
+  private def createODPPartitionsTask(partIDs: Buffer[Int], callback: (Int, Array[Byte]) => Unit):
                                                                   Task[Seq[TimeSeriesPartition]] = Task {
     assertThreadName(IngestSchedName)
     require(partIDs.nonEmpty)
@@ -182,7 +210,9 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
             } finally {
               partSetLock.unlockWrite(stamp)
             }
-            callback(partKeyBytesRef.bytes, unsafeKeyOffset)
+            val pkBytes = util.Arrays.copyOfRange(partKeyBytesRef.bytes, partKeyBytesRef.offset,
+                            partKeyBytesRef.offset + partKeyBytesRef.length)
+            callback(part.partID, pkBytes)
             part
           }
           // create the partition and update data structures (but no need to add to Lucene!)

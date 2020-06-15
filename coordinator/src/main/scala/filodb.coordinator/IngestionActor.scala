@@ -109,6 +109,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
     * reconciles any differences. It does so by stopping ingestion for shards that aren't mapped
     * to this node, and it starts ingestion for those that are.
     */
+  // scalastyle:off method.length
   private def resync(state: ShardIngestionState, origin: ActorRef): Unit = {
     if (invalid(state.ref)) {
       logger.error(s"$state is invalid for this ingester '$ref'.")
@@ -144,7 +145,13 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
           }
         } else {
           val status = state.map.statuses(shard)
-          logger.info(s"Will stop ingestion of for dataset=$ref shard=$shard due to status ${status}")
+          if (shardsToStop.contains(shard)) {
+            logger.info(s"Will stop ingestion for dataset=$ref shard=$shard due to status ${status}")
+          } else {
+            // Already stopped. Send the message again in case it got dropped.
+            logger.info(s"Stopping ingestion again for dataset=$ref shard=$shard due to status ${status}")
+            sendStopMessage(shard)
+          }
         }
       }
     }
@@ -237,9 +244,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
       // Define a cancel task to run when ingestion is stopped.
       val onCancel = Task {
         logger.info(s"Ingestion cancel task invoked for dataset=$ref shard=$shard")
-        val stopped = IngestionStopped(ref, shard)
-        self ! stopped
-        statusActor ! stopped
+        sendStopMessage(shard)
       }
 
       val shardIngestionEnd = memStore.ingestStream(ref,
@@ -266,6 +271,12 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
       logger.error(s"Error occurred when setting up ingestion pipeline for dataset=$ref shard=$shard ", t)
       handleError(ref, shard, t)
     }
+  }
+
+  private def sendStopMessage(shard: Int): Unit = {
+    val stopped = IngestionStopped(ref, shard)
+    self ! stopped
+    statusActor ! stopped
   }
 
   import Iterators._
