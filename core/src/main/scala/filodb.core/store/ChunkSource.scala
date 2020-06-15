@@ -78,16 +78,19 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
   def scanPartitions(ref: DatasetRef,
                      columnIDs: Seq[Types.ColumnId],
                      partMethod: PartitionScanMethod,
-                     chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition] = {
+                     chunkMethod: ChunkScanMethod = AllChunkScan,
+                     querySession: QuerySession): Observable[ReadablePartition] = {
     logger.debug(s"scanPartitions dataset=$ref shard=${partMethod.shard} " +
       s"partMethod=$partMethod chunkMethod=$chunkMethod")
-    scanPartitions(ref, lookupPartitions(ref, partMethod, chunkMethod))
+    scanPartitions(ref, lookupPartitions(ref, partMethod, chunkMethod, querySession), columnIDs, querySession)
   }
 
 
   // Internal API that needs to actually be implemented
   def scanPartitions(ref: DatasetRef,
-                     lookupRes: PartLookupResult): Observable[ReadablePartition]
+                     lookupRes: PartLookupResult,
+                     colIds: Seq[Types.ColumnId],
+                     querySession: QuerySession): Observable[ReadablePartition]
 
   // internal method to find # of groups in a dataset
   def groupsInDataset(ref: DatasetRef): Int
@@ -108,7 +111,8 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
    */
   def lookupPartitions(ref: DatasetRef,
                        partMethod: PartitionScanMethod,
-                       chunkMethod: ChunkScanMethod): PartLookupResult
+                       chunkMethod: ChunkScanMethod,
+                       querySession: QuerySession): PartLookupResult
 
   /**
    * Returns a stream of RangeVectors's.  Good for per-partition (or time series) processing.
@@ -124,18 +128,19 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
                    lookupRes: PartLookupResult,
                    columnIDs: Seq[Types.ColumnId],
                    schema: Schema,
-                   filterSchemas: Boolean): Observable[RangeVector] = {
+                   filterSchemas: Boolean,
+                   querySession: QuerySession): Observable[RangeVector] = {
     val ids = columnIDs.toArray
     val partCols = schema.infosFromIDs(schema.partition.columns.map(_.id))
     val numGroups = groupsInDataset(ref)
 
     val filteredParts = if (filterSchemas) {
-      scanPartitions(ref, lookupRes)
+      scanPartitions(ref, lookupRes, columnIDs, querySession)
         .filter { p => p.schema.schemaHash == schema.schemaHash && p.hasChunks(lookupRes.chunkMethod) }
     } else {
       lookupRes.firstSchemaId match {
         case Some(reqSchemaId) =>
-          scanPartitions(ref, lookupRes).filter { p =>
+          scanPartitions(ref, lookupRes, columnIDs, querySession).filter { p =>
             if (p.schema.schemaHash != reqSchemaId)
               throw SchemaMismatch(Schemas.global.schemaName(reqSchemaId), p.schema.name)
             p.hasChunks(lookupRes.chunkMethod)

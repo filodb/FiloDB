@@ -68,6 +68,7 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
       filoHttpServer.start(coordinatorActor, singleton, bootstrapper.getAkkaHttpRoute())
       // Launch the profiler after startup, if configured.
       SimpleProfiler.launch(systemConfig.getConfig("filodb.profiler"))
+      KamonShutdownHook.registerShutdownHook()
     } catch {
       // if there is an error in the initialization, we need to fail fast so that the process can be rescheduled
       case NonFatal(e) =>

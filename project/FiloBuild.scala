@@ -155,7 +155,7 @@ object Submodules {
 
   lazy val jmh = (project in file("jmh"))
     .enablePlugins(JmhPlugin)
-    .dependsOn(core % "compile->compile; compile->test", gateway)
+    .dependsOn(core % "compile->compile; compile->test", gateway, standalone)
     .settings(
       commonSettings,
       name := "filodb-jmh",

@@ -76,7 +76,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
             shard = shard.toInt, updateHour = epochHour)
           count += migrateWithDownsamplePartKeys(partKeys, shard)
         }
-        DownsamplerContext.dsLogger.info(s"Successfully Completed Full PartKey Migration for shard=$shard " +
+        DownsamplerContext.dsLogger.info(s"Successfully Completed Partial PartKey Migration for shard=$shard " +
           s"count=$count fromHour=$fromHour toHourExcl=$toHourExcl")
       }
       sparkForeachTasksCompleted.increment()

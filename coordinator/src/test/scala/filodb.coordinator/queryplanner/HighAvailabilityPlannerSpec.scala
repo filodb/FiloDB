@@ -4,10 +4,11 @@ import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{FunSpec, Matchers}
+
 import filodb.coordinator.ShardMapper
 import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryContext}
+import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser

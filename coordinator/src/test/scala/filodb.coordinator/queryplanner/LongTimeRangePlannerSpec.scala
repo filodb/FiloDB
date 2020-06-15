@@ -1,14 +1,16 @@
 package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration._
+
 import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
+
 import filodb.core.DatasetRef
-import filodb.core.query.QueryContext
+import filodb.core.query.{QueryContext, QuerySession}
 import filodb.core.store.ChunkSource
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{LogicalPlan, PeriodicSeries, PeriodicSeriesPlan, QueryConfig}
+import filodb.query.{LogicalPlan, PeriodicSeriesPlan, PeriodicSeriesWithWindowing}
 import filodb.query.exec._
 
 class LongTimeRangePlannerSpec extends FunSpec with Matchers {
@@ -19,7 +21,7 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
     override def submitTime: Long = ???
     override def dataset: DatasetRef = ???
     override def dispatcher: PlanDispatcher = ???
-    override def doExecute(source: ChunkSource, queryConfig: QueryConfig)
+    override def doExecute(source: ChunkSource, querySession: QuerySession)
                           (implicit sched: Scheduler): ExecResult = ???
     override protected def args: String = ???
   }
@@ -39,9 +41,11 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
   val rawRetention = 10.minutes
   val now = System.currentTimeMillis() / 1000 * 1000
   val earliestRawTime = now - rawRetention.toMillis
+  val latestDownsampleTime = now - 4.minutes.toMillis // say it takes 4 minutes to downsample
 
   private def disp = InProcessPlanDispatcher
-  val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, earliestRawTime, disp)
+  val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+                                                 earliestRawTime, latestDownsampleTime, disp)
 
   it("should direct raw-cluster-only queries to raw planner") {
     val logicalPlan = Parser.queryRangeToLogicalPlan("rate(foo[2m])",
@@ -92,7 +96,42 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
 
     downsampleLp.startMs shouldEqual logicalPlan.startMs
     downsampleLp.endMs shouldEqual rawStart - 1.minute.toMillis
+  }
 
+  it("should delegate to downsample cluster and omit recent instants when there is a long lookback") {
+
+    val start = now/1000 - 30.minutes.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now/1000
+    // notice raw data retention is 10m but lookback is 20m
+    val logicalPlan = Parser.queryRangeToLogicalPlan("rate(foo[20m])",
+      TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan]
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
+    val downsampleLp = ep.asInstanceOf[MockExecPlan]
+    downsampleLp.lp.asInstanceOf[PeriodicSeriesPlan].startMs shouldEqual logicalPlan.startMs
+    downsampleLp.lp.asInstanceOf[PeriodicSeriesPlan].endMs shouldEqual latestDownsampleTime
+
+  }
+
+  it("should delegate to downsample cluster and retain endTime when there is a long lookback with offset that causes " +
+    "recent data to not be used") {
+
+    val start = now/1000 - 30.minutes.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now/1000
+    // notice raw data retention is 10m but lookback is 20m
+    val logicalPlan = Parser.queryRangeToLogicalPlan("rate(foo[20m] offset 5m)",
+      TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan]
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
+    val downsampleLp = ep.asInstanceOf[MockExecPlan]
+    downsampleLp.lp.asInstanceOf[PeriodicSeriesPlan].startMs shouldEqual logicalPlan.startMs
+    // endTime is retained even with long lookback because 5m offset compensates
+    // for 4m delay in downsample data population
+    downsampleLp.lp.asInstanceOf[PeriodicSeriesPlan].endMs shouldEqual logicalPlan.endMs
 
   }
 
@@ -120,7 +159,7 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
     val start = now/1000 - 30.minutes.toSeconds
     val step = 1.minute.toSeconds
     val end = now/1000 - 2.minutes.toSeconds
-    val logicalPlan = Parser.queryRangeToLogicalPlan("foo offset 5m",
+    val logicalPlan = Parser.queryRangeToLogicalPlan("rate(foo[5m] offset 2m)",
       TimeStepParams(start, step, end))
       .asInstanceOf[PeriodicSeriesPlan]
 
@@ -138,15 +177,15 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
 
     // find first instant with range available within raw data
     val rawStart = ((start*1000) to (end*1000) by (step*1000)).find { instant =>
-      instant - 5.minutes.toMillis > earliestRawTime // subtract offset
+      instant - (5 + 2).minutes.toMillis > earliestRawTime // subtract lookback & offset
     }.get
 
     rawLp.startMs shouldEqual rawStart
     rawLp.endMs shouldEqual logicalPlan.endMs
-    rawLp.asInstanceOf[PeriodicSeries].offsetMs.get shouldEqual(300000)
+    rawLp.asInstanceOf[PeriodicSeriesWithWindowing].offsetMs.get shouldEqual(120000)
 
     downsampleLp.startMs shouldEqual logicalPlan.startMs
     downsampleLp.endMs shouldEqual rawStart - (step * 1000)
-    downsampleLp.asInstanceOf[PeriodicSeries].offsetMs.get shouldEqual(300000)
+    downsampleLp.asInstanceOf[PeriodicSeriesWithWindowing].offsetMs.get shouldEqual(120000)
   }
 }

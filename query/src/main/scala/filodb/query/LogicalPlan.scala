@@ -336,6 +336,10 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
   override def endMs: Long = vectors.endMs
 }
 
+case class LabelValueOperator(columnName: String, value: Seq[String], operator: String)
+
+case class LabelValueOperatorGroup(labelValueOperators: Seq[LabelValueOperator])
+
 object LogicalPlan {
   /**
     * Get leaf Logical Plans
@@ -346,6 +350,52 @@ object LogicalPlan {
      case lp: NonLeafLogicalPlan => lp.children.flatMap(findLeafLogicalPlans)
      case _                      => Seq(logicalPlan)
    }
+  }
+
+  def getLabelValueFromLogicalPlan(logicalPlan: LogicalPlan, labelName: String): Option[Seq[String]] = {
+    getLabelValueFromLogicalPlan(getLabelValueOperatorsFromLogicalPlan(logicalPlan), labelName)
+  }
+
+  def getLabelValueFromLogicalPlan(labelValues: Option[Seq[LabelValueOperatorGroup]],
+                                   labelName: String): Option[Seq[String]] = {
+    labelValues match {
+      case None => None
+      case _    => labelValues.get.flatMap(group =>
+        group.labelValueOperators.flatMap(lops => {
+          lops.columnName.equals(labelName) match {
+            case true  => lops.value
+            case false => Seq()
+          }
+        })).distinct match {
+        case Nil                    => None
+        case lVFilters: Seq[String] => Some(lVFilters)
+      }
+    }
+  }
+
+  private def getLabelValueOpsFromFilters(filters: Seq[ColumnFilter]): Option[LabelValueOperatorGroup] = {
+    Some(LabelValueOperatorGroup(filters.map(cf => LabelValueOperator(cf.column,
+      cf.filter.valuesStrings.map(_.toString).toSeq.sorted, cf.filter.operatorString))))
+  }
+
+  def getLabelValueOperatorsFromLogicalPlan(logicalPlan: LogicalPlan): Option[Seq[LabelValueOperatorGroup]] = {
+    LogicalPlan.findLeafLogicalPlans(logicalPlan).flatMap { lp =>
+      lp match {
+        case lp: LabelValues           => Some(
+          LabelValueOperatorGroup(
+            lp.labelConstraints.map(lbc => LabelValueOperator(lbc._1, Seq(lbc._2), "=")).toSeq))
+        case lp: RawSeries             => getLabelValueOpsFromFilters(lp.filters)
+        case lp: RawChunkMeta          => getLabelValueOpsFromFilters(lp.filters)
+        case lp: SeriesKeysByFilters   => getLabelValueOpsFromFilters(lp.filters)
+        case _: ScalarTimeBasedPlan    => Nil // Plan does not have labels
+        case _: ScalarFixedDoublePlan  => Nil
+        case _: ScalarBinaryOperation  => Nil
+        case _                         => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
+      }
+    } match {
+      case Nil => None
+      case groupSeq: Seq[LabelValueOperatorGroup] => Some(groupSeq)
+    }
   }
 }
 //scalastyle:on number.of.types

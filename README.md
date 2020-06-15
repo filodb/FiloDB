@@ -340,7 +340,7 @@ If you had run the unit test `DownsamplerMainSpec` which populates data into the
 dataset, you can query downsample results by visiting the following URL: 
 
 ```
-curl "http://localhost:8080/promql/prometheus/api/v1/query_range?query=my_counter\{_ws_='my_ws',_ns_='my_ns'\}&start=1574272801&end=1574273042&step=10&verbose=true&spread=2"
+curl "http://localhost:9080/promql/prometheus/api/v1/query_range?query=my_counter\{_ws_='my_ws',_ns_='my_ns'\}&start=74372801&end=74373042&step=10&verbose=true&spread=2"
 ```
 
 #### Local Scale Testing
