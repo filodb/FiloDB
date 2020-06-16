@@ -5,7 +5,7 @@ import com.esotericsoftware.kryo.Kryo
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2}
-import filodb.core.query.{ColumnInfo, PartitionInfo, PartitionRangeVectorKey, PromQlQueryParams}
+import filodb.core.query.{ColumnInfo, PartitionInfo, PartitionRangeVectorKey}
 import filodb.memory.format._
 
 // NOTE: This file has to be in the kryo namespace so we can use the require() method
@@ -76,33 +76,5 @@ class PartitionInfoSerializer extends KryoSerializer[PartitionInfo] {
     kryo.writeObject(output, info.schema)
     BinaryRegionUtils.writeLargeRegion(info.base, info.offset, output)
     output.writeInt(info.shardNo)
-  }
-}
-
-class PromQlQueryParamsSerializer extends KryoSerializer[PromQlQueryParams] {
-  override def read(kryo: Kryo, input: Input, typ: Class[PromQlQueryParams]): PromQlQueryParams = {
-    val promQl = input.readString()
-    val start = input.readLong()
-    val step = input.readLong()
-    val end = input.readLong()
-    val spreadInt = input.readInt()
-    val spread = if (spreadInt == -1) None else Some(spreadInt)
-    val queryPathString = input.readString()
-    val queryPath = if (queryPathString == "-1") None else Some(queryPathString)
-    val procFailure = input.readBoolean()
-    val procMultiPartition = input.readBoolean()
-    val verbose = input.readBoolean()
-    PromQlQueryParams(promQl, start, step, end, spread, queryPath, procFailure, procMultiPartition, verbose)
-  }
-  override def write(kryo: Kryo, output: Output, promParam: PromQlQueryParams): Unit = {
-    output.writeString(promParam.promQl)
-    output.writeLong(promParam.startSecs)
-    output.writeLong(promParam.stepSecs)
-    output.writeLong(promParam.endSecs)
-    output.writeInt(promParam.spread.getOrElse(-1))
-    output.writeString(promParam.remoteQueryPath.getOrElse("-1"))
-    output.writeBoolean(promParam.processFailure)
-    output.writeBoolean(promParam.processMultiPartition)
-    output.writeBoolean(promParam.verbose)
   }
 }

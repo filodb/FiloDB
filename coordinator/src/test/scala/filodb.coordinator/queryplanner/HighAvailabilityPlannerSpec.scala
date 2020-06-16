@@ -110,9 +110,9 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlRemoteExec].params.startSecs shouldEqual(from/1000)
-    execPlan.asInstanceOf[PromQlRemoteExec].params.endSecs shouldEqual(to/1000)
+    execPlan.isInstanceOf[PromQlMetricsRemoteExec] shouldEqual (true)
+    execPlan.asInstanceOf[PromQlMetricsRemoteExec].params.startSecs shouldEqual(from/1000)
+    execPlan.asInstanceOf[PromQlMetricsRemoteExec].params.endSecs shouldEqual(to/1000)
   }
 
   it("should generate RemoteExecPlan with RawSeries time according to lookBack") {
@@ -141,10 +141,10 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual (2)
     stitchRvsExec.children(0).isInstanceOf[ReduceAggregateExec] shouldEqual (true)
-    stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+    stitchRvsExec.children(1).isInstanceOf[PromQlMetricsRemoteExec] shouldEqual (true)
 
     val child1 = stitchRvsExec.children(0).asInstanceOf[ReduceAggregateExec]
-    val child2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
+    val child2 = stitchRvsExec.children(1).asInstanceOf[PromQlMetricsRemoteExec]
 
     child1.children.length shouldEqual (2) //default spread is 1 so 2 shards
 
@@ -185,9 +185,9 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlRemoteExec].params.startSecs shouldEqual(from/1000)
-    execPlan.asInstanceOf[PromQlRemoteExec].params.endSecs shouldEqual(to/1000)
+    execPlan.isInstanceOf[PromQlMetricsRemoteExec] shouldEqual (true)
+    execPlan.asInstanceOf[PromQlMetricsRemoteExec].params.startSecs shouldEqual(from/1000)
+    execPlan.asInstanceOf[PromQlMetricsRemoteExec].params.endSecs shouldEqual(to/1000)
   }
 
   it("should generate only PromQlExec when local failure timerange coincide with query time range") {
@@ -209,9 +209,9 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlRemoteExec].params.startSecs shouldEqual(from/1000)
-    execPlan.asInstanceOf[PromQlRemoteExec].params.endSecs shouldEqual(to/1000)
+    execPlan.isInstanceOf[PromQlMetricsRemoteExec] shouldEqual (true)
+    execPlan.asInstanceOf[PromQlMetricsRemoteExec].params.startSecs shouldEqual(from/1000)
+    execPlan.asInstanceOf[PromQlMetricsRemoteExec].params.endSecs shouldEqual(to/1000)
   }
 
   it("should generate only PromQlExec when local failure starts before query end time and ends after query end time") {
@@ -233,9 +233,9 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlRemoteExec].params.startSecs shouldEqual(from/1000)
-    execPlan.asInstanceOf[PromQlRemoteExec].params.endSecs shouldEqual(to/1000)
+    execPlan.isInstanceOf[PromQlMetricsRemoteExec] shouldEqual (true)
+    execPlan.asInstanceOf[PromQlMetricsRemoteExec].params.startSecs shouldEqual(from/1000)
+    execPlan.asInstanceOf[PromQlMetricsRemoteExec].params.endSecs shouldEqual(to/1000)
   }
 
   it("should generate PromQlExecPlan and LocalPlan with RawSeries time according to lookBack and step") {
@@ -267,10 +267,10 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual 2
     stitchRvsExec.children(0).isInstanceOf[ReduceAggregateExec] shouldEqual (true)
-    stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+    stitchRvsExec.children(1).isInstanceOf[PromQlMetricsRemoteExec] shouldEqual (true)
 
     val child1 = stitchRvsExec.children(0).asInstanceOf[ReduceAggregateExec]
-    val child2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
+    val child2 = stitchRvsExec.children(1).asInstanceOf[PromQlMetricsRemoteExec]
 
     child1.children.length shouldEqual 2 //default spread is 1 so 2 shards
 
@@ -316,9 +316,9 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual true
+    execPlan.isInstanceOf[PromQlMetricsRemoteExec] shouldEqual true
 
-    val child = execPlan.asInstanceOf[PromQlRemoteExec]
+    val child = execPlan.asInstanceOf[PromQlMetricsRemoteExec]
 
     child.params.startSecs shouldEqual 900
     child.params.endSecs shouldEqual 1980
@@ -388,9 +388,9 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual true
+    execPlan.isInstanceOf[PromQlMetricsRemoteExec] shouldEqual true
 
-    val child = execPlan.asInstanceOf[PromQlRemoteExec]
+    val child = execPlan.asInstanceOf[PromQlMetricsRemoteExec]
     child.params.startSecs shouldEqual from
     child.params.endSecs shouldEqual to
     child.params.stepSecs shouldEqual step
@@ -417,8 +417,8 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     // Because of offset starts time would be (700 - 600) = 100 seconds where there is failure
     // So PromQlExec is generated instead of local DistConcatExec. PromQlExec will have original query and start time
     // Start time with offset will be calculated by buddy pod
-    execPlan2.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
-    execPlan2.asInstanceOf[PromQlRemoteExec].params.startSecs shouldEqual(700)
-    execPlan2.asInstanceOf[PromQlRemoteExec].params.endSecs shouldEqual(10000)
+    execPlan2.isInstanceOf[PromQlMetricsRemoteExec] shouldEqual (true)
+    execPlan2.asInstanceOf[PromQlMetricsRemoteExec].params.startSecs shouldEqual(700)
+    execPlan2.asInstanceOf[PromQlMetricsRemoteExec].params.endSecs shouldEqual(10000)
   }
 }

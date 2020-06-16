@@ -55,13 +55,11 @@ trait RemoteExec extends LeafExecPlan {
       throw new BadQueryException("Remote Query endpoint can not be null in RemoteExec.")
     }
 
-    val queryResponse = sendHttpRequest(execPlan2Span, queryEndpoint, requestTimeoutMs)
-
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since
     // kamon uses thread-locals.
     Kamon.runWithSpan(execPlan2Span, true) {
-      Task.fromFuture(queryResponse)
+      Task.fromFuture(sendHttpRequest(execPlan2Span, queryEndpoint, requestTimeoutMs))
     }
   }
 
@@ -83,13 +81,13 @@ trait RemoteExec extends LeafExecPlan {
 
 }
 
-case class PromQlRemoteExec(queryEndpoint: String,
-                            requestTimeoutMs: Long,
-                            queryContext: QueryContext,
-                            dispatcher: PlanDispatcher,
-                            dataset: DatasetRef,
-                            params: PromQlQueryParams,
-                            numberColumnRequired: Boolean = false) extends RemoteExec {
+case class PromQlMetricsRemoteExec(queryEndpoint: String,
+                                   requestTimeoutMs: Long,
+                                   queryContext: QueryContext,
+                                   dispatcher: PlanDispatcher,
+                                   dataset: DatasetRef,
+                                   params: PromQlQueryParams,
+                                   numberColumnRequired: Boolean = false) extends RemoteExec {
 
   private val columns = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo(if (numberColumnRequired) "number" else "value", ColumnType.DoubleColumn))

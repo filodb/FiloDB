@@ -12,13 +12,13 @@ import filodb.memory.format.UTF8MapIteratorRowReader
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 
-case class MetadataRemoteExec(queryEndpoint: String,
-                              requestTimeoutMs: Long,
-                              urlParams: Map[String, Any],
-                              queryContext: QueryContext,
-                              dispatcher: PlanDispatcher,
-                              dataset: DatasetRef,
-                              params: PromQlQueryParams) extends RemoteExec {
+case class PromQlMetadataRemoteExec(queryEndpoint: String,
+                                    requestTimeoutMs: Long,
+                                    urlParams: Map[String, Any],
+                                    queryContext: QueryContext,
+                                    dispatcher: PlanDispatcher,
+                                    dataset: DatasetRef,
+                                    params: PromQlQueryParams) extends RemoteExec {
 
   private val columns = Seq(ColumnInfo("Labels", ColumnType.MapColumn))
   private val resultSchema = ResultSchema(columns, 1)
