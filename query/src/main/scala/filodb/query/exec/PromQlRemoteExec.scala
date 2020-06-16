@@ -81,13 +81,13 @@ trait RemoteExec extends LeafExecPlan {
 
 }
 
-case class PromQlMetricsRemoteExec(queryEndpoint: String,
-                                   requestTimeoutMs: Long,
-                                   queryContext: QueryContext,
-                                   dispatcher: PlanDispatcher,
-                                   dataset: DatasetRef,
-                                   params: PromQlQueryParams,
-                                   numberColumnRequired: Boolean = false) extends RemoteExec {
+case class PromQlRemoteExec(queryEndpoint: String,
+                            requestTimeoutMs: Long,
+                            queryContext: QueryContext,
+                            dispatcher: PlanDispatcher,
+                            dataset: DatasetRef,
+                            params: PromQlQueryParams,
+                            numberColumnRequired: Boolean = false) extends RemoteExec {
 
   private val columns = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo(if (numberColumnRequired) "number" else "value", ColumnType.DoubleColumn))

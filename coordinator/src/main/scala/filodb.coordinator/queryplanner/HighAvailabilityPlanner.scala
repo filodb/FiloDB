@@ -5,7 +5,7 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.core.DatasetRef
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.query.LogicalPlan
-import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PromQlMetricsRemoteExec, StitchRvsExec}
+import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PromQlRemoteExec, StitchRvsExec}
 
 /**
   * HighAvailabilityPlanner responsible for using underlying local planner and FailureProvider
@@ -59,7 +59,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
             (timeRange.startMs + offsetMs) / 1000, queryParams.stepSecs, (timeRange.endMs + offsetMs) / 1000,
             queryParams.spread, processFailure = false)
           logger.debug("PromQlExec params:" + promQlParams)
-          PromQlMetricsRemoteExec(remoteHttpEndpoint, remoteHttpTimeoutMs,
+          PromQlRemoteExec(remoteHttpEndpoint, remoteHttpTimeoutMs,
             qContext, InProcessPlanDispatcher, dsRef, promQlParams)
       }
     }
@@ -67,7 +67,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     if (execPlans.size == 1) execPlans.head
     else StitchRvsExec(qContext,
                        InProcessPlanDispatcher,
-                       execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlMetricsRemoteExec]))
+                       execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
     // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
     // Sort to move RemoteExec in end as it does not have schema
 

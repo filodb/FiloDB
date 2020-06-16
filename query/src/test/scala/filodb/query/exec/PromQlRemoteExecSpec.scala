@@ -11,7 +11,7 @@ import filodb.core.query.{PromQlQueryParams, QueryContext}
 import filodb.query
 import filodb.query.{Data, QueryResponse, QueryResult, Sampl}
 
-class PromQlMetricsRemoteExecSpec extends FunSpec with Matchers with ScalaFutures {
+class PromQlRemoteExecSpec extends FunSpec with Matchers with ScalaFutures {
   val timeseriesDataset = Dataset.make("timeseries",
     Seq("tags:map"),
     Seq("timestamp:ts", "value:double:detectDrops=true"),
@@ -26,7 +26,7 @@ class PromQlMetricsRemoteExecSpec extends FunSpec with Matchers with ScalaFuture
   val params = PromQlQueryParams("", 0, 0 , 0)
   it ("should convert matrix Data to QueryResponse ") {
     val expectedResult = List((1000000, 1.0), (2000000, 2.0), (3000000, 3.0))
-    val exec = PromQlMetricsRemoteExec("", 60000, queryContext, dummyDispatcher, timeseriesDataset.ref, params)
+    val exec = PromQlRemoteExec("", 60000, queryContext, dummyDispatcher, timeseriesDataset.ref, params)
     val result = query.Result (Map("instance" ->"inst1"), Some(Seq(Sampl(1000, 1), Sampl(2000, 2), Sampl(3000, 3))), None)
     val res = exec.toQueryResponse(Data("vector", Seq(result)), "id", Kamon.currentSpan())
     res.isInstanceOf[QueryResult] shouldEqual true
@@ -39,7 +39,7 @@ class PromQlMetricsRemoteExecSpec extends FunSpec with Matchers with ScalaFuture
 
   it ("should convert vector Data to QueryResponse ") {
     val expectedResult = List((1000000, 1.0))
-    val exec = PromQlMetricsRemoteExec("", 60000, queryContext, dummyDispatcher, timeseriesDataset.ref, params)
+    val exec = PromQlRemoteExec("", 60000, queryContext, dummyDispatcher, timeseriesDataset.ref, params)
     val result = query.Result (Map("instance" ->"inst1"), None, Some(Sampl(1000, 1)))
     val res = exec.toQueryResponse(Data("vector", Seq(result)), "id", Kamon.currentSpan())
     res.isInstanceOf[QueryResult] shouldEqual true
@@ -51,7 +51,7 @@ class PromQlMetricsRemoteExecSpec extends FunSpec with Matchers with ScalaFuture
   }
 
   it ("should convert vector Data to QueryResponse for MetadataQuery") {
-    val exec = PromQlMetadataRemoteExec("", 60000, Map.empty,
+    val exec = MetadataRemoteExec("", 60000, Map.empty,
       queryContext, dummyDispatcher, timeseriesDataset.ref, params)
     val map1 = Map("instance" -> "inst-1", "last-sample" -> "6377838" )
     val map2 = Map("instance" -> "inst-2", "last-sample" -> "6377834" )
@@ -64,7 +64,7 @@ class PromQlMetricsRemoteExecSpec extends FunSpec with Matchers with ScalaFuture
   }
 
   it ("should convert vector Data to QueryResponse for Metadata series query") {
-    val exec = PromQlMetadataRemoteExec("", 60000, Map.empty, queryContext, dummyDispatcher, timeseriesDataset.ref, params)
+    val exec = MetadataRemoteExec("", 60000, Map.empty, queryContext, dummyDispatcher, timeseriesDataset.ref, params)
     val map1 = Map("instance" -> "inst-1", "last-sample" -> "6377838" )
     val map2 = Map("instance" -> "inst-2", "last-sample" -> "6377834" )
     val res = exec.toQueryResponse(Seq(map1, map2), "id", Kamon.currentSpan())
