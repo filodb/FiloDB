@@ -167,10 +167,10 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       case lp: RawChunkMeta                => materializeRawChunkMeta(qContext, lp)
       case lp: PeriodicSeries              => materializePeriodicSeries(qContext, lp)
       case lp: PeriodicSeriesWithWindowing => materializePeriodicSeriesWithWindowing(qContext, lp)
-      case lp: ApplyInstantFunction        => materializeApplyInstantFunction(qContext, lp)
-      case lp: ApplyInstantFunctionRaw     => materializeApplyInstantFunctionRaw(qContext, lp)
-      case lp: Aggregate                   => materializeAggregate(qContext, lp)
-      case lp: BinaryJoin                  => materializeBinaryJoin(qContext, lp)
+      case lp: ApplyInstantFunction => materializeApplyInstantFunction(qContext, lp)
+      case lp: ApplyInstantFunctionRaw => materializeApplyInstantFunctionRaw(qContext, lp)
+      case lp: Aggregate => materializeAggregate(qContext, lp)
+      case lp: BinaryJoin => materializeBinaryJoin(qContext, lp)
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp)
       case lp: LabelValues                 => materializeLabelValues(qContext, lp)
       case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(qContext, lp)
@@ -316,7 +316,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     *         period, returns it as is.
     */
   private def boundToStartTimeToEarliestRetained(startMs: Long, stepMs: Long,
-                                        windowMs: Long, offsetMs: Long): Long = {
+                                                 windowMs: Long, offsetMs: Long): Long = {
     // In case query is earlier than earliestRetainedTimestamp then we need to drop the first few instants
     // to prevent inaccurate results being served. Inaccuracy creeps in because data can be in memory for which
     // equivalent data may not be in cassandra. Aggregations cannot be guaranteed to be complete.
@@ -361,12 +361,12 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val spreadChanges = spreadProvToUse.spreadFunc(renamedFilters)
     val rangeSelectorWithOffset = lp.rangeSelector match {
       case IntervalSelector(fromMs, toMs) => IntervalSelector(fromMs - offsetMillis - lp.lookbackMs.getOrElse(
-                                             queryConfig.staleSampleAfterMs), toMs - offsetMillis)
-      case _                              => lp.rangeSelector
+        queryConfig.staleSampleAfterMs), toMs - offsetMillis)
+      case _ => lp.rangeSelector
     }
     val needsStitch = rangeSelectorWithOffset match {
       case IntervalSelector(from, to) => spreadChanges.exists(c => c.time >= from && c.time <= to)
-      case _                          => false
+      case _ => false
     }
     val execPlans = shardsFromFilters(renamedFilters, qContext).map { shard =>
       val dispatcher = dispatcherForShard(shard)
@@ -378,22 +378,21 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   private def materializeLabelValues(qContext: QueryContext,
                                      lp: LabelValues): PlanResult = {
-    val filters = lp.labelConstraints.map { case (k, v) => ColumnFilter(k, Filter.Equals(v)) }.toSeq
     // If the label is PromMetricLabel and is different than dataset's metric name,
     // replace it with dataset's metric name. (needed for prometheus plugins)
     val metricLabelIndex = lp.labelNames.indexOf(PromMetricLabel)
     val labelNames = if (metricLabelIndex > -1 && dsOptions.metricColumn != PromMetricLabel)
       lp.labelNames.updated(metricLabelIndex, dsOptions.metricColumn) else lp.labelNames
 
-    val shardsToHit = if (shardColumns.toSet.subsetOf(lp.labelConstraints.keySet)) {
-      shardsFromFilters(filters, qContext)
+    val shardsToHit = if (shardColumns.toSet.subsetOf(lp.filters.map(_.column).toSet)) {
+      shardsFromFilters(lp.filters, qContext)
     } else {
       mdNoShardKeyFilterRequests.increment()
       shardMapperFunc.assignedShards
     }
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      exec.LabelValuesExec(qContext, dispatcher, dsRef, shard, filters, labelNames, lp.lookbackTimeMs)
+      exec.LabelValuesExec(qContext, dispatcher, dsRef, shard, lp.filters, labelNames, lp.lookbackTimeMs)
     }
     PlanResult(metaExec, false)
   }
@@ -412,7 +411,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       PartKeysExec(qContext, dispatcher, dsRef, shard, schemas.part, renamedFilters,
-                   lp.fetchFirstLastSampleTimes, lp.startMs, lp.endMs)
+        lp.fetchFirstLastSampleTimes, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec, false)
   }
@@ -442,16 +441,16 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   private def materializeFunctionArgs(functionParams: Seq[FunctionArgsPlan],
                                       qContext: QueryContext): Seq[FuncArgs] = {
-    if (functionParams.isEmpty){
+    if (functionParams.isEmpty) {
       Nil
     } else {
       functionParams.map { param =>
         param match {
           case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
           case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(materialize(s, qContext),
-                                                              RangeParams(s.startMs, s.stepMs, s.endMs))
-          case  t: ScalarTimeBasedPlan    => TimeFuncArgs(t.rangeParams)
-          case _                          => throw new UnsupportedOperationException("Invalid logical plan")
+            RangeParams(s.startMs, s.stepMs, s.endMs))
+          case t: ScalarTimeBasedPlan => TimeFuncArgs(t.rangeParams)
+          case _ => throw new UnsupportedOperationException("Invalid logical plan")
         }
       }
     }
@@ -467,7 +466,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       PlanResult(Seq(topPlan), vectors.needsStitch)
     } else {
       vectors.plans.foreach(_.addRangeVectorTransformer(ScalarFunctionMapper(lp.function,
-                                                               RangeParams(lp.startMs, lp.stepMs, lp.endMs))))
+        RangeParams(lp.startMs, lp.stepMs, lp.endMs))))
       vectors
     }
   }
@@ -475,7 +474,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   private def materializeApplySortFunction(qContext: QueryContext,
                                            lp: ApplySortFunction): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, qContext)
-    if(vectors.plans.length > 1) {
+    if (vectors.plans.length > 1) {
       val targetActor = pickDispatcher(vectors.plans)
       val topPlan = DistConcatExec(qContext, targetActor, vectors.plans)
       topPlan.addRangeVectorTransformer(SortFunctionMapper(lp.function))
@@ -497,7 +496,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       PlanResult(Seq(topPlan), vectors.needsStitch)
     } else {
       vectors.plans.foreach(_.addRangeVectorTransformer(AbsentFunctionMapper(lp.columnFilters, lp.rangeParams,
-        dsOptions.metricColumn )))
+        dsOptions.metricColumn)))
       vectors
     }
   }

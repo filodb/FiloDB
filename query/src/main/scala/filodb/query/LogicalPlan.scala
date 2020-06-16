@@ -78,7 +78,7 @@ case class RawSeries(rangeSelector: RangeSelector,
 }
 
 case class LabelValues(labelNames: Seq[String],
-                       labelConstraints: Map[String, String],
+                       filters: Seq[ColumnFilter],
                        lookbackTimeMs: Long) extends MetadataQueryPlan
 
 case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
@@ -383,9 +383,7 @@ object LogicalPlan {
   def getLabelValueOperatorsFromLogicalPlan(logicalPlan: LogicalPlan): Option[Seq[LabelValueOperatorGroup]] = {
     LogicalPlan.findLeafLogicalPlans(logicalPlan).flatMap { lp =>
       lp match {
-        case lp: LabelValues           => Some(
-          LabelValueOperatorGroup(
-            lp.labelConstraints.map(lbc => LabelValueOperator(lbc._1, Seq(lbc._2), "=")).toSeq))
+        case lp: LabelValues           => getLabelValueOpsFromFilters(lp.filters)
         case lp: RawSeries             => getLabelValueOpsFromFilters(lp.filters)
         case lp: RawChunkMeta          => getLabelValueOpsFromFilters(lp.filters)
         case lp: SeriesKeysByFilters   => getLabelValueOpsFromFilters(lp.filters)
@@ -400,15 +398,17 @@ object LogicalPlan {
     }
   }
 
-  def getRegex(logicalPlan: LogicalPlan, regexColumn: String): Option[String] = {
+  def getRawSeriesRegex(logicalPlan: LogicalPlan, regexColumn: String): Option[String] = {
     val filters = LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
-      case lp: RawSeries => lp.filters.filter(x => x.column.equals(regexColumn) && x.filter.isInstanceOf[EqualsRegex])
-
-      case _            => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
+      case lp: RawSeries            => getRegexFromFilter(lp.filters, regexColumn)
+      case _                        => Seq.empty
     }
 
     if (filters.isEmpty) None else Some(filters.head.filter.asInstanceOf[EqualsRegex].value.toString)
   }
+
+  private def getRegexFromFilter(filters: Seq[ColumnFilter], regexColumn: String) = filters.
+    filter(x => x.column.equals(regexColumn) && x.filter.isInstanceOf[EqualsRegex])
 
   def updateFilter(logicalPlan: LogicalPlan, column: String, filter: core.query.Filter): LogicalPlan = {
     LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {

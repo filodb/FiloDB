@@ -21,7 +21,8 @@ class ShardKeyRegexPlanner(mandatoryColumn: String,
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
     val regexShardKeyColumn = dataset.options.nonMetricShardColumns.filterNot(_.equals(mandatoryColumn))
-    val regexShardKeyValue = LogicalPlan.getRegex(logicalPlan, regexShardKeyColumn.head)
+    val regexShardKeyValue = LogicalPlan.getRawSeriesRegex(logicalPlan, regexShardKeyColumn.head)
+    // Fixed scalar, metadata query etc will be executed by multiPartitionPlanner directly
     if (regexShardKeyValue.isEmpty) multiPartitionPlanner.materialize(logicalPlan, qContext)
     else {
       val execPlans = regexFieldMatcher(RegexColumn(regexShardKeyColumn.head, regexShardKeyValue.get)).map { r =>
