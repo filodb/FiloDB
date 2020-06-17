@@ -73,7 +73,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
-
+    if (shardMapperFunc.numShards == 0) throw new IllegalStateException("No shards available")
     val materialized = walkLogicalPlanTree(logicalPlan, qContext)
     match {
       case PlanResult(Seq(justOne), stitch) =>
@@ -392,7 +392,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      exec.LabelValuesExec(qContext, dispatcher, dsRef, shard, lp.filters, labelNames, lp.lookbackTimeMs)
+      exec.LabelValuesExec(qContext, dispatcher, dsRef, shard, lp.filters, labelNames, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec, false)
   }

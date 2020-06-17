@@ -9,8 +9,8 @@ import org.scalatest.concurrent.ScalaFutures
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
-import filodb.core.query.Filter.Equals
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query.Filter.Equals
 import filodb.prometheus.parse.Parser
 import filodb.query.exec.{DistConcatExec, MultiSchemaPartitionsExec, ReduceAggregateExec}
 
@@ -28,7 +28,7 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     withFallback(routingConfig)
   private val queryConfig = new QueryConfig(config)
 
-  private val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "sum(heap_usage)", 100, 1, 1000, None)
+  private val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000, None)
 
   private val localMapper = new ShardMapper(32)
   for {i <- 0 until 32} localMapper.registerNode(Seq(i), node)

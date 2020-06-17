@@ -79,7 +79,8 @@ case class RawSeries(rangeSelector: RangeSelector,
 
 case class LabelValues(labelNames: Seq[String],
                        filters: Seq[ColumnFilter],
-                       lookbackTimeMs: Long) extends MetadataQueryPlan
+                       startMs: Long,
+                       endMs: Long) extends MetadataQueryPlan
 
 case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
                                fetchFirstLastSampleTimes: Boolean,
@@ -355,24 +356,27 @@ object LogicalPlan {
   }
 
   def getLabelValueFromLogicalPlan(logicalPlan: LogicalPlan, labelName: String): Option[Seq[String]] = {
-    getLabelValueFromLogicalPlan(getLabelValueOperatorsFromLogicalPlan(logicalPlan), labelName)
+    getAllLabelValueFromGroups(getLabelValueOperatorsFromLogicalPlan(logicalPlan), labelName)
   }
 
-  def getLabelValueFromLogicalPlan(labelValues: Option[Seq[LabelValueOperatorGroup]],
+  def getAllLabelValueFromGroups(labelValues: Option[Seq[LabelValueOperatorGroup]],
                                    labelName: String): Option[Seq[String]] = {
     labelValues match {
       case None => None
-      case _    => labelValues.get.flatMap(group =>
-        group.labelValueOperators.flatMap(lops => {
-          lops.columnName.equals(labelName) match {
-            case true  => lops.value
-            case false => Seq()
-          }
-        })).distinct match {
+      case _    => labelValues.get.flatMap(group => getLabelValueFromGroup(labelName, group)).distinct match {
         case Nil                    => None
         case lVFilters: Seq[String] => Some(lVFilters)
       }
     }
+  }
+
+  def getLabelValueFromGroup(labelName: String, group: LabelValueOperatorGroup): Seq[String] = {
+    group.labelValueOperators.flatMap(lops => {
+      lops.columnName.equals(labelName) match {
+        case true => lops.value
+        case false => Seq()
+      }
+    })
   }
 
   private def getLabelValueOpsFromFilters(filters: Seq[ColumnFilter]): Option[LabelValueOperatorGroup] = {
