@@ -30,13 +30,15 @@ class SinglePartitionPlannerSpec extends FunSpec with Matchers{
   private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
 
-  private val routingConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
+  private val routingConfigString = "routing {\n  remote {\n   " +
+    " http {\n      endpoint = localhost\n timeout = 10000\n    }\n  }\n}"
+
   private val routingConfig = ConfigFactory.parseString(routingConfigString)
   private val config = ConfigFactory.load("application_test.conf").getConfig("filodb.query").
     withFallback(routingConfig)
   private val queryConfig = new QueryConfig(config)
 
-  private val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "sum(heap_usage)", 100, 1, 1000, None)
+  private val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000)
 
   val localPlanner = new SingleClusterPlanner(dsRef, schemas, localMapper, earliestRetainedTimestampFn = 0, queryConfig)
   val remotePlanner = new SingleClusterPlanner(dsRef, schemas, remoteMapper, earliestRetainedTimestampFn = 0,
@@ -139,12 +141,13 @@ class SinglePartitionPlannerSpec extends FunSpec with Matchers{
       TimeStepParams(1000, 10, 2000))
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    execPlan.printTree()
     execPlan.isInstanceOf[PartKeysDistConcatExec] shouldEqual (true)
     execPlan.asInstanceOf[PartKeysDistConcatExec].children.length shouldEqual(3)
 
-    // For Raw and Downsample
+    // For Raw
     execPlan.asInstanceOf[PartKeysDistConcatExec].children(0).isInstanceOf[PartKeysDistConcatExec] shouldEqual true
+    execPlan.asInstanceOf[PartKeysDistConcatExec].children(0).asInstanceOf[PartKeysDistConcatExec].children.
+      forall(_.isInstanceOf[PartKeysExec]) shouldEqual true
 
     execPlan.asInstanceOf[PartKeysDistConcatExec].children(1).asInstanceOf[MockExecPlan].name shouldEqual ("rules1")
     execPlan.asInstanceOf[PartKeysDistConcatExec].children(2).asInstanceOf[MockExecPlan].name shouldEqual ("rules2")
