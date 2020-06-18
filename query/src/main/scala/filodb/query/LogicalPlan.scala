@@ -337,10 +337,6 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
   override def endMs: Long = vectors.endMs
 }
 
-case class LabelValueOperator(columnName: String, value: Seq[String], operator: String)
-
-case class LabelValueOperatorGroup(labelValueOperators: Seq[LabelValueOperator])
-
 object LogicalPlan {
   /**
     * Get leaf Logical Plans
