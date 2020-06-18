@@ -167,10 +167,10 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       case lp: RawChunkMeta                => materializeRawChunkMeta(qContext, lp)
       case lp: PeriodicSeries              => materializePeriodicSeries(qContext, lp)
       case lp: PeriodicSeriesWithWindowing => materializePeriodicSeriesWithWindowing(qContext, lp)
-      case lp: ApplyInstantFunction => materializeApplyInstantFunction(qContext, lp)
-      case lp: ApplyInstantFunctionRaw => materializeApplyInstantFunctionRaw(qContext, lp)
-      case lp: Aggregate => materializeAggregate(qContext, lp)
-      case lp: BinaryJoin => materializeBinaryJoin(qContext, lp)
+      case lp: ApplyInstantFunction        => materializeApplyInstantFunction(qContext, lp)
+      case lp: ApplyInstantFunctionRaw     => materializeApplyInstantFunctionRaw(qContext, lp)
+      case lp: Aggregate                   => materializeAggregate(qContext, lp)
+      case lp: BinaryJoin                  => materializeBinaryJoin(qContext, lp)
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp)
       case lp: LabelValues                 => materializeLabelValues(qContext, lp)
       case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(qContext, lp)
@@ -361,12 +361,12 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val spreadChanges = spreadProvToUse.spreadFunc(renamedFilters)
     val rangeSelectorWithOffset = lp.rangeSelector match {
       case IntervalSelector(fromMs, toMs) => IntervalSelector(fromMs - offsetMillis - lp.lookbackMs.getOrElse(
-        queryConfig.staleSampleAfterMs), toMs - offsetMillis)
-      case _ => lp.rangeSelector
+                                             queryConfig.staleSampleAfterMs), toMs - offsetMillis)
+      case _                              => lp.rangeSelector
     }
     val needsStitch = rangeSelectorWithOffset match {
       case IntervalSelector(from, to) => spreadChanges.exists(c => c.time >= from && c.time <= to)
-      case _ => false
+      case _                          => false
     }
     val execPlans = shardsFromFilters(renamedFilters, qContext).map { shard =>
       val dispatcher = dispatcherForShard(shard)
@@ -411,7 +411,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       PartKeysExec(qContext, dispatcher, dsRef, shard, schemas.part, renamedFilters,
-        lp.fetchFirstLastSampleTimes, lp.startMs, lp.endMs)
+                   lp.fetchFirstLastSampleTimes, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec, false)
   }
@@ -448,9 +448,9 @@ class SingleClusterPlanner(dsRef: DatasetRef,
         param match {
           case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
           case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(materialize(s, qContext),
-            RangeParams(s.startMs, s.stepMs, s.endMs))
-          case t: ScalarTimeBasedPlan => TimeFuncArgs(t.rangeParams)
-          case _ => throw new UnsupportedOperationException("Invalid logical plan")
+                                                              RangeParams(s.startMs, s.stepMs, s.endMs))
+          case  t: ScalarTimeBasedPlan    => TimeFuncArgs(t.rangeParams)
+          case _                          => throw new UnsupportedOperationException("Invalid logical plan")
         }
       }
     }
@@ -496,7 +496,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       PlanResult(Seq(topPlan), vectors.needsStitch)
     } else {
       vectors.plans.foreach(_.addRangeVectorTransformer(AbsentFunctionMapper(lp.columnFilters, lp.rangeParams,
-        dsOptions.metricColumn)))
+        dsOptions.metricColumn )))
       vectors
     }
   }

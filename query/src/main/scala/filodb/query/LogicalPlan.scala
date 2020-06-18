@@ -371,8 +371,13 @@ case class ScalarBinaryOperation(operator: BinaryOperator,
   override def stepMs: Long = rangeParams.stepSecs * 1000
   override def endMs: Long = rangeParams.endSecs * 1000
   override def isRoutable: Boolean = false
-  // TODO update when lhs/ rhs are ScalarBinaryOperation
-  override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = this
+  override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = {
+    val updatedLhs = if (lhs.isRight) Right(lhs.right.get.updatePeriodicSeriesFilter(column, filter).
+                      asInstanceOf[ScalarBinaryOperation]) else Left(lhs.left.get)
+    val updatedRhs = if (lhs.isRight) Right(rhs.right.get.updatePeriodicSeriesFilter(column, filter).
+                      asInstanceOf[ScalarBinaryOperation]) else Left(rhs.left.get)
+    this.copy(lhs = updatedLhs, rhs = updatedRhs)
+  }
 }
 
 /**

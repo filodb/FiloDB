@@ -5,14 +5,13 @@ import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
-
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.core.query.Filter.Equals
 import filodb.prometheus.parse.Parser
-import filodb.query.exec.{DistConcatExec, MultiSchemaPartitionsExec, ReduceAggregateExec, TimeScalarGeneratorExec}
+import filodb.query.exec.{DistConcatExec, MultiSchemaPartitionsExec, PeriodicSamplesMapper, ReduceAggregateExec, ScalarOperationMapper, TimeScalarGeneratorExec}
 
 class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
 
@@ -68,6 +67,21 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     val engine = new ShardKeyRegexPlanner("_ws_", dataset, localPlanner, regexFieldMatcher)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[TimeScalarGeneratorExec] shouldEqual(true)
+  }
+
+  it("should generate Exec plan for Scalar Binary Operation") {
+    val lp = Parser.queryToLogicalPlan("1 + test{_ws_ = \"demo\", _ns_ =~ \"app.*\", instance = \"Inst-1\" }", 1000)
+    val regexFieldMatcher = (regexColumn: RegexColumn) => { Seq("App-1", "App-2") }
+    val engine = new ShardKeyRegexPlanner("_ws_", dataset, localPlanner, regexFieldMatcher)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[DistConcatExec] shouldEqual(true)
+    execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
+    execPlan.children(0).children.head.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+    execPlan.children(0).children.head.rangeVectorTransformers(1).isInstanceOf[ScalarOperationMapper] shouldEqual true
+    execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 }
 
