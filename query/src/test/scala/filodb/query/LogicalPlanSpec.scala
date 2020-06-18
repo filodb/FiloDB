@@ -155,9 +155,8 @@ class LogicalPlanSpec extends FunSpec with Matchers {
     val rawSeries = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("_name_", Equals("MetricName")),
       currFilter), Seq("_name_", "instance"), Some(300000), None)
     val periodicSeriesWithWindowing = PeriodicSeriesWithWindowing(rawSeries, 1000, 500, 5000, 100, SumOverTime)
-
     val updatedFilter = ColumnFilter("instance", Equals("Inst1"))
-    val res = LogicalPlan.updateFilter(periodicSeriesWithWindowing, "instance", Equals("Inst1"))
+    val res = periodicSeriesWithWindowing.updateFilter( "instance", Equals("Inst1"))
     res.asInstanceOf[RawSeries].filters.contains(updatedFilter) shouldEqual(true)
     res.asInstanceOf[RawSeries].filters.contains(currFilter) shouldEqual(false)
   }
