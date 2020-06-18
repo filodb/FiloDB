@@ -9,7 +9,7 @@ import org.scalatest.{FunSpec, Matchers}
 
 class LogicalPlanSpec extends FunSpec with Matchers {
 
-  it("should get labelValueOps from logicalPlan") {
+  it("should get columnFilterGroup from logicalPlan") {
 
     val rawSeries = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("_name_", Equals("MetricName")),
       ColumnFilter("instance", NotEquals("Inst-0"))), Seq("_name_", "instance"), Some(300000), None)
@@ -33,7 +33,7 @@ class LogicalPlanSpec extends FunSpec with Matchers {
     }
   }
 
-  it("should get labelValueOps from logicalPlan with filter In") {
+  it("should get columnFilterGroup from logicalPlan with filter In") {
 
     val rawSeries = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("_name_", Equals("MetricName")),
       ColumnFilter("instance", In(Set("Inst-1", "Inst-0")))), Seq("_name_", "instance"), Some(300000), None)
@@ -56,7 +56,7 @@ class LogicalPlanSpec extends FunSpec with Matchers {
     }
   }
 
-  it("should get labelValueOps from BinaryJoin LogicalPlan") {
+  it("should get columnFilterGroup from BinaryJoin LogicalPlan") {
 
     val rawSeriesLhs = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("_name_", Equals("MetricName1")),
       ColumnFilter("instance", EqualsRegex("Inst-0"))), Seq("_name_", "instance"), Some(300000), None)
@@ -101,7 +101,7 @@ class LogicalPlanSpec extends FunSpec with Matchers {
     }
   }
 
-  it("should get labelValueOps fail for scalar logicalPlan") {
+  it("should get columnFilterGroup fail for scalar logicalPlan") {
     val periodicSeriesWithWindowing = ScalarTimeBasedPlan(ScalarFunctionId.Year, RangeParams(1000, 500, 5000))
     val res = LogicalPlan.getColumnFilterGroup(periodicSeriesWithWindowing)
     res.isEmpty should be (true)
@@ -175,7 +175,7 @@ class LogicalPlanSpec extends FunSpec with Matchers {
     res.shouldEqual(Set("Inst-0", "Inst-1"))
   }
 
-  it("should sort LabelValueOperators when only one group is present") {
+  it("should sort ColumnFilters when only one group is present") {
 
     val rawSeries = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("name", Equals("MetricName")),
       ColumnFilter("instance", NotEquals("Inst-0"))), Seq("name", "instance"), Some(300000), None)
@@ -264,7 +264,7 @@ class LogicalPlanSpec extends FunSpec with Matchers {
     }
   }
 
-  it("should have equal hashcode for identical LabelValueOperatorGroups") {
+  it("should have equal hashcode for identical ColumnFilterGroup") {
     val rawSeries1 = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("name", Equals("MetricName")),
       ColumnFilter("instance", NotEquals("Inst-0"))), Seq("name", "instance"), Some(300000), None)
     val periodicSeriesWithWindowing1 = PeriodicSeriesWithWindowing(rawSeries1, 1000, 500, 5000, 100, SumOverTime)
