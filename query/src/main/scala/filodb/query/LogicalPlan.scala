@@ -1,7 +1,7 @@
 package filodb.query
 
-import filodb.core.query.Filter.EqualsRegex
 import filodb.core.query.{ColumnFilter, Filter, RangeParams}
+import filodb.core.query.Filter._
 
 //scalastyle:off number.of.types
 sealed trait LogicalPlan {
@@ -14,8 +14,8 @@ sealed trait LogicalPlan {
   def updateFilter(column: String, filter: Filter): LogicalPlan = {
     this match {
       case p: PeriodicSeriesPlan => p.updatePeriodicSeriesFilter(column, filter)
-      case r: RawSeriesLikePlan => r.updateRawSeriesFilter(column, filter)
-      case _ => throw new UnsupportedOperationException("Logical plan not supported for update")
+      case r: RawSeriesLikePlan  => r.updateRawSeriesFilter(column, filter)
+      case _                     => throw new UnsupportedOperationException("Logical plan not supported for update")
     }
   }
 }
@@ -117,7 +117,7 @@ case class RawChunkMeta(rangeSelector: RangeSelector,
   override def endMs: Long = ???
 
   override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = {
-    val updatedFilters= this.filters.filterNot(_.column.equals(column)) :+
+    val updatedFilters = this.filters.filterNot(_.column.equals(column)) :+
       ColumnFilter(column, filter)
     this.copy(filters = updatedFilters)
   }
@@ -390,10 +390,6 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
     vectors.updatePeriodicSeriesFilter(column, filter))
 }
 
-case class LabelValueOperator(columnName: String, value: Seq[String], operator: String)
-
-case class LabelValueOperatorGroup(labelValueOperators: Seq[LabelValueOperator])
-
 object LogicalPlan {
   /**
     * Get leaf Logical Plans
@@ -406,50 +402,43 @@ object LogicalPlan {
    }
   }
 
-  def getLabelValueFromLogicalPlan(logicalPlan: LogicalPlan, labelName: String): Option[Seq[String]] = {
-    getAllLabelValueFromGroups(getLabelValueOperatorsFromLogicalPlan(logicalPlan), labelName)
+  def getColumnValues(logicalPlan: LogicalPlan, labelName: String): Set[String] = {
+    getColumnValues(getColumnFilterGroup(logicalPlan), labelName)
   }
 
-  def getAllLabelValueFromGroups(labelValues: Option[Seq[LabelValueOperatorGroup]],
-                                   labelName: String): Option[Seq[String]] = {
-    labelValues match {
-      case None => None
-      case _    => labelValues.get.flatMap(group => getLabelValueFromGroup(labelName, group)).distinct match {
-        case Nil                    => None
-        case lVFilters: Seq[String] => Some(lVFilters)
-      }
+  def getColumnValues(columnFilterGroup: Seq[Set[ColumnFilter]],
+                      labelName: String): Set[String] = {
+    columnFilterGroup.flatMap (columnFilters => getColumnValues(columnFilters, labelName)) match {
+      case columnValues: Iterable[String] => if (columnValues.isEmpty) Set.empty else columnValues.toSet
+      case _                              => Set.empty
     }
   }
 
-  def getLabelValueFromGroup(labelName: String, group: LabelValueOperatorGroup): Seq[String] = {
-    group.labelValueOperators.flatMap(lops => {
-      lops.columnName.equals(labelName) match {
-        case true => lops.value
-        case false => Seq()
+  def getColumnValues(columnFilters: Set[ColumnFilter], labelName: String): Set[String] = {
+    columnFilters.flatMap(cFilter => {
+      cFilter.column == labelName match {
+        case true  => cFilter.filter.valuesStrings.map(_.toString)
+        case false => Seq.empty
       }
     })
   }
 
-  private def getLabelValueOpsFromFilters(filters: Seq[ColumnFilter]): Option[LabelValueOperatorGroup] = {
-    Some(LabelValueOperatorGroup(filters.map(cf => LabelValueOperator(cf.column,
-      cf.filter.valuesStrings.map(_.toString).toSeq.sorted, cf.filter.operatorString))))
-  }
-
-  def getLabelValueOperatorsFromLogicalPlan(logicalPlan: LogicalPlan): Option[Seq[LabelValueOperatorGroup]] = {
-    LogicalPlan.findLeafLogicalPlans(logicalPlan).flatMap { lp =>
+  def getColumnFilterGroup(logicalPlan: LogicalPlan): Seq[Set[ColumnFilter]] = {
+    LogicalPlan.findLeafLogicalPlans(logicalPlan) map { lp =>
       lp match {
-        case lp: LabelValues           => getLabelValueOpsFromFilters(lp.filters)
-        case lp: RawSeries             => getLabelValueOpsFromFilters(lp.filters)
-        case lp: RawChunkMeta          => getLabelValueOpsFromFilters(lp.filters)
-        case lp: SeriesKeysByFilters   => getLabelValueOpsFromFilters(lp.filters)
-        case _: ScalarTimeBasedPlan    => Nil // Plan does not have labels
-        case _: ScalarFixedDoublePlan  => Nil
-        case _: ScalarBinaryOperation  => Nil
+        case lp: LabelValues           => lp.filters toSet
+        case lp: RawSeries             => lp.filters toSet
+        case lp: RawChunkMeta          => lp.filters toSet
+        case lp: SeriesKeysByFilters   => lp.filters toSet
+        case _: ScalarTimeBasedPlan    => Set.empty[ColumnFilter] // Plan does not have labels
+        case _: ScalarFixedDoublePlan  => Set.empty[ColumnFilter]
+        case _: ScalarBinaryOperation  => Set.empty[ColumnFilter]
         case _                         => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
       }
     } match {
-      case Nil => None
-      case groupSeq: Seq[LabelValueOperatorGroup] => Some(groupSeq)
+      case groupSeq: Seq[Set[ColumnFilter]] =>
+        if (groupSeq.isEmpty || groupSeq.forall(_.isEmpty)) Seq.empty else groupSeq
+      case _ => Seq.empty
     }
   }
 

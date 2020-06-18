@@ -137,9 +137,10 @@ object LogicalPlanUtils {
     }
   }
 
-  def getMetricName(logicalPlan: LogicalPlan, datasetMetricColumn: String): Option[Seq[String]] = {
-    val metricName = LogicalPlan.getLabelValueFromLogicalPlan(logicalPlan, PromMetricLabel)
-    if (metricName.isEmpty) LogicalPlan.getLabelValueFromLogicalPlan(logicalPlan, datasetMetricColumn)
+  def getMetricName(logicalPlan: LogicalPlan, datasetMetricColumn: String): Set[String] = {
+    val columnFilterGroup = LogicalPlan.getColumnFilterGroup(logicalPlan)
+    val metricName = LogicalPlan.getColumnValues(columnFilterGroup, PromMetricLabel)
+    if (metricName.isEmpty) LogicalPlan.getColumnValues(columnFilterGroup, datasetMetricColumn)
     else metricName
   }
 

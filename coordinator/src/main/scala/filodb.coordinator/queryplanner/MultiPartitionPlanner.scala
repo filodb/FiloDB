@@ -43,8 +43,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     }
   }
 
-  private def getRoutingKeys(logicalPlan: LogicalPlan) = dataset.options.nonMetricShardColumns
-    .map(x => (x, LogicalPlan.getLabelValueFromLogicalPlan(logicalPlan, x)))
+  private def getRoutingKeys(logicalPlan: LogicalPlan) = {
+    val columnFilterGroup = LogicalPlan.getColumnFilterGroup(logicalPlan)
+    dataset.options.nonMetricShardColumns
+      .map(x => (x, LogicalPlan.getColumnValues(columnFilterGroup, x)))
+  }
 
   private def generateRemoteExecParams(queryParams: PromQlQueryParams, startMs: Long, endMs: Long) = {
     PromQlQueryParams(queryParams.promQl, startMs / 1000, queryParams.stepSecs, endMs / 1000, queryParams.spread,
@@ -57,9 +60,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     * @param queryParams PromQlQueryParams having query details
     * @param logicalPlan Logical plan
     */
-  private def partitionUtil(routingKeys: Seq[(String, Option[scala.Seq[String]])], queryParams: PromQlQueryParams,
+  private def partitionUtil(routingKeys: Seq[(String, Set[String])], queryParams: PromQlQueryParams,
                             logicalPlan: LogicalPlan) = {
-    val routingKeyMap = routingKeys.map(x => (x._1, x._2.get.head)).toMap
+    val routingKeyMap = routingKeys.map(x => (x._1, x._2.head)).toMap
     val offsetMs = LogicalPlanUtils.getOffsetMillis(logicalPlan)
     val periodicSeriesTimeWithOffset = TimeRange((queryParams.startSecs * 1000) - offsetMs,
       (queryParams.endSecs * 1000) - offsetMs)
