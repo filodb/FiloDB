@@ -73,7 +73,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
-    if (shardMapperFunc.numShards == 0) throw new IllegalStateException("No shards available")
+    if (shardMapperFunc.numShards <= 0) throw new IllegalStateException("No shards available")
     val materialized = walkLogicalPlanTree(logicalPlan, qContext)
     match {
       case PlanResult(Seq(justOne), stitch) =>

@@ -11,6 +11,7 @@ import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
+import filodb.query.LogicalPlan
 import filodb.query.exec._
 
 class MultiPartitionPlannerSpec extends FunSpec with Matchers {
@@ -163,6 +164,26 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
+  }
+
+  it ("should have equal hashcode for identical getColumnFilterGroup") {
+
+    val lp1 = Parser.queryRangeToLogicalPlan("test1{inst = \"inst-001\", job = \"app\", host = \"localhost\"}",
+      TimeStepParams(1000, 100, 2000))
+
+    val lp2 = Parser.queryRangeToLogicalPlan("test1{job = \"app\", host = \"localhost\", inst = \"inst-001\"}",
+      TimeStepParams(3000, 100, 5000))
+
+    val res1 = LogicalPlan.getColumnFilterGroup(lp1)
+    val res2 = LogicalPlan.getColumnFilterGroup(lp2)
+
+    res1.size.shouldEqual(1)
+    res1(0).size.shouldEqual(4)
+    res2.size.shouldEqual(1)
+    res2(0).size.shouldEqual(4)
+
+    res1(0).hashCode() shouldEqual res2(0).hashCode()
+
   }
 
   it ("should generate PromQlRemoteExec plan for BinaryJoin when lhs and rhs are in same remote partition") {
