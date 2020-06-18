@@ -317,7 +317,8 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     * @param pct percentage: 0.0 to 100.0
     */
   def ensureHeadroom(pct: Double): Int = {
-    // Ramp up the timeout as the current headroom shrinks. Max timeout is a little over 2 seconds.
+    // Ramp up the timeout as the current headroom shrinks. Max timeout per attempt is a little
+    // over 2 seconds, and the total timeout can be double that, for a total of 4 seconds.
     val maxTimeoutMillis = 2048
     val timeoutMillis = ((1.0 - (currentFreePercent / pct)) * maxTimeoutMillis).toInt
 
