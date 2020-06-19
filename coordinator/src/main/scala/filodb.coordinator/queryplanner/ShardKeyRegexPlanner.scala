@@ -5,9 +5,7 @@ import filodb.core.query.{Filter, QueryContext}
 import filodb.query.{Aggregate, BinaryJoin, LogicalPlan}
 import filodb.query.exec.{DistConcatExec, ExecPlan, InProcessPlanDispatcher, ReduceAggregateExec}
 
-
-case class RegexColumn(column: String, regex: String)
-
+case class ShardColumnValues(regexColumn: String, regexValue: String, nonRegexColumn: String, nonRegexValue: String)
 
 /**
   * Responsible for query planning for queries having regex in shard column
@@ -15,13 +13,13 @@ case class RegexColumn(column: String, regex: String)
   * @param nonRegexShardColumn shard column which is mandatory and cannot be a regex
   * @param dataset dataset
   * @param multiPartitionPlanner multiPartition query planner
-  * @param regexFieldMatcher used to get values matching shard key column regex
+  * @param regexFieldMatcher used to get values for nonRegexShardColumn matching shard key column regex.
   */
 
 class ShardKeyRegexPlanner(nonRegexShardColumn: String,
                            dataset: Dataset,
                            multiPartitionPlanner: QueryPlanner,
-                           regexFieldMatcher: RegexColumn => Seq[String]) extends QueryPlanner {
+                           regexFieldMatcher: ShardColumnValues => Seq[String]) extends QueryPlanner {
   /**
     * Converts a logical plan to execution plan.
     *
@@ -33,10 +31,13 @@ class ShardKeyRegexPlanner(nonRegexShardColumn: String,
 
     val regexShardKeyColumn = dataset.options.nonMetricShardColumns.filterNot(_.equals(nonRegexShardColumn))
     val regexShardKeyValue = LogicalPlan.getRawSeriesRegex(logicalPlan, regexShardKeyColumn.head)
+    val nonRegexShardKeyValue = LogicalPlan.getColumnValues(logicalPlan, nonRegexShardColumn)
     // Fixed scalar, metadata query etc will be executed by multiPartitionPlanner directly
     if (regexShardKeyValue.isEmpty) multiPartitionPlanner.materialize(logicalPlan, qContext)
     else {
-      val execPlans = regexFieldMatcher(RegexColumn(regexShardKeyColumn.head, regexShardKeyValue.get)).map { r =>
+      val regexValues = regexFieldMatcher(ShardColumnValues(regexShardKeyColumn.head, regexShardKeyValue.get,
+        nonRegexShardColumn, nonRegexShardKeyValue.head))
+      val execPlans = regexValues.map { r =>
       multiPartitionPlanner.materialize(logicalPlan.updateFilter(regexShardKeyColumn.head,
         Filter.Equals(r)), qContext)
       }

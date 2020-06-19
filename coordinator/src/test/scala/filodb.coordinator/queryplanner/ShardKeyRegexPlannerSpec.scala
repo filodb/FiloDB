@@ -5,13 +5,14 @@ import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
+
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.core.query.Filter.Equals
 import filodb.prometheus.parse.Parser
-import filodb.query.exec.{DistConcatExec, MultiSchemaPartitionsExec, PeriodicSamplesMapper, ReduceAggregateExec, ScalarOperationMapper, TimeScalarGeneratorExec}
+import filodb.query.exec._
 
 class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
 
@@ -37,7 +38,7 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
 
   it("should generate Exec plan for simple query") {
     val lp = Parser.queryToLogicalPlan("test{_ws_ = \"demo\", _ns_ =~ \"app.*\", instance = \"Inst-1\" }", 1000)
-    val regexFieldMatcher = (regexColumn: RegexColumn) => { Seq("App-1", "App-2") }
+    val regexFieldMatcher = (shardColumnValues: ShardColumnValues) => { Seq("App-1", "App-2") }
     val engine = new ShardKeyRegexPlanner("_ws_", dataset, localPlanner, regexFieldMatcher)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[DistConcatExec] shouldEqual(true)
@@ -50,7 +51,7 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
 
   it("should generate Exec plan for Aggregate query") {
     val lp = Parser.queryToLogicalPlan("sum(test{_ws_ = \"demo\", _ns_ =~ \"app.*\", instance = \"Inst-1\" })", 1000)
-    val regexFieldMatcher = (regexColumn: RegexColumn) => { Seq("App-1", "App-2") }
+    val regexFieldMatcher = (shardColumnValues: ShardColumnValues) => { Seq("App-1", "App-2") }
     val engine = new ShardKeyRegexPlanner("_ws_", dataset, localPlanner, regexFieldMatcher)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[ReduceAggregateExec] shouldEqual(true)
@@ -63,7 +64,7 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
 
   it("should generate Exec plan for time()") {
     val lp = Parser.queryToLogicalPlan("time()", 1000)
-    val regexFieldMatcher = (regexColumn: RegexColumn) => { Seq("App-1", "App-2") }
+    val regexFieldMatcher = (shardColumnValues: ShardColumnValues) => { Seq("App-1", "App-2") }
     val engine = new ShardKeyRegexPlanner("_ws_", dataset, localPlanner, regexFieldMatcher)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[TimeScalarGeneratorExec] shouldEqual(true)
@@ -71,7 +72,7 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
 
   it("should generate Exec plan for Scalar Binary Operation") {
     val lp = Parser.queryToLogicalPlan("1 + test{_ws_ = \"demo\", _ns_ =~ \"app.*\", instance = \"Inst-1\" }", 1000)
-    val regexFieldMatcher = (regexColumn: RegexColumn) => { Seq("App-1", "App-2") }
+    val regexFieldMatcher = (shardColumnValues: ShardColumnValues) => { Seq("App-1", "App-2") }
     val engine = new ShardKeyRegexPlanner("_ws_", dataset, localPlanner, regexFieldMatcher)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[DistConcatExec] shouldEqual(true)
