@@ -130,8 +130,14 @@ object ChunkMap extends StrictLogging {
     if (numLocksReleased > 0) {
       logger.error(s"Number of locks was non-zero: $numLocksReleased. " +
         s"This is indicative of a possible lock acquisition/release bug.")
+      haltAndCatchFire
     }
     execPlanTracker.put(t, execPlan)
+  }
+
+  def haltAndCatchFire(): Unit = {
+    logger.error(s"Shutting down process since it may be in an unstable/corrupt state.")
+    Runtime.getRuntime.halt(1)
   }
 }
 
@@ -285,8 +291,7 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
         val lockState = UnsafeUtils.getIntVolatile(this, lockStateOffset)
         _logger.error(s"Following execPlan locks have not been released for a while: " +
           s"$locks2 $locks1 $execPlanTracker $lockState")
-        _logger.error(s"Shutting down process since it may be in an unstable/corrupt state.")
-        Runtime.getRuntime.halt(1)
+        haltAndCatchFire()
       }
     }
   }
