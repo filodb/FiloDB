@@ -2,10 +2,9 @@ package filodb.coordinator.queryplanner
 
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, QueryContext}
+import filodb.core.query.Filter.{EqualsRegex, NotEqualsRegex}
 import filodb.query.{Aggregate, BinaryJoin, LogicalPlan}
 import filodb.query.exec.{DistConcatExec, ExecPlan, InProcessPlanDispatcher, ReduceAggregateExec}
-
-case class ShardColumnValues(regexColumn: String, regexValue: String, nonRegexColumn: String, nonRegexValue: String)
 
 /**
   * Responsible for query planning for queries having regex in shard column
@@ -29,23 +28,38 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     * @return materialized Execution Plan which can be dispatched
     */
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+    logicalPlan match {
+           case a: Aggregate  => materializeAggregate(a, qContext)
+           case b: BinaryJoin => materializeBinaryJoin(b, qContext)
+           case _             => materializeNonAggregate(logicalPlan, qContext)
+    }
+  }
 
-    val nonMetricShardKeyFilters = LogicalPlan.getRawSeriesFilters(logicalPlan).filter(f => dataset.options.
-      nonMetricShardColumns.contains(f.column))
-    // Fixed scalar, metadata query etc will be executed by multiPartitionPlanner directly
-    if (nonMetricShardKeyFilters.isEmpty) queryPlanner.materialize(logicalPlan, qContext)
+  private def getNonMetricShardKeyFilters(logicalPlan: LogicalPlan) = LogicalPlan.
+    getRawSeriesFilters(logicalPlan).map { s => s.filter(f => dataset.options.nonMetricShardColumns.contains(f.column))}
+
+  private def generateExec(logicalPlan: LogicalPlan, nonMetricShardKeyFilters: Seq[ColumnFilter],
+                           qContext: QueryContext) = shardKeyMatcher(nonMetricShardKeyFilters).map(f =>
+                           queryPlanner.materialize(logicalPlan.replaceFilters(f), qContext))
+
+  private def materializeBinaryJoin(binaryJoin: BinaryJoin, qContext: QueryContext): ExecPlan = {
+   if (getNonMetricShardKeyFilters(binaryJoin).forall(_.forall(f => !f.filter.isInstanceOf[EqualsRegex] &&
+     !f.filter.isInstanceOf[NotEqualsRegex]))) queryPlanner.materialize(binaryJoin, qContext)
+   else throw new UnsupportedOperationException("Regex not supported for Binary Join")
+  }
+
+  private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext): ExecPlan = {
+    val execPlans = generateExec(aggregate, getNonMetricShardKeyFilters(aggregate).head, queryContext)
+    if (execPlans.size == 1) execPlans.head
+    else ReduceAggregateExec(queryContext, InProcessPlanDispatcher, execPlans, aggregate.operator, aggregate.params)
+  }
+
+  private def materializeNonAggregate(logicalPlan: LogicalPlan, queryContext: QueryContext): ExecPlan = {
+    val nonMetricShardKeyFilters = getNonMetricShardKeyFilters(logicalPlan)
+    if (nonMetricShardKeyFilters.head.isEmpty) queryPlanner.materialize(logicalPlan, queryContext)
     else {
-      val execPlans = shardKeyMatcher(nonMetricShardKeyFilters).map { f =>
-        queryPlanner.materialize(logicalPlan.replaceFilters(f), qContext)
-      }
-      if (execPlans.size == 1) execPlans.head
-      else {
-         logicalPlan match {
-           case a: Aggregate  => ReduceAggregateExec(qContext, InProcessPlanDispatcher, execPlans, a.operator, a.params)
-           case b: BinaryJoin => throw new UnsupportedOperationException("Regex not supported for Binary Join")
-           case _             => DistConcatExec(qContext, InProcessPlanDispatcher, execPlans)
-         }
-      }
+      val execPlans = generateExec(logicalPlan, nonMetricShardKeyFilters.head, queryContext)
+      if (execPlans.size == 1) execPlans.head else DistConcatExec(queryContext, InProcessPlanDispatcher, execPlans)
     }
   }
 }

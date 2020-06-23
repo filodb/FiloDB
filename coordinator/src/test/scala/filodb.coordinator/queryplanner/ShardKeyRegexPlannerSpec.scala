@@ -11,6 +11,7 @@ import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.core.query.Filter.Equals
+import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.exec._
 
@@ -91,6 +92,29 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
       contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
     execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
+  }
+
+  it("should generate Exec plan for Binary join without regex") {
+    val lp = Parser.queryToLogicalPlan("test1{_ws_ = \"demo\", _ns_ = \"app\"} + " +
+      "test2{_ws_ = \"demo\", _ns_ = \"app\"}", 1000)
+    val shardKeyMatcher = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-2"))))}
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcher)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual(true)
+  }
+
+  it ("should generate Exec plan for Metadata query") {
+    val lp = Parser.metadataQueryToLogicalPlan("http_requests_total{job=\"prometheus\", method=\"GET\"}",
+      TimeStepParams(1000, 1000, 3000))
+
+    val shardKeyMatcher = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-2"))))}
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcher)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[PartKeysDistConcatExec] shouldEqual (true)
   }
 }
 

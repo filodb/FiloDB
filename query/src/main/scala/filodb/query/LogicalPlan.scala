@@ -244,7 +244,7 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
   override def isRoutable: Boolean = vectors.isRoutable
-  override  def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 }
 
@@ -285,7 +285,7 @@ case class ApplySortFunction(vectors: PeriodicSeriesPlan,
   override def startMs: Long = vectors.startMs
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
-  override  def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
     vectors.replacePeriodicSeriesFilters(filters))
 }
 
@@ -413,8 +413,8 @@ object LogicalPlan {
   def getColumnValues(columnFilterGroup: Seq[Set[ColumnFilter]],
                       labelName: String): Set[String] = {
     columnFilterGroup.flatMap (columnFilters => getColumnValues(columnFilters, labelName)) match {
-      case columnValues: Iterable[String] => if (columnValues.isEmpty) Set.empty else columnValues.toSet
-      case _                              => Set.empty
+      case columnValues: Iterable[String]    => if (columnValues.isEmpty) Set.empty else columnValues.toSet
+      case _                                 => Set.empty
     }
   }
 
@@ -446,10 +446,13 @@ object LogicalPlan {
     }
   }
 
-  def getRawSeriesFilters(logicalPlan: LogicalPlan): Seq[ColumnFilter]= {
-    LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
-      case lp: RawSeries            => lp.filters
-      case _                        => Seq.empty
+  def getRawSeriesFilters(logicalPlan: LogicalPlan): Seq[Seq[ColumnFilter]] = {
+    LogicalPlan.findLeafLogicalPlans(logicalPlan).map { l =>
+      l match
+      {
+        case lp: RawSeries => lp.filters
+        case _             => Seq.empty
+      }
     }
   }
 }
