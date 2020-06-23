@@ -38,8 +38,10 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
 
   it("should generate Exec plan for simple query") {
     val lp = Parser.queryToLogicalPlan("test{_ws_ = \"demo\", _ns_ =~ \"app.*\", instance = \"Inst-1\" }", 1000)
-    val regexFieldMatcher = (shardColumnValues: ShardColumnValues) => { Seq("App-1", "App-2") }
-    val engine = new ShardKeyRegexPlanner("_ws_", dataset, localPlanner, regexFieldMatcher)
+    val shardKeyMatcher = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-2"))))}
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcher)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[DistConcatExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
@@ -51,8 +53,10 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
 
   it("should generate Exec plan for Aggregate query") {
     val lp = Parser.queryToLogicalPlan("sum(test{_ws_ = \"demo\", _ns_ =~ \"app.*\", instance = \"Inst-1\" })", 1000)
-    val regexFieldMatcher = (shardColumnValues: ShardColumnValues) => { Seq("App-1", "App-2") }
-    val engine = new ShardKeyRegexPlanner("_ws_", dataset, localPlanner, regexFieldMatcher)
+    val shardKeyMatcher = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-2"))))}
+    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcher)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[ReduceAggregateExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
@@ -64,16 +68,20 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
 
   it("should generate Exec plan for time()") {
     val lp = Parser.queryToLogicalPlan("time()", 1000)
-    val regexFieldMatcher = (shardColumnValues: ShardColumnValues) => { Seq("App-1", "App-2") }
-    val engine = new ShardKeyRegexPlanner("_ws_", dataset, localPlanner, regexFieldMatcher)
+    val shardKeyMatcher = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-2"))))}
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcher)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[TimeScalarGeneratorExec] shouldEqual(true)
   }
 
   it("should generate Exec plan for Scalar Binary Operation") {
     val lp = Parser.queryToLogicalPlan("1 + test{_ws_ = \"demo\", _ns_ =~ \"app.*\", instance = \"Inst-1\" }", 1000)
-    val regexFieldMatcher = (shardColumnValues: ShardColumnValues) => { Seq("App-1", "App-2") }
-    val engine = new ShardKeyRegexPlanner("_ws_", dataset, localPlanner, regexFieldMatcher)
+    val shardKeyMatcher = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-2"))))}
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcher)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[DistConcatExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]

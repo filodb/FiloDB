@@ -1,7 +1,7 @@
 package filodb.coordinator.queryplanner
 
 import filodb.core.metadata.Dataset
-import filodb.core.query.{Filter, QueryContext}
+import filodb.core.query.{ColumnFilter, QueryContext}
 import filodb.query.{Aggregate, BinaryJoin, LogicalPlan}
 import filodb.query.exec.{DistConcatExec, ExecPlan, InProcessPlanDispatcher, ReduceAggregateExec}
 
@@ -10,16 +10,17 @@ case class ShardColumnValues(regexColumn: String, regexValue: String, nonRegexCo
 /**
   * Responsible for query planning for queries having regex in shard column
   *
-  * @param nonRegexShardColumn shard column which is mandatory and cannot be a regex
-  * @param dataset dataset
-  * @param multiPartitionPlanner multiPartition query planner
-  * @param regexFieldMatcher used to get values for nonRegexShardColumn matching shard key column regex.
+  * @param dataset         dataset
+  * @param queryPlanner    multiPartition query planner
+  * @param shardKeyMatcher used to get values for regex shard keys. Each inner sequence corresponds to matching regex
+  * value. For example: Seq(ColumnFilter(ws, Equals(demo)), ColumnFilter(ns, EqualsRegex(App*)) returns
+  * Seq(Seq(ColumnFilter(ws, Equals(demo)), ColumnFilter(ns, Equals(App1))), Seq(ColumnFilter(ws, Equals(demo)),
+  * ColumnFilter(ns, Equals(App2))
   */
 
-class ShardKeyRegexPlanner(nonRegexShardColumn: String,
-                           dataset: Dataset,
-                           multiPartitionPlanner: QueryPlanner,
-                           regexFieldMatcher: ShardColumnValues => Seq[String]) extends QueryPlanner {
+class ShardKeyRegexPlanner(dataset: Dataset,
+                           queryPlanner: QueryPlanner,
+                           shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]]) extends QueryPlanner {
   /**
     * Converts a logical plan to execution plan.
     *
@@ -29,27 +30,22 @@ class ShardKeyRegexPlanner(nonRegexShardColumn: String,
     */
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
-    val regexShardKeyColumn = dataset.options.nonMetricShardColumns.filterNot(_.equals(nonRegexShardColumn))
-    val regexShardKeyValue = LogicalPlan.getRawSeriesRegex(logicalPlan, regexShardKeyColumn.head)
-    val nonRegexShardKeyValue = LogicalPlan.getColumnValues(logicalPlan, nonRegexShardColumn)
+    val nonMetricShardKeyFilters = LogicalPlan.getRawSeriesFilters(logicalPlan).filter(f => dataset.options.
+      nonMetricShardColumns.contains(f.column))
     // Fixed scalar, metadata query etc will be executed by multiPartitionPlanner directly
-    if (regexShardKeyValue.isEmpty) multiPartitionPlanner.materialize(logicalPlan, qContext)
+    if (nonMetricShardKeyFilters.isEmpty) queryPlanner.materialize(logicalPlan, qContext)
     else {
-      val regexValues = regexFieldMatcher(ShardColumnValues(regexShardKeyColumn.head, regexShardKeyValue.get,
-        nonRegexShardColumn, nonRegexShardKeyValue.head))
-      val execPlans = regexValues.map { r =>
-      multiPartitionPlanner.materialize(logicalPlan.updateFilter(regexShardKeyColumn.head,
-        Filter.Equals(r)), qContext)
+      val execPlans = shardKeyMatcher(nonMetricShardKeyFilters).map { f =>
+        queryPlanner.materialize(logicalPlan.replaceFilters(f), qContext)
       }
-       if (execPlans.size == 1) execPlans.head
-       else {
+      if (execPlans.size == 1) execPlans.head
+      else {
          logicalPlan match {
            case a: Aggregate  => ReduceAggregateExec(qContext, InProcessPlanDispatcher, execPlans, a.operator, a.params)
            case b: BinaryJoin => throw new UnsupportedOperationException("Regex not supported for Binary Join")
            case _             => DistConcatExec(qContext, InProcessPlanDispatcher, execPlans)
          }
-       }
-
+      }
     }
   }
 }

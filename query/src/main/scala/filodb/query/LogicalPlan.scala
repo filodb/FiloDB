@@ -1,7 +1,6 @@
 package filodb.query
 
-import filodb.core.query.{ColumnFilter, Filter, RangeParams}
-import filodb.core.query.Filter._
+import filodb.core.query.{ColumnFilter, RangeParams}
 
 //scalastyle:off number.of.types
 sealed trait LogicalPlan {
@@ -11,10 +10,10 @@ sealed trait LogicalPlan {
     * It is false for RawSeriesLikePlan, MetadataQueryPlan, RawChunkMeta, ScalarTimeBasedPlan and ScalarFixedDoublePlan
     */
   def isRoutable: Boolean = true
-  def updateFilter(column: String, filter: Filter): LogicalPlan = {
+  def replaceFilters(filters: Seq[ColumnFilter]): LogicalPlan = {
     this match {
-      case p: PeriodicSeriesPlan => p.updatePeriodicSeriesFilter(column, filter)
-      case r: RawSeriesLikePlan  => r.updateRawSeriesFilter(column, filter)
+      case p: PeriodicSeriesPlan => p.replacePeriodicSeriesFilters(filters)
+      case r: RawSeriesLikePlan  => r.replaceRawSeriesFilters(filters)
       case _                     => throw new UnsupportedOperationException("Logical plan not supported for update")
     }
   }
@@ -28,7 +27,7 @@ sealed trait LogicalPlan {
 sealed trait RawSeriesLikePlan extends LogicalPlan {
   override def isRoutable: Boolean = false
   def isRaw: Boolean = false
-  def updateRawSeriesFilter(column: String, filter: Filter): RawSeriesLikePlan
+  def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan
 }
 
 sealed trait NonLeafLogicalPlan extends LogicalPlan {
@@ -54,7 +53,7 @@ sealed trait PeriodicSeriesPlan extends LogicalPlan {
     */
   def endMs: Long
 
-  def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan
+  def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan
 }
 
 sealed trait MetadataQueryPlan extends LogicalPlan {
@@ -85,9 +84,9 @@ case class RawSeries(rangeSelector: RangeSelector,
                      offsetMs: Option[Long] = None) extends RawSeriesLikePlan {
   override def isRaw: Boolean = true
 
-  override def updateRawSeriesFilter(column: String, filter: Filter): RawSeriesLikePlan = {
-    val updatedFilters= this.filters.filterNot(_.column.equals(column)) :+
-      ColumnFilter(column, filter)
+  override def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan = {
+    val filterColumns = newFilters.map(_.column)
+    val updatedFilters = this.filters.filterNot(f => filterColumns.contains(f.column)) ++ newFilters
     this.copy(filters = updatedFilters)
   }
 }
@@ -116,9 +115,9 @@ case class RawChunkMeta(rangeSelector: RangeSelector,
   override def stepMs: Long = ???
   override def endMs: Long = ???
 
-  override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = {
-    val updatedFilters = this.filters.filterNot(_.column.equals(column)) :+
-      ColumnFilter(column, filter)
+  override def replacePeriodicSeriesFilters(newFilters: Seq[ColumnFilter]): PeriodicSeriesPlan  = {
+    val filterColumns = newFilters.map(_.column)
+    val updatedFilters = this.filters.filterNot(f => filterColumns.contains(f.column)) ++ newFilters
     this.copy(filters = updatedFilters)
   }
 }
@@ -141,8 +140,8 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
                           offsetMs: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(rawSeries)
 
-  override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = this.copy(rawSeries =
-    rawSeries.updateRawSeriesFilter(column, filter))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(rawSeries =
+    rawSeries.replaceRawSeriesFilters(filters))
 }
 
 /**
@@ -163,8 +162,8 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
   with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(series)
 
-  override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = this.copy(series =
-    series.updateRawSeriesFilter(column, filter))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(series =
+    series.replaceRawSeriesFilters(filters))
 }
 
 /**
@@ -183,8 +182,8 @@ case class Aggregate(operator: AggregationOperator,
   override def startMs: Long = vectors.startMs
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
-  override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = this.copy(vectors =
-    vectors.updatePeriodicSeriesFilter(column, filter))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
+    vectors.replacePeriodicSeriesFilters(filters))
 }
 
 /**
@@ -212,8 +211,8 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
   override def stepMs: Long = lhs.stepMs
   override def endMs: Long = lhs.endMs
   override def isRoutable: Boolean = lhs.isRoutable && rhs.isRoutable
-  override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = this.copy(lhs =
-    lhs.updatePeriodicSeriesFilter(column, filter), rhs = rhs.updatePeriodicSeriesFilter(column, filter))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(lhs =
+    lhs.replacePeriodicSeriesFilters(filters), rhs = rhs.replacePeriodicSeriesFilters(filters))
 }
 
 /**
@@ -228,8 +227,8 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
   override def stepMs: Long = vector.stepMs
   override def endMs: Long = vector.endMs
   override def isRoutable: Boolean = vector.isRoutable
-  override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = this.copy(vector =
-    vector.updatePeriodicSeriesFilter(column, filter))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vector =
+    vector.replacePeriodicSeriesFilters(filters))
 }
 
 /**
@@ -245,8 +244,8 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
   override def isRoutable: Boolean = vectors.isRoutable
-  override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = this.copy(vectors =
-    vectors.updatePeriodicSeriesFilter(column, filter))
+  override  def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
+    vectors.replacePeriodicSeriesFilters(filters))
 }
 
 /**
@@ -258,8 +257,8 @@ case class ApplyInstantFunctionRaw(vectors: RawSeries,
                                    functionArgs: Seq[FunctionArgsPlan] = Nil) extends RawSeriesLikePlan
   with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
-  override def updateRawSeriesFilter(column: String, filter: Filter): RawSeriesLikePlan = this.copy(vectors =
-    vectors.updateRawSeriesFilter(column, filter).asInstanceOf[RawSeries])
+  override def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan = this.copy(vectors =
+    vectors.replaceRawSeriesFilters(newFilters).asInstanceOf[RawSeries])
 }
 
 /**
@@ -273,8 +272,8 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
   override def startMs: Long = vectors.startMs
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
-  override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = this.copy(vectors =
-    vectors.updatePeriodicSeriesFilter(column, filter))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
+    vectors.replacePeriodicSeriesFilters(filters))
 }
 
 /**
@@ -286,8 +285,8 @@ case class ApplySortFunction(vectors: PeriodicSeriesPlan,
   override def startMs: Long = vectors.startMs
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
-  override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = this.copy(vectors =
-    vectors.updatePeriodicSeriesFilter(column, filter))
+  override  def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
+    vectors.replacePeriodicSeriesFilters(filters))
 }
 
 /**
@@ -315,8 +314,8 @@ final case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
   override def isRoutable: Boolean = vectors.isRoutable
-  override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = this.copy(vectors =
-    vectors.updatePeriodicSeriesFilter(column, filter))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
+    vectors.replacePeriodicSeriesFilters(filters))
 }
 
 /**
@@ -328,7 +327,7 @@ final case class ScalarTimeBasedPlan(function: ScalarFunctionId, rangeParams: Ra
   override def startMs: Long = rangeParams.startSecs * 1000
   override def stepMs: Long = rangeParams.stepSecs * 1000
   override def endMs: Long = rangeParams.endSecs * 1000
-  override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = this // No Filter
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this // No Filter
 }
 
 /**
@@ -342,7 +341,7 @@ final case class ScalarFixedDoublePlan(scalar: Double,
   override def startMs: Long = timeStepParams.startSecs * 1000
   override def stepMs: Long = timeStepParams.stepSecs * 1000
   override def endMs: Long = timeStepParams.endSecs * 1000
-  override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = this
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this
 }
 
 //scalastyle:off number.of.types
@@ -356,8 +355,8 @@ final case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with
   override def stepMs: Long = scalars.stepMs
   override def endMs: Long = scalars.endMs
   override def isRoutable: Boolean = scalars.isRoutable
-  override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = this.copy(scalars =
-    scalars.updatePeriodicSeriesFilter(column, filter).asInstanceOf[ScalarPlan])
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(scalars =
+    scalars.replacePeriodicSeriesFilters(filters).asInstanceOf[ScalarPlan])
 }
 
 /**
@@ -371,10 +370,10 @@ case class ScalarBinaryOperation(operator: BinaryOperator,
   override def stepMs: Long = rangeParams.stepSecs * 1000
   override def endMs: Long = rangeParams.endSecs * 1000
   override def isRoutable: Boolean = false
-  override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = {
-    val updatedLhs = if (lhs.isRight) Right(lhs.right.get.updatePeriodicSeriesFilter(column, filter).
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = {
+    val updatedLhs = if (lhs.isRight) Right(lhs.right.get.replacePeriodicSeriesFilters(filters).
                       asInstanceOf[ScalarBinaryOperation]) else Left(lhs.left.get)
-    val updatedRhs = if (lhs.isRight) Right(rhs.right.get.updatePeriodicSeriesFilter(column, filter).
+    val updatedRhs = if (lhs.isRight) Right(rhs.right.get.replacePeriodicSeriesFilters(filters).
                       asInstanceOf[ScalarBinaryOperation]) else Left(rhs.left.get)
     this.copy(lhs = updatedLhs, rhs = updatedRhs)
   }
@@ -391,8 +390,8 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
   override def startMs: Long = vectors.startMs
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
-  override def updatePeriodicSeriesFilter(column: String, filter: Filter): PeriodicSeriesPlan = this.copy(vectors =
-    vectors.updatePeriodicSeriesFilter(column, filter))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
+    vectors.replacePeriodicSeriesFilters(filters))
 }
 
 object LogicalPlan {
@@ -447,16 +446,11 @@ object LogicalPlan {
     }
   }
 
-  def getRawSeriesRegex(logicalPlan: LogicalPlan, regexColumn: String): Option[String] = {
-    val filters = LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
-      case lp: RawSeries            => getRegexFromFilter(lp.filters, regexColumn)
+  def getRawSeriesFilters(logicalPlan: LogicalPlan): Seq[ColumnFilter]= {
+    LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
+      case lp: RawSeries            => lp.filters
       case _                        => Seq.empty
     }
-
-    if (filters.isEmpty) None else Some(filters.head.filter.asInstanceOf[EqualsRegex].value.toString)
   }
-
-  private def getRegexFromFilter(filters: Seq[ColumnFilter], regexColumn: String) = filters.
-    filter(x => x.column.equals(regexColumn) && x.filter.isInstanceOf[EqualsRegex])
 }
 //scalastyle:on number.of.types
