@@ -158,7 +158,15 @@ object RangeVectorAggregator extends StrictLogging {
     rvs.groupBy(grouping).mapValues { rvs =>
       new Iterator[rowAgg.AggHolderType] {
         val itsAndKeys = rvs.map { rv => (rv.rows, rv.key) }
-        def hasNext: Boolean = itsAndKeys.forall(_._1.hasNext)
+        def hasNext: Boolean = {
+          // Dont use forAll since it short-circuits hasNext invocation
+          // It is important to invoke hasNext on all iterators to release shared locks
+          var hnRet = false
+          itsAndKeys.foreach { itKey =>
+            if (itKey._1.hasNext) hnRet = true
+          }
+          hnRet
+        }
         def next(): rowAgg.AggHolderType = {
           acc.resetToZero()
           itsAndKeys.foreach { case (rowIter, rvk) =>
