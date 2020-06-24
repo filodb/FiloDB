@@ -130,8 +130,7 @@ object ChunkMap extends StrictLogging {
     if (numLocksReleased > 0) {
       logger.error(s"Number of locks was non-zero: $numLocksReleased. " +
         s"This is indicative of a possible lock acquisition/release bug.")
-      // FIXME: Causes failures when running the unit tests for some unknown reason.
-      //haltAndCatchFire()
+      haltAndCatchFire()
     }
     execPlanTracker.put(t, execPlan)
   }
