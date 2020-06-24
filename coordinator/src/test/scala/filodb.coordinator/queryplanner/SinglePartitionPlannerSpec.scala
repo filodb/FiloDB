@@ -16,7 +16,7 @@ import filodb.prometheus.parse.Parser
 import filodb.query._
 import filodb.query.exec._
 
-class SinglePartitionPlannerSpec extends FunSpec with Matchers{
+class SinglePartitionPlannerSpec extends FunSpec with Matchers {
   private implicit val system = ActorSystem()
   private val node = TestProbe().ref
 

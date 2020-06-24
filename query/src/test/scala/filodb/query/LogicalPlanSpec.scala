@@ -5,6 +5,7 @@ import filodb.core.query.Filter.{Equals, EqualsRegex, In, NotEquals, NotEqualsRe
 import filodb.query.BinaryOperator.DIV
 import filodb.query.Cardinality.OneToOne
 import filodb.query.RangeFunctionId.SumOverTime
+
 import org.scalatest.{FunSpec, Matchers}
 
 class LogicalPlanSpec extends FunSpec with Matchers {
@@ -262,6 +263,19 @@ class LogicalPlanSpec extends FunSpec with Matchers {
         fail("invalid entry in column filter sequence " + cfSet)
       }
     }
+  }
+
+  it("should update logicalPlan filter") {
+    val currFilter = ColumnFilter("instance", EqualsRegex("Inst*"))
+    val rawSeries = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("_name_", Equals("MetricName")),
+      currFilter, ColumnFilter("job", Equals("job1"))), Seq("_name_", "instance"), Some(300000), None)
+    val periodicSeriesWithWindowing = PeriodicSeriesWithWindowing(rawSeries, 1000, 500, 5000, 100, SumOverTime)
+    val updatedFilter = ColumnFilter("instance", Equals("Inst1"))
+    val res = periodicSeriesWithWindowing.replaceFilters(Seq(updatedFilter))
+    res.asInstanceOf[PeriodicSeriesWithWindowing].series.asInstanceOf[RawSeries].filters.
+      contains(updatedFilter) shouldEqual(true)
+    res.asInstanceOf[PeriodicSeriesWithWindowing].series.asInstanceOf[RawSeries].filters.
+      contains(currFilter) shouldEqual(false)
   }
 
   it("should have equal hashcode for identical ColumnFilterGroup") {

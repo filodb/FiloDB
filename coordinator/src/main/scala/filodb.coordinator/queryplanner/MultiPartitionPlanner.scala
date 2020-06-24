@@ -169,8 +169,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         localPartitionPlanner.materialize(lp.copy(startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
       else
         createMetadataRemoteExec(qContext, queryParams, p,
-          Map("filter" -> lp.labelConstraints.map{case (k, v) => k + "=" + v}.mkString(","),
-            "labels" -> lp.labelNames.mkString(",")))
+          Map("filter" -> lp.filters.map{f => f.column + f.filter.operatorString + f.filter.valuesStrings.head}.
+            mkString(","), "labels" -> lp.labelNames.mkString(",")))
     }
     if (execPlans.size == 1) execPlans.head
     else LabelValuesDistConcatExec(qContext, InProcessPlanDispatcher,
