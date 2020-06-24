@@ -10,11 +10,16 @@ sealed trait LogicalPlan {
     * It is false for RawSeriesLikePlan, MetadataQueryPlan, RawChunkMeta, ScalarTimeBasedPlan and ScalarFixedDoublePlan
     */
   def isRoutable: Boolean = true
+
+  /**
+    * Replace filters present in logical plan
+    */
   def replaceFilters(filters: Seq[ColumnFilter]): LogicalPlan = {
     this match {
-      case p: PeriodicSeriesPlan => p.replacePeriodicSeriesFilters(filters)
-      case r: RawSeriesLikePlan  => r.replaceRawSeriesFilters(filters)
-      case _                     => throw new UnsupportedOperationException("Logical plan not supported for update")
+      case p: PeriodicSeriesPlan  => p.replacePeriodicSeriesFilters(filters)
+      case r: RawSeriesLikePlan   => r.replaceRawSeriesFilters(filters)
+      case l: LabelValues         => l.copy(filters = filters)
+      case s: SeriesKeysByFilters => s.copy(filters = filters)
     }
   }
 }
@@ -293,13 +298,13 @@ case class ApplySortFunction(vectors: PeriodicSeriesPlan,
   * Nested logical plan for argument of function
   * Example: clamp_max(node_info{job = "app"},scalar(http_requests_total{job = "app"}))
   */
-trait FunctionArgsPlan extends LogicalPlan
+trait FunctionArgsPlan extends LogicalPlan with PeriodicSeriesPlan
 
 /**
   * Generate scalar
   * Example: scalar(http_requests_total), time(), hour()
   */
-trait ScalarPlan extends LogicalPlan with PeriodicSeriesPlan with FunctionArgsPlan
+trait ScalarPlan extends FunctionArgsPlan
 
 /**
   * Generate scalar from vector

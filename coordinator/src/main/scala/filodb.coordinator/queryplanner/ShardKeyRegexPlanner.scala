@@ -31,7 +31,7 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     logicalPlan match {
            case a: Aggregate  => materializeAggregate(a, qContext)
            case b: BinaryJoin => materializeBinaryJoin(b, qContext)
-           case _             => materializeNonAggregate(logicalPlan, qContext)
+           case _             => materializeOthers(logicalPlan, qContext)
     }
   }
 
@@ -54,8 +54,9 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     else ReduceAggregateExec(queryContext, InProcessPlanDispatcher, execPlans, aggregate.operator, aggregate.params)
   }
 
-  private def materializeNonAggregate(logicalPlan: LogicalPlan, queryContext: QueryContext): ExecPlan = {
+  private def materializeOthers(logicalPlan: LogicalPlan, queryContext: QueryContext): ExecPlan = {
     val nonMetricShardKeyFilters = getNonMetricShardKeyFilters(logicalPlan)
+    // For queries which don't have RawSeries filters like metadata and fixed scalar queries
     if (nonMetricShardKeyFilters.head.isEmpty) queryPlanner.materialize(logicalPlan, queryContext)
     else {
       val execPlans = generateExec(logicalPlan, nonMetricShardKeyFilters.head, queryContext)
