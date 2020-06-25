@@ -3,7 +3,6 @@ package filodb.cassandra.columnstore
 import scala.concurrent.Future
 
 import com.typesafe.config.ConfigFactory
-import com.typesafe.scalalogging.StrictLogging
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
@@ -13,61 +12,16 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.core.{MachineMetricsData, TestData}
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder}
+import filodb.core.downsample.OffHeapMemory
 import filodb.core.memstore._
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
-import filodb.core.metadata.{Dataset, Schema, Schemas}
+import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.{ColumnFilter, QueryConfig, QueryContext, QuerySession}
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{InMemoryMetaStore, PartKeyRecord, StoreConfig, TimeRangeChunkScan}
-import filodb.memory._
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query.{QueryResponse, QueryResult}
 import filodb.query.exec.{InProcessPlanDispatcher, MultiSchemaPartitionsExec}
-
-class OffHeapMemory(schemas: Seq[Schema],
-                    kamonTags: Map[String, String],
-                    maxMetaSize: Int,
-                    storeConfig: StoreConfig)
-  extends StrictLogging {
-
-  private val blockMemSize = storeConfig.shardMemSize
-  private val nativeMemSize = storeConfig.ingestionBufferMemSize
-
-  logger.info(s"Allocating OffHeap memory $this with nativeMemManagerSize=$nativeMemSize " +
-    s"and blockMemorySize=$blockMemSize")
-  val blockStore = new PageAlignedBlockManager(blockMemSize,
-    stats = new MemoryStats(kamonTags),
-    reclaimer = new ReclaimListener {
-      override def onReclaim(metadata: Long, numBytes: Int): Unit = {}
-    },
-    numPagesPerBlock = 50)
-
-  val blockMemFactory = new BlockMemFactory(blockStore, None, maxMetaSize, kamonTags, false)
-
-  val nativeMemoryManager = new NativeMemoryManager(nativeMemSize, kamonTags)
-
-  /**
-    * Buffer Pool keyed by Raw schema Id
-    */
-  val bufferPools = {
-    val bufferPoolByRawSchemaId = debox.Map.empty[Int, WriteBufferPool]
-    schemas.foreach { s =>
-      val pool = new WriteBufferPool(nativeMemoryManager, s.data, storeConfig)
-      bufferPoolByRawSchemaId += s.schemaHash -> pool
-    }
-    bufferPoolByRawSchemaId
-  }
-
-  def free(): Unit = {
-    logger.info(s"Freeing OffHeap memory $this nativeMemFreeBytes=${nativeMemoryManager.numFreeBytes} " +
-      s"nativeMemUsedBytes=${nativeMemoryManager.usedMemory} " +
-      s"blockMemFreeBytes=${blockStore.numFreeBlocks * blockStore.blockSizeInBytes} " +
-      s"blockMemUsedBytes=${blockStore.usedMemory}")
-    blockStore.releaseBlocks()
-    nativeMemoryManager.shutdown()
-
-  }
-}
 
 class OdpSpec extends FunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
 
@@ -96,7 +50,7 @@ class OdpSpec extends FunSpec with Matchers with BeforeAndAfterAll with ScalaFut
   val shardStats = new TimeSeriesShardStats(dataset.ref, -1)
 
   val firstSampleTime = 74373042000L
-  val numSamples = 1000
+  val numSamples = 100
   val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
 
   // First create the tables in C*
