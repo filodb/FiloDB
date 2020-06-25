@@ -36,14 +36,14 @@ class PagedReadablePartition(override val schema: Schema,
   import PagedReadablePartition._
   val notNeededColIds = if (colIds.nonEmpty) schema.dataInfos.indices.toSet -- colIds.toSet
                         else Set.empty
-  partData.chunkSets.foreach { vectors =>
+  partData.chunkSetsTimeOrdered.foreach { vectors =>
     // release vectors that are not needed so they can be GCed quickly before scans
     // finish. This is a temporary workaround since we dont have ability to fetch
     // specific columns from Cassandra
     notNeededColIds.foreach(i => vectors.vectors(i) = emptyByteBuffer)
   }
 
-  override def numChunks: Int = partData.chunkSets.length
+  override def numChunks: Int = partData.chunkSetsTimeOrdered.length
 
   override def appendingChunkLen: Int = 0
 
@@ -51,10 +51,10 @@ class PagedReadablePartition(override val schema: Schema,
 
   override def infos(startTime: Long, endTime: Long): ChunkInfoIterator = chunkInfoIteratorImpl
 
-  override def hasChunks(method: ChunkScanMethod): Boolean = partData.chunkSets.nonEmpty
+  override def hasChunks(method: ChunkScanMethod): Boolean = partData.chunkSetsTimeOrdered.nonEmpty
 
   override def hasChunksAt(id: ChunkID): Boolean =
-    partData.chunkSets.iterator
+    partData.chunkSetsTimeOrdered.iterator
       .map(c => ChunkSetInfoOnHeap(c.infoBytes, c.vectors))
       .exists(_.id == id)
 
@@ -68,7 +68,7 @@ class PagedReadablePartition(override val schema: Schema,
 
   private def chunkInfoIteratorImpl = {
     new ChunkInfoIterator {
-      private val iter = partData.chunkSets.iterator
+      private val iter = partData.chunkSetsTimeOrdered.iterator
       override def close(): Unit = {}
       override def hasNext: Boolean = iter.hasNext
       override def nextInfo = ??? // intentionally not implemented since users dont bother with off-heap

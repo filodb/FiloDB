@@ -221,7 +221,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
 
     val parts = lz4ColStore.readRawPartitions(dataset.ref, 0.millis.toMillis, partScan).toListL.runAsync.futureValue
     parts should have length (1)
-    parts(0).chunkSets should have length (1)
-    parts(0).chunkSets(0).vectors.toSeq shouldEqual sourceChunks.head.chunks
+    parts(0).chunkSetsTimeOrdered should have length (1)
+    parts(0).chunkSetsTimeOrdered(0).vectors.toSeq shouldEqual sourceChunks.head.chunks
   }
 }
