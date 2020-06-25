@@ -217,7 +217,10 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
           }
           // create the partition and update data structures (but no need to add to Lucene!)
           // NOTE: if no memory, then no partition!
-        case p: TimeSeriesPartition => Some(p)
+        case p: TimeSeriesPartition =>
+          // invoke callback even if we didn't create the partition
+          callback(p.partID, p.partKeyBytes)
+          Some(p)
       }
     }.toVector.flatten
   }
