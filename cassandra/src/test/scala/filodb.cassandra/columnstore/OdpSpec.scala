@@ -76,7 +76,7 @@ class OdpSpec extends FunSpec with Matchers with BeforeAndAfterAll with ScalaFut
 
     gaugePartKeyBytes = part.partKeyBytes
 
-    val rawSamples = Stream.from(0, 1).map { i =>
+    val rawSamples = Stream.from(0).map { i =>
       Seq(firstSampleTime + i, i.toDouble, gaugeName, seriesTags)
     }.take(numSamples)
 
@@ -116,7 +116,7 @@ class OdpSpec extends FunSpec with Matchers with BeforeAndAfterAll with ScalaFut
       memStore.recoverIndex(dataset.ref, 0).futureValue
       memStore.refreshIndexForTesting(dataset.ref)
 
-      // issue 10 concurrent queries
+      // issue 2 concurrent queries
       val res = (0 to 1).map(_ => query(memStore))
 
       // all queries should result in all chunks
@@ -130,11 +130,63 @@ class OdpSpec extends FunSpec with Matchers with BeforeAndAfterAll with ScalaFut
     }
   }
 
+  it ("should be able to do partial ODP for non concurrent queries") {
+    val policy = new FixedMaxPartitionsEvictionPolicy(20)
+    val memStore = new TimeSeriesMemStore(config, colStore, new InMemoryMetaStore(), Some(policy))
+    try {
+      memStore.setup(dataset.ref, schemas, 0, TestData.storeConf)
+      memStore.recoverIndex(dataset.ref, 0).futureValue
+      memStore.refreshIndexForTesting(dataset.ref)
+
+      // ingrest some more samples to trigger partial odp
+      val rawSamples = Stream.from(0).map { i =>
+        Seq(firstSampleTime + numSamples + i, i.toDouble, gaugeName, seriesTags)
+      }.take(numSamples)
+
+      memStore.ingest(dataset.ref, 0, SomeData(MachineMetricsData.records(dataset, rawSamples).records, 300))
+
+      val rvs = query(memStore).futureValue.asInstanceOf[QueryResult]
+      rvs.result.size shouldEqual 1
+      rvs.result.head.rows.toList.size shouldEqual numSamples * 2
+    } finally {
+      memStore.shutdown()
+    }
+  }
+
+  it ("should be able to do partial ODP for concurrent queries") {
+    val policy = new FixedMaxPartitionsEvictionPolicy(20)
+    val memStore = new TimeSeriesMemStore(config, colStore, new InMemoryMetaStore(), Some(policy))
+    try {
+      memStore.setup(dataset.ref, schemas, 0, TestData.storeConf)
+      memStore.recoverIndex(dataset.ref, 0).futureValue
+      memStore.refreshIndexForTesting(dataset.ref)
+
+      // ingrest some more samples to trigger partial odp
+      val rawSamples = Stream.from(0).map { i =>
+        Seq(firstSampleTime + numSamples + i, i.toDouble, gaugeName, seriesTags)
+      }.take(numSamples)
+
+      memStore.ingest(dataset.ref, 0, SomeData(MachineMetricsData.records(dataset, rawSamples).records, 300))
+
+      // issue 2 concurrent queries
+      val res = (0 to 1).map(_ => query(memStore))
+
+      // all queries should result in all chunks
+      res.foreach { r =>
+        val rvs = r.futureValue.asInstanceOf[QueryResult]
+        rvs.result.size shouldEqual 1
+        rvs.result.head.rows.toList.size shouldEqual numSamples * 2
+      }
+    } finally {
+      memStore.shutdown()
+    }
+  }
+
   def query(memStore: TimeSeriesMemStore): Future[QueryResponse] = {
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(gaugeName))
-    val exec = MultiSchemaPartitionsExec(QueryContext(sampleLimit = numSamples), InProcessPlanDispatcher,
-      dataset.ref, 0, queryFilters, TimeRangeChunkScan(firstSampleTime, firstSampleTime + numSamples))
+    val exec = MultiSchemaPartitionsExec(QueryContext(sampleLimit = numSamples * 2), InProcessPlanDispatcher,
+      dataset.ref, 0, queryFilters, TimeRangeChunkScan(firstSampleTime, firstSampleTime + 2 * numSamples))
     val queryConfig = new QueryConfig(config.getConfig("query"))
     val querySession = QuerySession(QueryContext(), queryConfig)
     exec.execute(memStore, querySession)(queryScheduler).runAsync(queryScheduler)
