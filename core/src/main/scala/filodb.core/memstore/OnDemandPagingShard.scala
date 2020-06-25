@@ -66,6 +66,9 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
     }
   }
 
+  // FIXME: testing
+  private val odpLatch = new filodb.memory.Latch()
+
   // NOTE: the current implementation is as follows
   //  1. Fetch partitions from memStore
   //  2. Determine, one at a time, what chunks are missing and could be fetched from disk
@@ -78,6 +81,13 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
                               querySession: QuerySession): Observable[ReadablePartition] = {
 
     capDataScannedPerShardCheck(partLookupRes)
+
+    if (partLookupRes.partIdsNotInMemory.isEmpty && partLookupRes.partIdsMemTimeGap.isEmpty) {
+      return super.scanPartitions(partLookupRes, colIds, querySession)
+    }
+
+    // FIXME: testing ODP race condition
+    odpLatch.acquireExclusive()
 
     // For now, always read every data column.
     // 1. We don't have a good way to update just some columns of a chunkset for ODP
@@ -118,6 +128,10 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
     // return data that is in memory.  TODO: fix
     val result = Observable.fromIterator(noOdpPartitions) ++ {
       if (storeConfig.multiPartitionODP) {
+        // FIXME: testing that this variant is never used
+        odpLatch.releaseExclusive()
+        ???
+        /*
         Observable.fromTask(odpPartTask(partIdsNotInMemory, partKeyBytesToPage, pagingMethods,
                                         partLookupRes.chunkMethod)).flatMap { odpParts =>
           val multiPart = MultiPartitionScan(partKeyBytesToPage, shardNum)
@@ -131,6 +145,7 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
               .doOnTerminate(ex => span.finish())
           } else { Observable.empty }
         }
+         */
       } else {
         Observable.fromTask(odpPartTask(partIdsNotInMemory, partKeyBytesToPage, pagingMethods,
                                         partLookupRes.chunkMethod)).flatMap { odpParts =>
@@ -152,8 +167,9 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
                   .headL
                   // headL since we are fetching a SinglePartition above
               }
-              .doOnTerminate(ex => span.finish())
+              .doOnTerminate(ex => {odpLatch.releaseExclusive(); span.finish()})
           } else {
+            odpLatch.releaseExclusive()
             Observable.empty
           }
         }
