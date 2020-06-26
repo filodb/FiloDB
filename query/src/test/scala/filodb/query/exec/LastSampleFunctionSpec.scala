@@ -27,7 +27,6 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
 
       val lastSamplesIter = new SlidingWindowIterator(rv.rows, start, step, end, 0, LastSampleFunction, queryConfig)
       validateLastSamples(samples, lastSamplesIter, start, end, step)
-      filodb.memory.data.ChunkMap.validateNoSharedLocks("xxx")
 
       val chunkedIter = new ChunkedWindowIteratorD(rv, start, step, end, w, chunkedLSFunc, querySession)
       validateLastSamples(samples, chunkedIter, start, end, step)
