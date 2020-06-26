@@ -216,18 +216,19 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       case FilteredPartitionScan(split, filters) =>
 
         if (filters.nonEmpty) {
-
+          // This API loads all part keys into heap and can potentially be large size for
+          // high cardinality queries, but it is needed to do multiple
+          // iterations over the part keys. First iteration is for data size estimation.
+          // Second iteration is for query result evaluation. Loading everything to heap
+          // is expensive, but we do it to handle data sizing for metrics that have
+          // continuous churn. See capDataScannedPerShardCheck method.
           val res = partKeyIndex.partKeyRecordsFromFilters(filters,
             chunkMethod.startTime,
             chunkMethod.endTime)
-
           val _schema = res.headOption.map { pkRec =>
             RecordSchema.schemaID(pkRec.partKey, UnsafeUtils.arayOffset)
           }
-
           stats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
-
-          // send index result in the partsInMemory field of lookup
           PartLookupResult(shardNum, chunkMethod, debox.Buffer.empty,
             _schema, debox.Map.empty, debox.Buffer.empty, res)
         } else {
@@ -251,7 +252,6 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
     // when query is complete.
     Observable.fromIterable(lookup.pkRecords)
-      // 3 times value configured for raw dataset since expected throughput for downsampled cluster is much lower
       .mapAsync(downsampleStoreConfig.demandPagingParallelism) { partRec =>
         val partLoadSpan = Kamon.spanBuilder(s"single-partition-cassandra-latency")
           .asChildOf(Kamon.currentSpan())
