@@ -9,9 +9,10 @@ import filodb.core.GlobalConfig
 import filodb.core.Types._
 import filodb.core.binaryrecord2._
 import filodb.core.downsample.{ChunkDownsampler, DownsamplePeriodMarker}
+import filodb.core.memstore.PartKeyLuceneIndexRecord
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.ColumnInfo
-import filodb.core.store.ChunkSetInfo
+import filodb.core.store.{ChunkScanMethod, ChunkSetInfo}
 import filodb.memory.BinaryRegion
 import filodb.memory.format._
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
@@ -295,12 +296,12 @@ final case class Schemas(part: PartitionSchema,
     * (b) it also assigns bytes per sample based on schema which is much of a swag. In reality, it would depend on
     *     number of histogram buckets, samples per chunk etc.
     */
-  def ensureQueriedDataSizeWithinLimit(schemaId: Int,
-                                       numTsPartitions: Int,
-                                       chunkDurationMillis: Long,
-                                       resolutionMs: Long,
-                                       queryDurationMs: Long,
-                                       dataSizeLimit: Long): Unit = {
+  def ensureQueriedDataSizeWithinLimitApprox(schemaId: Int,
+                                             numTsPartitions: Int,
+                                             chunkDurationMillis: Long,
+                                             resolutionMs: Long,
+                                             queryDurationMs: Long,
+                                             dataSizeLimit: Long): Unit = {
     val numSamplesPerChunk = chunkDurationMillis / resolutionMs
     // find number of chunks to be scanned. Ceil division needed here
     val numChunksPerTs = (queryDurationMs + chunkDurationMillis - 1) / chunkDurationMillis
@@ -311,6 +312,34 @@ final case class Schemas(part: PartitionSchema,
         s"$dataSizeLimit bytes queried per shard for ${_schemas(schemaId).name} schema. Try one or more of these: " +
         s"(a) narrow your query filters to reduce to fewer than the current $numTsPartitions matches " +
         s"(b) reduce query time range, currently at ${queryDurationMs / 1000 / 60 } minutes")
+  }
+
+  /**
+    * This method estimates data size with much better accuracy than ensureQueriedDataSizeWithinLimitApprox
+    * since it accepts the start/end times of each matching part key. It is able to handle estimation with
+    * time series churn much better
+    */
+  def ensureQueriedDataSizeWithinLimit(schemaId: Int,
+                                       pkRecs: Seq[PartKeyLuceneIndexRecord],
+                                       chunkDurationMillis: Long,
+                                       resolutionMs: Long,
+                                       chunkMethod: ChunkScanMethod,
+                                       dataSizeLimit: Long): Unit = {
+    val numSamplesPerChunk = chunkDurationMillis / resolutionMs
+    val bytesPerSample = bytesPerSampleSwag(schemaId)
+    var estDataSize = 0d
+    val quRange = chunkMethod.startTime to chunkMethod.endTime
+    pkRecs.foreach { pkRec =>
+      val intersection = Math.min(chunkMethod.endTime, pkRec.endTime) - Math.max(chunkMethod.startTime, pkRec.startTime)
+      // find number of chunks to be scanned. Ceil division needed here
+      val numChunks = (intersection + chunkDurationMillis - 1) / chunkDurationMillis
+      estDataSize += bytesPerSample * numSamplesPerChunk * numChunks
+    }
+    require(estDataSize < dataSizeLimit,
+      s"With match of ${pkRecs.length} time series, estimate of $estDataSize bytes exceeds limit of " +
+        s"$dataSizeLimit bytes queried per shard for ${_schemas(schemaId).name} schema. Try one or more of these: " +
+        s"(a) narrow your query filters to reduce to fewer than the current ${pkRecs.length} matches " +
+        s"(b) reduce query time range, currently at ${quRange.length / 1000 / 60 } minutes")
   }
 
   /**

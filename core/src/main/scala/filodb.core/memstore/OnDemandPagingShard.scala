@@ -58,7 +58,7 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
       lookup.chunkMethod match {
         case TimeRangeChunkScan(st, end) =>
           val numMatches = lookup.partsInMemory.length + lookup.partIdsNotInMemory.length
-          schemas.ensureQueriedDataSizeWithinLimit(schId, numMatches,
+          schemas.ensureQueriedDataSizeWithinLimitApprox(schId, numMatches,
             storeConfig.flushInterval.toMillis,
             assumedResolution, end - st, storeConfig.maxDataPerShardQuery)
         case _ =>

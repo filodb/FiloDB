@@ -216,17 +216,19 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       case FilteredPartitionScan(split, filters) =>
 
         if (filters.nonEmpty) {
-          val res = partKeyIndex.partIdsFromFilters(filters,
-            chunkMethod.startTime,
-            chunkMethod.endTime)
-          val firstPartId = if (res.isEmpty) None else Some(res(0))
-
-          val _schema = firstPartId.map(schemaIDFromPartID)
+          // This API loads all part keys into heap and can potentially be large size for
+          // high cardinality queries, but it is needed to do multiple
+          // iterations over the part keys. First iteration is for data size estimation.
+          // Second iteration is for query result evaluation. Loading everything to heap
+          // is expensive, but we do it to handle data sizing for metrics that have
+          // continuous churn. See capDataScannedPerShardCheck method.
+          val recs = partKeyIndex.partKeyRecordsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
+          val _schema = recs.headOption.map { pkRec =>
+            RecordSchema.schemaID(pkRec.partKey, UnsafeUtils.arayOffset)
+          }
           stats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
-
-          // send index result in the partsInMemory field of lookup
-          PartLookupResult(shardNum, chunkMethod, res,
-            _schema, debox.Map.empty[Int, Long], debox.Buffer.empty)
+          PartLookupResult(shardNum, chunkMethod, debox.Buffer.empty,
+            _schema, debox.Map.empty, debox.Buffer.empty, recs)
         } else {
           throw new UnsupportedOperationException("Cannot have empty filters")
         }
@@ -247,10 +249,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     // Create a ReadablePartition objects that contain the time series data. This can be either a
     // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
     // when query is complete.
-    val partKeys = lookup.partsInMemory.iterator().map(partKeyFromPartId)
-    Observable.fromIterator(partKeys)
-      // 3 times value configured for raw dataset since expected throughput for downsampled cluster is much lower
-      .mapAsync(downsampleStoreConfig.demandPagingParallelism) { partBytes =>
+    Observable.fromIterable(lookup.pkRecords)
+      .mapAsync(downsampleStoreConfig.demandPagingParallelism) { partRec =>
         val partLoadSpan = Kamon.spanBuilder(s"single-partition-cassandra-latency")
           .asChildOf(Kamon.currentSpan())
           .tag("dataset", rawDatasetRef.toString)
@@ -259,7 +259,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         // TODO test multi-partition scan if latencies are high
         store.readRawPartitions(downsampledDataset,
                                 downsampleStoreConfig.maxChunkTime.toMillis,
-                                SinglePartitionScan(partBytes, shardNum),
+                                SinglePartitionScan(partRec.partKey, shardNum),
                                 lookup.chunkMethod)
           .map { pd =>
             val part = makePagedPartition(pd, lookup.firstSchemaId.get, colIds)
@@ -268,28 +268,17 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
             partLoadSpan.finish()
             part
           }
-          .defaultIfEmpty(makePagedPartition(RawPartData(partBytes, Seq.empty), lookup.firstSchemaId.get, colIds))
+          .defaultIfEmpty(makePagedPartition(RawPartData(partRec.partKey, Seq.empty), lookup.firstSchemaId.get, colIds))
           .headL
       }
   }
 
   private def capDataScannedPerShardCheck(lookup: PartLookupResult, resolution: Long) = {
     lookup.firstSchemaId.foreach { schId =>
-      lookup.chunkMethod match {
-        case TimeRangeChunkScan(st, end) =>
-          schemas.ensureQueriedDataSizeWithinLimit(schId, lookup.partsInMemory.length,
-                                      downsampleStoreConfig.flushInterval.toMillis,
-                                      resolution, end - st, downsampleStoreConfig.maxDataPerShardQuery)
-        case _ =>
-      }
+        schemas.ensureQueriedDataSizeWithinLimit(schId, lookup.pkRecords,
+                                    downsampleStoreConfig.flushInterval.toMillis,
+                                    resolution, lookup.chunkMethod, downsampleStoreConfig.maxDataPerShardQuery)
     }
-  }
-
-  protected def schemaIDFromPartID(partID: Int): Int = {
-    partKeyIndex.partKeyFromPartId(partID).map { pkBytesRef =>
-      val unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(pkBytesRef.offset)
-      RecordSchema.schemaID(pkBytesRef.bytes, unsafeKeyOffset)
-    }.getOrElse(throw new IllegalStateException(s"PartId $partID returned by lucene, but partKey not found"))
   }
 
   private def chooseDownsampleResolution(chunkScanMethod: ChunkScanMethod): (Long, DatasetRef) = {

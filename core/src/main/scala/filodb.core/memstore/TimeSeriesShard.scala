@@ -189,7 +189,8 @@ case class PartLookupResult(shard: Int,
                             partsInMemory: debox.Buffer[Int],
                             firstSchemaId: Option[Int] = None,
                             partIdsMemTimeGap: debox.Map[Int, Long] = debox.Map.empty,
-                            partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty)
+                            partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty,
+                            pkRecords: Seq[PartKeyLuceneIndexRecord] = Seq.empty)
 
 final case class SchemaMismatch(expected: String, found: String) extends
 Exception(s"Multiple schemas found, please filter. Expected schema $expected, found schema $found")
