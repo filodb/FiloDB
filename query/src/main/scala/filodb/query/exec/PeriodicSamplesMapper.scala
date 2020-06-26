@@ -180,27 +180,36 @@ extends Iterator[R] with StrictLogging {
     // the compiler. Copy to a local variable to reduce some overhead.
     val wit = windowIt
 
-    wit.nextWindow()
-    while (wit.hasNext) {
-      val nextInfo = wit.next
-      try {
-        rangeFunction.addChunks(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr, nextInfo.getTsReader,
-                                nextInfo.getValueVectorAccessor, nextInfo.getValueVectorAddr, nextInfo.getValueReader,
-                                wit.curWindowStart, wit.curWindowEnd, nextInfo, querySession.queryConfig)
-      } catch {
-        case e: Exception =>
-          val tsReader = LongBinaryVector(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)
-          val valReader = rv.partition.schema.data.reader(rv.valueColID,
-                                                          nextInfo.getValueVectorAccessor,
-                                                          nextInfo.getValueVectorAddr)
-          qLogger.error(s"addChunks Exception: info.numRows=${nextInfo.numRows} " +
-             s"info.endTime=${nextInfo.endTime} curWindowEnd=${wit.curWindowEnd} tsReader=$tsReader " +
-             s"timestampVectorLength=${tsReader.length(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)} " +
-             s"valueVectorLength=${valReader.length(nextInfo.getValueVectorAccessor, nextInfo.getValueVectorAddr)}", e)
-          throw e
+    try {
+      wit.nextWindow()
+
+      while (wit.hasNext) {
+        val nextInfo = wit.next
+        try {
+          rangeFunction.addChunks(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr, nextInfo.getTsReader,
+                                  nextInfo.getValueVectorAccessor, nextInfo.getValueVectorAddr, nextInfo.getValueReader,
+                                  wit.curWindowStart, wit.curWindowEnd, nextInfo, querySession.queryConfig)
+        } catch {
+          case e: Exception =>
+            val tsReader = LongBinaryVector(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)
+            val valReader = rv.partition.schema.data.reader(rv.valueColID,
+                                                            nextInfo.getValueVectorAccessor,
+                                                            nextInfo.getValueVectorAddr)
+            qLogger.error(s"addChunks Exception: info.numRows=${nextInfo.numRows} " +
+              s"info.endTime=${nextInfo.endTime} curWindowEnd=${wit.curWindowEnd} tsReader=$tsReader " +
+              s"timestampVectorLength=${tsReader.length(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)} " +
+              s"valueVectorLength=${valReader.length(nextInfo.getValueVectorAccessor, nextInfo.getValueVectorAddr)}", e)
+            throw e
+        }
+      }
+      rangeFunction.apply(wit.curWindowStart, wit.curWindowEnd, sampleToEmit)
+    } catch {
+      case e: Throwable => {
+        wit.unlock()
+        wit.close()
+        throw e;
       }
     }
-    rangeFunction.apply(wit.curWindowStart, wit.curWindowEnd, sampleToEmit)
 
     if (!wit.hasMoreWindows) {
       // Release the shared lock and close the iterator, in case it also holds a lock.
@@ -272,7 +281,15 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
   // to avoid creation of object per sample, we use a pool
   val windowSamplesPool = new TransientRowPool()
 
-  override def hasNext: Boolean = curWindowEnd <= end
+  override def hasNext: Boolean = {
+    val hasNext = curWindowEnd <= end
+    if (!hasNext) {
+      // Make sure the raw source is fully drained to release any locks it might be holding.
+      while (raw.hasNext) raw.next()
+    }
+    hasNext
+  }
+
   override def next(): TransientRow = {
     val curWindowStart = curWindowEnd - window
     // current window is: (curWindowStart, curWindowEnd]. Excludes start, includes end.
