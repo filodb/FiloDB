@@ -93,6 +93,28 @@ object CustomRangeVectorKey {
 }
 
 /**
+  * General purpose wrapper which can be used to enaure that locks are released when an exception is thrown.
+  */
+abstract class WrappedRowReaderIterator(rows: Iterator[RowReader]) extends Iterator[RowReader] {
+  final def next(): RowReader = {
+    try {
+      doNext()
+    } catch {
+      case e: Throwable => {
+        // Make sure the iterator is fully drained to release any locks it might be holding.
+        while (rows.hasNext) rows.next()
+        throw e
+      }
+    }
+  }
+
+  def hasNext: Boolean = rows.hasNext
+
+  // Subclass must implement this method.
+  def doNext(): RowReader
+}
+
+/**
   * Represents a single result of any FiloDB Query.
   */
 trait RangeVector {

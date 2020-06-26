@@ -142,28 +142,12 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
   }
 }
 
-private abstract class FuncIterator(rows: Iterator[RowReader])  extends Iterator[RowReader] {
-  final def hasNext: Boolean = rows.hasNext
-
-  final def next(): RowReader = {
-    try {
-      doNext()
-    } catch {
-      case e: Throwable => {
-        // Make sure the iterator is fully drained to release any locks it might be holding.
-        while (rows.hasNext) rows.next()
-        throw e
-      }
-    }
-  }
-
-  def doNext(): RowReader
-}
-
 private class DoubleInstantFuncIterator(rows: Iterator[RowReader],
                                         instantFunction: DoubleInstantFunction,
                                         scalar: Seq[ScalarRangeVector],
-                                        result: TransientRow = new TransientRow()) extends FuncIterator(rows) {
+                                        result: TransientRow = new TransientRow())
+  extends WrappedRowReaderIterator(rows)
+{
   override def doNext(): RowReader = {
     val next = rows.next()
     val nextVal = next.getDouble(1)
@@ -177,7 +161,9 @@ private class DoubleInstantFuncIterator(rows: Iterator[RowReader],
 private class H2DoubleInstantFuncIterator(rows: Iterator[RowReader],
                                           instantFunction: HistToDoubleIFunction,
                                           scalar: Seq[ScalarRangeVector],
-                                          result: TransientRow = new TransientRow()) extends FuncIterator(rows) {
+                                          result: TransientRow = new TransientRow())
+  extends WrappedRowReaderIterator(rows)
+{
   override def doNext(): RowReader = {
     val next = rows.next()
     val timestamp = next.getLong(0)
@@ -190,7 +176,9 @@ private class H2DoubleInstantFuncIterator(rows: Iterator[RowReader],
 private class HD2DoubleInstantFuncIterator(rows: Iterator[RowReader],
                                            instantFunction: HDToDoubleIFunction,
                                            scalar: Seq[ScalarRangeVector],
-                                           result: TransientRow = new TransientRow()) extends FuncIterator(rows) {
+                                           result: TransientRow = new TransientRow())
+  extends WrappedRowReaderIterator(rows)
+{
   override def doNext(): RowReader = {
     val next = rows.next()
     val timestamp = next.getLong(0)
@@ -229,14 +217,11 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
 
   private def evaluate(source: Observable[RangeVector], scalarRangeVector: ScalarRangeVector) = {
     source.map { rv =>
-      val resultIterator: Iterator[RowReader] = new Iterator[RowReader]() {
-        private val rows = rv.rows
+      val resultIterator: Iterator[RowReader] = new WrappedRowReaderIterator(rv.rows) {
         private val result = new TransientRow()
 
-        override def hasNext: Boolean = rows.hasNext
-
-        override def next(): RowReader = {
-          val next = rows.next()
+        override def doNext(): RowReader = {
+          val next = rv.rows.next()
           val nextVal = next.getDouble(1)
           val timestamp = next.getLong(0)
           val sclrVal = scalarRangeVector.getValue(timestamp)
