@@ -222,15 +222,13 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           // Second iteration is for query result evaluation. Loading everything to heap
           // is expensive, but we do it to handle data sizing for metrics that have
           // continuous churn. See capDataScannedPerShardCheck method.
-          val res = partKeyIndex.partKeyRecordsFromFilters(filters,
-            chunkMethod.startTime,
-            chunkMethod.endTime)
-          val _schema = res.headOption.map { pkRec =>
+          val recs = partKeyIndex.partKeyRecordsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
+          val _schema = recs.headOption.map { pkRec =>
             RecordSchema.schemaID(pkRec.partKey, UnsafeUtils.arayOffset)
           }
           stats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
           PartLookupResult(shardNum, chunkMethod, debox.Buffer.empty,
-            _schema, debox.Map.empty, debox.Buffer.empty, res)
+            _schema, debox.Map.empty, debox.Buffer.empty, recs)
         } else {
           throw new UnsupportedOperationException("Cannot have empty filters")
         }

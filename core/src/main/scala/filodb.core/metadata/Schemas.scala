@@ -325,7 +325,6 @@ final case class Schemas(part: PartitionSchema,
                                        resolutionMs: Long,
                                        chunkMethod: ChunkScanMethod,
                                        dataSizeLimit: Long): Unit = {
-
     val numSamplesPerChunk = chunkDurationMillis / resolutionMs
     val bytesPerSample = bytesPerSampleSwag(schemaId)
     var estDataSize = 0d
