@@ -120,11 +120,7 @@ object ChunkMap extends StrictLogging {
     * consumption from a query iterator. If there are lingering locks,
     * it is quite possible a lock acquire or release bug exists
     */
-  def validateNoSharedLocks(execPlan: String): Unit = {
-    validateNoSharedLocks(execPlan, false)
-  }
-
-  def validateNoSharedLocks(execPlan: String, unitTest: Boolean): Unit = {
+  def validateNoSharedLocks(execPlan: String, unitTest: Boolean = false): Unit = {
     val t = Thread.currentThread()
     if (execPlanTracker.containsKey(t)) {
       logger.error(s"Current thread ${t.getName} did not release lock for execPlan: ${execPlanTracker.get(t)}")
