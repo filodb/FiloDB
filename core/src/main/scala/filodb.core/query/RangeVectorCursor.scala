@@ -33,7 +33,7 @@ class CustomCloseCursor(iter: Iterator[RowReader])(cl: => Unit) extends RangeVec
 }
 
 object NoCloseCursor {
-  implicit class NoCloseIterator(iter: Iterator[RowReader]) extends RangeVectorCursor {
+  implicit class NoCloseCursor(iter: Iterator[RowReader]) extends RangeVectorCursor {
     override def close(): Unit = {}
     override def hasNext: Boolean = iter.hasNext
     override def next(): RowReader = iter.next()
