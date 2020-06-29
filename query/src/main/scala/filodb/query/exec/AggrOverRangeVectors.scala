@@ -121,6 +121,10 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
   */
 object RangeVectorAggregator extends StrictLogging {
 
+  trait CloseableIterator[R] extends Iterator[R] {
+    def close(): Unit
+  }
+
   /**
     * This method is the facade for map and reduce steps of the aggregation.
     * In the reduction-only (non-leaf) phases, skipMapPhase should be true.
@@ -134,7 +138,7 @@ object RangeVectorAggregator extends StrictLogging {
       // now reduce each group and create one result range vector per group
       val groupedResult = mapReduceInternal(rvs, rowAgg, skipMapPhase, grouping)
       groupedResult.map { case (rvk, aggHolder) =>
-        val rowIterator = new CustomCloseCursor(aggHolder.map(_.toRowReader))(rvs.foreach(_.rows().close()))
+        val rowIterator = new CustomCloseCursor(aggHolder.map(_.toRowReader))(aggHolder.close())
         IteratorBackedRangeVector(rvk, rowIterator)
       }
     }
@@ -153,12 +157,13 @@ object RangeVectorAggregator extends StrictLogging {
   private def mapReduceInternal(rvs: List[RangeVector],
                      rowAgg: RowAggregator,
                      skipMapPhase: Boolean,
-                     grouping: RangeVector => RangeVectorKey): Map[RangeVectorKey, Iterator[rowAgg.AggHolderType]] = {
+                     grouping: RangeVector => RangeVectorKey):
+                          Map[RangeVectorKey, CloseableIterator[rowAgg.AggHolderType]] = {
     logger.trace(s"mapReduceInternal on ${rvs.size} RangeVectors...")
     var acc = rowAgg.zero
     val mapInto = rowAgg.newRowToMapInto
     rvs.groupBy(grouping).mapValues { rvs =>
-      new Iterator[rowAgg.AggHolderType] {
+      new CloseableIterator[rowAgg.AggHolderType] {
         val itsAndKeys = rvs.map { rv => (rv.rows, rv.key) }
         def hasNext: Boolean = {
           // Dont use forAll since it short-circuits hasNext invocation
@@ -177,6 +182,7 @@ object RangeVectorAggregator extends StrictLogging {
           }
           acc
         }
+        def close() = rvs.foreach(_.rows().close())
       }
     }
   }
