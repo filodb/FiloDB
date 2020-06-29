@@ -120,7 +120,7 @@ object ChunkMap extends StrictLogging {
     * consumption from a query iterator. If there are lingering locks,
     * it is quite possible a lock acquire or release bug exists
     */
-  def validateNoSharedLocks(execPlan: String): Unit = {
+  def validateNoSharedLocks(execPlan: String, unitTest: Boolean = false): Unit = {
     val t = Thread.currentThread()
     if (execPlanTracker.containsKey(t)) {
       logger.error(s"Current thread ${t.getName} did not release lock for execPlan: ${execPlanTracker.get(t)}")
@@ -128,6 +128,10 @@ object ChunkMap extends StrictLogging {
 
     val numLocksReleased = ChunkMap.releaseAllSharedLocks()
     if (numLocksReleased > 0) {
+      if (unitTest) {
+        // FIXME: Uncomment this when tests have been fixed.
+        //throw new Error(s"Number of locks was non-zero: $numLocksReleased")
+      }
       logger.error(s"Number of locks was non-zero: $numLocksReleased. " +
         s"This is indicative of a possible lock acquisition/release bug.")
       // FIXME: Causes failures when running the unit tests for some unknown reason.
