@@ -4,20 +4,21 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 
 import filodb.core.{MetricsTestData, QueryTimeoutException, TestData, MachineMetricsData => MMD}
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
 import filodb.core.query._
 import filodb.core.store.AllChunkScan
 import filodb.memory._
+import filodb.memory.data.ChunkMap
 import filodb.memory.format.{TupleRowReader, vectors => bv}
 import filodb.query.exec._
 
 /**
  * A common trait for windowing query tests which uses real chunks and real RawDataRangeVectors
  */
-trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll {
+trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
   import MetricsTestData._
 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
@@ -30,6 +31,10 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
   protected val ingestBlockHolder2 = new BlockMemFactory(blockStore, None, downsampleSchema.data.blockMetaSize,
                                       MMD.dummyContext, true)
   protected val tsBufferPool2 = new WriteBufferPool(TestData.nativeMem, downsampleSchema.data, storeConf)
+
+  after {
+    ChunkMap.validateNoSharedLocks(getClass().toString(), true)
+  }
 
   override def afterAll(): Unit = {
     blockStore.releaseBlocks()

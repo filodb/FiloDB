@@ -4,16 +4,21 @@ package filodb.query.exec.rangefn
 import com.typesafe.config.{Config, ConfigFactory}
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
-import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core.MetricsTestData
 import filodb.core.query._
 import filodb.core.query.Filter.{Equals, NotEqualsRegex}
+import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query.exec
 
-class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures {
+class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures with BeforeAndAfter {
+  after {
+    ChunkMap.validateNoSharedLocks("AbsentFunctionSpec", true)
+  }
+
   val config: Config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val resultSchema = ResultSchema(MetricsTestData.timeseriesSchema.infosFromIDs(0 to 1), 1)
   val queryConfig = new QueryConfig(config.getConfig("query"))
