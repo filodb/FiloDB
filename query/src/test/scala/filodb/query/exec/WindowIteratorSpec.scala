@@ -137,13 +137,14 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
 
   it ("should ignore out of order samples for RateFunction") {
     val rawRows = counterSamples.map(s => new TransientRow(s._1, s._2))
+    import filodb.core.query.NoCloseIterator._
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator,
            1538416154000L, 20000, 1538416649000L, 20000,
       RangeFunction(tsResSchema, Some(InternalRangeFunction.Rate),
           ColumnType.DoubleColumn, queryConfig, useChunked = false).asSliding, queryConfig)
     slidingWinIterator.foreach{ v =>
       // if out of order samples are not removed, counter correction causes rate to spike up to very high value
-      v.value should be < 10000d
+      v.getDouble(1) should be < 10000d
     }
   }
 
@@ -164,10 +165,11 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val start = 50L
     val end = 1000L
     val step = 5
+    import filodb.core.query.NoCloseIterator._
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, start, step,
       end, 0, RangeFunction(tsResSchema,
         None, ColumnType.DoubleColumn, queryConfig, useChunked = false).asSliding, queryConfig)
-    val result = slidingWinIterator.map(v => (v.timestamp, v.value)).toSeq
+    val result = slidingWinIterator.map(v => (v.getLong(0), v.getDouble(1))).toSeq
     result.map(_._1) shouldEqual (start to end).by(step)
     result.foreach{ v =>
       v._2 should not equal 698713d
@@ -234,12 +236,13 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       1548191556000L -> 1.0357142857142858
     )
     val rawRows = samples.map(s => new TransientRow(s._1, s._2))
+    import filodb.core.query.NoCloseIterator._
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 1548191496000L, 15000, 1548191796000L, 300000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.Rate), ColumnType.DoubleColumn, queryConfig,
                     useChunked = false).asSliding, queryConfig)
     slidingWinIterator.foreach { v =>
-      windowResults.find(a => a._1 == v.timestamp).foreach(b => v.value shouldEqual b._2 +- 0.0000000001)
+      windowResults.find(a => a._1 == v.getLong(0)).foreach(b => v.getDouble(1) shouldEqual b._2 +- 0.0000000001)
     }
 
     val rv = timeValueRV(samples)
@@ -247,7 +250,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       RangeFunction(tsResSchema,
         Some(Rate), ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, querySession)
     chunkedIt.foreach { v =>
-      windowResults.find(a => a._1 == v.timestamp).foreach(b => v.value shouldEqual b._2 +- 0.0000000001)
+      windowResults.find(a => a._1 == v.getLong(0)).foreach(b => v.getDouble(1) shouldEqual b._2 +- 0.0000000001)
     }
 
   }

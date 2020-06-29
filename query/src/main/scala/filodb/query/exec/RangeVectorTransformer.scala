@@ -381,7 +381,10 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
       }
       new RangeVector {
         override def key: RangeVectorKey = if (rowList.isEmpty) CustomRangeVectorKey.empty else keysFromFilter
-        override def rows(): CloseableIterator[RowReader] = new NoCloseIterator(rowList.iterator)
+        override def rows(): CloseableIterator[RowReader] = {
+          import NoCloseIterator._
+          rowList.iterator
+        }
       }
     }
 

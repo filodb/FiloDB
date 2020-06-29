@@ -44,8 +44,9 @@ case class MetadataRemoteExec(queryEndpoint: String,
 
     val iteratorMap = data.map { r => r.map { v => (v._1.utf8, v._2.utf8) }}
 
+    import NoCloseIterator._
     val rangeVector = IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-      new NoCloseIterator(new UTF8MapIteratorRowReader(iteratorMap.toIterator)))
+      new UTF8MapIteratorRowReader(iteratorMap.toIterator))
 
     val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, recordSchema, printTree(false)))
 

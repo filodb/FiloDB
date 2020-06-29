@@ -46,18 +46,21 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 1d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 5d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 3d),
         new TransientRow(2L, 3d),
@@ -66,24 +69,28 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 2d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 4d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 6d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 0d)).iterator
     })
@@ -92,6 +99,7 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 1d),
         new TransientRow(2L, 10d),

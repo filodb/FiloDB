@@ -36,48 +36,56 @@ class SortFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 1d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 5d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 3d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 2d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 4d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 6d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 0d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq.empty[RowReader].iterator
     }
     )
@@ -113,12 +121,14 @@ class SortFunctionSpec extends FunSpec with Matchers with ScalaFutures {
       new RangeVector {
         override def key: RangeVectorKey = testKey1
 
+        import filodb.core.query.NoCloseIterator._
         override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 1d)).iterator
       },
       new RangeVector {
         override def key: RangeVectorKey = testKey2
 
+        import filodb.core.query.NoCloseIterator._
         override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 5d)).iterator
       })

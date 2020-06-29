@@ -52,8 +52,9 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
           }
         }
       }
+      import NoCloseIterator._
       IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-        new NoCloseIterator(new UTF8MapIteratorRowReader(metadataResult.toIterator)))
+        new UTF8MapIteratorRowReader(metadataResult.toIterator))
     }
     Observable.fromTask(taskOfResults)
   }
@@ -86,8 +87,9 @@ final case class PartKeysExec(queryContext: QueryContext,
       case memStore: MemStore =>
         val response = memStore.partKeysWithFilters(dataset, shard, filters,
           fetchFirstLastSampleTimes, end, start, queryContext.sampleLimit)
+        import NoCloseIterator._
         Observable.now(IteratorBackedRangeVector(
-          new CustomRangeVectorKey(Map.empty), new NoCloseIterator(UTF8MapIteratorRowReader(response))))
+          new CustomRangeVectorKey(Map.empty), UTF8MapIteratorRowReader(response)))
       case other =>
         Observable.empty
     }
@@ -126,8 +128,9 @@ final case class LabelValuesExec(queryContext: QueryContext,
         case false => memStore.labelValuesWithFilters(dataset, shard, filters, columns, endMs, startMs,
           queryContext.sampleLimit)
       }
+      import NoCloseIterator._
       Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-        new NoCloseIterator(new UTF8MapIteratorRowReader(response))))
+        new UTF8MapIteratorRowReader(response)))
     } else {
       Observable.empty
     }

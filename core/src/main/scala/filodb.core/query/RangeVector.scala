@@ -94,38 +94,6 @@ object CustomRangeVectorKey {
   val emptyAsZcUtf8 = toZcUtf8(empty)
 }
 
-trait CloseableIterator[R <: RowReader] extends Iterator[R] { self =>
-
-  /**
-    * This method mut release all resources (example locks) acquired
-    * for the purpose of executing this query
-    */
-  def close(): Unit
-  def map2(f: R => R): CloseableIterator[R] = new CloseableIterator[R] {
-    def hasNext = self.hasNext
-    def next() = f(self.next())
-    def close(): Unit = self.close()
-  }
-}
-
-class NoCloseIterator(iter: Iterator[RowReader]) extends CloseableIterator[RowReader] {
-  override def close(): Unit = {}
-  override def hasNext: Boolean = iter.hasNext
-  override def next(): RowReader = iter.next()
-}
-
-class ConsumeCloseIterator(iter: Iterator[RowReader]) extends CloseableIterator[RowReader] {
-  override def close(): Unit = iter.size // consume quickly
-  override def hasNext: Boolean = iter.hasNext
-  override def next(): RowReader = iter.next()
-}
-
-class CustomCloseIterator(iter: Iterator[RowReader])(cl: => Unit) extends CloseableIterator[RowReader] {
-  override def close(): Unit = cl // invoke function
-  override def hasNext: Boolean = iter.hasNext
-  override def next(): RowReader = iter.next()
-}
-
 /**
   * Represents a single result of any FiloDB Query.
   */
@@ -156,8 +124,9 @@ trait ScalarRangeVector extends SerializableRangeVector {
   * ScalarRangeVector which has time specific value
   */
 final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]) extends ScalarRangeVector {
-  override def rows(): CloseableIterator[RowReader] = new NoCloseIterator(timeValueMap.toList.sortWith(_._1 < _._1).
-                                            map { x => new TransientRow(x._1, x._2) }.iterator)
+  import NoCloseIterator._
+  override def rows: CloseableIterator[RowReader] = timeValueMap.toList.sortWith(_._1 < _._1).
+                                            map { x => new TransientRow(x._1, x._2) }.iterator
   def getValue(time: Long): Double = timeValueMap(time)
 
   override def numRowsInt: Int = timeValueMap.size
@@ -170,12 +139,12 @@ trait ScalarSingleValue extends ScalarRangeVector {
   var numRowsInt : Int = 0
 
   override def rows(): CloseableIterator[RowReader] = {
-    new NoCloseIterator(
+    import NoCloseIterator._
     Iterator.from(0, rangeParams.stepSecs.toInt).takeWhile(_ <= rangeParams.endSecs - rangeParams.startSecs).map { i =>
       numRowsInt += 1
       val t = i + rangeParams.startSecs
       new TransientRow(t * 1000, getValue(t * 1000))
-    })
+    }
   }
 }
 
@@ -255,7 +224,7 @@ final case class DaysInMonthScalar(rangeParams: RangeParams) extends ScalarSingl
 
 // First column of columnIDs should be the timestamp column
 final case class RawDataRangeVector(key: RangeVectorKey,
-                                    val partition: ReadablePartition,
+                                    partition: ReadablePartition,
                                     chunkMethod: ChunkScanMethod,
                                     columnIDs: Array[Int]) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
@@ -278,11 +247,12 @@ final case class ChunkInfoRangeVector(key: RangeVectorKey,
                                       chunkMethod: ChunkScanMethod,
                                       column: Column) extends RangeVector {
   val reader = new ChunkInfoRowReader(column)
+  import NoCloseIterator._
   // Iterators are stateful, for correct reuse make this a def
-  def rows(): CloseableIterator[RowReader] = new NoCloseIterator(partition.infos(chunkMethod).map { info =>
+  def rows(): CloseableIterator[RowReader] = partition.infos(chunkMethod).map { info =>
     reader.setInfo(info)
     reader
-  })
+  }
 }
 
 /**
@@ -300,11 +270,10 @@ final class SerializedRangeVector(val key: RangeVectorKey,
                                   java.io.Serializable {
 
   override val numRows = Some(numRowsInt)
-
+  import NoCloseIterator._
   // Possible for records to spill across containers, so we read from all containers
-  override def rows(): CloseableIterator[RowReader] =
-    new NoCloseIterator(
-      containers.toIterator.flatMap(_.iterate(schema)).slice(startRecordNo, startRecordNo + numRowsInt))
+  override def rows: CloseableIterator[RowReader] =
+    containers.toIterator.flatMap(_.iterate(schema)).slice(startRecordNo, startRecordNo + numRowsInt)
 
   /**
     * Pretty prints all the elements into strings using record schema

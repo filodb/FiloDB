@@ -32,6 +32,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     def noGrouping(rv: RangeVector): RangeVectorKey = noKey
 
     val samples: Array[RangeVector] = Array.fill(100)(new RangeVector {
+      import NoCloseIterator._
       val data = Stream.from(0).map { n=>
         new TransientRow(n.toLong, rand.nextDouble())
       }.take(20)
@@ -295,6 +296,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
   private def toRv(samples: Seq[(Long, Double)]): RangeVector = {
     new RangeVector {
+      import NoCloseIterator._
       override def key: RangeVectorKey = ignoreKey
       override def rows(): CloseableIterator[RowReader] = samples.map(r => new TransientRow(r._1, r._2)).iterator
     }

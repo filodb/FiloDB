@@ -35,12 +35,14 @@ class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1000L, 1d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1000L, 5d)).iterator
     })
@@ -49,6 +51,7 @@ class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1000L, Double.NaN),
         new TransientRow(2000L, 1d),
@@ -57,6 +60,7 @@ class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1000L, 5d),
         new TransientRow(2000L, Double.NaN),

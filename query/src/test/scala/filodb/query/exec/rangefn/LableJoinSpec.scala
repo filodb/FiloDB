@@ -55,6 +55,7 @@ class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 3.3d),
         new TransientRow(2L, 5.1d)).iterator
@@ -62,6 +63,7 @@ class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(3L, 100d),
         new TransientRow(4L, 200d)).iterator
@@ -71,6 +73,7 @@ class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey3
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 3.3d),
         new TransientRow(2L, 5.1d)).iterator
@@ -78,6 +81,7 @@ class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey4
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(3L, 100d),
         new TransientRow(4L, 200d)).iterator

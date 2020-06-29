@@ -21,12 +21,14 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
   val sampleBase: Array[RangeVector] = Array(
     new RangeVector {
       override def key: RangeVectorKey = ignoreKey
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 3.3d),
         new TransientRow(2L, 5.1d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = ignoreKey
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(3L, 3239.3423d),
         new TransientRow(4L, 94935.1523d)).iterator
@@ -49,6 +51,7 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
 
       override def key: RangeVectorKey = ignoreKey
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = data.iterator
     })
     fireBinaryOperatorTests(samples, scalar)
@@ -63,18 +66,21 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
     val samples: Array[RangeVector] = Array(
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
+        import filodb.core.query.NoCloseIterator._
         override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, Double.NaN),
           new TransientRow(2L, 5.6d)).iterator
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
+        import filodb.core.query.NoCloseIterator._
         override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 4.6d),
           new TransientRow(2L, 4.4d)).iterator
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
+        import filodb.core.query.NoCloseIterator._
         override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 0d),
           new TransientRow(2L, 5.4d)).iterator
@@ -93,6 +99,7 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
 
+        import filodb.core.query.NoCloseIterator._
         override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 2.0d/0d),
           new TransientRow(2L, 4.5d),
@@ -252,18 +259,21 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
     val samples: Array[RangeVector] = Array(
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
+        import filodb.core.query.NoCloseIterator._
         override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 1),
           new TransientRow(2L, 2)).iterator
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
+        import filodb.core.query.NoCloseIterator._
         override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 1),
           new TransientRow(2L, 2)).iterator
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
+        import filodb.core.query.NoCloseIterator._
         override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 1),
           new TransientRow(2L, 2)).iterator
@@ -288,6 +298,7 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
     val samples: Array[RangeVector] = Array(
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
+        import filodb.core.query.NoCloseIterator._
         override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 15.004124836249305),
           new TransientRow(2L, 2)).iterator

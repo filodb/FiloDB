@@ -22,12 +22,14 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
   val sampleBase: Array[RangeVector] = Array(
     new RangeVector {
       override def key: RangeVectorKey = ignoreKey
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 3.3d),
         new TransientRow(2L, 5.1d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = ignoreKey
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(3L, 3239.3423d),
         new TransientRow(4L, 94935.1523d)).iterator
@@ -47,6 +49,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
 
       override def key: RangeVectorKey = ignoreKey
 
+      import filodb.core.query.NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = data.iterator
     })
     fireInstantFunctionTests(samples)
@@ -58,6 +61,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
 
     val samples: Array[RangeVector] = Array(
       new RangeVector {
+        import filodb.core.query.NoCloseIterator._
         override def key: RangeVectorKey = ignoreKey
         override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, Double.NaN),
@@ -65,12 +69,14 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
+        import filodb.core.query.NoCloseIterator._
         override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 4.6d),
           new TransientRow(2L, 4.4d)).iterator
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
+        import filodb.core.query.NoCloseIterator._
         override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 0d),
           new TransientRow(2L, 5.4d)).iterator
@@ -87,6 +93,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
 
+        import filodb.core.query.NoCloseIterator._
         override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 2.0d/0d),
           new TransientRow(2L, 4.5d),
@@ -275,6 +282,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
     val samples: Array[RangeVector] = Array(
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
+        import filodb.core.query.NoCloseIterator._
         override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 1456790399), // 2016-02-29 23:59:59 February 29th
           new TransientRow(2L, 1456790400), // 2016-03-01 00:00:00 March 1st
@@ -297,6 +305,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
     val samples: Array[RangeVector] = Array(
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
+        import filodb.core.query.NoCloseIterator._
         override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, Double.NaN),
           new TransientRow(2L, Double.NaN)

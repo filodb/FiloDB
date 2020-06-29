@@ -51,6 +51,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "group".utf8 -> s"production".utf8)
       )
 
+      import NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 100)).iterator
     },
@@ -62,6 +63,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "group".utf8 -> s"production".utf8)
       )
 
+      import NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 200)).iterator
     },
@@ -73,6 +75,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "group".utf8 -> s"canary".utf8)
       )
 
+      import NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 300)).iterator
     },
@@ -84,6 +87,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "group".utf8 -> s"canary".utf8)
       )
 
+      import NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 400)).iterator
     },
@@ -95,6 +99,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "group".utf8 -> s"production".utf8)
       )
 
+      import NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 500)).iterator
     },
@@ -106,6 +111,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "group".utf8 -> s"production".utf8)
       )
 
+      import NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 600)).iterator
     },
@@ -117,6 +123,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "group".utf8 -> s"canary".utf8)
       )
 
+      import NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 700)).iterator
     },
@@ -128,6 +135,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "group".utf8 -> s"canary".utf8)
       )
 
+      import NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 800)).iterator
     }
@@ -136,6 +144,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     new RangeVector {
       override def key: RangeVectorKey = noKey
 
+      import NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 1)).iterator
     }
@@ -148,6 +157,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "l".utf8 -> "x".utf8)
       )
 
+      import NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 100)).iterator
     },
@@ -157,6 +167,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "l".utf8 -> "y".utf8)
       )
 
+      import NoCloseIterator._
       override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 200)).iterator
     }
