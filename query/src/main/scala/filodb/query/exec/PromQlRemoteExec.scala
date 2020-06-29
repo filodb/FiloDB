@@ -124,12 +124,13 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
         override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map (m => m._1.utf8 -> m._2.utf8))
 
-        override def rows: Iterator[RowReader] = {
-          samples.iterator.collect { case v: Sampl =>
-            row.setLong(0, v.timestamp * 1000)
-            row.setDouble(1, v.value)
-            row
-          }
+        override def rows(): CloseableIterator[RowReader] = {
+          new NoCloseIterator(
+            samples.iterator.collect { case v: Sampl =>
+              row.setLong(0, v.timestamp * 1000)
+              row.setDouble(1, v.value)
+              row
+            })
         }
 
         override def numRows: Option[Int] = Option(samples.size)

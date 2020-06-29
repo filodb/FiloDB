@@ -46,19 +46,19 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 1d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 5d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 3d),
         new TransientRow(2L, 3d),
         new TransientRow(3L, 3d)).iterator
@@ -66,25 +66,25 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 2d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 4d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 6d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 0d)).iterator
     })
 
@@ -92,7 +92,7 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 1d),
         new TransientRow(2L, 10d),
         new TransientRow(3L, 30d)

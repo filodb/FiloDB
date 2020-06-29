@@ -139,7 +139,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       new ColumnInfo("value", ColumnType.DoubleColumn))
     val srvs = for { i <- 0 to 9 } yield {
       val rv = new RangeVector {
-        override val rows: Iterator[RowReader] = rowbuf.iterator
+        override val rows(): _root_.filodb.core.query.CloseableIterator[_root_.filodb.memory.format.RowReader] = rowbuf.iterator
         override val key: RangeVectorKey = rvKey
       }
       val srv = SerializedRangeVector(rv, cols)

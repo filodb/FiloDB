@@ -2,6 +2,8 @@ package filodb.core.query
 
 import java.time.{LocalDateTime, YearMonth, ZoneOffset}
 
+import scala.collection.Iterator
+
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import kamon.Kamon
@@ -92,12 +94,44 @@ object CustomRangeVectorKey {
   val emptyAsZcUtf8 = toZcUtf8(empty)
 }
 
+trait CloseableIterator[R <: RowReader] extends Iterator[R] { self =>
+
+  /**
+    * This method mut release all resources (example locks) acquired
+    * for the purpose of executing this query
+    */
+  def close(): Unit
+  def map2(f: R => R): CloseableIterator[R] = new CloseableIterator[R] {
+    def hasNext = self.hasNext
+    def next() = f(self.next())
+    def close(): Unit = self.close()
+  }
+}
+
+class NoCloseIterator(iter: Iterator[RowReader]) extends CloseableIterator[RowReader] {
+  override def close(): Unit = {}
+  override def hasNext: Boolean = iter.hasNext
+  override def next(): RowReader = iter.next()
+}
+
+class ConsumeCloseIterator(iter: Iterator[RowReader]) extends CloseableIterator[RowReader] {
+  override def close(): Unit = iter.size // consume quickly
+  override def hasNext: Boolean = iter.hasNext
+  override def next(): RowReader = iter.next()
+}
+
+class CustomCloseIterator(iter: Iterator[RowReader])(cl: => Unit) extends CloseableIterator[RowReader] {
+  override def close(): Unit = cl // invoke function
+  override def hasNext: Boolean = iter.hasNext
+  override def next(): RowReader = iter.next()
+}
+
 /**
   * Represents a single result of any FiloDB Query.
   */
 trait RangeVector {
   def key: RangeVectorKey
-  def rows: Iterator[RowReader]
+  def rows(): CloseableIterator[RowReader]
   def numRows: Option[Int] = None
   def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
 }
@@ -122,8 +156,8 @@ trait ScalarRangeVector extends SerializableRangeVector {
   * ScalarRangeVector which has time specific value
   */
 final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]) extends ScalarRangeVector {
-  override def rows: Iterator[RowReader] = timeValueMap.toList.sortWith(_._1 < _._1).
-                                            map { x => new TransientRow(x._1, x._2) }.iterator
+  override def rows(): CloseableIterator[RowReader] = new NoCloseIterator(timeValueMap.toList.sortWith(_._1 < _._1).
+                                            map { x => new TransientRow(x._1, x._2) }.iterator)
   def getValue(time: Long): Double = timeValueMap(time)
 
   override def numRowsInt: Int = timeValueMap.size
@@ -135,12 +169,13 @@ trait ScalarSingleValue extends ScalarRangeVector {
   def rangeParams: RangeParams
   var numRowsInt : Int = 0
 
-  override def rows: Iterator[RowReader] = {
+  override def rows(): CloseableIterator[RowReader] = {
+    new NoCloseIterator(
     Iterator.from(0, rangeParams.stepSecs.toInt).takeWhile(_ <= rangeParams.endSecs - rangeParams.startSecs).map { i =>
       numRowsInt += 1
       val t = i + rangeParams.startSecs
       new TransientRow(t * 1000, getValue(t * 1000))
-    }
+    })
   }
 }
 
@@ -224,7 +259,7 @@ final case class RawDataRangeVector(key: RangeVectorKey,
                                     chunkMethod: ChunkScanMethod,
                                     columnIDs: Array[Int]) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
-  def rows: Iterator[RowReader] = partition.timeRangeRows(chunkMethod, columnIDs)
+  def rows(): CloseableIterator[RowReader] = partition.timeRangeRows(chunkMethod, columnIDs)
 
   // Obtain ChunkSetInfos from specific window of time from partition
   def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = partition.infos(windowStart, windowEnd)
@@ -244,10 +279,10 @@ final case class ChunkInfoRangeVector(key: RangeVectorKey,
                                       column: Column) extends RangeVector {
   val reader = new ChunkInfoRowReader(column)
   // Iterators are stateful, for correct reuse make this a def
-  def rows: Iterator[RowReader] = partition.infos(chunkMethod).map { info =>
+  def rows(): CloseableIterator[RowReader] = new NoCloseIterator(partition.infos(chunkMethod).map { info =>
     reader.setInfo(info)
     reader
-  }
+  })
 }
 
 /**
@@ -267,8 +302,9 @@ final class SerializedRangeVector(val key: RangeVectorKey,
   override val numRows = Some(numRowsInt)
 
   // Possible for records to spill across containers, so we read from all containers
-  override def rows: Iterator[RowReader] =
-    containers.toIterator.flatMap(_.iterate(schema)).slice(startRecordNo, startRecordNo + numRowsInt)
+  override def rows(): CloseableIterator[RowReader] =
+    new NoCloseIterator(
+      containers.toIterator.flatMap(_.iterate(schema)).slice(startRecordNo, startRecordNo + numRowsInt))
 
   /**
     * Pretty prints all the elements into strings using record schema
@@ -319,6 +355,7 @@ object SerializedRangeVector extends StrictLogging {
         builder.addFromReader(rows.next, schema, 0)
       }
     } finally {
+      rv.rows().close()
       // clear exec plan
       // When the query is done, clean up lingering shared locks caused by iterator limit.
       ChunkMap.releaseAllSharedLocks()
@@ -356,14 +393,14 @@ object SerializedRangeVector extends StrictLogging {
 }
 
 final case class IteratorBackedRangeVector(key: RangeVectorKey,
-                                           rows: Iterator[RowReader]) extends RangeVector
+                                           rows: CloseableIterator[RowReader]) extends RangeVector
 
 final case class BufferRangeVector(key: RangeVectorKey,
                                    timestamps: Buffer[Long],
                                    values: Buffer[Double]) extends RangeVector {
   require(timestamps.length == values.length, s"${timestamps.length} ts != ${values.length} values")
 
-  def rows: Iterator[RowReader] = new Iterator[RowReader] {
+  def rows(): CloseableIterator[RowReader] = new CloseableIterator[RowReader] {
     val row = new TransientRow()
     var n = 0
     def hasNext: Boolean = n < timestamps.length
@@ -372,5 +409,6 @@ final case class BufferRangeVector(key: RangeVectorKey,
       n += 1
       row
     }
+    def close(): Unit = {}
   }
 }

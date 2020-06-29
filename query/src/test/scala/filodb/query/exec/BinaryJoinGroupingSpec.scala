@@ -47,7 +47,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
           "mode".utf8 -> s"idle".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 3)).iterator
     },
     new RangeVector {
@@ -58,7 +58,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
           "mode".utf8 -> s"user".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 1)).iterator
     },
     new RangeVector {
@@ -69,7 +69,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
           "mode".utf8 -> s"idle".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 8)).iterator
     },
     new RangeVector {
@@ -80,7 +80,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
           "mode".utf8 -> s"user".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 2)).iterator
     }
   )
@@ -93,7 +93,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
           "role".utf8 -> s"prometheus".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 1)).iterator
     }
   )
@@ -106,7 +106,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
           "job".utf8 -> "node".utf8
       ))
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 2)).iterator
     }
   )
@@ -320,7 +320,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
             "mode".utf8 -> s"idle".utf8)
         )
 
-        override def rows: Iterator[RowReader] = Seq(
+        override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 3)).iterator
       },
       new RangeVector {
@@ -331,7 +331,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
             "mode".utf8 -> s"user".utf8)
         )
 
-        override def rows: Iterator[RowReader] = Seq(
+        override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 1)).iterator
       })
 
@@ -344,7 +344,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
             "role".utf8 -> s"prometheus".utf8)
         )
 
-        override def rows: Iterator[RowReader] = Seq(
+        override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 1)).iterator
       }
     )

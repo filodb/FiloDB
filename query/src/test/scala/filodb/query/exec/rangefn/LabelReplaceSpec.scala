@@ -7,7 +7,7 @@ import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core.MetricsTestData
-import filodb.core.query.{CustomRangeVectorKey, QueryConfig, QueryContext, QuerySession, RangeVector, RangeVectorKey, ResultSchema, TransientRow}
+import filodb.core.query.{CloseableIterator, CustomRangeVectorKey, QueryConfig, QueryContext, QuerySession, RangeVector, RangeVectorKey, ResultSchema, TransientRow}
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query._
 
@@ -30,14 +30,14 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 3.3d),
         new TransientRow(2L, 5.1d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(3L, 100d),
         new TransientRow(4L, 200d)).iterator
     })
@@ -56,14 +56,14 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
       new RangeVector {
         override def key: RangeVectorKey = sampleKey1
 
-        override def rows: Iterator[RowReader] = Seq(
+        override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 3.3d),
           new TransientRow(2L, 5.1d)).iterator
       },
       new RangeVector {
         override def key: RangeVectorKey = sampleKey2
 
-        override def rows: Iterator[RowReader] = Seq(
+        override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(3L, 100d),
           new TransientRow(4L, 200d)).iterator
       })
@@ -100,14 +100,14 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
       new RangeVector {
         override def key: RangeVectorKey = sampleKey1
 
-        override def rows: Iterator[RowReader] = Seq(
+        override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 3.3d),
           new TransientRow(2L, 5.1d)).iterator
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
 
-        override def rows: Iterator[RowReader] = Seq(
+        override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(3L, 100d),
           new TransientRow(4L, 200d)).iterator
       })
@@ -145,14 +145,14 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
       new RangeVector {
         override def key: RangeVectorKey = sampleKey1
 
-        override def rows: Iterator[RowReader] = Seq(
+        override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(1L, 3.3d),
           new TransientRow(2L, 5.1d)).iterator
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
 
-        override def rows: Iterator[RowReader] = Seq(
+        override def rows(): CloseableIterator[RowReader] = Seq(
           new TransientRow(3L, 100d),
           new TransientRow(4L, 200d)).iterator
       })

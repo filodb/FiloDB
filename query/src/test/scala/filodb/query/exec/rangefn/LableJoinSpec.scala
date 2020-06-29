@@ -55,14 +55,14 @@ class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 3.3d),
         new TransientRow(2L, 5.1d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(3L, 100d),
         new TransientRow(4L, 200d)).iterator
     })
@@ -71,14 +71,14 @@ class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey3
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 3.3d),
         new TransientRow(2L, 5.1d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey4
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(3L, 100d),
         new TransientRow(4L, 200d)).iterator
     })

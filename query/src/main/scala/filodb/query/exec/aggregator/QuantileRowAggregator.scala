@@ -65,7 +65,7 @@ class QuantileRowAggregator(q: Double) extends RowAggregator {
 
   def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = {
     val mutRow = new TransientRow()
-    val result = aggRangeVector.rows.map { r =>
+    val result = aggRangeVector.rows.map2 { r =>
       val qVal = ArrayDigest.fromBytes(r.getBuffer(1)).quantile(q)
       mutRow.setValues(r.getLong(0), qVal)
       mutRow

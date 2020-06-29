@@ -36,7 +36,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
         new TransientRow(n.toLong, rand.nextDouble())
       }.take(20)
       override def key: RangeVectorKey = ignoreKey
-      override def rows: Iterator[RowReader] = data.iterator
+      override def rows(): CloseableIterator[RowReader] = data.iterator
     })
 
     // Sum
@@ -296,7 +296,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   private def toRv(samples: Seq[(Long, Double)]): RangeVector = {
     new RangeVector {
       override def key: RangeVectorKey = ignoreKey
-      override def rows: Iterator[RowReader] = samples.map(r => new TransientRow(r._1, r._2)).iterator
+      override def rows(): CloseableIterator[RowReader] = samples.map(r => new TransientRow(r._1, r._2)).iterator
     }
   }
 

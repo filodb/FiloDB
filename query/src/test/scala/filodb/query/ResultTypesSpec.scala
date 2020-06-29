@@ -21,7 +21,7 @@ class ResultTypesSpec extends FunSpec with Matchers with ScalaFutures {
 
       override def key: RangeVectorKey = ignoreKey
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 3.3d),
         new TransientRow(2L, 5.1d)).iterator
 
@@ -38,7 +38,7 @@ class ResultTypesSpec extends FunSpec with Matchers with ScalaFutures {
 
       override def key: RangeVectorKey = ignoreKey
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 3.3d)).toIterator
       override def numRows: Option[Int] = Option(rows.size)
 
@@ -49,7 +49,7 @@ class ResultTypesSpec extends FunSpec with Matchers with ScalaFutures {
 
       override def key: RangeVectorKey = ignoreKey
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 9.4d)).toIterator
       override def numRows: Option[Int] = Option(rows.size)
 
@@ -65,7 +65,7 @@ class ResultTypesSpec extends FunSpec with Matchers with ScalaFutures {
 
       override def key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
 
-      override def rows: Iterator[RowReader] = Seq(
+      override def rows(): CloseableIterator[RowReader] = Seq(
         new TransientRow(1L, 3.3d)).toIterator
       override def numRows: Option[Int] = Option(rows.size)
 

@@ -16,7 +16,7 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
                                      startTime: Long,
                                      endTime: Long,
                                      infos: ChunkInfoIterator,
-                                     columnIDs: Array[Int]) extends Iterator[RowReader] {
+                                     columnIDs: Array[Int]) extends CloseableIterator[RowReader] {
   // MinValue = no current chunk
   private var curChunkID = Long.MinValue
   private final val vectorIts = new Array[TypedIterator](columnIDs.size)
@@ -96,5 +96,9 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
   final def next: RowReader = {
     rowNo += 1
     rowReader
+  }
+
+  final def close(): Unit = {
+    infos.close()
   }
 }
