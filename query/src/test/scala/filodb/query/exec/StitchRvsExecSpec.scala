@@ -6,7 +6,7 @@ import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, TimestampColumn}
 import filodb.core.query.{ColumnInfo, QueryContext, ResultSchema, TransientRow}
-import filodb.core.query.NoCloseIterator.NoCloseIterator
+import filodb.core.query.NoCloseCursor.NoCloseIterator
 import filodb.memory.format.UnsafeUtils
 import filodb.query.QueryResult
 

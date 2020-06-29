@@ -2,14 +2,15 @@ package filodb.query.exec
 
 import scala.annotation.tailrec
 import scala.util.Random
+
 import com.tdunning.math.stats.TDigest
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
+
 import filodb.core.{MachineMetricsData => MMD}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
-import filodb.memory.format.RowReader
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query.AggregationOperator
 import filodb.query.exec.aggregator.RowAggregator
@@ -32,12 +33,12 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     def noGrouping(rv: RangeVector): RangeVectorKey = noKey
 
     val samples: Array[RangeVector] = Array.fill(100)(new RangeVector {
-      import NoCloseIterator._
+      import NoCloseCursor._
       val data = Stream.from(0).map { n=>
         new TransientRow(n.toLong, rand.nextDouble())
       }.take(20)
       override def key: RangeVectorKey = ignoreKey
-      override def rows(): CloseableIterator[RowReader] = data.iterator
+      override def rows(): RangeVectorCursor = data.iterator
     })
 
     // Sum
@@ -296,9 +297,9 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
   private def toRv(samples: Seq[(Long, Double)]): RangeVector = {
     new RangeVector {
-      import NoCloseIterator._
+      import NoCloseCursor._
       override def key: RangeVectorKey = ignoreKey
-      override def rows(): CloseableIterator[RowReader] = samples.map(r => new TransientRow(r._1, r._2)).iterator
+      override def rows(): RangeVectorCursor = samples.map(r => new TransientRow(r._1, r._2)).iterator
     }
   }
 

@@ -99,7 +99,7 @@ object CustomRangeVectorKey {
   */
 trait RangeVector {
   def key: RangeVectorKey
-  def rows(): CloseableIterator[RowReader]
+  def rows(): RangeVectorCursor
   def numRows: Option[Int] = None
   def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
 }
@@ -124,8 +124,8 @@ trait ScalarRangeVector extends SerializableRangeVector {
   * ScalarRangeVector which has time specific value
   */
 final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]) extends ScalarRangeVector {
-  import NoCloseIterator._
-  override def rows: CloseableIterator[RowReader] = timeValueMap.toList.sortWith(_._1 < _._1).
+  import NoCloseCursor._
+  override def rows: RangeVectorCursor = timeValueMap.toList.sortWith(_._1 < _._1).
                                             map { x => new TransientRow(x._1, x._2) }.iterator
   def getValue(time: Long): Double = timeValueMap(time)
 
@@ -138,8 +138,8 @@ trait ScalarSingleValue extends ScalarRangeVector {
   def rangeParams: RangeParams
   var numRowsInt : Int = 0
 
-  override def rows(): CloseableIterator[RowReader] = {
-    import NoCloseIterator._
+  override def rows(): RangeVectorCursor = {
+    import NoCloseCursor._
     Iterator.from(0, rangeParams.stepSecs.toInt).takeWhile(_ <= rangeParams.endSecs - rangeParams.startSecs).map { i =>
       numRowsInt += 1
       val t = i + rangeParams.startSecs
@@ -228,7 +228,7 @@ final case class RawDataRangeVector(key: RangeVectorKey,
                                     chunkMethod: ChunkScanMethod,
                                     columnIDs: Array[Int]) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
-  def rows(): CloseableIterator[RowReader] = partition.timeRangeRows(chunkMethod, columnIDs)
+  def rows(): RangeVectorCursor = partition.timeRangeRows(chunkMethod, columnIDs)
 
   // Obtain ChunkSetInfos from specific window of time from partition
   def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = partition.infos(windowStart, windowEnd)
@@ -247,9 +247,9 @@ final case class ChunkInfoRangeVector(key: RangeVectorKey,
                                       chunkMethod: ChunkScanMethod,
                                       column: Column) extends RangeVector {
   val reader = new ChunkInfoRowReader(column)
-  import NoCloseIterator._
+  import NoCloseCursor._
   // Iterators are stateful, for correct reuse make this a def
-  def rows(): CloseableIterator[RowReader] = partition.infos(chunkMethod).map { info =>
+  def rows(): RangeVectorCursor = partition.infos(chunkMethod).map { info =>
     reader.setInfo(info)
     reader
   }
@@ -270,9 +270,9 @@ final class SerializedRangeVector(val key: RangeVectorKey,
                                   java.io.Serializable {
 
   override val numRows = Some(numRowsInt)
-  import NoCloseIterator._
+  import NoCloseCursor._
   // Possible for records to spill across containers, so we read from all containers
-  override def rows: CloseableIterator[RowReader] =
+  override def rows: RangeVectorCursor =
     containers.toIterator.flatMap(_.iterate(schema)).slice(startRecordNo, startRecordNo + numRowsInt)
 
   /**
@@ -362,14 +362,14 @@ object SerializedRangeVector extends StrictLogging {
 }
 
 final case class IteratorBackedRangeVector(key: RangeVectorKey,
-                                           rows: CloseableIterator[RowReader]) extends RangeVector
+                                           rows: RangeVectorCursor) extends RangeVector
 
 final case class BufferRangeVector(key: RangeVectorKey,
                                    timestamps: Buffer[Long],
                                    values: Buffer[Double]) extends RangeVector {
   require(timestamps.length == values.length, s"${timestamps.length} ts != ${values.length} values")
 
-  def rows(): CloseableIterator[RowReader] = new CloseableIterator[RowReader] {
+  def rows(): RangeVectorCursor = new RangeVectorCursor {
     val row = new TransientRow()
     var n = 0
     def hasNext: Boolean = n < timestamps.length

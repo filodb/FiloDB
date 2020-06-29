@@ -10,7 +10,7 @@ import org.scalatest.concurrent.ScalaFutures
 import filodb.core.MetricsTestData
 import filodb.core.query._
 import filodb.core.query.Filter.{Equals, NotEqualsRegex}
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.ZeroCopyUTF8String
 import filodb.query.exec
 
 class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures {
@@ -35,15 +35,15 @@ class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
-      import filodb.core.query.NoCloseIterator._
-      override def rows(): CloseableIterator[RowReader] = Seq(
+      import filodb.core.query.NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1000L, 1d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
-      import filodb.core.query.NoCloseIterator._
-      override def rows(): CloseableIterator[RowReader] = Seq(
+      import filodb.core.query.NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1000L, 5d)).iterator
     })
 
@@ -51,8 +51,8 @@ class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
-      import filodb.core.query.NoCloseIterator._
-      override def rows(): CloseableIterator[RowReader] = Seq(
+      import filodb.core.query.NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1000L, Double.NaN),
         new TransientRow(2000L, 1d),
         new TransientRow(3000L, Double.NaN)).iterator
@@ -60,8 +60,8 @@ class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
-      import filodb.core.query.NoCloseIterator._
-      override def rows(): CloseableIterator[RowReader] = Seq(
+      import filodb.core.query.NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1000L, 5d),
         new TransientRow(2000L, Double.NaN),
         new TransientRow(3000L, Double.NaN)).iterator

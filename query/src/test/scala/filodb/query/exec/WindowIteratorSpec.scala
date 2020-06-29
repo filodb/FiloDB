@@ -137,7 +137,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
 
   it ("should ignore out of order samples for RateFunction") {
     val rawRows = counterSamples.map(s => new TransientRow(s._1, s._2))
-    import filodb.core.query.NoCloseIterator._
+    import filodb.core.query.NoCloseCursor._
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator,
            1538416154000L, 20000, 1538416649000L, 20000,
       RangeFunction(tsResSchema, Some(InternalRangeFunction.Rate),
@@ -165,7 +165,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val start = 50L
     val end = 1000L
     val step = 5
-    import filodb.core.query.NoCloseIterator._
+    import filodb.core.query.NoCloseCursor._
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, start, step,
       end, 0, RangeFunction(tsResSchema,
         None, ColumnType.DoubleColumn, queryConfig, useChunked = false).asSliding, queryConfig)
@@ -236,7 +236,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       1548191556000L -> 1.0357142857142858
     )
     val rawRows = samples.map(s => new TransientRow(s._1, s._2))
-    import filodb.core.query.NoCloseIterator._
+    import filodb.core.query.NoCloseCursor._
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 1548191496000L, 15000, 1548191796000L, 300000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.Rate), ColumnType.DoubleColumn, queryConfig,

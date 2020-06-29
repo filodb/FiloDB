@@ -142,11 +142,11 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
   }
 }
 
-private class DoubleInstantFuncIterator(rows: CloseableIterator[RowReader],
+private class DoubleInstantFuncIterator(rows: RangeVectorCursor,
                                         instantFunction: DoubleInstantFunction,
                                         scalar: Seq[ScalarRangeVector],
                                         result: TransientRow = new TransientRow()) extends
-        CloseableIterator[RowReader] {
+        RangeVectorCursor {
   final def hasNext: Boolean = rows.hasNext
   final def next(): RowReader = {
     val next = rows.next()
@@ -159,11 +159,11 @@ private class DoubleInstantFuncIterator(rows: CloseableIterator[RowReader],
   final def close(): Unit = rows.close()
 }
 
-private class H2DoubleInstantFuncIterator(rows: CloseableIterator[RowReader],
+private class H2DoubleInstantFuncIterator(rows: RangeVectorCursor,
                                           instantFunction: HistToDoubleIFunction,
                                           scalar: Seq[ScalarRangeVector],
                                           result: TransientRow = new TransientRow())
-          extends CloseableIterator[RowReader] {
+          extends RangeVectorCursor {
   final def hasNext: Boolean = rows.hasNext
   final def next(): RowReader = {
     val next = rows.next()
@@ -175,11 +175,11 @@ private class H2DoubleInstantFuncIterator(rows: CloseableIterator[RowReader],
   final def close(): Unit = rows.close()
 }
 
-private class HD2DoubleInstantFuncIterator(rows: CloseableIterator[RowReader],
+private class HD2DoubleInstantFuncIterator(rows: RangeVectorCursor,
                                            instantFunction: HDToDoubleIFunction,
                                            scalar: Seq[ScalarRangeVector],
                                            result: TransientRow = new TransientRow())
-        extends CloseableIterator[RowReader] {
+        extends RangeVectorCursor {
   final def hasNext: Boolean = rows.hasNext
   final def next(): RowReader = {
     val next = rows.next()
@@ -220,7 +220,7 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
 
   private def evaluate(source: Observable[RangeVector], scalarRangeVector: ScalarRangeVector) = {
     source.map { rv =>
-      val resultIterator: CloseableIterator[RowReader] = new CloseableIterator[RowReader]() {
+      val resultIterator: RangeVectorCursor = new RangeVectorCursor() {
         private val rows = rv.rows
         private val result = new TransientRow()
 
@@ -341,7 +341,7 @@ final case class VectorFunctionMapper() extends RangeVectorTransformer {
     source.map { rv =>
       new RangeVector {
         override def key: RangeVectorKey = rv.key
-        override def rows(): CloseableIterator[RowReader] = rv.rows
+        override def rows(): RangeVectorCursor = rv.rows
       }
     }
   }
@@ -381,8 +381,8 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
       }
       new RangeVector {
         override def key: RangeVectorKey = if (rowList.isEmpty) CustomRangeVectorKey.empty else keysFromFilter
-        override def rows(): CloseableIterator[RowReader] = {
-          import NoCloseIterator._
+        override def rows(): RangeVectorCursor = {
+          import NoCloseCursor._
           rowList.iterator
         }
       }

@@ -108,7 +108,7 @@ final case class PeriodicSamplesMapper(start: Long,
 
         override def key: RangeVectorKey = rv.key
 
-        override def rows(): CloseableIterator[RowReader] = rv.rows.map2 { r =>
+        override def rows(): RangeVectorCursor = rv.rows.map2 { r =>
           row.setLong(0, r.getLong(0) + o)
           row.setDouble(1, r.getDouble(1))
           row
@@ -158,7 +158,7 @@ abstract class ChunkedWindowIterator[R <: MutableRowReader](
     window: Long,
     rangeFunction: ChunkedRangeFunction[R],
     querySession: QuerySession)
-extends CloseableIterator[RowReader] with StrictLogging {
+extends RangeVectorCursor with StrictLogging {
   // Lazily open the iterator and obtain the lock. This allows one thread to create the
   // iterator, but the lock is owned by the thread actually performing the iteration.
   private lazy val windowIt = {
@@ -242,13 +242,13 @@ class QueueBasedWindow(q: IndexedArrayQueue[TransientRow]) extends Window {
   * Decorates a raw series iterator to apply a range vector function
   * on periodic time windows
   */
-class SlidingWindowIterator(raw: CloseableIterator[RowReader],
+class SlidingWindowIterator(raw: RangeVectorCursor,
                             start: Long,
                             step: Long,
                             end: Long,
                             window: Long,
                             rangeFunction: RangeFunction,
-                            queryConfig: QueryConfig) extends CloseableIterator[RowReader] {
+                            queryConfig: QueryConfig) extends RangeVectorCursor {
   private val sampleToEmit = new TransientRow()
   private var curWindowEnd = start
 
@@ -346,7 +346,7 @@ class SlidingWindowIterator(raw: CloseableIterator[RowReader],
 /**
   * Converts the long value column to double.
   */
-class LongToDoubleIterator(iter: CloseableIterator[RowReader]) extends CloseableIterator[RowReader] {
+class LongToDoubleIterator(iter: RangeVectorCursor) extends RangeVectorCursor {
   val sampleToEmit = new TransientRow()
   override final def hasNext: Boolean = iter.hasNext
   override final def next(): TransientRow = {

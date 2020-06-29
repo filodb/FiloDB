@@ -28,7 +28,7 @@ class HistToPromSeriesMapperSpec extends FunSpec with Matchers with ScalaFutures
                                           ColumnInfo("value", ColumnType.HistogramColumn)), 1)
 
   it("should convert single schema histogram to appropriate Prom bucket time series") {
-    import NoCloseIterator._
+    import NoCloseCursor._
     val rv = IteratorBackedRangeVector(rvKey, rows.toIterator)
 
     val mapper = HistToPromSeriesMapper(MMD.histDataset.schema.partition)
@@ -64,7 +64,7 @@ class HistToPromSeriesMapperSpec extends FunSpec with Matchers with ScalaFutures
   val tenRows = tenBTimes.zip(tenBHists).map { case (t, h) => new TransientHistRow(t, h) }
 
   it("should convert multiple schema histograms to Prom bucket time series") {
-    import filodb.core.query.NoCloseIterator._
+    import filodb.core.query.NoCloseCursor._
     val rv = IteratorBackedRangeVector(rvKey, (rows ++ tenRows).toIterator)
 
     val mapper = HistToPromSeriesMapper(MMD.histDataset.schema.partition)

@@ -71,7 +71,7 @@ class HistogramQuantileMapperSpec extends FunSpec with Matchers with ScalaFuture
 
   it ("should calculate histogram_quantile correctly") {
     val histRvs = bucketValues.zipWithIndex.map { case (rv, i) =>
-      import NoCloseIterator._
+      import NoCloseCursor._
       IteratorBackedRangeVector(histBuckets1(i), rv.map(s => new TransientRow(s._1, s._2.toDouble)).toIterator)
     }
 
@@ -80,7 +80,7 @@ class HistogramQuantileMapperSpec extends FunSpec with Matchers with ScalaFuture
   }
 
   it ("should calculate histogram_quantile correctly for multiple histograms") {
-    import NoCloseIterator._
+    import NoCloseCursor._
     val histRvs = bucketValues.zipWithIndex.map { case (rv, i) =>
       IteratorBackedRangeVector(histBuckets1(i), rv.map(s => new TransientRow(s._1, s._2.toDouble)).toIterator)
     } ++ bucketValues.zipWithIndex.map { case (rv, i) =>
@@ -92,7 +92,7 @@ class HistogramQuantileMapperSpec extends FunSpec with Matchers with ScalaFuture
   }
 
   it ("should sort the buckets to calculate histogram_quantile correctly ") {
-    import NoCloseIterator._
+    import NoCloseCursor._
     val histRvs = bucketValues.zipWithIndex.map { case (rv, i) =>
       IteratorBackedRangeVector(histBuckets1(i), rv.map(s => new TransientRow(s._1, s._2.toDouble)).toIterator)
     }
@@ -114,7 +114,7 @@ class HistogramQuantileMapperSpec extends FunSpec with Matchers with ScalaFuture
       Array[(Int, Double)]( (10, 34), (20, 42), (30, 46), (40, Double.NaN) ),
       Array[(Int, Double)]( (10, 35), (20, 45), (30, 46), (40, 89) )
     ).zipWithIndex.map { case (rv, i) =>
-      import NoCloseIterator._
+      import NoCloseCursor._
       IteratorBackedRangeVector(histBuckets1(i), rv.map(s => new TransientRow(s._1, s._2)).toIterator)
     }
 

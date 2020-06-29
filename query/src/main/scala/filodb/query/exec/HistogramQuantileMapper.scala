@@ -75,7 +75,7 @@ final case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends Rang
         val buckets = sortedBucketRvs.map { b => Bucket(b._1, 0d) }
 
         // create the result iterator that lazily produces quantile for each timestamp
-        val quantileResult = new CloseableIterator[RowReader] {
+        val quantileResult = new RangeVectorCursor {
           val row = new TransientRow()
           override def hasNext: Boolean = samples.forall(_.hasNext)
           override def next(): RowReader = {

@@ -2,8 +2,8 @@ package filodb.core.store
 
 import filodb.core.Types.{ChunkID, ColumnId}
 import filodb.core.metadata.Schema
-import filodb.core.query.{CloseableIterator, PartitionTimeRangeReader}
-import filodb.memory.format.{BinaryVector, MemoryReader, RowReader, UnsafeUtils, VectorDataReader}
+import filodb.core.query.{PartitionTimeRangeReader, RangeVectorCursor}
+import filodb.memory.format.{BinaryVector, MemoryReader, UnsafeUtils, VectorDataReader}
 
 
 trait FiloPartition {
@@ -116,10 +116,10 @@ trait ReadablePartition extends FiloPartition {
    * @param endTime ending timestamp, in milliseconds since Epoch
    * @param columnIDs the column IDs to query
    */
-  final def timeRangeRows(startTime: Long, endTime: Long, columnIDs: Array[ColumnId]): CloseableIterator[RowReader] =
+  final def timeRangeRows(startTime: Long, endTime: Long, columnIDs: Array[ColumnId]): RangeVectorCursor =
     new PartitionTimeRangeReader(this, startTime, endTime, infos(startTime, endTime), columnIDs)
 
-  final def timeRangeRows(method: ChunkScanMethod, columnIDs: Array[ColumnId]): CloseableIterator[RowReader] =
+  final def timeRangeRows(method: ChunkScanMethod, columnIDs: Array[ColumnId]): RangeVectorCursor =
     new PartitionTimeRangeReader(this, method.startTime, method.endTime, infos(method), columnIDs)
 
 }

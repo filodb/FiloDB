@@ -142,9 +142,9 @@ final case class BinaryJoinExec(queryContext: QueryContext,
     CustomRangeVectorKey(result)
   }
 
-  private def binOp(lhsRows: CloseableIterator[RowReader],
-                    rhsRows: CloseableIterator[RowReader]): CloseableIterator[RowReader] = {
-    new CloseableIterator[RowReader] {
+  private def binOp(lhsRows: RangeVectorCursor,
+                    rhsRows: RangeVectorCursor): RangeVectorCursor = {
+    new RangeVectorCursor {
       val cur = new TransientRow()
       val binFunc = BinaryOperatorFunction.factoryMethod(binaryOp)
       override def hasNext: Boolean = lhsRows.hasNext && rhsRows.hasNext

@@ -5,7 +5,7 @@ import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.ZeroCopyUTF8String
 
 
 class ResultTypesSpec extends FunSpec with Matchers with ScalaFutures {
@@ -21,8 +21,8 @@ class ResultTypesSpec extends FunSpec with Matchers with ScalaFutures {
 
       override def key: RangeVectorKey = ignoreKey
 
-      import NoCloseIterator._
-      override def rows(): CloseableIterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 3.3d),
         new TransientRow(2L, 5.1d)).iterator
 
@@ -39,8 +39,8 @@ class ResultTypesSpec extends FunSpec with Matchers with ScalaFutures {
 
       override def key: RangeVectorKey = ignoreKey
 
-      import NoCloseIterator._
-      override def rows(): CloseableIterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 3.3d)).toIterator
       override def numRows: Option[Int] = Option(rows.size)
 
@@ -51,8 +51,8 @@ class ResultTypesSpec extends FunSpec with Matchers with ScalaFutures {
 
       override def key: RangeVectorKey = ignoreKey
 
-      import NoCloseIterator._
-      override def rows(): CloseableIterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 9.4d)).toIterator
       override def numRows: Option[Int] = Option(rows.size)
 
@@ -68,8 +68,8 @@ class ResultTypesSpec extends FunSpec with Matchers with ScalaFutures {
 
       override def key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
 
-      import NoCloseIterator._
-      override def rows(): CloseableIterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 3.3d)).toIterator
       override def numRows: Option[Int] = Option(rows.size)
 

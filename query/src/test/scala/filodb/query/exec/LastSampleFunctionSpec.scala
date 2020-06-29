@@ -5,8 +5,7 @@ import java.util.concurrent.ThreadLocalRandom
 import scala.concurrent.duration._
 import scala.util.Random
 
-import filodb.core.query.{CloseableIterator, TransientRow}
-import filodb.memory.format.RowReader
+import filodb.core.query.{RangeVectorCursor, TransientRow}
 import filodb.query.exec.rangefn.{LastSampleChunkedFunctionD, LastSampleFunction, RawDataWindowingSpec}
 
 class LastSampleFunctionSpec extends RawDataWindowingSpec {
@@ -133,7 +132,7 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
   }
 
   def validateLastSamples(input: Seq[(Long, Double)],
-                          output: CloseableIterator[RowReader],
+                          output: RangeVectorCursor,
                           start: Long,
                           end: Long,
                           step: Int): Unit = {

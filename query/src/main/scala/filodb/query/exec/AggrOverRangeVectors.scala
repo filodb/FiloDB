@@ -8,7 +8,7 @@ import monix.reactive.Observable
 import scalaxy.loops._
 
 import filodb.core.query._
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.ZeroCopyUTF8String
 import filodb.query._
 import filodb.query.exec.aggregator.RowAggregator
 
@@ -134,7 +134,7 @@ object RangeVectorAggregator extends StrictLogging {
       // now reduce each group and create one result range vector per group
       val groupedResult = mapReduceInternal(rvs, rowAgg, skipMapPhase, grouping)
       groupedResult.map { case (rvk, aggHolder) =>
-        val rowIterator = new CustomCloseIterator(aggHolder.map(_.toRowReader))(rvs.foreach(_.rows().close()))
+        val rowIterator = new CustomCloseCursor(aggHolder.map(_.toRowReader))(rvs.foreach(_.rows().close()))
         IteratorBackedRangeVector(rvk, rowIterator)
       }
     }
@@ -196,7 +196,7 @@ object RangeVectorAggregator extends StrictLogging {
     val accs = collection.mutable.ArrayBuffer.fill(outputLen)(rowAgg.zero)
     var count = 0
     // keeps track of all iters to close
-    val toClose = ArrayBuffer.empty[CloseableIterator[RowReader]]
+    val toClose = ArrayBuffer.empty[RangeVectorCursor]
 
     // FoldLeft means we create the source PeriodicMapper etc and process immediately.  We can release locks right away
     // NOTE: ChunkedWindowIterator automatically releases locks after last window.  So it should all just work.  :)
@@ -226,7 +226,7 @@ object RangeVectorAggregator extends StrictLogging {
 
     aggObs.flatMap { _ =>
       if (count > 0) {
-        val iter = new CustomCloseIterator(accs.toIterator.map(_.toRowReader))(toClose.foreach(_.close()))
+        val iter = new CustomCloseCursor(accs.toIterator.map(_.toRowReader))(toClose.foreach(_.close()))
         Observable.now(IteratorBackedRangeVector(CustomRangeVectorKey.empty, iter))
       } else {
         Observable.empty
