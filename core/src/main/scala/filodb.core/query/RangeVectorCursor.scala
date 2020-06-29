@@ -13,13 +13,13 @@ import filodb.memory.format.RowReader
   * that force developer to care for "closing" the cursor before
   * completing the query
   */
-trait RangeVectorCursor extends Iterator[RowReader] { self =>
+trait RangeVectorCursor extends Iterator[RowReader] with java.io.Closeable { self =>
   /**
     * This method mut release all resources (example locks) acquired
     * for the purpose of executing this query
     */
   def close(): Unit
-  def map2(f: RowReader => RowReader): RangeVectorCursor = new RangeVectorCursor {
+  def mapRow(f: RowReader => RowReader): RangeVectorCursor = new RangeVectorCursor {
     def hasNext = self.hasNext
     def next() = f(self.next())
     def close(): Unit = self.close()

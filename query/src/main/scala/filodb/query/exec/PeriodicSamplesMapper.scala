@@ -108,7 +108,7 @@ final case class PeriodicSamplesMapper(start: Long,
 
         override def key: RangeVectorKey = rv.key
 
-        override def rows(): RangeVectorCursor = rv.rows.map2 { r =>
+        override def rows(): RangeVectorCursor = rv.rows.mapRow { r =>
           row.setLong(0, r.getLong(0) + o)
           row.setDouble(1, r.getDouble(1))
           row
