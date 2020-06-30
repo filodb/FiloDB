@@ -152,6 +152,7 @@ object PromRemoteExec extends StrictLogging {
 
   // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
   // Needed to override Sampl case class Encoder.
+  import PromCirceSupport._
   implicit val backend = AsyncHttpClientFutureBackend()
 
   ShutdownHookThread(shutdown())
