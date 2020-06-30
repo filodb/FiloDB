@@ -49,7 +49,7 @@ abstract class WrappedCursor(rows: RangeVectorCursor) extends RangeVectorCursor 
       doNext()
     } catch {
       case e: Throwable => {
-        rows.close()
+        close()
         throw e
       }
     }
