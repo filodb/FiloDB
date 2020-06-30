@@ -44,6 +44,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
 
     val iteratorMap = data.map { r => r.map { v => (v._1.utf8, v._2.utf8) }}
 
+    import NoCloseCursor._
     val rangeVector = IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
       new UTF8MapIteratorRowReader(iteratorMap.toIterator))
 

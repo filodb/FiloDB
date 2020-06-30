@@ -14,7 +14,7 @@ import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.QueryConfig
 import filodb.core.store.IngestionConfig
-import filodb.memory.format.{RowReader, SeqRowReader, UTF8MapIteratorRowReader, ZeroCopyUTF8String => UTF8Str}
+import filodb.memory.format.{SeqRowReader, UTF8MapIteratorRowReader, ZeroCopyUTF8String => UTF8Str}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryResult => QueryResult2, _}
@@ -139,7 +139,10 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       new ColumnInfo("value", ColumnType.DoubleColumn))
     val srvs = for { i <- 0 to 9 } yield {
       val rv = new RangeVector {
-        override val rows: Iterator[RowReader] = rowbuf.iterator
+        override val rows: RangeVectorCursor = {
+          import NoCloseCursor._
+          rowbuf.iterator
+        }
         override val key: RangeVectorKey = rvKey
       }
       val srv = SerializedRangeVector(rv, cols)
@@ -284,6 +287,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
                       UTF8Str("key2") -> UTF8Str("val2"))
     val key = CustomRangeVectorKey(keysMap)
     val cols = Seq(ColumnInfo("value", ColumnType.DoubleColumn))
+    import filodb.core.query.NoCloseCursor._
     val ser = SerializedRangeVector(IteratorBackedRangeVector(key, Iterator.empty), cols)
 
     val schema = ResultSchema(MachineMetricsData.dataset1.schema.infosFromIDs(0 to 0), 1)
@@ -300,6 +304,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val expected = Seq(Map("App-0" -> "App-1"))
     val schema = new ResultSchema(Seq(new ColumnInfo("_ns_", ColumnType.MapColumn)), 1)
     val cols = Seq(ColumnInfo("value", ColumnType.MapColumn))
+    import filodb.core.query.NoCloseCursor._
     val ser = Seq(SerializedRangeVector(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
       new UTF8MapIteratorRowReader(input.toIterator)), cols))
 

@@ -11,7 +11,7 @@ import filodb.core.MetricsTestData
 import filodb.core.query._
 import filodb.core.query.Filter.{Equals, NotEqualsRegex}
 import filodb.memory.data.ChunkMap
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.ZeroCopyUTF8String
 import filodb.query.exec
 
 class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures with BeforeAndAfter {
@@ -40,13 +40,15 @@ class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures with Be
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
-      override def rows: Iterator[RowReader] = Seq(
+      import filodb.core.query.NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1000L, 1d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
-      override def rows: Iterator[RowReader] = Seq(
+      import filodb.core.query.NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1000L, 5d)).iterator
     })
 
@@ -54,7 +56,8 @@ class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures with Be
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
-      override def rows: Iterator[RowReader] = Seq(
+      import filodb.core.query.NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1000L, Double.NaN),
         new TransientRow(2000L, 1d),
         new TransientRow(3000L, Double.NaN)).iterator
@@ -62,7 +65,8 @@ class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures with Be
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
-      override def rows: Iterator[RowReader] = Seq(
+      import filodb.core.query.NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1000L, 5d),
         new TransientRow(2000L, Double.NaN),
         new TransientRow(3000L, Double.NaN)).iterator

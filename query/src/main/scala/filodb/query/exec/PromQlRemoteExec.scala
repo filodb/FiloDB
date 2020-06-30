@@ -2,6 +2,10 @@ package filodb.query.exec
 
 import java.util.concurrent.TimeUnit
 
+import scala.concurrent.Future
+import scala.concurrent.duration._
+import scala.sys.ShutdownHookThread
+
 import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
 import com.softwaremill.sttp.circe._
 import com.typesafe.scalalogging.StrictLogging
@@ -9,15 +13,11 @@ import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
 import monix.execution.Scheduler
-import scala.concurrent.Future
-import scala.concurrent.duration._
-import scala.sys.ShutdownHookThread
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.store.ChunkSource
-import filodb.memory.format.RowReader
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 
@@ -124,7 +124,8 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
         override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map (m => m._1.utf8 -> m._2.utf8))
 
-        override def rows: Iterator[RowReader] = {
+        override def rows(): RangeVectorCursor = {
+          import NoCloseCursor._
           samples.iterator.collect { case v: Sampl =>
             row.setLong(0, v.timestamp * 1000)
             row.setDouble(1, v.value)

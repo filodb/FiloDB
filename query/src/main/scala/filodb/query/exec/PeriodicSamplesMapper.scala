@@ -108,7 +108,7 @@ final case class PeriodicSamplesMapper(start: Long,
 
         override def key: RangeVectorKey = rv.key
 
-        override def rows: Iterator[RowReader] = rv.rows.map { r =>
+        override def rows(): RangeVectorCursor = rv.rows.mapRow { r =>
           row.setLong(0, r.getLong(0) + o)
           row.setDouble(1, r.getDouble(1))
           row
@@ -158,7 +158,7 @@ abstract class ChunkedWindowIterator[R <: MutableRowReader](
     window: Long,
     rangeFunction: ChunkedRangeFunction[R],
     querySession: QuerySession)
-extends Iterator[R] with StrictLogging {
+extends RangeVectorCursor with StrictLogging {
   // Lazily open the iterator and obtain the lock. This allows one thread to create the
   // iterator, but the lock is owned by the thread actually performing the iteration.
   private lazy val windowIt = {
@@ -169,6 +169,8 @@ extends Iterator[R] with StrictLogging {
     it.lock()
     it
   }
+
+  def close: Unit = rv.rows().close()
 
   def sampleToEmit: R
 
@@ -240,13 +242,13 @@ class QueueBasedWindow(q: IndexedArrayQueue[TransientRow]) extends Window {
   * Decorates a raw series iterator to apply a range vector function
   * on periodic time windows
   */
-class SlidingWindowIterator(raw: Iterator[RowReader],
+class SlidingWindowIterator(raw: RangeVectorCursor,
                             start: Long,
                             step: Long,
                             end: Long,
                             window: Long,
                             rangeFunction: RangeFunction,
-                            queryConfig: QueryConfig) extends Iterator[TransientRow] {
+                            queryConfig: QueryConfig) extends RangeVectorCursor {
   private val sampleToEmit = new TransientRow()
   private var curWindowEnd = start
 
@@ -271,6 +273,8 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
 
   // to avoid creation of object per sample, we use a pool
   val windowSamplesPool = new TransientRowPool()
+
+  override def close(): Unit = raw.close()
 
   override def hasNext: Boolean = curWindowEnd <= end
   override def next(): TransientRow = {
@@ -342,7 +346,7 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
 /**
   * Converts the long value column to double.
   */
-class LongToDoubleIterator(iter: Iterator[RowReader]) extends Iterator[TransientRow] {
+class LongToDoubleIterator(iter: RangeVectorCursor) extends RangeVectorCursor {
   val sampleToEmit = new TransientRow()
   override final def hasNext: Boolean = iter.hasNext
   override final def next(): TransientRow = {
@@ -351,6 +355,8 @@ class LongToDoubleIterator(iter: Iterator[RowReader]) extends Iterator[Transient
     sampleToEmit.setDouble(1, next.getLong(1).toDouble)
     sampleToEmit
   }
+
+  override def close(): Unit = iter.close()
 }
 
 /**

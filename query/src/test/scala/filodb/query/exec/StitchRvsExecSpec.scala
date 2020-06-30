@@ -1,10 +1,12 @@
 package filodb.query.exec
 
-import filodb.core.query.{ColumnInfo, QueryContext, ResultSchema, TransientRow}
-
 import scala.annotation.tailrec
+
 import org.scalatest.{FunSpec, Matchers}
+
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, TimestampColumn}
+import filodb.core.query.{ColumnInfo, QueryContext, ResultSchema, TransientRow}
+import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.memory.format.UnsafeUtils
 import filodb.query.QueryResult
 
@@ -167,7 +169,9 @@ class StitchRvsExecSpec extends FunSpec with Matchers {
   }
 
   def mergeAndValidate(rvs: Seq[Seq[(Long, Double)]], expected: Seq[(Long, Double)]): Unit = {
-    val inputSeq = rvs.map { rows => rows.iterator.map(r => new TransientRow(r._1, r._2)) }
+    val inputSeq = rvs.map { rows =>
+      new NoCloseCursor(rows.iterator.map(r => new TransientRow(r._1, r._2)))
+    }
     val result = StitchRvsExec.merge(inputSeq).map(r => (r.getLong(0), r.getDouble(1)))
     compareIter(result, expected.toIterator)
   }

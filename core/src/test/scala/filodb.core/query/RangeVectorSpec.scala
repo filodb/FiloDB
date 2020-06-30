@@ -3,7 +3,7 @@ package filodb.core.query
 import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core.metadata.Column.ColumnType
-import filodb.memory.format.{RowReader, SeqRowReader, ZeroCopyUTF8String}
+import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 
 
 class RangeVectorSpec  extends FunSpec with Matchers {
@@ -13,7 +13,8 @@ class RangeVectorSpec  extends FunSpec with Matchers {
   val tuples = (numRawSamples until 0).by(-1).map(n => (now - n * reportingInterval, n.toDouble))
 
   class TuplesRangeVector(inputTuples: Seq[(Long, Double)]) extends RangeVector {
-    override def rows: Iterator[RowReader] = inputTuples.map { t =>
+    import NoCloseCursor._
+    override def rows(): RangeVectorCursor = inputTuples.map { t =>
       new SeqRowReader(Seq[Any](t._1, t._2))
     }.iterator
     override def key: RangeVectorKey = new RangeVectorKey {
