@@ -335,6 +335,11 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
             else if (val1.isNaN) val2.isNaN shouldEqual true
             else val1 shouldEqual val2 +- 0.0001
         }
+        // The zip method appears to short circuit and doesn't always fully drain all the
+        // iterators. This can leave locks stuck. Calling size has the side effect of fully
+        // draining the iterator, which will in turn ensure that locks are released.
+        ex.size
+        res.size
       }
     }
   }

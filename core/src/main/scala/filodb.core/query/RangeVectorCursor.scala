@@ -40,3 +40,26 @@ object NoCloseCursor {
   }
 }
 
+/**
+  * Wraps another cursor and auto-closes it when an exception is thrown.
+  */
+abstract class WrappedCursor(rows: RangeVectorCursor) extends RangeVectorCursor {
+ final def next(): RowReader = {
+    try {
+      doNext()
+    } catch {
+      case e: Throwable => {
+        rows.close()
+        throw e
+      }
+    }
+  }
+
+  def hasNext: Boolean = rows.hasNext
+
+  def close(): Unit = rows.close()
+
+  // Subclass must implement this method.
+  def doNext(): RowReader
+}
+
