@@ -142,10 +142,11 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
   }
 }
 
-private class DoubleInstantFuncIterator(rows: Iterator[RowReader],
+private class DoubleInstantFuncIterator(rows: RangeVectorCursor,
                                         instantFunction: DoubleInstantFunction,
                                         scalar: Seq[ScalarRangeVector],
-                                        result: TransientRow = new TransientRow()) extends Iterator[RowReader] {
+                                        result: TransientRow = new TransientRow()) extends
+        RangeVectorCursor {
   final def hasNext: Boolean = rows.hasNext
   final def next(): RowReader = {
     val next = rows.next()
@@ -155,12 +156,14 @@ private class DoubleInstantFuncIterator(rows: Iterator[RowReader],
     result.setValues(timestamp, newValue)
     result
   }
+  final def close(): Unit = rows.close()
 }
 
-private class H2DoubleInstantFuncIterator(rows: Iterator[RowReader],
+private class H2DoubleInstantFuncIterator(rows: RangeVectorCursor,
                                           instantFunction: HistToDoubleIFunction,
                                           scalar: Seq[ScalarRangeVector],
-                                          result: TransientRow = new TransientRow()) extends Iterator[RowReader] {
+                                          result: TransientRow = new TransientRow())
+          extends RangeVectorCursor {
   final def hasNext: Boolean = rows.hasNext
   final def next(): RowReader = {
     val next = rows.next()
@@ -169,12 +172,14 @@ private class H2DoubleInstantFuncIterator(rows: Iterator[RowReader],
     result.setValues(timestamp, newValue)
     result
   }
+  final def close(): Unit = rows.close()
 }
 
-private class HD2DoubleInstantFuncIterator(rows: Iterator[RowReader],
+private class HD2DoubleInstantFuncIterator(rows: RangeVectorCursor,
                                            instantFunction: HDToDoubleIFunction,
                                            scalar: Seq[ScalarRangeVector],
-                                           result: TransientRow = new TransientRow()) extends Iterator[RowReader] {
+                                           result: TransientRow = new TransientRow())
+        extends RangeVectorCursor {
   final def hasNext: Boolean = rows.hasNext
   final def next(): RowReader = {
     val next = rows.next()
@@ -184,6 +189,7 @@ private class HD2DoubleInstantFuncIterator(rows: Iterator[RowReader],
     result.setValues(timestamp, newValue)
     result
   }
+  final def close(): Unit = rows.close()
 }
 
 /**
@@ -214,7 +220,7 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
 
   private def evaluate(source: Observable[RangeVector], scalarRangeVector: ScalarRangeVector) = {
     source.map { rv =>
-      val resultIterator: Iterator[RowReader] = new Iterator[RowReader]() {
+      val resultIterator: RangeVectorCursor = new RangeVectorCursor() {
         private val rows = rv.rows
         private val result = new TransientRow()
 
@@ -230,6 +236,7 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
           result.setValues(timestamp, newValue)
           result
         }
+        override def close(): Unit = rv.rows().close()
       }
       IteratorBackedRangeVector(rv.key, resultIterator)
     }
@@ -334,7 +341,7 @@ final case class VectorFunctionMapper() extends RangeVectorTransformer {
     source.map { rv =>
       new RangeVector {
         override def key: RangeVectorKey = rv.key
-        override def rows: Iterator[RowReader] = rv.rows
+        override def rows(): RangeVectorCursor = rv.rows
       }
     }
   }
@@ -366,18 +373,20 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
     }
     val nonNanTimestamps = source.foldLeftL(List[Long]())(addNonNanTimestamps)
 
-    val resultRv = nonNanTimestamps.map {
-      t =>
-        val rowList = new ListBuffer[TransientRow]()
-        for (i <- rangeParams.startSecs to rangeParams.endSecs by rangeParams.stepSecs) {
-          if (!t.contains(i * 1000))
-            rowList += new TransientRow(i * 1000, 1)
+    val resultRv = nonNanTimestamps.map { t =>
+      val rowList = new ListBuffer[TransientRow]()
+      for (i <- rangeParams.startSecs to rangeParams.endSecs by rangeParams.stepSecs) {
+        if (!t.contains(i * 1000))
+          rowList += new TransientRow(i * 1000, 1)
+      }
+      new RangeVector {
+        override def key: RangeVectorKey = if (rowList.isEmpty) CustomRangeVectorKey.empty else keysFromFilter
+        override def rows(): RangeVectorCursor = {
+          import NoCloseCursor._
+          rowList.iterator
         }
-        new RangeVector {
-          override def key: RangeVectorKey = if (rowList.isEmpty) CustomRangeVectorKey.empty else keysFromFilter
-          override def rows: Iterator[RowReader] = rowList.iterator
-          }
-        }
+      }
+    }
 
     Observable.fromTask(resultRv)
   }

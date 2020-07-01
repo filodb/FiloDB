@@ -1,4 +1,4 @@
-package filodb.downsampler.chunk
+package filodb.core.downsample
 
 import com.typesafe.scalalogging.StrictLogging
 

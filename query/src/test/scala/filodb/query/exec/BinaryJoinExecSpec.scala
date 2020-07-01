@@ -13,7 +13,6 @@ import org.scalatest.exceptions.TestFailedException
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
-import filodb.memory.format.RowReader
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 
@@ -45,7 +44,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
         Map("__name__".utf8 -> s"someMetricLhs".utf8,
           "tag1".utf8 -> s"tag1-$i".utf8,
           "tag2".utf8 -> s"tag2-$i".utf8))
-      val rows: Iterator[RowReader] = data(i).iterator
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(i).iterator
     }
   }
 
@@ -55,7 +55,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
         Map("__name__".utf8 -> s"someMetricRhs".utf8,
           "tag1".utf8 -> samplesLhs(i).key.labelValues("tag1".utf8),
           "tag2".utf8 -> samplesLhs(i).key.labelValues("tag2".utf8)))
-      val rows: Iterator[RowReader] = data(i).iterator
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(i).iterator
     }
   }
 
@@ -66,7 +67,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
           "tag1".utf8 -> s"tag1-$i".utf8,
           "tag2".utf8 -> s"tag2-1".utf8,
           "job".utf8 -> s"somejob".utf8))
-      val rows: Iterator[RowReader] = data(i).iterator
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(i).iterator
     }
   }
 
@@ -76,7 +78,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
         Map("__name__".utf8 -> s"someMetricRhs".utf8,
           "tag1".utf8 -> s"tag1-$i".utf8,
           "job".utf8 -> s"somejob".utf8))
-      val rows: Iterator[RowReader] = data(i).iterator
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(i).iterator
     }
   }
 
@@ -146,7 +149,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
         Map("__name__".utf8 -> s"someMetricRhs".utf8,
           "tag1".utf8 -> "tag1-uniqueValue".utf8,
           "tag2".utf8 -> samplesLhs(2).key.labelValues("tag2".utf8))) // duplicate value
-      val rows: Iterator[RowReader] = data(2).iterator
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(2).iterator
     }
 
     val samplesRhs2 = scala.util.Random.shuffle(duplicate +: samplesRhs.toList) // they may come out of order
@@ -176,7 +180,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
         Map("__name__".utf8 -> s"someMetricRhs".utf8,
           "tag1".utf8 -> "tag1-uniqueValue".utf8,
           "tag2".utf8 -> samplesLhs(2).key.labelValues("tag2".utf8))) // duplicate value
-      val rows: Iterator[RowReader] = data(2).iterator
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(2).iterator
     }
 
     val samplesLhs2 = scala.util.Random.shuffle(duplicate +: samplesLhs.toList) // they may come out of order
@@ -271,7 +276,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
           Map("metric".utf8 -> s"someMetricLhs".utf8,
             "tag1".utf8 -> s"tag1-$i".utf8,
             "tag2".utf8 -> s"tag2-$i".utf8))
-        val rows: Iterator[RowReader] = data(i).iterator
+        import NoCloseCursor._
+        val rows: RangeVectorCursor = data(i).iterator
       }
     }
 
@@ -281,7 +287,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
           Map("metric".utf8 -> s"someMetricRhs".utf8,
             "tag1".utf8 -> samplesLhs(i).key.labelValues("tag1".utf8),
             "tag2".utf8 -> samplesLhs(i).key.labelValues("tag2".utf8)))
-        val rows: Iterator[RowReader] = data(i).iterator
+        import NoCloseCursor._
+        val rows: RangeVectorCursor = data(i).iterator
       }
     }
 
@@ -313,7 +320,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
           Map("metric".utf8 -> s"someMetricLhs".utf8,
             "tag1".utf8 -> s"tag1-$i".utf8,
             "tag2".utf8 -> s"tag2-$i".utf8))
-        val rows: Iterator[RowReader] = data(i).iterator
+        import NoCloseCursor._
+        val rows: RangeVectorCursor = data(i).iterator
       }
     }
 
@@ -323,7 +331,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
           Map("metric".utf8 -> s"someMetricRhs".utf8,
             "tag1".utf8 -> samplesLhs(i).key.labelValues("tag1".utf8),
             "tag2".utf8 -> samplesLhs(i).key.labelValues("tag2".utf8)))
-        val rows: Iterator[RowReader] = data(i).iterator
+        import NoCloseCursor._
+        val rows: RangeVectorCursor = data(i).iterator
       }
     }
 

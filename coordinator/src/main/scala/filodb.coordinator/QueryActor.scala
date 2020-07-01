@@ -1,5 +1,7 @@
 package filodb.coordinator
 
+import java.lang.Thread.UncaughtExceptionHandler
+import java.util.concurrent.{ScheduledThreadPoolExecutor, ThreadFactory}
 import java.util.concurrent.atomic.AtomicLong
 
 import scala.util.control.NonFatal
@@ -8,8 +10,10 @@ import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.dispatch.{Envelope, UnboundedStablePriorityMailbox}
 import com.typesafe.config.Config
 import kamon.Kamon
+import kamon.instrumentation.executor.ExecutorInstrumentation
 import kamon.tag.TagSet
 import monix.execution.Scheduler
+import monix.execution.schedulers.SchedulerService
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
 
@@ -88,14 +92,49 @@ final class QueryActor(memStore: MemStore,
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   val queryPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapFunc,
                                               earliestRawTimestampFn, queryConfig, functionalSpreadProvider)
-  val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor") * sys.runtime.availableProcessors)
-  val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName-$dsRef", numSchedThreads.toInt)
+  val queryScheduler = createInstrumentedQueryScheduler()
 
   private val tags = Map("dataset" -> dsRef.toString)
   private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").withTags(TagSet.from(tags))
   private val epRequests = Kamon.counter("queryactor-execplan-requests").withTags(TagSet.from(tags))
   private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").withTags(TagSet.from(tags))
   private val queryErrors = Kamon.counter("queryactor-query-errors").withTags(TagSet.from(tags))
+
+  /**
+    * Instrumentation adds following metrics on the Query Scheduler
+    *
+    * # Counter
+    * executor_tasks_submitted_total{type="ThreadPoolExecutor",name="query-sched-prometheus"}
+    * # Counter
+    * executor_tasks_completed_total{type="ThreadPoolExecutor",name="query-sched-prometheus"}
+    * # Histogram
+    * executor_threads_active{type="ThreadPoolExecutor",name="query-sched-prometheus"}
+    * # Histogram
+    * executor_queue_size_count{type="ThreadPoolExecutor",name="query-sched-prometheus"}
+    *
+    */
+  private def createInstrumentedQueryScheduler(): SchedulerService = {
+    val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor")
+                                      * sys.runtime.availableProcessors).toInt
+    val schedName = s"$QuerySchedName-$dsRef"
+
+    val thFactory = new ThreadFactory {
+      def newThread(r: Runnable) = {
+        val thread = new Thread(r)
+        thread.setName(s"$schedName-${thread.getId}")
+        thread.setDaemon(true)
+        thread.setUncaughtExceptionHandler(
+          new UncaughtExceptionHandler {
+            override def uncaughtException(t: Thread, e: Throwable): Unit =
+              logger.error("Uncaught Exception in Query Scheduler", e)
+          })
+        thread
+      }
+    }
+    // TODO retaining old fixed size pool for now - later change to fork join pool.
+    val executor = new ScheduledThreadPoolExecutor(numSchedThreads, thFactory)
+    Scheduler.apply(ExecutorInstrumentation.instrument(executor, schedName))
+  }
 
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
     if (checkTimeout(q.queryContext, replyTo)) {
@@ -106,6 +145,7 @@ final class QueryActor(memStore: MemStore,
       q.execute(memStore, querySession)(queryScheduler)
         .foreach { res =>
           FiloSchedulers.assertThreadName(QuerySchedName)
+          querySession.close()
           replyTo ! res
           res match {
             case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
@@ -118,10 +158,11 @@ final class QueryActor(memStore: MemStore,
               }
           }
         }(queryScheduler).recover { case ex =>
-        // Unhandled exception in query, should be rare
-        logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
-        replyTo ! QueryError(q.queryContext.queryId, ex)
-      }(queryScheduler)
+          querySession.close()
+          // Unhandled exception in query, should be rare
+          logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
+          replyTo ! QueryError(q.queryContext.queryId, ex)
+        }(queryScheduler)
     }
   }
 

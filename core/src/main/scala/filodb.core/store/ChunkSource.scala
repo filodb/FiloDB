@@ -60,7 +60,7 @@ final case class RawChunkSet(infoBytes: Array[Byte], vectors: Array[ByteBuffer])
 /**
  * Raw data for a partition, with one RawChunkSet per ID read
  */
-final case class RawPartData(partitionKey: Array[Byte], chunkSets: Seq[RawChunkSet])
+final case class RawPartData(partitionKey: Array[Byte], chunkSetsTimeOrdered: Seq[RawChunkSet])
 
 trait ChunkSource extends RawChunkSource with StrictLogging {
   /**

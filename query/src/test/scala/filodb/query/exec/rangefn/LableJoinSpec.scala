@@ -8,7 +8,7 @@ import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core.MetricsTestData
 import filodb.core.query._
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.ZeroCopyUTF8String
 import filodb.query._
 
 class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
@@ -55,14 +55,16 @@ class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
-      override def rows: Iterator[RowReader] = Seq(
+      import filodb.core.query.NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 3.3d),
         new TransientRow(2L, 5.1d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
-      override def rows: Iterator[RowReader] = Seq(
+      import filodb.core.query.NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(3L, 100d),
         new TransientRow(4L, 200d)).iterator
     })
@@ -71,14 +73,16 @@ class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
     new RangeVector {
       override def key: RangeVectorKey = testKey3
 
-      override def rows: Iterator[RowReader] = Seq(
+      import filodb.core.query.NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 3.3d),
         new TransientRow(2L, 5.1d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey4
 
-      override def rows: Iterator[RowReader] = Seq(
+      import filodb.core.query.NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(3L, 100d),
         new TransientRow(4L, 200d)).iterator
     })

@@ -107,6 +107,7 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
       }
     }
     finally {
+      aggRangeVector.rows.close()
       ChunkMap.releaseAllSharedLocks()
     }
     resRvs.map { case (key, builder) =>

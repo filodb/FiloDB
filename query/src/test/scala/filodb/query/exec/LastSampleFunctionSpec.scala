@@ -2,10 +2,10 @@ package filodb.query.exec
 
 import java.util.concurrent.ThreadLocalRandom
 
-import filodb.core.query.TransientRow
-
 import scala.concurrent.duration._
 import scala.util.Random
+
+import filodb.core.query.{RangeVectorCursor, TransientRow}
 import filodb.query.exec.rangefn.{LastSampleChunkedFunctionD, LastSampleFunction, RawDataWindowingSpec}
 
 class LastSampleFunctionSpec extends RawDataWindowingSpec {
@@ -60,8 +60,8 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
 
   it ("should return NaN when no reported samples for more than 5 minutes - static samples") {
     // note std dev for interval between reported samples is 5 mins
-    val samplesWithLongGap = Seq((59725569L,1.524759725569E12), (60038121L,1.524760038121E12),
-                (60370409L,1.524760370409E12), (60679268L,1.524760679268E12), (60988895L,1.524760988895E12))
+    val samplesWithLongGap = Seq((59725569L, 1.524759725569E12), (60038121L, 1.524760038121E12),
+                (60370409L, 1.524760370409E12), (60679268L, 1.524760679268E12), (60988895L, 1.524760988895E12))
     val rvWithLongGap = timeValueRV(samplesWithLongGap)
     val start = 60330762L
     val end = 63030762L
@@ -132,7 +132,7 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
   }
 
   def validateLastSamples(input: Seq[(Long, Double)],
-                          output: Iterator[TransientRow],
+                          output: RangeVectorCursor,
                           start: Long,
                           end: Long,
                           step: Int): Unit = {
@@ -141,12 +141,12 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
     var cur = start
     while (cur <= end) {
       val observed = output.next()
-      observed.timestamp shouldEqual cur
+      observed.getLong(0) shouldEqual cur
       val expected = validationMap.floorEntry(cur)
       if (expected == null || cur - expected.getKey > 5.minutes.toMillis) {
-        observed.value.isNaN shouldEqual true
+        observed.getDouble(1).isNaN shouldEqual true
       } else {
-        observed.value shouldEqual expected.getValue
+        observed.getDouble(1) shouldEqual expected.getValue
       }
       cur = cur + step
     }

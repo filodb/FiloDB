@@ -13,10 +13,10 @@ import filodb.query.Query.qLogger
 
 object StitchRvsExec {
 
-  def merge(vectors: Seq[Iterator[RowReader]]): Iterator[RowReader] = {
+  def merge(vectors: Seq[RangeVectorCursor]): RangeVectorCursor = {
     // This is an n-way merge without using a heap.
     // Heap is not used since n is expected to be very small (almost always just 1 or 2)
-    new Iterator[RowReader] {
+    new RangeVectorCursor {
       val bVectors = vectors.map(_.buffered)
       val mins = new mutable.ArrayBuffer[BufferedIterator[RowReader]](2)
       val noResult = new TransientRow(0, 0)
@@ -50,6 +50,8 @@ object StitchRvsExec {
           noResult
         }
       }
+
+      override def close(): Unit = vectors.foreach(_.close())
     }
   }
 }
