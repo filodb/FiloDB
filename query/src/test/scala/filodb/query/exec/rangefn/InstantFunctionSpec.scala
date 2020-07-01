@@ -337,7 +337,9 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
             else val1 shouldEqual val2Num +- 0.0001
           }
         }
-        // Ensure that locks are released from DoubleInstantFuncIterator.
+        // Ensure that locks are released from DoubleInstantFuncIterator. A couple of the tests
+        // don't feed in enough expected data for the iterator to reach the end naturally and
+        // close itself.
         res.close();
       }
     }
