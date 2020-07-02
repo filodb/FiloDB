@@ -326,15 +326,21 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
                                 schema: ResultSchema = resultSchema): Unit = {
     val instantVectorFnMapper = exec.InstantVectorFunctionMapper(instantFunctionId, funcParams.map(x => StaticFuncArgs(x, RangeParams(100,10,200))))
     val resultObs = instantVectorFnMapper(Observable.fromIterable(samples), querySession, 1000, schema, Nil)
-    val result = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val result = resultObs.toListL.runAsync.futureValue.map(_.rows)
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
         ex.zip(res).foreach {
-          case (val1, val2) =>
-            if (val1.isInfinity) val2.isInfinity shouldEqual true
-            else if (val1.isNaN) val2.isNaN shouldEqual true
-            else val1 shouldEqual val2 +- 0.0001
+          case (val1, val2) => {
+            val val2Num = val2.getDouble(1)
+            if (val1.isInfinity) val2Num.isInfinity shouldEqual true
+            else if (val1.isNaN) val2Num.isNaN shouldEqual true
+            else val1 shouldEqual val2Num +- 0.0001
+          }
         }
+        // Ensure that locks are released from DoubleInstantFuncIterator. A couple of the tests
+        // don't feed in enough expected data for the iterator to reach the end naturally and
+        // close itself.
+        res.close();
       }
     }
   }
