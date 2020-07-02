@@ -151,5 +151,6 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
       cur = cur + step
     }
     output.hasNext shouldEqual false
+    output.close()
   }
 }

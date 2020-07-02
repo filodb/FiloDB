@@ -128,14 +128,13 @@ object ChunkMap extends StrictLogging {
 
     val numLocksReleased = ChunkMap.releaseAllSharedLocks()
     if (numLocksReleased > 0) {
+      val msg = s"Number of locks was non-zero: $numLocksReleased. " +
+        s"This is indicative of a possible lock acquisition/release bug."
       if (unitTest) {
-        // FIXME: Uncomment this when tests have been fixed.
-        //throw new Error(s"Number of locks was non-zero: $numLocksReleased")
+        throw new Error(msg)
       }
-      logger.error(s"Number of locks was non-zero: $numLocksReleased. " +
-        s"This is indicative of a possible lock acquisition/release bug.")
-      // FIXME: Causes failures when running the unit tests for some unknown reason.
-      //haltAndCatchFire()
+      logger.error(msg)
+      haltAndCatchFire()
     }
     execPlanTracker.put(t, execPlan)
   }

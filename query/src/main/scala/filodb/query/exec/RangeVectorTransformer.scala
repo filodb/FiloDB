@@ -145,10 +145,9 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
 private class DoubleInstantFuncIterator(rows: RangeVectorCursor,
                                         instantFunction: DoubleInstantFunction,
                                         scalar: Seq[ScalarRangeVector],
-                                        result: TransientRow = new TransientRow()) extends
-        RangeVectorCursor {
-  final def hasNext: Boolean = rows.hasNext
-  final def next(): RowReader = {
+                                        result: TransientRow = new TransientRow())
+    extends WrappedCursor(rows) {
+  override def doNext(): RowReader = {
     val next = rows.next()
     val nextVal = next.getDouble(1)
     val timestamp = next.getLong(0)
@@ -156,32 +155,28 @@ private class DoubleInstantFuncIterator(rows: RangeVectorCursor,
     result.setValues(timestamp, newValue)
     result
   }
-  final def close(): Unit = rows.close()
 }
 
 private class H2DoubleInstantFuncIterator(rows: RangeVectorCursor,
                                           instantFunction: HistToDoubleIFunction,
                                           scalar: Seq[ScalarRangeVector],
                                           result: TransientRow = new TransientRow())
-          extends RangeVectorCursor {
-  final def hasNext: Boolean = rows.hasNext
-  final def next(): RowReader = {
+    extends WrappedCursor(rows) {
+  override def doNext(): RowReader = {
     val next = rows.next()
     val timestamp = next.getLong(0)
     val newValue = instantFunction(next.getHistogram(1), scalar.map(_.getValue(timestamp)))
     result.setValues(timestamp, newValue)
     result
   }
-  final def close(): Unit = rows.close()
 }
 
 private class HD2DoubleInstantFuncIterator(rows: RangeVectorCursor,
                                            instantFunction: HDToDoubleIFunction,
                                            scalar: Seq[ScalarRangeVector],
                                            result: TransientRow = new TransientRow())
-        extends RangeVectorCursor {
-  final def hasNext: Boolean = rows.hasNext
-  final def next(): RowReader = {
+    extends WrappedCursor(rows) {
+  override def doNext(): RowReader = {
     val next = rows.next()
     val timestamp = next.getLong(0)
     val newValue = instantFunction(next.getHistogram(1),
@@ -189,7 +184,6 @@ private class HD2DoubleInstantFuncIterator(rows: RangeVectorCursor,
     result.setValues(timestamp, newValue)
     result
   }
-  final def close(): Unit = rows.close()
 }
 
 /**
@@ -220,13 +214,13 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
 
   private def evaluate(source: Observable[RangeVector], scalarRangeVector: ScalarRangeVector) = {
     source.map { rv =>
-      val resultIterator: RangeVectorCursor = new RangeVectorCursor() {
+      val resultIterator: RangeVectorCursor = new WrappedCursor(rv.rows) {
         private val rows = rv.rows
         private val result = new TransientRow()
 
         override def hasNext: Boolean = rows.hasNext
 
-        override def next(): RowReader = {
+        override def doNext(): RowReader = {
           val next = rows.next()
           val nextVal = next.getDouble(1)
           val timestamp = next.getLong(0)
@@ -236,7 +230,6 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
           result.setValues(timestamp, newValue)
           result
         }
-        override def close(): Unit = rv.rows().close()
       }
       IteratorBackedRangeVector(rv.key, resultIterator)
     }
