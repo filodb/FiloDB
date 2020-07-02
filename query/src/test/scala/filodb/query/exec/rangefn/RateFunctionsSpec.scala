@@ -167,6 +167,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
 
       val slidingRate = slidingWindowIt(data, rv, RateFunction, windowSize, step)
       val slidingResults = slidingRate.map(_.getDouble(1)).toBuffer
+      slidingRate.close()
 
       val rateChunked = chunkedWindowIt(data, rv, new ChunkedRateFunction, windowSize, step)
       val resultRows = rateChunked.map { r => (r.getLong(0), r.getDouble(1)) }.toBuffer

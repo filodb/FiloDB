@@ -424,6 +424,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
                     Some(InternalRangeFunction.AvgOverTime), ColumnType.DoubleColumn, queryConfig,
                     useChunked = false).asSliding, queryConfig)
     slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
+    slidingWinIterator.close()
 
     val chunkedIt = new ChunkedWindowIteratorD(rv, 50000L, 100000, 700000L, 100000,
       RangeFunction(tsResSchema,
@@ -459,7 +460,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
                     Some(InternalRangeFunction.CountOverTime), ColumnType.DoubleColumn, queryConfig,
                     useChunked = false).asSliding, queryConfig)
     slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
-
+    slidingWinIterator.close();
 
     val chunkedIt = new ChunkedWindowIteratorD(rv, 50000L, 100000, 700000L, 100000,
       RangeFunction(tsResSchema,
@@ -549,6 +550,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
                     Some(InternalRangeFunction.MinOverTime), ColumnType.DoubleColumn, queryConfig,
                     useChunked = false).asSliding, queryConfig)
     slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
+    slidingWinIterator.close()
 
     val chunkedIt = new ChunkedWindowIteratorD(rv, 50000L, 100000, 700000L, 100000,
       RangeFunction(tsResSchema,
@@ -585,6 +587,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
                     Some(InternalRangeFunction.MaxOverTime), ColumnType.DoubleColumn, queryConfig,
                     useChunked = false).asSliding, queryConfig)
     slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
+    slidingWinIterator.close()
 
     val chunkedIt = new ChunkedWindowIteratorD(rv, 50000L, 100000, 700000L, 100000,
       RangeFunction(tsResSchema,
