@@ -286,7 +286,6 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
   override def close(): Unit = raw.close()
 
   override def hasNext: Boolean = curWindowEnd <= end
-
   override def next(): TransientRow = {
     val curWindowStart = curWindowEnd - window
     // current window is: (curWindowStart, curWindowEnd]. Excludes start, includes end.
