@@ -194,8 +194,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                                     userTimeStart: Long,
                                     endTimeExclusive: Long,
                                     maxChunkTime: Long,
-                                    batchSize: Int,
-                                    batchTime: FiniteDuration): Observable[Seq[RawPartData]] = {
+                                    batchSize: Int): Observable[Seq[RawPartData]] = {
     val partKeys = Observable.fromIterator(splits).flatMap {
       case split: CassandraTokenRangeSplit =>
         val indexTable = getOrCreateIngestionTimeIndexTable(datasetRef)
@@ -208,7 +207,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     import filodb.core.Iterators._
 
     val chunksTable = getOrCreateChunkTable(datasetRef)
-    partKeys.bufferTimedAndCounted(batchTime, batchSize).map { parts =>
+    partKeys.bufferTumbling(batchSize).map { parts =>
       logger.debug(s"Querying cassandra for chunks from ${parts.size} partitions userTimeStart=$userTimeStart " +
         s"endTimeExclusive=$endTimeExclusive maxChunkTime=$maxChunkTime")
       // TODO evaluate if we can increase parallelism here. This needs to be tuneable

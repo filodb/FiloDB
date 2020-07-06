@@ -116,7 +116,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
           ingestionTimeEnd = ingestionTimeEnd,
           userTimeStart = userTimeStart, endTimeExclusive = userTimeEndExclusive,
           maxChunkTime = settings.rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
-          batchSize = settings.batchSize, batchTime = settings.batchTime).toIterator()
+          batchSize = settings.batchSize).toIterator()
         batchReadSpan.finish()
         batchIter // iterator of batches
       }
