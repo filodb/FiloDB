@@ -9,6 +9,7 @@ import akka.actor.ActorSystem
 import ch.qos.logback.classic.{Level, Logger}
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -26,6 +27,13 @@ import filodb.prometheus.parse.Parser
 import filodb.query.{QueryError => QError, QueryResult => QueryResult2}
 import filodb.timeseries.TestTimeseriesProducer
 
+object Params {
+  final val numShards = 32
+  final val numSamples = 720   // 2 hours * 3600 / 10 sec interval
+  final val numSeries = 100
+  final val numQueries = 100
+}
+
 //scalastyle:off regex
 /**
  * A macrobenchmark (IT-test level) for QueryEngine2 aggregations, in-memory only (no on-demand paging)
@@ -35,21 +43,19 @@ import filodb.timeseries.TestTimeseriesProducer
  */
 @State(Scope.Thread)
 class QueryInMemoryBenchmark extends StrictLogging {
-  org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.WARN)
+  Kamon.init()   // Needed for metrics logging
+  org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.INFO)
 
   import filodb.coordinator._
   import client.Client.{actorAsk, asyncAsk}
   import client.QueryCommands._
   import NodeClusterActor._
+  import Params._
 
   import filodb.standalone.SimpleProfiler
-  val prof = new SimpleProfiler(5, 60, 50)
+  val prof = new SimpleProfiler(10, 120, 50)
 
-  val numShards = 32
-  val numSamples = 720   // 2 hours * 3600 / 10 sec interval
-  val numSeries = 100
   val startTime = System.currentTimeMillis - (3600*1000)
-  val numQueries = 500       // Please make sure this number matches the OperationsPerInvocation below
   val queryIntervalMin = 55  // # minutes between start and stop
   val queryStep = 150        // # of seconds between each query sample "step"
   val spread = 5
@@ -145,7 +151,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  @OperationsPerInvocation(500)
+  @OperationsPerInvocation(numQueries)
   def someOverlapQueries(): Unit = {
     val futures = (0 until numQueries).map { n =>
       val qCmd = queryCommands(n % queryCommands.length)
@@ -164,16 +170,18 @@ class QueryInMemoryBenchmark extends StrictLogging {
   val qParams2 = TimeStepParams(queryTime/1000, noOverlapStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans2 = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams2) }
   val queryCommands2 = logicalPlans2.map { plan =>
-    LogicalPlan2Query(dataset.ref, plan, QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 10000))
+    LogicalPlan2Query(dataset.ref, plan, QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, spread))), 10000))
   }
 
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  @OperationsPerInvocation(500)
+  @OperationsPerInvocation(numQueries)
   def noOverlapQueries(): Unit = {
     val futures = (0 until numQueries).map { n =>
-      val f = asyncAsk(coordinator, queryCommands2(n % queryCommands2.length))
+      val qCmd = queryCommands2(n % queryCommands2.length)
+      val time = System.currentTimeMillis
+      val f = asyncAsk(coordinator, qCmd.copy(qContext = qCmd.qContext.copy(queryId = n.toString, submitTime = time)))
       f.onSuccess {
         case q: QueryResult2 => queriesSucceeded += 1
         case e: QError       => queriesFailed += 1
@@ -195,7 +203,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  @OperationsPerInvocation(500)
+  @OperationsPerInvocation(numQueries)
   def singleThreadedRawQuery(): Long = {
     val querySession = QuerySession(QueryContext(), queryConfig)
 
@@ -213,7 +221,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  @OperationsPerInvocation(500)
+  @OperationsPerInvocation(numQueries)
   def singleThreadedMinOverTimeQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
       val querySession = QuerySession(QueryContext(), queryConfig)
@@ -230,7 +238,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  @OperationsPerInvocation(500)
+  @OperationsPerInvocation(numQueries)
   def singleThreadedSumRateCCQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
       val querySession = QuerySession(QueryContext(), queryConfig)

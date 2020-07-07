@@ -739,13 +739,22 @@ public class Latch implements Lock {
                         return true;
                     }
 
-                    if (!(node instanceof Shared) && mLatchState >= 0) {
-                        // Unpark any shared waiters that queued behind this exclusive request.
+                    int state = mLatchState;
+                    if (state >= 0) {
+                        // Unpark any waiters that queued behind this request.
                         WaitNode wnode = node;
-                        while ((wnode = wnode.mNext) instanceof Shared) {
+                        while ((wnode = wnode.mNext) != null) {
                             Object waiter = wnode.mWaiter;
                             if (waiter instanceof Thread) {
-                                LockSupport.unpark((Thread) waiter);
+                                if (wnode instanceof Shared) {
+                                    LockSupport.unpark((Thread) waiter);
+                                } else {
+                                    if (state == 0) {
+                                        LockSupport.unpark((Thread) waiter);
+                                    }
+                                    // No need to iterate past an exclusive waiter.
+                                    break;
+                                }
                             }
                         }
                     }
@@ -1014,12 +1023,16 @@ public class Latch implements Lock {
                     }
                     Thread.onSpinWait();
                 }
-                if (++trials >= SPIN_LIMIT >> 1) {
+                if (++trials >= SPIN_LIMIT >> 1 || timedOut()) {
                     return -1;
                 }
                 // Yield to avoid parking.
                 Thread.yield();
             }
+        }
+
+        protected boolean timedOut() {
+            return false;
         }
 
         @Override
@@ -1057,6 +1070,19 @@ public class Latch implements Lock {
                 }
                 return (mNanosTimeout = mEndNanos - System.nanoTime()) <= 0;
             }
+        }
+
+        @Override
+        protected boolean timedOut() {
+            if (mNanosTimeout >= 0) {
+                long timeout = mEndNanos - System.nanoTime();
+                if (timeout <= 0) {
+                    mNanosTimeout = 0;
+                    return true;
+                }
+                mNanosTimeout = timeout;
+            }
+            return false;
         }
     }
 

@@ -1,5 +1,7 @@
 package filodb.query.exec
 
+import scala.collection.mutable.ArrayBuffer
+
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.reactive.Observable
@@ -7,7 +9,7 @@ import scalaxy.loops._
 
 import filodb.core.query._
 import filodb.memory.format.ZeroCopyUTF8String
-import filodb.query. _
+import filodb.query._
 import filodb.query.exec.aggregator.RowAggregator
 
 /**
@@ -119,6 +121,10 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
   */
 object RangeVectorAggregator extends StrictLogging {
 
+  trait CloseableIterator[R] extends Iterator[R] {
+    def close(): Unit
+  }
+
   /**
     * This method is the facade for map and reduce steps of the aggregation.
     * In the reduction-only (non-leaf) phases, skipMapPhase should be true.
@@ -132,7 +138,7 @@ object RangeVectorAggregator extends StrictLogging {
       // now reduce each group and create one result range vector per group
       val groupedResult = mapReduceInternal(rvs, rowAgg, skipMapPhase, grouping)
       groupedResult.map { case (rvk, aggHolder) =>
-        val rowIterator = aggHolder.map(_.toRowReader)
+        val rowIterator = new CustomCloseCursor(aggHolder.map(_.toRowReader))(aggHolder.close())
         IteratorBackedRangeVector(rvk, rowIterator)
       }
     }
@@ -151,14 +157,23 @@ object RangeVectorAggregator extends StrictLogging {
   private def mapReduceInternal(rvs: List[RangeVector],
                      rowAgg: RowAggregator,
                      skipMapPhase: Boolean,
-                     grouping: RangeVector => RangeVectorKey): Map[RangeVectorKey, Iterator[rowAgg.AggHolderType]] = {
+                     grouping: RangeVector => RangeVectorKey):
+                          Map[RangeVectorKey, CloseableIterator[rowAgg.AggHolderType]] = {
     logger.trace(s"mapReduceInternal on ${rvs.size} RangeVectors...")
     var acc = rowAgg.zero
     val mapInto = rowAgg.newRowToMapInto
     rvs.groupBy(grouping).mapValues { rvs =>
-      new Iterator[rowAgg.AggHolderType] {
+      new CloseableIterator[rowAgg.AggHolderType] {
         val itsAndKeys = rvs.map { rv => (rv.rows, rv.key) }
-        def hasNext: Boolean = itsAndKeys.forall(_._1.hasNext)
+        def hasNext: Boolean = {
+          // Dont use forAll since it short-circuits hasNext invocation
+          // It is important to invoke hasNext on all iterators to release shared locks
+          var hnRet = false
+          itsAndKeys.foreach { itKey =>
+            if (itKey._1.hasNext) hnRet = true
+          }
+          hnRet
+        }
         def next(): rowAgg.AggHolderType = {
           acc.resetToZero()
           itsAndKeys.foreach { case (rowIter, rvk) =>
@@ -167,6 +182,7 @@ object RangeVectorAggregator extends StrictLogging {
           }
           acc
         }
+        def close() = rvs.foreach(_.rows().close())
       }
     }
   }
@@ -185,6 +201,8 @@ object RangeVectorAggregator extends StrictLogging {
     // Can't use an Array here because rowAgg.AggHolderType does not have a ClassTag
     val accs = collection.mutable.ArrayBuffer.fill(outputLen)(rowAgg.zero)
     var count = 0
+    // keeps track of all iters to close
+    val toClose = ArrayBuffer.empty[RangeVectorCursor]
 
     // FoldLeft means we create the source PeriodicMapper etc and process immediately.  We can release locks right away
     // NOTE: ChunkedWindowIterator automatically releases locks after last window.  So it should all just work.  :)
@@ -192,6 +210,7 @@ object RangeVectorAggregator extends StrictLogging {
       source.foldLeftF(accs) { case (_, rv) =>
         count += 1
         val rowIter = rv.rows
+        toClose += rowIter
         for { i <- 0 until outputLen optimized } {
           accs(i) = rowAgg.reduceAggregate(accs(i), rowIter.next)
         }
@@ -202,6 +221,7 @@ object RangeVectorAggregator extends StrictLogging {
       source.foldLeftF(accs) { case (_, rv) =>
         count += 1
         val rowIter = rv.rows
+        toClose += rowIter
         for { i <- 0 until outputLen optimized } {
           val mapped = rowAgg.map(rv.key, rowIter.next, mapIntos(i))
           accs(i) = rowAgg.reduceMappedRow(accs(i), mapped)
@@ -212,7 +232,8 @@ object RangeVectorAggregator extends StrictLogging {
 
     aggObs.flatMap { _ =>
       if (count > 0) {
-        Observable.now(IteratorBackedRangeVector(CustomRangeVectorKey.empty, accs.toIterator.map(_.toRowReader)))
+        val iter = new CustomCloseCursor(accs.toIterator.map(_.toRowReader))(toClose.foreach(_.close()))
+        Observable.now(IteratorBackedRangeVector(CustomRangeVectorKey.empty, iter))
       } else {
         Observable.empty
       }

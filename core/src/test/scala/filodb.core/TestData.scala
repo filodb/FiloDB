@@ -479,6 +479,13 @@ object MetricsTestData {
     None,
     DatasetOptions(Seq("_metric_", "_ns_"), "_metric_")).get
 
+  val timeseriesDatasetMultipleShardKeys = Dataset.make("timeseries",
+    Seq("tags:map"),
+    Seq("timestamp:ts", "value:double:detectDrops=true"),
+    Seq.empty,
+    None,
+    DatasetOptions(Seq("_metric_", "_ws_", "_ns_"), "_metric_")).get
+
   val downsampleDataset = Dataset.make("tsdbdata",
     Seq("tags:map"),
     Seq("timestamp:ts", "min:double", "max:double", "sum:double", "count:double", "avg:double"),

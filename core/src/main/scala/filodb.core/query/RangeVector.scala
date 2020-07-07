@@ -2,6 +2,8 @@ package filodb.core.query
 
 import java.time.{LocalDateTime, YearMonth, ZoneOffset}
 
+import scala.collection.Iterator
+
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import kamon.Kamon
@@ -97,7 +99,7 @@ object CustomRangeVectorKey {
   */
 trait RangeVector {
   def key: RangeVectorKey
-  def rows: Iterator[RowReader]
+  def rows(): RangeVectorCursor
   def numRows: Option[Int] = None
   def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
 }
@@ -122,7 +124,8 @@ trait ScalarRangeVector extends SerializableRangeVector {
   * ScalarRangeVector which has time specific value
   */
 final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]) extends ScalarRangeVector {
-  override def rows: Iterator[RowReader] = timeValueMap.toList.sortWith(_._1 < _._1).
+  import NoCloseCursor._
+  override def rows: RangeVectorCursor = timeValueMap.toList.sortWith(_._1 < _._1).
                                             map { x => new TransientRow(x._1, x._2) }.iterator
   def getValue(time: Long): Double = timeValueMap(time)
 
@@ -135,7 +138,8 @@ trait ScalarSingleValue extends ScalarRangeVector {
   def rangeParams: RangeParams
   var numRowsInt : Int = 0
 
-  override def rows: Iterator[RowReader] = {
+  override def rows(): RangeVectorCursor = {
+    import NoCloseCursor._
     Iterator.from(0, rangeParams.stepSecs.toInt).takeWhile(_ <= rangeParams.endSecs - rangeParams.startSecs).map { i =>
       numRowsInt += 1
       val t = i + rangeParams.startSecs
@@ -220,11 +224,11 @@ final case class DaysInMonthScalar(rangeParams: RangeParams) extends ScalarSingl
 
 // First column of columnIDs should be the timestamp column
 final case class RawDataRangeVector(key: RangeVectorKey,
-                                    val partition: ReadablePartition,
+                                    partition: ReadablePartition,
                                     chunkMethod: ChunkScanMethod,
                                     columnIDs: Array[Int]) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
-  def rows: Iterator[RowReader] = partition.timeRangeRows(chunkMethod, columnIDs)
+  def rows(): RangeVectorCursor = partition.timeRangeRows(chunkMethod, columnIDs)
 
   // Obtain ChunkSetInfos from specific window of time from partition
   def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = partition.infos(windowStart, windowEnd)
@@ -243,8 +247,9 @@ final case class ChunkInfoRangeVector(key: RangeVectorKey,
                                       chunkMethod: ChunkScanMethod,
                                       column: Column) extends RangeVector {
   val reader = new ChunkInfoRowReader(column)
+  import NoCloseCursor._
   // Iterators are stateful, for correct reuse make this a def
-  def rows: Iterator[RowReader] = partition.infos(chunkMethod).map { info =>
+  def rows(): RangeVectorCursor = partition.infos(chunkMethod).map { info =>
     reader.setInfo(info)
     reader
   }
@@ -265,9 +270,9 @@ final class SerializedRangeVector(val key: RangeVectorKey,
                                   java.io.Serializable {
 
   override val numRows = Some(numRowsInt)
-
+  import NoCloseCursor._
   // Possible for records to spill across containers, so we read from all containers
-  override def rows: Iterator[RowReader] =
+  override def rows: RangeVectorCursor =
     containers.toIterator.flatMap(_.iterate(schema)).slice(startRecordNo, startRecordNo + numRowsInt)
 
   /**
@@ -319,6 +324,7 @@ object SerializedRangeVector extends StrictLogging {
         builder.addFromReader(rows.next, schema, 0)
       }
     } finally {
+      rv.rows().close()
       // clear exec plan
       // When the query is done, clean up lingering shared locks caused by iterator limit.
       ChunkMap.releaseAllSharedLocks()
@@ -356,14 +362,14 @@ object SerializedRangeVector extends StrictLogging {
 }
 
 final case class IteratorBackedRangeVector(key: RangeVectorKey,
-                                           rows: Iterator[RowReader]) extends RangeVector
+                                           rows: RangeVectorCursor) extends RangeVector
 
 final case class BufferRangeVector(key: RangeVectorKey,
                                    timestamps: Buffer[Long],
                                    values: Buffer[Double]) extends RangeVector {
   require(timestamps.length == values.length, s"${timestamps.length} ts != ${values.length} values")
 
-  def rows: Iterator[RowReader] = new Iterator[RowReader] {
+  def rows(): RangeVectorCursor = new RangeVectorCursor {
     val row = new TransientRow()
     var n = 0
     def hasNext: Boolean = n < timestamps.length
@@ -372,5 +378,6 @@ final case class BufferRangeVector(key: RangeVectorKey,
       n += 1
       row
     }
+    def close(): Unit = {}
   }
 }
