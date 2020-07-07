@@ -187,33 +187,37 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     *    handle this case.
     */
   // scalastyle:off parameter.number
-  def getChunksByIngestionTimeRange(datasetRef: DatasetRef,
-                                    splits: Iterator[ScanSplit],
-                                    ingestionTimeStart: Long,
-                                    ingestionTimeEnd: Long,
-                                    userTimeStart: Long,
-                                    endTimeExclusive: Long,
-                                    maxChunkTime: Long,
-                                    batchSize: Int,
-                                    batchTime: FiniteDuration): Observable[Seq[RawPartData]] = {
-    val partKeys = Observable.fromIterator(splits).flatMap {
+  def getChunksByIngestionTimeRangeNoAsync(datasetRef: DatasetRef,
+                                           splits: Iterator[ScanSplit],
+                                           ingestionTimeStart: Long,
+                                           ingestionTimeEnd: Long,
+                                           userTimeStart: Long,
+                                           endTimeExclusive: Long,
+                                           maxChunkTime: Long,
+                                           batchSize: Int): Iterator[Seq[RawPartData]] = {
+    val partKeys = splits.flatMap {
       case split: CassandraTokenRangeSplit =>
         val indexTable = getOrCreateIngestionTimeIndexTable(datasetRef)
         logger.debug(s"Querying cassandra for partKeys for split=$split ingestionTimeStart=$ingestionTimeStart " +
           s"ingestionTimeEnd=$ingestionTimeEnd")
-        indexTable.scanPartKeysByIngestionTime(split.tokens, ingestionTimeStart, ingestionTimeEnd)
+        indexTable.scanPartKeysByIngestionTimeNoAsync(split.tokens, ingestionTimeStart, ingestionTimeEnd)
       case split => throw new UnsupportedOperationException(s"Unknown split type $split seen")
     }
 
     import filodb.core.Iterators._
 
     val chunksTable = getOrCreateChunkTable(datasetRef)
-    partKeys.bufferTimedAndCounted(batchTime, batchSize).map { parts =>
+    partKeys.sliding(batchSize, batchSize).map { parts =>
       logger.debug(s"Querying cassandra for chunks from ${parts.size} partitions userTimeStart=$userTimeStart " +
         s"endTimeExclusive=$endTimeExclusive maxChunkTime=$maxChunkTime")
-      // TODO evaluate if we can increase parallelism here. This needs to be tuneable
-      // based on how much faster downsampling should run, and how much additional read load cassandra can take.
-      chunksTable.readRawPartitionRangeBB(parts, userTimeStart - maxChunkTime, endTimeExclusive).toIterator().toSeq
+      // This could be more parallel, but decision was made to control parallelism at one place: In spark (via its
+      // parallelism configuration. Revisit if needed later.
+      val batchReadSpan = Kamon.spanBuilder("cassandra-per-batch-data-read-latency").start()
+      try {
+        chunksTable.readRawPartitionRangeBBNoAsync(parts, userTimeStart - maxChunkTime, endTimeExclusive)
+      } finally {
+        batchReadSpan.finish()
+      }
     }
   }
 

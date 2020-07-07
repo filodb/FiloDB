@@ -5,7 +5,6 @@ import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
 
 import com.datastax.driver.core.{ConsistencyLevel, ResultSet, Row}
-import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
@@ -101,10 +100,10 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
     }
   }
 
-  def scanPartKeysByIngestionTime(tokens: Seq[(String, String)],
-                                  ingestionTimeStart: Long,
-                                  ingestionTimeEnd: Long): Observable[ByteBuffer] = {
-    val it = tokens.iterator.flatMap { case (start, end) =>
+  def scanPartKeysByIngestionTimeNoAsync(tokens: Seq[(String, String)],
+                                         ingestionTimeStart: Long,
+                                         ingestionTimeEnd: Long): Iterator[ByteBuffer] = {
+    tokens.iterator.flatMap { case (start, end) =>
       /*
        * FIXME conversion of tokens to Long works only for Murmur3Partitioner because it generates
        * Long based tokens. If other partitioners are used, this can potentially break.
@@ -117,7 +116,6 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
       session.execute(stmt).iterator.asScala
         .map { row => row.getBytes("partition") }
     }
-    Observable.fromIterator(it).handleObservableErrors
   }
 
   /**
