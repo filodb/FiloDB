@@ -71,9 +71,10 @@ extends RawToPartitionMaker with StrictLogging {
     tsShard.getPartition(rawPartition.partitionKey).map { tsPart =>
       logger.debug(s"Populating paged chunks for shard=${tsShard.shardNum} partId=${tsPart.partID}")
       tsShard.shardStats.partitionsPagedFromColStore.increment()
-      tsShard.shardStats.numChunksPagedIn.increment(rawPartition.chunkSets.size)
+      tsShard.shardStats.numChunksPagedIn.increment(rawPartition.chunkSetsTimeOrdered.size)
       // One chunkset at a time, load them into offheap and populate the partition
-      rawPartition.chunkSets.foreach { case RawChunkSet(infoBytes, rawVectors) =>
+      // Populate newest chunk first so concurrent queries dont assume all data is populated in to chunk-map already
+      rawPartition.chunkSetsTimeOrdered.reverseIterator.foreach { case RawChunkSet(infoBytes, rawVectors) =>
         // If the chunk is empty, skip it. If no call to allocateOffheap is made, then no check
         // is made to ensure that the block has room even for metadata. The call to endMetaSpan
         // might end up returning 0, because the last block doesn't have any room. It's

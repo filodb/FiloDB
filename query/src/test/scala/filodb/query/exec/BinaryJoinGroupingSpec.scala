@@ -12,7 +12,7 @@ import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.ZeroCopyUTF8String
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.exec.aggregator.RowAggregator
@@ -47,7 +47,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
           "mode".utf8 -> s"idle".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 3)).iterator
     },
     new RangeVector {
@@ -58,7 +59,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
           "mode".utf8 -> s"user".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 1)).iterator
     },
     new RangeVector {
@@ -69,7 +71,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
           "mode".utf8 -> s"idle".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 8)).iterator
     },
     new RangeVector {
@@ -80,7 +83,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
           "mode".utf8 -> s"user".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 2)).iterator
     }
   )
@@ -93,7 +97,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
           "role".utf8 -> s"prometheus".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 1)).iterator
     }
   )
@@ -106,7 +111,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
           "job".utf8 -> "node".utf8
       ))
 
-      override def rows: Iterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 2)).iterator
     }
   )
@@ -320,7 +326,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
             "mode".utf8 -> s"idle".utf8)
         )
 
-        override def rows: Iterator[RowReader] = Seq(
+        import NoCloseCursor._
+        override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 3)).iterator
       },
       new RangeVector {
@@ -331,7 +338,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
             "mode".utf8 -> s"user".utf8)
         )
 
-        override def rows: Iterator[RowReader] = Seq(
+        import NoCloseCursor._
+        override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 1)).iterator
       })
 
@@ -344,7 +352,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
             "role".utf8 -> s"prometheus".utf8)
         )
 
-        override def rows: Iterator[RowReader] = Seq(
+        import NoCloseCursor._
+        override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 1)).iterator
       }
     )

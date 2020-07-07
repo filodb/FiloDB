@@ -48,7 +48,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
             logicalPlan
           } else {
             copyWithUpdatedTimeRange(logicalPlan,
-              TimeRange(p.startMs, latestDownsampleTimestampFn + offsetMillis), lookbackMs)
+              TimeRange(p.startMs, latestDownsampleTimestampFn + offsetMillis))
           }
           downsampleClusterPlanner.materialize(downsampleLp, qContext)
         } else {
@@ -58,14 +58,14 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
           val firstInstantInRaw = lastDownsampleInstant + p.stepMs
 
           val downsampleLp = copyWithUpdatedTimeRange(logicalPlan,
-                                                      TimeRange(p.startMs, lastDownsampleInstant),
-                                                      lookbackMs)
+                                                      TimeRange(p.startMs, lastDownsampleInstant))
           val downsampleEp = downsampleClusterPlanner.materialize(downsampleLp, qContext)
 
-          val rawLp = copyWithUpdatedTimeRange(logicalPlan, TimeRange(firstInstantInRaw, p.endMs), lookbackMs)
+          val rawLp = copyWithUpdatedTimeRange(logicalPlan, TimeRange(firstInstantInRaw, p.endMs))
           val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
           StitchRvsExec(qContext, stitchDispatcher, Seq(rawEp, downsampleEp))
         }
+       // Metadata query not supported for downsample cluster
       case _ => rawClusterPlanner.materialize(logicalPlan, qContext)
     }
   }

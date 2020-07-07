@@ -158,7 +158,6 @@ trait ExecPlan extends QueryCommand {
                   s"Try applying more filters or reduce time range.")
               srv
           }
-          .take(queryContext.sampleLimit)
           .toListL
           .map { r =>
             val numBytes = builder.allContainers.map(_.numBytes).sum

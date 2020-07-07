@@ -65,6 +65,9 @@ class BlockSpec extends FlatSpec with Matchers with BeforeAndAfter with BeforeAn
 
     block.remaining shouldEqual 3822
 
+    //XXX for debugging
+    println(block.detailedDebugString)
+
     block.markReclaimable()
     block.reclaim()
     testReclaimer.reclaimedBytes shouldEqual 70

@@ -371,7 +371,7 @@ class BlockMemFactory(blockStore: BlockManager,
   def shutdown(): Unit = {}
 
   def debugString: String =
-    s"BlockMemFactory($bucketTime) ${tags.map { case (k, v) => s"$k=$v" }.mkString(" ")}"
+    s"BlockMemFactory($bucketTime, $metadataAllocSize) ${tags.map { case (k, v) => s"$k=$v" }.mkString(" ")}"
 }
 
 

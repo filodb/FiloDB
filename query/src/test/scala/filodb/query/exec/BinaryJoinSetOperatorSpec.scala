@@ -7,13 +7,13 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
-import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.ZeroCopyUTF8String
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 
@@ -51,7 +51,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "group".utf8 -> s"production".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 100)).iterator
     },
     new RangeVector {
@@ -62,7 +63,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "group".utf8 -> s"production".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 200)).iterator
     },
     new RangeVector {
@@ -73,7 +75,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "group".utf8 -> s"canary".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 300)).iterator
     },
     new RangeVector {
@@ -84,7 +87,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "group".utf8 -> s"canary".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 400)).iterator
     },
     new RangeVector {
@@ -95,7 +99,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "group".utf8 -> s"production".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 500)).iterator
     },
     new RangeVector {
@@ -106,7 +111,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "group".utf8 -> s"production".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 600)).iterator
     },
     new RangeVector {
@@ -117,7 +123,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "group".utf8 -> s"canary".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 700)).iterator
     },
     new RangeVector {
@@ -128,7 +135,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "group".utf8 -> s"canary".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 800)).iterator
     }
   )
@@ -136,7 +144,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     new RangeVector {
       override def key: RangeVectorKey = noKey
 
-      override def rows: Iterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 1)).iterator
     }
   )
@@ -148,7 +157,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "l".utf8 -> "x".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 100)).iterator
     },
     new RangeVector {
@@ -157,7 +167,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
           "l".utf8 -> "y".utf8)
       )
 
-      override def rows: Iterator[RowReader] = Seq(
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 200)).iterator
     }
   )

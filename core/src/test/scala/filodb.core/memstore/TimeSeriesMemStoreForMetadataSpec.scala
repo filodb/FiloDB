@@ -1,7 +1,5 @@
 package filodb.core.memstore
 
-import scala.collection.mutable.ArrayBuffer
-
 import com.typesafe.config.ConfigFactory
 import monix.execution.Scheduler.Implicits.global
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
@@ -11,7 +9,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.core.MetricsTestData.{builder, timeseriesDataset, timeseriesSchema}
 import filodb.core.TestData
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, SeqMapConsumer}
+import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -27,10 +25,12 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
 
   val metadataKeyLabelValues = Map("ignore" -> "ignore")
   val jobQueryResult1 = Map(("job".utf8, "myCoolService".utf8))
-  val jobQueryResult2 = ArrayBuffer(("__name__".utf8, "http_req_total".utf8),
+  val jobQueryResult2 = Map(("job".utf8, "myCoolService".utf8),
     ("id".utf8, "0".utf8),
-    ("instance".utf8, "someHost:8787".utf8),
-    ("job".utf8, "myCoolService".utf8))
+    ("__name__".utf8, "http_req_total".utf8),
+    ("_type_".utf8 -> "schemaID:35859".utf8),
+    ("instance".utf8, "someHost:8787".utf8)
+    )
 
   val now = System.currentTimeMillis()
   val numRawSamples = 1000
@@ -60,12 +60,8 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)),
         ColumnFilter("id", Filter.Equals("0".utf8)))
     val metadata = memStore.partKeysWithFilters(timeseriesDataset.ref, 0, filters, false, now, now - 5000, 10)
-    val seqMapConsumer = new SeqMapConsumer()
     val tsPartData = metadata.next()
-    timeseriesDataset.partKeySchema.consumeMapItems(tsPartData.base, tsPartData.offset, 0, seqMapConsumer)
-    tsPartData.startTime shouldEqual -1 // since fetchFirstLastSampleTimes is false
-    tsPartData.endTime shouldEqual -1 // since fetchFirstLastSampleTimes is false
-    seqMapConsumer.pairs shouldEqual jobQueryResult2
+    tsPartData shouldEqual jobQueryResult2
   }
 
   it("should search the metadata of evicted partitions") {
@@ -88,12 +84,10 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)),
       ColumnFilter("id", Filter.Equals("0".utf8)))
     val metadata = memStore.partKeysWithFilters(timeseriesDataset.ref, 0, filters, true, endTime, endTime - 5000, 10)
-    val seqMapConsumer = new SeqMapConsumer()
     val tsPartData = metadata.next()
-    timeseriesDataset.partKeySchema.consumeMapItems(tsPartData.base, tsPartData.offset, 0, seqMapConsumer)
-    tsPartData.startTime shouldEqual startTime
-    tsPartData.endTime shouldEqual endTime
-    seqMapConsumer.pairs shouldEqual jobQueryResult2
+    val jobQueryResult = jobQueryResult2 ++
+      Map(("_firstSampleTime_".utf8, startTime.toString.utf8), ("_lastSampleTime_".utf8, endTime.toString.utf8))
+    tsPartData shouldEqual jobQueryResult
   }
 
   it ("should read the metadata label values for instance") {
