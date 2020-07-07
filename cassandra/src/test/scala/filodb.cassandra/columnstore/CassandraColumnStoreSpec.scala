@@ -240,7 +240,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     parts(0).chunkSetsTimeOrdered(0).vectors.toSeq shouldEqual sourceChunks.head.chunks
   }
 
-  "getChunksByIngestionTimeRange" should "batch partitions properly" in {
+  "getChunksByIngestionTimeRangeNoAsync" should "batch partitions properly" in {
 
     val gaugeName = "my_gauge"
     val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8)
@@ -254,7 +254,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     }
     colStore.write(promDataset.ref, Observable.fromIterable(chunksets)).futureValue
 
-    val batches = colStore.getChunksByIngestionTimeRange(
+    val batches = colStore.getChunksByIngestionTimeRangeNoAsync(
       promDataset.ref,
       colStore.getScanSplits(promDataset.ref).iterator,
       ingestTime - 1,
@@ -262,14 +262,12 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
       firstSampleTime - 1,
       firstSampleTime + 1,
       10L,
-      200
-    ).toListL.runAsync.futureValue
+      100
+    ).toList
 
-    // TODO there seems to be a bug with batch size 100, possibly with the toIterator logic
-
-    batches.size shouldEqual 6 // 200 rows per batch, 1050 rows => 6 batches
+    batches.size shouldEqual 11 // 100 rows per batch, 1050 rows => 11 batches
     batches.zipWithIndex.foreach { case (b, i) =>
-      b.size shouldEqual (if (i == 5) 50 else 200)
+      b.size shouldEqual (if (i == 10) 50 else 100)
     }
   }
 }
