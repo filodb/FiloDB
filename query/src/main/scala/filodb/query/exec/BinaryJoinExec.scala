@@ -61,10 +61,15 @@ final case class BinaryJoinExec(queryContext: QueryContext,
 
   protected def args: String = s"binaryOp=$binaryOp, on=$on, ignoring=$ignoring"
 
+  //scalastyle:off method.length
   protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],
                               firstSchema: Task[ResultSchema],
                               querySession: QuerySession): Observable[RangeVector] = {
     val taskOfResults = childResponses.map {
+      case (QueryResult(_, _, result), _)
+        if (result.size  > queryContext.joinQueryCardLimit && cardinality == Cardinality.OneToOne) =>
+        throw new BadQueryException(s"This query results in more than ${queryContext.joinQueryCardLimit} " +
+          s"join cardinality. Try applying more filters.")
       case (QueryResult(_, _, result), i) => (result, i)
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
@@ -73,12 +78,10 @@ final case class BinaryJoinExec(queryContext: QueryContext,
       // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
       val lhsRvs = resp.filter(_._2 < lhs.size).flatMap(_._1)
       val rhsRvs = resp.filter(_._2 >= lhs.size).flatMap(_._1)
-
       // figure out which side is the "one" side
       val (oneSide, otherSide, lhsIsOneSide) =
         if (cardinality == Cardinality.OneToMany) (lhsRvs, rhsRvs, true)
         else (rhsRvs, lhsRvs, false)
-
       // load "one" side keys in a hashmap
       val oneSideMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
       oneSide.foreach { rv =>
@@ -90,7 +93,6 @@ final case class BinaryJoinExec(queryContext: QueryContext,
         }
         oneSideMap.put(jk, rv)
       }
-
       // keep a hashset of result range vector keys to help ensure uniqueness of result range vectors
       val resultKeySet = new mutable.HashSet[RangeVectorKey]()
       // iterate across the the "other" side which could be one or many and perform the binary operation
@@ -102,6 +104,12 @@ final case class BinaryJoinExec(queryContext: QueryContext,
             throw new BadQueryException(s"Non-unique result vectors found for $resKey. " +
               s"Use grouping to create unique matching")
           resultKeySet.add(resKey)
+
+          // OneToOne cardinality case is already handled. this condition handles OneToMany case
+          if (resultKeySet.size > queryContext.joinQueryCardLimit)
+            throw new BadQueryException(s"This query results in more than ${queryContext.joinQueryCardLimit} " +
+              s"join cardinality. Try applying more filters.")
+
           val res = if (lhsIsOneSide) binOp(rvOne.rows, rvOther.rows) else binOp(rvOther.rows, rvOne.rows)
           IteratorBackedRangeVector(resKey, res)
         }

@@ -9,6 +9,7 @@ import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.exceptions.TestFailedException
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
@@ -118,7 +119,6 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
   )
 
   it("should join many-to-one with on ") {
-
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
@@ -387,5 +387,91 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
     result.size shouldEqual 2
     result.map(_.key.labelValues) sameElements(expectedLabels) shouldEqual true
+  }
+
+  it("should throw BadQueryException - many-to-one with on - cardinality limit 1") {
+    val queryContext = QueryContext(joinQueryCardLimit = 1) // set join card limit to 1
+    val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
+
+    val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.MUL,
+      Cardinality.ManyToOne,
+      Seq("instance"), Nil, Seq("role"), "__name__")
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema)))
+    // scalastyle:on
+
+    // actual query results into 2 rows. since limit is 1, this results in BadQueryException
+    val thrown = intercept[TestFailedException] {
+      execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
+        .toListL.runAsync.futureValue
+    }
+
+    thrown.getCause.getClass shouldEqual classOf[BadQueryException]
+    thrown.getCause.getMessage shouldEqual "This query results in more than 1 join cardinality." +
+      " Try applying more filters."
+  }
+
+  it("should throw BadQueryException - many-to-one with ignoring - cardinality limit 1") {
+    val queryContext = QueryContext(joinQueryCardLimit = 1) // set join card limit to 1
+    val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
+
+    val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
+      BinaryOperator.MUL,
+      Cardinality.ManyToOne,
+      Nil, Seq("role", "mode"), Seq("role"), "__name__")
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema)))
+    // scalastyle:on
+
+    // actual query results into 2 rows. since limit is 1, this results in BadQueryException
+    val thrown = intercept[TestFailedException] {
+      execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
+        .toListL.runAsync.futureValue
+    }
+
+    thrown.getCause.getClass shouldEqual classOf[BadQueryException]
+    thrown.getCause.getMessage shouldEqual "This query results in more than 1 join cardinality." +
+      " Try applying more filters."
+  }
+
+  it("should throw BadQueryException - many-to-one with by and grouping without arguments - cardinality limit 1") {
+    val queryContext = QueryContext(joinQueryCardLimit = 3) // set join card limit to 3
+    val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
+    val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Seq("instance", "job"))
+    val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), querySession, 1000, tvSchema)
+
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
+    val samplesRhs = resultObs4.toListL.runAsync.futureValue
+
+    val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
+      BinaryOperator.DIV,
+      Cardinality.ManyToOne,
+      Seq("instance"), Nil, Nil, "__name__")
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializedRangeVector(rv, schema)))
+    // scalastyle:on
+
+    // actual query results into 4 rows. since limit is 3, this results in BadQueryException
+    val thrown = intercept[TestFailedException] {
+      execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
+        .toListL.runAsync.futureValue
+    }
+
+    thrown.getCause.getClass shouldEqual classOf[BadQueryException]
+    thrown.getCause.getMessage shouldEqual "This query results in more than 3 join cardinality." +
+      " Try applying more filters."
   }
 }
