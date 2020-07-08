@@ -247,9 +247,12 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     val firstSampleTime = 74373042000L
     val partBuilder = new RecordBuilder(nativeMemoryManager)
     val ingestTime = 1594130687316L
-    val rows = Seq(TupleRowReader((Some(firstSampleTime), Some(0.0d))))
-    val chunksets = for { i <- 0 until 1050 } yield {
-      val partKey = partBuilder.partKeyFromObjects(Schemas.gauge, gaugeName + i, seriesTags)
+    val chunksets = for {
+      i <- 0 until 1050
+      partKey = partBuilder.partKeyFromObjects(Schemas.gauge, gaugeName + i, seriesTags)
+      c <- 0 until 3
+    } yield {
+      val rows = Seq(TupleRowReader((Some(firstSampleTime + c), Some(0.0d))))
       ChunkSet(Schemas.gauge.data, partKey, ingestTime, rows, nativeMemoryManager)
     }
     colStore.write(promDataset.ref, Observable.fromIterable(chunksets)).futureValue
@@ -260,7 +263,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
       ingestTime - 1,
       ingestTime + 1,
       firstSampleTime - 1,
-      firstSampleTime + 1,
+      firstSampleTime + 5,
       10L,
       100
     ).toList
@@ -268,6 +271,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     batches.size shouldEqual 11 // 100 rows per batch, 1050 rows => 11 batches
     batches.zipWithIndex.foreach { case (b, i) =>
       b.size shouldEqual (if (i == 10) 50 else 100)
+      b.foreach(_.chunkSetsTimeOrdered.size shouldEqual 3)
     }
   }
 }
