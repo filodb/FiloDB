@@ -5,11 +5,11 @@ import com.typesafe.config.ConfigFactory
 import org.scalatest.WordSpecLike
 
 class ValidSeedValidatorSpec extends BaseSeedNodeDiscoverySpec(AbstractTestKit.head) {
-  "Valid WhitelistSeedValidator" must {
+  "Valid ExplicitlyListClusterSeedDiscovery" must {
     "return expected valid seed nodes for valid configuration" in {
-      val strategy = new WhitelistClusterSeedDiscovery(cluster, settings)
+      val strategy = new ExplicitlyListClusterSeedDiscovery(cluster, settings)
       strategy.invalidSeedNodes.isEmpty shouldBe true
-      strategy.validSeedNodes.size shouldEqual settings.seedsWhitelist.size
+      strategy.validSeedNodes.size shouldEqual settings.seedsExplicitlyListed.size
       strategy.discoverClusterSeeds.size shouldEqual strategy.validSeedNodes.size
     }
   }
@@ -18,17 +18,17 @@ class ValidSeedValidatorSpec extends BaseSeedNodeDiscoverySpec(AbstractTestKit.h
 class InvalidSeedValidatorSpec extends AbstractTestKit(
   ConfigFactory.parseString(
     s"""
-       |akka-bootstrapper.whitelist.seeds = [
+       |akka-bootstrapper.explicitly-list.seeds = [
        |  "akka.tcp://test@127.0.0.1:0", "akka://test:127.0.0.1:0", "akka.tcp://test@localhost" ]
       """.stripMargin).withFallback(AbstractTestKit.rootConfig))
   with WordSpecLike {
 
-  "Invalid WhitelistSeedValidator" must {
+  "Invalid ExplicitlyListClusterSeedDiscovery" must {
     "return expected invalid seed nodes for invalid configuration" in {
       val settings = new AkkaBootstrapperSettings(system.settings.config)
-      val strategy = new WhitelistClusterSeedDiscovery(Cluster(system), settings)
-      strategy.invalidSeedNodes.size shouldEqual settings.seedsWhitelist.size - 1
-      strategy.validSeedNodes.size shouldEqual settings.seedsWhitelist.size - 2
+      val strategy = new ExplicitlyListClusterSeedDiscovery(Cluster(system), settings)
+      strategy.invalidSeedNodes.size shouldEqual settings.seedsExplicitlyListed.size - 1
+      strategy.validSeedNodes.size shouldEqual settings.seedsExplicitlyListed.size - 2
       strategy.validSeedNodes.contains(strategy.cluster.selfAddress) shouldBe false
       intercept[java.net.MalformedURLException](strategy.discoverClusterSeeds)
     }

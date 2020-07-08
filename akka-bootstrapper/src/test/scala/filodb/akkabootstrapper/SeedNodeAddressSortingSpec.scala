@@ -20,7 +20,7 @@ object SeedNodeSortingFixture {
   val config = {
     val seeds = expected.map(_.toString).mkString("\"", "\",\"", "\"")
     ConfigFactory
-      .parseString(s"""akka-bootstrapper.whitelist.seeds = [ $seeds ] """)
+      .parseString(s"""akka-bootstrapper.explicitly-list.seeds = [ $seeds ] """)
       .withFallback(AbstractTestKit.rootConfig)
   }
 }
@@ -44,12 +44,12 @@ class SeedNodeAddressSortingSpec
       (SortedSet.empty[Address] ++ shuffled).toIndexedSeq shouldEqual expected
     }
   }
-  "WhitelistClusterSeedDiscovery.discoverClusterSeeds" must {
+  "ExplicitlyListClusterSeedDiscovery.discoverClusterSeeds" must {
     val expected = SeedNodeSortingFixture.expected
 
     "be sorted by address correctly from config" in {
       val settings = new AkkaBootstrapperSettings(system.settings.config)
-      val strategy = new WhitelistClusterSeedDiscovery(Cluster(system), settings)
+      val strategy = new ExplicitlyListClusterSeedDiscovery(Cluster(system), settings)
       strategy.discoverClusterSeeds shouldEqual expected
     }
     "be sorted by address correctly from shuffled seeds" in {
@@ -57,12 +57,12 @@ class SeedNodeAddressSortingSpec
         val shuffled = Random.shuffle(expected)
         val seeds = shuffled.map(_.toString).mkString("\"", "\",\"", "\"")
         ConfigFactory
-          .parseString(s"""akka-bootstrapper.whitelist.seeds = [ $seeds ] """)
+          .parseString(s"""akka-bootstrapper.explicitly-list.seeds = [ $seeds ] """)
           .withFallback(AbstractTestKit.rootConfig)
       }
 
       val settings = new AkkaBootstrapperSettings(shuffledConfig)
-      val strategy = new WhitelistClusterSeedDiscovery(Cluster(system), settings)
+      val strategy = new ExplicitlyListClusterSeedDiscovery(Cluster(system), settings)
       strategy.discoverClusterSeeds shouldEqual expected
     }
   }

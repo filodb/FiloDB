@@ -39,6 +39,7 @@ final class AkkaBootstrapperSettings(val config: Config) extends StrictLogging {
   lazy val consulApiPort: Int = bootstrapper.getInt("consul.api-port")
   lazy val registrationServiceName: String = bootstrapper.getString("consul.registration-service-name")
 
-  lazy val seedsWhitelist: List[String] = bootstrapper.getStringList("whitelist.seeds").asScala.toList
+  lazy val seedsExplicitlyListed: List[String] = bootstrapper.getStringList("explicitly-list.seeds")
+                                                             .asScala.toList
 
 }

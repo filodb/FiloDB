@@ -8,25 +8,25 @@ import akka.actor.{Address, AddressFromURIString}
 import akka.cluster.{Cluster, Member}
 
 /**
-  * This implementation of discovery allows clients to whitelist nodes that form the
+  * This implementation of discovery allows clients to allow nodes that form the
   * cluster seeds. Essentially, this is just an adapter that allows for the simple
   * implementation of `akka.cluster.Cluster.joinSeedNodes`.
   *
   * Collects invalid and valid seed nodes from configuration.
   * Allows the user to decide error handling if any invalid are found.
   */
-class WhitelistClusterSeedDiscovery(cluster: Cluster, settings: AkkaBootstrapperSettings)
+class ExplicitlyListClusterSeedDiscovery(cluster: Cluster, settings: AkkaBootstrapperSettings)
   extends ClusterSeedDiscovery(cluster, settings)
     with SeedValidator { self: ClusterSeedDiscovery =>
 
-  /** Attempts to create addresses from a whitelist seed config. */
+  /** Attempts to create addresses from a allow seed config. */
   private val validate = (s: String) =>
     try AddressFromURIString(s) catch { case e: MalformedURLException =>
       logger.error("MalformedURLException: invalid cluster seed node [{}]", s)
       s
     }
 
-  private val validated = settings.seedsWhitelist.map(validate)
+  private val validated = settings.seedsExplicitlyListed.map(validate)
 
   /** Collects invalid seed nodes. */
   override val invalidSeedNodes: List[String] =
@@ -38,13 +38,13 @@ class WhitelistClusterSeedDiscovery(cluster: Cluster, settings: AkkaBootstrapper
 
   /** Removes cluster self node unless it is in the head of the sorted list.
     * First logs all invalid seeds first during validation, for full auditing,
-    * in `filodb.akkabootstrapper.WhitelistSeedValidator.validate`.
+    * in `filodb.akkabootstrapper.AllowSeedValidator.validate`.
     * Then raises exception to fail fast.
     */
   override protected lazy val discoverPeersForNewCluster: immutable.Seq[Address] = {
 
     if (invalidSeedNodes.nonEmpty) throw new MalformedURLException(
-      s"Detected ${invalidSeedNodes.size} invalid 'whitelist' seed node configurations.")
+      s"Detected ${invalidSeedNodes.size} invalid 'allow' seed node configurations.")
 
     import Member.addressOrdering
 
