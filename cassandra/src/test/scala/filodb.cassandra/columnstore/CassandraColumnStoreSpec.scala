@@ -271,6 +271,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     batches.size shouldEqual 11 // 100 rows per batch, 1050 rows => 11 batches
     batches.zipWithIndex.foreach { case (b, i) =>
       b.size shouldEqual (if (i == 10) 50 else 100)
+      b.foreach(_.chunkSetsTimeOrdered.size shouldEqual 3)
     }
   }
 }
