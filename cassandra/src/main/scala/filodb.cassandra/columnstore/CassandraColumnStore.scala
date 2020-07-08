@@ -204,8 +204,6 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       case split => throw new UnsupportedOperationException(s"Unknown split type $split seen")
     }
 
-    import filodb.core.Iterators._
-
     val chunksTable = getOrCreateChunkTable(datasetRef)
     partKeys.sliding(batchSize, batchSize).map { parts =>
       logger.debug(s"Querying cassandra for chunks from ${parts.size} partitions userTimeStart=$userTimeStart " +
