@@ -153,6 +153,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val partitions = partitionLocationProvider.getAuthorizedPartitions(
       TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
     val execPlans = partitions.map { p =>
+      logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
       if (p.partitionName.equals(localPartitionName))
         localPartitionPlanner.materialize(lp.copy(startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
       else
@@ -168,6 +169,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val partitions = partitionLocationProvider.getAuthorizedPartitions(
       TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
     val execPlans = partitions.map { p =>
+      logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
       if (p.partitionName.equals(localPartitionName))
         localPartitionPlanner.materialize(lp.copy(startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
       else

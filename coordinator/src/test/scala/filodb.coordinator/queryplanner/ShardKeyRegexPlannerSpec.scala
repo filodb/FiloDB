@@ -73,7 +73,8 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
 
   it("should generate Exec plan for time()") {
     val lp = Parser.queryToLogicalPlan("time()", 1000)
-    val shardKeyMatcher = (shardColumnFilters: Seq[ColumnFilter], query: String) => { Seq.empty }
+    val shardKeyMatcher = (shardColumnFilters: Seq[ColumnFilter], query: String) => {
+      Seq(ShardKeyMatcherResult(Seq.empty, "time()")) }
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcher)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[TimeScalarGeneratorExec] shouldEqual(true)
@@ -101,7 +102,9 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
   it("should generate Exec plan for Binary join without regex") {
     val lp = Parser.queryToLogicalPlan("test1{_ws_ = \"demo\", _ns_ = \"App\"} + " +
       "test2{_ws_ = \"demo\", _ns_ = \"App\"}", 1000)
-    val shardKeyMatcher = (shardColumnFilters: Seq[ColumnFilter], query: String) => { Seq.empty }
+    val shardKeyMatcher = (shardColumnFilters: Seq[ColumnFilter], query: String) => {
+      Seq(ShardKeyMatcherResult(Seq.empty, "test1{_ws_ = \"demo\", _ns_ = \"App\"} + " +
+        "test2{_ws_ = \"demo\", _ns_ = \"App\"}")) }
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcher)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual(true)
@@ -111,10 +114,10 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     val lp = Parser.metadataQueryToLogicalPlan("http_requests_total{job=\"prometheus\", method=\"GET\"}",
       TimeStepParams(1000, 1000, 3000))
 
-    val shardKeyMatcher = (shardColumnFilters: Seq[ColumnFilter], query: String) => { Seq.empty }
+    val shardKeyMatcher = (shardColumnFilters: Seq[ColumnFilter], query: String) => {
+      Seq(ShardKeyMatcherResult(Seq.empty, "http_requests_total{job=\"prometheus\", method=\"GET\"}")) }
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcher)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[PartKeysDistConcatExec] shouldEqual (true)
   }
 }
-
