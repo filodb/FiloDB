@@ -1,5 +1,7 @@
 package filodb.coordinator.queryplanner
 
+import com.typesafe.scalalogging.StrictLogging
+
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.Dataset
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
@@ -18,7 +20,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                             localPartitionPlanner: QueryPlanner,
                             localPartitionName: String,
                             dataset: Dataset,
-                            queryConfig: QueryConfig) extends QueryPlanner {
+                            queryConfig: QueryConfig) extends QueryPlanner with StrictLogging {
 
   import net.ceedubs.ficus.Ficus._
 
@@ -105,6 +107,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                       }
         prevPartitionStart = startMs
         val endMs = if (isInstantQuery) queryParams.endSecs * 1000 else p.timeRange.endMs + offsetMs
+        logger.debug(s"partitionInfo=$p; updated startMs=$startMs, endMs=$endMs")
         if (p.partitionName.equals(localPartitionName))
           localPartitionPlanner.materialize(
             copyLogicalPlanWithUpdatedTimeRange(logicalPlan, TimeRange(startMs, endMs)), qContext)
@@ -150,6 +153,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val partitions = partitionLocationProvider.getAuthorizedPartitions(
       TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
     val execPlans = partitions.map { p =>
+      logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
       if (p.partitionName.equals(localPartitionName))
         localPartitionPlanner.materialize(lp.copy(startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
       else
@@ -165,6 +169,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val partitions = partitionLocationProvider.getAuthorizedPartitions(
       TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
     val execPlans = partitions.map { p =>
+      logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
       if (p.partitionName.equals(localPartitionName))
         localPartitionPlanner.materialize(lp.copy(startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
       else
