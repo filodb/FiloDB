@@ -295,7 +295,7 @@ class BlockMemFactory(blockStore: BlockManager,
       if (blk != metadataSpan.last) {
         if (markFullBlocksAsReclaimable) {
           blk.markReclaimable()
-        } else {
+        } else synchronized {
           fullBlocks += blk
         }
       }
