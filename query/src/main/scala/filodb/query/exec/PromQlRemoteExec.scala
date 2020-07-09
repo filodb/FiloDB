@@ -59,11 +59,11 @@ trait RemoteExec extends LeafExecPlan {
     // across threads. Note that task/observable will not run on the thread where span is present since
     // kamon uses thread-locals.
     Kamon.runWithSpan(execPlan2Span, true) {
-      Task.fromFuture(sendHttpRequest(execPlan2Span, queryEndpoint, requestTimeoutMs))
+      Task.fromFuture(sendHttpRequest(execPlan2Span, requestTimeoutMs))
     }
   }
 
-  def sendHttpRequest(execPlan2Span: Span, httpEndpoint: String, httpTimeoutMs: Long)
+  def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                      (implicit sched: Scheduler): Future[QueryResponse]
 
   def getUrlParams(): Map[String, Any] = {
@@ -97,7 +97,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
   override val urlParams = Map("query" -> params.promQl)
 
-  override def sendHttpRequest(execPlan2Span: Span, httpEndpoint: String, httpTimeoutMs: Long)
+  override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                      (implicit sched: Scheduler): Future[QueryResponse] = {
     PromRemoteExec.httpGet(queryEndpoint, requestTimeoutMs, queryContext.submitTime, getUrlParams())
       .map { response =>

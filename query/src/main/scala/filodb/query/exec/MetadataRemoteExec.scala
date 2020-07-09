@@ -25,9 +25,9 @@ case class MetadataRemoteExec(queryEndpoint: String,
   private val recordSchema = SerializedRangeVector.toSchema(columns)
   private val builder = SerializedRangeVector.newBuilder()
 
-  override def sendHttpRequest(execPlan2Span: Span, httpEndpoint: String, httpTimeoutMs: Long)
+  override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                               (implicit sched: Scheduler): Future[QueryResponse] = {
-    PromRemoteExec.httpMetadataGet(httpEndpoint, httpTimeoutMs, queryContext.submitTime, getUrlParams())
+    PromRemoteExec.httpMetadataGet(queryEndpoint, httpTimeoutMs, queryContext.submitTime, getUrlParams())
       .map { response =>
         response.unsafeBody match {
           case Left(error) => QueryError(queryContext.queryId, error.error)
