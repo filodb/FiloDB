@@ -3,6 +3,8 @@ package filodb.coordinator
 import java.lang.Thread.UncaughtExceptionHandler
 import java.util.concurrent.{ForkJoinPool, ForkJoinWorkerThread}
 
+import scala.collection.mutable.{HashMap => mHashMap, Queue => mQueue}
+import scala.concurrent.Future
 import scala.util.control.NonFatal
 
 import akka.actor.{ActorRef, ActorSystem, Props}
@@ -24,6 +26,80 @@ import filodb.core.query.{QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.CorruptVectorException
 import filodb.query._
 import filodb.query.exec.ExecPlan
+
+
+// TODO: move this?
+// A class to manage a queue and a set of currently executing queries, allowing no more than concurrentQueries
+// at a time.  When the query and execplans finishes execution, then they are removed.
+// concurrentQueries defines the number of current queries where all execPlans belonging to the same queryID
+// is counted as a single query.
+// A queue keeps track of queries for which there is no space.  It is not expected for there to be more than
+// one query in the queue belonging to the same queryID, this is because only high-level ExecPlans spawn more
+// low-level ones, and spawned ones arrive in the Actor mailbox and will go striaght to executing if the parent
+// plan is already executing.
+class QueryQueue(concurrentQueries: Int) {
+  val currentIDs = new mHashMap[String, Int]().withDefaultValue(0)
+  val currentPlans = new mHashMap[ExecPlan, Future[Unit]]
+  val queue = new mQueue[(ExecPlan, ActorRef)]
+
+  // Given a plan and replyTo, executes the plan if there is room or it is a currently executing query.
+  // If there isn't room, add it to the queue.
+  def execOrWait(plan: ExecPlan, replyTo: ActorRef, newPlanFunc: (ExecPlan, ActorRef) => Future[Unit])
+                (implicit sched: Scheduler): Unit = {
+    val id = plan.queryContext.queryId
+    if ((currentIDs contains id) || currentIDs.size < concurrentQueries) {
+      execute(plan, replyTo, newPlanFunc)
+    } else {
+      queue.enqueue((plan, replyTo))
+    }
+  }
+
+  def queueSize: Int = queue.length
+
+  // Pop next item(s?) off top of queue so long as there is room to execute another query.
+  def tryPop(newPlanFunc: (ExecPlan, ActorRef) => Future[Unit])
+            (implicit sched: Scheduler): Unit = synchronized {
+    if (currentIDs.size < concurrentQueries && queue.nonEmpty) {
+      val (nextPlan, replyTo) = queue.dequeue
+      execute(nextPlan, replyTo, newPlanFunc)
+    }
+  }
+
+  // Executes newPlanFunc, updating currentIDs/plans as needed
+  // The closure is called in the current thread, but the callback when Future/plan is completed will not be.
+  private def execute(newPlan: ExecPlan,
+                      replyTo: ActorRef,
+                      newPlanFunc: (ExecPlan, ActorRef) => Future[Unit])
+                     (implicit sched: Scheduler): Unit = {
+    val planFut = newPlanFunc(newPlan, replyTo)
+    val queryId = newPlan.queryContext.queryId
+
+    // Add plan to data structures
+    synchronized {
+      currentIDs(queryId) += 1
+      currentPlans(newPlan) = planFut
+    }
+
+    // Remove plan on Future complete.  If a slot opens up, recursively call myself to open up a new slot
+    var newspace = false
+    planFut.onComplete {
+      case _ => synchronized {
+                  currentPlans.remove(newPlan)
+                  currentIDs(queryId) -= 1
+                  if (currentIDs(queryId) == 0) {
+                    currentIDs.remove(queryId)
+                    newspace = true
+                  }
+                }
+                if (newspace) {
+                  tryPop(newPlanFunc)
+                }
+    }
+  }
+
+  // Currently active query IDs
+  def currentQueryIDs: Set[String] = currentIDs.keySet.toSet
+}
 
 object QueryCommandPriority extends java.util.Comparator[Envelope] {
   override def compare(o1: Envelope, o2: Envelope): Int = {
@@ -89,6 +165,7 @@ final class QueryActor(memStore: MemStore,
   val queryPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapFunc,
                                               earliestRawTimestampFn, queryConfig, functionalSpreadProvider)
   val queryScheduler = createInstrumentedQueryScheduler()
+  val qq = new QueryQueue(16)  // TODO: make configurable
 
   private val tags = Map("dataset" -> dsRef.toString)
   private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").withTags(TagSet.from(tags))
@@ -130,7 +207,7 @@ final class QueryActor(memStore: MemStore,
     Scheduler.apply(ExecutorInstrumentation.instrument(executor, schedName))
   }
 
-  def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
+  def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Future[Unit] = {
     if (checkTimeout(q.queryContext, replyTo)) {
       epRequests.increment()
       Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
@@ -157,6 +234,8 @@ final class QueryActor(memStore: MemStore,
           logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
           replyTo ! QueryError(q.queryContext.queryId, ex)
         }(queryScheduler)
+    } else {
+      Future.successful(())
     }
   }
 
@@ -217,7 +296,7 @@ final class QueryActor(memStore: MemStore,
                                       processLogicalPlan2Query(q, replyTo)
     case q: ExplainPlan2Query      => val replyTo = sender()
                                       processExplainPlanQuery(q, replyTo)
-    case q: ExecPlan              =>  execPhysicalPlan2(q, sender())
+    case q: ExecPlan               => qq.execOrWait(q, sender(), execPhysicalPlan2)(queryScheduler)
 
     case GetIndexNames(ref, limit, _) =>
       sender() ! memStore.indexNames(ref, limit).map(_._1).toBuffer
