@@ -292,6 +292,13 @@ class BlockMemFactory(blockStore: BlockManager,
     metadataSpan.foreach { blk =>
       metaAddr = blk.allocMetadata(metaSize)
       metadataWriter(metaAddr)
+      if (blk != metadataSpan.last) {
+        if (markFullBlocksAsReclaimable) {
+          blk.markReclaimable()
+        } else synchronized {
+          fullBlocks += blk
+        }
+      }
     }
 
     metadataSpan.clear()
@@ -318,10 +325,12 @@ class BlockMemFactory(blockStore: BlockManager,
       }
     } else {
       val newBlock = requestBlock()
-      if (markFullBlocksAsReclaimable) {
-        block.markReclaimable()
-      } else {
-        fullBlocks += block
+      if (!metadataSpanActive) {
+        if (markFullBlocksAsReclaimable) {
+          block.markReclaimable()
+        } else {
+          fullBlocks += block
+        }
       }
       block = newBlock
       currentBlock = block
@@ -339,7 +348,7 @@ class BlockMemFactory(blockStore: BlockManager,
     * @param allocateSize Request memory allocation size in bytes
     * @return Memory which has a base, offset and a length
     */
-  def allocateOffheap(size: Int, zero: Boolean = false): BinaryRegion.NativePointer = {
+  def allocateOffheap(size: Int, zero: Boolean = false): BinaryRegion.NativePointer = synchronized {
     require(!zero, "BlockMemFactory cannot zero memory at allocation")
     val block = ensureCapacity(size + metadataAllocSize + 2)
     block.own()
