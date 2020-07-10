@@ -1,12 +1,11 @@
 package filodb.query.exec
 
 import scala.collection.mutable.ArrayBuffer
-
 import com.typesafe.scalalogging.StrictLogging
+import filodb.core.memstore.SchemaMismatch
 import monix.eval.Task
 import monix.reactive.Observable
 import scalaxy.loops._
-
 import filodb.core.query._
 import filodb.memory.format.ZeroCopyUTF8String
 import filodb.query._
@@ -40,6 +39,19 @@ final case class ReduceAggregateExec(queryContext: QueryContext,
                }
     Observable.fromTask(task).flatten
   }
+
+  override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema = {
+    resp match {
+      case QueryResult(_, schema, _) if rs == ResultSchema.empty =>
+        schema     /// First schema, take as is
+      case QueryResult(_, schema, _) =>
+        if (!rs.hasSameColumnsAs(schema)) throw SchemaMismatch(rs.toString, schema.toString)
+        val fixedVecLen = if (rs.fixedVectorLen.isEmpty && schema.fixedVectorLen.isEmpty) None
+        else Some(rs.fixedVectorLen.getOrElse(0) + schema.fixedVectorLen.getOrElse(0))
+        rs.copy(fixedVectorLen = fixedVecLen)
+    }
+  }
+
 }
 
 /**
