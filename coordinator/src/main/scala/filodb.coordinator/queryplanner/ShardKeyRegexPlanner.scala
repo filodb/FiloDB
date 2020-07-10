@@ -1,25 +1,37 @@
 package filodb.coordinator.queryplanner
 
 import filodb.core.metadata.Dataset
-import filodb.core.query.{ColumnFilter, QueryContext}
+import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryContext}
 import filodb.core.query.Filter.{EqualsRegex, NotEqualsRegex}
 import filodb.query.{Aggregate, BinaryJoin, LogicalPlan}
 import filodb.query.exec.{DistConcatExec, ExecPlan, InProcessPlanDispatcher, ReduceAggregateExec}
+
+/**
+ * Holder for the shard key regex matcher results.
+ *
+ * @param columnFilters - non metric shard key filters
+ * @param query - query
+ */
+case class ShardKeyMatcher(columnFilters: Seq[ColumnFilter], query: String)
 
 /**
   * Responsible for query planning for queries having regex in shard column
   *
   * @param dataset         dataset
   * @param queryPlanner    multiPartition query planner
-  * @param shardKeyMatcher used to get values for regex shard keys. Each inner sequence corresponds to matching regex
-  * value. For example: Seq(ColumnFilter(ws, Equals(demo)), ColumnFilter(ns, EqualsRegex(App*)) returns
-  * Seq(Seq(ColumnFilter(ws, Equals(demo)), ColumnFilter(ns, Equals(App1))), Seq(ColumnFilter(ws, Equals(demo)),
-  * ColumnFilter(ns, Equals(App2))
+  * @param shardKeyMatcherFn used to get values for regex shard keys. Each inner sequence corresponds to matching regex
+  * value. For example: Seq(ColumnFilter(ws, Equals(demo)), ColumnFilter(ns, EqualsRegex(App.*)) with following query
+  * metric1{ws="demo", ns=~"App.*} returns,
+  * Seq(ShardKeyMatcherResult(Seq(ColumnFilter(ws, Equals(demo)),
+  *   ColumnFilter(ns, Equals(App1)), metric1{ws="demo", ns="App1"}),
+  *     ShardKeyMatcherResult(Seq(ColumnFilter(ws, Equals(demo)),
+  *       ColumnFilter(ns, Equals(App2)), metric1{ws="demo", ns="App2"}))
   */
-
 class ShardKeyRegexPlanner(dataset: Dataset,
                            queryPlanner: QueryPlanner,
-                           shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]]) extends QueryPlanner {
+                           shardKeyMatcherFn: ShardKeyMatcher => Seq[ShardKeyMatcher])
+  extends QueryPlanner {
+
   /**
     * Converts a logical plan to execution plan.
     *
@@ -35,12 +47,19 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     }
   }
 
-  private def getNonMetricShardKeyFilters(logicalPlan: LogicalPlan) = LogicalPlan.
-    getRawSeriesFilters(logicalPlan).map { s => s.filter(f => dataset.options.nonMetricShardColumns.contains(f.column))}
+  private def getNonMetricShardKeyFilters(logicalPlan: LogicalPlan): Seq[Seq[ColumnFilter]] =
+    LogicalPlan.getRawSeriesFilters(logicalPlan)
+      .map { s => s.filter(f => dataset.options.nonMetricShardColumns.contains(f.column))}
 
   private def generateExec(logicalPlan: LogicalPlan, nonMetricShardKeyFilters: Seq[ColumnFilter],
-                           qContext: QueryContext) = shardKeyMatcher(nonMetricShardKeyFilters).map(f =>
-                           queryPlanner.materialize(logicalPlan.replaceFilters(f), qContext))
+                           qContext: QueryContext): Seq[ExecPlan] = {
+    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    shardKeyMatcherFn(ShardKeyMatcher(nonMetricShardKeyFilters, queryParams.promQl)).map { result =>
+        val newQueryParams = queryParams.copy(promQl = result.query)
+        val newQueryContext = qContext.copy(origQueryParams = newQueryParams)
+        queryPlanner.materialize(logicalPlan.replaceFilters(result.columnFilters), newQueryContext)
+      }
+  }
 
   private def materializeBinaryJoin(binaryJoin: BinaryJoin, qContext: QueryContext): ExecPlan = {
    if (getNonMetricShardKeyFilters(binaryJoin).forall(_.forall(f => !f.filter.isInstanceOf[EqualsRegex] &&
