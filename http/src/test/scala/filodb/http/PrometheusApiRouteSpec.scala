@@ -86,7 +86,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
       val resp = responseAs[ExplainPlanResponse]
       resp.status shouldEqual "success"
 
-      resp.debugInfo(0).toString should startWith("E~DistConcatExec()")
+      resp.debugInfo(0).toString should startWith("E~LocalPartitionDistConcatExec()")
       resp.debugInfo(1) should startWith("-T~PeriodicSamplesMapper")
       resp.debugInfo(2) should startWith("--E~MultiSchemaPartitionsExec")
       resp.debugInfo(3) should startWith("-T~PeriodicSamplesMapper")

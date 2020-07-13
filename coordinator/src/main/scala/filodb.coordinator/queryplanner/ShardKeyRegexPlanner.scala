@@ -4,7 +4,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryContext}
 import filodb.core.query.Filter.{EqualsRegex, NotEqualsRegex}
 import filodb.query.{Aggregate, BinaryJoin, LogicalPlan}
-import filodb.query.exec.{DistConcatExec, ExecPlan, InProcessPlanDispatcher, ReduceAggregateExec}
+import filodb.query.exec._
 
 /**
  * Holder for the shard key regex matcher results.
@@ -70,7 +70,12 @@ class ShardKeyRegexPlanner(dataset: Dataset,
   private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext): ExecPlan = {
     val execPlans = generateExec(aggregate, getNonMetricShardKeyFilters(aggregate).head, queryContext)
     if (execPlans.size == 1) execPlans.head
-    else ReduceAggregateExec(queryContext, InProcessPlanDispatcher, execPlans, aggregate.operator, aggregate.params)
+    else {
+      val reducer = MultiPartitionReduceAggregateExec(queryContext, InProcessPlanDispatcher,
+        execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
+      reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params))
+      reducer
+    }
   }
 
   private def materializeOthers(logicalPlan: LogicalPlan, queryContext: QueryContext): ExecPlan = {
@@ -79,7 +84,8 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     if (nonMetricShardKeyFilters.head.isEmpty) queryPlanner.materialize(logicalPlan, queryContext)
     else {
       val execPlans = generateExec(logicalPlan, nonMetricShardKeyFilters.head, queryContext)
-      if (execPlans.size == 1) execPlans.head else DistConcatExec(queryContext, InProcessPlanDispatcher, execPlans)
+      if (execPlans.size == 1) execPlans.head else MultiPartitionDistConcatExec(queryContext, InProcessPlanDispatcher,
+        execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
     }
   }
 }

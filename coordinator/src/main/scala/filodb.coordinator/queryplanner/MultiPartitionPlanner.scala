@@ -105,7 +105,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                         val numStepsInPrevPartition = (p.timeRange.startMs - prevPartitionStart + lookBackMs) / stepMs
                         val lastPartitionInstant = prevPartitionStart + numStepsInPrevPartition * stepMs
                         val start = lastPartitionInstant + stepMs
-                        if ( start > queryParams.endSecs) queryParams.endSecs * 1000 else start
+                        // If query duration is less than or equal to lookback start will be greater than query end time
+                        if (start > (queryParams.endSecs * 1000)) queryParams.endSecs * 1000 else start
                       }
         prevPartitionStart = startMs
         val endMs = if (isInstantQuery) queryParams.endSecs * 1000 else p.timeRange.endMs + offsetMs

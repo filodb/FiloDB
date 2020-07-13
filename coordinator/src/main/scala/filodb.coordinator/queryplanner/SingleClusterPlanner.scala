@@ -85,7 +85,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
           case lve: LabelValuesExec => LabelValuesDistConcatExec(qContext, targetActor, many)
           case ske: PartKeysExec => PartKeysDistConcatExec(qContext, targetActor, many)
           case ep: ExecPlan =>
-            val topPlan = DistConcatExec(qContext, targetActor, many)
+            val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, many)
             if (stitch) topPlan.addRangeVectorTransformer(StitchRvsMapper())
             topPlan
         }
@@ -249,12 +249,12 @@ class SingleClusterPlanner(dsRef: DatasetRef,
         val groupSize = Math.sqrt(toReduceLevel1.plans.size).ceil.toInt
         toReduceLevel1.plans.grouped(groupSize).map { nodePlans =>
           val reduceDispatcher = nodePlans.head.dispatcher
-          ReduceAggregateExec(qContext, reduceDispatcher, nodePlans, lp.operator, lp.params)
+          LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, nodePlans, lp.operator, lp.params)
         }.toList
       } else toReduceLevel1.plans
 
     val reduceDispatcher = pickDispatcher(toReduceLevel2)
-    val reducer = ReduceAggregateExec(qContext, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
+    val reducer = LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
     reducer.addRangeVectorTransformer(AggregatePresenter(lp.operator, lp.params))
     PlanResult(Seq(reducer), false) // since we have aggregated, no stitching
   }
@@ -461,7 +461,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val vectors = walkLogicalPlanTree(lp.vectors, qContext)
     if (vectors.plans.length > 1) {
       val targetActor = pickDispatcher(vectors.plans)
-      val topPlan = DistConcatExec(qContext, targetActor, vectors.plans)
+      val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, vectors.plans)
       topPlan.addRangeVectorTransformer(ScalarFunctionMapper(lp.function, RangeParams(lp.startMs, lp.stepMs, lp.endMs)))
       PlanResult(Seq(topPlan), vectors.needsStitch)
     } else {
@@ -476,7 +476,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val vectors = walkLogicalPlanTree(lp.vectors, qContext)
     if (vectors.plans.length > 1) {
       val targetActor = pickDispatcher(vectors.plans)
-      val topPlan = DistConcatExec(qContext, targetActor, vectors.plans)
+      val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, vectors.plans)
       topPlan.addRangeVectorTransformer(SortFunctionMapper(lp.function))
       PlanResult(Seq(topPlan), vectors.needsStitch)
     } else {
@@ -490,7 +490,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val vectors = walkLogicalPlanTree(lp.vectors, qContext)
     if (vectors.plans.length > 1) {
       val targetActor = pickDispatcher(vectors.plans)
-      val topPlan = DistConcatExec(qContext, targetActor, vectors.plans)
+      val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, vectors.plans)
       topPlan.addRangeVectorTransformer(AbsentFunctionMapper(lp.columnFilters, lp.rangeParams,
         PromMetricLabel))
       PlanResult(Seq(topPlan), vectors.needsStitch)

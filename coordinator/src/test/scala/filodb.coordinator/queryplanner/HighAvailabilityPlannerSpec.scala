@@ -74,10 +74,10 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[ReduceAggregateExec] shouldEqual (true)
+    execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
 
     // Should ignore smaller local failure which is from 1500 - 4000 and generate local exec plan
-    val reduceAggregateExec = execPlan.asInstanceOf[ReduceAggregateExec]
+    val reduceAggregateExec = execPlan.asInstanceOf[LocalPartitionReduceAggregateExec]
 
     reduceAggregateExec.children.length shouldEqual (2) //default spread is 1 so 2 shards
 
@@ -140,10 +140,10 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual (2)
-    stitchRvsExec.children(0).isInstanceOf[ReduceAggregateExec] shouldEqual (true)
+    stitchRvsExec.children(0).isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
     stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
 
-    val child1 = stitchRvsExec.children(0).asInstanceOf[ReduceAggregateExec]
+    val child1 = stitchRvsExec.children(0).asInstanceOf[LocalPartitionReduceAggregateExec]
     val child2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
 
     child1.children.length shouldEqual (2) //default spread is 1 so 2 shards
@@ -266,10 +266,10 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual 2
-    stitchRvsExec.children(0).isInstanceOf[ReduceAggregateExec] shouldEqual (true)
+    stitchRvsExec.children(0).isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
     stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
 
-    val child1 = stitchRvsExec.children(0).asInstanceOf[ReduceAggregateExec]
+    val child1 = stitchRvsExec.children(0).asInstanceOf[LocalPartitionReduceAggregateExec]
     val child2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
 
     child1.children.length shouldEqual 2 //default spread is 1 so 2 shards
@@ -349,9 +349,9 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[ReduceAggregateExec] shouldEqual (true)
+    execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
 
-    val reduceAggregateExec = execPlan.asInstanceOf[ReduceAggregateExec]
+    val reduceAggregateExec = execPlan.asInstanceOf[LocalPartitionReduceAggregateExec]
 
     reduceAggregateExec.children.length shouldEqual (2) //default spread is 1 so 2 shards
 
@@ -410,12 +410,12 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val lp1 = Parser.queryRangeToLogicalPlan("http_requests_total{job = \"app\"}", t)
     val execPlan1 = engine.materialize(lp1, QueryContext(origQueryParams = promQlQueryParams))
-    execPlan1.isInstanceOf[DistConcatExec] shouldEqual (true) // No routing as failure is before query start time
+    execPlan1.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true) // No routing as failure is before query start time
 
     val lp2 = Parser.queryRangeToLogicalPlan("http_requests_total{job = \"app\"} offset 10m", t)
     val execPlan2 = engine.materialize(lp2, QueryContext(origQueryParams = promQlQueryParams))
     // Because of offset starts time would be (700 - 600) = 100 seconds where there is failure
-    // So PromQlExec is generated instead of local DistConcatExec. PromQlExec will have original query and start time
+    // So PromQlExec is generated instead of local LocalPartitionDistConcatExec. PromQlExec will have original query and start time
     // Start time with offset will be calculated by buddy pod
     execPlan2.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
     execPlan2.asInstanceOf[PromQlRemoteExec].params.startSecs shouldEqual(700)

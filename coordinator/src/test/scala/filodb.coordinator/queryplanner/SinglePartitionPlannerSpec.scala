@@ -86,7 +86,7 @@ class SinglePartitionPlannerSpec extends FunSpec with Matchers {
     val lp = Parser.queryToLogicalPlan("test{job = \"app\"}", 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    execPlan.isInstanceOf[DistConcatExec] shouldEqual (true)
+    execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
     execPlan.children.length shouldEqual 2
     execPlan.children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
     execPlan.children.head.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual true
@@ -99,7 +99,7 @@ class SinglePartitionPlannerSpec extends FunSpec with Matchers {
     execPlan.printTree()
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.children.foreach { l1 =>
-      l1.isInstanceOf[DistConcatExec] shouldEqual true
+      l1.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
       l1.children.foreach { l2 =>
         l2.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
         l2.rangeVectorTransformers.size shouldEqual 1
@@ -114,7 +114,7 @@ class SinglePartitionPlannerSpec extends FunSpec with Matchers {
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.asInstanceOf[BinaryJoinExec].lhs.head.isInstanceOf[BinaryJoinExec] shouldEqual true
-    execPlan.asInstanceOf[BinaryJoinExec].rhs.head.isInstanceOf[DistConcatExec] shouldEqual true
+    execPlan.asInstanceOf[BinaryJoinExec].rhs.head.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
   }
 
   it("should generate BinaryJoin Exec plan with remote and local cluster metrics") {
@@ -124,7 +124,7 @@ class SinglePartitionPlannerSpec extends FunSpec with Matchers {
     execPlan.printTree()
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.asInstanceOf[BinaryJoinExec].rhs.head.asInstanceOf[MockExecPlan].name shouldEqual ("rules1")
-    execPlan.asInstanceOf[BinaryJoinExec].lhs.head.isInstanceOf[DistConcatExec] shouldEqual true
+    execPlan.asInstanceOf[BinaryJoinExec].lhs.head.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
   }
 
   it("should generate BinaryJoin Exec plan with remote cluster metrics") {

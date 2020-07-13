@@ -1,11 +1,12 @@
 package filodb.query.exec
 
 import scala.collection.mutable.ArrayBuffer
+
 import com.typesafe.scalalogging.StrictLogging
-import filodb.core.memstore.SchemaMismatch
 import monix.eval.Task
 import monix.reactive.Observable
 import scalaxy.loops._
+
 import filodb.core.query._
 import filodb.memory.format.ZeroCopyUTF8String
 import filodb.query._
@@ -15,12 +16,12 @@ import filodb.query.exec.aggregator.RowAggregator
   * Reduce combined aggregates from children. Can be applied in a
   * hierarchical manner multiple times to arrive at result.
   */
-final case class ReduceAggregateExec(queryContext: QueryContext,
-                                     dispatcher: PlanDispatcher,
-                                     childAggregates: Seq[ExecPlan],
-                                     aggrOp: AggregationOperator,
-                                     aggrParams: Seq[Any]) extends NonLeafExecPlan {
+trait ReduceAggregateExec extends NonLeafExecPlan {
+  def childAggregates: Seq[ExecPlan]
+
   def children: Seq[ExecPlan] = childAggregates
+  def aggrOp: AggregationOperator
+  def aggrParams: Seq[Any]
 
   protected def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
@@ -40,19 +41,32 @@ final case class ReduceAggregateExec(queryContext: QueryContext,
     Observable.fromTask(task).flatten
   }
 
-  override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema = {
-    resp match {
-      case QueryResult(_, schema, _) if rs == ResultSchema.empty =>
-        schema     /// First schema, take as is
-      case QueryResult(_, schema, _) =>
-        if (!rs.hasSameColumnsAs(schema)) throw SchemaMismatch(rs.toString, schema.toString)
-        val fixedVecLen = if (rs.fixedVectorLen.isEmpty && schema.fixedVectorLen.isEmpty) None
-        else Some(rs.fixedVectorLen.getOrElse(0) + schema.fixedVectorLen.getOrElse(0))
-        rs.copy(fixedVectorLen = fixedVecLen)
-    }
-  }
-
 }
+
+/**
+  * Use when child ExecPlan's span single local partition
+  */
+final case class LocalPartitionReduceAggregateExec(queryContext: QueryContext,
+                                                   dispatcher: PlanDispatcher,
+                                                   childAggregates: Seq[ExecPlan],
+                                                   aggrOp: AggregationOperator,
+                                                   aggrParams: Seq[Any]) extends ReduceAggregateExec
+
+/**
+  * Use when child ExecPlan's span multiple partitions
+  */
+final case class MultiPartitionReduceAggregateExec(queryContext: QueryContext,
+                                                   dispatcher: PlanDispatcher,
+                                                   childAggregates: Seq[ExecPlan],
+                                                   aggrOp: AggregationOperator,
+                                                   aggrParams: Seq[Any]) extends ReduceAggregateExec {
+  // overriden since it can reduce schemas with different vector lengths as long as the columns are same
+  override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema =
+    IgnoreFixedVectorLenSchemaReducer.reduceSchema(rs, resp)
+}
+
+
+
 
 /**
   * Performs aggregation operation across RangeVectors within a shard
