@@ -77,6 +77,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
     val partitions = partitionLocationProvider.getPartitions(routingKeyMap, queryTimeRange).
       sortBy(_.timeRange.startMs)
+    if (partitions.isEmpty) new UnsupportedOperationException("No partitions found for routing keys: " + routingKeyMap)
 
     (partitions, lookBackMs, offsetMs)
   }
@@ -103,7 +104,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                         // Lookback not supported across partitions
                         val numStepsInPrevPartition = (p.timeRange.startMs - prevPartitionStart + lookBackMs) / stepMs
                         val lastPartitionInstant = prevPartitionStart + numStepsInPrevPartition * stepMs
-                        lastPartitionInstant + stepMs
+                        val start = lastPartitionInstant + stepMs
+                        // If query duration is less than or equal to lookback start will be greater than query end time
+                        if (start > (queryParams.endSecs * 1000)) queryParams.endSecs * 1000 else start
                       }
         prevPartitionStart = startMs
         val endMs = if (isInstantQuery) queryParams.endSecs * 1000 else p.timeRange.endMs + offsetMs

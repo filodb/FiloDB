@@ -61,7 +61,7 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[DistConcatExec] shouldEqual (true)
+    execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
     execPlan.children.length shouldEqual 2
     execPlan.children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
     execPlan.children.head.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual true
@@ -93,8 +93,8 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
 
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual (2)
-    stitchRvsExec.children(0).isInstanceOf[DistConcatExec] shouldEqual (true)
-    stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+    stitchRvsExec.children(0).isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
+    stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual true
 
 
     val remoteExec = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
@@ -105,8 +105,8 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     remoteExec.params.processMultiPartition shouldEqual false
     remoteExec.queryEndpoint shouldEqual "remote-url"
 
-    val localExec = stitchRvsExec.children(0).asInstanceOf[DistConcatExec]
-    localExec.isInstanceOf[DistConcatExec] shouldEqual (true)
+    val localExec = stitchRvsExec.children(0).asInstanceOf[LocalPartitionDistConcatExec]
+    localExec.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
     localExec.children.length shouldEqual 2
     localExec.children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
 
@@ -279,7 +279,7 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual (3)
-    stitchRvsExec.children(0).isInstanceOf[DistConcatExec] shouldEqual (true)
+    stitchRvsExec.children(0).isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
     stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
     stitchRvsExec.children(2).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
     val remoteExec1 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
@@ -305,8 +305,8 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     remoteExec2.params.processFailure shouldEqual true
     remoteExec2.params.processMultiPartition shouldEqual false
     remoteExec2.queryEndpoint shouldEqual "remote-url2"
-    val localExec = stitchRvsExec.children(0).asInstanceOf[DistConcatExec]
-    localExec.isInstanceOf[DistConcatExec] shouldEqual (true)
+    val localExec = stitchRvsExec.children(0).asInstanceOf[LocalPartitionDistConcatExec]
+    localExec.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
     localExec.children.length shouldEqual 2
     localExec.children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
 
@@ -353,7 +353,7 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
 
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual (2)
-    stitchRvsExec.children(0).isInstanceOf[DistConcatExec] shouldEqual (true)
+    stitchRvsExec.children(0).isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
     stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
 
 
@@ -366,8 +366,8 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     remoteExec.params.processMultiPartition shouldEqual false
     remoteExec.queryEndpoint shouldEqual "remote-url"
 
-    val localExec = stitchRvsExec.children(0).asInstanceOf[DistConcatExec]
-    localExec.isInstanceOf[DistConcatExec] shouldEqual (true)
+    val localExec = stitchRvsExec.children(0).asInstanceOf[LocalPartitionDistConcatExec]
+    localExec.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
     localExec.children.length shouldEqual 2
     localExec.children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
 
@@ -377,4 +377,59 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
       chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual (endSeconds * 1000)
 
   }
+
+  it ("should generate second Exec with start and end time equal to query end time when query duration is less" +
+    "than or equal to lookback ") {
+
+    val startSeconds = 1594309980L
+    val endSeconds = 1594310280L
+    val localPartitionStartMs: Long = 1594309980001L
+    val step = 15L
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        if (routingKey.equals(Map("job" -> "app"))) List(
+          PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
+            localPartitionStartMs - 1)), PartitionAssignment("remote", "remote-url",
+            TimeRange(localPartitionStartMs, endSeconds * 1000)))
+        else Nil
+      }
+
+      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = List(
+        PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
+          localPartitionStartMs - 1)), PartitionAssignment("remote", "remote-url",
+          TimeRange(localPartitionStartMs, endSeconds * 1000)))
+
+    }
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
+
+    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds,
+      processMultiPartition = true)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
+    stitchRvsExec.children.size shouldEqual (2)
+    stitchRvsExec.children(0).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+    stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+
+
+    val remoteExec = stitchRvsExec.children(0).asInstanceOf[PromQlRemoteExec]
+    remoteExec.params.startSecs shouldEqual startSeconds
+    remoteExec.params.endSecs shouldEqual (localPartitionStartMs - 1) / 1000
+    remoteExec.params.stepSecs shouldEqual step
+    remoteExec.params.processFailure shouldEqual true
+    remoteExec.params.processMultiPartition shouldEqual false
+    remoteExec.queryEndpoint shouldEqual "remote-url"
+
+    val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
+    remoteExec2.params.startSecs shouldEqual endSeconds
+    remoteExec2.params.endSecs shouldEqual endSeconds
+    remoteExec2.params.stepSecs shouldEqual step
+    remoteExec2.params.processFailure shouldEqual true
+    remoteExec2.params.processMultiPartition shouldEqual false
+    remoteExec2.queryEndpoint shouldEqual "remote-url"
+
+  }
+
 }

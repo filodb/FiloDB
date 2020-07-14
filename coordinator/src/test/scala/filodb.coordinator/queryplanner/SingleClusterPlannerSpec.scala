@@ -78,7 +78,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
 
     BinaryJoinExec(binaryOp=DIV, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-4#-325843755])
     -AggregatePresenter(aggrOp=Sum, aggrParams=List())
-    --ReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-4#-325843755])
+    --LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-4#-325843755])
     ---AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
     ----PeriodicSamplesMapper(start=1526094025509, step=1000, end=1526094075509, window=Some(5000), functionId=Some(Rate), funcParams=List())
     -----MultiSchemaPartitionsExec(shard=2, rowKeyRange=RowKeyInterval(b[1526094025509],b[1526094075509]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket)), ColumnFilter(job,Equals(myService)), ColumnFilter(le,Equals(0.3)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-3#342951049])
@@ -86,7 +86,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     ----PeriodicSamplesMapper(start=1526094025509, step=1000, end=1526094075509, window=Some(5000), functionId=Some(Rate), funcParams=List())
     -----SelectRawPartitionsExec(shard=3, rowKeyRange=RowKeyInterval(b[1526094025509],b[1526094075509]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket)), ColumnFilter(job,Equals(myService)), ColumnFilter(le,Equals(0.3)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-4#-325843755])
     -AggregatePresenter(aggrOp=Sum, aggrParams=List())
-    --ReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-2#-1576910232])
+    --LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-2#-1576910232])
     ---AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
     ----PeriodicSamplesMapper(start=1526094025509, step=1000, end=1526094075509, window=Some(5000), functionId=Some(Rate), funcParams=List())
     -----SelectRawPartitionsExec(shard=0, rowKeyRange=RowKeyInterval(b[1526094025509],b[1526094075509]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_count)), ColumnFilter(job,Equals(myService)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-238515561])
@@ -98,7 +98,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
     execPlan.children.foreach { l1 =>
       // Now there should be single level of reduce because we have 2 shards
-      l1.isInstanceOf[ReduceAggregateExec] shouldEqual true
+      l1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
       l1.children.foreach { l2 =>
         l2.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
         l2.rangeVectorTransformers.size shouldEqual 2
@@ -118,9 +118,9 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
 
     // Now there should be multiple levels of reduce because we have 16 shards
     execPlan.children.foreach { l1 =>
-      l1.isInstanceOf[ReduceAggregateExec] shouldEqual true
+      l1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
       l1.children.foreach { l2 =>
-        l2.isInstanceOf[ReduceAggregateExec] shouldEqual true
+        l2.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
         l2.children.foreach { l3 =>
           l3.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
           l3.rangeVectorTransformers.size shouldEqual 2
@@ -145,7 +145,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
       QueryContext(promQlQueryParams, Some(StaticSpreadProvider(SpreadChange(0, 4))), 1000000))
 
     info(s"First child plan: ${execPlan.children.head.printTree()}")
-    execPlan.isInstanceOf[DistConcatExec] shouldEqual true
+    execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
     execPlan.children.foreach { l1 =>
       l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
       l1.rangeVectorTransformers.size shouldEqual 2
@@ -166,7 +166,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
 
     // materialized exec plan
     val execPlan = engine2.materialize(raw2, QueryContext(origQueryParams = promQlQueryParams))
-    execPlan.isInstanceOf[DistConcatExec] shouldEqual true
+    execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
     execPlan.children.foreach { l1 =>
       l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
       val rpExec = l1.asInstanceOf[MultiSchemaPartitionsExec]
@@ -190,7 +190,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
     execPlan.children should have length (2)
     execPlan.children.foreach { reduceAggPlan =>
-      reduceAggPlan.isInstanceOf[ReduceAggregateExec] shouldEqual true
+      reduceAggPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
       reduceAggPlan.children should have length (4)   // spread=2 means 4 shards
     }
   }
@@ -252,7 +252,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     execPlan.isInstanceOf[SetOperatorExec] shouldEqual true
     execPlan.children.foreach { l1 =>
       // Now there should be single level of reduce because we have 2 shards
-      l1.isInstanceOf[ReduceAggregateExec] shouldEqual true
+      l1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
       l1.children.foreach { l2 =>
         l2.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
         l2.rangeVectorTransformers.size shouldEqual 2
@@ -271,7 +271,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     val logicalPlan1 = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""",
       TimeStepParams(nowSeconds - 4.days.toSeconds, 1.minute.toSeconds, nowSeconds))
 
-    val ep1 = planner.materialize(logicalPlan1, QueryContext()).asInstanceOf[DistConcatExec]
+    val ep1 = planner.materialize(logicalPlan1, QueryContext()).asInstanceOf[LocalPartitionDistConcatExec]
     val psm1 = ep1.children.head.asInstanceOf[MultiSchemaPartitionsExec]
                 .rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
     psm1.start shouldEqual (nowSeconds * 1000
@@ -283,7 +283,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     val logicalPlan2 = Parser.queryRangeToLogicalPlan("""rate(foo{job="bar"}[20m])""",
       TimeStepParams(nowSeconds - 4.days.toSeconds, 1.minute.toSeconds, nowSeconds))
 
-    val ep2 = planner.materialize(logicalPlan2, QueryContext()).asInstanceOf[DistConcatExec]
+    val ep2 = planner.materialize(logicalPlan2, QueryContext()).asInstanceOf[LocalPartitionDistConcatExec]
     val psm2 = ep2.children.head.asInstanceOf[MultiSchemaPartitionsExec]
       .rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
     psm2.start shouldEqual (nowSeconds * 1000
@@ -296,7 +296,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     val logicalPlan3 = Parser.queryRangeToLogicalPlan("""rate(foo{job="bar"}[20m] offset 15m)""",
       TimeStepParams(nowSeconds - 4.days.toSeconds, 1.minute.toSeconds, nowSeconds))
 
-    val ep3 = planner.materialize(logicalPlan3, QueryContext()).asInstanceOf[DistConcatExec]
+    val ep3 = planner.materialize(logicalPlan3, QueryContext()).asInstanceOf[LocalPartitionDistConcatExec]
     val psm3 = ep3.children.head.asInstanceOf[MultiSchemaPartitionsExec]
       .rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
     psm3.start shouldEqual (nowSeconds * 1000
@@ -376,7 +376,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     
     val execPlan1 = engine.materialize(logicalPlan1, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan1.isInstanceOf[ReduceAggregateExec] shouldEqual true
+    execPlan1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
     execPlan1.children.foreach { l1 =>
       l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
@@ -391,7 +391,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     // materialized exec plan
     val execPlan2 = engine.materialize(logicalPlan2, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan2.isInstanceOf[ReduceAggregateExec] shouldEqual true
+    execPlan2.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
     execPlan2.children.foreach { l1 =>
       l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
