@@ -79,6 +79,10 @@ trait BlockManager {
     ensureFreeBytes((totalMemorySizeInBytes * pct * 0.01).toLong)
   }
 
+  def currentFreePercent: Double = {
+    (((numFreeBlocks * blockSizeInBytes).toDouble) / totalMemorySizeInBytes) * 100.0
+  }
+
   def totalMemorySizeInBytes: Long
 
   /**
@@ -159,8 +163,6 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   final val reclaimLock = new Latch
 
   override def blockSizeInBytes: Long = PageManager.getInstance().pageSize() * numPagesPerBlock
-
-  def availablePreAllocated: Long = numFreeBlocks * blockSizeInBytes
 
   def usedMemory: Long = usedBlocks.size * blockSizeInBytes
 
@@ -298,11 +300,11 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       if (acquired) {
         return true
       }
-      timeout <<= 1
-      if (timeout > finalTimeoutMillis) {
+      if (timeout >= finalTimeoutMillis) {
         return false
       }
       Thread.`yield`()
+      timeout = Math.min(finalTimeoutMillis, timeout << 1)
     }
     false // never reached, but scala compiler complains otherwise
   }
@@ -315,12 +317,25 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     * @param pct percentage: 0.0 to 100.0
     */
   def ensureHeadroom(pct: Double): Int = {
+    // Ramp up the timeout as the current headroom shrinks. Max timeout per attempt is a little
+    // over 2 seconds, and the total timeout can be double that, for a total of 4 seconds.
+    val maxTimeoutMillis = 2048
+    val timeoutMillis = ((1.0 - (currentFreePercent / pct)) * maxTimeoutMillis).toInt
+
+    if (timeoutMillis <= 0) {
+      // Headroom target is already met.
+      return numFreeBlocks
+    }
+
     var numFree: Int = 0
     val start = System.nanoTime()
-    // Give up after waiting (in total) a little over 2 seconds.
-    val acquired = tryExclusiveReclaimLock(1024)
+    val acquired = tryExclusiveReclaimLock(timeoutMillis)
     if (!acquired) {
-      logger.warn(s"Lock for BlockManager.ensureFreePercent timed out: ${reclaimLock}")
+      if (timeoutMillis >= maxTimeoutMillis / 2) {
+        // Start warning when the current headroom has dipped below the halfway point.
+        // The lock state is logged in case it's stuck due to a runaway query somewhere.
+        logger.warn(s"Lock for BlockManager.ensureHeadroom timed out: ${reclaimLock}")
+      }
       numFree = numFreeBlocks
     } else {
       try {
@@ -329,7 +344,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         reclaimLock.releaseExclusive()
       }
       val numBytes = numFree * blockSizeInBytes
-      logger.debug(s"BlockManager.ensureFreePercent numFree: $numFree ($numBytes bytes)")
+      logger.debug(s"BlockManager.ensureHeadroom numFree: $numFree ($numBytes bytes)")
     }
     val stall = System.nanoTime() - start
     stats.blockHeadroomStall.increment(stall)

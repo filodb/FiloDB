@@ -189,7 +189,8 @@ case class PartLookupResult(shard: Int,
                             partsInMemory: debox.Buffer[Int],
                             firstSchemaId: Option[Int] = None,
                             partIdsMemTimeGap: debox.Map[Int, Long] = debox.Map.empty,
-                            partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty)
+                            partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty,
+                            pkRecords: Seq[PartKeyLuceneIndexRecord] = Seq.empty)
 
 final case class SchemaMismatch(expected: String, found: String) extends
 Exception(s"Multiple schemas found, please filter. Expected schema $expected, found schema $found")
@@ -280,8 +281,18 @@ class TimeSeriesShard(val ref: DatasetRef,
       val partID = UnsafeUtils.getInt(metaAddr)
       val partition = partitions.get(partID)
       if (partition != UnsafeUtils.ZeroPointer) {
-        assert(numBytes == partition.schema.data.blockMetaSize)
+        // The number of bytes passed in is the metadata size which depends on schema.  It should match the
+        // TSPartition's blockMetaSize; if it doesn't that is a flag for possible corruption, and we should halt
+        // the process to be safe and log details for further debugging.
         val chunkID = UnsafeUtils.getLong(metaAddr + 4)
+        if (numBytes != partition.schema.data.blockMetaSize) {
+          logger.error(f"POSSIBLE CORRUPTION DURING onReclaim(metaAddr=0x$metaAddr%08x, numBytes=$numBytes)" +
+                       s"Expected meta size: ${partition.schema.data.blockMetaSize} for schema=${partition.schema}" +
+                       s"  Reclaiming chunk chunkID=$chunkID from shard=$shardNum " +
+                       s"partID=$partID ${partition.stringPartition}")
+          logger.warn("Halting FiloDB...")
+          sys.exit(33)   // Special onReclaim corruption exit code
+        }
         partition.removeChunksAt(chunkID)
         logger.debug(s"Reclaiming chunk chunkID=$chunkID from shard=$shardNum " +
           s"partID=$partID ${partition.stringPartition}")
@@ -673,18 +684,31 @@ class TimeSeriesShard(val ref: DatasetRef,
                           fetchFirstLastSampleTimes: Boolean,
                           endTime: Long,
                           startTime: Long,
-                          limit: Int): Iterator[PartKeyWithTimes] = {
+                          limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
     if (fetchFirstLastSampleTimes) {
       partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime).iterator.map { pk =>
-        PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime)
-      }
+        val partKeyMap = convertPartKeyWithTimesToMap(
+          PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime))
+        partKeyMap ++ Map(
+          ("_firstSampleTime_".utf8, pk.startTime.toString.utf8),
+          ("_lastSampleTime_".utf8, pk.endTime.toString.utf8))
+      } take(limit)
     } else {
       val partIds = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
       val inMem = InMemPartitionIterator2(partIds)
-      val inMemPartKeys = inMem.map { p => PartKeyWithTimes(p.partKeyBase, p.partKeyOffset, -1, -1) }
-      val skippedPartKeys = inMem.skippedPartIDs.iterator().map(partKeyFromPartId)
+      val inMemPartKeys = inMem.map { p =>
+        convertPartKeyWithTimesToMap(PartKeyWithTimes(p.partKeyBase, p.partKeyOffset, -1, -1))}
+      val skippedPartKeys = inMem.skippedPartIDs.iterator().map(partId => {
+        convertPartKeyWithTimesToMap(partKeyFromPartId(partId))})
       (inMemPartKeys ++ skippedPartKeys).take(limit)
     }
+  }
+
+  private def convertPartKeyWithTimesToMap(partKey: PartKeyWithTimes): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = {
+    schemas.part.binSchema.toStringPairs(partKey.base, partKey.offset).map(pair => {
+      pair._1.utf8 -> pair._2.utf8
+    }).toMap ++
+      Map("_type_".utf8 -> Schemas.global.schemaName(RecordSchema.schemaID(partKey.base, partKey.offset)).utf8)
   }
 
   /**

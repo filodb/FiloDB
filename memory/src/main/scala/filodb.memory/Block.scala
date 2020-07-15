@@ -104,6 +104,10 @@ trait ReusableMemory extends StrictLogging {
   }
 }
 
+object Block extends StrictLogging {
+  val _log = logger
+}
+
 /**
   * A block is a reusable piece of memory beginning at the address and has a capacity.
   * It is capable of holding metadata also for reclaims.
@@ -177,6 +181,7 @@ class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimL
       UnsafeUtils.setShort(UnsafeUtils.ZeroPointer, metaAddr, metaSize)
       metaAddr + 2
     } else {
+      Block._log.error(s"Unexpected ERROR with allocMetadata.  Block info: $detailedDebugString")
       throw new OutOfOffheapMemoryException(metaSize, rem)
     }
   }
@@ -210,6 +215,26 @@ class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimL
 
   def debugString: String = f"Block @0x$address%016x canReclaim=$canReclaim remaining=$remaining " +
                             s"owner: ${owner.map(_.debugString).getOrElse("--")}"
+
+  // Include detailed metadata debug info, enough to debug any block metadata allocation issues
+  // Meta alloc overhead, plus histogram and stats on meta allocation, plus pointer info
+  def detailedDebugString: String = {
+    val metasizeHist = collection.mutable.HashMap[Int, Int]().withDefaultValue(0)
+    var numMetas = 0
+
+    // Walk metadata blocks and collect stats
+    var metaPointer = address + _metaPosition
+    while (metaPointer < (address + capacity)) {
+      val metaSize = UnsafeUtils.getShort(metaPointer)
+      numMetas += 1
+      metasizeHist(metaSize) += 1
+      metaPointer += (2 + metaSize)
+    }
+
+    debugString +
+      f"\ncapacity=$capacity position=${_position}  metaPos=${_metaPosition}  gap=${_metaPosition - _position}\n" +
+      s"# metadatas=$numMetas  metadata size histogram=$metasizeHist"
+  }
 
   // debug method to set memory to specific value for testing
   private[memory] def set(value: Byte): Unit =

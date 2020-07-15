@@ -9,7 +9,7 @@ import scala.concurrent.duration.FiniteDuration
 import com.typesafe.config.{Config, ConfigFactory}
 import monix.eval.Task
 import monix.execution.Scheduler
-import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
@@ -21,11 +21,13 @@ import filodb.core.metadata.{Column, Dataset, Schemas}
 import filodb.core.query.{ColumnFilter, Filter, QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.MemFactory
+import filodb.memory.data.ChunkMap
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
 
 // So, this is effectively a test for NonLeafExecPlan
-class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
+class InProcessPlanDispatcherSpec extends FunSpec
+  with Matchers with ScalaFutures with BeforeAndAfter with BeforeAndAfterAll {
 
   import ZeroCopyUTF8String._
   import filodb.core.{MachineMetricsData => MMD}
@@ -43,6 +45,10 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
     memStore.refreshIndexForTesting(MMD.dataset1.ref)
     memStore.refreshIndexForTesting(MMD.histDataset.ref)
     memStore.refreshIndexForTesting(MMD.histMaxDS.ref)
+  }
+
+  after {
+    ChunkMap.validateNoSharedLocks("InProcessPlanDispatcherSpec", true)
   }
 
   override def afterAll(): Unit = {

@@ -321,6 +321,11 @@ public class SimpleProfiler {
             return null;
         }
 
+        // XXX: only profile threads which are query scheduler threads
+        // if (!info.getThreadName().startsWith("query-sched")) {
+        //     return null;
+        // }
+
         StackTraceElement[] trace = info.getStackTrace();
 
         // Reject internal threads which have no trace at all.

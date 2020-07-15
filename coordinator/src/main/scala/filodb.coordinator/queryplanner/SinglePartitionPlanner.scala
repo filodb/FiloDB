@@ -32,8 +32,9 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner], plannerSelecto
     * If logical plan does not have metric, first planner present in planners is returned
     */
   private def getPlanner(logicalPlan: LogicalPlan): QueryPlanner = {
-    LogicalPlanUtils.getMetricName(logicalPlan, datasetMetricColumn).
-      map(x => planners.get(plannerSelector(x.head)).get).getOrElse(planners.values.head)
+    val planner = LogicalPlanUtils.getMetricName(logicalPlan, datasetMetricColumn)
+      .map(x => planners.get(plannerSelector(x)).get)
+    if(planner.isEmpty)  planners.values.head else planner.head
   }
 
   private def materializeSimpleQuery(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {

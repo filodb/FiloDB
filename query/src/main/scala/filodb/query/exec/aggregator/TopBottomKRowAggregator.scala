@@ -107,6 +107,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
         }
       }
     } finally {
+      aggRangeVector.rows().close()
       ChunkMap.releaseAllSharedLocks()
     }
     resRvs.map { case (key, builder) =>

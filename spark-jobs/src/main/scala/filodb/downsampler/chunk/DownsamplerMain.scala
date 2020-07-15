@@ -108,17 +108,15 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
       .mapPartitions { splitIter =>
         Kamon.init()
         KamonShutdownHook.registerShutdownHook()
-        import filodb.core.Iterators._
         val rawDataSource = batchDownsampler.rawCassandraColStore
-        val batchReadSpan = Kamon.spanBuilder("cassandra-raw-data-read-latency").start()
-        val batchIter = rawDataSource.getChunksByIngestionTimeRange(datasetRef = batchDownsampler.rawDatasetRef,
+        val batchIter = rawDataSource.getChunksByIngestionTimeRangeNoAsync(
+          datasetRef = batchDownsampler.rawDatasetRef,
           splits = splitIter, ingestionTimeStart = ingestionTimeStart,
           ingestionTimeEnd = ingestionTimeEnd,
           userTimeStart = userTimeStart, endTimeExclusive = userTimeEndExclusive,
           maxChunkTime = settings.rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
-          batchSize = settings.batchSize, batchTime = settings.batchTime).toIterator()
-        batchReadSpan.finish()
-        batchIter // iterator of batches
+          batchSize = settings.batchSize)
+        batchIter
       }
       .foreach { rawPartsBatch =>
         Kamon.init()
