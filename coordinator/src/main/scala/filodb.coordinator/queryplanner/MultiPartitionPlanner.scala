@@ -111,7 +111,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         prevPartitionStart = startMs
         val endMs = if (isInstantQuery) queryParams.endSecs * 1000 else p.timeRange.endMs + offsetMs
         logger.debug(s"partitionInfo=$p; updated startMs=$startMs, endMs=$endMs")
-        if (p.partitionName.equals(localPartitionName))
+        if (partitions.size == 1 && p.partitionName.equals(localPartitionName))
           localPartitionPlanner.materialize(
             copyLogicalPlanWithUpdatedTimeRange(logicalPlan, TimeRange(startMs, endMs)), qContext)
         else {
