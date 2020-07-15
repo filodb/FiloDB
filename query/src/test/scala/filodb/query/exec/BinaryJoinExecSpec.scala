@@ -9,10 +9,10 @@ import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.exceptions.TestFailedException
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
-import filodb.memory.format.RowReader
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 
@@ -44,7 +44,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
         Map("__name__".utf8 -> s"someMetricLhs".utf8,
           "tag1".utf8 -> s"tag1-$i".utf8,
           "tag2".utf8 -> s"tag2-$i".utf8))
-      val rows: Iterator[RowReader] = data(i).iterator
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(i).iterator
     }
   }
 
@@ -54,7 +55,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
         Map("__name__".utf8 -> s"someMetricRhs".utf8,
           "tag1".utf8 -> samplesLhs(i).key.labelValues("tag1".utf8),
           "tag2".utf8 -> samplesLhs(i).key.labelValues("tag2".utf8)))
-      val rows: Iterator[RowReader] = data(i).iterator
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(i).iterator
     }
   }
 
@@ -65,7 +67,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
           "tag1".utf8 -> s"tag1-$i".utf8,
           "tag2".utf8 -> s"tag2-1".utf8,
           "job".utf8 -> s"somejob".utf8))
-      val rows: Iterator[RowReader] = data(i).iterator
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(i).iterator
     }
   }
 
@@ -75,7 +78,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
         Map("__name__".utf8 -> s"someMetricRhs".utf8,
           "tag1".utf8 -> s"tag1-$i".utf8,
           "job".utf8 -> s"somejob".utf8))
-      val rows: Iterator[RowReader] = data(i).iterator
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(i).iterator
     }
   }
 
@@ -145,7 +149,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
         Map("__name__".utf8 -> s"someMetricRhs".utf8,
           "tag1".utf8 -> "tag1-uniqueValue".utf8,
           "tag2".utf8 -> samplesLhs(2).key.labelValues("tag2".utf8))) // duplicate value
-      val rows: Iterator[RowReader] = data(2).iterator
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(2).iterator
     }
 
     val samplesRhs2 = scala.util.Random.shuffle(duplicate +: samplesRhs.toList) // they may come out of order
@@ -175,7 +180,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
         Map("__name__".utf8 -> s"someMetricRhs".utf8,
           "tag1".utf8 -> "tag1-uniqueValue".utf8,
           "tag2".utf8 -> samplesLhs(2).key.labelValues("tag2".utf8))) // duplicate value
-      val rows: Iterator[RowReader] = data(2).iterator
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(2).iterator
     }
 
     val samplesLhs2 = scala.util.Random.shuffle(duplicate +: samplesLhs.toList) // they may come out of order
@@ -270,7 +276,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
           Map("metric".utf8 -> s"someMetricLhs".utf8,
             "tag1".utf8 -> s"tag1-$i".utf8,
             "tag2".utf8 -> s"tag2-$i".utf8))
-        val rows: Iterator[RowReader] = data(i).iterator
+        import NoCloseCursor._
+        val rows: RangeVectorCursor = data(i).iterator
       }
     }
 
@@ -280,7 +287,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
           Map("metric".utf8 -> s"someMetricRhs".utf8,
             "tag1".utf8 -> samplesLhs(i).key.labelValues("tag1".utf8),
             "tag2".utf8 -> samplesLhs(i).key.labelValues("tag2".utf8)))
-        val rows: Iterator[RowReader] = data(i).iterator
+        import NoCloseCursor._
+        val rows: RangeVectorCursor = data(i).iterator
       }
     }
 
@@ -312,7 +320,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
           Map("metric".utf8 -> s"someMetricLhs".utf8,
             "tag1".utf8 -> s"tag1-$i".utf8,
             "tag2".utf8 -> s"tag2-$i".utf8))
-        val rows: Iterator[RowReader] = data(i).iterator
+        import NoCloseCursor._
+        val rows: RangeVectorCursor = data(i).iterator
       }
     }
 
@@ -322,7 +331,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
           Map("metric".utf8 -> s"someMetricRhs".utf8,
             "tag1".utf8 -> samplesLhs(i).key.labelValues("tag1".utf8),
             "tag2".utf8 -> samplesLhs(i).key.labelValues("tag2".utf8)))
-        val rows: Iterator[RowReader] = data(i).iterator
+        import NoCloseCursor._
+        val rows: RangeVectorCursor = data(i).iterator
       }
     }
 
@@ -348,5 +358,54 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
     }
 
     result.map(_.key).toSet.size shouldEqual 200
+  }
+
+  it("should throw BadQueryException - one-to-one with ignoring - cardinality limit 1") {
+    val queryContext = QueryContext(joinQueryCardLimit = 1) // set join card limit to 1
+    val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.ADD,
+      Cardinality.OneToOne,
+      Nil, Seq("tag2"), Nil, "__name__")
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, samplesLhsGrouping.map(rv => SerializedRangeVector(rv, schema)))
+    // val lhs = QueryResult("someId", null, samplesLhs.filter(rv => rv.key.labelValues.get(ZeroCopyUTF8String("tag2")).get.equals("tag1-1")).map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhsGrouping.map(rv => SerializedRangeVector(rv, schema)))
+    // scalastyle:on
+
+    // actual query results into 2 rows. since limit is 1, this results in BadQueryException
+    val thrown = intercept[TestFailedException] {
+      execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
+        .toListL.runAsync.futureValue
+    }
+    thrown.getCause.getClass shouldEqual classOf[BadQueryException]
+    thrown.getCause.getMessage shouldEqual "This query results in more than 1 join cardinality." +
+      " Try applying more filters."
+  }
+
+  it("should throw BadQueryException - one-to-one with on - cardinality limit 1") {
+    val queryContext = QueryContext(joinQueryCardLimit = 1) // set join card limit to 1
+    val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.ADD,
+      Cardinality.OneToOne,
+      Seq("tag1", "job"), Nil, Nil, "__name__")
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, samplesLhsGrouping.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhsGrouping.map(rv => SerializedRangeVector(rv, schema)))
+    // scalastyle:on
+
+    // actual query results into 2 rows. since limit is 1, this results in BadQueryException
+    val thrown = intercept[TestFailedException] {
+      execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
+        .toListL.runAsync.futureValue
+    }
+    thrown.getCause.getClass shouldEqual classOf[BadQueryException]
+    thrown.getCause.getMessage shouldEqual "This query results in more than 1 join cardinality." +
+      " Try applying more filters."
   }
 }

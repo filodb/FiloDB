@@ -16,8 +16,8 @@ import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.store.{ChunkSet, ChunkSetInfo, ColumnStoreSpec, PartKeyRecord}
-import filodb.memory.BinaryRegionLarge
-import filodb.memory.format.UnsafeUtils
+import filodb.memory.{BinaryRegionLarge, NativeMemoryManager}
+import filodb.memory.format.{TupleRowReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
 
 class CassandraColumnStoreSpec extends ColumnStoreSpec {
@@ -26,6 +26,21 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
   lazy val session = new DefaultFiloSessionProvider(config.getConfig("cassandra")).session
   lazy val colStore = new CassandraColumnStore(config, s, session)
   lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"), session)
+
+  val nativeMemoryManager = new NativeMemoryManager(100000000L, Map.empty)
+  val promDataset = Dataset("prometheus", Schemas.gauge)
+
+  // First create the tables in C*
+  override def beforeAll(): Unit = {
+    super.beforeAll()
+    colStore.initialize(promDataset.ref, 1).futureValue
+    colStore.truncate(promDataset.ref, 1).futureValue
+  }
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    nativeMemoryManager.shutdown()
+  }
 
   "getScanSplits" should "return splits from Cassandra" in {
     // Single split, token_start should equal token_end
@@ -221,7 +236,42 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
 
     val parts = lz4ColStore.readRawPartitions(dataset.ref, 0.millis.toMillis, partScan).toListL.runAsync.futureValue
     parts should have length (1)
-    parts(0).chunkSets should have length (1)
-    parts(0).chunkSets(0).vectors.toSeq shouldEqual sourceChunks.head.chunks
+    parts(0).chunkSetsTimeOrdered should have length (1)
+    parts(0).chunkSetsTimeOrdered(0).vectors.toSeq shouldEqual sourceChunks.head.chunks
+  }
+
+  "getChunksByIngestionTimeRangeNoAsync" should "batch partitions properly" in {
+
+    val gaugeName = "my_gauge"
+    val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8)
+    val firstSampleTime = 74373042000L
+    val partBuilder = new RecordBuilder(nativeMemoryManager)
+    val ingestTime = 1594130687316L
+    val chunksets = for {
+      i <- 0 until 1050
+      partKey = partBuilder.partKeyFromObjects(Schemas.gauge, gaugeName + i, seriesTags)
+      c <- 0 until 3
+    } yield {
+      val rows = Seq(TupleRowReader((Some(firstSampleTime + c), Some(0.0d))))
+      ChunkSet(Schemas.gauge.data, partKey, ingestTime, rows, nativeMemoryManager)
+    }
+    colStore.write(promDataset.ref, Observable.fromIterable(chunksets)).futureValue
+
+    val batches = colStore.getChunksByIngestionTimeRangeNoAsync(
+      promDataset.ref,
+      colStore.getScanSplits(promDataset.ref).iterator,
+      ingestTime - 1,
+      ingestTime + 1,
+      firstSampleTime - 1,
+      firstSampleTime + 5,
+      10L,
+      100
+    ).toList
+
+    batches.size shouldEqual 11 // 100 rows per batch, 1050 rows => 11 batches
+    batches.zipWithIndex.foreach { case (b, i) =>
+      b.size shouldEqual (if (i == 10) 50 else 100)
+      b.foreach(_.chunkSetsTimeOrdered.size shouldEqual 3)
+    }
   }
 }

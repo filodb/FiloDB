@@ -9,7 +9,6 @@ import scala.util.Try
 
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
-import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
 import org.scalactic._
 
@@ -19,7 +18,7 @@ import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Column, Schemas}
-import filodb.core.query.{PromQlQueryParams, QueryContext, TsdbQueryParams, UnavailablePromQlQueryParams}
+import filodb.core.query._
 import filodb.core.store.ChunkSetInfoOnHeap
 import filodb.memory.MemFactory
 import filodb.memory.format.{BinaryVector, Classes, MemoryReader, RowReader}
@@ -266,7 +265,9 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
   def parseLabelValuesQuery(client: LocalClient, labelNames: Seq[String], constraints: Map[String, String], dataset: String,
                             timeParams: TimeRangeParams,
                             options: QOptions): Unit = {
-    val logicalPlan = LabelValues(labelNames, constraints, 3.days.toMillis)
+    // TODO support all filters
+    val filters = constraints.map { case (k, v) => ColumnFilter(k, Filter.Equals(v)) }.toSeq
+    val logicalPlan = LabelValues(labelNames, filters, timeParams.start * 1000, timeParams.end * 1000)
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 
@@ -275,8 +276,8 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
                       options: QOptions): Unit = {
     val logicalPlan = Parser.queryRangeToLogicalPlan(query, timeParams)
     // Routing is not supported with CLI
-    executeQuery2(client, dataset, logicalPlan, options, PromQlQueryParams(ConfigFactory.empty, query,timeParams.start, timeParams.step,
-      timeParams.end))
+    executeQuery2(client, dataset, logicalPlan, options,
+      PromQlQueryParams(query,timeParams.start, timeParams.step, timeParams.end))
   }
 
   def promFilterToPartKeyBr(query: String, schemaName: String): Unit = {

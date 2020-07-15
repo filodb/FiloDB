@@ -3,8 +3,6 @@ package filodb.core.query
 import java.util.UUID
 import java.util.concurrent.locks.Lock
 
-import com.typesafe.config.Config
-
 import filodb.core.{SpreadChange, SpreadProvider}
 
 trait TsdbQueryParams
@@ -13,8 +11,9 @@ trait TsdbQueryParams
   * This class provides PromQl query parameters
   * Config has routing parameters
   */
-case class PromQlQueryParams(config: Config, promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long,
-                             spread: Option[Int] = None, processFailure: Boolean = true) extends TsdbQueryParams
+case class PromQlQueryParams(promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long, spread: Option[Int] = None,
+                             remoteQueryPath: Option[String] = None, processFailure: Boolean = true,
+                             processMultiPartition: Boolean = false, verbose: Boolean = false) extends TsdbQueryParams
 case object UnavailablePromQlQueryParams extends TsdbQueryParams
 
 /**
@@ -24,6 +23,8 @@ final case class QueryContext(origQueryParams: TsdbQueryParams = UnavailableProm
                               spreadOverride: Option[SpreadProvider] = None,
                               queryTimeoutMillis: Int = 30000,
                               sampleLimit: Int = 1000000,
+                              groupByCardLimit: Int = 100000,
+                              joinQueryCardLimit: Int = 100000,
                               shardOverrides: Option[Seq[Int]] = None,
                               queryId: String = UUID.randomUUID().toString,
                               submitTime: Long = System.currentTimeMillis())
