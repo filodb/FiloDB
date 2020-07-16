@@ -78,7 +78,7 @@ final case class PeriodicSamplesMapper(start: Long,
                                        rv.asInstanceOf[RawDataRangeVector].publishInterval.getOrElse(0) else 0)
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorH(rv.asInstanceOf[RawDataRangeVector], startWithOffset, step, endWithOffset,
-                                     windowLength + windowPlusPubInt, rangeFuncGen().asChunkedH, querySession, histRow))
+                    windowPlusPubInt, rangeFuncGen().asChunkedH, querySession, histRow))
         }
       case c: ChunkedRangeFunction[_] =>
         source.map { rv =>
@@ -87,7 +87,7 @@ final case class PeriodicSamplesMapper(start: Long,
             rv.asInstanceOf[RawDataRangeVector].publishInterval.getOrElse(0) else 0)
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorD(rv.asInstanceOf[RawDataRangeVector], startWithOffset, step, endWithOffset,
-                                       windowLength + windowPlusPubInt, rangeFuncGen().asChunkedD, querySession))
+                    windowPlusPubInt, rangeFuncGen().asChunkedD, querySession))
         }
       // Iterator-based: Wrap long columns to yield a double value
       case f: RangeFunction if valColType == ColumnType.LongColumn =>
@@ -96,7 +96,7 @@ final case class PeriodicSamplesMapper(start: Long,
             rv.asInstanceOf[RawDataRangeVector].publishInterval.getOrElse(0) else 0)
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), startWithOffset, step, endWithOffset,
-              windowLength + windowPlusPubInt, rangeFuncGen().asSliding, querySession.queryConfig))
+              windowPlusPubInt, rangeFuncGen().asSliding, querySession.queryConfig))
         }
       // Otherwise just feed in the double column
       case f: RangeFunction =>
@@ -104,7 +104,7 @@ final case class PeriodicSamplesMapper(start: Long,
           val windowPlusPubInt = windowLength + (if (functionId.exists(_.onCumulCounter) && addPublishIntervalToWindow)
             rv.asInstanceOf[RawDataRangeVector].publishInterval.getOrElse(0) else 0)
           IteratorBackedRangeVector(rv.key,
-            new SlidingWindowIterator(rv.rows, startWithOffset, step, endWithOffset, windowLength + windowPlusPubInt,
+            new SlidingWindowIterator(rv.rows, startWithOffset, step, endWithOffset, windowPlusPubInt,
               rangeFuncGen().asSliding, querySession.queryConfig))
         }
     }
