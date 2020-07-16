@@ -16,7 +16,7 @@ import filodb.query.exec
 
 class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures with BeforeAndAfter {
   after {
-    ChunkMap.validateNoSharedLocks("AbsentFunctionSpec", true)
+    ChunkMap.validateNoSharedLocks(true)
   }
 
   val config: Config = ConfigFactory.load("application_test.conf").getConfig("filodb")
