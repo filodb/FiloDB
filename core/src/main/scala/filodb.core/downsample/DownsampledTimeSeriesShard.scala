@@ -225,7 +225,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           val recs = partKeyIndex.partKeyRecordsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
           val partInfo = recs.headOption.map { pkRec =>
             val schema = RecordSchema.schemaID(pkRec.partKey, UnsafeUtils.arayOffset)
-            val pubInt = StepTagPubIntFinder.findPublishIntervalMs(pkRec.partKey, UnsafeUtils.arayOffset)
+            val pubInt = StepTagPubIntFinder.findPublishIntervalMs(schema, pkRec.partKey, UnsafeUtils.arayOffset)
             (schema, pubInt)
           }
 

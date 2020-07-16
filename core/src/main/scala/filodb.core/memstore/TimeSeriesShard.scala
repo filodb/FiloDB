@@ -1430,12 +1430,12 @@ class TimeSeriesShard(val ref: DatasetRef,
         partKeyIndex.partKeyFromPartId(partID).map { pkBytesRef =>
           val unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(pkBytesRef.offset)
           val schemaId = RecordSchema.schemaID(pkBytesRef.bytes, unsafeKeyOffset)
-          val pubInt = StepTagPubIntFinder.findPublishIntervalMs(pkBytesRef.bytes, unsafeKeyOffset)
+          val pubInt = StepTagPubIntFinder.findPublishIntervalMs(schemaId, pkBytesRef.bytes, unsafeKeyOffset)
           (schemaId, pubInt)
         }.getOrElse(throw new IllegalArgumentException(s"Part Id $partID not present in index"))
       case p: TimeSeriesPartition =>
         val schemaId = p.schema.schemaHash
-        val pubInt = StepTagPubIntFinder.findPublishIntervalMs(p.partKeyBase, p.partKeyOffset)
+        val pubInt = StepTagPubIntFinder.findPublishIntervalMs(schemaId, p.partKeyBase, p.partKeyOffset)
         (schemaId, pubInt)
     }
   }
