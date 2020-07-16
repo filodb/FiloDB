@@ -33,7 +33,7 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfter wit
   protected val tsBufferPool2 = new WriteBufferPool(TestData.nativeMem, downsampleSchema.data, storeConf)
 
   after {
-    ChunkMap.validateNoSharedLocks(getClass().toString(), true)
+    ChunkMap.validateNoSharedLocks(true)
   }
 
   override def afterAll(): Unit = {
