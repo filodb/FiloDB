@@ -12,7 +12,8 @@ trait TimeUnits {
     * d - days
     * w - weeks
     * y - years
-    */
+    * i - factor of step (aka interval)
+    * */
 
   sealed trait TimeUnit {
     def millis(step: Long): Long
@@ -43,7 +44,10 @@ trait TimeUnits {
   }
 
   case object IntervalFactor extends TimeUnit {
-    override def millis(step: Long): Long = step
+    override def millis(step: Long): Long = {
+      require(step > 0, "Interval factor notation was used to indicate lookback/range without valid step")
+      step
+    }
   }
 
   case class Duration(scale: Int, timeUnit: TimeUnit) {

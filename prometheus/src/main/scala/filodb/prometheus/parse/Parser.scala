@@ -350,9 +350,9 @@ object Parser extends Expression {
     }
   }
 
-  def queryToLogicalPlan(query: String, queryTimestamp: Long): LogicalPlan = {
-    // step does not matter here in instant query - just use a dummy value more than minStep
-    val defaultQueryParams = TimeStepParams(queryTimestamp, 1000, queryTimestamp)
+  def queryToLogicalPlan(query: String, queryTimestamp: Long, step: Long): LogicalPlan = {
+    // Remember step matters here in instant query, when lookback is provided in step factor notation as in [5i]
+    val defaultQueryParams = TimeStepParams(queryTimestamp, step, queryTimestamp)
     queryRangeToLogicalPlan(query, defaultQueryParams)
   }
 
