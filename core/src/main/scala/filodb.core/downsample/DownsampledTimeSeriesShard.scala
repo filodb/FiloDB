@@ -223,15 +223,12 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           // is expensive, but we do it to handle data sizing for metrics that have
           // continuous churn. See capDataScannedPerShardCheck method.
           val recs = partKeyIndex.partKeyRecordsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
-          val partInfo = recs.headOption.map { pkRec =>
-            val schema = RecordSchema.schemaID(pkRec.partKey, UnsafeUtils.arayOffset)
-            val pubInt = StepTagPubIntFinder.findPublishIntervalMs(schema, pkRec.partKey, UnsafeUtils.arayOffset)
-            (schema, pubInt)
+          val _schema = recs.headOption.map { pkRec =>
+            RecordSchema.schemaID(pkRec.partKey, UnsafeUtils.arayOffset)
           }
-
           stats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
           PartLookupResult(shardNum, chunkMethod, debox.Buffer.empty,
-            partInfo.map(_._1), partInfo.flatMap(_._2), debox.Map.empty, debox.Buffer.empty, recs)
+            _schema, debox.Map.empty, debox.Buffer.empty, recs)
         } else {
           throw new UnsupportedOperationException("Cannot have empty filters")
         }

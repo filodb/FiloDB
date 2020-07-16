@@ -162,6 +162,7 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
                                        endMs: Long,
                                        window: Long,
                                        function: RangeFunctionId,
+                                       intervalFactorLookbackUsed: Boolean = false,
                                        functionArgs: Seq[FunctionArgsPlan] = Nil,
                                        offsetMs: Option[Long] = None) extends PeriodicSeriesPlan
   with NonLeafLogicalPlan {

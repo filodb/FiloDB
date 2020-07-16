@@ -72,14 +72,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
                                                   Some(sch), Some(lookupRes),
                                                   schema.isDefined, colIDs)
             qLogger.debug(s"Discovered schema ${sch.name} and created inner plan $newPlan")
-            newxformers.foreach { xf =>
-              xf match {
-                case p: PeriodicSamplesMapper =>
-                  p.pubInt = lookupRes.firstSchemaPublishInterval
-                case _ =>
-              }
-              newPlan.addRangeVectorTransformer(xf)
-            }
+            newxformers.foreach { xf => newPlan.addRangeVectorTransformer(xf) }
             newPlan
           }.getOrElse {
             qLogger.debug(s"No time series found for filters $filters... employing empty plan")

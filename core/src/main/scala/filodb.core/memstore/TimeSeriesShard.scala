@@ -188,7 +188,6 @@ case class PartLookupResult(shard: Int,
                             chunkMethod: ChunkScanMethod,
                             partsInMemory: debox.Buffer[Int],
                             firstSchemaId: Option[Int] = None,
-                            firstSchemaPublishInterval: Option[Int] = None,
                             partIdsMemTimeGap: debox.Map[Int, Long] = debox.Map.empty,
                             partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty,
                             pkRecords: Seq[PartKeyLuceneIndexRecord] = Seq.empty)
@@ -1424,19 +1423,14 @@ class TimeSeriesShard(val ref: DatasetRef,
     part.map(_.asInstanceOf[TimeSeriesPartition])
   }
 
-  protected def schemaIDAndPubIntFromPartID(partID: Int): (Int, Option[Int]) = {
+  protected def schemaIDFromPartID(partID: Int): Int = {
     partitions.get(partID) match {
       case TimeSeriesShard.OutOfMemPartition =>
         partKeyIndex.partKeyFromPartId(partID).map { pkBytesRef =>
           val unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(pkBytesRef.offset)
-          val schemaId = RecordSchema.schemaID(pkBytesRef.bytes, unsafeKeyOffset)
-          val pubInt = StepTagPubIntFinder.findPublishIntervalMs(schemaId, pkBytesRef.bytes, unsafeKeyOffset)
-          (schemaId, pubInt)
-        }.getOrElse(throw new IllegalArgumentException(s"Part Id $partID not present in index"))
-      case p: TimeSeriesPartition =>
-        val schemaId = p.schema.schemaHash
-        val pubInt = StepTagPubIntFinder.findPublishIntervalMs(schemaId, p.partKeyBase, p.partKeyOffset)
-        (schemaId, pubInt)
+          RecordSchema.schemaID(pkBytesRef.bytes, unsafeKeyOffset)
+        }.getOrElse(-1)
+      case p: TimeSeriesPartition => p.schema.schemaHash
     }
   }
 
@@ -1470,7 +1464,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
         // first find out which partitions are being queried for data not in memory
         val firstPartId = if (matches.isEmpty) None else Some(matches(0))
-        val partInfo = firstPartId.map(schemaIDAndPubIntFromPartID)
+        val _schema = firstPartId.map(schemaIDFromPartID)
         val it1 = InMemPartitionIterator2(matches)
         val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
         val partIdsNotInMem = it1.skippedPartIDs
@@ -1489,8 +1483,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         }
         // now provide an iterator that additionally supplies the startTimes for
         // those partitions that may need to be paged
-        PartLookupResult(shardNum, chunkMethod, matches, partInfo.map(_._1), partInfo.flatMap(_._2),
-          startTimes, partIdsNotInMem)
+        PartLookupResult(shardNum, chunkMethod, matches, _schema, startTimes, partIdsNotInMem)
     }
   }
 
