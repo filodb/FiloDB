@@ -324,7 +324,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
       TimeStepParams(nowSeconds, 1.minute.toSeconds, nowSeconds))
 
     val ep = planner.materialize(logicalPlan, QueryContext()).asInstanceOf[LocalPartitionReduceAggregateExec]
-    val psm = ep.children.head.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    val psm = ep.children.head.asInstanceOf[MultiSchemaPartitionsExec]
       .rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
     psm.start shouldEqual (nowSeconds * 1000)
     psm.end shouldEqual (nowSeconds * 1000)
