@@ -176,14 +176,14 @@ trait Functions extends Base with Operators with Vectors {
 
           PeriodicSeriesWithWindowing(instantExpression.toRawSeriesPlan(timeParams),
             timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000, 0,
-            rangeFunctionId, otherParams, instantExpression.offset.map(_.millis))
+            rangeFunctionId, otherParams, instantExpression.offset.map(_.millis(Some(timeParams.step * 1000))))
         } else {
           val rangeExpression = seriesParam.asInstanceOf[RangeExpression]
           PeriodicSeriesWithWindowing(
             rangeExpression.toSeriesPlan(timeParams, isRoot = false),
             timeParams.start * 1000 , timeParams.step * 1000, timeParams.end * 1000,
-            rangeExpression.window.millis,
-            rangeFunctionId, otherParams, rangeExpression.offset.map(_.millis))
+            rangeExpression.window.millis(Some(timeParams.step * 1000)),
+            rangeFunctionId, otherParams, rangeExpression.offset.map(_.millis(Some(timeParams.step * 1000))))
         }
       }
     }

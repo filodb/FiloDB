@@ -123,8 +123,9 @@ trait Unit extends BaseParser {
 
   lazy val year = "y" ^^ (_ => Year)
 
-  lazy val timeUnit = second | minute | hour | day | week | year
+  lazy val interval = "i" ^^ (_ => IntervalFactor)
 
+  lazy val timeUnit = second | minute | hour | day | week | year | interval
 
   lazy val duration: PackratParser[Duration] = wholeNumber ~ timeUnit ^^ {
     case d ~ tu => Duration(Integer.parseInt(d), tu)
@@ -320,8 +321,6 @@ object Parser extends Expression {
   override lazy val skipWhitespace: Boolean = true
 
   override val whiteSpace = "[ \t\r\f\n]+".r
-
-  val FiveMinutes = Duration(5, Minute).millis
 
   def parseQuery(query: String): Expression = {
     parseAll(expression, query) match {

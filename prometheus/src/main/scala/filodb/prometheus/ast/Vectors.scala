@@ -169,12 +169,11 @@ trait Vectors extends Scalars with TimeUnits with Base {
     * It is possible to filter these time series further by
     * appending a set of labels to match in curly braces ({}).
     */
-  case class InstantExpression(val metricName: Option[String],
-                               val labelSelection: Seq[LabelMatch],
+  case class InstantExpression(metricName: Option[String],
+                               labelSelection: Seq[LabelMatch],
                                offset: Option[Duration]) extends Vector with PeriodicSeries {
 
     import WindowConstants._
-    val offsetMillis : Long = offset.map(_.millis).getOrElse(0)
 
     private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
@@ -183,9 +182,9 @@ trait Vectors extends Scalars with TimeUnits with Base {
       // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
       val ps = PeriodicSeries(
         RawSeries(timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
-          offset.map(_.millis)),
+          offset.map(_.millis(Some(timeParams.step * 1000)))),
         timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
-        offset.map(_.millis)
+        offset.map(_.millis(Some(timeParams.step * 1000)))
       )
       bucketOpt.map { bOpt =>
         // It's a fixed value, the range params don't matter at all
@@ -211,8 +210,8 @@ trait Vectors extends Scalars with TimeUnits with Base {
     * at the end of a vector selector to specify how far back in time values
     * should be fetched for each resulting range vector element.
     */
-  case class RangeExpression(val metricName: Option[String],
-                             val labelSelection: Seq[LabelMatch],
+  case class RangeExpression(metricName: Option[String],
+                             labelSelection: Seq[LabelMatch],
                              window: Duration,
                              offset: Option[Duration]) extends Vector with SimpleSeries {
 
@@ -223,8 +222,9 @@ trait Vectors extends Scalars with TimeUnits with Base {
         throw new UnsupportedOperationException("Range expression is not allowed in query_range")
       }
       // multiply by 1000 to convert unix timestamp in seconds to millis
-      val rs = RawSeries(timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(window.millis),
-        offset.map(_.millis))
+      val rs = RawSeries(timeParamToSelector(timeParams), columnFilters, column.toSeq,
+        Some(window.millis(Some(timeParams.step * 1000))),
+        offset.map(_.millis(Some(timeParams.step * 1000))))
       bucketOpt.map { bOpt =>
         // It's a fixed value, the range params don't matter at all
         val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))

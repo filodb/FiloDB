@@ -29,7 +29,8 @@ final case class PeriodicSamplesMapper(start: Long,
                                        queryContext: QueryContext,
                                        funcParams: Seq[FuncArgs] = Nil,
                                        offsetMs: Option[Long] = None,
-                                       rawSource: Boolean = true) extends RangeVectorTransformer {
+                                       rawSource: Boolean = true,
+                                       var pubInt: Option[Int] = None) extends RangeVectorTransformer {
   require(start <= end, s"start $start should be <= end $end")
   require(step > 0, s"step $step should be > 0")
 
@@ -67,7 +68,10 @@ final case class PeriodicSamplesMapper(start: Long,
     // Really, use the stale lookback window size, not 0 which doesn't make sense
     // Default value for window  should be queryConfig.staleSampleAfterMs + 1 for empty functionId,
     // so that it returns value present at time - staleSampleAfterMs
-    val windowLength = window.getOrElse(if (isLastFn) querySession.queryConfig.staleSampleAfterMs + 1 else 0L)
+    val windowLength = {
+      val w = window.getOrElse(if (isLastFn) querySession.queryConfig.staleSampleAfterMs + 1 else 0L)
+      w + (if (functionId.exists(_.onCumulCounter)) pubInt.getOrElse(0) else 0)
+    }
 
     val rvs = sampleRangeFunc match {
       case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
@@ -89,13 +93,13 @@ final case class PeriodicSamplesMapper(start: Long,
         source.map { rv =>
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), startWithOffset, step, endWithOffset,
-              window.getOrElse(0L), rangeFuncGen().asSliding, querySession.queryConfig))
+              windowLength, rangeFuncGen().asSliding, querySession.queryConfig))
         }
       // Otherwise just feed in the double column
       case f: RangeFunction =>
         source.map { rv =>
           IteratorBackedRangeVector(rv.key,
-            new SlidingWindowIterator(rv.rows, startWithOffset, step, endWithOffset, window.getOrElse(0L),
+            new SlidingWindowIterator(rv.rows, startWithOffset, step, endWithOffset, windowLength,
               rangeFuncGen().asSliding, querySession.queryConfig))
         }
     }

@@ -1,9 +1,11 @@
 package filodb.query.exec
 
+import enumeratum.EnumEntry
+
 import filodb.query.RangeFunctionId
 
 // Used for internal representations of RangeFunctions
-sealed trait InternalRangeFunction
+sealed abstract class InternalRangeFunction(val onCumulCounter: Boolean = false) extends EnumEntry
 
 object InternalRangeFunction {
   case object AvgOverTime extends InternalRangeFunction
@@ -22,7 +24,7 @@ object InternalRangeFunction {
 
   case object Idelta extends InternalRangeFunction
 
-  case object Increase extends InternalRangeFunction
+  case object Increase extends InternalRangeFunction(true)
 
   case object Irate extends InternalRangeFunction
 
@@ -34,7 +36,7 @@ object InternalRangeFunction {
 
   case object QuantileOverTime extends InternalRangeFunction
 
-  case object Rate extends InternalRangeFunction
+  case object Rate extends InternalRangeFunction(true)
 
   case object Resets extends InternalRangeFunction
 

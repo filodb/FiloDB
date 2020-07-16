@@ -110,6 +110,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
   def downsampleBatch(rawPartsBatch: Seq[RawPartData],
                       userTimeStart: Long,
                       userTimeEndExclusive: Long): Unit = {
+    val batchSpan = Kamon.spanBuilder("downsample-batch-latency").start()
     DownsamplerContext.dsLogger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
       s"rawDataset=${settings.rawDatasetName} for " +
       s"userTimeStart=${java.time.Instant.ofEpochMilli(userTimeStart)} " +
@@ -157,6 +158,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
       numBatchesFailed.increment()
       throw e // will be logged by spark
     } finally {
+      batchSpan.finish()
       offHeapMem.free()   // free offheap mem
       pagedPartsToFree.clear()
       downsampledPartsToFree.clear()
