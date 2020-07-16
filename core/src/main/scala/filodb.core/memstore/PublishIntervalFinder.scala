@@ -5,11 +5,11 @@ import filodb.core.metadata.Schemas
 import filodb.memory.{UTF8StringMedium, UTF8StringShort}
 import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
 
-trait PubIntFinder {
+trait PublishIntervalFinder {
   def findPublishIntervalMs(pkSchemaId: Int, pkBase: Any, pkOffset: Long): Option[Int]
 }
 
-object StepTagPubIntFinder extends PubIntFinder {
+object StepTagPublishIntervalFinder extends PublishIntervalFinder {
 
   import UTF8Str._
   val stepTag = "_step_".utf8
