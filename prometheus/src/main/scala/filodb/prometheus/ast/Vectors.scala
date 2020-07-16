@@ -182,9 +182,9 @@ trait Vectors extends Scalars with TimeUnits with Base {
       // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
       val ps = PeriodicSeries(
         RawSeries(timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
-          offset.map(_.millis(Some(timeParams.step * 1000)))),
+          offset.map(_.millis(timeParams.step * 1000))),
         timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
-        offset.map(_.millis(Some(timeParams.step * 1000)))
+        offset.map(_.millis(timeParams.step * 1000))
       )
       bucketOpt.map { bOpt =>
         // It's a fixed value, the range params don't matter at all
@@ -223,8 +223,8 @@ trait Vectors extends Scalars with TimeUnits with Base {
       }
       // multiply by 1000 to convert unix timestamp in seconds to millis
       val rs = RawSeries(timeParamToSelector(timeParams), columnFilters, column.toSeq,
-        Some(window.millis(Some(timeParams.step * 1000))),
-        offset.map(_.millis(Some(timeParams.step * 1000))))
+        Some(window.millis(timeParams.step * 1000)),
+        offset.map(_.millis(timeParams.step * 1000)))
       bucketOpt.map { bOpt =>
         // It's a fixed value, the range params don't matter at all
         val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
