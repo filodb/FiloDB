@@ -14,7 +14,7 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
   val now = System.currentTimeMillis()
   // stddev higher than mean to simulate skipped samples
   val samples = generateRandomRawCounterSeries(2000, 20000, 25000, now)
-  val rv = timeValueRV(samples)
+  val rv = timeValueRVPk(samples)
   val w = 5.minutes.toMillis     // window size = lookback time
 
   val chunkedLSFunc = new LastSampleChunkedFunctionD
@@ -62,7 +62,7 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
     // note std dev for interval between reported samples is 5 mins
     val samplesWithLongGap = Seq((59725569L, 1.524759725569E12), (60038121L, 1.524760038121E12),
                 (60370409L, 1.524760370409E12), (60679268L, 1.524760679268E12), (60988895L, 1.524760988895E12))
-    val rvWithLongGap = timeValueRV(samplesWithLongGap)
+    val rvWithLongGap = timeValueRVPk(samplesWithLongGap)
     val start = 60330762L
     val end = 63030762L
     val step = 60000
@@ -77,7 +77,7 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
   it ("should return NaN when no reported samples for more than 5 minutes - test case 2 dynamic samples ") {
     // note std dev for interval between reported samples is 5 mins
     val samplesWithLongGap = generateRandomRawCounterSeries(5, 300.seconds.toMillis, 50000, now)
-    val rvWithLongGap = timeValueRV(samplesWithLongGap)
+    val rvWithLongGap = timeValueRVPk(samplesWithLongGap)
     val start = now + 300.seconds.toMillis
     val end = now + 300.seconds.toMillis * 10
     val step = 60000
@@ -92,7 +92,7 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
   it ("should return NaN when no reported samples for more than 5 minutes - test case 3 with more samples") {
     // note std dev for interval between reported samples is 5 mins
     val samplesWithLongGap = generateRandomRawCounterSeries(5000, 300.seconds.toMillis, 50000, now)
-    val rvWithLongGap = timeValueRV(samplesWithLongGap)
+    val rvWithLongGap = timeValueRVPk(samplesWithLongGap)
     val start = now + 300.seconds.toMillis
     val end = now + 300.seconds.toMillis * 10
     val step = 60000

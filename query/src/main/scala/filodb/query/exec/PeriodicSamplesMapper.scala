@@ -20,6 +20,9 @@ import filodb.query.util.IndexedArrayQueue
   * regular interval from start to end, with step as
   * interval. At the same time, it can optionally apply a range vector function
   * to time windows of indicated length.
+  *
+  * @param stepFactorNotationUsed if counter based range function is used, and this flag is
+  *                               enabled, then publish interval is padded to lookback window length
   */
 final case class PeriodicSamplesMapper(start: Long,
                                        step: Long,
@@ -27,7 +30,7 @@ final case class PeriodicSamplesMapper(start: Long,
                                        window: Option[Long],
                                        functionId: Option[InternalRangeFunction],
                                        queryContext: QueryContext,
-                                       addPublishIntervalToWindow: Boolean = false,
+                                       stepFactorNotationUsed: Boolean = false,
                                        funcParams: Seq[FuncArgs] = Nil,
                                        offsetMs: Option[Long] = None,
                                        rawSource: Boolean = true) extends RangeVectorTransformer {
@@ -74,26 +77,35 @@ final case class PeriodicSamplesMapper(start: Long,
       case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
         source.map { rv =>
           val histRow = if (hasMaxCol) new TransientHistMaxRow() else new TransientHistRow()
-          val windowPlusPubInt = windowLength + (if (functionId.exists(_.onCumulCounter) && addPublishIntervalToWindow)
-                                       rv.asInstanceOf[RawDataRangeVector].publishInterval.getOrElse(0) else 0)
+          val rdrv = rv.asInstanceOf[RawDataRangeVector]
+          val pubInt =
+            if (functionId.exists(_.onCumulCounter) && stepFactorNotationUsed) rdrv.publishInterval.getOrElse(0L)
+            else 0L
+          val windowPlusPubInt = windowLength + pubInt
           IteratorBackedRangeVector(rv.key,
-            new ChunkedWindowIteratorH(rv.asInstanceOf[RawDataRangeVector], startWithOffset, step, endWithOffset,
+            new ChunkedWindowIteratorH(rdrv, startWithOffset, step, endWithOffset,
                     windowPlusPubInt, rangeFuncGen().asChunkedH, querySession, histRow))
         }
       case c: ChunkedRangeFunction[_] =>
         source.map { rv =>
           qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, step=$step windowLength=$windowLength")
-          val windowPlusPubInt = windowLength + (if (functionId.exists(_.onCumulCounter) && addPublishIntervalToWindow)
-            rv.asInstanceOf[RawDataRangeVector].publishInterval.getOrElse(0) else 0)
+          val rdrv = rv.asInstanceOf[RawDataRangeVector]
+          val pubInt =
+            if (functionId.exists(_.onCumulCounter) && stepFactorNotationUsed) rdrv.publishInterval.getOrElse(0L)
+            else 0L
+          val windowPlusPubInt = windowLength + pubInt
           IteratorBackedRangeVector(rv.key,
-            new ChunkedWindowIteratorD(rv.asInstanceOf[RawDataRangeVector], startWithOffset, step, endWithOffset,
+            new ChunkedWindowIteratorD(rdrv, startWithOffset, step, endWithOffset,
                     windowPlusPubInt, rangeFuncGen().asChunkedD, querySession))
         }
       // Iterator-based: Wrap long columns to yield a double value
       case f: RangeFunction if valColType == ColumnType.LongColumn =>
         source.map { rv =>
-          val windowPlusPubInt = windowLength + (if (functionId.exists(_.onCumulCounter) && addPublishIntervalToWindow)
-            rv.asInstanceOf[RawDataRangeVector].publishInterval.getOrElse(0) else 0)
+          val rdrv = rv.asInstanceOf[RawDataRangeVector]
+          val pubInt =
+            if (functionId.exists(_.onCumulCounter) && stepFactorNotationUsed) rdrv.publishInterval.getOrElse(0L)
+            else 0L
+          val windowPlusPubInt = windowLength + pubInt
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), startWithOffset, step, endWithOffset,
               windowPlusPubInt, rangeFuncGen().asSliding, querySession.queryConfig))
@@ -101,8 +113,11 @@ final case class PeriodicSamplesMapper(start: Long,
       // Otherwise just feed in the double column
       case f: RangeFunction =>
         source.map { rv =>
-          val windowPlusPubInt = windowLength + (if (functionId.exists(_.onCumulCounter) && addPublishIntervalToWindow)
-            rv.asInstanceOf[RawDataRangeVector].publishInterval.getOrElse(0) else 0)
+          val rdrv = rv.asInstanceOf[RawDataRangeVector]
+          val pubInt =
+            if (functionId.exists(_.onCumulCounter) && stepFactorNotationUsed) rdrv.publishInterval.getOrElse(0L)
+            else 0L
+          val windowPlusPubInt = windowLength + pubInt
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(rv.rows, startWithOffset, step, endWithOffset, windowPlusPubInt,
               rangeFuncGen().asSliding, querySession.queryConfig))

@@ -237,7 +237,7 @@ final case class RawDataRangeVector(key: RangeVectorKey,
   // the query engine is based around one main data column to query, so it will always be the second column passed in
   def valueColID: Int = columnIDs(1)
 
-  def publishInterval: Option[Int] = StepTagPublishIntervalFinder.findPublishIntervalMs(
+  def publishInterval: Option[Long] = StepTagPublishIntervalFinder.findPublishIntervalMs(
                                           partition.schema.partition.hash,
                                           partition.partKeyBase, partition.partKeyOffset)
 }

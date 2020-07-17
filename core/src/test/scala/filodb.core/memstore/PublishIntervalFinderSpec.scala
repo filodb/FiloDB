@@ -24,7 +24,7 @@ class PublishIntervalFinderSpec  extends FunSpec with Matchers with ScalaFutures
     val pubInt = StepTagPublishIntervalFinder.findPublishIntervalMs(
       Schemas.promCounter.partition.hash, UnsafeUtils.ZeroArray,
       partKey)
-    pubInt shouldEqual Some(10000)
+    pubInt shouldEqual Some(10000L)
   }
 
   it ("should extract return None for step tag for publish interval when absent") {
