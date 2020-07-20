@@ -197,7 +197,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
     if (rawPartSchema == Schemas.UnknownSchema) throw UnknownSchemaQueryErr(rawSchemaId)
     rawPartSchema.downsample match {
       case Some(downsampleSchema) =>
-        val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0, rawPart)
+        val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0, rawPart, None)
         DownsamplerContext.dsLogger.debug(s"Downsampling partition ${rawReadablePart.stringPartition}")
         val bufferPool = offHeapMem.bufferPools(rawPartSchema.downsample.get.schemaHash)
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
