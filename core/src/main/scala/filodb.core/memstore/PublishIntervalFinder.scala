@@ -10,17 +10,15 @@ trait PublishIntervalFinder {
 }
 
 object StepTagPublishIntervalFinder extends PublishIntervalFinder {
-
-  import UTF8Str._
-  val stepTag = "_step_".utf8
+  val (stepBase, stepOffset) = UTF8StringShort.apply("_step_")
 
   override def findPublishIntervalMs(pkSchemaId: Int, pkBase: Any, pkOffset: Long): Option[Long] = {
     var result: Option[Long] = None
     if (pkSchemaId == Schemas.global.part.hash) {
       val consumer = new MapItemConsumer {
         override def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
-          val keyUtf8 = new UTF8Str(keyBase, keyOffset + 1, UTF8StringShort.numBytes(keyBase, keyOffset))
-          if (keyUtf8 == stepTag) {
+          val isStepTag = UTF8StringShort.matchAt(keyBase, keyOffset, stepBase, stepOffset, 0)
+          if (isStepTag) {
             val str = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
             result = Some(str.toString.toLong * 1000) // step tag unit is seconds
           }

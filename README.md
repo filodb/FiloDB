@@ -494,6 +494,45 @@ One major difference FiloDB has from the Prometheus data model is that FiloDB su
 
 FiloDB offers an improved accuracy `histogram_max_quantile` function designed to work with a max column from the source.  If clients are able to send the max value captured during a window, then we can report more accurate upper quantiles (ie 99%, 99.9%, etc.) that do not suffer from clipping.
 
+### Step & Lookback PromQL Improvements
+
+The value provided within square brackets in the Range Vector Selector expression of the PromQL expression
+is commonly known as "range" or "lookback". It indicates how far behind each instant
+the query engine will lookback to normalize the value for any given instant.
+
+**Problem 1:** PromQL has an important gotcha on range value. Hard coded lookback
+can yield to queries with unintended effects. Lets consider the expression `rate(foo[5m])`. The result
+of this query would have completely different meanings with different step values. Since step parameter
+typically is not controlled by user (as in Grafana), it can have silent negative effects. For example, if
+lookback becomes smaller than step because longer time range was chosen, then query silently drops samples.
+
+To alleviate this, we introduce a new range notation where lookback can be specified as a multiple of step.
+The notation `[1i]` would cause lookback to be 1 times step. Notation `[2i]` would make lookback as 2 times
+step and so on. This feature is in alignment with [MetricsQL](https://github.com/VictoriaMetrics/VictoriaMetrics/wiki/MetricsQL) FiloDB
+approach to solving this. 
+
+This notation will help users who do not know what range value to use in their queries. The `[1i]` should be a good
+default for all queries. 2 or more times step can be used when smoothing is needed.
+
+**Problem 2:** There is yet another gotcha that we solve. If step == lookback, lookback windows in consecutive instants
+become adjacent and non-overlapping. In the case of cumulative counters, where rate or increase is used, this can
+still yield to wrong results. The increase or decrease between the adjacent windows would be omitted from the query. 
+
+The solution that we have adopted to solve this is to extend the lookback window by the publish interval of the
+time series. The padding is done if the publish interval is supplied. The publish interval is supplied as an
+internal `_step_` tag within the time series tags. The intent here is to make it better over time. by making it
+a first class column in the partition key schema. 
+
+Important to note that the lookback padding happens **only** if step multiple notation was used in the PromQL expression.
+If a fixed range was used in the query, that value will be honored as such. This way, backward compatibility will
+always be retained.
+
+Examples
+* `sum_over_time(foo[5i])` with step = 10s will be equivalent to `sum_over_time(foo[50s])` , thus lookback = 5 * 10s
+* `sum_over_time(foo[1i])` with step = 10s will be equivalent to `sum_over_time(foo[10s])` , thus lookback = 1 * 10s
+* `rate(foo[1i])` with step = 60s and publishInterval = 10s will be equivalent to `rate(foo[70s])`, thus 
+lookback = 1 * 60s + 10s. Publish interval is padded when both counter functions and step-factor notation is used.
+
 ### Using the FiloDB HTTP API
 
 Please see the [HTTP API](doc/http_api.md) doc.
