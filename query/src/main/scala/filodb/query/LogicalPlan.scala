@@ -155,6 +155,8 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
   *
   * Applies a range function on raw windowed data (perhaps with instant function applied) before
   * sampling data at regular intervals.
+  * @param stepMultipleNotationUsed is true if promQL lookback used a step multiple notation
+  *                                 like foo{..}[3i]
   */
 case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
                                        startMs: Long,
@@ -162,7 +164,7 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
                                        endMs: Long,
                                        window: Long,
                                        function: RangeFunctionId,
-                                       intervalFactorLookbackUsed: Boolean = false,
+                                       stepMultipleNotationUsed: Boolean = false,
                                        functionArgs: Seq[FunctionArgsPlan] = Nil,
                                        offsetMs: Option[Long] = None) extends PeriodicSeriesPlan
   with NonLeafLogicalPlan {

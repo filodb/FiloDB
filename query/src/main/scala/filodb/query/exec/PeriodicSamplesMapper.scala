@@ -21,8 +21,8 @@ import filodb.query.util.IndexedArrayQueue
   * interval. At the same time, it can optionally apply a range vector function
   * to time windows of indicated length.
   *
-  * @param stepFactorNotationUsed if counter based range function is used, and this flag is
-  *                               enabled, then publish interval is padded to lookback window length
+  * @param stepMultipleNotationUsed if counter based range function is used, and this flag is
+  *                                 enabled, then publish interval is padded to lookback window length
   */
 final case class PeriodicSamplesMapper(start: Long,
                                        step: Long,
@@ -30,7 +30,7 @@ final case class PeriodicSamplesMapper(start: Long,
                                        window: Option[Long],
                                        functionId: Option[InternalRangeFunction],
                                        queryContext: QueryContext,
-                                       stepFactorNotationUsed: Boolean = false,
+                                       stepMultipleNotationUsed: Boolean = false,
                                        funcParams: Seq[FuncArgs] = Nil,
                                        offsetMs: Option[Long] = None,
                                        rawSource: Boolean = true) extends RangeVectorTransformer {
@@ -50,7 +50,7 @@ final case class PeriodicSamplesMapper(start: Long,
   protected[exec] def args: String = s"start=$start, step=$step, end=$end," +
     s" window=$window, functionId=$functionId, rawSource=$rawSource, offsetMs=$offsetMs"
 
- //scalastyle:off method.length
+ //scalastyle:off method.length cyclomatic.complexity
   def apply(source: Observable[RangeVector],
             querySession: QuerySession,
             limit: Int,
@@ -79,7 +79,7 @@ final case class PeriodicSamplesMapper(start: Long,
           val histRow = if (hasMaxCol) new TransientHistMaxRow() else new TransientHistRow()
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
           val pubInt =
-            if (functionId.exists(_.onCumulCounter) && stepFactorNotationUsed) rdrv.publishInterval.getOrElse(0L)
+            if (functionId.exists(_.onCumulCounter) && stepMultipleNotationUsed) rdrv.publishInterval.getOrElse(0L)
             else 0L
           val windowPlusPubInt = windowLength + pubInt
           IteratorBackedRangeVector(rv.key,
@@ -91,7 +91,7 @@ final case class PeriodicSamplesMapper(start: Long,
           qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, step=$step windowLength=$windowLength")
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
           val pubInt =
-            if (functionId.exists(_.onCumulCounter) && stepFactorNotationUsed) rdrv.publishInterval.getOrElse(0L)
+            if (functionId.exists(_.onCumulCounter) && stepMultipleNotationUsed) rdrv.publishInterval.getOrElse(0L)
             else 0L
           val windowPlusPubInt = windowLength + pubInt
           IteratorBackedRangeVector(rv.key,
@@ -101,10 +101,13 @@ final case class PeriodicSamplesMapper(start: Long,
       // Iterator-based: Wrap long columns to yield a double value
       case f: RangeFunction if valColType == ColumnType.LongColumn =>
         source.map { rv =>
-          val rdrv = rv.asInstanceOf[RawDataRangeVector]
-          val pubInt =
-            if (functionId.exists(_.onCumulCounter) && stepFactorNotationUsed) rdrv.publishInterval.getOrElse(0L)
-            else 0L
+          // TODO Old code not casting to RawDataRangeVector. Retaining that.
+          // Need to ensure that publishInterval is sent here too.
+          val pubInt = rv match {
+            case rvrd: RawDataRangeVector if (functionId.exists(_.onCumulCounter) && stepMultipleNotationUsed)
+                => rvrd.publishInterval.getOrElse(0L)
+            case _ => 0L
+          }
           val windowPlusPubInt = windowLength + pubInt
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), startWithOffset, step, endWithOffset,
@@ -113,10 +116,13 @@ final case class PeriodicSamplesMapper(start: Long,
       // Otherwise just feed in the double column
       case f: RangeFunction =>
         source.map { rv =>
-          val rdrv = rv.asInstanceOf[RawDataRangeVector]
-          val pubInt =
-            if (functionId.exists(_.onCumulCounter) && stepFactorNotationUsed) rdrv.publishInterval.getOrElse(0L)
-            else 0L
+          // TODO Old code not casting to RawDataRangeVector. Retaining that.
+          // Need to ensure that publishInterval is sent here too.
+          val pubInt = rv match {
+            case rvrd: RawDataRangeVector if (functionId.exists(_.onCumulCounter) && stepMultipleNotationUsed)
+            => rvrd.publishInterval.getOrElse(0L)
+            case _ => 0L
+          }
           val windowPlusPubInt = windowLength + pubInt
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(rv.rows, startWithOffset, step, endWithOffset, windowPlusPubInt,

@@ -286,7 +286,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     if (newStartMs <= lp.endMs) { // if there is an overlap between query and retention ranges
       val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
       series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs,
-        lp.endMs, window, Some(execRangeFn), qContext, lp.intervalFactorLookbackUsed,
+        lp.endMs, window, Some(execRangeFn), qContext, lp.stepMultipleNotationUsed,
         paramsExec, lp.offsetMs, rawSource)))
       series
     } else { // query is outside retention period, simply return empty result

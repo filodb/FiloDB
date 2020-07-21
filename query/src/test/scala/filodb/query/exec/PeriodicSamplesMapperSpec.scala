@@ -104,10 +104,10 @@ class PeriodicSamplesMapperSpec extends FunSpec with Matchers with ScalaFutures 
     )
 
     // step == lookback here
-    // stepFactorNotationUsed = true when step factor notation is used.
+    // stepMultipleNotationUsed = true when step factor notation is used.
     val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
       Some(400000L), Some(Increase), QueryContext(),
-      stepFactorNotationUsed = true, Nil, None)
+      stepMultipleNotationUsed = true, Nil, None)
     val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
       1000, resultSchema, Nil)
 
