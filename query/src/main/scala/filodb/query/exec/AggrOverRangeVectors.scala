@@ -62,7 +62,7 @@ final case class MultiPartitionReduceAggregateExec(queryContext: QueryContext,
                                                    aggrParams: Seq[Any]) extends ReduceAggregateExec {
   // overriden since it can reduce schemas with different vector lengths as long as the columns are same
   override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema =
-    IgnoreFixedVectorLenSchemaReducer.reduceSchema(rs, resp)
+    IgnoreFixedVectorLenAndColumnNamesSchemaReducer.reduceSchema(rs, resp)
 }
 
 

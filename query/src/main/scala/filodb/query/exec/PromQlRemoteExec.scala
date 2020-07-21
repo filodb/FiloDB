@@ -19,9 +19,10 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.memory.format.ZeroCopyUTF8String._
+import filodb.memory.format.vectors.{CustomBuckets, MutableHistogram}
 import filodb.query._
 
-trait RemoteExec extends LeafExecPlan {
+trait RemoteExec extends LeafExecPlan with StrictLogging {
 
   val params: PromQlQueryParams
 
@@ -74,8 +75,10 @@ trait RemoteExec extends LeafExecPlan {
         "step" -> params.stepSecs,
         "processFailure" -> params.processFailure,
         "processMultiPartition" -> params.processMultiPartition,
+        "histogramMap" -> "true",
         "verbose" -> params.verbose)
     if (params.spread.isDefined) finalUrlParams = finalUrlParams + ("spread" -> params.spread.get)
+    logger.debug("URLParams for RemoteExec:" + finalUrlParams)
     finalUrlParams
   }
 
@@ -89,16 +92,24 @@ case class PromQlRemoteExec(queryEndpoint: String,
                             params: PromQlQueryParams,
                             numberColumnRequired: Boolean = false) extends RemoteExec {
 
-  private val columns = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+  override def args: String = s"${params.toString}, queryEndpoint=$queryEndpoint, " +
+    s"requestTimeoutMs=$requestTimeoutMs, limit=${queryContext.sampleLimit}, " +
+    s"numberColumnRequired=${numberColumnRequired}"
+  private val defaultColumns = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo(if (numberColumnRequired) "number" else "value", ColumnType.DoubleColumn))
-  private val recSchema = SerializedRangeVector.toSchema(columns)
-  private val resultSchema = ResultSchema(columns, 1)
+ private val defaultRecSchema = SerializedRangeVector.toSchema(defaultColumns)
+  private val defaultResultSchema = ResultSchema(defaultColumns, 1)
+
+  val histColumns = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+    ColumnInfo("h", ColumnType.HistogramColumn))
+  val histRecSchema = SerializedRangeVector.toSchema(histColumns)
+  val histResultSchema = ResultSchema(histColumns, 1)
   private val builder = SerializedRangeVector.newBuilder()
 
   override val urlParams = Map("query" -> params.promQl)
 
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
-                     (implicit sched: Scheduler): Future[QueryResponse] = {
+                              (implicit sched: Scheduler): Future[QueryResponse] = {
     PromRemoteExec.httpGet(queryEndpoint, requestTimeoutMs, queryContext.submitTime, getUrlParams())
       .map { response =>
         response.unsafeBody match {
@@ -116,13 +127,34 @@ case class PromQlRemoteExec(queryEndpoint: String,
       .asChildOf(parentSpan)
       .tag("query-id", id)
       .start()
+
+    val queryResponse = if (data.result.isEmpty) {
+      logger.debug("PromQlRemoteExec generating empty QueryResult as result is empty")
+      QueryResult(id, ResultSchema.empty, Seq.empty)
+    } else {
+      val samples = data.result.head.values.getOrElse(Seq(data.result.head.value.get))
+      if (samples.isEmpty) {
+        logger.debug("PromQlRemoteExec generating empty QueryResult as samples is empty")
+        QueryResult(id, ResultSchema.empty, Seq.empty)
+      } else {
+        // Passing histogramMap = true so DataSampl will be HistSampl for histograms
+        if (samples.head.isInstanceOf[HistSampl]) genHistQueryResult(data, id)
+        else genDefaultQueryResult(data, id)
+      }
+    }
+    span.finish()
+    queryResponse
+  }
+
+
+  def genDefaultQueryResult(data: Data, id: String): QueryResult = {
     val rangeVectors = data.result.map { r =>
       val samples = r.values.getOrElse(Seq(r.value.get))
 
       val rv = new RangeVector {
         val row = new TransientRow()
 
-        override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map (m => m._1.utf8 -> m._2.utf8))
+        override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map(m => m._1.utf8 -> m._2.utf8))
 
         override def rows(): RangeVectorCursor = {
           import NoCloseCursor._
@@ -136,11 +168,42 @@ case class PromQlRemoteExec(queryEndpoint: String,
         override def numRows: Option[Int] = Option(samples.size)
 
       }
-      SerializedRangeVector(rv, builder, recSchema, printTree(useNewline = false))
+      SerializedRangeVector(rv, builder, defaultRecSchema, printTree(useNewline = false))
       // TODO: Handle stitching with verbose flag
     }
-    span.finish()
-    QueryResult(id, resultSchema, rangeVectors)
+    QueryResult(id, defaultResultSchema, rangeVectors)
+  }
+
+  def genHistQueryResult(data: Data, id: String): QueryResult = {
+
+    val rangeVectors = data.result.map { r =>
+      val samples = r.values.getOrElse(Seq(r.value.get))
+
+      val rv = new RangeVector {
+        val row = new TransientHistRow()
+
+        override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map(m => m._1.utf8 -> m._2.utf8))
+
+        override def rows(): RangeVectorCursor = {
+          import NoCloseCursor._
+
+          samples.iterator.collect { case v: HistSampl =>
+            row.setLong(0, v.timestamp * 1000)
+            val sortedBucketsWithValues = v.buckets.toArray.map(x => (x._1.toDouble, x._2)).sortBy(_._1)
+            val hist = MutableHistogram(CustomBuckets(sortedBucketsWithValues.map(_._1)),
+              sortedBucketsWithValues.map(_._2))
+            row.setValues(v.timestamp * 1000, hist)
+            row
+          }
+        }
+
+        override def numRows: Option[Int] = Option(samples.size)
+
+      }
+      SerializedRangeVector(rv, builder, histRecSchema, printTree(useNewline = false))
+      // TODO: Handle stitching with verbose flag
+    }
+    QueryResult(id, histResultSchema, rangeVectors)
   }
 
 }
