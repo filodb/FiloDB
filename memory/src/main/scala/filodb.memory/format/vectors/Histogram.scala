@@ -220,8 +220,9 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
    * If the scheme is different, then an approximation is used so that the resulting histogram has
    * an approximate sum of the individual distributions, with the original scheme.  Modifies itself.
    */
-  final def addNoCorrection(other: HistogramWithBuckets): Unit =
-    if (buckets == other.buckets) {
+  final def addNoCorrection(other: HistogramWithBuckets): Unit = {
+    // Allow addition when type of bucket is different
+    if (buckets.allBucketTops.sameElements(other.buckets.allBucketTops)) {
       // If it was NaN before, reset to 0 to sum another hist
       if (values(0).isNaN) java.util.Arrays.fill(values, 0.0)
       for { b <- 0 until numBuckets optimized } {
@@ -241,6 +242,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
       //   }
       // }
     }
+  }
 
   /**
    * Adds the values from another Histogram, making a monotonic correction to ensure correctness

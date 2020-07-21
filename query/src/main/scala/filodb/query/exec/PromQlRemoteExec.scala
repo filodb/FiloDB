@@ -97,7 +97,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
     s"numberColumnRequired=${numberColumnRequired}"
   private val defaultColumns = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo(if (numberColumnRequired) "number" else "value", ColumnType.DoubleColumn))
- private val defaultRecSchema = SerializedRangeVector.toSchema(defaultColumns)
+  private val defaultRecSchema = SerializedRangeVector.toSchema(defaultColumns)
   private val defaultResultSchema = ResultSchema(defaultColumns, 1)
 
   val histColumns = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
@@ -145,7 +145,6 @@ case class PromQlRemoteExec(queryEndpoint: String,
     span.finish()
     queryResponse
   }
-
 
   def genDefaultQueryResult(data: Data, id: String): QueryResult = {
     val rangeVectors = data.result.map { r =>

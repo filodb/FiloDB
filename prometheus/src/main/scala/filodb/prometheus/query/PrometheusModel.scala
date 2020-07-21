@@ -125,7 +125,8 @@ object PrometheusModel {
     }
   }
 
-  def toHistResult(srv: RangeVector, verbose: Boolean,
+  def toHistResult(srv: RangeVector,
+                   verbose: Boolean,
                    typ: QueryResultType,
                    processMultiPartition: Boolean = true): Result = {
     val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
