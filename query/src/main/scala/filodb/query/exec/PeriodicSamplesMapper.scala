@@ -50,7 +50,7 @@ final case class PeriodicSamplesMapper(start: Long,
   protected[exec] def args: String = s"start=$start, step=$step, end=$end," +
     s" window=$window, functionId=$functionId, rawSource=$rawSource, offsetMs=$offsetMs"
 
- //scalastyle:off method.length cyclomatic.complexity
+ //scalastyle:off method.length
   def apply(source: Observable[RangeVector],
             querySession: QuerySession,
             limit: Int,
@@ -78,10 +78,7 @@ final case class PeriodicSamplesMapper(start: Long,
         source.map { rv =>
           val histRow = if (hasMaxCol) new TransientHistMaxRow() else new TransientHistRow()
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
-          val pubInt =
-            if (functionId.exists(_.onCumulCounter) && stepMultipleNotationUsed) rdrv.publishInterval.getOrElse(0L)
-            else 0L
-          val windowPlusPubInt = windowLength + pubInt
+          val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorH(rdrv, startWithOffset, step, endWithOffset,
                     windowPlusPubInt, rangeFuncGen().asChunkedH, querySession, histRow))
@@ -90,10 +87,7 @@ final case class PeriodicSamplesMapper(start: Long,
         source.map { rv =>
           qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, step=$step windowLength=$windowLength")
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
-          val pubInt =
-            if (functionId.exists(_.onCumulCounter) && stepMultipleNotationUsed) rdrv.publishInterval.getOrElse(0L)
-            else 0L
-          val windowPlusPubInt = windowLength + pubInt
+          val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorD(rdrv, startWithOffset, step, endWithOffset,
                     windowPlusPubInt, rangeFuncGen().asChunkedD, querySession))
@@ -101,14 +95,7 @@ final case class PeriodicSamplesMapper(start: Long,
       // Iterator-based: Wrap long columns to yield a double value
       case f: RangeFunction if valColType == ColumnType.LongColumn =>
         source.map { rv =>
-          // TODO Old code not casting to RawDataRangeVector. Retaining that.
-          // Need to ensure that publishInterval is sent here too.
-          val pubInt = rv match {
-            case rvrd: RawDataRangeVector if (functionId.exists(_.onCumulCounter) && stepMultipleNotationUsed)
-                => rvrd.publishInterval.getOrElse(0L)
-            case _ => 0L
-          }
-          val windowPlusPubInt = windowLength + pubInt
+          val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), startWithOffset, step, endWithOffset,
               windowPlusPubInt, rangeFuncGen().asSliding, querySession.queryConfig))
@@ -116,14 +103,7 @@ final case class PeriodicSamplesMapper(start: Long,
       // Otherwise just feed in the double column
       case f: RangeFunction =>
         source.map { rv =>
-          // TODO Old code not casting to RawDataRangeVector. Retaining that.
-          // Need to ensure that publishInterval is sent here too.
-          val pubInt = rv match {
-            case rvrd: RawDataRangeVector if (functionId.exists(_.onCumulCounter) && stepMultipleNotationUsed)
-            => rvrd.publishInterval.getOrElse(0L)
-            case _ => 0L
-          }
-          val windowPlusPubInt = windowLength + pubInt
+          val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(rv.rows, startWithOffset, step, endWithOffset, windowPlusPubInt,
               rangeFuncGen().asSliding, querySession.queryConfig))
@@ -147,6 +127,25 @@ final case class PeriodicSamplesMapper(start: Long,
     }).getOrElse(rvs)
   }
   //scalastyle:on method.length
+
+  /**
+   * If a counter function is used (increase or rate) along with a step multiple notation,
+   * the idea is to extend lookback by one publish interval so that the increase between
+   * adjacent lookback windows is also accounted for. This error would be especially
+   * pronounced if [1i] notation was used and step == lookback.
+   */
+  private def extendLookback(rv: RangeVector, window: Long): Long = {
+    // TODO There is a code path is used by Histogram bucket extraction path where
+    // underlying vector need not be a RawDataRangeVector. For those cases, we may
+    // not able to reliably extend lookback.
+    // Much more thought and work needed - so punting the bug
+    val pubInt = rv match {
+      case rvrd: RawDataRangeVector if (functionId.exists(_.onCumulCounter) && stepMultipleNotationUsed)
+          => rvrd.publishInterval.getOrElse(0L)
+      case _ => 0L
+    }
+    window + pubInt
+  }
 
   // Transform source double or long to double schema
   override def schema(source: ResultSchema): ResultSchema = {
