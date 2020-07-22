@@ -127,8 +127,8 @@ trait Unit extends BaseParser {
 
   lazy val timeUnit = second | minute | hour | day | week | year | interval
 
-  lazy val duration: PackratParser[Duration] = wholeNumber ~ timeUnit ^^ {
-    case d ~ tu => Duration(Integer.parseInt(d), tu)
+  lazy val duration: PackratParser[Duration] = decimalNumber ~ timeUnit ^^ {
+    case d ~ tu => Duration(d.toDouble, tu)
   }
   lazy val offset: PackratParser[Offset] = OFFSET ~ duration ^^ {
     case ignore ~ t => Offset(t)

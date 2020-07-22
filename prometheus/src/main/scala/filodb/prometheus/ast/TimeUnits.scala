@@ -50,9 +50,9 @@ trait TimeUnits {
     }
   }
 
-  case class Duration(scale: Int, timeUnit: TimeUnit) {
+  case class Duration(scale: Double, timeUnit: TimeUnit) {
     if (scale <= 0) throw new IllegalArgumentException("Duration should be greater than zero")
-    def millis(step: Long): Long = scale * timeUnit.millis(step)
+    def millis(step: Long): Long = (scale * timeUnit.millis(step)).toLong
   }
 
   case class Offset(duration: Duration)

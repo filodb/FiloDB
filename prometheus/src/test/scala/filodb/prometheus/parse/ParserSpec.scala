@@ -430,6 +430,8 @@ class ParserSpec extends FunSpec with Matchers {
         "RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total::foo))),List(sum),Some(300000),None)",
       "http_requests_total offset 5m" ->
         "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),Some(300000)),1524855988000,1000000,1524855988000,Some(300000))",
+      "http_requests_total offset 0.5m" ->
+        "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),Some(30000)),1524855988000,1000000,1524855988000,Some(30000))",
       "http_requests_total{environment=~\"staging|testing|development\",method!=\"GET\"}" ->
         "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(environment,EqualsRegex(staging|testing|development)), ColumnFilter(method,NotEquals(GET)), ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None)",
 
@@ -515,9 +517,13 @@ class ParserSpec extends FunSpec with Matchers {
       "timestamp(http_requests_total)" -> "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,0,Timestamp,false,List(),None)",
       "sum:some_metric:dataset:1m{_ws_=\"demo\", _ns_=\"test\"}" -> "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(test)), ColumnFilter(__name__,Equals(sum:some_metric:dataset:1m))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None)",
       "1 + 2 * 3" -> "ScalarBinaryOperation(ADD,Left(1.0),Right(ScalarBinaryOperation(MUL,Left(2.0),Left(3.0),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))",
-      "sum(rate(foo{job=\"SNRT-App-0\"}[5i]))" -> "Aggregate(Sum,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(SNRT-App-0)), ColumnFilter(__name__,Equals(foo))),List(),Some(5000000),None),1524855988000,1000000,1524855988000,5000000,Rate,true,List(),None),List(),List(),List())",
-      "rate(foo{job=\"SNRT-App-0\"}[5i]) + rate(bar{job=\"SNRT-App-0\"}[4i])" -> "BinaryJoin(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(SNRT-App-0)), ColumnFilter(__name__,Equals(foo))),List(),Some(5000000),None),1524855988000,1000000,1524855988000,5000000,Rate,true,List(),None),ADD,OneToOne,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(SNRT-App-0)), ColumnFilter(__name__,Equals(bar))),List(),Some(4000000),None),1524855988000,1000000,1524855988000,4000000,Rate,true,List(),None),List(),List(),List())"
 
+      // step multiple tests
+      "http_requests_total offset 2i" ->
+        "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),Some(2000000)),1524855988000,1000000,1524855988000,Some(2000000))",
+      "sum(rate(foo{job=\"SNRT-App-0\"}[5i]))" -> "Aggregate(Sum,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(SNRT-App-0)), ColumnFilter(__name__,Equals(foo))),List(),Some(5000000),None),1524855988000,1000000,1524855988000,5000000,Rate,true,List(),None),List(),List(),List())",
+      "rate(foo{job=\"SNRT-App-0\"}[5i]) + rate(bar{job=\"SNRT-App-0\"}[4i])" -> "BinaryJoin(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(SNRT-App-0)), ColumnFilter(__name__,Equals(foo))),List(),Some(5000000),None),1524855988000,1000000,1524855988000,5000000,Rate,true,List(),None),ADD,OneToOne,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(SNRT-App-0)), ColumnFilter(__name__,Equals(bar))),List(),Some(4000000),None),1524855988000,1000000,1524855988000,4000000,Rate,true,List(),None),List(),List(),List())",
+      "sum(rate(foo{job=\"SNRT-App-0\"}[0.5i]))" -> "Aggregate(Sum,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(SNRT-App-0)), ColumnFilter(__name__,Equals(foo))),List(),Some(500000),None),1524855988000,1000000,1524855988000,500000,Rate,true,List(),None),List(),List(),List())"
     )
 
     val qts: Long = 1524855988L

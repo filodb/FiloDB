@@ -508,7 +508,7 @@ lookback becomes smaller than step because longer time range was chosen, then qu
 
 To alleviate this, we introduce a new range notation where lookback can be specified as a multiple of step.
 The notation `[1i]` would cause lookback to be 1 times step. Notation `[2i]` would make lookback as 2 times
-step and so on. This feature is in alignment with [MetricsQL](https://github.com/VictoriaMetrics/VictoriaMetrics/wiki/MetricsQL) FiloDB
+step and so on. This feature is in alignment with [MetricsQL](https://github.com/VictoriaMetrics/VictoriaMetrics/wiki/MetricsQL)
 approach to solving this. 
 
 This notation will help users who do not know what range value to use in their queries. The `[1i]` should be a good
@@ -531,8 +531,9 @@ Examples
 * `sum_over_time(foo[5i])` with step = 10s will be equivalent to `sum_over_time(foo[50s])` , thus lookback = 5 * 10s
 * `sum_over_time(foo[1i])` with step = 10s will be equivalent to `sum_over_time(foo[10s])` , thus lookback = 1 * 10s
 * `rate(foo[1i])` with step = 60s and publishInterval = 10s will be equivalent to `rate(foo[70s])`, thus 
-lookback = 1 * 60s + 10s. Publish interval is padded when both counter functions and step-factor notation is used.
-
+   lookback = 1 * 60s + 10s. Publish interval is padded when both counter functions and step-factor notation is used.
+* `sum_over_time(foo[2.5i])` - decimal scale can also be used. Here lookback will be 2.5 times the step.
+* `foo offset 2i` - offset can also use step multiple notation  
 ### Using the FiloDB HTTP API
 
 Please see the [HTTP API](doc/http_api.md) doc.
