@@ -8,14 +8,14 @@ import akka.actor.{Address, AddressFromURIString}
 import akka.cluster.{Cluster, Member}
 
 /**
-  * This implementation of discovery allows clients to allow nodes that form the
+  * This implementation of discovery allows clients to allow explicitly listed nodes that form the
   * cluster seeds. Essentially, this is just an adapter that allows for the simple
   * implementation of `akka.cluster.Cluster.joinSeedNodes`.
   *
   * Collects invalid and valid seed nodes from configuration.
   * Allows the user to decide error handling if any invalid are found.
   */
-class ExplicitlyListClusterSeedDiscovery(cluster: Cluster, settings: AkkaBootstrapperSettings)
+class ExplicitListClusterSeedDiscovery(cluster: Cluster, settings: AkkaBootstrapperSettings)
   extends ClusterSeedDiscovery(cluster, settings)
     with SeedValidator { self: ClusterSeedDiscovery =>
 

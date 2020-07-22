@@ -4,16 +4,16 @@ import akka.remote.testkit.MultiNodeSpec
 import com.typesafe.config.{Config, ConfigFactory}
 
 
-object ExplicitlyListBootstrapperMultiNodeConfig extends AkkaBootstrapperMultiNodeConfig {
+object ExplicitListBootstrapperMultiNodeConfig extends AkkaBootstrapperMultiNodeConfig {
 
   override def baseConfig: Config = ConfigFactory.parseString(
     s"""
        |akka-bootstrapper {
-       |  seed-discovery.class = "filodb.akkabootstrapper.ExplicitlyListClusterSeedDiscovery"
-       |  explicitly-list.seeds = [
-       |                          "akka.tcp://ExplicitlyListBootstrapperSpec@127.0.0.1:2552"
-       |                          "akka.tcp://ExplicitlyListBootstrapperSpec@127.0.0.1:2562"
-       |                          "akka.tcp://ExplicitlyListBootstrapperSpec@127.0.0.1:2572"
+       |  seed-discovery.class = "filodb.akkabootstrapper.ExplicitListClusterSeedDiscovery"
+       |  explicit-list.seeds = [
+       |                          "akka.tcp://ExplicitListBootstrapperSpec@127.0.0.1:2552"
+       |                          "akka.tcp://ExplicitListBootstrapperSpec@127.0.0.1:2562"
+       |                          "akka.tcp://ExplicitListBootstrapperSpec@127.0.0.1:2572"
        |                    ]
        |}
      """.stripMargin).withFallback(super.baseConfig)
@@ -57,12 +57,12 @@ object ExplicitlyListBootstrapperMultiNodeConfig extends AkkaBootstrapperMultiNo
   *
   * Then start consul: `consul agent -dev -config-dir=/usr/local/etc/consul/config/`
   *
-  * Run test: `sbt "multi-jvm:test-only filodb.akkabootstrapper.multijvm.ExplicitlyListBootstrapperSpec"`
+  * Run test: `sbt "multi-jvm:test-only filodb.akkabootstrapper.multijvm.ExplicitListBootstrapperSpec"`
   */
-class ExplicitlyListBootstrapperSpec extends MultiNodeSpec(ExplicitlyListBootstrapperMultiNodeConfig)
+class ExplicitListBootstrapperSpec extends MultiNodeSpec(ExplicitListBootstrapperMultiNodeConfig)
   with BaseAkkaBootstrapperSpec {
-  override val akkaBootstrapperMultiNodeConfig = ExplicitlyListBootstrapperMultiNodeConfig
+  override val akkaBootstrapperMultiNodeConfig = ExplicitListBootstrapperMultiNodeConfig
 }
-class ExplicitlyListBootstrapperSpecMultiJvmNode1 extends ExplicitlyListBootstrapperSpec
-class ExplicitlyListBootstrapperSpecMultiJvmNode2 extends ExplicitlyListBootstrapperSpec
-class ExplicitlyListBootstrapperSpecMultiJvmNode3 extends ExplicitlyListBootstrapperSpec
+class ExplicitListBootstrapperSpecMultiJvmNode1 extends ExplicitListBootstrapperSpec
+class ExplicitListBootstrapperSpecMultiJvmNode2 extends ExplicitListBootstrapperSpec
+class ExplicitListBootstrapperSpecMultiJvmNode3 extends ExplicitListBootstrapperSpec
