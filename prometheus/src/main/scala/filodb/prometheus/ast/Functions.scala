@@ -183,7 +183,7 @@ trait Functions extends Base with Operators with Vectors {
             rangeExpression.toSeriesPlan(timeParams, isRoot = false),
             timeParams.start * 1000 , timeParams.step * 1000, timeParams.end * 1000,
             rangeExpression.window.millis(timeParams.step * 1000),
-            rangeFunctionId, rangeExpression.window.timeUnit == IntervalFactor,
+            rangeFunctionId, rangeExpression.window.timeUnit == IntervalMultiple,
             otherParams, rangeExpression.offset.map(_.millis(timeParams.step * 1000)))
         }
       }

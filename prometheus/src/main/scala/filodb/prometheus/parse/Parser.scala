@@ -123,7 +123,7 @@ trait Unit extends BaseParser {
 
   lazy val year = "y" ^^ (_ => Year)
 
-  lazy val interval = "i" ^^ (_ => IntervalFactor)
+  lazy val interval = "i" ^^ (_ => IntervalMultiple)
 
   lazy val timeUnit = second | minute | hour | day | week | year | interval
 

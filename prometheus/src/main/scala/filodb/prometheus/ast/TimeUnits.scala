@@ -43,9 +43,9 @@ trait TimeUnits {
     override def millis(step: Long): Long = Week.millis(step) * 52
   }
 
-  case object IntervalFactor extends TimeUnit {
+  case object IntervalMultiple extends TimeUnit {
     override def millis(step: Long): Long = {
-      require(step > 0, "Interval factor notation was used to indicate lookback/range without valid step")
+      require(step > 0, "Interval multiple notation was used in lookback/range without valid step")
       step
     }
   }
