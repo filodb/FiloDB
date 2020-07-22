@@ -39,7 +39,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
   @transient lazy val numBatchesCompleted = Kamon.counter("num-batches-completed").withoutTags()
   @transient lazy val numBatchesFailed = Kamon.counter("num-batches-failed").withoutTags()
   @transient lazy val numPartitionsEncountered = Kamon.counter("num-partitions-encountered").withoutTags()
-  @transient lazy val numPartitionsBlacklisted = Kamon.counter("num-partitions-blacklisted").withoutTags()
+  @transient lazy val numPartitionsBlocked = Kamon.counter("num-partitions-blocked").withoutTags()
   @transient lazy val numPartitionsCompleted = Kamon.counter("num-partitions-completed").withoutTags()
   @transient lazy val numPartitionsNoDownsampleSchema = Kamon.counter("num-partitions-no-downsample-schema")
                                                              .withoutTags()
@@ -144,8 +144,8 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
               numPartitionsFailed.increment()
             }
           } else {
-            DownsamplerContext.dsLogger.debug(s"Skipping blacklisted partition $pkPairs")
-            numPartitionsBlacklisted.increment()
+            DownsamplerContext.dsLogger.debug(s"Skipping blocked partition $pkPairs")
+            numPartitionsBlocked.increment()
           }
         } else {
           numPartitionsSkipped.increment()
