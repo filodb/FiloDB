@@ -9,8 +9,8 @@ trait PublishIntervalFinder {
   def findPublishIntervalMs(pkSchemaId: Int, pkBase: Any, pkOffset: Long): Option[Long]
 }
 
-object StepTagPublishIntervalFinder extends PublishIntervalFinder {
-  val (stepBase, stepOffset) = UTF8StringShort.apply("_step_")
+case class TagPublishIntervalFinder(tagName: String) extends PublishIntervalFinder {
+  val (stepBase, stepOffset) = UTF8StringShort.apply(tagName)
 
   override def findPublishIntervalMs(pkSchemaId: Int, pkBase: Any, pkOffset: Long): Option[Long] = {
     var result: Option[Long] = None

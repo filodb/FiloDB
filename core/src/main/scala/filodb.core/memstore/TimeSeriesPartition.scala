@@ -24,6 +24,11 @@ object TimeSeriesPartition extends StrictLogging {
   def partKeyString(schema: PartitionSchema, partKeyBase: Any, partKeyOffset: Long): String = {
     schema.binSchema.stringify(partKeyBase, partKeyOffset)
   }
+
+  val publishIntervalTag = "_step_"
+  // If you are changing the tag value, consider adding to the predefined list of keys in filo-defaults
+  // for space optimization
+  val publishIntervalFinder = TagPublishIntervalFinder(publishIntervalTag)
 }
 
 // Temporary holder of chunk metadata pointer and appenders array before optimize/finalize step
@@ -75,7 +80,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   def partKeyOffset: Long = partitionKey
 
   def publishInterval: Option[Long] = {
-    StepTagPublishIntervalFinder.findPublishIntervalMs(schema.partition.hash, UnsafeUtils.ZeroArray, partitionKey)
+    publishIntervalFinder.findPublishIntervalMs(schema.partition.hash, UnsafeUtils.ZeroArray, partitionKey)
   }
   /**
     * Incoming, unencoded data gets appended to these BinaryAppendableVectors.
