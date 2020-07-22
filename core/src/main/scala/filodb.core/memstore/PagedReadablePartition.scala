@@ -31,6 +31,7 @@ class PagedReadablePartition(override val schema: Schema,
                              override val shard: Int,
                              override val partID: Int,
                              partData: RawPartData,
+                             resolution: Option[Long],
                              colIds: Seq[Types.ColumnId] = Seq.empty) extends ReadablePartition {
 
   import PagedReadablePartition._
@@ -80,5 +81,7 @@ class PagedReadablePartition(override val schema: Schema,
       override def unlock(): Unit = {}
     }
   }
+
+  def publishInterval: Option[Long] = resolution
 
 }

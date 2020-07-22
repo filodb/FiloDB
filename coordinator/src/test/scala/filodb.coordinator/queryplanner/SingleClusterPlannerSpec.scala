@@ -315,6 +315,21 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     res.result.isEmpty shouldEqual true
   }
 
+  it("should materialize instant queries with lookback == retention correctly") {
+    val nowSeconds = System.currentTimeMillis() / 1000
+    val planner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
+      earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis, queryConfig)
+
+    val logicalPlan = Parser.queryRangeToLogicalPlan("""sum(rate(foo{job="bar"}[3d]))""",
+      TimeStepParams(nowSeconds, 1.minute.toSeconds, nowSeconds))
+
+    val ep = planner.materialize(logicalPlan, QueryContext()).asInstanceOf[LocalPartitionReduceAggregateExec]
+    val psm = ep.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+      .rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
+    psm.start shouldEqual (nowSeconds * 1000)
+    psm.end shouldEqual (nowSeconds * 1000)
+  }
+
   it("should generate execPlan with offset") {
     val t = TimeStepParams(700, 1000, 10000)
     val lp = Parser.queryRangeToLogicalPlan("http_requests_total{job = \"app\"} offset 5m", t)
