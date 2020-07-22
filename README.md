@@ -504,7 +504,8 @@ the query engine will lookback to normalize the value for any given instant.
 can yield to queries with unintended effects. Lets consider the expression `rate(foo[5m])`. The result
 of this query would have completely different meanings with different step values. Since step parameter
 typically is not controlled by user (as in Grafana), it can have silent negative effects. For example, if
-lookback becomes smaller than step because longer time range was chosen, then query silently drops samples.
+user expands the time range and hardcoded lookback becomes smaller than step, the same query will no
+longer do what the user orginally intends to do because samples wont be included in the query.
 
 To alleviate this, we introduce a new range notation where lookback can be specified as a multiple of step.
 The notation `[1i]` would cause lookback to be 1 times step. Notation `[2i]` would make lookback as 2 times
