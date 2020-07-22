@@ -36,7 +36,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                            earliestRetainedTimestampFn: => Long,
                            queryConfig: QueryConfig,
                            spreadProvider: SpreadProvider = StaticSpreadProvider())
-                                extends QueryPlanner with StrictLogging {
+                                extends QueryPlanner with StrictLogging with PlannerUtil {
 
   private val dsOptions = schemas.part.options
   private val shardColumns = dsOptions.shardKeyColumns.sorted
@@ -439,22 +439,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     vectors
   }
 
-  private def materializeFunctionArgs(functionParams: Seq[FunctionArgsPlan],
-                                      qContext: QueryContext): Seq[FuncArgs] = {
-    if (functionParams.isEmpty) {
-      Nil
-    } else {
-      functionParams.map { param =>
-        param match {
-          case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
-          case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(materialize(s, qContext),
-                                                              RangeParams(s.startMs, s.stepMs, s.endMs))
-          case  t: ScalarTimeBasedPlan    => TimeFuncArgs(t.rangeParams)
-          case _                          => throw new UnsupportedOperationException("Invalid logical plan")
-        }
-      }
-    }
-  }
+
 
   private def materializeScalarPlan(qContext: QueryContext,
                                     lp: ScalarVaryingDoublePlan): PlanResult = {

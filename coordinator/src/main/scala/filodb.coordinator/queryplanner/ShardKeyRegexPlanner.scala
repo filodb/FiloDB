@@ -1,11 +1,33 @@
 package filodb.coordinator.queryplanner
 
 import filodb.core.metadata.Dataset
-import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryContext}
+import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryContext, RangeParams}
 import filodb.core.query.Filter.{EqualsRegex, NotEqualsRegex}
-import filodb.query.{Aggregate, BinaryJoin, LogicalPlan}
+import filodb.query.{Aggregate, ApplyInstantFunction, ApplyMiscellaneousFunction, BinaryJoin, FunctionArgsPlan,
+  LogicalPlan, ScalarFixedDoublePlan, ScalarTimeBasedPlan, ScalarVaryingDoublePlan}
 import filodb.query.exec._
 
+
+trait PlannerUtil {
+
+  def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan
+  def materializeFunctionArgs(functionParams: Seq[FunctionArgsPlan],
+                              qContext: QueryContext): Seq[FuncArgs] = {
+    if (functionParams.isEmpty) {
+      Nil
+    } else {
+      functionParams.map { param =>
+        param match {
+          case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
+          case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(materialize(s, qContext),
+            RangeParams(s.startMs, s.stepMs, s.endMs))
+          case  t: ScalarTimeBasedPlan    => TimeFuncArgs(t.rangeParams)
+          case _                          => throw new UnsupportedOperationException("Invalid logical plan")
+        }
+      }
+    }
+  }
+}
 /**
  * Holder for the shard key regex matcher results.
  *
@@ -30,7 +52,7 @@ case class ShardKeyMatcher(columnFilters: Seq[ColumnFilter], query: String)
 class ShardKeyRegexPlanner(dataset: Dataset,
                            queryPlanner: QueryPlanner,
                            shardKeyMatcherFn: ShardKeyMatcher => Seq[ShardKeyMatcher])
-  extends QueryPlanner {
+  extends QueryPlanner with PlannerUtil {
 
   /**
     * Converts a logical plan to execution plan.
@@ -40,11 +62,62 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     * @return materialized Execution Plan which can be dispatched
     */
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+     walkLogicalPlanTree(logicalPlan, qContext)
+
+//    logicalPlan match {
+//           case a: Aggregate  => materializeAggregate(a, qContext)
+//           case b: BinaryJoin => materializeBinaryJoin(b, qContext)
+//           case _             => materializeOthers(logicalPlan, qContext)
+//    }
+  }
+
+  private def materializeApplyMiscellaneousFunction(lp: ApplyMiscellaneousFunction,
+                                                    qContext: QueryContext): ExecPlan = {
+    val vectors = walkLogicalPlanTree(lp.vectors, qContext)
+    //TODO pass dataset schemas for HistToPromVectors
+
+//    if (lp.function == MiscellaneousFunctionId.HistToPromVectors)
+//      vectors.addRangeVectorTransformer(HistToPromSeriesMapper(dataset.schema.part)))
+//    else
+      vectors.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function, lp.stringArgs))
+    vectors
+  }
+
+  private def materializeApplyInstantFunction(lp: ApplyInstantFunction,
+                                              qContext: QueryContext): ExecPlan = {
+    val vectors = walkLogicalPlanTree(lp.vectors, qContext)
+    val paramsExec = materializeFunctionArgs(lp.functionArgs, qContext)
+    vectors.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, paramsExec))
+    vectors
+  }
+
+//  private def materializeFunctionArgs(functionParams: Seq[FunctionArgsPlan],
+//                                      qContext: QueryContext): Seq[FuncArgs] = {
+//    if (functionParams.isEmpty) {
+//      Nil
+//    } else {
+//      functionParams.map { param =>
+//        param match {
+//          case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
+//          case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(materialize(s, qContext),
+//            RangeParams(s.startMs, s.stepMs, s.endMs))
+//          case  t: ScalarTimeBasedPlan    => TimeFuncArgs(t.rangeParams)
+//          case _                          => throw new UnsupportedOperationException("Invalid logical plan")
+//        }
+//      }
+//    }
+//  }
+
+  private def walkLogicalPlanTree(logicalPlan: LogicalPlan,
+                                  qContext: QueryContext): ExecPlan = {
     logicalPlan match {
-           case a: Aggregate  => materializeAggregate(a, qContext)
-           case b: BinaryJoin => materializeBinaryJoin(b, qContext)
-           case _             => materializeOthers(logicalPlan, qContext)
+      case lp: ApplyMiscellaneousFunction => materializeApplyMiscellaneousFunction(lp, qContext)
+      case lp: ApplyInstantFunction       => materializeApplyInstantFunction(lp, qContext)
+      case a: Aggregate  => materializeAggregate(a, qContext)
+      case b: BinaryJoin => materializeBinaryJoin(b, qContext)
+      case _             => materializeOthers(logicalPlan, qContext)
     }
+
   }
 
   private def getNonMetricShardKeyFilters(logicalPlan: LogicalPlan): Seq[Seq[ColumnFilter]] =

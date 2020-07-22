@@ -5,7 +5,6 @@ import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
-
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
@@ -13,6 +12,7 @@ import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryCon
 import filodb.core.query.Filter.Equals
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
+import filodb.query.InstantFunctionId.HistogramQuantile
 import filodb.query.exec._
 
 class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
@@ -117,5 +117,36 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[PartKeysDistConcatExec] shouldEqual (true)
+  }
+
+  it("should generate Exec plan for histgram quantile for Aggregate query") {
+    val lp = Parser.queryToLogicalPlan("histogram_quantile(0.2, sum(test{_ws_ = \"demo\", _ns_ =~ \"App.*\", instance = \"Inst-1\"}))", 1000)
+    val shardKeyMatcherFn = (shardKeyMatcher: ShardKeyMatcher) => {
+      Seq(ShardKeyMatcher(Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-1"))),
+        "sum(test{_ws_ = \"demo\", _ns_ =~ \"App.1\", instance = \"Inst-1\" }"),
+        ShardKeyMatcher(Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-2"))),
+          "sum(test{_ws_ = \"demo\", _ns_ =~ \"App.2\", instance = \"Inst-1\" }"))}
+    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    println("execplan:")
+    println(execPlan)
+    execPlan.isInstanceOf[MultiPartitionReduceAggregateExec] shouldEqual(true)
+    execPlan.asInstanceOf[MultiPartitionReduceAggregateExec].rangeVectorTransformers(0).
+      isInstanceOf[AggregatePresenter] shouldEqual true
+    execPlan.asInstanceOf[MultiPartitionReduceAggregateExec].rangeVectorTransformers(1).
+      isInstanceOf[InstantVectorFunctionMapper] shouldEqual true
+
+    execPlan.asInstanceOf[MultiPartitionReduceAggregateExec].rangeVectorTransformers(1).
+      asInstanceOf[InstantVectorFunctionMapper].function shouldEqual HistogramQuantile
+    execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
+
+    //Plan for each map should not have histogram quantile
+    execPlan.children(0).children.head.rangeVectorTransformers.length shouldEqual 2
+    execPlan.children(0).children.head.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+    execPlan.children(0).children.head.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 }
