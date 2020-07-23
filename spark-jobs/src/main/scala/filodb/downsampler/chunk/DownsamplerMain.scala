@@ -62,6 +62,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
   // scalastyle:off method.length
   def run(sparkConf: SparkConf): SparkSession = {
 
+    sparkConf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
     val spark = SparkSession.builder()
       .appName("FiloDBDownsampler")
       .config(sparkConf)
@@ -101,6 +102,8 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
     DownsamplerContext.dsLogger.info(s"Cassandra split size: ${splits.size}. We will have this many spark " +
       s"partitions. Tune splitsPerNode which was ${settings.splitsPerNode} if parallelism is low")
 
+    val sparkParallelism = spark.sparkContext.defaultParallelism
+
     KamonShutdownHook.registerShutdownHook()
 
     spark.sparkContext
@@ -118,6 +121,10 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
           batchSize = settings.batchSize)
         batchIter
       }
+      // needed since original number of partitions (cassandra splits) can have unbalanced data sizes
+      // and caused long tails and increase job times. Hence repartition. This can cause shuffle,
+      // but since part keys are small and we use kryo for serialization, we should be ok
+      .repartition(sparkParallelism * 4)
       .foreach { rawPartsBatch =>
         Kamon.init()
         KamonShutdownHook.registerShutdownHook()
