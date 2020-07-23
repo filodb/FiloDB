@@ -124,7 +124,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
       // needed since original number of partitions (cassandra splits) can have unbalanced data sizes
       // and caused long tails and increase job times. Hence repartition. This can cause shuffle,
       // but since part keys are small and we use kryo for serialization, we should be ok
-      .repartition(sparkParallelism * 4)
+      .repartition(sparkParallelism * 3)
       .foreach { rawPartsBatch =>
         Kamon.init()
         KamonShutdownHook.registerShutdownHook()
