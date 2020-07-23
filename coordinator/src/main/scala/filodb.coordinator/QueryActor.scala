@@ -44,11 +44,11 @@ class QueryQueue(concurrentQueries: Int) {
 
   // Given a plan and replyTo, executes the plan if there is room or it is a currently executing query.
   // If there isn't room, add it to the queue.
-  def execOrWait(plan: ExecPlan, replyTo: ActorRef, newPlanFunc: (ExecPlan, ActorRef) => Future[Unit])
-                (implicit sched: Scheduler): Unit = {
+  def execOrWait(plan: ExecPlan, replyTo: ActorRef, newPlanFunc: (ExecPlan, ActorRef, Scheduler) => Future[Unit])
+                (sched: Scheduler): Unit = {
     val id = plan.queryContext.queryId
     if ((currentIDs contains id) || currentIDs.size < concurrentQueries) {
-      execute(plan, replyTo, newPlanFunc)
+      execute(plan, replyTo, newPlanFunc)(sched)
     } else {
       queue.enqueue((plan, replyTo))
     }
@@ -57,11 +57,11 @@ class QueryQueue(concurrentQueries: Int) {
   def queueSize: Int = queue.length
 
   // Pop next item(s?) off top of queue so long as there is room to execute another query.
-  def tryPop(newPlanFunc: (ExecPlan, ActorRef) => Future[Unit])
-            (implicit sched: Scheduler): Unit = synchronized {
+  def tryPop(newPlanFunc: (ExecPlan, ActorRef, Scheduler) => Future[Unit])
+            (sched: Scheduler): Unit = synchronized {
     if (currentIDs.size < concurrentQueries && queue.nonEmpty) {
       val (nextPlan, replyTo) = queue.dequeue
-      execute(nextPlan, replyTo, newPlanFunc)
+      execute(nextPlan, replyTo, newPlanFunc)(sched)
     }
   }
 
@@ -69,9 +69,9 @@ class QueryQueue(concurrentQueries: Int) {
   // The closure is called in the current thread, but the callback when Future/plan is completed will not be.
   private def execute(newPlan: ExecPlan,
                       replyTo: ActorRef,
-                      newPlanFunc: (ExecPlan, ActorRef) => Future[Unit])
-                     (implicit sched: Scheduler): Unit = {
-    val planFut = newPlanFunc(newPlan, replyTo)
+                      newPlanFunc: (ExecPlan, ActorRef, Scheduler) => Future[Unit])
+                     (sched: Scheduler): Unit = {
+    val planFut = newPlanFunc(newPlan, replyTo, sched)
     val queryId = newPlan.queryContext.queryId
 
     // Add plan to data structures
@@ -92,9 +92,9 @@ class QueryQueue(concurrentQueries: Int) {
                   }
                 }
                 if (newspace) {
-                  tryPop(newPlanFunc)
+                  tryPop(newPlanFunc)(sched)
                 }
-    }
+    }(sched)
   }
 
   // Currently active query IDs
@@ -207,13 +207,13 @@ final class QueryActor(memStore: MemStore,
     Scheduler.apply(ExecutorInstrumentation.instrument(executor, schedName))
   }
 
-  def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Future[Unit] = {
+  def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef, sched: Scheduler): Future[Unit] = {
     if (checkTimeout(q.queryContext, replyTo)) {
       epRequests.increment()
       Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
       Kamon.currentSpan().tag("query-id", q.queryContext.queryId)
       val querySession = QuerySession(q.queryContext, queryConfig)
-      q.execute(memStore, querySession)(queryScheduler)
+      q.execute(memStore, querySession)(sched)
         .foreach { res =>
           FiloSchedulers.assertThreadName(QuerySchedName)
           querySession.close()
@@ -228,12 +228,12 @@ final class QueryActor(memStore: MemStore,
                 case t: Throwable =>
               }
           }
-        }(queryScheduler).recover { case ex =>
+        }(sched).recover { case ex =>
           querySession.close()
           // Unhandled exception in query, should be rare
           logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
           replyTo ! QueryError(q.queryContext.queryId, ex)
-        }(queryScheduler)
+        }(sched)
     } else {
       Future.successful(())
     }
