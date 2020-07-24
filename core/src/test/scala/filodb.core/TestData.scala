@@ -473,7 +473,7 @@ object MetricsTestData {
   val timeseriesSchemas = Schemas(timeseriesSchema)
 
   val timeseriesDatasetWithMetric = Dataset.make("timeseries",
-    Seq("tags:map"),
+    Seq("_metric_:string", "tags:map"),
     Seq("timestamp:ts", "value:double:detectDrops=true"),
     Seq.empty,
     None,

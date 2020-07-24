@@ -39,7 +39,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
   @transient lazy val numBatchesCompleted = Kamon.counter("num-batches-completed").withoutTags()
   @transient lazy val numBatchesFailed = Kamon.counter("num-batches-failed").withoutTags()
   @transient lazy val numPartitionsEncountered = Kamon.counter("num-partitions-encountered").withoutTags()
-  @transient lazy val numPartitionsBlacklisted = Kamon.counter("num-partitions-blacklisted").withoutTags()
+  @transient lazy val numPartitionsBlocked = Kamon.counter("num-partitions-blocked").withoutTags()
   @transient lazy val numPartitionsCompleted = Kamon.counter("num-partitions-completed").withoutTags()
   @transient lazy val numPartitionsNoDownsampleSchema = Kamon.counter("num-partitions-no-downsample-schema")
                                                              .withoutTags()
@@ -110,6 +110,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
   def downsampleBatch(rawPartsBatch: Seq[RawPartData],
                       userTimeStart: Long,
                       userTimeEndExclusive: Long): Unit = {
+    val batchSpan = Kamon.spanBuilder("downsample-batch-latency").start()
     DownsamplerContext.dsLogger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
       s"rawDataset=${settings.rawDatasetName} for " +
       s"userTimeStart=${java.time.Instant.ofEpochMilli(userTimeStart)} " +
@@ -144,8 +145,8 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
               numPartitionsFailed.increment()
             }
           } else {
-            DownsamplerContext.dsLogger.debug(s"Skipping blacklisted partition $pkPairs")
-            numPartitionsBlacklisted.increment()
+            DownsamplerContext.dsLogger.debug(s"Skipping blocked partition $pkPairs")
+            numPartitionsBlocked.increment()
           }
         } else {
           numPartitionsSkipped.increment()
@@ -157,6 +158,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
       numBatchesFailed.increment()
       throw e // will be logged by spark
     } finally {
+      batchSpan.finish()
       offHeapMem.free()   // free offheap mem
       pagedPartsToFree.clear()
       downsampledPartsToFree.clear()
@@ -195,7 +197,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
     if (rawPartSchema == Schemas.UnknownSchema) throw UnknownSchemaQueryErr(rawSchemaId)
     rawPartSchema.downsample match {
       case Some(downsampleSchema) =>
-        val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0, rawPart)
+        val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0, rawPart, None)
         DownsamplerContext.dsLogger.debug(s"Downsampling partition ${rawReadablePart.stringPartition}")
         val bufferPool = offHeapMem.bufferPools(rawPartSchema.downsample.get.schemaHash)
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)

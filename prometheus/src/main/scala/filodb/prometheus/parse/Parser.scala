@@ -123,11 +123,12 @@ trait Unit extends BaseParser {
 
   lazy val year = "y" ^^ (_ => Year)
 
-  lazy val timeUnit = second | minute | hour | day | week | year
+  lazy val interval = "i" ^^ (_ => IntervalMultiple)
 
+  lazy val timeUnit = second | minute | hour | day | week | year | interval
 
-  lazy val duration: PackratParser[Duration] = wholeNumber ~ timeUnit ^^ {
-    case d ~ tu => Duration(Integer.parseInt(d), tu)
+  lazy val duration: PackratParser[Duration] = decimalNumber ~ timeUnit ^^ {
+    case d ~ tu => Duration(d.toDouble, tu)
   }
   lazy val offset: PackratParser[Offset] = OFFSET ~ duration ^^ {
     case ignore ~ t => Offset(t)
@@ -321,8 +322,6 @@ object Parser extends Expression {
 
   override val whiteSpace = "[ \t\r\f\n]+".r
 
-  val FiveMinutes = Duration(5, Minute).millis
-
   def parseQuery(query: String): Expression = {
     parseAll(expression, query) match {
       case s: Success[_] => s.get.asInstanceOf[Expression]
@@ -351,9 +350,9 @@ object Parser extends Expression {
     }
   }
 
-  def queryToLogicalPlan(query: String, queryTimestamp: Long): LogicalPlan = {
-    // step does not matter here in instant query - just use a dummy value more than minStep
-    val defaultQueryParams = TimeStepParams(queryTimestamp, 1000, queryTimestamp)
+  def queryToLogicalPlan(query: String, queryTimestamp: Long, step: Long): LogicalPlan = {
+    // Remember step matters here in instant query, when lookback is provided in step factor notation as in [5i]
+    val defaultQueryParams = TimeStepParams(queryTimestamp, step, queryTimestamp)
     queryRangeToLogicalPlan(query, defaultQueryParams)
   }
 

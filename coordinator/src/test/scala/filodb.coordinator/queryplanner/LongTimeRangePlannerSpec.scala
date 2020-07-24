@@ -138,7 +138,7 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
   it("should direct raw-data queries to both raw planner only irrespective of time length") {
 
     Seq(5, 10, 20).foreach { t =>
-      val logicalPlan = Parser.queryToLogicalPlan(s"foo[${t}m]", now)
+      val logicalPlan = Parser.queryToLogicalPlan(s"foo[${t}m]", now, 1000)
       val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
       ep.name shouldEqual "raw"
       ep.lp shouldEqual logicalPlan

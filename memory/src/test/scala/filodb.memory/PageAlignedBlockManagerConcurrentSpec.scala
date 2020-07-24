@@ -25,7 +25,6 @@ with ConductorFixture with Matchers with BeforeAndAfterAll {
         val blocks = blockManager.requestBlocks(pageSize, None)
         blocks.size should be(1)
         val block = blocks.head
-        block.own()
         block.position(block.position() + 1)
         waitForBeat(1)
       }
@@ -34,7 +33,6 @@ with ConductorFixture with Matchers with BeforeAndAfterAll {
         val blocks = blockManager.requestBlocks(2 * pageSize, None)
         blocks.size should be(2)
         val block = blocks.head
-        block.own()
         block.position(block.position() + 1)
         waitForBeat(1)
       }
@@ -43,7 +41,6 @@ with ConductorFixture with Matchers with BeforeAndAfterAll {
         val blocks = blockManager.requestBlocks(3 * pageSize, None)
         blocks.size should be(3)
         val block = blocks.head
-        block.own()
         block.position(block.position() + 1)
         waitForBeat(1)
       }

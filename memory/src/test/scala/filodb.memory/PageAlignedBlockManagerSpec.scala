@@ -82,7 +82,6 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
     //used 2 out of 2
     firstRequest.size should be(2)
     //simulate writing to the block
-    firstRequest.head.own()
     firstRequest.head.position(blockSize.toInt - 1)
     //mark them as reclaimable
     firstRequest.foreach(_.markReclaimable())

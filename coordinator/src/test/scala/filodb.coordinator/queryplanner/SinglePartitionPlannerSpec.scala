@@ -83,7 +83,7 @@ class SinglePartitionPlannerSpec extends FunSpec with Matchers {
   val engine = new SinglePartitionPlanner(planners, plannerSelector, "_metric_")
 
   it("should generate Exec plan for simple query") {
-    val lp = Parser.queryToLogicalPlan("test{job = \"app\"}", 1000)
+    val lp = Parser.queryToLogicalPlan("test{job = \"app\"}", 1000, 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
@@ -93,7 +93,7 @@ class SinglePartitionPlannerSpec extends FunSpec with Matchers {
   }
 
   it("should generate BinaryJoin Exec plan") {
-    val lp = Parser.queryToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}", 1000)
+    val lp = Parser.queryToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
@@ -109,7 +109,7 @@ class SinglePartitionPlannerSpec extends FunSpec with Matchers {
   }
 
   it("should generate exec plan for nested Binary Join query") {
-    val lp = Parser.queryToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"} + test3{job = \"app\"}", 1000)
+    val lp = Parser.queryToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"} + test3{job = \"app\"}", 1000, 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
@@ -118,7 +118,7 @@ class SinglePartitionPlannerSpec extends FunSpec with Matchers {
   }
 
   it("should generate BinaryJoin Exec plan with remote and local cluster metrics") {
-    val lp = Parser.queryToLogicalPlan("test{job = \"app\"} + rr1{job = \"app\"}", 1000)
+    val lp = Parser.queryToLogicalPlan("test{job = \"app\"} + rr1{job = \"app\"}", 1000, 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
@@ -128,7 +128,7 @@ class SinglePartitionPlannerSpec extends FunSpec with Matchers {
   }
 
   it("should generate BinaryJoin Exec plan with remote cluster metrics") {
-    val lp = Parser.queryToLogicalPlan("rr1{job = \"app\"} + rr2{job = \"app\"}", 1000)
+    val lp = Parser.queryToLogicalPlan("rr1{job = \"app\"} + rr2{job = \"app\"}", 1000, 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
@@ -154,7 +154,7 @@ class SinglePartitionPlannerSpec extends FunSpec with Matchers {
   }
 
   it("should generate Exec plan for Scalar query which does not have any metric") {
-    val lp = Parser.queryToLogicalPlan("time()", 1000)
+    val lp = Parser.queryToLogicalPlan("time()", 1000, 1000)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[TimeScalarGeneratorExec] shouldEqual true
   }

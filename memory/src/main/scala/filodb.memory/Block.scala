@@ -1,39 +1,8 @@
 package filodb.memory
 
 import java.nio.ByteBuffer
-import java.util.ConcurrentModificationException
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 
 import com.typesafe.scalalogging.StrictLogging
-
-/*
-* Useful to establish thread ownership of a buffer.
-* A buffer uses marks and positions to read and write data. As such it cannot be used
-* by multiple threads concurrently.
-*
-* This trait helps to establish ownership of a thread on a buffer.
-* When a buffer is owned by a thread another thread cannot mark the buffer.
-* This protects the buffer position from being modified by multiple threads.
-* This is a programmer protection like in Rust except this is runtime checked
-* instead of compile time.
-*/
-protected[memory] trait Owned extends ReusableMemory {
-
-  protected val ref = new AtomicReference[Thread]()
-
-  def own(): Unit = {
-    val owningThread = ref.get()
-    val currentThread = Thread.currentThread()
-    ref.set(currentThread)
-  }
-
-  protected def checkOwnership(): Unit = {
-    if (!(ref.get() == Thread.currentThread())) {
-      throw new ConcurrentModificationException("Thread does not own this block")
-    }
-  }
-
-}
 
 /**
   * A listener called when a ReusableMemory is reclaimed.  The onReclaim() method is called for each piece of
@@ -48,8 +17,8 @@ trait ReclaimListener {
   * It also can hold pieces of metadata which are passed to a ReclaimListener when the memory is reclaimed.
   * The metadata can be used to free references and do other housekeeping.
   */
-trait ReusableMemory extends StrictLogging {
-  protected val _isReusable: AtomicBoolean = new AtomicBoolean(false)
+trait ReusableMemory {
+  @volatile protected var _isReusable: Boolean = false
 
   def reclaimListener: ReclaimListener
 
@@ -57,7 +26,7 @@ trait ReusableMemory extends StrictLogging {
     * @return Whether this block can be reclaimed. The original owning callsite has to
     *         set this as being reusable
     */
-  def canReclaim: Boolean = _isReusable.get()
+  def canReclaim: Boolean = _isReusable
 
   /**
     * @return The starting location of the memory
@@ -73,14 +42,14 @@ trait ReusableMemory extends StrictLogging {
     * Marks this Memory as in use.
     */
   protected[memory] def markInUse() = {
-    _isReusable.set(false)
+    _isReusable = false
   }
 
   /**
     * Marks this memory as reclaimable.
     */
   def markReclaimable(): Unit = {
-    _isReusable.set(true)
+    _isReusable = true
   }
 
   /**
@@ -118,7 +87,7 @@ object Block extends StrictLogging {
   * @param address
   * @param capacity
   */
-class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimListener) extends Owned {
+class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimListener) extends ReusableMemory {
   import format.UnsafeUtils
 
   protected var _position: Int = 0
@@ -161,7 +130,6 @@ class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimL
   }
 
   def position(newPosition: Int): Unit = {
-    checkOwnership()
     _position = newPosition
   }
 

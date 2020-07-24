@@ -145,7 +145,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
 
   // queryTimestamp is in millis
   def runCliQuery(client: LocalClient, queryTimestamp: Long): Double = {
-    val logicalPlan = Parser.queryToLogicalPlan(query, queryTimestamp/1000)
+    val logicalPlan = Parser.queryToLogicalPlan(query, queryTimestamp/1000, 1000)
 
     val curTime = System.currentTimeMillis
     val result = client.logicalPlan2Query(dataset, logicalPlan) match {
