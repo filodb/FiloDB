@@ -59,7 +59,7 @@ For fully working example code, look at the [example application](https://github
 The key step is to invoke the AkkaBootstrapper.bootstrap() method, passing in the configuration and the Akka cluster 
 object. This call blocks and waits until seedNodeCount peers are available and the join completes. The peer discovery 
 strategy can be changed by providing an implementation of AkkaClusterSeedDiscovery class in the configuration. Included 
-implementations are Simple SRV record discovery, Consul based service discovery, as well as whitelisted nodes for 
+implementations are Simple SRV record discovery, Consul based service discovery, as well as explicitly listed nodes for 
 non-clustered environments.  
 
 Once the bootstrap() call returns, the caller can call the getAkkaHttpRoute() method to get an Akka HTTP Route which 

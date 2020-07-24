@@ -21,7 +21,6 @@ class BlockSpec extends FlatSpec with Matchers with BeforeAndAfter with BeforeAn
 
   it should "allocate metadata and report remaining bytes accurately" in {
     val block = blockManager.requestBlock(None).get
-    block.own()
     block.capacity shouldEqual 4096
     block.remaining shouldEqual 4096
 
@@ -36,7 +35,6 @@ class BlockSpec extends FlatSpec with Matchers with BeforeAndAfter with BeforeAn
 
   it should "return null when allocate metadata if not enough space" in {
     val block = blockManager.requestBlock(None).get
-    block.own()
     block.capacity shouldEqual 4096
     block.remaining shouldEqual 4096
 
@@ -48,14 +46,12 @@ class BlockSpec extends FlatSpec with Matchers with BeforeAndAfter with BeforeAn
 
   it should "not reclaim when block has not been marked reclaimable" in {
     val block = blockManager.requestBlock(None).get
-    block.own()
 
     intercept[IllegalStateException] { block.reclaim() }
   }
 
   it should "call reclaimListener with address of all allocated metadatas" in {
     val block = blockManager.requestBlock(None).get
-    block.own()
     block.capacity shouldEqual 4096
     block.remaining shouldEqual 4096
 

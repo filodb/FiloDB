@@ -38,7 +38,7 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
   val localPlanner = new SingleClusterPlanner(dsRef, schemas, localMapper, earliestRetainedTimestampFn = 0, queryConfig)
 
   it("should generate Exec plan for simple query") {
-    val lp = Parser.queryToLogicalPlan("test{_ws_ = \"demo\", _ns_ =~ \"App.*\", instance = \"Inst-1\" }", 1000)
+    val lp = Parser.queryToLogicalPlan("test{_ws_ = \"demo\", _ns_ =~ \"App.*\", instance = \"Inst-1\" }", 1000, 1000)
     val shardKeyMatcherFn = (shardKeyMatcher: ShardKeyMatcher) => {
       Seq(ShardKeyMatcher(Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-1"))),
         "test{_ws_ = \"demo\", _ns_ = \"App-1\", instance = \"Inst-1\" }"),
@@ -55,7 +55,7 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
   it("should generate Exec plan for Aggregate query") {
-    val lp = Parser.queryToLogicalPlan("sum(test{_ws_ = \"demo\", _ns_ =~ \"App.*\", instance = \"Inst-1\" })", 1000)
+    val lp = Parser.queryToLogicalPlan("sum(test{_ws_ = \"demo\", _ns_ =~ \"App.*\", instance = \"Inst-1\" })", 1000, 1000)
     val shardKeyMatcherFn = (shardKeyMatcher: ShardKeyMatcher) => {
       Seq(ShardKeyMatcher(Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-1"))),
         "sum(test{_ws_ = \"demo\", _ns_ =~ \"App.1\", instance = \"Inst-1\" }"),
@@ -72,7 +72,7 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
   it("should generate Exec plan for time()") {
-    val lp = Parser.queryToLogicalPlan("time()", 1000)
+    val lp = Parser.queryToLogicalPlan("time()", 1000, 1000)
     val shardKeyMatcherFn = (shardKeyMatcher: ShardKeyMatcher) => { Seq(ShardKeyMatcher(Seq.empty, "time()")) }
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
@@ -80,7 +80,7 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
   it("should generate Exec plan for Scalar Binary Operation") {
-    val lp = Parser.queryToLogicalPlan("1 + test{_ws_ = \"demo\", _ns_ =~ \"App.*\", instance = \"Inst-1\" }", 1000)
+    val lp = Parser.queryToLogicalPlan("1 + test{_ws_ = \"demo\", _ns_ =~ \"App.*\", instance = \"Inst-1\" }", 1000, 1000)
     val shardKeyMatcherFn = (shardKeyMatcher: ShardKeyMatcher) => {
       Seq(ShardKeyMatcher(Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-1"))),
         "1 + test{_ws_ = \"demo\", _ns_ =~ \"App-1\", instance = \"Inst-1\" }"),
@@ -100,7 +100,7 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
 
   it("should generate Exec plan for Binary join without regex") {
     val lp = Parser.queryToLogicalPlan("test1{_ws_ = \"demo\", _ns_ = \"App\"} + " +
-      "test2{_ws_ = \"demo\", _ns_ = \"App\"}", 1000)
+      "test2{_ws_ = \"demo\", _ns_ = \"App\"}", 1000, 1000)
     val shardKeyMatcherFn = (shardKeyMatcher: ShardKeyMatcher) => {
       Seq(ShardKeyMatcher(Seq.empty, "test1{_ws_ = \"demo\", _ns_ = \"App\"} + " +
         "test2{_ws_ = \"demo\", _ns_ = \"App\"}")) }
