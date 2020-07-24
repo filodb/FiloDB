@@ -24,7 +24,8 @@ import filodb.query.exec.ExecPlan
 
 
 // A class to manage a queue and a set of currently executing queries, allowing no more than concurrentQueries
-// at a time.  When the query and execplans finishes execution, then they are removed.
+// at a time.  When the query and execplans finishes execution, then they are removed.  This has multiple benefits
+// including limiting memory usage and tracking running queries.
 // concurrentQueries defines the number of current queries where all execPlans belonging to the same queryID
 // is counted as a single query.
 // A queue keeps track of queries for which there is no space.  It is not expected for there to be more than
