@@ -18,7 +18,7 @@ object Dependencies {
   val akkaHttpVersion   = "10.1.8"
   val cassDriverVersion = "3.7.1"
   val ficusVersion      = "1.1.2"
-  val kamonBundleVersion = "2.1.4"
+  val kamonBundleVersion = "2.0.6"
   val kamonZipkinVersion = "2.0.1"
   val kamonPrometheusVersion = "2.0.1"
   val monixKafkaVersion = "0.15"
