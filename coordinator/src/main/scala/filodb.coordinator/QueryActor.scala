@@ -1,8 +1,7 @@
 package filodb.coordinator
 
 import java.lang.Thread.UncaughtExceptionHandler
-import java.util.concurrent.{ScheduledThreadPoolExecutor, ThreadFactory}
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.{ForkJoinPool, ForkJoinWorkerThread}
 
 import scala.util.control.NonFatal
 
@@ -41,9 +40,6 @@ class QueryActorMailbox(settings: ActorSystem.Settings, config: Config)
   extends UnboundedStablePriorityMailbox(QueryCommandPriority)
 
 object QueryActor {
-  private val nextId = new AtomicLong()
-  def nextQueryId: Long = nextId.getAndIncrement
-
   final case class ThrowException(dataset: DatasetRef)
 
   def props(memStore: MemStore, dsRef: DatasetRef,
@@ -117,22 +113,20 @@ final class QueryActor(memStore: MemStore,
     val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor")
                                       * sys.runtime.availableProcessors).toInt
     val schedName = s"$QuerySchedName-$dsRef"
-
-    val thFactory = new ThreadFactory {
-      def newThread(r: Runnable) = {
-        val thread = new Thread(r)
-        thread.setName(s"$schedName-${thread.getId}")
+    val exceptionHandler = new UncaughtExceptionHandler {
+      override def uncaughtException(t: Thread, e: Throwable): Unit =
+        logger.error("Uncaught Exception in Query Scheduler", e)
+    }
+    val threadFactory = new ForkJoinPool.ForkJoinWorkerThreadFactory {
+      def newThread(pool: ForkJoinPool): ForkJoinWorkerThread = {
+        val thread = ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(pool)
         thread.setDaemon(true)
-        thread.setUncaughtExceptionHandler(
-          new UncaughtExceptionHandler {
-            override def uncaughtException(t: Thread, e: Throwable): Unit =
-              logger.error("Uncaught Exception in Query Scheduler", e)
-          })
+        thread.setUncaughtExceptionHandler(exceptionHandler)
+        thread.setName(s"$schedName-${thread.getPoolIndex}")
         thread
       }
     }
-    // TODO retaining old fixed size pool for now - later change to fork join pool.
-    val executor = new ScheduledThreadPoolExecutor(numSchedThreads, thFactory)
+    val executor = new ForkJoinPool( numSchedThreads, threadFactory, exceptionHandler, true)
     Scheduler.apply(ExecutorInstrumentation.instrument(executor, schedName))
   }
 
