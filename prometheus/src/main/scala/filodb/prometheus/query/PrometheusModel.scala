@@ -134,7 +134,7 @@ object PrometheusModel {
                 else Map.empty)
     val samples = srv.rows.map { r => (r.getLong(0), r.getHistogram(1)) }.collect {
       // Don't remove empty histogram for remote query as it is needed for stitching with local results
-      case (t, h) if (h.numBuckets > 0 || !processMultiPartition)=>
+      case (t, h) if (h.numBuckets > 0 || !processMultiPartition) =>
         val buckets = (0 until h.numBuckets).map { b =>
           val le = h.bucketTop(b)
           (if (le == Double.PositiveInfinity) "+Inf" else le.toString) -> h.bucketValue(b)

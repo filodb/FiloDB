@@ -222,7 +222,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
    */
   final def addNoCorrection(other: HistogramWithBuckets): Unit = {
     // Allow addition when type of bucket is different
-    if (buckets.allBucketTops.sameElements(other.buckets.allBucketTops)) {
+    if (buckets.similarForMath(other.buckets)) {
       // If it was NaN before, reset to 0 to sum another hist
       if (values(0).isNaN) java.util.Arrays.fill(values, 0.0)
       for { b <- 0 until numBuckets optimized } {
@@ -368,6 +368,11 @@ sealed trait HistogramBuckets {
    * @return the final position
    */
   def serialize(buf: MutableDirectBuffer, pos: Int): Int
+
+  /**
+    Returns true when buckets are similar for mathematical operations like addition
+   */
+  def similarForMath(other: HistogramBuckets): Boolean = this == other
 }
 
 object HistogramBuckets {
@@ -452,6 +457,13 @@ final case class GeometricBuckets(firstBucket: Double,
     buf.putDouble(numBucketsPos + OffsetBucketDetails + 8, multiplier, LITTLE_ENDIAN)
     pos + 2 + 2 + 8 + 8
   }
+
+  override def similarForMath(other: HistogramBuckets): Boolean = {
+    other match {
+      case c: CustomBuckets => c.allBucketTops.sameElements(other.allBucketTops)
+      case _                => this == other
+    }
+  }
 }
 
 /**
@@ -477,4 +489,11 @@ final case class CustomBuckets(les: Array[Double]) extends HistogramBuckets {
   }
 
   override def hashCode: Int = les.hashCode
+
+  override def similarForMath(other: HistogramBuckets): Boolean = {
+    other match {
+      case g: GeometricBuckets  => g.allBucketTops.sameElements(other.allBucketTops)
+      case _                    => this == other
+    }
+  }
 }

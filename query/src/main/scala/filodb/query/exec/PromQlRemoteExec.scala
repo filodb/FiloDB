@@ -89,21 +89,16 @@ case class PromQlRemoteExec(queryEndpoint: String,
                             queryContext: QueryContext,
                             dispatcher: PlanDispatcher,
                             dataset: DatasetRef,
-                            params: PromQlQueryParams,
-                            numberColumnRequired: Boolean = false) extends RemoteExec {
-
-  override def args: String = s"${params.toString}, queryEndpoint=$queryEndpoint, " +
-    s"requestTimeoutMs=$requestTimeoutMs, limit=${queryContext.sampleLimit}, " +
-    s"numberColumnRequired=${numberColumnRequired}"
+                            params: PromQlQueryParams) extends RemoteExec {
   private val defaultColumns = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
-    ColumnInfo(if (numberColumnRequired) "number" else "value", ColumnType.DoubleColumn))
+    ColumnInfo("value", ColumnType.DoubleColumn))
   private val defaultRecSchema = SerializedRangeVector.toSchema(defaultColumns)
   private val defaultResultSchema = ResultSchema(defaultColumns, 1)
 
-  val histColumns = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+  private val histColumns = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("h", ColumnType.HistogramColumn))
-  val histRecSchema = SerializedRangeVector.toSchema(histColumns)
-  val histResultSchema = ResultSchema(histColumns, 1)
+  private val histRecSchema = SerializedRangeVector.toSchema(histColumns)
+  private val histResultSchema = ResultSchema(histColumns, 1)
   private val builder = SerializedRangeVector.newBuilder()
 
   override val urlParams = Map("query" -> params.promQl)
