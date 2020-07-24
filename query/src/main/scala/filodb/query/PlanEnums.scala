@@ -29,7 +29,6 @@ object InstantFunctionId extends Enum[InstantFunctionId] {
   case object Minute extends InstantFunctionId("minute")
   case object Month extends InstantFunctionId("month")
   case object Year extends InstantFunctionId("year")
-  // TODO time, vector, scalar
 }
 
 
@@ -102,45 +101,48 @@ object AggregationOperator extends Enum[AggregationOperator] {
 sealed abstract class BinaryOperator extends EnumEntry {
   def precedence: Int
   def isRightAssociative : Boolean
+  def operatorString: String
 }
 
-sealed class MathOperator (val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
-sealed class SetOperator(val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
-sealed class ComparisonOperator(val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
+sealed class MathOperator (val operatorString: String, val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
+sealed class SetOperator(val operatorString: String, val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
+sealed class ComparisonOperator(val operatorString: String, val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
 
 object BinaryOperator extends Enum[BinaryOperator] {
   val values = findValues
 
-  case object SUB extends MathOperator(4)
-  case object ADD extends MathOperator(4)
-  case object MUL extends MathOperator(5)
-  case object MOD extends MathOperator(5)
-  case object DIV extends MathOperator(5)
-  case object POW extends MathOperator(6, true)
-  case object LAND extends SetOperator(2)
-  case object LOR extends SetOperator(1)
-  case object LUnless extends SetOperator(2)
-  case object EQL extends ComparisonOperator(3)
-  case object NEQ extends ComparisonOperator(3)
-  case object LTE extends ComparisonOperator(3)
-  case object LSS extends ComparisonOperator(3)
-  case object GTE extends ComparisonOperator(3)
-  case object GTR extends ComparisonOperator(3)
-  case object EQL_BOOL extends ComparisonOperator(3)
-  case object NEQ_BOOL extends ComparisonOperator(3)
-  case object LTE_BOOL extends ComparisonOperator(3)
-  case object LSS_BOOL extends ComparisonOperator(3)
-  case object GTE_BOOL extends ComparisonOperator(3)
-  case object GTR_BOOL extends ComparisonOperator(3)
+  case object SUB extends MathOperator("-",4)
+  case object ADD extends MathOperator("+",4)
+  case object MUL extends MathOperator("*", 5)
+  case object MOD extends MathOperator("+", 5)
+  case object DIV extends MathOperator("/", 5)
+  case object POW extends MathOperator("^", 6, true)
+  case object LAND extends SetOperator("and", 2)
+  case object LOR extends SetOperator("or", 1)
+  case object LUnless extends SetOperator("unless", 2)
+  case object EQL extends ComparisonOperator("==",3)
+  case object NEQ extends ComparisonOperator("!=",3)
+  case object LTE extends ComparisonOperator("<=",3)
+  case object LSS extends ComparisonOperator("<", 3)
+  case object GTE extends ComparisonOperator(">=", 3)
+  case object GTR extends ComparisonOperator(">", 3)
+  case object EQL_BOOL extends ComparisonOperator("== bool", 3)
+  case object NEQ_BOOL extends ComparisonOperator("!= bool",3)
+  case object LTE_BOOL extends ComparisonOperator("<= bool", 3)
+  case object LSS_BOOL extends ComparisonOperator("< bool", 3)
+  case object GTE_BOOL extends ComparisonOperator(">= bool", 3)
+  case object GTR_BOOL extends ComparisonOperator("> bool", 3)
 
   case object EQLRegex extends BinaryOperator { // FIXME when implemented
     override def precedence: Int = 0
     override def isRightAssociative: Boolean = false
+    override def operatorString: String = ???
   }
 
   case object NEQRegex extends BinaryOperator { // FIXME when implemented
     override def precedence: Int = 0
     override def isRightAssociative: Boolean = false
+    override def operatorString: String = ???
   }
 }
 
