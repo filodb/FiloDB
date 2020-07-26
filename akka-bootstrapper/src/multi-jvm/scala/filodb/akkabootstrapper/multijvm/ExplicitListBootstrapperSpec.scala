@@ -4,16 +4,16 @@ import akka.remote.testkit.MultiNodeSpec
 import com.typesafe.config.{Config, ConfigFactory}
 
 
-object WhitelistBootstrapperMultiNodeConfig extends AkkaBootstrapperMultiNodeConfig {
+object ExplicitListBootstrapperMultiNodeConfig extends AkkaBootstrapperMultiNodeConfig {
 
   override def baseConfig: Config = ConfigFactory.parseString(
     s"""
        |akka-bootstrapper {
-       |  seed-discovery.class = "filodb.akkabootstrapper.WhitelistClusterSeedDiscovery"
-       |  whitelist.seeds = [
-       |                          "akka.tcp://WhitelistBootstrapperSpec@127.0.0.1:2552"
-       |                          "akka.tcp://WhitelistBootstrapperSpec@127.0.0.1:2562"
-       |                          "akka.tcp://WhitelistBootstrapperSpec@127.0.0.1:2572"
+       |  seed-discovery.class = "filodb.akkabootstrapper.ExplicitListClusterSeedDiscovery"
+       |  explicit-list.seeds = [
+       |                          "akka.tcp://ExplicitListBootstrapperSpec@127.0.0.1:2552"
+       |                          "akka.tcp://ExplicitListBootstrapperSpec@127.0.0.1:2562"
+       |                          "akka.tcp://ExplicitListBootstrapperSpec@127.0.0.1:2572"
        |                    ]
        |}
      """.stripMargin).withFallback(super.baseConfig)
@@ -57,12 +57,12 @@ object WhitelistBootstrapperMultiNodeConfig extends AkkaBootstrapperMultiNodeCon
   *
   * Then start consul: `consul agent -dev -config-dir=/usr/local/etc/consul/config/`
   *
-  * Run test: `sbt "multi-jvm:test-only filodb.akkabootstrapper.multijvm.WhitelistBootstrapperSpec"`
+  * Run test: `sbt "multi-jvm:test-only filodb.akkabootstrapper.multijvm.ExplicitListBootstrapperSpec"`
   */
-class WhitelistBootstrapperSpec extends MultiNodeSpec(WhitelistBootstrapperMultiNodeConfig)
+class ExplicitListBootstrapperSpec extends MultiNodeSpec(ExplicitListBootstrapperMultiNodeConfig)
   with BaseAkkaBootstrapperSpec {
-  override val akkaBootstrapperMultiNodeConfig = WhitelistBootstrapperMultiNodeConfig
+  override val akkaBootstrapperMultiNodeConfig = ExplicitListBootstrapperMultiNodeConfig
 }
-class WhitelistBootstrapperSpecMultiJvmNode1 extends WhitelistBootstrapperSpec
-class WhitelistBootstrapperSpecMultiJvmNode2 extends WhitelistBootstrapperSpec
-class WhitelistBootstrapperSpecMultiJvmNode3 extends WhitelistBootstrapperSpec
+class ExplicitListBootstrapperSpecMultiJvmNode1 extends ExplicitListBootstrapperSpec
+class ExplicitListBootstrapperSpecMultiJvmNode2 extends ExplicitListBootstrapperSpec
+class ExplicitListBootstrapperSpecMultiJvmNode3 extends ExplicitListBootstrapperSpec

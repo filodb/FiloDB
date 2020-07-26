@@ -351,7 +351,6 @@ class BlockMemFactory(blockStore: BlockManager,
   def allocateOffheap(size: Int, zero: Boolean = false): BinaryRegion.NativePointer = synchronized {
     require(!zero, "BlockMemFactory cannot zero memory at allocation")
     val block = ensureCapacity(size + metadataAllocSize + 2)
-    block.own()
     val preAllocationPosition = block.position()
     val newAddress = block.address + preAllocationPosition
     val postAllocationPosition = preAllocationPosition + size

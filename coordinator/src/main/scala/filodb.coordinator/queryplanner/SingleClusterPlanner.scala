@@ -283,10 +283,11 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val paramsExec = materializeFunctionArgs(lp.functionArgs, qContext)
 
     val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs, lp.window, lp.offsetMs.getOrElse(0))
-    if (newStartMs <= lp.endMs) {
+    if (newStartMs <= lp.endMs) { // if there is an overlap between query and retention ranges
       val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
       series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs,
-        lp.endMs, window, Some(execRangeFn), qContext, paramsExec, lp.offsetMs, rawSource)))
+        lp.endMs, window, Some(execRangeFn), qContext, lp.stepMultipleNotationUsed,
+        paramsExec, lp.offsetMs, rawSource)))
       series
     } else { // query is outside retention period, simply return empty result
       PlanResult(Seq(EmptyResultExec(qContext, dsRef)))
@@ -298,9 +299,9 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, qContext)
     val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs,
       WindowConstants.staleDataLookbackMillis, lp.offsetMs.getOrElse(0))
-    if (newStartMs <= lp.endMs) {
+    if (newStartMs <= lp.endMs) {  // if there is an overlap between query and retention ranges
       rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs, lp.endMs,
-        None, None, qContext, Nil, lp.offsetMs)))
+        None, None, qContext, false, Nil, lp.offsetMs)))
       rawSeries
     } else { // query is outside retention period, simply return empty result
       PlanResult(Seq(EmptyResultExec(qContext, dsRef)))
