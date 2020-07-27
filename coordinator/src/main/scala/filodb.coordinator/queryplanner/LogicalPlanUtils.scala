@@ -3,6 +3,7 @@ package filodb.coordinator.queryplanner
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
 import filodb.query.InstantFunctionId.{ClampMax, ClampMin}
+import filodb.query.RangeFunctionId.QuantileOverTime
 import filodb.query._
 
 object LogicalPlanUtils {
@@ -166,26 +167,37 @@ object LogicalPlanUtils {
   private val OFFSET = "offset"
   private val OPENING_ROUND_BRACKET = "("
   private val CLOSING_ROUND_BRACKET = ")"
+  private val OPENING_SQUARE_BRACKET = "["
+  private val CLOSING_SQUARE_BRACKET = "]"
   private val COMMA = ","
 
 
+  private def getFiltersFromRawSeries(lp: RawSeries)= lp.filters.map(f => (f.column, f.filter.operatorString,
+    QUOTES + f.filter.valuesStrings.head.toString + QUOTES))
 
-  def periodicSeriesToQuery(periodicSeries: PeriodicSeries): String = {
-    periodicSeries.rawSeries match {
-      case r: RawSeries =>
-        val filters = r.filters.map(f => (f.column, f.filter.operatorString,
-          QUOTES + f.filter.valuesStrings.head.toString + QUOTES))
+  private def filersToQuery(filters: Seq[(String, String, String)]): String = {
+    val name = filters.find(x => x._1.equals(PromMetricLabel)).head._3 replaceAll(QUOTES, "")
+    name + OPENING_CURLY_BRACES + filters.filterNot(x => x._1.equals(PromMetricLabel)).
+      map(f => f._1 + f._2 + f._3).mkString(",") + CLOSING_CURLY_BRACES
+  }
 
-        val name = filters.find(x => x._1.equals(PromMetricLabel)).head._3 replaceAll(QUOTES, "")
-        name + OPENING_CURLY_BRACES + filters.filterNot(x => x._1.equals(PromMetricLabel)).
-          map(f => f._1 + f._2 + f._3).mkString(",") + CLOSING_CURLY_BRACES +
-           periodicSeries.offsetMs.map(o => SPACE + OFFSET + SPACE + (o / 1000).toString + "s" ).getOrElse("")
-
-      case _            => throw new UnsupportedOperationException()
+  private def rawSeriesLikeToQuery(lp: RawSeriesLikePlan): String = {
+    lp match {
+      case r: RawSeries               => filersToQuery(getFiltersFromRawSeries(r))
+      case a: ApplyInstantFunctionRaw => val filters = getFiltersFromRawSeries(a.vectors)
+        val bucketFilter = ("_bucket_", "=", QUOTES + functionArgsToQuery(a.functionArgs.head) + QUOTES)
+        filersToQuery(filters :+ bucketFilter)
+      case _            => throw new UnsupportedOperationException(s"$lp can't be converted to Query")
     }
   }
 
-  def aggregateToQuery(lp: Aggregate): String = {
+  private def periodicSeriesToQuery(periodicSeries: PeriodicSeries): String = {
+    rawSeriesLikeToQuery(periodicSeries.rawSeries) +
+      periodicSeries.offsetMs.map(o => SPACE + OFFSET + SPACE + (o / 1000).toString + "s" ).getOrElse("")
+  }
+
+
+  private def aggregateToQuery(lp: Aggregate): String = {
     val periodicSeriesQuery = periodicSeriesPlanToQuery(lp.vectors)
     val byString = if (lp.by.isEmpty) "" else SPACE + "by" + SPACE + OPENING_ROUND_BRACKET + lp.by.mkString(",") +
       CLOSING_ROUND_BRACKET
@@ -198,45 +210,71 @@ object LogicalPlanUtils {
 
   }
 
-  def absentFnToQuery(lp: ApplyAbsentFunction): String = {
+  private def absentFnToQuery(lp: ApplyAbsentFunction): String = {
     val periodicSeriesQuery = periodicSeriesPlanToQuery(lp.vectors)
     "absent" + OPENING_ROUND_BRACKET + periodicSeriesQuery + CLOSING_ROUND_BRACKET
   }
 
-  def instantFnToQuery(lp: ApplyInstantFunction): String = {
+  private def functionArgsToQuery(f: FunctionArgsPlan): String = {
+   f match {
+     case d: ScalarFixedDoublePlan => d.scalar.toString
+     case t: ScalarTimeBasedPlan => t.function.entryName + OPENING_ROUND_BRACKET + CLOSING_ROUND_BRACKET
+     case s: ScalarVaryingDoublePlan => periodicSeriesPlanToQuery(s.vectors)
+   }
+  }
+
+  private def instantFnToQuery(lp: ApplyInstantFunction): String = {
     val periodicSeriesQuery = periodicSeriesPlanToQuery(lp.vectors)
-    if (lp.functionArgs.isEmpty)
-    lp.function.entryName + OPENING_ROUND_BRACKET + periodicSeriesQuery + CLOSING_ROUND_BRACKET
+    val prefix = lp.function.entryName + OPENING_ROUND_BRACKET
+    if (lp.functionArgs.isEmpty) prefix + periodicSeriesQuery + CLOSING_ROUND_BRACKET
     else {
-      val functionArg =
-      lp.functionArgs.head match {
-        case d: ScalarFixedDoublePlan   =>  d.scalar
-        case t: ScalarTimeBasedPlan     =>  t.function.entryName + OPENING_ROUND_BRACKET + CLOSING_ROUND_BRACKET
-        case s: ScalarVaryingDoublePlan =>  periodicSeriesPlanToQuery(s.vectors)
-      }
       if (lp.function.equals(ClampMax) || lp.function.equals(ClampMin))
-        lp.function.entryName + OPENING_ROUND_BRACKET + periodicSeriesQuery +
-          COMMA + functionArg + CLOSING_ROUND_BRACKET
-      else lp.function.entryName + OPENING_ROUND_BRACKET + functionArg + COMMA + periodicSeriesQuery +
-        CLOSING_ROUND_BRACKET
+        prefix + periodicSeriesQuery + COMMA + functionArgsToQuery(lp.functionArgs.head) + CLOSING_ROUND_BRACKET
+      else prefix + functionArgsToQuery(lp.functionArgs.head) + COMMA +
+        periodicSeriesQuery + CLOSING_ROUND_BRACKET
     }
   }
 
-  def scalarBinaryOperationToQuery(lp: ScalarBinaryOperation): String = {
+  private def scalarBinaryOperationToQuery(lp: ScalarBinaryOperation): String = {
     val rhs = if (lp.rhs.isLeft) lp.rhs.left.get.toString else periodicSeriesPlanToQuery(lp.rhs.right.get)
     val lhs = if (lp.lhs.isLeft) lp.lhs.left.get.toString else periodicSeriesPlanToQuery(lp.lhs.right.get)
     lhs + SPACE + lp.operator.operatorString + SPACE + rhs
 
   }
 
-  def periodicSeriesPlanToQuery(lp: PeriodicSeriesPlan): String = {
+  private def scalarVectorBinaryOperationToQuery(lp: ScalarVectorBinaryOperation): String = {
+    val periodicSeriesQuery = periodicSeriesPlanToQuery(lp.vector)
+
+    if (lp.scalarIsLhs) functionArgsToQuery(lp.scalarArg) + SPACE + lp.operator.operatorString + SPACE +
+      periodicSeriesQuery
+    else periodicSeriesQuery + SPACE + lp.operator.operatorString + SPACE + functionArgsToQuery(lp.scalarArg)
+  }
+
+  private def periodicSeriesWithWindowingToQuery(lp: PeriodicSeriesWithWindowing): String = {
+
+    val rawSeriesQueryWithWindow = rawSeriesLikeToQuery(lp.series) + OPENING_SQUARE_BRACKET + lp.window/1000 + "s" +
+      CLOSING_SQUARE_BRACKET
+    val prefix = lp.function.entryName + OPENING_ROUND_BRACKET
+    if (lp.functionArgs.isEmpty) prefix + rawSeriesQueryWithWindow + CLOSING_ROUND_BRACKET
+    else {
+      if (lp.function.equals(QuantileOverTime))
+        prefix + functionArgsToQuery(lp.functionArgs.head) + COMMA + rawSeriesQueryWithWindow + CLOSING_ROUND_BRACKET
+      else
+        prefix + rawSeriesQueryWithWindow + COMMA + lp.functionArgs.map(functionArgsToQuery(_)).mkString(",") +
+          CLOSING_ROUND_BRACKET
+    }
+
+  }
+
+  private def periodicSeriesPlanToQuery(lp: PeriodicSeriesPlan): String = {
     lp match {
       case lp: PeriodicSeries              => periodicSeriesToQuery(lp)
       case lp: Aggregate                   => aggregateToQuery(lp)
       case lp: ApplyAbsentFunction         => absentFnToQuery(lp)
       case lp: ApplyInstantFunction        => instantFnToQuery(lp)
-     // case lp: ScalarVectorBinaryOperation      => scalarVectorBinaryOperationToQuery(lp)
+      case lp: ScalarVectorBinaryOperation      => scalarVectorBinaryOperationToQuery(lp)
       case lp: ScalarBinaryOperation      => scalarBinaryOperationToQuery(lp)
+      case lp: PeriodicSeriesWithWindowing =>periodicSeriesWithWindowingToQuery(lp)
       case _                               => throw new UnsupportedOperationException(s"$lp not supported")
     }
   }

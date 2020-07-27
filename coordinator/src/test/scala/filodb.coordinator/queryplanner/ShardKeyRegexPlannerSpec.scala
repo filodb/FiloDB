@@ -119,8 +119,8 @@ class ShardKeyRegexPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     execPlan.isInstanceOf[PartKeysDistConcatExec] shouldEqual (true)
   }
 
-  it("should generate Exec plan for histgram quantile for Aggregate query") {
-    val lp = Parser.queryToLogicalPlan("histogram_quantile(0.2, sum(test{_ws_ = \"demo\", _ns_ =~ \"App.*\", instance = \"Inst-1\"}))", 1000)
+  it("should generate Exec plan for histogram quantile for Aggregate query") {
+    val lp = Parser.queryToLogicalPlan("histogram_quantile(0.2, sum(test{_ws_ = \"demo\", _ns_ =~ \"App.*\", instance = \"Inst-1\"}))", 1000, 1000)
     val shardKeyMatcherFn = (shardKeyMatcher: ShardKeyMatcher) => {
       Seq(ShardKeyMatcher(Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("App-1"))),
         "sum(test{_ws_ = \"demo\", _ns_ =~ \"App.1\", instance = \"Inst-1\" }"),

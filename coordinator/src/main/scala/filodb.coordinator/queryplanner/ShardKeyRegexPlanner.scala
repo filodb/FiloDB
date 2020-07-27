@@ -128,7 +128,8 @@ class ShardKeyRegexPlanner(dataset: Dataset,
                            qContext: QueryContext): Seq[ExecPlan] = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     shardKeyMatcherFn(ShardKeyMatcher(nonMetricShardKeyFilters, queryParams.promQl)).map { result =>
-        val newQueryParams = queryParams.copy(promQl = result.query)
+        val newLogicalPlan = logicalPlan.replaceFilters(result.columnFilters)
+        val newQueryParams = queryParams.copy(promQl = LogicalPlanUtils.logicalPlanToQuery(newLogicalPlan))
         val newQueryContext = qContext.copy(origQueryParams = newQueryParams)
         queryPlanner.materialize(logicalPlan.replaceFilters(result.columnFilters), newQueryContext)
       }
