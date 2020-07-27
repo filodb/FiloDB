@@ -343,6 +343,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
 
   final def submitTime: Long = children.head.queryContext.submitTime
 
+  def parallelChildTasks: Boolean = true
+
   private def dispatchRemotePlan(plan: ExecPlan, span: kamon.trace.Span)
                                 (implicit sched: Scheduler) = {
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
@@ -370,8 +372,13 @@ abstract class NonLeafExecPlan extends ExecPlan {
     parentSpan.mark("create-child-tasks")
     // Create tasks for all results.
     // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
+    val parallelism: Int = if (parallelChildTasks)
+                              Runtime.getRuntime.availableProcessors()
+                           else
+                              1
+
     val childTasks = Observable.fromIterable(children.zipWithIndex)
-                               .mapAsync(Runtime.getRuntime.availableProcessors()) { case (plan, i) =>
+                               .mapAsync(parallelism) { case (plan, i) =>
                                  dispatchRemotePlan(plan, parentSpan).map((_, i))
                                }
 

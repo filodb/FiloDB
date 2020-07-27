@@ -11,6 +11,8 @@ sealed trait LogicalPlan {
     */
   def isRoutable: Boolean = true
 
+  def isSplittable: Boolean = true
+
   /**
     * Replace filters present in logical plan
     */
