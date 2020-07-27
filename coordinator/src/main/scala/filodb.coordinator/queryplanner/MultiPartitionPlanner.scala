@@ -5,7 +5,7 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.Dataset
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.query.{BinaryJoin, LabelValues, LogicalPlan, RawSeriesLikePlan, SeriesKeysByFilters}
+import filodb.query.{BinaryJoin, LabelValues, LogicalPlan, SeriesKeysByFilters}
 import filodb.query.exec._
 
 case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange)
@@ -117,7 +117,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         else {
           val httpEndpoint = p.endPoint + queryParams.remoteQueryPath.getOrElse("")
           PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, qContext, InProcessPlanDispatcher, dataset.ref,
-            generateRemoteExecParams(queryParams, startMs, endMs), logicalPlan.isInstanceOf[RawSeriesLikePlan])
+            generateRemoteExecParams(queryParams, startMs, endMs))
         }
       }
       if (execPlans.size == 1) execPlans.head
@@ -143,8 +143,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         else {
           val httpEndpoint = partitions.head.endPoint + queryParams.remoteQueryPath.getOrElse("")
           PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, qContext, InProcessPlanDispatcher, dataset.ref,
-            generateRemoteExecParams(queryParams, queryParams.startSecs * 1000, queryParams.endSecs * 1000),
-            logicalPlan.isInstanceOf[RawSeriesLikePlan])
+            generateRemoteExecParams(queryParams, queryParams.startSecs * 1000, queryParams.endSecs * 1000))
         }
       }
       else throw new UnsupportedOperationException("Binary Join across multiple partitions not supported")

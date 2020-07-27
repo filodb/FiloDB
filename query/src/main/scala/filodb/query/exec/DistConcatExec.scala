@@ -39,5 +39,5 @@ final case class MultiPartitionDistConcatExec(queryContext: QueryContext,
                                               children: Seq[ExecPlan]) extends DistConcatExec {
   // overriden since it can reduce schemas with different vector lengths as long as the columns are same
   override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema =
-    IgnoreFixedVectorLenSchemaReducer.reduceSchema(rs, resp)
+    IgnoreFixedVectorLenAndColumnNamesSchemaReducer.reduceSchema(rs, resp)
 }

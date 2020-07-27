@@ -537,6 +537,16 @@ class ParserSpec extends FunSpec with Matchers {
     }
   }
 
+  it("should error instant queries without step when step multiple notation is used") {
+    val q = "sum(rate(foo{job=\"SNRT-App-0\"}[5i]))"
+    val qts: Long = 1524855988L
+    val step = 0
+    info(s"Parsing $q")
+    intercept[IllegalArgumentException] {
+      Parser.queryToLogicalPlan(q, qts, step)
+    }
+  }
+
   private def printBinaryJoin( lp: LogicalPlan, level: Int = 0) : scala.Unit =  {
     if (!lp.isInstanceOf[BinaryJoin]) {
       info(s"${"  "*level}" + lp.toString)
