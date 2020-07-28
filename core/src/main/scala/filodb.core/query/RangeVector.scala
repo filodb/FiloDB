@@ -140,11 +140,15 @@ trait ScalarSingleValue extends ScalarRangeVector {
 
   override def rows(): RangeVectorCursor = {
     import NoCloseCursor._
-    Iterator.from(0, rangeParams.stepSecs.toInt).takeWhile(_ <= rangeParams.endSecs - rangeParams.startSecs).map { i =>
+    val it = Iterator.from(0, rangeParams.stepSecs.toInt)
+                     .takeWhile(_ <= rangeParams.endSecs - rangeParams.startSecs).map { i =>
       numRowsInt += 1
       val t = i + rangeParams.startSecs
       new TransientRow(t * 1000, getValue(t * 1000))
     }
+    // address step == 0 case
+    if (rangeParams.startSecs == rangeParams.endSecs) it.take(1)
+    else it
   }
 }
 

@@ -65,9 +65,9 @@ case class ScalarFixedDoubleExec(queryContext: QueryContext,
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
           (transf.apply(acc._1, querySession, queryContext.sampleLimit, acc._2,
             paramRangeVector), transf.schema(acc._2))
-        }._1.toListL.map({
+        }._1.toListL.map({ r =>
           span.finish()
-          QueryResult(queryContext.queryId, resultSchema, _)
+          QueryResult(queryContext.queryId, resultSchema, r)
         })
       }.flatten
     }
