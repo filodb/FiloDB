@@ -56,7 +56,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
         } else { // raw/downsample overlapping query without long lookback
           // Split the query between raw and downsample planners
           // Note - should never arrive here when start == end (so step never 0)
-          require(p.stepMs > 0)
+          require(p.stepMs > 0, "Step was 0 when trying to split query between raw and downsample cluster")
           val numStepsInDownsample = (earliestRawTime - startWithOffsetMs + lookbackMs) / p.stepMs
           val lastDownsampleInstant = p.startMs + numStepsInDownsample * p.stepMs
           val firstInstantInRaw = lastDownsampleInstant + p.stepMs

@@ -61,10 +61,10 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
         parameter('query.as[String], 'time.as[Double], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?,
           'spread.as[Int].?, 'histogramMap.as[Boolean].?, 'step.as[Double].?)
         { (query, time, explainOnly, verbose, spread, histMap, step) =>
-          val correctStep = step.map(_.toLong).getOrElse(0L)
-          val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong, correctStep)
+          val stepLong = step.map(_.toLong).getOrElse(0L)
+          val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong, stepLong)
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
-            verbose.getOrElse(false), spread, PromQlQueryParams(query, time.toLong, correctStep, time.toLong, spread),
+            verbose.getOrElse(false), spread, PromQlQueryParams(query, time.toLong, stepLong, time.toLong, spread),
             histMap.getOrElse(false))
         }
       }
@@ -126,8 +126,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     }
     onSuccess(asyncAsk(nodeCoord, command, settings.queryAskTimeout)) {
       case qr: QueryResult => val translated = if (histMap) qr else convertHistToPromResult(qr, schemas.part)
-                              val res = toPromSuccessResponse(translated, verbose)
-                              complete(res)
+                              complete(toPromSuccessResponse(translated, verbose))
       case qr: QueryError => complete(toPromErrorResponse(qr))
       case qr: ExecPlan => complete(toPromExplainPlanResponse(qr))
       case UnknownDataset => complete(Codes.NotFound ->
