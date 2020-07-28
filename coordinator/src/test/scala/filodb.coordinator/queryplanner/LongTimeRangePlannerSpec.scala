@@ -65,6 +65,16 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
     ep.lp shouldEqual logicalPlan
   }
 
+  it("should direct overlapping instant queries correctly to raw or downsample clusters") {
+    // this instant query spills into downsample period
+    val logicalPlan = Parser.queryRangeToLogicalPlan("rate(foo[2m])",
+      TimeStepParams(now/1000 - 12.minutes.toSeconds, 0, now/1000 - 12.minutes.toSeconds))
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
+    ep.name shouldEqual "downsample"
+    ep.lp shouldEqual logicalPlan
+  }
+
   it("should direct overlapping queries to both raw & downsample planner and stitch") {
 
     val start = now/1000 - 30.minutes.toSeconds
