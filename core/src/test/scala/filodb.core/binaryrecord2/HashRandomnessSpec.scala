@@ -1,11 +1,12 @@
 package filodb.core.binaryrecord2
 
-import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 /**
  * A test to ensure that the hashing algorithm used in RecordBuilder for maps is random enough
  */
-class HashRandomnessSpec extends FunSpec with Matchers {
+class HashRandomnessSpec extends AnyFunSpec with Matchers {
 
   val NumPairs = 10000
 

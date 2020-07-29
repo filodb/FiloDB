@@ -6,7 +6,7 @@ import com.typesafe.config.ConfigFactory
 import monix.execution.ExecutionModel.BatchedExecution
 import monix.reactive.Observable
 import org.apache.lucene.util.BytesRef
-import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
+import org.scalatest.BeforeAndAfter
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
@@ -17,8 +17,10 @@ import filodb.core.query.{ColumnFilter, Filter, QuerySession}
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.vectors.LongHistogram
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
+class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfter with ScalaFutures {
   implicit val s = monix.execution.Scheduler.Implicits.global
 
   import MachineMetricsData._

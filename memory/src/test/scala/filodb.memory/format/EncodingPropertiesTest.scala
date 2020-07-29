@@ -1,12 +1,13 @@
 package filodb.memory.format
 
-import org.scalatest.{FunSpec, Matchers}
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format.MemoryReader._
 import filodb.memory.format.vectors.UTF8Vector
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class EncodingPropertiesTest extends FunSpec with Matchers with ScalaCheckPropertyChecks {
+class EncodingPropertiesTest extends AnyFunSpec with Matchers with ScalaCheckPropertyChecks {
   import org.scalacheck._
   import Arbitrary.arbitrary
 

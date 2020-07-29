@@ -5,7 +5,7 @@ import scala.concurrent.duration._
 import scala.util.Random
 
 import com.googlecode.javaewah.IntIterator
-import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
+import org.scalatest.BeforeAndAfter
 
 import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
@@ -14,8 +14,10 @@ import filodb.core.query.{ColumnFilter, Filter}
 import filodb.memory.format.UnsafeUtils.ZeroPointer
 import filodb.memory.format.UTF8Wrapper
 import filodb.memory.format.ZeroCopyUTF8String._
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
+class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfter {
   import Filter._
   import GdeltTestData._
 

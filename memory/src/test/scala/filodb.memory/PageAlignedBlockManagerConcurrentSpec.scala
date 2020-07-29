@@ -1,10 +1,11 @@
 package filodb.memory
 
-import org.scalatest.{Matchers, BeforeAndAfterAll}
+import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ConductorFixture
-import org.scalatest.fixture.FunSuite
+import org.scalatest.funsuite.FixtureAnyFunSuite
+import org.scalatest.matchers.should.Matchers
 
-class PageAlignedBlockManagerConcurrentSpec extends FunSuite
+class PageAlignedBlockManagerConcurrentSpec extends FixtureAnyFunSuite
 with ConductorFixture with Matchers with BeforeAndAfterAll {
   import PageAlignedBlockManagerSpec._
 

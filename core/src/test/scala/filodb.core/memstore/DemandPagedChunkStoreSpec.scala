@@ -3,14 +3,14 @@ package filodb.core.memstore
 import scala.concurrent.duration._
 
 import com.typesafe.config.ConfigFactory
-import org.scalatest.FunSpec
 
 import filodb.core.{AsyncTest, TestData}
 import filodb.core.metadata.Schemas
 import filodb.core.store.{ColumnStore, InMemoryMetaStore, NullColumnStore, StoreConfig}
 import filodb.memory.PageAlignedBlockManager
+import org.scalatest.funspec.AnyFunSpec
 
-class DemandPagedChunkStoreSpec extends FunSpec with AsyncTest {
+class DemandPagedChunkStoreSpec extends AnyFunSpec with AsyncTest {
   import filodb.core.MachineMetricsData._
   import monix.execution.Scheduler.Implicits.global
 
