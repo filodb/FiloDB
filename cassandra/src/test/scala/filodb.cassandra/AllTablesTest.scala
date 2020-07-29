@@ -5,8 +5,9 @@ import org.scalatest._
 
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core._
+import org.scalatest.funspec.AnyFunSpec
 
-trait AllTablesTest extends FunSpec with AsyncTest {
+trait AllTablesTest extends AnyFunSpec with AsyncTest {
   import filodb.cassandra.metastore._
 
   implicit val scheduler = monix.execution.Scheduler.Implicits.global
