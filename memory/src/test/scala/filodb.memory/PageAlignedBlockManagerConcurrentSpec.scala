@@ -20,7 +20,7 @@ with ConductorFixture with Matchers with BeforeAndAfterAll {
     (conductor: Conductor) =>
       import conductor._
 
-      thread("Random guy") {
+      threadNamed("Random guy") {
         //1 page
         val blocks = blockManager.requestBlocks(pageSize, None)
         blocks.size should be(1)
@@ -28,7 +28,7 @@ with ConductorFixture with Matchers with BeforeAndAfterAll {
         block.position(block.position() + 1)
         waitForBeat(1)
       }
-      thread("Another dude") {
+      threadNamed("Another dude") {
         //2 page
         val blocks = blockManager.requestBlocks(2 * pageSize, None)
         blocks.size should be(2)
@@ -36,7 +36,7 @@ with ConductorFixture with Matchers with BeforeAndAfterAll {
         block.position(block.position() + 1)
         waitForBeat(1)
       }
-      thread("Yet another dude") {
+      threadNamed("Yet another dude") {
         //3 page
         val blocks = blockManager.requestBlocks(3 * pageSize, None)
         blocks.size should be(3)
