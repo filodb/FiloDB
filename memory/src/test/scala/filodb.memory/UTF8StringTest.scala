@@ -1,11 +1,10 @@
 package filodb.memory
 
-import org.scalatest.{FunSpec, Matchers, BeforeAndAfterAll}
-import org.scalatest.prop.PropertyChecks
-
+import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import filodb.memory.format.UnsafeUtils.ZeroPointer
+import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
-class UTF8StringTest extends FunSpec with Matchers with BeforeAndAfterAll with PropertyChecks {
+class UTF8StringTest extends FunSpec with Matchers with BeforeAndAfterAll with ScalaCheckPropertyChecks {
   import UTF8StringMedium._
 
   val nativeMem = new NativeMemoryManager(10 * 1024 * 1024)
