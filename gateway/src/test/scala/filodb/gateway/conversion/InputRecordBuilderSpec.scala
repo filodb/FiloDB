@@ -1,13 +1,14 @@
 package filodb.gateway.conversion
 
-import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
 import filodb.memory.MemFactory
 import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class InputRecordBuilderSpec extends FunSpec with Matchers {
+class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
   val builder = new RecordBuilder(MemFactory.onHeapFactory)
 
   val baseTags = Map("dataset" -> "timeseries",
