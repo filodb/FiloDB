@@ -13,9 +13,10 @@ import filodb.query.{exec, AggregationOperator, SortFunctionId}
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class SortFunctionSpec extends FunSpec with Matchers with ScalaFutures {
+class SortFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
   val config: Config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val resultSchema = ResultSchema(MetricsTestData.timeseriesSchema.infosFromIDs(0 to 1), 1)
   val queryConfig = new QueryConfig(config.getConfig("query"))
