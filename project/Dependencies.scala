@@ -30,7 +30,7 @@ object Dependencies {
   val log4jDep          = "log4j"                      % "log4j"                 % "1.2.17"
   val scalaLoggingDep   = "com.typesafe.scala-logging" %% "scala-logging"        % "3.7.2"
   val scalaTest         = "org.scalatest"              %% "scalatest"            % "2.2.6" // TODO upgrade to 3.0.4
-  val scalaCheck        = "org.scalacheck"             %% "scalacheck"           % "1.11.0"
+  val scalaCheck        = "org.scalacheck"             %% "scalacheck"           % "1.14.3"
   val akkaHttp          = "com.typesafe.akka"          %% "akka-http"            % akkaHttpVersion withJavadoc()
   val akkaHttpTestkit   = "com.typesafe.akka"          %% "akka-http-testkit"    % akkaHttpVersion withJavadoc()
   val akkaHttpCirce     = "de.heikoseeberger"          %% "akka-http-circe"      % "1.21.0"
