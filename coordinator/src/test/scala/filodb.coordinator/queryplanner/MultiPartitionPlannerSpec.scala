@@ -4,6 +4,7 @@ import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{FunSpec, Matchers}
+
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
@@ -70,7 +71,7 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
 
     def twoPartitions(timeRange: TimeRange): List[PartitionAssignment] = List(
       PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
-        localPartitionStart * 1000 - 1)), PartitionAssignment("local", "local-url",
+        localPartitionStart * 1000 - 1)), PartitionAssignment("remote2", "remote-url2",
         TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
 
     val partitionLocationProvider = new PartitionLocationProvider {
@@ -114,7 +115,7 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     remoteExec2.params.stepSecs shouldEqual step
     remoteExec2.params.processFailure shouldEqual true
     remoteExec2.params.processMultiPartition shouldEqual false
-    remoteExec2.queryEndpoint shouldEqual "local-url"
+    remoteExec2.queryEndpoint shouldEqual "remote-url2"
 
   }
 
@@ -254,7 +255,7 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
              secondPartitionStart * 1000 - 1)),
             PartitionAssignment("remote2", "remote-url2", TimeRange(secondPartitionStart * 1000,
               thirdPartitionStart * 1000 - 1)),
-            PartitionAssignment("local", "local-url", TimeRange(thirdPartitionStart * 1000, endSeconds * 1000)))
+            PartitionAssignment("remote3", "remote-url3", TimeRange(thirdPartitionStart * 1000, endSeconds * 1000)))
         else Nil
       }
       override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
@@ -304,7 +305,7 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     remoteExec3.params.stepSecs shouldEqual step
     remoteExec3.params.processFailure shouldEqual true
     remoteExec3.params.processMultiPartition shouldEqual false
-    remoteExec3.queryEndpoint shouldEqual "local-url"
+    remoteExec3.queryEndpoint shouldEqual "remote-url3"
 
   }
 
@@ -318,8 +319,8 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app")))
-          List(PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
-            localPartitionStartSec * 1000 - 1)), PartitionAssignment("local", "local-url",
+          List(PartitionAssignment("remote1", "remote-url1", TimeRange(startSeconds * 1000 - lookbackMs,
+            localPartitionStartSec * 1000 - 1)), PartitionAssignment("remote2", "remote-url2",
             TimeRange(localPartitionStartSec * 1000, endSeconds * 1000)))
         else Nil
       }
@@ -350,7 +351,7 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     remoteExec1.params.stepSecs shouldEqual step
     remoteExec1.params.processFailure shouldEqual true
     remoteExec1.params.processMultiPartition shouldEqual false
-    remoteExec1.queryEndpoint shouldEqual "remote-url"
+    remoteExec1.queryEndpoint shouldEqual "remote-url1"
 
     val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
     remoteExec2.params.startSecs shouldEqual startSeconds
@@ -358,7 +359,7 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     remoteExec2.params.stepSecs shouldEqual step
     remoteExec2.params.processFailure shouldEqual true
     remoteExec2.params.processMultiPartition shouldEqual false
-    remoteExec2.queryEndpoint shouldEqual "local-url"
+    remoteExec2.queryEndpoint shouldEqual "remote-url2"
 
   }
 
