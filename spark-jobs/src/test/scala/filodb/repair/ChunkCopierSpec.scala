@@ -1,7 +1,7 @@
 package filodb.repair
 
 import org.apache.spark.SparkConf
-import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
+import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 import com.typesafe.config.ConfigFactory
@@ -10,8 +10,10 @@ import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.GlobalConfig
 import filodb.core.metadata.{Dataset, Schemas}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class ChunkCopierSpec extends FunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
+class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(15, Seconds), interval = Span(250, Millis))
 

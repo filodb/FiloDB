@@ -5,13 +5,13 @@ import akka.http.scaladsl.model.{ContentTypes, StatusCodes}
 import akka.http.scaladsl.testkit.{RouteTestTimeout, ScalatestRouteTest}
 import akka.testkit.TestProbe
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
-import org.scalatest.FunSpec
 
 import scala.concurrent.duration._
 import filodb.coordinator._
 import filodb.core.{AsyncTest, DatasetRef, TestData}
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.query.{ExplainPlanResponse, HistSampl, Sampl, SuccessResponse}
+import org.scalatest.funspec.AnyFunSpec
 
 
 object PrometheusApiRouteSpec extends ActorSpecConfig {
@@ -34,7 +34,7 @@ object PrometheusApiRouteSpec extends ActorSpecConfig {
   }"""
 }
 
-class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncTest {
+class PrometheusApiRouteSpec extends AnyFunSpec with ScalatestRouteTest with AsyncTest {
 
   import FailFastCirceSupport._
   import io.circe.generic.auto._

@@ -16,7 +16,6 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 import org.xerial.snappy.Snappy
 import remote.RemoteStorage.{LabelMatcher, Query, ReadRequest, ReadResponse}
-
 import filodb.coordinator._
 import filodb.coordinator.NodeClusterActor.{DatasetResourceSpec, IngestionSource}
 import filodb.coordinator.client.LocalClient
@@ -24,10 +23,11 @@ import filodb.core.DatasetRef
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryError, QueryResult => QueryResult2, Sampl}
+import filodb.query.{QueryError, Sampl, QueryResult => QueryResult2}
 import filodb.query.PromCirceSupport
 import filodb.query.Sampl
 import filodb.query.SuccessResponse
+import org.scalatest.flatspec.AnyFlatSpecLike
 
 /**
  * A trait used for MultiJVM tests based on starting the standalone FiloServer using timeseries-dev config
@@ -35,8 +35,8 @@ import filodb.query.SuccessResponse
  */
 abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNodeSpec(config)
   with Suite with StrictLogging
-  with ScalaFutures with FlatSpecLike with ImplicitSender
-  with Matchers with BeforeAndAfterAll {
+  with ScalaFutures with AnyFlatSpecLike with ImplicitSender
+  with matchers.should.Matchers with BeforeAndAfterAll {
   override def initialParticipants: Int = roles.size
 
   import akka.testkit._

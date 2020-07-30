@@ -7,7 +7,6 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
-import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.exceptions.TestFailedException
 
@@ -15,8 +14,10 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
+class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
   import MultiSchemaPartitionsExecSpec._
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")

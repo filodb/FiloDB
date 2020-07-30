@@ -1,8 +1,9 @@
 package filodb.query.util
 
-import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class IndexedArrayQueueSpec extends FunSpec with Matchers {
+class IndexedArrayQueueSpec extends AnyFunSpec with Matchers {
 
   it ("should be able to perform add and remove") {
     val q = new IndexedArrayQueue[String](8)

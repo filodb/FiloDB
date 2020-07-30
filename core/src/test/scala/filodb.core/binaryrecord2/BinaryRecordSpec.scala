@@ -1,7 +1,7 @@
 package filodb.core.binaryrecord2
 
 import debox.Buffer
-import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 
 import filodb.core.{MachineMetricsData, Types}
 import filodb.core.metadata.Column.ColumnType
@@ -9,8 +9,10 @@ import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.query.ColumnInfo
 import filodb.memory._
 import filodb.memory.format.{SeqRowReader, UnsafeUtils, ZeroCopyUTF8String => ZCUTF8}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
+class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
   import MachineMetricsData._
   import UTF8StringMedium._
   import RecordBuilder.ContainerHeaderLen

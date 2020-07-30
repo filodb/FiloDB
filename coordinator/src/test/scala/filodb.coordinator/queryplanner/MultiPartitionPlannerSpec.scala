@@ -3,7 +3,8 @@ package filodb.coordinator.queryplanner
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
@@ -14,7 +15,7 @@ import filodb.prometheus.parse.Parser
 import filodb.query.LogicalPlan
 import filodb.query.exec._
 
-class MultiPartitionPlannerSpec extends FunSpec with Matchers {
+class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
   private implicit val system = ActorSystem()
   private val node = TestProbe().ref
 
