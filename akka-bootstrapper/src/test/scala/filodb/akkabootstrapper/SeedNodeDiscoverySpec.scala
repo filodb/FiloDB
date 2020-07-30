@@ -5,6 +5,8 @@ import akka.cluster.Cluster
 import akka.testkit.{ImplicitSender, TestKit}
 import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest._
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpecLike
 
 class SeedNodeHeadDiscoverySpec extends BaseSeedNodeDiscoverySpec(AbstractTestKit.head) {
   "ExplicitListClusterSeedDiscovery" must {
@@ -31,7 +33,7 @@ class SeedNodeLastDiscoverySpec extends BaseSeedNodeDiscoverySpec(AbstractTestKi
 }
 
 abstract class BaseSeedNodeDiscoverySpec(config: Config)
-  extends AbstractTestKit(config) with WordSpecLike {
+  extends AbstractTestKit(config) with AnyWordSpecLike {
 
   protected val cluster = Cluster(system)
   protected val selfAddress = cluster.selfAddress

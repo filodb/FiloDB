@@ -1,15 +1,16 @@
 package filodb.memory
 
 import com.kenai.jffi.MemoryIO
-import org.scalatest.{FlatSpec, Matchers}
 
 import filodb.memory.BinaryRegion.Memory
 import filodb.memory.format.UnsafeUtils
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 /**
   * Buffer manager allocation and freeing tests
   */
-class NativeMemoryManagerSpec extends FlatSpec with Matchers {
+class NativeMemoryManagerSpec extends AnyFlatSpec with Matchers {
   it should "Allocate and allow writing up to the allocation size" in {
     //16 for magic header
     val bufferManager = new NativeMemoryManager(1000 + 16)

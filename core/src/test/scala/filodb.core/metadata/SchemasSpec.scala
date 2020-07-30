@@ -1,12 +1,13 @@
 package filodb.core.metadata
 
 import com.typesafe.config.{Config, ConfigFactory}
-import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core._
 import filodb.core.query.ColumnInfo
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class SchemasSpec extends FunSpec with Matchers {
+class SchemasSpec extends AnyFunSpec with Matchers {
   import Column.ColumnType._
   import Dataset._
   import NamesTestData._

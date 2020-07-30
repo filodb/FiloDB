@@ -2,7 +2,6 @@ package filodb.query.exec
 
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
-import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core.{MetricsTestData, TestData}
@@ -13,8 +12,10 @@ import filodb.memory.format.ZeroCopyUTF8String
 import filodb.query._
 import filodb.query.exec.InternalRangeFunction.Increase
 import filodb.query.exec.rangefn.RawDataWindowingSpec
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class PeriodicSamplesMapperSpec extends FunSpec with Matchers with ScalaFutures with RawDataWindowingSpec {
+class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutures with RawDataWindowingSpec {
 
   val resultSchema = ResultSchema(MetricsTestData.timeseriesSchema.infosFromIDs(0 to 1), 1)
 

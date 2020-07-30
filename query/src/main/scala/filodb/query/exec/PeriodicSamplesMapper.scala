@@ -35,7 +35,7 @@ final case class PeriodicSamplesMapper(start: Long,
                                        offsetMs: Option[Long] = None,
                                        rawSource: Boolean = true) extends RangeVectorTransformer {
   require(start <= end, s"start $start should be <= end $end")
-  require(step > 0, s"step $step should be > 0")
+  require(start == end || step > 0, s"step $step should be > 0 for range query")
 
   val startWithOffset = start - offsetMs.getOrElse(0L)
   val endWithOffset = end - offsetMs.getOrElse(0L)
@@ -57,7 +57,7 @@ final case class PeriodicSamplesMapper(start: Long,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     // enforcement of minimum step is good since we have a high limit on number of samples
-    if (step < querySession.queryConfig.minStepMs)
+    if (start > end && step < querySession.queryConfig.minStepMs) // range query with small step
       throw new BadQueryException(s"step should be at least ${querySession.queryConfig.minStepMs/1000}s")
     val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
     // If a max column is present, the ExecPlan's job is to put it into column 2
@@ -170,7 +170,7 @@ final case class PeriodicSamplesMapper(start: Long,
         case (ColumnInfo(name, ColumnType.DoubleColumn), i) if i == 1 =>
           ColumnInfo("value", ColumnType.DoubleColumn)
         case (c: ColumnInfo, _) => c
-      }, fixedVectorLen = Some(((end - start) / step).toInt + 1))
+      }, fixedVectorLen = if (end == start) Some(1) else Some(((end - start) / step).toInt + 1))
     }
   }
 }

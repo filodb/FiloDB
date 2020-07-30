@@ -1,10 +1,11 @@
 package filodb.memory
 
-import org.scalatest.{Matchers, BeforeAndAfterAll}
+import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ConductorFixture
-import org.scalatest.fixture.FunSuite
+import org.scalatest.funsuite.FixtureAnyFunSuite
+import org.scalatest.matchers.should.Matchers
 
-class PageAlignedBlockManagerConcurrentSpec extends FunSuite
+class PageAlignedBlockManagerConcurrentSpec extends FixtureAnyFunSuite
 with ConductorFixture with Matchers with BeforeAndAfterAll {
   import PageAlignedBlockManagerSpec._
 
@@ -20,7 +21,7 @@ with ConductorFixture with Matchers with BeforeAndAfterAll {
     (conductor: Conductor) =>
       import conductor._
 
-      thread("Random guy") {
+      threadNamed("Random guy") {
         //1 page
         val blocks = blockManager.requestBlocks(pageSize, None)
         blocks.size should be(1)
@@ -28,7 +29,7 @@ with ConductorFixture with Matchers with BeforeAndAfterAll {
         block.position(block.position() + 1)
         waitForBeat(1)
       }
-      thread("Another dude") {
+      threadNamed("Another dude") {
         //2 page
         val blocks = blockManager.requestBlocks(2 * pageSize, None)
         blocks.size should be(2)
@@ -36,7 +37,7 @@ with ConductorFixture with Matchers with BeforeAndAfterAll {
         block.position(block.position() + 1)
         waitForBeat(1)
       }
-      thread("Yet another dude") {
+      threadNamed("Yet another dude") {
         //3 page
         val blocks = blockManager.requestBlocks(3 * pageSize, None)
         blocks.size should be(3)

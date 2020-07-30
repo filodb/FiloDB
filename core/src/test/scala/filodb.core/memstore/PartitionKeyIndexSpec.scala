@@ -1,13 +1,15 @@
 package filodb.core.memstore
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
-import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
+import org.scalatest.BeforeAndAfter
 
 import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.query.{ColumnFilter, Filter}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
+class PartitionKeyIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfter {
   import GdeltTestData._
   import Filter._
   import filodb.memory.format.UnsafeUtils.ZeroPointer

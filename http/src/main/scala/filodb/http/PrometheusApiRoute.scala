@@ -61,9 +61,10 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
         parameter('query.as[String], 'time.as[Double], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?,
           'spread.as[Int].?, 'histogramMap.as[Boolean].?, 'step.as[Double].?)
         { (query, time, explainOnly, verbose, spread, histMap, step) =>
-          val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong, step.map(_.toLong).getOrElse(-1))
+          val stepLong = step.map(_.toLong).getOrElse(0L)
+          val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong, stepLong)
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
-            verbose.getOrElse(false), spread, PromQlQueryParams(query, time.toLong, 1000, time.toLong, spread),
+            verbose.getOrElse(false), spread, PromQlQueryParams(query, time.toLong, stepLong, time.toLong, spread),
             histMap.getOrElse(false))
         }
       }

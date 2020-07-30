@@ -2,16 +2,17 @@ package filodb.query.exec
 
 import scala.annotation.tailrec
 
-import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, TimestampColumn}
 import filodb.core.query.{ColumnInfo, QueryContext, ResultSchema, TransientRow}
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.memory.format.UnsafeUtils
 import filodb.query.QueryResult
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 // scalastyle:off null
-class StitchRvsExecSpec extends FunSpec with Matchers {
+class StitchRvsExecSpec extends AnyFunSpec with Matchers {
   val error = 0.0000001d
 
   it ("should merge with two overlapping RVs correctly") {
