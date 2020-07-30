@@ -36,6 +36,7 @@ final case class PeriodicSamplesMapper(start: Long,
                                        rawSource: Boolean = true) extends RangeVectorTransformer {
   require(start <= end, s"start $start should be <= end $end")
   require(start == end || step > 0, s"step $step should be > 0 for range query")
+  val adjustedStep = if (step > 0) step else step + 1 // needed for iterators to terminate when start == end
 
   val startWithOffset = start - offsetMs.getOrElse(0L)
   val endWithOffset = end - offsetMs.getOrElse(0L)
@@ -57,7 +58,7 @@ final case class PeriodicSamplesMapper(start: Long,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     // enforcement of minimum step is good since we have a high limit on number of samples
-    if (start > end && step < querySession.queryConfig.minStepMs) // range query with small step
+    if (start < end && step < querySession.queryConfig.minStepMs) // range query with small step
       throw new BadQueryException(s"step should be at least ${querySession.queryConfig.minStepMs/1000}s")
     val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
     // If a max column is present, the ExecPlan's job is to put it into column 2
@@ -80,16 +81,17 @@ final case class PeriodicSamplesMapper(start: Long,
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
-            new ChunkedWindowIteratorH(rdrv, startWithOffset, step, endWithOffset,
+            new ChunkedWindowIteratorH(rdrv, startWithOffset, adjustedStep, endWithOffset,
                     windowPlusPubInt, rangeFuncGen().asChunkedH, querySession, histRow))
         }
       case c: ChunkedRangeFunction[_] =>
         source.map { rv =>
-          qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, step=$step windowLength=$windowLength")
+          qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, step=$adjustedStep " +
+            s"windowLength=$windowLength")
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
-            new ChunkedWindowIteratorD(rdrv, startWithOffset, step, endWithOffset,
+            new ChunkedWindowIteratorD(rdrv, startWithOffset, adjustedStep, endWithOffset,
                     windowPlusPubInt, rangeFuncGen().asChunkedD, querySession))
         }
       // Iterator-based: Wrap long columns to yield a double value
@@ -97,7 +99,7 @@ final case class PeriodicSamplesMapper(start: Long,
         source.map { rv =>
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
-            new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), startWithOffset, step, endWithOffset,
+            new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), startWithOffset, adjustedStep, endWithOffset,
               windowPlusPubInt, rangeFuncGen().asSliding, querySession.queryConfig))
         }
       // Otherwise just feed in the double column
@@ -105,7 +107,7 @@ final case class PeriodicSamplesMapper(start: Long,
         source.map { rv =>
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
-            new SlidingWindowIterator(rv.rows, startWithOffset, step, endWithOffset, windowPlusPubInt,
+            new SlidingWindowIterator(rv.rows, startWithOffset, adjustedStep, endWithOffset, windowPlusPubInt,
               rangeFuncGen().asSliding, querySession.queryConfig))
         }
     }
@@ -170,7 +172,7 @@ final case class PeriodicSamplesMapper(start: Long,
         case (ColumnInfo(name, ColumnType.DoubleColumn), i) if i == 1 =>
           ColumnInfo("value", ColumnType.DoubleColumn)
         case (c: ColumnInfo, _) => c
-      }, fixedVectorLen = if (end == start) Some(1) else Some(((end - start) / step).toInt + 1))
+      }, fixedVectorLen = if (end == start) Some(1) else Some(((end - start) / adjustedStep).toInt + 1))
     }
   }
 }
@@ -188,6 +190,7 @@ abstract class ChunkedWindowIterator[R <: MutableRowReader](
     rangeFunction: ChunkedRangeFunction[R],
     querySession: QuerySession)
 extends WrappedCursor(rv.rows()) with StrictLogging {
+  require(step > 0, s"Adjusted step $step not > 0")
   // Lazily open the iterator and obtain the lock. This allows one thread to create the
   // iterator, but the lock is owned by the thread actually performing the iteration.
   private lazy val windowIt = {
@@ -287,6 +290,7 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
                             window: Long,
                             rangeFunction: RangeFunction,
                             queryConfig: QueryConfig) extends RangeVectorCursor {
+  require(step > 0, s"Adjusted step $step not > 0")
   private val sampleToEmit = new TransientRow()
   private var curWindowEnd = start
 
