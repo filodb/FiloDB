@@ -86,7 +86,7 @@ final case class PeriodicSamplesMapper(start: Long,
         }
       case c: ChunkedRangeFunction[_] =>
         source.map { rv =>
-          qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, step=$adjustedStep " +
+          qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, adjustedStep=$adjustedStep " +
             s"windowLength=$windowLength")
           val rdrv = rv.asInstanceOf[RawDataRangeVector]
           val windowPlusPubInt = extendLookback(rv, windowLength)
