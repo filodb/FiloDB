@@ -6,9 +6,11 @@ import filodb.memory.NativeMemoryManager
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.memory.format.UnsafeUtils
 import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
+import org.scalatest.BeforeAndAfter
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class PublishIntervalFinderSpec  extends FunSpec with Matchers with ScalaFutures with BeforeAndAfter {
+class PublishIntervalFinderSpec  extends AnyFunSpec with Matchers with ScalaFutures with BeforeAndAfter {
 
   val nativeMemoryManager = new NativeMemoryManager(300000, Map.empty)
 

@@ -6,7 +6,7 @@ import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
-import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
+import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.time.{Millis, Seconds, Span}
@@ -21,6 +21,8 @@ import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore, Time
 import filodb.memory.MemFactory
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 object MultiSchemaPartitionsExecSpec {
   val dummyDispatcher = new PlanDispatcher {
@@ -34,7 +36,7 @@ object MultiSchemaPartitionsExecSpec {
   val builder = new RecordBuilder(MemFactory.onHeapFactory)
 }
 
-class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
+class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
   import ZeroCopyUTF8String._
   import filodb.core.{MachineMetricsData => MMD}
   import MultiSchemaPartitionsExecSpec._

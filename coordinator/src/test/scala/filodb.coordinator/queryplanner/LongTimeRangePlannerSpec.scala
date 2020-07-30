@@ -3,7 +3,6 @@ package filodb.coordinator.queryplanner
 import scala.concurrent.duration._
 
 import monix.execution.Scheduler
-import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core.DatasetRef
 import filodb.core.query.{QueryContext, QuerySession}
@@ -12,8 +11,10 @@ import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{LogicalPlan, PeriodicSeriesPlan, PeriodicSeriesWithWindowing}
 import filodb.query.exec._
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class LongTimeRangePlannerSpec extends FunSpec with Matchers {
+class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
 
   class MockExecPlan(val name: String, val lp: LogicalPlan) extends ExecPlan {
     override def queryContext: QueryContext = QueryContext()

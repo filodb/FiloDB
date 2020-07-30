@@ -29,8 +29,9 @@ object Dependencies {
   val logbackDep        = "ch.qos.logback"             % "logback-classic"       % "1.2.3"
   val log4jDep          = "log4j"                      % "log4j"                 % "1.2.17"
   val scalaLoggingDep   = "com.typesafe.scala-logging" %% "scala-logging"        % "3.7.2"
-  val scalaTest         = "org.scalatest"              %% "scalatest"            % "2.2.6" // TODO upgrade to 3.0.4
-  val scalaCheck        = "org.scalacheck"             %% "scalacheck"           % "1.11.0"
+  val scalaTest         = "org.scalatest"              %% "scalatest"            % "3.1.2"
+  val scalaCheck        = "org.scalacheck"             %% "scalacheck"           % "1.14.3"
+  val scalaTestPlus     = "org.scalatestplus"          %% "scalacheck-1-14"      % "3.1.2.0"
   val akkaHttp          = "com.typesafe.akka"          %% "akka-http"            % akkaHttpVersion withJavadoc()
   val akkaHttpTestkit   = "com.typesafe.akka"          %% "akka-http-testkit"    % akkaHttpVersion withJavadoc()
   val akkaHttpCirce     = "de.heikoseeberger"          %% "akka-http-circe"      % "1.21.0"
@@ -42,7 +43,8 @@ object Dependencies {
     logbackDep % Test,
     scalaTest  % Test,
     "com.softwaremill.quicklens" %% "quicklens" % "1.4.12" % Test,
-    scalaCheck % "test"
+    scalaCheck % Test,
+    scalaTestPlus % Test
   )
 
   lazy val scalaxyDep = "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided"
@@ -70,7 +72,7 @@ object Dependencies {
     "io.fastjson"                  % "boon"               % "0.33",
     "com.googlecode.javaewah"      % "JavaEWAH"           % "1.1.6" withJavadoc(),
     "com.github.rholder.fauxflake" % "fauxflake-core"     % "1.1.0",
-    "org.scalactic"                %% "scalactic"         % "2.2.6" withJavadoc(),
+    "org.scalactic"                %% "scalactic"         % "3.2.0" withJavadoc(),
     "org.apache.lucene"            % "lucene-core"        % "7.3.0" withJavadoc(),
     "com.github.alexandrnikitin"   %% "bloom-filter"      % "0.11.0",
     scalaxyDep

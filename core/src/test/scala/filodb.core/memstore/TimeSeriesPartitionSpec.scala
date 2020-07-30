@@ -3,7 +3,7 @@ package filodb.core.memstore
 import scala.concurrent.Future
 
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
@@ -12,6 +12,8 @@ import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.UnsafeUtils
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 object TimeSeriesPartitionSpec {
   import MachineMetricsData._
@@ -37,7 +39,7 @@ object TimeSeriesPartitionSpec {
   }
 }
 
-trait MemFactoryCleanupTest extends FunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
+trait MemFactoryCleanupTest extends AnyFunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
   override def afterAll(): Unit = {
     super.afterAll()
     TimeSeriesPartitionSpec.memFactory.shutdown()

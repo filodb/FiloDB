@@ -1,12 +1,13 @@
 package filodb.prometheus.parse
 
-import org.scalatest.{FunSpec, Matchers}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.query.{BinaryJoin, LogicalPlan}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 //noinspection ScalaStyle
 // scalastyle:off
-class ParserSpec extends FunSpec with Matchers {
+class ParserSpec extends AnyFunSpec with Matchers {
 
   it("metadata matcher query") {
     parseSuccessfully("http_requests_total{job=\"prometheus\", method=\"GET\"}")

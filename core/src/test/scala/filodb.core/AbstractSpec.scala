@@ -5,8 +5,10 @@ import org.scalactic.Explicitly
 import org.scalatest._
 import org.scalatest.concurrent.{Eventually, IntegrationPatience, ScalaFutures}
 import org.scalatest.time.{Millis, Seconds, Span}
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
-trait AbstractSpec extends WordSpec with Matchers
+trait AbstractSpec extends AnyWordSpec with Matchers
   with BeforeAndAfterAll with BeforeAndAfterEach
   with Eventually with Explicitly with IntegrationPatience
   with StrictLogging

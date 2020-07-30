@@ -9,6 +9,9 @@ import org.scalatest._
 import org.scalatest.concurrent.{Eventually, IntegrationPatience, ScalaFutures}
 
 import filodb.core.AbstractSpec
+import org.scalatest.funspec.AnyFunSpecLike
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpecLike
 
 object ActorSpecConfig {
   def getNewSystem(name: String, config: Config): ActorSystem = {
@@ -57,7 +60,7 @@ abstract class AbstractTestKit(system: ActorSystem) extends TestKit(system)
   }
 }
 
-abstract class ActorTest(system: ActorSystem) extends AbstractTestKit(system) with FunSpecLike
+abstract class ActorTest(system: ActorSystem) extends AbstractTestKit(system) with AnyFunSpecLike
 
 object AkkaSpec extends SeedNodeConfig {
 
@@ -102,7 +105,7 @@ object AkkaSpec extends SeedNodeConfig {
 
 abstract class AkkaSpec(system: ActorSystem) extends AbstractTestKit(system)
   with SeedNodeConfig
-  with WordSpecLike
+  with AnyWordSpecLike
   with Eventually
   with IntegrationPatience
   with Matchers
