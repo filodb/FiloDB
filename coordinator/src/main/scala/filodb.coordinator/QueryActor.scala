@@ -63,7 +63,7 @@ class QueryScheduler(concurrentQueries: Int, maxQueueLen: Int, tags: Map[String,
       countExecImmed.increment()
       execute(plan, replyTo, newPlanFunc)
       true
-    } else if (queue.size < maxQueueLen) {
+    } else if (queueSize < maxQueueLen) {
       countAddQueue.increment()
       queue.enqueue((plan, replyTo))
       true
@@ -73,6 +73,7 @@ class QueryScheduler(concurrentQueries: Int, maxQueueLen: Int, tags: Map[String,
     }
   }
 
+  // Length of queue - not synchronized, so data might not be consistent.
   def queueSize: Int = queue.length
 
   // Pop next item(s?) off top of queue so long as there is room to execute another query.
@@ -110,14 +111,14 @@ class QueryScheduler(concurrentQueries: Int, maxQueueLen: Int, tags: Map[String,
                   if (currentIDs(queryId) == 0) {
                     currentIDs.remove(queryId)
                     schedulers.enqueue(idToSched.remove(queryId).get)
-                    queueLen.update(queue.size)
+                    queueLen.update(queueSize)
                     tryPop(newPlanFunc)
                   }
                 }
     }(sched)
   }
 
-  // Currently active query IDs
+  // Currently active query IDs.  Not synchronized, so data might not be consistent.
   def currentQueryIDs: Set[String] = currentIDs.keySet.toSet
 }
 
