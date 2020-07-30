@@ -217,6 +217,32 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     }
   }
 
+  it ("should read periodic samples from Memstore with instant query where step == 0") {
+    import ZeroCopyUTF8String._
+    val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher,
+      dsRef, 0, filters, AllChunkScan)
+    val start = now - (numRawSamples-100) * reportingInterval
+    val step = 0
+    val end = now - (numRawSamples-100) * reportingInterval
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, Some(reportingInterval * 3),
+      Some(InternalRangeFunction.SumOverTime), QueryContext()))
+
+    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
+    // PSM should rename the double column to value always
+    result.resultSchema.columns.map(_.name) shouldEqual Seq("timestamp", "value")
+    result.result.size shouldEqual 1
+    val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
+    partKeyRead shouldEqual partKeyKVWithMetric
+    val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toList
+    dataRead.map(_._1) shouldEqual Seq(start)
+    dataRead.map(_._2) shouldEqual Seq(2703.0)
+  }
+
+
   it("should read periodic samples from Long column") {
     import ZeroCopyUTF8String._
     val filters = Seq(ColumnFilter("series", Filter.Equals("Series 1".utf8)))
