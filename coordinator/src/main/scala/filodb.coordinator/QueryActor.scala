@@ -35,7 +35,7 @@ import filodb.query.exec.ExecPlan
 // A single threaded scheduler is created for each query (all ExecPlans with the same query ID).  This reduces
 // thread contention significantly and reduces task switching overhead, boosting query throughput especially
 // when the tasks are small.
-class QueryScheduler(concurrentQueries: Int, maxQueueLen: Int) {
+class QueryScheduler(concurrentQueries: Int, maxQueueLen: Int, tags: Map[String, String]) {
   //  Currently executing query IDs -> number of execPlans in that query ID.  Used to track when all plans finish
   //  so that cleanup can be done and more queries can be popped off the stack.
   val currentIDs = new mHashMap[String, Int]().withDefaultValue(0)
@@ -46,6 +46,13 @@ class QueryScheduler(concurrentQueries: Int, maxQueueLen: Int) {
   //  Queue of schedulers available for future queries
   val schedulers = new mQueue[Scheduler]()
 
+  // Immediate ExecPlan execution, direct on current pool, no Queue, vs from queue
+  private val countExecImmed = Kamon.counter("query-scheduler-execute-immediate").withTags(TagSet.from(tags))
+  private val countExecQueue = Kamon.counter("query-scheduler-execute-queue").withTags(TagSet.from(tags))
+  private val countAddQueue  = Kamon.counter("query-scheduler-add-queue").withTags(TagSet.from(tags))
+  private val countQueueFull = Kamon.counter("query-scheduler-reject-queue-full").withTags(TagSet.from(tags))
+  private val queueLen = Kamon.gauge("query-scheduler-queue-length").withTags(TagSet.from(tags))
+
   // Given a plan and replyTo, executes the plan if there is room or it is a currently executing query.
   // If there isn't room, add it to the queue.  If the queue has no room, return false; otherwise true.
   def execOrWait(plan: ExecPlan,
@@ -53,12 +60,15 @@ class QueryScheduler(concurrentQueries: Int, maxQueueLen: Int) {
                  newPlanFunc: (ExecPlan, ActorRef, Scheduler) => Future[Unit]): Boolean = synchronized {
     val id = plan.queryContext.queryId
     if ((currentIDs contains id) || currentIDs.size < concurrentQueries) {
+      countExecImmed.increment()
       execute(plan, replyTo, newPlanFunc)
       true
     } else if (queue.size < maxQueueLen) {
+      countAddQueue.increment()
       queue.enqueue((plan, replyTo))
       true
     } else {
+      countQueueFull.increment()
       false
     }
   }
@@ -69,6 +79,7 @@ class QueryScheduler(concurrentQueries: Int, maxQueueLen: Int) {
   def tryPop(newPlanFunc: (ExecPlan, ActorRef, Scheduler) => Future[Unit]): Unit = synchronized {
     if (currentIDs.size < concurrentQueries && queue.nonEmpty) {
       val (nextPlan, replyTo) = queue.dequeue
+      countExecQueue.increment()
       execute(nextPlan, replyTo, newPlanFunc)
     }
   }
@@ -99,6 +110,7 @@ class QueryScheduler(concurrentQueries: Int, maxQueueLen: Int) {
                   if (currentIDs(queryId) == 0) {
                     currentIDs.remove(queryId)
                     schedulers.enqueue(idToSched.remove(queryId).get)
+                    queueLen.update(queue.size)
                     tryPop(newPlanFunc)
                   }
                 }
@@ -172,14 +184,15 @@ final class QueryActor(memStore: MemStore,
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   val queryPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapFunc,
                                               earliestRawTimestampFn, queryConfig, functionalSpreadProvider)
-  val numSchedThreads = Math.ceil(queryConfig.threadsFactor * sys.runtime.availableProcessors).toInt
-  val sched = new QueryScheduler(numSchedThreads, queryConfig.maxQueueLen)
 
   private val tags = Map("dataset" -> dsRef.toString)
   private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").withTags(TagSet.from(tags))
   private val epRequests = Kamon.counter("queryactor-execplan-requests").withTags(TagSet.from(tags))
   private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").withTags(TagSet.from(tags))
   private val queryErrors = Kamon.counter("queryactor-query-errors").withTags(TagSet.from(tags))
+
+  val numSchedThreads = Math.ceil(queryConfig.threadsFactor * sys.runtime.availableProcessors).toInt
+  val sched = new QueryScheduler(numSchedThreads, queryConfig.maxQueueLen, tags)
 
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef, sched: Scheduler): Future[Unit] = {
     if (checkTimeout(q.queryContext, replyTo)) {
