@@ -1,17 +1,18 @@
 package filodb.coordinator.client
 
-import com.esotericsoftware.kryo.io._
 import com.esotericsoftware.kryo.{Kryo, Serializer => KryoSerializer}
+import com.esotericsoftware.kryo.io._
 import com.esotericsoftware.minlog.Log
 import de.javakaffee.kryoserializers.UnmodifiableCollectionsSerializer
+import io.altoo.akka.serialization.kryo.DefaultKryoInitializer
+import io.altoo.akka.serialization.kryo.serializer.scala.ScalaKryo
+
 import filodb.coordinator.FilodbSettings
 import filodb.core._
 import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2}
 import filodb.core.metadata.{Column, PartitionSchema, Schema, Schemas}
 import filodb.core.query.ColumnInfo
 import filodb.memory.format.ZeroCopyUTF8String
-import io.altoo.akka.serialization.kryo.DefaultKryoInitializer
-import io.altoo.akka.serialization.kryo.serializer.scala.ScalaKryo
 
 /**
  * Register commonly used classes for efficient Kryo serialization.  If this is not done then Kryo might have to
