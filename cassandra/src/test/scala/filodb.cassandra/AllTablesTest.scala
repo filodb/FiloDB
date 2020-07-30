@@ -1,7 +1,6 @@
 package filodb.cassandra
 
 import com.typesafe.config.ConfigFactory
-import org.scalatest._
 
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core._
