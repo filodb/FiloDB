@@ -35,22 +35,31 @@ import filodb.query.exec.ExecPlan
 // A single threaded scheduler is created for each query (all ExecPlans with the same query ID).  This reduces
 // thread contention significantly and reduces task switching overhead, boosting query throughput especially
 // when the tasks are small.
-class QueryScheduler(concurrentQueries: Int) {
+class QueryScheduler(concurrentQueries: Int, maxQueueLen: Int) {
+  //  Currently executing query IDs -> number of execPlans in that query ID.  Used to track when all plans finish
+  //  so that cleanup can be done and more queries can be popped off the stack.
   val currentIDs = new mHashMap[String, Int]().withDefaultValue(0)
+  //  Queue of queries waiting to be added to currently executing ones
   val queue = new mQueue[(ExecPlan, ActorRef)]
+  //  Mapping of queryID to scheduler.  Each queryID gets its own scheduler.
   val idToSched = new mHashMap[String, Scheduler]()
+  //  Queue of schedulers available for future queries
   val schedulers = new mQueue[Scheduler]()
 
   // Given a plan and replyTo, executes the plan if there is room or it is a currently executing query.
-  // If there isn't room, add it to the queue.
+  // If there isn't room, add it to the queue.  If the queue has no room, return false; otherwise true.
   def execOrWait(plan: ExecPlan,
                  replyTo: ActorRef,
-                 newPlanFunc: (ExecPlan, ActorRef, Scheduler) => Future[Unit]): Unit = {
+                 newPlanFunc: (ExecPlan, ActorRef, Scheduler) => Future[Unit]): Boolean = synchronized {
     val id = plan.queryContext.queryId
     if ((currentIDs contains id) || currentIDs.size < concurrentQueries) {
       execute(plan, replyTo, newPlanFunc)
-    } else {
+      true
+    } else if (queue.size < maxQueueLen) {
       queue.enqueue((plan, replyTo))
+      true
+    } else {
+      false
     }
   }
 
@@ -84,18 +93,14 @@ class QueryScheduler(concurrentQueries: Int) {
     val planFut = newPlanFunc(newPlan, replyTo, sched)
 
     // Remove plan on Future complete.  If a slot opens up, recursively call myself to open up a new slot
-    var newspace = false
     planFut.onComplete {
       case _ => synchronized {
                   currentIDs(queryId) -= 1
                   if (currentIDs(queryId) == 0) {
                     currentIDs.remove(queryId)
                     schedulers.enqueue(idToSched.remove(queryId).get)
-                    newspace = true
+                    tryPop(newPlanFunc)
                   }
-                }
-                if (newspace) {
-                  tryPop(newPlanFunc)
                 }
     }(sched)
   }
@@ -167,9 +172,8 @@ final class QueryActor(memStore: MemStore,
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   val queryPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapFunc,
                                               earliestRawTimestampFn, queryConfig, functionalSpreadProvider)
-  val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor")
-                                    * sys.runtime.availableProcessors).toInt
-  val sched = new QueryScheduler(numSchedThreads)
+  val numSchedThreads = Math.ceil(queryConfig.threadsFactor * sys.runtime.availableProcessors).toInt
+  val sched = new QueryScheduler(numSchedThreads, queryConfig.maxQueueLen)
 
   private val tags = Map("dataset" -> dsRef.toString)
   private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").withTags(TagSet.from(tags))
@@ -266,7 +270,8 @@ final class QueryActor(memStore: MemStore,
                                       processLogicalPlan2Query(q, replyTo)
     case q: ExplainPlan2Query      => val replyTo = sender()
                                       processExplainPlanQuery(q, replyTo)
-    case q: ExecPlan               => sched.execOrWait(q, sender(), execPhysicalPlan2)
+    case q: ExecPlan               => if (!sched.execOrWait(q, sender(), execPhysicalPlan2))
+                                        sender() ! QueryQueueFull
 
     case GetIndexNames(ref, limit, _) =>
       sender() ! memStore.indexNames(ref, limit).map(_._1).toBuffer
