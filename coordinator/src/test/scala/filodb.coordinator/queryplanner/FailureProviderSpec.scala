@@ -1,12 +1,13 @@
 package filodb.coordinator.queryplanner
 
-import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core.DatasetRef
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.query._
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class FailureProviderSpec extends FunSpec with Matchers {
+class FailureProviderSpec extends AnyFunSpec with Matchers {
 
   import LogicalPlanUtils._
 

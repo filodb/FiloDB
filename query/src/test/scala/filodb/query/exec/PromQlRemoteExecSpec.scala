@@ -3,15 +3,16 @@ package filodb.query.exec
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
-import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.query.{PromQlQueryParams, QueryContext}
 import filodb.query
 import filodb.query.{Data, QueryResponse, QueryResult, Sampl}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class PromQlRemoteExecSpec extends FunSpec with Matchers with ScalaFutures {
+class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
   val timeseriesDataset = Dataset.make("timeseries",
     Seq("tags:map"),
     Seq("timestamp:ts", "value:double:detectDrops=true"),

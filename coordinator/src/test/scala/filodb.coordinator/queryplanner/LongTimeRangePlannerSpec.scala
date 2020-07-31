@@ -3,7 +3,6 @@ package filodb.coordinator.queryplanner
 import scala.concurrent.duration._
 
 import monix.execution.Scheduler
-import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core.DatasetRef
 import filodb.core.query.{QueryContext, QuerySession}
@@ -12,8 +11,10 @@ import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{LogicalPlan, PeriodicSeriesPlan, PeriodicSeriesWithWindowing}
 import filodb.query.exec._
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class LongTimeRangePlannerSpec extends FunSpec with Matchers {
+class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
 
   class MockExecPlan(val name: String, val lp: LogicalPlan) extends ExecPlan {
     override def queryContext: QueryContext = QueryContext()
@@ -59,6 +60,16 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
   it("should direct downsample-only queries to downsample planner") {
     val logicalPlan = Parser.queryRangeToLogicalPlan("rate(foo[2m])",
       TimeStepParams(now/1000 - 20.minutes.toSeconds, 1.minute.toSeconds, now/1000 - 15.minutes.toSeconds))
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
+    ep.name shouldEqual "downsample"
+    ep.lp shouldEqual logicalPlan
+  }
+
+  it("should direct overlapping instant queries correctly to raw or downsample clusters") {
+    // this instant query spills into downsample period
+    val logicalPlan = Parser.queryRangeToLogicalPlan("rate(foo[2m])",
+      TimeStepParams(now/1000 - 12.minutes.toSeconds, 0, now/1000 - 12.minutes.toSeconds))
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
     ep.name shouldEqual "downsample"

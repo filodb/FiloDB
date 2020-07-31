@@ -1,12 +1,13 @@
 package filodb.gateway.conversion
 
-import org.scalatest.{FunSpec, Matchers}
 
 import remote.RemoteStorage.{LabelPair, Sample, TimeSeries}
 
 import filodb.core.binaryrecord2.{RecordBuilder, StringifyMapItemConsumer}
 import filodb.core.metadata.Schemas
 import filodb.memory.MemFactory
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 object TimeSeriesFixture {
   //  "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=0,_ws_=demo,_ns_=filodb counter=0 1536790212000000000",
@@ -19,7 +20,7 @@ object TimeSeriesFixture {
   }
 }
 
-class PrometheusInputRecordSpec extends FunSpec with Matchers {
+class PrometheusInputRecordSpec extends AnyFunSpec with Matchers {
   val schema = Schemas.promCounter
   val baseTags = Map("dataset" -> "timeseries",
                      "host" -> "MacBook-Pro-229.local",

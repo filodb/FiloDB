@@ -6,7 +6,7 @@ import scala.util.Random
 import akka.actor.Address
 import akka.cluster.{Cluster, Member}
 import com.typesafe.config.ConfigFactory
-import org.scalatest.WordSpecLike
+import org.scalatest.wordspec.AnyWordSpecLike
 
 object SeedNodeSortingFixture {
 
@@ -27,7 +27,7 @@ object SeedNodeSortingFixture {
 
 class SeedNodeAddressSortingSpec
   extends AbstractTestKit(SeedNodeSortingFixture.config)
-    with WordSpecLike {
+    with AnyWordSpecLike {
 
   "An Ordering[Address]" must {
     "be sorted by address correctly" in {

@@ -2,7 +2,6 @@ package filodb.query.exec
 
 import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
-import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core.{MachineMetricsData => MMD}
@@ -10,8 +9,10 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.{ZeroCopyUTF8String => ZCUTF8}
 import filodb.memory.format.vectors.HistogramWithBuckets
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class HistToPromSeriesMapperSpec extends FunSpec with Matchers with ScalaFutures {
+class HistToPromSeriesMapperSpec extends AnyFunSpec with Matchers with ScalaFutures {
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = new QueryConfig(config.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)

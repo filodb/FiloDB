@@ -1,7 +1,7 @@
 package filodb.core.downsample
 
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
+import org.scalatest.BeforeAndAfterAll
 
 import filodb.core.{MachineMetricsData => MMD}
 import filodb.core.TestData
@@ -14,9 +14,11 @@ import filodb.core.store.AllChunkScan
 import filodb.memory._
 import filodb.memory.format.{vectors => bv}
 import filodb.memory.format.{TupleRowReader, ZeroCopyUTF8String}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 // scalastyle:off null
-class ShardDownsamplerSpec extends FunSpec with Matchers with BeforeAndAfterAll {
+class ShardDownsamplerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
 
   val promDataset = Dataset.make("custom1",
     Seq("someStr:string", "tags:map"),

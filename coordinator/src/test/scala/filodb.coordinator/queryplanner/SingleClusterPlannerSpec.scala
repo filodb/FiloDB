@@ -5,7 +5,6 @@ import scala.concurrent.duration._
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator.ShardMapper
@@ -18,8 +17,10 @@ import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
 import filodb.query._
 import filodb.query.exec._
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
+class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
   implicit val system = ActorSystem()
   private val node = TestProbe().ref

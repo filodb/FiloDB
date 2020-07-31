@@ -83,7 +83,8 @@ object PrometheusModel {
                     qr.result.map(toHistResult(_, verbose, qr.resultType))
                   else
                     qr.result.map(toPromResult(_, verbose, qr.resultType))
-    SuccessResponse(Data(toPromResultType(qr.resultType), results.filter(_.values.nonEmpty)))
+    SuccessResponse(Data(toPromResultType(qr.resultType),
+                         results.filter(r => r.values.nonEmpty || r.value.isDefined)))
   }
 
   def toPromExplainPlanResponse(ex: ExecPlan): ExplainPlanResponse = {
@@ -120,8 +121,8 @@ object PrometheusModel {
         )
       case QueryResultType.InstantVector =>
         Result(tags, None, samples.headOption)
-      // TODO: implememt output for Scalar results
-      case QueryResultType.Scalar => ???
+      case QueryResultType.Scalar =>
+        Result(tags, None, samples.headOption)
     }
   }
 

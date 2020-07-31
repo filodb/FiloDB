@@ -7,7 +7,7 @@ import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
-import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
+import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
@@ -20,8 +20,10 @@ import filodb.core.query.{ColumnFilter, Filter, QueryConfig, QueryContext, Query
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
+class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
   import ZeroCopyUTF8String._
 
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))

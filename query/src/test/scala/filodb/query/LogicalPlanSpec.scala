@@ -6,9 +6,10 @@ import filodb.query.BinaryOperator.DIV
 import filodb.query.Cardinality.OneToOne
 import filodb.query.RangeFunctionId.SumOverTime
 
-import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class LogicalPlanSpec extends FunSpec with Matchers {
+class LogicalPlanSpec extends AnyFunSpec with Matchers {
 
   it("should get columnFilterGroup from logicalPlan") {
 
