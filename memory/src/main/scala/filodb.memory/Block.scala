@@ -161,6 +161,7 @@ class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimL
       reclaimListener.onReclaim(metaPointer + 2, metaSize)
       metaPointer += (2 + metaSize)
     }
+    _metaPosition = capacity.toInt
   }
 
   /**
