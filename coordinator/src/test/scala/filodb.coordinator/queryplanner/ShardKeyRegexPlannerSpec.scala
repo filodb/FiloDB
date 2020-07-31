@@ -4,6 +4,8 @@ import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
@@ -14,8 +16,6 @@ import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.InstantFunctionId.{Exp, HistogramQuantile}
 import filodb.query.exec._
-import org.scalatest.funspec.AnyFunSpec
-import org.scalatest.matchers.should.Matchers
 
 class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures {
 

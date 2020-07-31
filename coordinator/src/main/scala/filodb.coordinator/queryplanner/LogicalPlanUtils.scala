@@ -179,7 +179,8 @@ object LogicalPlanUtils {
     Quotes + f.filter.valuesStrings.head.toString + Quotes))
 
   private def filtersToQuery(filters: Seq[(String, String, String)]): String = {
-    val name = filters.find(x => x._1.equals(PromMetricLabel)).head._3 replaceAll(Quotes, "")
+    // Get metric name from filters and remove quotes from start and end
+    val name = filters.find(x => x._1.equals(PromMetricLabel)).head._3.replaceAll("^\"|\"$", "")
     // When only metric name is present
     if (filters.size == 1) name
     else name + OpeningCurlyBraces + filters.filterNot(x => x._1.equals(PromMetricLabel)).

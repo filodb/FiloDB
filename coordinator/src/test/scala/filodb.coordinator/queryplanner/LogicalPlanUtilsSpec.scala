@@ -1,10 +1,11 @@
 package filodb.coordinator.queryplanner
 
-import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 import filodb.prometheus.parse.Parser
 
-class LogicalPlanUtilsSpec extends FunSpec with Matchers {
+class LogicalPlanUtilsSpec extends AnyFunSpec with Matchers {
 
   it("should generate query from LogicalPlan") {
     val query = "http_requests_total{job=\"app\"}"
@@ -13,7 +14,7 @@ class LogicalPlanUtilsSpec extends FunSpec with Matchers {
     res shouldEqual(query)
   }
 
-  it("should generate query from LogicalPlan with offset") {
+  it("should generate query from LogicalPlan having offset") {
     val query = "http_requests_total{job=\"app\"} offset 5m"
     val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
     val res = LogicalPlanUtils.logicalPlanToQuery(lp)
@@ -79,7 +80,6 @@ class LogicalPlanUtilsSpec extends FunSpec with Matchers {
   it("should generate query for scalar vector binary operation") {
     val query = "http_requests_total{job=\"app\"} + 2.1"
     val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
-    println("lp:" + lp )
     val res = LogicalPlanUtils.logicalPlanToQuery(lp)
     res shouldEqual(query)
   }
