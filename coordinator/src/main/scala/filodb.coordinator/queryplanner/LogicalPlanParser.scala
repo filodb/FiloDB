@@ -37,7 +37,7 @@ object LogicalPlanParser {
     lp match {
       case r: RawSeries               => filtersToQuery(getFiltersFromRawSeries(r))
       case a: ApplyInstantFunctionRaw => val filters = getFiltersFromRawSeries(a.vectors)
-        val bucketFilter = ("_bucket_", "=", Quotes + functionArgsToQuery(a.functionArgs.head) + Quotes)
+        val bucketFilter = ("_bucket_", "=", s"$Quotes${functionArgsToQuery(a.functionArgs.head)}$Quotes")
         filtersToQuery(filters :+ bucketFilter)
       case _            => throw new UnsupportedOperationException(s"$lp can't be converted to Query")
     }
@@ -52,8 +52,8 @@ object LogicalPlanParser {
     val periodicSeriesQuery = convertToQuery(lp.vectors)
     val byString = if (lp.by.isEmpty) "" else Space + "by" + Space + OpeningRoundBracket + lp.by.mkString(Comma) +
       ClosingRoundBracket
-    val withoutString = if (lp.without.isEmpty) "" else Space + "without" + Space + OpeningRoundBracket +
-      lp.without.mkString(Comma) + ClosingRoundBracket
+    val withoutString = if (lp.without.isEmpty) "" else s"${Space}without$Space$OpeningRoundBracket" +
+      s"${lp.without.mkString(Comma)}$ClosingRoundBracket"
 
     s"${lp.operator.toString.toLowerCase}$OpeningRoundBracket$periodicSeriesQuery$ClosingRoundBracket$byString" +
       s"$withoutString"
