@@ -17,7 +17,7 @@ object Dependencies {
   val akkaVersion       = "2.5.22" // akka-http/akka-stream compat. TODO when kamon-akka-remote is akka 2.5.4 compat
   val akkaHttpVersion   = "10.1.8"
   val cassDriverVersion = "3.7.1"
-  val ficusVersion      = "1.1.2"
+  val ficusVersion      = "1.3.4"
   val kamonBundleVersion = "2.1.4"
   val kamonZipkinVersion = "2.1.4"
   val kamonPrometheusVersion = "2.1.4"
@@ -68,7 +68,7 @@ object Dependencies {
     "com.beachape"                 %% "enumeratum"        % "1.5.10",
     "io.monix"                     %% "monix"             % "2.3.0",
     "com.googlecode.concurrentlinkedhashmap"              % "concurrentlinkedhashmap-lru" % "1.4",
-    "net.ceedubs"                  %% "ficus"             % ficusVersion,
+    "com.iheart"                   %% "ficus"             % ficusVersion,
     "io.fastjson"                  % "boon"               % "0.33",
     "com.googlecode.javaewah"      % "JavaEWAH"           % "1.1.6" withJavadoc(),
     "com.github.rholder.fauxflake" % "fauxflake-core"     % "1.1.0",
@@ -106,7 +106,7 @@ object Dependencies {
   lazy val coordDeps = commonDeps ++ Seq(
     "com.typesafe.akka"      %% "akka-slf4j"                  % akkaVersion,
     "com.typesafe.akka"      %% "akka-cluster"                % akkaVersion withJavadoc(),
-    "com.github.romix.akka"  %% "akka-kryo-serialization"     % "0.5.0" excludeAll(excludeMinlog, excludeOldLz4),
+    "io.altoo"               %% "akka-kryo-serialization"     % "1.0.0" excludeAll(excludeMinlog, excludeOldLz4),
     "de.javakaffee"          % "kryo-serializers"             % "0.42" excludeAll(excludeMinlog),
     "io.kamon"               %% "kamon-prometheus"            % kamonPrometheusVersion,
     // Redirect minlog logs to SLF4J
@@ -156,7 +156,7 @@ object Dependencies {
   lazy val standaloneDeps = Seq(
     logbackDep,
     "io.kamon"              %% "kamon-zipkin"            % kamonZipkinVersion,
-    "net.ceedubs"           %% "ficus"                   % ficusVersion      % Test,
+    "com.iheart"            %% "ficus"                   % ficusVersion      % Test,
     "com.typesafe.akka"     %% "akka-multi-node-testkit" % akkaVersion       % Test,
     "com.softwaremill.sttp" %% "circe"                   % sttpVersion       % Test,
     "com.softwaremill.sttp" %% "akka-http-backend"       % sttpVersion       % Test,

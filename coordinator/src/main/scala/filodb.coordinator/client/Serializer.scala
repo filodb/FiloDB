@@ -1,10 +1,11 @@
 package filodb.coordinator.client
 
-import com.esotericsoftware.kryo.{Serializer => KryoSerializer}
-import com.esotericsoftware.kryo.Kryo
+import com.esotericsoftware.kryo.{Kryo, Serializer => KryoSerializer}
 import com.esotericsoftware.kryo.io._
 import com.esotericsoftware.minlog.Log
 import de.javakaffee.kryoserializers.UnmodifiableCollectionsSerializer
+import io.altoo.akka.serialization.kryo.DefaultKryoInitializer
+import io.altoo.akka.serialization.kryo.serializer.scala.ScalaKryo
 
 import filodb.coordinator.FilodbSettings
 import filodb.core._
@@ -30,8 +31,8 @@ import filodb.memory.format.ZeroCopyUTF8String
  * - Recreating original class and injecting base, offset, any at runtime is a possibility, but we don't want
  *   to reinstantiate things like GrowableVector, wrappers, and appendable types
  */
-class KryoInit {
-  def customize(kryo: Kryo): Unit = {
+class KryoInit extends DefaultKryoInitializer {
+  override def postInit(kryo: ScalaKryo): Unit = {
     kryo.addDefaultSerializer(classOf[Column.ColumnType], classOf[ColumnTypeSerializer])
     val colTypeSer = new ColumnTypeSerializer
     Column.ColumnType.values.zipWithIndex.foreach { case (ct, i) => kryo.register(ct.getClass, colTypeSer, 100 + i) }
