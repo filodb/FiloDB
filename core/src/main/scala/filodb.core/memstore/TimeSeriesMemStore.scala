@@ -161,8 +161,8 @@ extends MemStore with StrictLogging {
       }
         // Nothing to read from source, blocking indefinitely. In such cases, 60sec timeout causes it
         // to return endOffset, making recovery complete and to start normal ingestion.
-        .timeoutOnSlowUpstreamTo(timeout, Observable.now(endOffset))
-        .collect {
+      .timeoutOnSlowUpstreamTo(timeout, Observable.now(endOffset))
+      .collect {
         case offset: Long if offset >= endOffset => // last offset reached
           offset
         case offset: Long if offset > targetOffset => // reporting interval reached
