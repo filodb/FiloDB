@@ -93,7 +93,6 @@ object LogicalPlanParser {
     val periodicSeriesQuery = convertToQuery(lp.vector)
     if (lp.scalarIsLhs) s"${functionArgsToQuery(lp.scalarArg)}$Space${lp.operator.operatorString}$Space" +
       s"$periodicSeriesQuery"
-
     else s"$periodicSeriesQuery ${lp.operator.operatorString} ${functionArgsToQuery(lp.scalarArg)}"
   }
 
@@ -101,7 +100,7 @@ object LogicalPlanParser {
     val rawSeriesQueryWithWindow = s"${rawSeriesLikeToQuery(lp.series)}$OpeningSquareBracket${lp.window/1000}s" +
       s"$ClosingSquareBracket${lp.offsetMs.map(o => Space + Offset + Space + (o / 1000).toString + "s").getOrElse("")}"
     val prefix = lp.function.entryName + OpeningRoundBracket
-    if (lp.functionArgs.isEmpty) prefix + rawSeriesQueryWithWindow + ClosingRoundBracket
+    if (lp.functionArgs.isEmpty) s"$prefix$rawSeriesQueryWithWindow$ClosingRoundBracket"
     else {
       if (lp.function.equals(QuantileOverTime))
         s"$prefix${functionArgsToQuery(lp.functionArgs.head)}$Comma$rawSeriesQueryWithWindow$ClosingRoundBracket"
