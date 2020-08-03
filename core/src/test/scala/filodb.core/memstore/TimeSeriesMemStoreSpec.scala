@@ -172,7 +172,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     memStore.ingest(dataset1.ref, 0, data)
     memStore.refreshIndexForTesting(dataset1.ref)
 
-    val filter =  ColumnFilter("series", Filter.Equals("Series 1".utf8))
+    val filter = ColumnFilter("series", Filter.Equals("Series 1".utf8))
     val split = memStore.getScanSplits(dataset1.ref, 1).head
     val q2 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(split, Seq(filter)))
     q2.map(_.getDouble(0)).toSeq should equal (Seq(2.0, 12.0))
@@ -386,6 +386,20 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val data1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.head))
                         .map(_.getDouble(0)).toSeq
     data1.length shouldEqual 47
+  }
+
+  it("should recoverStream after timeout, returns endOffset to start normal ingestion") {
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
+    val checkpoints = Map(0 -> 2L, 1 -> 21L, 2 -> 6L, 3 -> 8L)
+
+    val stream = Observable.never // "never" to mimic no data in stream source
+    val startOffset = checkpoints.values.min
+    val endOffset = checkpoints.values.max
+    // recover from checkpoints.min to checkpoints.max - timeout after 1sec
+    val offsets = memStore.recoverStream(dataset1.ref, 0, stream, startOffset, endOffset, checkpoints, 4L)(1.second)
+      .until(_ >= 21L).toListL.runAsync.futureValue
+
+    offsets shouldEqual Seq(checkpoints.values.max) // should equal end offset
   }
 
   it("should truncate shards properly") {

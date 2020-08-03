@@ -1,6 +1,7 @@
 package filodb.core.memstore
 
 import scala.concurrent.Future
+import scala.concurrent.duration._
 
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler}
@@ -131,7 +132,7 @@ trait MemStore extends ChunkSource {
                     startOffset: Long,
                     endOffset: Long,
                     checkpoints: Map[Int, Long],
-                    reportingInterval: Long): Observable[Long]
+                    reportingInterval: Long) (implicit timeout: FiniteDuration = 60.seconds): Observable[Long]
 
   /**
    * Returns the names of tags or columns that are indexed at the partition level, across
