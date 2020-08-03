@@ -157,5 +157,4 @@ object LogicalPlanUtils {
     } else {
       labels
     }
-
 }
