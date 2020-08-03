@@ -50,7 +50,7 @@ object LogicalPlanParser {
 
   private def aggregateToQuery(lp: Aggregate): String = {
     val periodicSeriesQuery = convertToQuery(lp.vectors)
-    val byString = if (lp.by.isEmpty) "" else Space + "by" + Space + OpeningRoundBracket + lp.by.mkString(Comma) +
+    val byString = if (lp.by.isEmpty) "" else s"${Space}by${Space}$OpeningRoundBracket${lp.by.mkString(Comma)}" +
       ClosingRoundBracket
     val withoutString = if (lp.without.isEmpty) "" else s"${Space}without$Space$OpeningRoundBracket" +
       s"${lp.without.mkString(Comma)}$ClosingRoundBracket"
