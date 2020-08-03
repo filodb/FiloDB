@@ -63,25 +63,36 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     LogicalPlan.getRawSeriesFilters(logicalPlan)
       .map { s => s.filter(f => dataset.options.nonMetricShardColumns.contains(f.column))}
 
-  private def generateExec(logicalPlan: LogicalPlan, nonMetricShardKeyFilters: Seq[ColumnFilter],
-                           qContext: QueryContext): Seq[ExecPlan] = {
+  private def generateExecWithoutRegex(logicalPlan: LogicalPlan, nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                       qContext: QueryContext): Seq[ExecPlan] = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     shardKeyMatcher(nonMetricShardKeyFilters).map { result =>
         val newLogicalPlan = logicalPlan.replaceFilters(result)
-        val newQueryParams = queryParams.copy(promQl = LogicalPlanUtils.logicalPlanToQuery(newLogicalPlan))
+        // Querycontext should just have the part of query which has regex
+        // For example for exp(sum(test{_ws_ = "demo", _ns_ =~ "App.*"})), sub queries should be
+        // sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
+        val newQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
         val newQueryContext = qContext.copy(origQueryParams = newQueryParams)
         queryPlanner.materialize(logicalPlan.replaceFilters(result), newQueryContext)
       }
   }
 
+  /**
+    * For binary join queries like test1{_ws_ = "demo", _ns_ =~ "App.*"} + test2{_ws_ = "demo", _ns_ =~ "App.*"})
+    */
   private def materializeBinaryJoin(binaryJoin: BinaryJoin, qContext: QueryContext): PlanResult = {
    if (getNonMetricShardKeyFilters(binaryJoin).forall(_.forall(f => !f.filter.isInstanceOf[EqualsRegex] &&
      !f.filter.isInstanceOf[NotEqualsRegex]))) PlanResult(Seq(queryPlanner.materialize(binaryJoin, qContext)))
    else throw new UnsupportedOperationException("Regex not supported for Binary Join")
   }
 
+  /***
+    * For aggregate queries like sum(test{_ws_ = "demo", _ns_ =~ "App.*"})
+    * It will be broken down to sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
+    * Sub query could be across multiple partitions so aggregate using MultiPartitionReduceAggregateExec
+    * */
   private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext): PlanResult = {
-    val execPlans = generateExec(aggregate, getNonMetricShardKeyFilters(aggregate).head, queryContext)
+    val execPlans = generateExecWithoutRegex(aggregate, getNonMetricShardKeyFilters(aggregate).head, queryContext)
     val exec = if (execPlans.size == 1) execPlans.head
     else {
       val reducer = MultiPartitionReduceAggregateExec(queryContext, InProcessPlanDispatcher,
@@ -92,12 +103,17 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     PlanResult(Seq(exec))
   }
 
+  /***
+    * For non aggregate & non binary join queries like test{_ws_ = "demo", _ns_ =~ "App.*"}
+    * It will be broken down to test{_ws_ = "demo", _ns_ = "App-1"}, test{_ws_ = "demo", _ns_ = "App-2"} etc
+    * Sub query could be across multiple partitions so concatenate using MultiPartitionDistConcatExec
+    * */
   private def materializeOthers(logicalPlan: LogicalPlan, queryContext: QueryContext): PlanResult = {
     val nonMetricShardKeyFilters = getNonMetricShardKeyFilters(logicalPlan)
     // For queries which don't have RawSeries filters like metadata and fixed scalar queries
     val exec = if (nonMetricShardKeyFilters.head.isEmpty) queryPlanner.materialize(logicalPlan, queryContext)
     else {
-      val execPlans = generateExec(logicalPlan, nonMetricShardKeyFilters.head, queryContext)
+      val execPlans = generateExecWithoutRegex(logicalPlan, nonMetricShardKeyFilters.head, queryContext)
       if (execPlans.size == 1) execPlans.head else MultiPartitionDistConcatExec(queryContext, InProcessPlanDispatcher,
         execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
     }

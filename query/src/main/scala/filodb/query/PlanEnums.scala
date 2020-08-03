@@ -111,8 +111,8 @@ sealed class ComparisonOperator(val operatorString: String, val precedence: Int 
 object BinaryOperator extends Enum[BinaryOperator] {
   val values = findValues
 
-  case object SUB extends MathOperator("-",4)
-  case object ADD extends MathOperator("+",4)
+  case object SUB extends MathOperator("-", 4)
+  case object ADD extends MathOperator("+", 4)
   case object MUL extends MathOperator("*", 5)
   case object MOD extends MathOperator("+", 5)
   case object DIV extends MathOperator("/", 5)
@@ -120,9 +120,9 @@ object BinaryOperator extends Enum[BinaryOperator] {
   case object LAND extends SetOperator("and", 2)
   case object LOR extends SetOperator("or", 1)
   case object LUnless extends SetOperator("unless", 2)
-  case object EQL extends ComparisonOperator("==",3)
-  case object NEQ extends ComparisonOperator("!=",3)
-  case object LTE extends ComparisonOperator("<=",3)
+  case object EQL extends ComparisonOperator("==", 3)
+  case object NEQ extends ComparisonOperator("!=", 3)
+  case object LTE extends ComparisonOperator("<=", 3)
   case object LSS extends ComparisonOperator("<", 3)
   case object GTE extends ComparisonOperator(">=", 3)
   case object GTR extends ComparisonOperator(">", 3)

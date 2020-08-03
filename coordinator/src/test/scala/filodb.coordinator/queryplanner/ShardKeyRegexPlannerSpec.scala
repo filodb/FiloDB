@@ -161,7 +161,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it("should generate Exec plan for exp for Aggregate query") {
-    val lp = Parser.queryToLogicalPlan("exp(sum(test{_ws_ = \"demo\", _ns_ =~ \"App.*\"}))",
+    val lp = Parser.queryToLogicalPlan("""exp(sum(test{_ws_ = "demo", _ns_ =~ "App.*"}))""",
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
