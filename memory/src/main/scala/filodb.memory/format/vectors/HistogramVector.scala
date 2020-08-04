@@ -544,7 +544,7 @@ class RowHistogramReader(val acc: MemoryReader, histVect: Ptr.U8) extends Histog
   final def sum(start: Int, end: Int): MutableHistogram = {
     require(length > 0 && start >= 0 && end < length)
     val summedHist = MutableHistogram.empty(buckets)
-    for { i <- start to end optimized } {
+    cforRange { start to end } { i =>
       summedHist.addNoCorrection(apply(i))
     }
     summedHist

@@ -73,7 +73,7 @@ class RowToVectorBuilder(schema: Seq[VectorInfo], memFactory: MemFactory) {
     * @param row the row of data to transpose.  Each column will be added to the right Builders.
     */
   def addRow(row: RowReader): Unit = {
-    for { i <- 0 until numColumns optimized } {
+    cforRange { 0 until numColumns } { i =>
       builders(i).addFromReader(row, i)
     }
   }

@@ -184,7 +184,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     */
   def removePartKeys(partIds: debox.Buffer[Int]): Unit = {
     val terms = new util.ArrayList[BytesRef]()
-    for { i <- 0 until partIds.length optimized } {
+    cforRange { 0 until partIds.length } { i =>
       terms.add(new BytesRef(partIds(i).toString.getBytes))
     }
     indexWriter.deleteDocuments(new TermInSetQuery(PART_ID, terms))
@@ -317,7 +317,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     // Currently there is a bit of leak in abstraction of Binary Record processing in this class.
 
     luceneDocument.set(document) // threadlocal since we are not able to pass the document into mapconsumer
-    for { i <- 0 until numPartColumns optimized } {
+    cforRange { 0 until numPartColumns } { i =>
       indexers(i).fromPartKey(partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset), partId)
     }
     // partId

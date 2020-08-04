@@ -442,7 +442,7 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
       }
 
       timestamps += row.getLong(0)
-      for { b <- 0 until hist.numBuckets optimized } {
+      cforRange { 0 until hist.numBuckets } { b =>
         buckets(hist.bucketTop(b)) += hist.bucketValue(b)
       }
       emptyBuckets.foreach { b => buckets(b) += Double.NaN }

@@ -58,7 +58,7 @@ class DictStringBenchmark {
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def rawStringLengthTotal(): Int = {
     var totalLen = 0
-    for { i <- 0 until numValues optimized } {
+    cforRange { 0 until numValues } { i =>
       totalLen += scNoNA(i).length
     }
     totalLen
@@ -75,7 +75,7 @@ class DictStringBenchmark {
 
     val reader = UTF8Vector(acc, scNAPtr)
     val it = reader.iterate(acc, scNAPtr)
-    for { i <- 0 until numValues optimized } {
+    cforRange { 0 until numValues } { i =>
       totalLen += it.next.length
     }
     totalLen

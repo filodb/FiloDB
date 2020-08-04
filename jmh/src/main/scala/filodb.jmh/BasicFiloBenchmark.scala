@@ -62,7 +62,7 @@ class BasicFiloBenchmark {
   def sumAllLongsApply(): Long = {
     var total = 0L
     val acc2 = acc // local variable to make the scala compiler not use virtual invoke
-    for { i <- 0 until numValues optimized } {
+    cforRange { 0 until numValues } { i =>
       total += ivReader(acc2, iv, i)
     }
     total
@@ -74,7 +74,7 @@ class BasicFiloBenchmark {
   def sumAllLongsIterate(): Long = {
     var total = 0L
     val it = ivReader.iterate(acc, iv)
-    for { i <- 0 until numValues optimized } {
+    cforRange { 0 until numValues } { i =>
       total += it.next
     }
     total
@@ -107,7 +107,7 @@ class BasicFiloBenchmark {
   def sumTimeSeriesBytesApply(): Long = {
     var total = 0L
     val acc2 = acc // local variable to make the scala compiler not use virtual invoke
-    for { i <- 0 until numValues optimized } {
+    cforRange { 0 until numValues } { i =>
       total += byteReader(acc2, byteVect, i)
     }
     total
@@ -119,7 +119,7 @@ class BasicFiloBenchmark {
   def sumTimeSeriesBytesIterate(): Long = {
     var total = 0L
     val it = byteReader.iterate(acc, byteVect)
-    for { i <- 0 until numValues optimized } {
+    cforRange { 0 until numValues } { i =>
       total += it.next
     }
     total

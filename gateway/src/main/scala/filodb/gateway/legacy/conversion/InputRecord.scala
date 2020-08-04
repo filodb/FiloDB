@@ -79,7 +79,7 @@ case class PrometheusInputRecord(tags: Map[String, String],
     val metricBytes = metric.getBytes
     builder.addMapKeyValueHash(dataset.options.metricBytes, dataset.options.metricHash,
                                metricBytes, 0, metricBytes.size)
-    for { i <- 0 until javaTags.size optimized } {
+    cforRange { 0 until javaTags.size } { i =>
       val (k, v) = javaTags.get(i)
       builder.addMapKeyValue(k.getBytes, v.getBytes)
       builder.updatePartitionHash(hashes(i))

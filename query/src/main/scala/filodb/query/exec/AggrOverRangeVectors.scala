@@ -246,7 +246,7 @@ object RangeVectorAggregator extends StrictLogging {
         count += 1
         val rowIter = rv.rows
         toClose += rowIter
-        for { i <- 0 until outputLen optimized } {
+        cforRange { 0 until outputLen } { i =>
           accs(i) = rowAgg.reduceAggregate(accs(i), rowIter.next)
         }
         accs
@@ -257,7 +257,7 @@ object RangeVectorAggregator extends StrictLogging {
         count += 1
         val rowIter = rv.rows
         toClose += rowIter
-        for { i <- 0 until outputLen optimized } {
+        cforRange { 0 until outputLen } { i =>
           val mapped = rowAgg.map(rv.key, rowIter.next, mapIntos(i))
           accs(i) = rowAgg.reduceMappedRow(accs(i), mapped)
         }
