@@ -2,6 +2,7 @@ package filodb.core.memstore
 
 import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.duration._
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
@@ -15,8 +16,7 @@ import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
-import filodb.memory.MemFactory
-import filodb.memory.NativeMemoryManager
+import filodb.memory.{MemFactory, NativeMemoryManager}
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class TimeSeriesMemStore(config: Config,
@@ -139,7 +139,7 @@ extends MemStore with StrictLogging {
                     startOffset: Long,
                     endOffset: Long,
                     checkpoints: Map[Int, Long],
-                    reportingInterval: Long): Observable[Long] = {
+                    reportingInterval: Long) (implicit timeout: FiniteDuration = 60.seconds): Observable[Long] = {
     val shard = getShardE(dataset, shardNum)
     shard.setGroupWatermarks(checkpoints)
     if (endOffset < startOffset) Observable.empty
@@ -158,7 +158,11 @@ extends MemStore with StrictLogging {
           startOffsetValidated = true
         }
         shard.ingest(r)
-      }.collect {
+      }
+        // Nothing to read from source, blocking indefinitely. In such cases, 60sec timeout causes it
+        // to return endOffset, making recovery complete and to start normal ingestion.
+      .timeoutOnSlowUpstreamTo(timeout, Observable.now(endOffset))
+      .collect {
         case offset: Long if offset >= endOffset => // last offset reached
           offset
         case offset: Long if offset > targetOffset => // reporting interval reached

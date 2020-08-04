@@ -294,4 +294,6 @@ class LogicalPlanSpec extends AnyFunSpec with Matchers {
     res2(0).size.shouldEqual(2)
     res1.hashCode() shouldEqual res2.hashCode()
   }
+
+
 }
