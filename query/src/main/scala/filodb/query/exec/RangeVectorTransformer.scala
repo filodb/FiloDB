@@ -2,7 +2,7 @@ package filodb.query.exec
 
 import monix.reactive.Observable
 import scala.collection.mutable.ListBuffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema

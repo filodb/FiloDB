@@ -1,6 +1,6 @@
 package filodb.core.binaryrecord2
 
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.format.UnsafeUtils
 

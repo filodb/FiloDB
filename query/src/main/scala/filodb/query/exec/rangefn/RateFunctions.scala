@@ -1,6 +1,6 @@
 package filodb.query.exec.rangefn
 
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.query.{QueryConfig, TransientHistRow, TransientRow}
 import filodb.memory.format.{CounterVectorReader, MemoryReader}

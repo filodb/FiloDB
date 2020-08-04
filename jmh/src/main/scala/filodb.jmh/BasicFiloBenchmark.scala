@@ -5,7 +5,7 @@ import java.util.concurrent.TimeUnit
 import scala.language.postfixOps
 
 import org.openjdk.jmh.annotations._
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format.MemoryReader._

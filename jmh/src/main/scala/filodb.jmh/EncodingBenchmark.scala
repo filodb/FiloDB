@@ -8,7 +8,7 @@ import org.openjdk.jmh.annotations.{Mode, Scope, State}
 import org.openjdk.jmh.annotations.Benchmark
 import org.openjdk.jmh.annotations.BenchmarkMode
 import org.openjdk.jmh.annotations.OutputTimeUnit
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format._

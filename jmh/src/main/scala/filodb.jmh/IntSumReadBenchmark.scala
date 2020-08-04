@@ -6,7 +6,7 @@ import scala.language.postfixOps
 
 import ch.qos.logback.classic.{Level, Logger}
 import org.openjdk.jmh.annotations._
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.{NamesTestData, TestData}
 import filodb.core.metadata.{Dataset, DatasetOptions}

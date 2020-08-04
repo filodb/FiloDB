@@ -4,7 +4,7 @@ import java.nio.ByteBuffer
 
 import scala.language.existentials
 
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.MemFactory
 import filodb.memory.format.Encodings.{AutoDetect, EncodingHint}

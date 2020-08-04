@@ -3,7 +3,7 @@ package filodb.gateway.legacy.conversion
 import scala.language.postfixOps
 
 import remote.RemoteStorage.TimeSeries
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.legacy.binaryrecord.RecordBuilder
 import filodb.core.metadata.Dataset
