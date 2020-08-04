@@ -114,7 +114,7 @@ object TimeSeriesShard {
   def writeMeta(addr: Long, partitionID: Int, info: ChunkSetInfo, vectors: Array[BinaryVectorPtr]): Unit = {
     UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, addr, partitionID)
     ChunkSetInfo.copy(info, addr + 4)
-    for { i <- 0 until vectors.size optimized } {
+    cforRange { 0 until vectors.size } { i =>
       ChunkSetInfo.setVectorPtr(addr + 4, i, vectors(i))
     }
   }
@@ -125,7 +125,7 @@ object TimeSeriesShard {
   def writeMeta(addr: Long, partitionID: Int, bytes: Array[Byte], vectors: Array[BinaryVectorPtr]): Unit = {
     UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, addr, partitionID)
     ChunkSetInfo.copy(bytes, addr + 4)
-    for { i <- 0 until vectors.size optimized } {
+    cforRange { 0 until vectors.size } { i =>
       ChunkSetInfo.setVectorPtr(addr + 4, i, vectors(i))
     }
   }
@@ -135,7 +135,7 @@ object TimeSeriesShard {
     */
   def writeMetaWithoutPartId(addr: Long, bytes: Array[Byte], vectors: Array[BinaryVectorPtr]): Unit = {
     ChunkSetInfo.copy(bytes, addr)
-    for { i <- 0 until vectors.size optimized } {
+    cforRange { 0 until vectors.size } { i =>
       ChunkSetInfo.setVectorPtr(addr, i, vectors(i))
     }
   }

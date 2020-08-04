@@ -372,7 +372,7 @@ final case class HistogramBucketImpl() extends HistToDoubleIFunction {
       if (value.bucketTop(value.numBuckets - 1) == Double.PositiveInfinity) value.topBucketValue
       else throw new IllegalArgumentException(s"+Inf bucket not in the last position!")
     } else {
-      for { b <- 0 until value.numBuckets optimized } {
+      cforRange { 0 until value.numBuckets } { b =>
         // This comparison does not work for +Inf
         if (Math.abs(value.bucketTop(b) - bucket) <= 1E-10) return value.bucketValue(b)
       }

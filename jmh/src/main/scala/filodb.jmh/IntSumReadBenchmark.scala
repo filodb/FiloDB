@@ -52,7 +52,7 @@ class IntSumReadBenchmark {
   def applyVectorScan(): Int = {
     var total = 0
     val acc2 = acc // local variable to make the scala compiler not use virtual invoke
-    for { i <- 0 until NumRows optimized } {
+    cforRange { 0 until NumRows } { i =>
       total += intReader(acc2, intVectAddr, i)
     }
     total
@@ -67,7 +67,7 @@ class IntSumReadBenchmark {
   def iterateScan(): Int = {
     val it = intReader.iterate(acc, intVectAddr, 0)
     var sum = 0
-    for { i <- 0 until NumRows optimized } {
+    cforRange { 0 until NumRows } { i =>
       sum += it.next
     }
     sum

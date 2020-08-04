@@ -188,7 +188,7 @@ class HistogramIngestBenchmark {
     ddsink.writePos = 0
     java.util.Arrays.fill(ddsink.lastHistDeltas, 0)
     var lastPos = 0
-    for { i <- 0 until numInputs optimized } {
+    cforRange { 0 until numInputs } { i =>
       ddSlice.wrap(increasingBuf, lastPos, increasingHistPos(i) - lastPos)
       val res = NibblePack.unpackToSink(ddSlice, ddsink, inputs.size)
       require(res == NibblePack.Ok)

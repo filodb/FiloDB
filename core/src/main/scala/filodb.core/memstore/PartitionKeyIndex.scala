@@ -71,7 +71,7 @@ class PartitionKeyIndex(dataset: Dataset) extends StrictLogging {
    * Adds fields from a partition key to the index
    */
   def addPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
-    for { i <- 0 until numPartColumns optimized } {
+    cforRange { 0 until numPartColumns } { i =>
       indexers(i).fromPartKey(base, offset, partIndex)
     }
   }

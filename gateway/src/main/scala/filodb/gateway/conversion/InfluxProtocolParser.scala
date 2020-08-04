@@ -169,7 +169,7 @@ object InfluxProtocolParser extends StrictLogging {
   // relies on offsets being in the same order as keys
   def parseKeyValues(bytes: Array[Byte], offsets: Buffer[Int], endOffset: Int, visitor: KVVisitor): Unit = {
     val last = offsets.length - 1
-    for { i <- 0 to last optimized } {
+    cforRange { 0 to last } { i =>
       val fieldEnd = if (i < last) keyOffset(offsets(i + 1)) - 1 else endOffset
       val curOffsetInt = offsets(i)
       val valueOffset = valOffset(curOffsetInt)
