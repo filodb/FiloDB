@@ -5,7 +5,7 @@ import java.util.concurrent.TimeUnit
 import scala.language.postfixOps
 
 import org.openjdk.jmh.annotations._
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 /**
  * Microbenchmark involving comparison of data structures for holding partition lists in a shard.
@@ -18,7 +18,7 @@ import scalaxy.loops._
 @State(Scope.Thread)
 class PartitionListBenchmark {
   val lhm = new collection.mutable.LinkedHashMap[Int, String]
-  for { i <- 0 until 1000000 optimized } { lhm(i) = "shoo" }
+  cForRange { 0 until 1000000 } { i => lhm(i) = "shoo" }
 
   val jlhm = new java.util.LinkedHashMap[Int, String]
   for { i <- 0 until 1000000 optimized } { jlhm.put(i, "shoo") }

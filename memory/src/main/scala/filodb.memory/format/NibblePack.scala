@@ -3,7 +3,7 @@ package filodb.memory.format
 import java.nio.ByteOrder.LITTLE_ENDIAN
 
 import org.agrona.{DirectBuffer, MutableDirectBuffer}
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 /**
  * An implementation of the NibblePack algorithm for efficient encoding, see [compression.md](doc/compression.md).

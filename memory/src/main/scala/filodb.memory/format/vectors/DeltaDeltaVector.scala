@@ -1,7 +1,7 @@
 package filodb.memory.format.vectors
 
 import debox.Buffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._

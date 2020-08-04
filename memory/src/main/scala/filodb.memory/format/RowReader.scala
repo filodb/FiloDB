@@ -8,7 +8,7 @@ import scala.reflect.ClassTag
 import org.agrona.DirectBuffer
 import org.agrona.concurrent.UnsafeBuffer
 import org.joda.time.DateTime
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.format.vectors.Histogram
 

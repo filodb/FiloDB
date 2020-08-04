@@ -3,7 +3,7 @@ package filodb.core.memstore
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
 import org.jctools.maps.NonBlockingHashMap
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.Types.PartitionKey
 import filodb.core.binaryrecord2.MapItemConsumer

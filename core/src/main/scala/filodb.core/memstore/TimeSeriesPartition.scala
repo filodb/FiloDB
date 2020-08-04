@@ -1,7 +1,7 @@
 package filodb.core.memstore
 
 import com.typesafe.scalalogging.StrictLogging
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.DatasetRef
 import filodb.core.Types._

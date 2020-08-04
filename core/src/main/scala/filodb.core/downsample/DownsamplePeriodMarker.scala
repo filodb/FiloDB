@@ -1,7 +1,7 @@
 package filodb.core.downsample
 
 import enumeratum.{Enum, EnumEntry}
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.metadata.DataSchema
 import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}

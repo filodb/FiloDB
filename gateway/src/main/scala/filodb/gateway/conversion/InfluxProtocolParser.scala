@@ -5,7 +5,7 @@ import scala.language.postfixOps
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import org.jboss.netty.buffer.ChannelBuffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.memory.format.UnsafeUtils

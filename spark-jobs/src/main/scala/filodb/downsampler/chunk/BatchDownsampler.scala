@@ -6,7 +6,7 @@ import scala.concurrent.duration.FiniteDuration
 
 import kamon.Kamon
 import monix.reactive.Observable
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, ErrorResponse, Instance}

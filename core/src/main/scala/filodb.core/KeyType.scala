@@ -6,7 +6,7 @@ import scala.language.postfixOps
 import scala.math.Ordering
 
 import org.joda.time.DateTime
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.format.{vectors => bv, RowReader, ZeroCopyUTF8String}
 import filodb.memory.format.RowReader._

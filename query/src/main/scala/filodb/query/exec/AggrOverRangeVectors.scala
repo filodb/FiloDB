@@ -5,7 +5,7 @@ import scala.collection.mutable.ArrayBuffer
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.reactive.Observable
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.query._
 import filodb.memory.format.ZeroCopyUTF8String

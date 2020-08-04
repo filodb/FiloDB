@@ -3,7 +3,7 @@ package filodb.memory.format.vectors
 import java.nio.ByteOrder.LITTLE_ENDIAN
 
 import org.agrona.{DirectBuffer, MutableDirectBuffer}
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.format._
 

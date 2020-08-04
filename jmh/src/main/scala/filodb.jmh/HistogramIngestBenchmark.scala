@@ -9,7 +9,7 @@ import com.typesafe.config.ConfigFactory
 import org.agrona.{ExpandableArrayBuffer, ExpandableDirectByteBuffer}
 import org.agrona.concurrent.UnsafeBuffer
 import org.openjdk.jmh.annotations.{Level => JMHLevel, _}
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.{MachineMetricsData, MetricsTestData, TestData}
 import filodb.core.binaryrecord2.RecordBuilder

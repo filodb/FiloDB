@@ -2,7 +2,7 @@ package filodb.core.binaryrecord2
 
 import com.typesafe.scalalogging.StrictLogging
 import org.agrona.DirectBuffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.binaryrecord2.RecordSchema.schemaID
 import filodb.core.metadata.{Column, DatasetOptions, PartitionSchema, Schema, Schemas}

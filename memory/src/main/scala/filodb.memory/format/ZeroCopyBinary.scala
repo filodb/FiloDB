@@ -1,7 +1,7 @@
 package filodb.memory.format
 
 import net.jpountz.xxhash.XXHashFactory
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.{MemFactory, UTF8StringMedium}
 

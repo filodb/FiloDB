@@ -4,7 +4,7 @@ import scala.io.Source
 
 import org.agrona.{ExpandableArrayBuffer, ExpandableDirectByteBuffer}
 import org.agrona.concurrent.UnsafeBuffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format._

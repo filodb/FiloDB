@@ -6,7 +6,7 @@ import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import org.agrona.{DirectBuffer, ExpandableArrayBuffer, MutableDirectBuffer}
 import org.agrona.concurrent.UnsafeBuffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._

@@ -21,7 +21,7 @@ import monix.execution.{Scheduler, UncaughtExceptionReporter}
 import monix.execution.atomic.AtomicBoolean
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._

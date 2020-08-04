@@ -2,7 +2,7 @@ package filodb.core.memstore
 
 import com.typesafe.scalalogging.StrictLogging
 import org.jctools.queues.MpscUnboundedArrayQueue
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.metadata.DataSchema
 import filodb.core.store.{ChunkSetInfo, StoreConfig}

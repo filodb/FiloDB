@@ -2,7 +2,7 @@ package filodb.query.exec
 
 import monix.reactive.Observable
 import org.agrona.MutableDirectBuffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}

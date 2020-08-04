@@ -21,7 +21,7 @@ import org.apache.lucene.search.BooleanClause.Occur
 import org.apache.lucene.store.MMapDirectory
 import org.apache.lucene.util.{BytesRef, InfoStream}
 import org.apache.lucene.util.automaton.RegExp
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.{concurrentCache, DatasetRef}
 import filodb.core.Types.PartitionKey

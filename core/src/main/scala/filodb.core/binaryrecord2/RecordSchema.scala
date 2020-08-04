@@ -4,7 +4,7 @@ import scala.collection.mutable.ArrayBuffer
 
 import org.agrona.DirectBuffer
 import org.agrona.concurrent.UnsafeBuffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.metadata.{Column, Schemas}
 import filodb.core.metadata.Column.ColumnType.{LongColumn, MapColumn, TimestampColumn}

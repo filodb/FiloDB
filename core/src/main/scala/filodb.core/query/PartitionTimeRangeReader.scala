@@ -1,6 +1,6 @@
 package filodb.core.query
 
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.metadata.Dataset
 import filodb.core.store.{ChunkInfoIterator, ChunkSetInfoReader, ReadablePartition}
