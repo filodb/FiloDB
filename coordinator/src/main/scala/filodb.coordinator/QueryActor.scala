@@ -98,7 +98,7 @@ class QueryScheduler(concurrentQueries: Int, maxQueueLen: Int, tags: Map[String,
       currentIDs(queryId) += 1
       idToSched.getOrElseUpdate(queryId, {
         if (schedulers.nonEmpty) schedulers.dequeue
-        else Scheduler.singleThread(s"Query-Queue-${currentIDs.size}")
+        else Scheduler.singleThread(s"${FiloSchedulers.QuerySchedName}-${currentIDs.size}")
       })
     }
 
