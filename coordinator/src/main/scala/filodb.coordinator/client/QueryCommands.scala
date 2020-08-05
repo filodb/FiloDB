@@ -77,4 +77,5 @@ object QueryCommands {
   final case class BadArgument(msg: String) extends ErrorResponse with QueryResponse
   final case class BadQuery(msg: String) extends ErrorResponse with QueryResponse
   final case class WrongNumberOfArgs(actual: Int, expected: Int) extends ErrorResponse with QueryResponse
+  case object QueryQueueFull extends ErrorResponse with QueryResponse
 }

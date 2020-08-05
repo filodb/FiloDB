@@ -29,7 +29,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     q.add(s)
   }
   val counterWindow = new QueueBasedWindow(q)
-  val counterRV = timeValueRV(counterSamples)
+  val counterRV = timeValueRVPk(counterSamples)
 
   val gaugeSamples = Seq(   8072000L->7419.00,
                             8082100L->5511.00,
@@ -74,7 +74,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
                          8193000L->614.00,
                          8203000L->724.00,
                          8213000L->909.00)
-    val rv = timeValueRV(counterSamples)
+    val rv = timeValueRVPk(counterSamples)
 
     // Add data and chunkify chunk2Data
     addChunkToRV(rv, chunk2Data)
@@ -112,7 +112,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
 
   it("should compute rate correctly when drops occur in middle of chunks") {
     // One drop in each chunk
-    val rv = timeValueRV(resetChunk1)
+    val rv = timeValueRVPk(resetChunk1)
     addChunkToRV(rv, resetChunk2)
 
     val startTs = 8071950L
@@ -127,7 +127,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     it.next.getDouble(1) shouldEqual expected +- errorOk
 
     // Two drops in one chunk
-    val rv2 = timeValueRV(resetChunk1 ++ resetChunk2)
+    val rv2 = timeValueRVPk(resetChunk1 ++ resetChunk2)
     val it2 = new ChunkedWindowIteratorD(rv2, endTs, 10000, endTs, endTs - startTs,
                                          new ChunkedRateFunction, querySession)
     it2.next.getDouble(1) shouldEqual expected +- errorOk
@@ -146,7 +146,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val startTs = 8071950L
     val endTs =   8163070L
     val flatSamples = counterSamples.map { case (t, v) => t -> counterSamples.head._2 }
-    val flatRV = timeValueRV(flatSamples)
+    val flatRV = timeValueRVPk(flatSamples)
 
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(flatRV, endTs, 10000, endTs, endTs - startTs,
@@ -158,7 +158,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
   it("rate should work for variety of window and step sizes") {
     val data = (1 to 500).map(_ * 10 + rand.nextInt(10)).map(_.toDouble)
     val tuples = data.zipWithIndex.map { case (d, t) => (defaultStartTS + t * pubFreq, d) }
-    val rv = timeValueRV(tuples)  // should be a couple chunks
+    val rv = timeValueRVPk(tuples)  // should be a couple chunks
 
     (0 until 10).foreach { x =>
       val windowSize = rand.nextInt(100) + 10
@@ -393,7 +393,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     toEmit.value shouldEqual expected +- errorOk
 
     // One window, start=end=endTS
-    val gaugeRV = timeValueRV(gaugeSamples)
+    val gaugeRV = timeValueRVPk(gaugeSamples)
     val it = new ChunkedWindowIteratorD(gaugeRV, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedDeltaFunction, querySession)
     it.next.getDouble(1) shouldEqual expected +- errorOk

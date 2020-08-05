@@ -192,7 +192,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       700000L->9d,
       710000L->Double.NaN // NOTE: Prom end of time series marker
     )
-    val rv = timeValueRV(samples)
+    val rv = timeValueRVPk(samples)
 
     val windowResults = Seq(
       150000->1.0,
@@ -245,8 +245,47 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       windowResults.find(a => a._1 == v.getLong(0)).foreach(b => v.getDouble(1) shouldEqual b._2 +- 0.0000000001)
     }
 
-    val rv = timeValueRV(samples)
+    val rv = timeValueRVPk(samples)
     val chunkedIt = new ChunkedWindowIteratorD(rv, 1548191496000L, 15000, 1548191796000L, 300000,
+      RangeFunction(tsResSchema,
+        Some(Rate), ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, querySession)
+    chunkedIt.foreach { v =>
+      windowResults.find(a => a._1 == v.getLong(0)).foreach(b => v.getDouble(1) shouldEqual b._2 +- 0.0000000001)
+    }
+
+  }
+
+  it("should calculate the rate for instant queries where step is 0") {
+    val samples = Seq(
+      1548191486000L -> 84d,
+      1548191496000L -> 152d,
+      1548191506000L -> 195d,
+      1548191516000L -> 222d,
+      1548191526000L -> 245d,
+      1548191536000L -> 251d,
+      1548191546000L -> 329d,
+      1548191556000L -> 374d,
+      1548191566000L -> 431d
+    )
+    val windowResults = Seq(
+      1548191496000L -> 0.34,
+      1548191511000L -> 0.555,
+      1548191526000L -> 0.60375,
+      1548191541000L -> 0.668,
+      1548191556000L -> 1.0357142857142858
+    )
+    val rawRows = samples.map(s => new TransientRow(s._1, s._2))
+    import filodb.core.query.NoCloseCursor._
+    val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 1548191796000L, 1, 1548191796000L, 300000,
+      RangeFunction(tsResSchema,
+        Some(InternalRangeFunction.Rate), ColumnType.DoubleColumn, queryConfig,
+        useChunked = false).asSliding, queryConfig)
+    slidingWinIterator.foreach { v =>
+      windowResults.find(a => a._1 == v.getLong(0)).foreach(b => v.getDouble(1) shouldEqual b._2 +- 0.0000000001)
+    }
+
+    val rv = timeValueRVPk(samples)
+    val chunkedIt = new ChunkedWindowIteratorD(rv, 1548191796000L, 1, 1548191796000L, 300000,
       RangeFunction(tsResSchema,
         Some(Rate), ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, querySession)
     chunkedIt.foreach { v =>
@@ -264,7 +303,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       1540846754000L->237d,
       1540850354000L->330d
     )
-    val rv = timeValueRV(samples)
+    val rv = timeValueRVPk(samples)
 
     val windowResults: Seq[(Long, Double)] = Seq(
       1540846755000L->237,
@@ -308,7 +347,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       1540846754000L->237d,
       1540850354000L->330d
     )
-    val rv = timeValueRV(samples)
+    val rv = timeValueRVPk(samples)
 
     val windowResults = Seq(
       1540846755000L->237,
@@ -379,7 +418,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       400000L -> 200d,
       500000L -> 200d
     )
-    val rv = timeValueRV(samples)
+    val rv = timeValueRVPk(samples)
 
     val slidingWinIterator = new SlidingWindowIterator(rv.rows, 100000L,
       100000, 600000L, 0,
@@ -410,7 +449,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       700000L -> 9d,
       710000L -> Double.NaN // NOTE: Prom end of time series marker
     )
-    val rv = timeValueRV(samples)
+    val rv = timeValueRVPk(samples)
 
     val windowResults = Seq(
       150000 -> 1.0,
@@ -446,7 +485,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       700000L -> 9d,
       710000L -> Double.NaN
     )
-    val rv = timeValueRV(samples)
+    val rv = timeValueRVPk(samples)
 
     val windowResults = Seq(
       150000 -> 1.0,
@@ -536,7 +575,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       700000L -> 9d,
       710000L -> Double.NaN
     )
-    val rv = timeValueRV(samples)
+    val rv = timeValueRVPk(samples)
 
     val windowResults = Seq(
       150000 -> 1.0,
@@ -573,7 +612,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       700000L -> 9d,
       710000L -> Double.NaN
     )
-    val rv = timeValueRV(samples)
+    val rv = timeValueRVPk(samples)
 
     val windowResults = Seq(
       150000 -> 1.0,

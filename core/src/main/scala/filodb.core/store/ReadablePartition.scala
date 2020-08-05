@@ -122,4 +122,5 @@ trait ReadablePartition extends FiloPartition {
   final def timeRangeRows(method: ChunkScanMethod, columnIDs: Array[ColumnId]): RangeVectorCursor =
     new PartitionTimeRangeReader(this, method.startTime, method.endTime, infos(method), columnIDs)
 
+  def publishInterval: Option[Long]
 }

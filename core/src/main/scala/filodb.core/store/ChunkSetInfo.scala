@@ -386,6 +386,7 @@ class WindowedChunkIterator(rv: RawDataRangeVector, start: Long, step: Long, end
                             private var readIndex: Int = 0,
                             windowInfos: Buffer[ChunkSetInfoReader] = Buffer.empty[ChunkSetInfoReader])
 extends Iterator[ChunkSetInfoReader] {
+  require(step > 0, s"Adjusted step $step not > 0")
   private val infos = rv.chunkInfos(start - window, end)
 
   final def close(): Unit = infos.close()

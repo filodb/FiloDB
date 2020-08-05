@@ -1,9 +1,11 @@
 package filodb.coordinator.queryplanner
 
+import com.typesafe.scalalogging.StrictLogging
+
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.Dataset
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.query.{BinaryJoin, LabelValues, LogicalPlan, RawSeriesLikePlan, SeriesKeysByFilters}
+import filodb.query.{BinaryJoin, LabelValues, LogicalPlan, SeriesKeysByFilters}
 import filodb.query.exec._
 
 case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange)
@@ -18,7 +20,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                             localPartitionPlanner: QueryPlanner,
                             localPartitionName: String,
                             dataset: Dataset,
-                            queryConfig: QueryConfig) extends QueryPlanner {
+                            queryConfig: QueryConfig) extends QueryPlanner with StrictLogging {
 
   import net.ceedubs.ficus.Ficus._
 
@@ -75,6 +77,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
     val partitions = partitionLocationProvider.getPartitions(routingKeyMap, queryTimeRange).
       sortBy(_.timeRange.startMs)
+    if (partitions.isEmpty) new UnsupportedOperationException("No partitions found for routing keys: " + routingKeyMap)
 
     (partitions, lookBackMs, offsetMs)
   }
@@ -101,17 +104,20 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                         // Lookback not supported across partitions
                         val numStepsInPrevPartition = (p.timeRange.startMs - prevPartitionStart + lookBackMs) / stepMs
                         val lastPartitionInstant = prevPartitionStart + numStepsInPrevPartition * stepMs
-                        lastPartitionInstant + stepMs
+                        val start = lastPartitionInstant + stepMs
+                        // If query duration is less than or equal to lookback start will be greater than query end time
+                        if (start > (queryParams.endSecs * 1000)) queryParams.endSecs * 1000 else start
                       }
         prevPartitionStart = startMs
         val endMs = if (isInstantQuery) queryParams.endSecs * 1000 else p.timeRange.endMs + offsetMs
+        logger.debug(s"partitionInfo=$p; updated startMs=$startMs, endMs=$endMs")
         if (p.partitionName.equals(localPartitionName))
           localPartitionPlanner.materialize(
             copyLogicalPlanWithUpdatedTimeRange(logicalPlan, TimeRange(startMs, endMs)), qContext)
         else {
           val httpEndpoint = p.endPoint + queryParams.remoteQueryPath.getOrElse("")
           PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, qContext, InProcessPlanDispatcher, dataset.ref,
-            generateRemoteExecParams(queryParams, startMs, endMs), logicalPlan.isInstanceOf[RawSeriesLikePlan])
+            generateRemoteExecParams(queryParams, startMs, endMs))
         }
       }
       if (execPlans.size == 1) execPlans.head
@@ -137,8 +143,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         else {
           val httpEndpoint = partitions.head.endPoint + queryParams.remoteQueryPath.getOrElse("")
           PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, qContext, InProcessPlanDispatcher, dataset.ref,
-            generateRemoteExecParams(queryParams, queryParams.startSecs * 1000, queryParams.endSecs * 1000),
-            logicalPlan.isInstanceOf[RawSeriesLikePlan])
+            generateRemoteExecParams(queryParams, queryParams.startSecs * 1000, queryParams.endSecs * 1000))
         }
       }
       else throw new UnsupportedOperationException("Binary Join across multiple partitions not supported")
@@ -150,6 +155,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val partitions = partitionLocationProvider.getAuthorizedPartitions(
       TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
     val execPlans = partitions.map { p =>
+      logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
       if (p.partitionName.equals(localPartitionName))
         localPartitionPlanner.materialize(lp.copy(startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
       else
@@ -165,6 +171,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val partitions = partitionLocationProvider.getAuthorizedPartitions(
       TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
     val execPlans = partitions.map { p =>
+      logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
       if (p.partitionName.equals(localPartitionName))
         localPartitionPlanner.materialize(lp.copy(startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
       else

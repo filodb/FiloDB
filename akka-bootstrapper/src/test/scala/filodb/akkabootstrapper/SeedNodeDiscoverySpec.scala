@@ -5,41 +5,43 @@ import akka.cluster.Cluster
 import akka.testkit.{ImplicitSender, TestKit}
 import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest._
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpecLike
 
 class SeedNodeHeadDiscoverySpec extends BaseSeedNodeDiscoverySpec(AbstractTestKit.head) {
-  "WhitelistSeedDiscovery" must {
+  "ExplicitListClusterSeedDiscovery" must {
     "discover if selfNode is head of list" in {
       seeds.headOption shouldEqual Some(selfAddress)
-      val discovery = new WhitelistClusterSeedDiscovery(cluster, settings)
+      val discovery = new ExplicitListClusterSeedDiscovery(cluster, settings)
       // remove self node unless it is in the head of the sorted list.
       discovery.discoverClusterSeeds.contains(cluster.selfAddress) shouldBe true
-      discovery.discoverClusterSeeds.size shouldEqual settings.seedsWhitelist.size
+      discovery.discoverClusterSeeds.size shouldEqual settings.seedsExplicitlyListed.size
     }
   }
 }
 
 class SeedNodeLastDiscoverySpec extends BaseSeedNodeDiscoverySpec(AbstractTestKit.last) {
-  "WhitelistSeedDiscovery" must {
+  "ExplicitListClusterSeedDiscovery" must {
     "discover if selfNode is last of list" in {
       seeds.last shouldEqual selfAddress
-      val discovery = new WhitelistClusterSeedDiscovery(cluster, settings)
+      val discovery = new ExplicitListClusterSeedDiscovery(cluster, settings)
       // remove self node unless it is in the head of the sorted list.
       discovery.discoverClusterSeeds.contains(cluster.selfAddress) shouldBe false
-      discovery.discoverClusterSeeds.size shouldEqual settings.seedsWhitelist.size - 1
+      discovery.discoverClusterSeeds.size shouldEqual settings.seedsExplicitlyListed.size - 1
     }
   }
 }
 
 abstract class BaseSeedNodeDiscoverySpec(config: Config)
-  extends AbstractTestKit(config) with WordSpecLike {
+  extends AbstractTestKit(config) with AnyWordSpecLike {
 
   protected val cluster = Cluster(system)
   protected val selfAddress = cluster.selfAddress
 
   protected val settings = new AkkaBootstrapperSettings(system.settings.config)
-  protected val seeds = settings.seedsWhitelist.map(AddressFromURIString(_))
+  protected val seeds = settings.seedsExplicitlyListed.map(AddressFromURIString(_))
 
-  "WhitelistSeedDiscovery" must {
+  "ExplicitListClusterSeedDiscovery" must {
     "include the self node in seeds if first not malformed and first is self" in {
       seeds.contains(selfAddress) shouldBe true
     }
@@ -57,7 +59,7 @@ object AbstractTestKit {
       s"""
          |akka-bootstrapper {
          |  seed-discovery.timeout = 1 minute
-         |  seed-discovery.class = "filodb.akkabootstrapper.WhitelistAkkaClusterSeedDiscovery"
+         |  seed-discovery.class = "filodb.akkabootstrapper.ExplicitListClusterSeedDiscovery"
          |  http-seeds.base-url = "http://$host:8080/"
          |}
          |akka.remote.netty.tcp.port = $port
@@ -73,7 +75,7 @@ object AbstractTestKit {
     ConfigFactory.parseString(
       s"""
          |akka-bootstrapper{
-         |  whitelist.seeds = [
+         |  explicit-list.seeds = [
          |   "akka.tcp://$name@$host:$port",
          |   "akka.tcp://$name@$host:2553",
          |   "akka.tcp://$name@$host:2554"
@@ -85,7 +87,7 @@ object AbstractTestKit {
     ConfigFactory.parseString(
       s"""
          |akka-bootstrapper{
-         |  whitelist.seeds = [
+         |  explicit-list.seeds = [
          |  "akka.tcp://$name@$host:2553",
          |  "akka.tcp://$name@$host:2554",
          |  "akka.tcp://$name@$host:$port" ]
