@@ -64,6 +64,9 @@ class Arguments(args: Seq[String]) extends ScallopConf(args) {
   val everynseconds = opt[String]()
   val shards = opt[List[String]]()
   val spread = opt[Int]()
+  var shardKeyPrefix: Seq[String] = Nil
+  var k: Option[String] = None
+
   verify()
 
   override def onError(e: Throwable): Unit = e match {
@@ -101,6 +104,7 @@ object CliMain extends FilodbClusterNode {
     println("  --host <hostname/IP> [--port ...] --command list")
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labelvalues --labelName <lable-names> --labelfilter <label-filter> --dataset <dataset>")
+    println("  --host <hostname/IP> [--port ...] --command topkcard --dataset prometheus --k 2 --shardKeyPrefix demo,App-0")
     println("""  --command promFilterToPartKeyBR --promql "myMetricName{_ws_='myWs',_ns_='myNs'}" --schema prom-counter""")
     println("""  --command partKeyBrAsString --hexpk 0x2C0000000F1712000000200000004B8B36940C006D794D65747269634E616D650E00C104006D794E73C004006D795773""")
     println("""  --command decodeChunkInfo --hexchunkinfo 0x12e8253a267ea2db060000005046fc896e0100005046fc896e010000""")
@@ -164,6 +168,23 @@ object CliMain extends FilodbClusterNode {
           val (remote, ref) = getClientAndRef(args)
           val values = remote.getIndexValues(ref, args.indexname(), args.shards().head.toInt, args.limit())
           values.foreach { case (term, freq) => println(f"$term%40s\t$freq") }
+
+        case Some("topkcard") =>
+          require(args.host.isDefined && args.dataset.isDefined && args.k.nonEmpty,
+            "--host, --dataset, --k and --shardKeyPrefix must be defined")
+          val (remote, ref) = getClientAndRef(args)
+          val res = remote.getTopkCardinality(ref, args.shards.getOrElse(Nil).map(_.toInt),
+                                                 args.shardKeyPrefix, args.k.get.toInt)
+          println(s"ShardKeyPrefix: ${args.shardKeyPrefix}")
+          res.groupBy(_.shard).foreach { crs =>
+            println(s"Shard: ${crs._1}")
+            printf("%40s %12s %10s %10s\n", "Child", "TimeSeries", "Children", "Children")
+            printf("%40s %12s %10s %10s\n", "Name", "Count", "Count", "Quota")
+            println("===================================================================================")
+            crs._2.foreach { cr =>
+              printf("%40s %12d %10d %10d\n", cr.childName, cr.timeSeriesCount, cr.childrenCount, cr.childrenQuota)
+            }
+          }
 
         case Some("status") =>
           val (remote, ref) = getClientAndRef(args)

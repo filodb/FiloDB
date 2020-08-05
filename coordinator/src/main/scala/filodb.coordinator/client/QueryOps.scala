@@ -5,6 +5,7 @@ import scala.concurrent.duration._
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core._
+import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.query.QueryContext
 import filodb.query.{LogicalPlan => LogicalPlan2, QueryResponse => QueryResponse2}
 
@@ -42,6 +43,15 @@ trait QueryOps extends ClientBase with StrictLogging {
                      timeout: FiniteDuration = 15.seconds): Seq[(String, Int)] =
     askCoordinator(GetIndexValues(dataset, indexName, shard, limit, System.currentTimeMillis()), timeout) {
       case s: Seq[(String, Int)] @unchecked => s
+    }
+
+  def getTopkCardinality(dataset: DatasetRef,
+                     shards: Seq[Int],
+                     shardKeyPrefix: Seq[String],
+                     k: Int,
+                     timeout: FiniteDuration = 15.seconds): Seq[CardinalityRecord] =
+    askCoordinator(GetTopkCardinality(dataset, shards, shardKeyPrefix, k), timeout) {
+      case s: Seq[CardinalityRecord] @unchecked => s
     }
 
   /**

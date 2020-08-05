@@ -202,6 +202,11 @@ final class QueryActor(memStore: MemStore,
     }
   }
 
+  private def execTopkCardinalityQuery(q: GetTopkCardinality, sender: ActorRef): Unit = {
+    val ret = memStore.topKCardinality(q.dataset, q.shards, q.shardKeyPrefix, q.k)
+    sender ! ret
+  }
+
   def checkTimeout(queryContext: QueryContext, replyTo: ActorRef): Boolean = {
     // timeout can occur here if there is a build up in actor mailbox queue and delayed delivery
     val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
@@ -218,6 +223,7 @@ final class QueryActor(memStore: MemStore,
     case q: ExplainPlan2Query      => val replyTo = sender()
                                       processExplainPlanQuery(q, replyTo)
     case q: ExecPlan              =>  execPhysicalPlan2(q, sender())
+    case q: GetTopkCardinality     => execTopkCardinalityQuery(q, sender())
 
     case GetIndexNames(ref, limit, _) =>
       sender() ! memStore.indexNames(ref, limit).map(_._1).toBuffer

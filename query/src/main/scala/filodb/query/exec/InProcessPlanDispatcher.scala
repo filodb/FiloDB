@@ -7,6 +7,7 @@ import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.PartLookupResult
+import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.Schemas
 import filodb.core.query.{EmptyQueryConfig, QueryConfig, QuerySession}
 import filodb.core.store._
@@ -70,10 +71,13 @@ case class UnsupportedChunkSource() extends ChunkSource {
                                  chunkMethod: ChunkScanMethod): Observable[RawPartData] =
     throw new UnsupportedOperationException("This operation is not supported")
 
-  /**
-    * True if this store is in the mode of serving downsampled data.
-    * This is used to switch ingestion and query behaviors for downsample cluster.
-    */
   override def isDownsampleStore: Boolean = false
+
+  override def topKCardinality(ref: DatasetRef,
+                               shards: Seq[Int],
+                               shardKeyPrefix: scala.Seq[String],
+                               k: Int): scala.Seq[CardinalityRecord] =
+    throw new UnsupportedOperationException("This operation is not supported")
+
 }
 

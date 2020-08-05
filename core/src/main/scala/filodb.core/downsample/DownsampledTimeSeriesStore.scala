@@ -13,6 +13,7 @@ import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.memstore._
+import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
@@ -169,4 +170,10 @@ extends MemStore with StrictLogging {
   override def readRawPartitions(ref: DatasetRef, maxChunkTime: Long,
                                  partMethod: PartitionScanMethod,
                                  chunkMethod: ChunkScanMethod): Observable[RawPartData] = ???
+
+  // TODO we need breakdown for downsample store too, but in a less memory intensive way
+  override def topKCardinality(ref: DatasetRef,
+                               shards: Seq[Int],
+                               shardKeyPrefix: scala.Seq[String],
+                               k: Int): scala.Seq[CardinalityRecord] = ???
 }

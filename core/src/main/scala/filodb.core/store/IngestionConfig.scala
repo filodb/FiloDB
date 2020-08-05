@@ -37,7 +37,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              ensureHeadroomPercent: Double,
                              // filters on ingested records to log in detail
                              traceFilters: Map[String, String],
-                             maxDataPerShardQuery: Long) {
+                             maxDataPerShardQuery: Long,
+                             meteringEnabled: Boolean) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
@@ -61,7 +62,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "demand-paging-enabled" -> demandPagingEnabled,
                                "max-data-per-shard-query" -> maxDataPerShardQuery,
                                "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity,
-                               "ensure-headroom-percent" -> ensureHeadroomPercent).asJava)
+                               "ensure-headroom-percent" -> ensureHeadroomPercent,
+                               "metering-enabled" -> meteringEnabled).asJava)
 }
 
 final case class AssignShardConfig(address: String, shardList: Seq[Int])
@@ -97,6 +99,7 @@ object StoreConfig {
                                            |evicted-pk-bloom-filter-capacity = 5000000
                                            |ensure-headroom-percent = 5.0
                                            |trace-filters = {}
+                                           |metering-enabled = true
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
   def apply(storeConfig: Config): StoreConfig = {
@@ -128,7 +131,8 @@ object StoreConfig {
                 config.getInt("evicted-pk-bloom-filter-capacity"),
                 config.getDouble("ensure-headroom-percent"),
                 config.as[Map[String, String]]("trace-filters"),
-                config.getMemorySize("max-data-per-shard-query").toBytes)
+                config.getMemorySize("max-data-per-shard-query").toBytes,
+                config.getBoolean("metering-enabled"))
   }
 }
 
