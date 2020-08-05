@@ -9,7 +9,6 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
 
   private def parseAndAssertResult(query: String) = {
     val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
-    println("lp:" + lp)
     val res = LogicalPlanParser.convertToQuery(lp)
     res shouldEqual(query)
   }
