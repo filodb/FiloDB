@@ -2,6 +2,7 @@ package filodb.coordinator.queryplanner
 
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query._
+import filodb.query.AggregationOperator.CountValues
 import filodb.query.InstantFunctionId.{ClampMax, ClampMin}
 import filodb.query.RangeFunctionId.QuantileOverTime
 
@@ -24,9 +25,11 @@ object LogicalPlanParser {
   private def getFiltersFromRawSeries(lp: RawSeries)= lp.filters.map(f => (f.column, f.filter.operatorString,
     Quotes + f.filter.valuesStrings.head.toString + Quotes))
 
-  private def filtersToQuery(filters: Seq[(String, String, String)]): String = {
+  private def filtersToQuery(filters: Seq[(String, String, String)], columns: Seq[String]): String = {
+    val columnString = if (columns.isEmpty) "" else s"::${columns.head}"
     // Get metric name from filters and remove quotes from start and end
-    val name = filters.find(x => x._1.equals(PromMetricLabel)).head._3.replaceAll("^\"|\"$", "")
+    val name = s"${filters.find(x => x._1.equals(PromMetricLabel)).head._3.
+      replaceAll("^\"|\"$", "")}$columnString"
     // When only metric name is present
     if (filters.size == 1) name
     else s"$name$OpeningCurlyBraces${filters.filterNot(x => x._1.equals(PromMetricLabel)).
@@ -35,10 +38,10 @@ object LogicalPlanParser {
 
   private def rawSeriesLikeToQuery(lp: RawSeriesLikePlan): String = {
     lp match {
-      case r: RawSeries               => filtersToQuery(getFiltersFromRawSeries(r))
+      case r: RawSeries               => filtersToQuery(getFiltersFromRawSeries(r), r.columns)
       case a: ApplyInstantFunctionRaw => val filters = getFiltersFromRawSeries(a.vectors)
         val bucketFilter = ("_bucket_", "=", s"$Quotes${functionArgsToQuery(a.functionArgs.head)}$Quotes")
-        filtersToQuery(filters :+ bucketFilter)
+        filtersToQuery(filters :+ bucketFilter, a.vectors.columns)
       case _            => throw new UnsupportedOperationException(s"$lp can't be converted to Query")
     }
   }
@@ -54,9 +57,10 @@ object LogicalPlanParser {
       ClosingRoundBracket
     val withoutString = if (lp.without.isEmpty) "" else s"${Space}without$Space$OpeningRoundBracket" +
       s"${lp.without.mkString(Comma)}$ClosingRoundBracket"
+    val params = if (lp.params.isEmpty) "" else s"${lp.params.mkString(",")},"
 
-    s"${lp.operator.toString.toLowerCase}$OpeningRoundBracket$periodicSeriesQuery$ClosingRoundBracket$byString" +
-      s"$withoutString"
+    val function = if (lp.operator.equals(CountValues)) "count_values" else lp.operator.toString.toLowerCase
+    s"$function$OpeningRoundBracket$params$periodicSeriesQuery$ClosingRoundBracket$byString$withoutString"
   }
 
   private def absentFnToQuery(lp: ApplyAbsentFunction): String = {
