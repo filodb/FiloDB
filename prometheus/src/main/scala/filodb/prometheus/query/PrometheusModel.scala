@@ -83,7 +83,8 @@ object PrometheusModel {
                     qr.result.map(toHistResult(_, verbose, qr.resultType))
                   else
                     qr.result.map(toPromResult(_, verbose, qr.resultType))
-    SuccessResponse(Data(toPromResultType(qr.resultType), results.filter(_.values.nonEmpty)))
+    SuccessResponse(Data(toPromResultType(qr.resultType),
+                         results.filter(r => r.values.nonEmpty || r.value.isDefined)))
   }
 
   def toPromExplainPlanResponse(ex: ExecPlan): ExplainPlanResponse = {
@@ -120,17 +121,21 @@ object PrometheusModel {
         )
       case QueryResultType.InstantVector =>
         Result(tags, None, samples.headOption)
-      // TODO: implememt output for Scalar results
-      case QueryResultType.Scalar => ???
+      case QueryResultType.Scalar =>
+        Result(tags, None, samples.headOption)
     }
   }
 
-  def toHistResult(srv: RangeVector, verbose: Boolean, typ: QueryResultType): Result = {
+  def toHistResult(srv: RangeVector,
+                   verbose: Boolean,
+                   typ: QueryResultType,
+                   processMultiPartition: Boolean = true): Result = {
     val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
                 (if (verbose) makeVerboseLabels(srv.key)
                 else Map.empty)
     val samples = srv.rows.map { r => (r.getLong(0), r.getHistogram(1)) }.collect {
-      case (t, h) if h.numBuckets > 0 =>
+      // Don't remove empty histogram for remote query as it is needed for stitching with local results
+      case (t, h) if (h.numBuckets > 0 || !processMultiPartition) =>
         val buckets = (0 until h.numBuckets).map { b =>
           val le = h.bucketTop(b)
           (if (le == Double.PositiveInfinity) "+Inf" else le.toString) -> h.bucketValue(b)

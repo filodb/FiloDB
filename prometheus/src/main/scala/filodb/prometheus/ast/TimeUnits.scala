@@ -12,39 +12,47 @@ trait TimeUnits {
     * d - days
     * w - weeks
     * y - years
-    */
+    * i - factor of step (aka interval)
+    * */
 
   sealed trait TimeUnit {
-    def millis: Long
+    def millis(step: Long): Long
   }
 
   case object Second extends TimeUnit {
-    override def millis: Long = 1000L
+    override def millis(step: Long): Long = 1000L
   }
 
   case object Minute extends TimeUnit {
-    override def millis: Long = Second.millis * 60
+    override def millis(step: Long): Long = Second.millis(step) * 60
   }
 
   case object Hour extends TimeUnit {
-    override def millis: Long = Minute.millis * 60
+    override def millis(step: Long): Long = Minute.millis(step) * 60
   }
 
   case object Day extends TimeUnit {
-    override def millis: Long = Hour.millis * 24
+    override def millis(step: Long): Long = Hour.millis(step) * 24
   }
 
   case object Week extends TimeUnit {
-    override def millis: Long = Day.millis * 7
+    override def millis(step: Long): Long = Day.millis(step) * 7
   }
 
   case object Year extends TimeUnit {
-    override def millis: Long = Week.millis * 52
+    override def millis(step: Long): Long = Week.millis(step) * 52
   }
 
-  case class Duration(scale: Int, timeUnit: TimeUnit) {
+  case object IntervalMultiple extends TimeUnit {
+    override def millis(step: Long): Long = {
+      require(step > 0, "Interval multiple notation was used in lookback/range without valid step")
+      step
+    }
+  }
+
+  case class Duration(scale: Double, timeUnit: TimeUnit) {
     if (scale <= 0) throw new IllegalArgumentException("Duration should be greater than zero")
-    val millis = scale * timeUnit.millis
+    def millis(step: Long): Long = (scale * timeUnit.millis(step)).toLong
   }
 
   case class Offset(duration: Duration)

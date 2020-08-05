@@ -3,11 +3,10 @@ package filodb.memory.format.vectors
 import java.nio.ByteBuffer
 
 import debox.Buffer
-import org.scalatest.prop.PropertyChecks
-
 import filodb.memory.format.{BinaryVector, GrowableVector, MemoryReader, WireFormat}
+import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
-class LongVectorTest extends NativeVectorTest with PropertyChecks {
+class LongVectorTest extends NativeVectorTest with ScalaCheckPropertyChecks {
   def maxPlus(i: Int): Long = Int.MaxValue.toLong + i
 
   describe("LongMaskedAppendableVector") {

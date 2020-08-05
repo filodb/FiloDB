@@ -9,7 +9,7 @@ import scala.concurrent.duration.FiniteDuration
 import com.typesafe.config.{Config, ConfigFactory}
 import monix.eval.Task
 import monix.execution.Scheduler
-import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
@@ -24,9 +24,11 @@ import filodb.memory.MemFactory
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 // So, this is effectively a test for NonLeafExecPlan
-class InProcessPlanDispatcherSpec extends FunSpec
+class InProcessPlanDispatcherSpec extends AnyFunSpec
   with Matchers with ScalaFutures with BeforeAndAfter with BeforeAndAfterAll {
 
   import ZeroCopyUTF8String._
@@ -48,7 +50,7 @@ class InProcessPlanDispatcherSpec extends FunSpec
   }
 
   after {
-    ChunkMap.validateNoSharedLocks("InProcessPlanDispatcherSpec", true)
+    ChunkMap.validateNoSharedLocks(true)
   }
 
   override def afterAll(): Unit = {

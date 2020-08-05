@@ -2,11 +2,12 @@ package filodb.memory.format
 
 import org.agrona.{DirectBuffer, ExpandableArrayBuffer}
 import org.agrona.concurrent.UnsafeBuffer
-
 import org.scalatest._
-import org.scalatest.prop.PropertyChecks
+import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class NibblePackTest extends FunSpec with Matchers with PropertyChecks {
+class NibblePackTest extends AnyFunSpec with Matchers with ScalaCheckPropertyChecks {
   it("should NibblePack 8 words partial non-zero even nibbles") {
     // All 8 are nonzero, even # nibbles
     val buf = new ExpandableArrayBuffer()

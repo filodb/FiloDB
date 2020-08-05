@@ -109,7 +109,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
     within(chunkDurationTimeout) {
       runOn(first) {
         Thread.sleep(15000) // needed since awaitNodeUp doesnt wait for shard consumption to begin
-        TestTimeseriesProducer.produceMetrics(source, 1000, 100, 400).futureValue(producePatience)
+        TestTimeseriesProducer.produceMetrics(source, 1000, 100, 400).futureValue
         info("Waiting for chunk-duration to pass so checkpoints for all groups are created")
         Thread.sleep(chunkDuration.toMillis + 7000)
       }
@@ -140,7 +140,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
         // NOTE: 10000 samples / 100 time series = 100 samples per series
         // 100 * 10s = 1000seconds =~ 16 minutes
         queryTimestamp = System.currentTimeMillis() - 195.minutes.toMillis
-        TestTimeseriesProducer.produceMetrics(source, 10000, 100, 200).futureValue(producePatience)
+        TestTimeseriesProducer.produceMetrics(source, 10000, 100, 200).futureValue
         info("Waiting for part of the chunk-duration so that there are unpersisted chunks")
         Thread.sleep(chunkDuration.toMillis / 3)
       }
@@ -230,7 +230,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
 
   it should "be able to ingest some more data on node 1" in {
     runOn(first) {
-      TestTimeseriesProducer.produceMetrics(source, 1000, 100, 50).futureValue(producePatience)
+      TestTimeseriesProducer.produceMetrics(source, 1000, 100, 50).futureValue
     }
     enterBarrier("data3-ingested")
   }

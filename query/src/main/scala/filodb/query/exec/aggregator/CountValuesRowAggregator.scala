@@ -86,12 +86,10 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
       ColumnInfo("value", ColumnType.DoubleColumn))
     val recSchema = SerializedRangeVector.toSchema(colSchema)
     val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
-    // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
-    // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
     try {
       FiloSchedulers.assertThreadName(QuerySchedName)
       // aggRangeVector.rows.take below triggers the ChunkInfoIterator which requires lock/release
-      ChunkMap.validateNoSharedLocks(s"CountValues-$label")
+      ChunkMap.validateNoSharedLocks()
       aggRangeVector.rows.take(limit).foreach { row =>
         val rowMap = CountValuesSerDeser.deserialize(row.getBlobBase(1),
           row.getBlobNumBytes(1), row.getBlobOffset(1))

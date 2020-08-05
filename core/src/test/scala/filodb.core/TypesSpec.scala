@@ -1,11 +1,12 @@
 package filodb.core
 
-import org.scalatest.{FunSpec, Matchers}
 
 import filodb.memory.format.TupleRowReader
 import filodb.memory.format.ZeroCopyUTF8String._
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class TypesSpec extends FunSpec with Matchers {
+class TypesSpec extends AnyFunSpec with Matchers {
   import Ordered._
 
   import SingleKeyTypes._

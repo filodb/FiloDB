@@ -1,11 +1,13 @@
 package filodb.memory.format.vectors
 
-import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
+import org.scalatest.BeforeAndAfterAll
 
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format.{MemoryAccessor}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-trait NativeVectorTest extends FunSpec with Matchers with BeforeAndAfterAll {
+trait NativeVectorTest extends AnyFunSpec with Matchers with BeforeAndAfterAll {
 
   val acc = MemoryAccessor.nativePtrAccessor
 

@@ -140,11 +140,15 @@ trait ScalarSingleValue extends ScalarRangeVector {
 
   override def rows(): RangeVectorCursor = {
     import NoCloseCursor._
-    Iterator.from(0, rangeParams.stepSecs.toInt).takeWhile(_ <= rangeParams.endSecs - rangeParams.startSecs).map { i =>
+    val it = Iterator.from(0, rangeParams.stepSecs.toInt)
+                     .takeWhile(_ <= rangeParams.endSecs - rangeParams.startSecs).map { i =>
       numRowsInt += 1
       val t = i + rangeParams.startSecs
       new TransientRow(t * 1000, getValue(t * 1000))
     }
+    // address step == 0 case
+    if (rangeParams.startSecs == rangeParams.endSecs) it.take(1)
+    else it
   }
 }
 
@@ -235,6 +239,8 @@ final case class RawDataRangeVector(key: RangeVectorKey,
 
   // the query engine is based around one main data column to query, so it will always be the second column passed in
   def valueColID: Int = columnIDs(1)
+
+  def publishInterval: Option[Long] = partition.publishInterval
 }
 
 /**
@@ -314,10 +320,8 @@ object SerializedRangeVector extends StrictLogging {
     var numRows = 0
     val oldContainerOpt = builder.currentContainer
     val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
-    // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
-    // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
     try {
-      ChunkMap.validateNoSharedLocks(execPlan)
+      ChunkMap.validateNoSharedLocks()
       val rows = rv.rows
       while (rows.hasNext) {
         numRows += 1
