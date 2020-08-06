@@ -194,7 +194,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   // Single-threaded query test
   val qContext = QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 10000)
   val logicalPlan = Parser.queryRangeToLogicalPlan(rawQuery, qParams)
-  // Pick the children nodes, not the DistConcatExec.  Thus we can run in a single thread this way
+  // Pick the children nodes, not the LocalPartitionDistConcatExec.  Thus we can run in a single thread this way
   val execPlan = engine.materialize(logicalPlan, qContext).children.head
   val querySched = Scheduler.singleThread(s"benchmark-query")
 

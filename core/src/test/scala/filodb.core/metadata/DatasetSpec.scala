@@ -1,9 +1,10 @@
 package filodb.core.metadata
 
-import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 // DEPRECATED: remove soon
-class DatasetSpec extends FunSpec with Matchers {
+class DatasetSpec extends AnyFunSpec with Matchers {
   describe("Dataset validation") {
     it("should compute nonMetricShardColumns correctly") {
       val options = DatasetOptions.DefaultOptions.copy(shardKeyColumns = Seq("job", "__name__"))

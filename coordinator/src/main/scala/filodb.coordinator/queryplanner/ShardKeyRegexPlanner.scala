@@ -1,10 +1,18 @@
 package filodb.coordinator.queryplanner
 
-import filodb.core.metadata.Dataset
-import filodb.core.query.{ColumnFilter, QueryContext}
+import filodb.core.metadata.{Dataset, Schemas}
+import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryContext}
 import filodb.core.query.Filter.{EqualsRegex, NotEqualsRegex}
-import filodb.query.{Aggregate, BinaryJoin, LogicalPlan}
-import filodb.query.exec.{DistConcatExec, ExecPlan, InProcessPlanDispatcher, ReduceAggregateExec}
+import filodb.query._
+import filodb.query.exec._
+
+/**
+ * Holder for the shard key regex matcher results.
+ *
+ * @param columnFilters - non metric shard key filters
+ * @param query - query
+ */
+case class ShardKeyMatcher(columnFilters: Seq[ColumnFilter], query: String)
 
 /**
   * Responsible for query planning for queries having regex in shard column
@@ -19,7 +27,10 @@ import filodb.query.exec.{DistConcatExec, ExecPlan, InProcessPlanDispatcher, Red
 
 class ShardKeyRegexPlanner(dataset: Dataset,
                            queryPlanner: QueryPlanner,
-                           shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]]) extends QueryPlanner {
+                           shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]])
+  extends QueryPlanner with PlannerMaterializer {
+
+  override val schemas = Schemas(dataset.schema)
   /**
     * Converts a logical plan to execution plan.
     *
@@ -28,39 +39,84 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     * @return materialized Execution Plan which can be dispatched
     */
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+     walkLogicalPlanTree(logicalPlan, qContext).plans.head
+  }
+
+   def walkLogicalPlanTree(logicalPlan: LogicalPlan,
+                                  qContext: QueryContext): PlanResult = {
     logicalPlan match {
-           case a: Aggregate  => materializeAggregate(a, qContext)
-           case b: BinaryJoin => materializeBinaryJoin(b, qContext)
-           case _             => materializeOthers(logicalPlan, qContext)
+      case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
+      case lp: ApplyInstantFunction        => materializeApplyInstantFunction(qContext, lp)
+      case lp: ApplyInstantFunctionRaw     => materializeApplyInstantFunctionRaw(qContext, lp)
+      case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp)
+      case lp: ApplySortFunction           => materializeApplySortFunction(qContext, lp)
+      case lp: ScalarVaryingDoublePlan     => materializeScalarPlan(qContext, lp)
+      case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
+      case lp: VectorPlan                  => materializeVectorPlan(qContext, lp)
+      case lp: Aggregate                   => materializeAggregate(lp, qContext)
+      case lp: BinaryJoin                  => materializeBinaryJoin(lp, qContext)
+      case _                               => materializeOthers(logicalPlan, qContext)
     }
   }
 
-  private def getNonMetricShardKeyFilters(logicalPlan: LogicalPlan) = LogicalPlan.
-    getRawSeriesFilters(logicalPlan).map { s => s.filter(f => dataset.options.nonMetricShardColumns.contains(f.column))}
+  private def getNonMetricShardKeyFilters(logicalPlan: LogicalPlan): Seq[Seq[ColumnFilter]] =
+    LogicalPlan.getRawSeriesFilters(logicalPlan)
+      .map { s => s.filter(f => dataset.options.nonMetricShardColumns.contains(f.column))}
 
-  private def generateExec(logicalPlan: LogicalPlan, nonMetricShardKeyFilters: Seq[ColumnFilter],
-                           qContext: QueryContext) = shardKeyMatcher(nonMetricShardKeyFilters).map(f =>
-                           queryPlanner.materialize(logicalPlan.replaceFilters(f), qContext))
+  private def generateExecWithoutRegex(logicalPlan: LogicalPlan, nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                       qContext: QueryContext): Seq[ExecPlan] = {
+    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    shardKeyMatcher(nonMetricShardKeyFilters).map { result =>
+        val newLogicalPlan = logicalPlan.replaceFilters(result)
+        // Querycontext should just have the part of query which has regex
+        // For example for exp(sum(test{_ws_ = "demo", _ns_ =~ "App.*"})), sub queries should be
+        // sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
+        val newQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
+        val newQueryContext = qContext.copy(origQueryParams = newQueryParams)
+        queryPlanner.materialize(logicalPlan.replaceFilters(result), newQueryContext)
+      }
+  }
 
-  private def materializeBinaryJoin(binaryJoin: BinaryJoin, qContext: QueryContext): ExecPlan = {
+  /**
+    * For binary join queries like test1{_ws_ = "demo", _ns_ =~ "App.*"} + test2{_ws_ = "demo", _ns_ =~ "App.*"})
+    */
+  private def materializeBinaryJoin(binaryJoin: BinaryJoin, qContext: QueryContext): PlanResult = {
    if (getNonMetricShardKeyFilters(binaryJoin).forall(_.forall(f => !f.filter.isInstanceOf[EqualsRegex] &&
-     !f.filter.isInstanceOf[NotEqualsRegex]))) queryPlanner.materialize(binaryJoin, qContext)
+     !f.filter.isInstanceOf[NotEqualsRegex]))) PlanResult(Seq(queryPlanner.materialize(binaryJoin, qContext)))
    else throw new UnsupportedOperationException("Regex not supported for Binary Join")
   }
 
-  private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext): ExecPlan = {
-    val execPlans = generateExec(aggregate, getNonMetricShardKeyFilters(aggregate).head, queryContext)
-    if (execPlans.size == 1) execPlans.head
-    else ReduceAggregateExec(queryContext, InProcessPlanDispatcher, execPlans, aggregate.operator, aggregate.params)
+  /***
+    * For aggregate queries like sum(test{_ws_ = "demo", _ns_ =~ "App.*"})
+    * It will be broken down to sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
+    * Sub query could be across multiple partitions so aggregate using MultiPartitionReduceAggregateExec
+    * */
+  private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext): PlanResult = {
+    val execPlans = generateExecWithoutRegex(aggregate, getNonMetricShardKeyFilters(aggregate).head, queryContext)
+    val exec = if (execPlans.size == 1) execPlans.head
+    else {
+      val reducer = MultiPartitionReduceAggregateExec(queryContext, InProcessPlanDispatcher,
+        execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
+      reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params))
+      reducer
+    }
+    PlanResult(Seq(exec))
   }
 
-  private def materializeOthers(logicalPlan: LogicalPlan, queryContext: QueryContext): ExecPlan = {
+  /***
+    * For non aggregate & non binary join queries like test{_ws_ = "demo", _ns_ =~ "App.*"}
+    * It will be broken down to test{_ws_ = "demo", _ns_ = "App-1"}, test{_ws_ = "demo", _ns_ = "App-2"} etc
+    * Sub query could be across multiple partitions so concatenate using MultiPartitionDistConcatExec
+    * */
+  private def materializeOthers(logicalPlan: LogicalPlan, queryContext: QueryContext): PlanResult = {
     val nonMetricShardKeyFilters = getNonMetricShardKeyFilters(logicalPlan)
     // For queries which don't have RawSeries filters like metadata and fixed scalar queries
-    if (nonMetricShardKeyFilters.head.isEmpty) queryPlanner.materialize(logicalPlan, queryContext)
+    val exec = if (nonMetricShardKeyFilters.head.isEmpty) queryPlanner.materialize(logicalPlan, queryContext)
     else {
-      val execPlans = generateExec(logicalPlan, nonMetricShardKeyFilters.head, queryContext)
-      if (execPlans.size == 1) execPlans.head else DistConcatExec(queryContext, InProcessPlanDispatcher, execPlans)
+      val execPlans = generateExecWithoutRegex(logicalPlan, nonMetricShardKeyFilters.head, queryContext)
+      if (execPlans.size == 1) execPlans.head else MultiPartitionDistConcatExec(queryContext, InProcessPlanDispatcher,
+        execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
     }
+    PlanResult(Seq(exec))
   }
 }

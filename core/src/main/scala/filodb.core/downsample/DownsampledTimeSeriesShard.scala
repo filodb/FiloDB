@@ -262,13 +262,14 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                 SinglePartitionScan(partRec.partKey, shardNum),
                                 lookup.chunkMethod)
           .map { pd =>
-            val part = makePagedPartition(pd, lookup.firstSchemaId.get, colIds)
+            val part = makePagedPartition(pd, lookup.firstSchemaId.get, Some(resolution), colIds)
             stats.partitionsQueried.increment()
             stats.chunksQueried.increment(part.numChunks)
             partLoadSpan.finish()
             part
           }
-          .defaultIfEmpty(makePagedPartition(RawPartData(partRec.partKey, Seq.empty), lookup.firstSchemaId.get, colIds))
+          .defaultIfEmpty(makePagedPartition(RawPartData(partRec.partKey, Seq.empty),
+            lookup.firstSchemaId.get, Some(resolution), colIds))
           .headL
       }
   }
@@ -296,13 +297,14 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   }
 
   private def makePagedPartition(part: RawPartData, firstSchemaId: Int,
+                                 resolution: Option[Long],
                                  colIds: Seq[Types.ColumnId]): ReadablePartition = {
     val schemaId = RecordSchema.schemaID(part.partitionKey, UnsafeUtils.arayOffset)
     if (schemaId != firstSchemaId) {
       throw SchemaMismatch(schemas.schemaName(firstSchemaId), schemas.schemaName(schemaId))
     }
     // FIXME It'd be nice to pass in the correct partId here instead of -1
-    new PagedReadablePartition(schemas(schemaId), shardNum, -1, part, colIds)
+    new PagedReadablePartition(schemas(schemaId), shardNum, -1, part, resolution, colIds)
   }
 
   /**

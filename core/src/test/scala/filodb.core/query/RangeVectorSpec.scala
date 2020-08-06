@@ -1,12 +1,13 @@
 package filodb.core.query
 
-import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 
-class RangeVectorSpec  extends FunSpec with Matchers {
+class RangeVectorSpec  extends AnyFunSpec with Matchers {
   val now = System.currentTimeMillis()
   val numRawSamples = 1000
   val reportingInterval = 10000

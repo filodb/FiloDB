@@ -86,11 +86,9 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
       ColumnInfo("value", ColumnType.DoubleColumn))
     val recSchema = SerializedRangeVector.toSchema(colSchema)
     val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
-    // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
-    // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
     try {
       FiloSchedulers.assertThreadName(QuerySchedName)
-      ChunkMap.validateNoSharedLocks(s"TopkQuery-$k-$bottomK")
+      ChunkMap.validateNoSharedLocks()
       // We limit the results wherever it is materialized first. So it is done here.
       aggRangeVector.rows.take(limit).foreach { row =>
         var i = 1

@@ -3,13 +3,15 @@ package filodb.core.store
 import java.util.UUID
 
 import com.typesafe.config.{ConfigException, ConfigFactory, ConfigRenderOptions}
-import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core._
 import filodb.core.metadata.{Dataset, DatasetOptions}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-trait MetaStoreSpec extends FunSpec with Matchers
+trait MetaStoreSpec extends AnyFunSpec with Matchers
 with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   def metaStore: MetaStore
   implicit def defaultPatience: PatienceConfig

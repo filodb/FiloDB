@@ -2,17 +2,16 @@ package filodb.akkabootstrapper.multijvm
 
 import scala.concurrent.duration._
 import scala.language.postfixOps
-
 import akka.actor.AddressFromURIString
 import akka.cluster.Cluster
 import akka.http.scaladsl.Http
-import akka.remote.testkit.{MultiNodeConfig, MultiNodeSpecCallbacks, MultiNodeSpec}
+import akka.remote.testkit.{MultiNodeConfig, MultiNodeSpec, MultiNodeSpecCallbacks}
 import akka.stream.ActorMaterializer
 import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest._
 import org.scalatest.concurrent.ScalaFutures
-
 import filodb.akkabootstrapper.{AkkaBootstrapper, ClusterMembershipHttpResponse}
+import org.scalatest.wordspec.AnyWordSpecLike
 
 trait AkkaBootstrapperMultiNodeConfig extends MultiNodeConfig {
 
@@ -48,7 +47,7 @@ trait AkkaBootstrapperMultiNodeConfig extends MultiNodeConfig {
   * Concrete multi-jvm tests can mixin this trait to instantiate tests for each discovery strategy.
   */
 trait BaseAkkaBootstrapperSpec extends MultiNodeSpecCallbacks
-  with WordSpecLike with Matchers with ScalaFutures
+  with AnyWordSpecLike with matchers.should.Matchers with ScalaFutures
   with BeforeAndAfterAll { multiNodeSpecWithConfig: MultiNodeSpec =>
 
   import io.circe.parser.decode

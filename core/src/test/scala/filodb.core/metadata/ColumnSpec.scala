@@ -2,9 +2,10 @@ package filodb.core.metadata
 
 import com.typesafe.config.ConfigFactory
 
-import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class ColumnSpec extends FunSpec with Matchers {
+class ColumnSpec extends AnyFunSpec with Matchers {
   import Column.ColumnType
   import Dataset._
 

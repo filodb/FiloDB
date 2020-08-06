@@ -2,6 +2,7 @@ package filodb.core.downsample
 
 import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.duration.FiniteDuration
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
@@ -149,7 +150,8 @@ extends MemStore with StrictLogging {
   override def recoverStream(dataset: DatasetRef, shard: Int,
                              stream: Observable[SomeData],
                              startOffset: Long, endOffset: Long, checkpoints: Map[Int, Long],
-                             reportingInterval: Long): Observable[Long] = throw new UnsupportedOperationException()
+                             reportingInterval: Long) (implicit timeout: FiniteDuration)
+                              : Observable[Long] = throw new UnsupportedOperationException()
 
   override def numPartitions(dataset: DatasetRef, shard: Int): Int = throw new UnsupportedOperationException()
 

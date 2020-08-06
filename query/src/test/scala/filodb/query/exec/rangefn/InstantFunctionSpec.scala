@@ -322,9 +322,10 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
   }
 
   private def applyFunctionAndAssertResult(samples: Array[RangeVector], expectedVal: Array[Iterator[Double]],
-                                instantFunctionId: InstantFunctionId, funcParams: Seq[Double] = Nil,
-                                schema: ResultSchema = resultSchema): Unit = {
-    val instantVectorFnMapper = exec.InstantVectorFunctionMapper(instantFunctionId, funcParams.map(x => StaticFuncArgs(x, RangeParams(100,10,200))))
+                                           instantFunctionId: InstantFunctionId, funcParams: Seq[Double] = Nil,
+                                           schema: ResultSchema = resultSchema): Unit = {
+    val instantVectorFnMapper = exec.InstantVectorFunctionMapper(instantFunctionId,
+      funcParams.map(x => StaticFuncArgs(x, RangeParams(100, 10, 200))))
     val resultObs = instantVectorFnMapper(Observable.fromIterable(samples), querySession, 1000, schema, Nil)
     val result = resultObs.toListL.runAsync.futureValue.map(_.rows)
     expectedVal.zip(result).foreach {

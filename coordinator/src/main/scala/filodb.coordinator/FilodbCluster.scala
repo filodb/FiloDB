@@ -255,7 +255,6 @@ private[filodb] trait FilodbClusterNode extends NodeConfiguration with StrictLog
       case ClusterRole.Cli => ConfigFactory.parseString(
         """# akka.actor.provider=akka.remote.RemoteActorRefProvider
           |akka.coordinated-shutdown.run-by-jvm-shutdown-hook=off
-          |akka.extensions = ["com.romix.akka.serialization.kryo.KryoSerializationExtension$"]
         """.stripMargin)
       case _ => ConfigFactory.parseString(s"""akka.cluster.roles=["${role.roleName}"]""")
     }).withFallback(systemConfig)

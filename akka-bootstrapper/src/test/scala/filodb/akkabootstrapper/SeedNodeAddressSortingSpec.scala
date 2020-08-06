@@ -6,7 +6,7 @@ import scala.util.Random
 import akka.actor.Address
 import akka.cluster.{Cluster, Member}
 import com.typesafe.config.ConfigFactory
-import org.scalatest.WordSpecLike
+import org.scalatest.wordspec.AnyWordSpecLike
 
 object SeedNodeSortingFixture {
 
@@ -20,14 +20,14 @@ object SeedNodeSortingFixture {
   val config = {
     val seeds = expected.map(_.toString).mkString("\"", "\",\"", "\"")
     ConfigFactory
-      .parseString(s"""akka-bootstrapper.whitelist.seeds = [ $seeds ] """)
+      .parseString(s"""akka-bootstrapper.explicit-list.seeds = [ $seeds ] """)
       .withFallback(AbstractTestKit.rootConfig)
   }
 }
 
 class SeedNodeAddressSortingSpec
   extends AbstractTestKit(SeedNodeSortingFixture.config)
-    with WordSpecLike {
+    with AnyWordSpecLike {
 
   "An Ordering[Address]" must {
     "be sorted by address correctly" in {
@@ -44,12 +44,12 @@ class SeedNodeAddressSortingSpec
       (SortedSet.empty[Address] ++ shuffled).toIndexedSeq shouldEqual expected
     }
   }
-  "WhitelistClusterSeedDiscovery.discoverClusterSeeds" must {
+  "ExplicitListClusterSeedDiscovery.discoverClusterSeeds" must {
     val expected = SeedNodeSortingFixture.expected
 
     "be sorted by address correctly from config" in {
       val settings = new AkkaBootstrapperSettings(system.settings.config)
-      val strategy = new WhitelistClusterSeedDiscovery(Cluster(system), settings)
+      val strategy = new ExplicitListClusterSeedDiscovery(Cluster(system), settings)
       strategy.discoverClusterSeeds shouldEqual expected
     }
     "be sorted by address correctly from shuffled seeds" in {
@@ -57,12 +57,12 @@ class SeedNodeAddressSortingSpec
         val shuffled = Random.shuffle(expected)
         val seeds = shuffled.map(_.toString).mkString("\"", "\",\"", "\"")
         ConfigFactory
-          .parseString(s"""akka-bootstrapper.whitelist.seeds = [ $seeds ] """)
+          .parseString(s"""akka-bootstrapper.explicit-list.seeds = [ $seeds ] """)
           .withFallback(AbstractTestKit.rootConfig)
       }
 
       val settings = new AkkaBootstrapperSettings(shuffledConfig)
-      val strategy = new WhitelistClusterSeedDiscovery(Cluster(system), settings)
+      val strategy = new ExplicitListClusterSeedDiscovery(Cluster(system), settings)
       strategy.discoverClusterSeeds shouldEqual expected
     }
   }

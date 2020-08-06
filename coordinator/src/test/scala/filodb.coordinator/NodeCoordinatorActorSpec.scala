@@ -244,7 +244,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
       memStore.refreshIndexForTesting(dataset1.ref)
 
-      val numQueries = 6
+      val numQueries = 30   // Want to make sure more queries than default concurrent limit in Query Scheduler
 
       val series2 = (2 to 4).map(n => s"Series $n").toSet.asInstanceOf[Set[Any]]
       val multiFilter = Seq(ColumnFilter("series", Filter.In(series2)))
