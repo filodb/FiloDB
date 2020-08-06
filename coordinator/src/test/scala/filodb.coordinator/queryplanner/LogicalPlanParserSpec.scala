@@ -50,6 +50,11 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     parseAndAssertResult("""scalar(http_requests_total{job="app",instance="inst-1"})""")
     parseAndAssertResult("""vector(1.5)""")
     parseAndAssertResult("""time()""")
+    parseAndAssertResult("""http_requests_total::count{job="app"}""")
+    parseAndAssertResult("""http_requests_total::sum{job="app"}""")
+    parseAndAssertResult("""topk(2.0,http_requests_total{job="app"})""")
+    parseAndAssertResult("""quantile(0.2,http_requests_total{job="app"})""")
+    parseAndAssertResult("""count_values("freq",http_requests_total{job="app"})""")
   }
 
   it("should generate query from LogicalPlan having offset") {
