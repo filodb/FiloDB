@@ -183,7 +183,9 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
           samples.iterator.collect { case v: HistSampl =>
             row.setLong(0, v.timestamp * 1000)
-            val sortedBucketsWithValues = v.buckets.toArray.map(x => (x._1.toDouble, x._2)).sortBy(_._1)
+            val sortedBucketsWithValues = v.buckets.toArray.map { h =>
+              if (h._1.toLowerCase.equals("+inf")) (Double.PositiveInfinity, h._2) else (h._1.toDouble, h._2)
+            }.sortBy(_._1)
             val hist = MutableHistogram(CustomBuckets(sortedBucketsWithValues.map(_._1)),
               sortedBucketsWithValues.map(_._2))
             row.setValues(v.timestamp * 1000, hist)

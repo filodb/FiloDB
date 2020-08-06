@@ -64,5 +64,4 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // Converted query has time in seconds
     res shouldEqual("http_requests_total{job=\"app\"} offset 300s")
   }
-
 }
