@@ -193,4 +193,17 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
       "sum(test{_ws_=\"demo\",_ns_=\"App-2\"})"
   }
+
+  it("should generate local Exec plan for query without regex") {
+    val lp = Parser.queryToLogicalPlan("""test{_ws_ = "demo", _ns_ = "App-1" }""", 1000, 1000)
+    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-2"))))}
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual(true)
+    execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec]
+    execPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+  }
 }

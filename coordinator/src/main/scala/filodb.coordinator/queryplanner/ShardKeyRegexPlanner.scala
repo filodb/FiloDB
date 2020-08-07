@@ -39,11 +39,12 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     * @return materialized Execution Plan which can be dispatched
     */
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
-     walkLogicalPlanTree(logicalPlan, qContext).plans.head
+    if (withoutShardKeyRegex(logicalPlan)) queryPlanner.materialize(logicalPlan, qContext)
+    else walkLogicalPlanTree(logicalPlan, qContext).plans.head
   }
 
    def walkLogicalPlanTree(logicalPlan: LogicalPlan,
-                                  qContext: QueryContext): PlanResult = {
+                           qContext: QueryContext): PlanResult = {
     logicalPlan match {
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplyInstantFunction        => materializeApplyInstantFunction(qContext, lp)
@@ -63,6 +64,12 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     LogicalPlan.getRawSeriesFilters(logicalPlan)
       .map { s => s.filter(f => dataset.options.nonMetricShardColumns.contains(f.column))}
 
+  /**
+    * Returns true when shard key filters do not have regex
+    */
+  private def withoutShardKeyRegex(logicalPlan: LogicalPlan) = getNonMetricShardKeyFilters(logicalPlan).
+    forall(_.forall(f => !f.filter.isInstanceOf[EqualsRegex] && !f.filter.isInstanceOf[NotEqualsRegex]))
+
   private def generateExecWithoutRegex(logicalPlan: LogicalPlan, nonMetricShardKeyFilters: Seq[ColumnFilter],
                                        qContext: QueryContext): Seq[ExecPlan] = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
@@ -81,8 +88,7 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     * For binary join queries like test1{_ws_ = "demo", _ns_ =~ "App.*"} + test2{_ws_ = "demo", _ns_ =~ "App.*"})
     */
   private def materializeBinaryJoin(binaryJoin: BinaryJoin, qContext: QueryContext): PlanResult = {
-   if (getNonMetricShardKeyFilters(binaryJoin).forall(_.forall(f => !f.filter.isInstanceOf[EqualsRegex] &&
-     !f.filter.isInstanceOf[NotEqualsRegex]))) PlanResult(Seq(queryPlanner.materialize(binaryJoin, qContext)))
+   if (withoutShardKeyRegex(binaryJoin)) PlanResult(Seq(queryPlanner.materialize(binaryJoin, qContext)))
    else throw new UnsupportedOperationException("Regex not supported for Binary Join")
   }
 
