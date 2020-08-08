@@ -2,7 +2,6 @@ package filodb.coordinator.queryplanner
 
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryContext}
-import filodb.core.query.Filter.{EqualsRegex, NotEqualsRegex}
 import filodb.query._
 import filodb.query.exec._
 
@@ -39,7 +38,7 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     * @return materialized Execution Plan which can be dispatched
     */
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
-    if (withoutShardKeyRegex(logicalPlan)) queryPlanner.materialize(logicalPlan, qContext)
+    if (hasShardKeyEqualsOnly(logicalPlan)) queryPlanner.materialize(logicalPlan, qContext)
     else walkLogicalPlanTree(logicalPlan, qContext).plans.head
   }
 
@@ -65,10 +64,10 @@ class ShardKeyRegexPlanner(dataset: Dataset,
       .map { s => s.filter(f => dataset.options.nonMetricShardColumns.contains(f.column))}
 
   /**
-    * Returns true when shard key filters do not have regex
+    * Returns true when all shard key filters have Equals
     */
-  private def withoutShardKeyRegex(logicalPlan: LogicalPlan) = getNonMetricShardKeyFilters(logicalPlan).
-    forall(_.forall(f => !f.filter.isInstanceOf[EqualsRegex] && !f.filter.isInstanceOf[NotEqualsRegex]))
+  private def hasShardKeyEqualsOnly(logicalPlan: LogicalPlan) = getNonMetricShardKeyFilters(logicalPlan).
+    forall(_.forall(f => f.filter.isInstanceOf[filodb.core.query.Filter.Equals]))
 
   private def generateExecWithoutRegex(logicalPlan: LogicalPlan, nonMetricShardKeyFilters: Seq[ColumnFilter],
                                        qContext: QueryContext): Seq[ExecPlan] = {
@@ -88,7 +87,7 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     * For binary join queries like test1{_ws_ = "demo", _ns_ =~ "App.*"} + test2{_ws_ = "demo", _ns_ =~ "App.*"})
     */
   private def materializeBinaryJoin(binaryJoin: BinaryJoin, qContext: QueryContext): PlanResult = {
-   if (withoutShardKeyRegex(binaryJoin)) PlanResult(Seq(queryPlanner.materialize(binaryJoin, qContext)))
+   if (hasShardKeyEqualsOnly(binaryJoin)) PlanResult(Seq(queryPlanner.materialize(binaryJoin, qContext)))
    else throw new UnsupportedOperationException("Regex not supported for Binary Join")
   }
 
