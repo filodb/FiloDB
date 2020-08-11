@@ -112,7 +112,7 @@ object Dependencies {
     // Redirect minlog logs to SLF4J
     "com.dorkbox"            % "MinLog-SLF4J"                 % "1.12",
     "com.opencsv"            % "opencsv"                      % "3.3",
-    "com.github.TanUkkii007" %% "akka-cluster-custom-downing" % "0.0.12",
+    "org.sisioh"             %% "akka-cluster-custom-downing" % "0.0.21",
     "com.typesafe.akka"      %% "akka-testkit"                % akkaVersion % Test,
     "com.typesafe.akka"      %% "akka-multi-node-testkit"     % akkaVersion % Test
   )
