@@ -1,7 +1,5 @@
 package filodb.gateway.conversion
 
-import scala.language.postfixOps
-
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import org.jboss.netty.buffer.ChannelBuffer

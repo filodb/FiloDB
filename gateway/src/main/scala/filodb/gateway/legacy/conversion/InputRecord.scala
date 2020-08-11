@@ -1,7 +1,5 @@
 package filodb.gateway.legacy.conversion
 
-import scala.language.postfixOps
-
 import remote.RemoteStorage.TimeSeries
 import spire.syntax.cfor._
 

@@ -140,7 +140,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       // we have reached maximum userTime in chunk. switch buffers, start a new chunk and ingest
       switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)
     } else {
-      for { col <- 0 until schema.numDataColumns optimized} {
+      cforRange { 0 until schema.numDataColumns } { col =>
         currentChunks(col).addFromReaderNoNA(row, col) match {
           case r: VectorTooSmall =>
             switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)

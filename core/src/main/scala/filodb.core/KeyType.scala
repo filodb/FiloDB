@@ -2,7 +2,6 @@ package filodb.core
 
 import java.sql.Timestamp
 
-import scala.language.postfixOps
 import scala.math.Ordering
 
 import org.joda.time.DateTime
