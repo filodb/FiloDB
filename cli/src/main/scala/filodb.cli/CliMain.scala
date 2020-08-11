@@ -120,7 +120,8 @@ object CliMain extends FilodbClusterNode {
       }.getOrElse(TimeStepParams(args.start, args.step(), args.end))
     }
 
-  def main(args: Arguments): Unit = {
+  def main(rawArgs: Array[String]): Unit = {
+    val args = new Arguments(rawArgs)
     try {
       val timeout = args.timeoutSeconds().seconds
       args.command.toOption match {
