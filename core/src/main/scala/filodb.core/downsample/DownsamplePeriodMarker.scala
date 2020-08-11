@@ -125,7 +125,7 @@ class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePerio
         case r: DoubleVectorDataReader =>
           if (PrimitiveVectorReader.dropped(ctrVecAcc, ctrVecPtr)) { // counter dip detected
             val drops = r.asInstanceOf[CorrectingDoubleVectorReader].dropPositions(ctrVecAcc, ctrVecPtr)
-            for {i <- 0 until drops.length optimized} {
+            cforRange { 0 until drops.length } { i =>
               if (drops(i) <= endRow) {
                 result += drops(i) - 1
                 result += drops(i)

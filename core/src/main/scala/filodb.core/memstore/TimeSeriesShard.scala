@@ -809,7 +809,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     var newTimestamp = ingestionTime
 
     if (newTimestamp > oldTimestamp && oldTimestamp != Long.MinValue) {
-      for (group <- 0 until numGroups optimized) {
+      cforRange ( 0 until numGroups ) { group =>
         /* Logically, the task creation filter is as follows:
 
            // Compute the time offset relative to the group number. 0 min, 1 min, 2 min, etc.

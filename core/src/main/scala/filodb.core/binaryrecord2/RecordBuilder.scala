@@ -283,7 +283,7 @@ class RecordBuilder(memFactory: MemFactory,
    */
   final def addFromReader(row: RowReader, schema: RecordSchema, schemID: Int): Long = {
     startNewRecord(schema, schemID)
-    for { pos <- 0 until schema.numFields optimized } {
+    cforRange { 0 until schema.numFields } { pos =>
       schema.builderAdders(pos)(row, this)
     }
     endRecord()

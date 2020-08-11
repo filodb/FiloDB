@@ -2,8 +2,6 @@ package filodb.memory.format
 
 import java.nio.ByteBuffer
 
-import scala.language.existentials
-
 import spire.syntax.cfor._
 
 import filodb.memory.MemFactory

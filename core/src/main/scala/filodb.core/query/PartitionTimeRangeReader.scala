@@ -45,7 +45,7 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
 
   private def populateIterators(info: ChunkSetInfoReader): Unit = {
     setChunkStartEnd(info)
-    for { pos <- 0 until columnIDs.size optimized } {
+    cforRange { 0 until columnIDs.size } { pos =>
       val colID = columnIDs(pos)
       if (Dataset.isPartitionID(colID)) {
         // Look up the TypedIterator for that partition key

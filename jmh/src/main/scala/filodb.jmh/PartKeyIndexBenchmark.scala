@@ -53,7 +53,7 @@ class PartKeyIndexBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def partIdsLookupWithEqualsFilters(): Unit = {
-    for ( i <- 0 until 8 optimized) {
+    cforRange ( 0 until 8 ) { i =>
       partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
             ColumnFilter("_ws_", Filter.Equals("demo")),
@@ -68,7 +68,7 @@ class PartKeyIndexBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def emptyPartIdsLookupWithEqualsFilters(): Unit = {
-    for ( i <- 0 until 8 optimized) {
+    cforRange ( 0 until 8 ) { i =>
       partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-${i + 200}")),
           ColumnFilter("_ws_", Filter.Equals("demo")),
@@ -83,7 +83,7 @@ class PartKeyIndexBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def partIdsLookupWithSuffixRegexFilters(): Unit = {
-    for ( i <- 0 until 8 optimized) {
+    cforRange ( 0 until 8 ) { i =>
       partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
           ColumnFilter("_ws_", Filter.Equals("demo")),
@@ -98,7 +98,7 @@ class PartKeyIndexBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def partIdsLookupWithPrefixRegexFilters(): Unit = {
-    for ( i <- 0 until 8 optimized) {
+    cforRange ( 0 until 8 ) { i =>
       partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
           ColumnFilter("_ws_", Filter.Equals("demo")),
@@ -113,9 +113,9 @@ class PartKeyIndexBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def startTimeLookupWithPartId(): Unit = {
-    for ( i <- 0 until 8 optimized) {
+    cforRange ( 0 until 8 ) { i =>
       val pIds = debox.Buffer.empty[Int]
-      for ( j <- i * 1000 to i * 1000 + 1000 optimized) { pIds += j }
+      cforRange ( i * 1000 to i * 1000 + 1000 ) { j => pIds += j }
       partKeyIndex.startTimeFromPartIds(pIds.iterator())
     }
   }
