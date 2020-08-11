@@ -15,8 +15,6 @@ class QueryConfig(queryConfig: Config) {
   lazy val minStepMs = queryConfig.getDuration("min-step").toMillis
   lazy val fastReduceMaxWindows = queryConfig.getInt("fastreduce-max-windows")
   lazy val routingConfig = queryConfig.getConfig("routing")
-  lazy val threadsFactor = queryConfig.getDouble("threads-factor")
-  lazy val maxQueueLen = queryConfig.getInt("max-queue-length")
 
   /**
    * Feature flag test: returns true if the config has an entry with "true", "t" etc
