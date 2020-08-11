@@ -1,6 +1,6 @@
 <scalastyle>
  <name>Scalastyle configuration</name>
- <check level="error" class="org.scalastyle.scalariform.ImportOrderChecker" enabled="true">
+ <check level="error" class="org.scalastyle.scalariform.ImportOrderChecker" enabled="false">
   <parameters>
    <parameter name="groups">java,scala,3rdParty,filodb</parameter>
    <parameter name="group.java">javax?\..*</parameter>
@@ -116,7 +116,7 @@
    <parameter name="maxLength"><![CDATA[50]]></parameter>
   </parameters>
  </check>
- <check level="error" class="org.scalastyle.scalariform.MethodNamesChecker" enabled="true">
+ <check level="error" class="org.scalastyle.scalariform.MethodNamesChecker" enabled="false">
   <parameters>
    <parameter name="regex"><![CDATA[^[a-z][A-Za-z0-9]*$]]></parameter>
   </parameters>
@@ -126,7 +126,7 @@
    <parameter name="maxMethods"><![CDATA[50]]></parameter>
   </parameters>
  </check>
- <check level="error" class="org.scalastyle.scalariform.PublicMethodsHaveTypeChecker" enabled="true"/>
+ <check level="error" class="org.scalastyle.scalariform.PublicMethodsHaveTypeChecker" enabled="false"/>
  <check level="error" class="org.scalastyle.scalariform.EnsureSingleSpaceAfterTokenChecker" enabled="true" >
   <parameters>
    <parameter name="tokens">COLON, IF, EQUALS, COMMA</parameter>
