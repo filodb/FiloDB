@@ -242,10 +242,6 @@ object FiloSettings {
 
 
   lazy val moduleSettings = Seq(
-    resolvers ++= Seq(
-      "Velvia Bintray" at "https://dl.bintray.com/velvia/maven"
-    ),
-    resolvers += Resolver.bintrayRepo("tanukkii007", "maven"),
 
     cancelable in Global := true,
 
