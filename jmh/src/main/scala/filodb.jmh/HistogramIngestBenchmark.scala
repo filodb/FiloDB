@@ -2,8 +2,6 @@ package filodb.jmh
 
 import java.util.concurrent.TimeUnit
 
-import scala.language.postfixOps
-
 import ch.qos.logback.classic.{Level, Logger}
 import com.typesafe.config.ConfigFactory
 import org.agrona.{ExpandableArrayBuffer, ExpandableDirectByteBuffer}

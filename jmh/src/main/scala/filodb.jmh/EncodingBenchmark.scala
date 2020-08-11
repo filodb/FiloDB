@@ -2,8 +2,6 @@ package filodb.jmh
 
 import java.util.concurrent.TimeUnit
 
-import scala.language.postfixOps
-
 import org.openjdk.jmh.annotations.{Mode, Scope, State}
 import org.openjdk.jmh.annotations.Benchmark
 import org.openjdk.jmh.annotations.BenchmarkMode
