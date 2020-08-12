@@ -101,8 +101,10 @@ object LogicalPlanParser {
   }
 
   private def periodicSeriesWithWindowingToQuery(lp: PeriodicSeriesWithWindowing): String = {
-    val rawSeriesQueryWithWindow = s"${rawSeriesLikeToQuery(lp.series)}$OpeningSquareBracket${lp.window/1000}s" +
-      s"$ClosingSquareBracket${lp.offsetMs.map(o => Space + Offset + Space + (o / 1000).toString + "s").getOrElse("")}"
+    val rawSeries = rawSeriesLikeToQuery(lp.series)
+    val rawSeriesQueryWithWindow = if (lp.window == 0) rawSeries else s"${rawSeries}$OpeningSquareBracket" +
+      s"${lp.window/1000}s$ClosingSquareBracket${lp.offsetMs.map(o => s"$Space$Offset$Space${(o / 1000).toString}s")
+        .getOrElse("")}"
     val prefix = lp.function.entryName + OpeningRoundBracket
     if (lp.functionArgs.isEmpty) s"$prefix$rawSeriesQueryWithWindow$ClosingRoundBracket"
     else {
