@@ -6,8 +6,9 @@ import scala.math.min
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, StaticSpreadProvider}
@@ -20,7 +21,7 @@ import filodb.prometheus.parse.Parser
 import filodb.query._
 import filodb.query.exec._
 
-class SingleClusterPlannerSplitSpec extends FunSpec with Matchers with ScalaFutures {
+class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
   implicit val system = ActorSystem()
   private val node = TestProbe().ref
