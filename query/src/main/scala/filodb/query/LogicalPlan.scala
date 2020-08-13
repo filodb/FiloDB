@@ -65,6 +65,7 @@ sealed trait PeriodicSeriesPlan extends LogicalPlan {
 
 sealed trait MetadataQueryPlan extends LogicalPlan {
   override def isRoutable: Boolean = false
+  override def isSplittable: Boolean = false
 }
 
 /**

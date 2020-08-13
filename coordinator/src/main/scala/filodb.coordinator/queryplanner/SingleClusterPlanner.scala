@@ -2,6 +2,8 @@ package filodb.coordinator.queryplanner
 
 import java.util.concurrent.ThreadLocalRandom
 
+import scala.concurrent.duration._
+
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
@@ -11,12 +13,12 @@ import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{DatasetRef, SpreadProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, QueryConfig, QueryContext, RangeParams}
+import filodb.core.query._
 import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
-import filodb.query._
-import filodb.query.exec._
+import filodb.query.{exec, _}
+import filodb.query.exec.{LocalPartitionDistConcatExec, _}
 
 object SingleClusterPlanner {
   private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests").withoutTags
@@ -35,7 +37,10 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                            shardMapperFunc: => ShardMapper,
                            earliestRetainedTimestampFn: => Long,
                            queryConfig: QueryConfig,
-                           spreadProvider: SpreadProvider = StaticSpreadProvider())
+                           spreadProvider: SpreadProvider = StaticSpreadProvider(),
+                           splitEnabled: Boolean = false,
+                           splitThresholdMs: => Long = 1.day.toMillis,
+                           splitSizeMs: => Long = 1.day.toMillis)
                                 extends QueryPlanner with StrictLogging {
 
   private val dsOptions = schemas.part.options
@@ -74,6 +79,27 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
     if (shardMapperFunc.numShards <= 0) throw new IllegalStateException("No shards available")
+    val logicalPlans = if (logicalPlan.isInstanceOf[PeriodicSeriesPlan])
+      LogicalPlanUtils.splitPlans(logicalPlan, qContext, splitEnabled, splitThresholdMs, splitSizeMs)
+    else
+      Seq(logicalPlan)
+    val materialized = logicalPlans match {
+      case Seq(one) => materializePlan(one, qContext)
+      case many =>
+        val meterializedPlans = many.map(materializePlan(_, qContext))
+        val targetActor = pickDispatcher(meterializedPlans)
+
+        // create SplitLocalPartitionDistConcatExec that will execute child execplanss sequentially and stitches
+        // results back with StitchRvsMapper transformer.
+        val stitchPlan = SplitLocalPartitionDistConcatExec(qContext, targetActor, meterializedPlans)
+        stitchPlan
+    }
+    logger.debug(s"Materialized logical plan for dataset=$dsRef :" +
+      s" $logicalPlan to \n${materialized.printTree()}")
+    materialized
+  }
+
+  private def materializePlan(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     val materialized = walkLogicalPlanTree(logicalPlan, qContext)
     match {
       case PlanResult(Seq(justOne), stitch) =>
@@ -93,9 +119,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     logger.debug(s"Materialized logical plan for dataset=$dsRef :" +
       s" $logicalPlan to \n${materialized.printTree()}")
     materialized
-
   }
-
 
   private def shardsFromFilters(filters: Seq[ColumnFilter],
                                 qContext: QueryContext): Seq[Int] = {
