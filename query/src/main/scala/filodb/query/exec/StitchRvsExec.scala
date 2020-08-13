@@ -60,8 +60,7 @@ object StitchRvsExec {
   */
 final case class StitchRvsExec(queryContext: QueryContext,
                                dispatcher: PlanDispatcher,
-                               children: Seq[ExecPlan],
-                               override val parallelChildTasks: Boolean = true) extends NonLeafExecPlan {
+                               children: Seq[ExecPlan]) extends NonLeafExecPlan {
   require(children.nonEmpty)
 
   protected def args: String = ""
