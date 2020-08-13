@@ -1,18 +1,14 @@
 package filodb.coordinator
 
-import java.lang.Thread.UncaughtExceptionHandler
-import java.util.concurrent.{ForkJoinPool, ForkJoinWorkerThread}
-
+import scala.concurrent.Future
 import scala.util.control.NonFatal
 
 import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.dispatch.{Envelope, UnboundedStablePriorityMailbox}
 import com.typesafe.config.Config
 import kamon.Kamon
-import kamon.instrumentation.executor.ExecutorInstrumentation
 import kamon.tag.TagSet
 import monix.execution.Scheduler
-import monix.execution.schedulers.SchedulerService
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
 
@@ -23,7 +19,7 @@ import filodb.core.metadata.Schemas
 import filodb.core.query.{QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.CorruptVectorException
 import filodb.query._
-import filodb.query.exec.ExecPlan
+import filodb.query.exec.{ExecPlan, NonLeafExecPlan}
 
 object QueryCommandPriority extends java.util.Comparator[Envelope] {
   override def compare(o1: Envelope, o2: Envelope): Int = {
@@ -88,7 +84,11 @@ final class QueryActor(memStore: MemStore,
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   val queryPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapFunc,
                                               earliestRawTimestampFn, queryConfig, functionalSpreadProvider)
-  val queryScheduler = createInstrumentedQueryScheduler()
+
+
+  val queryExecutionParallelism = Math.ceil(config.getDouble("filodb.query.threads-factor")
+                                * sys.runtime.availableProcessors).toInt
+  val queryExecutor = new QueryExecutor(dsRef, queryExecutionParallelism, self)
 
   private val tags = Map("dataset" -> dsRef.toString)
   private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").withTags(TagSet.from(tags))
@@ -96,47 +96,13 @@ final class QueryActor(memStore: MemStore,
   private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").withTags(TagSet.from(tags))
   private val queryErrors = Kamon.counter("queryactor-query-errors").withTags(TagSet.from(tags))
 
-  /**
-    * Instrumentation adds following metrics on the Query Scheduler
-    *
-    * # Counter
-    * executor_tasks_submitted_total{type="ThreadPoolExecutor",name="query-sched-prometheus"}
-    * # Counter
-    * executor_tasks_completed_total{type="ThreadPoolExecutor",name="query-sched-prometheus"}
-    * # Histogram
-    * executor_threads_active{type="ThreadPoolExecutor",name="query-sched-prometheus"}
-    * # Histogram
-    * executor_queue_size_count{type="ThreadPoolExecutor",name="query-sched-prometheus"}
-    *
-    */
-  private def createInstrumentedQueryScheduler(): SchedulerService = {
-    val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor")
-                                      * sys.runtime.availableProcessors).toInt
-    val schedName = s"$QuerySchedName-$dsRef"
-    val exceptionHandler = new UncaughtExceptionHandler {
-      override def uncaughtException(t: Thread, e: Throwable): Unit =
-        logger.error("Uncaught Exception in Query Scheduler", e)
-    }
-    val threadFactory = new ForkJoinPool.ForkJoinWorkerThreadFactory {
-      def newThread(pool: ForkJoinPool): ForkJoinWorkerThread = {
-        val thread = ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(pool)
-        thread.setDaemon(true)
-        thread.setUncaughtExceptionHandler(exceptionHandler)
-        thread.setName(s"$schedName-${thread.getPoolIndex}")
-        thread
-      }
-    }
-    val executor = new ForkJoinPool( numSchedThreads, threadFactory, exceptionHandler, true)
-    Scheduler.apply(ExecutorInstrumentation.instrument(executor, schedName))
-  }
-
-  def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
+  def execPhysicalPlan(q: ExecPlan, replyTo: ActorRef, sched: Scheduler): Future[Unit] = {
     if (checkTimeout(q.queryContext, replyTo)) {
       epRequests.increment()
       Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
       Kamon.currentSpan().tag("query-id", q.queryContext.queryId)
       val querySession = QuerySession(q.queryContext, queryConfig)
-      q.execute(memStore, querySession)(queryScheduler)
+      q.execute(memStore, querySession)(sched)
         .foreach { res =>
           FiloSchedulers.assertThreadName(QuerySchedName)
           querySession.close()
@@ -151,12 +117,14 @@ final class QueryActor(memStore: MemStore,
                 case t: Throwable =>
               }
           }
-        }(queryScheduler).recover { case ex =>
+        }(sched).recover { case ex =>
           querySession.close()
           // Unhandled exception in query, should be rare
           logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
           replyTo ! QueryError(q.queryContext.queryId, ex)
-        }(queryScheduler)
+        }(sched)
+    } else {
+      Future.successful(Unit)
     }
   }
 
@@ -217,7 +185,10 @@ final class QueryActor(memStore: MemStore,
                                       processLogicalPlan2Query(q, replyTo)
     case q: ExplainPlan2Query      => val replyTo = sender()
                                       processExplainPlanQuery(q, replyTo)
-    case q: ExecPlan              =>  execPhysicalPlan2(q, sender())
+    case q: ExecPlan              =>  val replyTo = sender()
+                                      queryExecutor.execute(q, q.isInstanceOf[NonLeafExecPlan],
+                                                             replyTo, execPhysicalPlan)
+    case qc: QueryCompletedScheduleNext => queryExecutor.queryCompletedScheduleNext(qc)
 
     case GetIndexNames(ref, limit, _) =>
       sender() ! memStore.indexNames(ref, limit).map(_._1).toBuffer
