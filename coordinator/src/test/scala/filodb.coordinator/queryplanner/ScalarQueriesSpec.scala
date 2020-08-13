@@ -3,7 +3,6 @@ package filodb.coordinator.queryplanner
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{FunSpec, Matchers}
 
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
@@ -13,8 +12,10 @@ import filodb.prometheus.parse.Parser
 import filodb.query._
 import filodb.query.ScalarFunctionId.Time
 import filodb.query.exec._
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class ScalarQueriesSpec extends FunSpec with Matchers {
+class ScalarQueriesSpec extends AnyFunSpec with Matchers {
 
   implicit val system = ActorSystem()
   val node = TestProbe().ref

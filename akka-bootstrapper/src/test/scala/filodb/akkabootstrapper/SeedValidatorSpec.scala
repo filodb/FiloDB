@@ -2,7 +2,7 @@ package filodb.akkabootstrapper
 
 import akka.cluster.Cluster
 import com.typesafe.config.ConfigFactory
-import org.scalatest.WordSpecLike
+import org.scalatest.wordspec.AnyWordSpecLike
 
 class ValidSeedValidatorSpec extends BaseSeedNodeDiscoverySpec(AbstractTestKit.head) {
   "Valid ExplicitListClusterSeedDiscovery" must {
@@ -21,7 +21,7 @@ class InvalidSeedValidatorSpec extends AbstractTestKit(
        |akka-bootstrapper.explicit-list.seeds = [
        |  "akka.tcp://test@127.0.0.1:0", "akka://test:127.0.0.1:0", "akka.tcp://test@localhost" ]
       """.stripMargin).withFallback(AbstractTestKit.rootConfig))
-  with WordSpecLike {
+  with AnyWordSpecLike {
 
   "Invalid ExplicitListClusterSeedDiscovery" must {
     "return expected invalid seed nodes for invalid configuration" in {

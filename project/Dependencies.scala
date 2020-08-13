@@ -17,10 +17,10 @@ object Dependencies {
   val akkaVersion       = "2.5.22" // akka-http/akka-stream compat. TODO when kamon-akka-remote is akka 2.5.4 compat
   val akkaHttpVersion   = "10.1.8"
   val cassDriverVersion = "3.7.1"
-  val ficusVersion      = "1.1.2"
-  val kamonBundleVersion = "2.0.6"
-  val kamonZipkinVersion = "2.0.1"
-  val kamonPrometheusVersion = "2.0.1"
+  val ficusVersion      = "1.3.4"
+  val kamonBundleVersion = "2.1.4"
+  val kamonZipkinVersion = "2.1.4"
+  val kamonPrometheusVersion = "2.1.4"
   val monixKafkaVersion = "0.15"
   val sparkVersion      = "2.4.4"
   val sttpVersion       = "1.3.3"
@@ -29,8 +29,9 @@ object Dependencies {
   val logbackDep        = "ch.qos.logback"             % "logback-classic"       % "1.2.3"
   val log4jDep          = "log4j"                      % "log4j"                 % "1.2.17"
   val scalaLoggingDep   = "com.typesafe.scala-logging" %% "scala-logging"        % "3.7.2"
-  val scalaTest         = "org.scalatest"              %% "scalatest"            % "2.2.6" // TODO upgrade to 3.0.4
-  val scalaCheck        = "org.scalacheck"             %% "scalacheck"           % "1.11.0"
+  val scalaTest         = "org.scalatest"              %% "scalatest"            % "3.1.2"
+  val scalaCheck        = "org.scalacheck"             %% "scalacheck"           % "1.14.3"
+  val scalaTestPlus     = "org.scalatestplus"          %% "scalacheck-1-14"      % "3.1.2.0"
   val akkaHttp          = "com.typesafe.akka"          %% "akka-http"            % akkaHttpVersion withJavadoc()
   val akkaHttpTestkit   = "com.typesafe.akka"          %% "akka-http-testkit"    % akkaHttpVersion withJavadoc()
   val akkaHttpCirce     = "de.heikoseeberger"          %% "akka-http-circe"      % "1.21.0"
@@ -42,7 +43,8 @@ object Dependencies {
     logbackDep % Test,
     scalaTest  % Test,
     "com.softwaremill.quicklens" %% "quicklens" % "1.4.12" % Test,
-    scalaCheck % "test"
+    scalaCheck % Test,
+    scalaTestPlus % Test
   )
 
   lazy val scalaxyDep = "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided"
@@ -66,11 +68,11 @@ object Dependencies {
     "com.beachape"                 %% "enumeratum"        % "1.5.10",
     "io.monix"                     %% "monix"             % "2.3.0",
     "com.googlecode.concurrentlinkedhashmap"              % "concurrentlinkedhashmap-lru" % "1.4",
-    "net.ceedubs"                  %% "ficus"             % ficusVersion,
+    "com.iheart"                   %% "ficus"             % ficusVersion,
     "io.fastjson"                  % "boon"               % "0.33",
     "com.googlecode.javaewah"      % "JavaEWAH"           % "1.1.6" withJavadoc(),
     "com.github.rholder.fauxflake" % "fauxflake-core"     % "1.1.0",
-    "org.scalactic"                %% "scalactic"         % "2.2.6" withJavadoc(),
+    "org.scalactic"                %% "scalactic"         % "3.2.0" withJavadoc(),
     "org.apache.lucene"            % "lucene-core"        % "7.3.0" withJavadoc(),
     "com.github.alexandrnikitin"   %% "bloom-filter"      % "0.11.0",
     scalaxyDep
@@ -104,13 +106,13 @@ object Dependencies {
   lazy val coordDeps = commonDeps ++ Seq(
     "com.typesafe.akka"      %% "akka-slf4j"                  % akkaVersion,
     "com.typesafe.akka"      %% "akka-cluster"                % akkaVersion withJavadoc(),
-    "com.github.romix.akka"  %% "akka-kryo-serialization"     % "0.5.0" excludeAll(excludeMinlog, excludeOldLz4),
+    "io.altoo"               %% "akka-kryo-serialization"     % "1.0.0" excludeAll(excludeMinlog, excludeOldLz4),
     "de.javakaffee"          % "kryo-serializers"             % "0.42" excludeAll(excludeMinlog),
     "io.kamon"               %% "kamon-prometheus"            % kamonPrometheusVersion,
     // Redirect minlog logs to SLF4J
     "com.dorkbox"            % "MinLog-SLF4J"                 % "1.12",
     "com.opencsv"            % "opencsv"                      % "3.3",
-    "com.github.TanUkkii007" %% "akka-cluster-custom-downing" % "0.0.12",
+    "org.sisioh"             %% "akka-cluster-custom-downing" % "0.0.21",
     "com.typesafe.akka"      %% "akka-testkit"                % akkaVersion % Test,
     "com.typesafe.akka"      %% "akka-multi-node-testkit"     % akkaVersion % Test
   )
@@ -154,7 +156,7 @@ object Dependencies {
   lazy val standaloneDeps = Seq(
     logbackDep,
     "io.kamon"              %% "kamon-zipkin"            % kamonZipkinVersion,
-    "net.ceedubs"           %% "ficus"                   % ficusVersion      % Test,
+    "com.iheart"            %% "ficus"                   % ficusVersion      % Test,
     "com.typesafe.akka"     %% "akka-multi-node-testkit" % akkaVersion       % Test,
     "com.softwaremill.sttp" %% "circe"                   % sttpVersion       % Test,
     "com.softwaremill.sttp" %% "akka-http-backend"       % sttpVersion       % Test,

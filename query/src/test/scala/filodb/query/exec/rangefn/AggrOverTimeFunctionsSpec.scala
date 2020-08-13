@@ -4,7 +4,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 
 import filodb.core.{MetricsTestData, QueryTimeoutException, TestData, MachineMetricsData => MMD}
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
@@ -16,11 +16,13 @@ import filodb.memory.data.ChunkMap
 import filodb.memory.format.{TupleRowReader, vectors => bv}
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.query.exec._
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 /**
  * A common trait for windowing query tests which uses real chunks and real RawDataRangeVectors
  */
-trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
+trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
   import MetricsTestData._
 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,

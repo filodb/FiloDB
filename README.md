@@ -5,8 +5,6 @@
 
 Distributed, Prometheus-compatible, real-time, in-memory, massively scalable, multi-schema time series / event / operational database.
 
-[filodb-announce](https://groups.google.com/forum/#!forum/filodb-announce) google group
-and [filodb-discuss](https://groups.google.com/forum/#!forum/filodb-discuss) google group
 
 ```
     _______ __      ____  ____ 

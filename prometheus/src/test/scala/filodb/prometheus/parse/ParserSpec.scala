@@ -1,12 +1,13 @@
 package filodb.prometheus.parse
 
-import org.scalatest.{FunSpec, Matchers}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.query.{BinaryJoin, LogicalPlan}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 //noinspection ScalaStyle
 // scalastyle:off
-class ParserSpec extends FunSpec with Matchers {
+class ParserSpec extends AnyFunSpec with Matchers {
 
   it("metadata matcher query") {
     parseSuccessfully("http_requests_total{job=\"prometheus\", method=\"GET\"}")
@@ -545,6 +546,14 @@ class ParserSpec extends FunSpec with Matchers {
     intercept[IllegalArgumentException] {
       Parser.queryToLogicalPlan(q, qts, step)
     }
+  }
+
+  it("should not error instant queries without step when step multiple notation is NOT used") {
+    val q = "sum(rate(foo{job=\"SNRT-App-0\"}[5m]))"
+    val qts: Long = 1524855988L
+    val step = 0
+    info(s"Parsing $q")
+    Parser.queryToLogicalPlan(q, qts, step)
   }
 
   private def printBinaryJoin( lp: LogicalPlan, level: Int = 0) : scala.Unit =  {

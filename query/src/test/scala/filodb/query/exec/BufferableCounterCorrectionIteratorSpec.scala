@@ -1,9 +1,10 @@
 package filodb.query.exec
 
 import filodb.core.query.TransientRow
-import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class BufferableCounterCorrectionIteratorSpec extends FunSpec with Matchers {
+class BufferableCounterCorrectionIteratorSpec extends AnyFunSpec with Matchers {
 
   it("should correct dips in counter") {
     val input = Seq(3, 5, 7, 13, 2, 34).map(d => new TransientRow(0, d))
