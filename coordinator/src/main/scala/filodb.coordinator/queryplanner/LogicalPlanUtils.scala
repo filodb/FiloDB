@@ -195,5 +195,4 @@ object LogicalPlanUtils extends StrictLogging {
       Seq(lp)
     }
   }
-  
 }
