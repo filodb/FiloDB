@@ -113,7 +113,9 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
                                end.toLong: java.lang.Long,
                                ingestionTimeStart: java.lang.Long,
                                ingestionTimeEnd: java.lang.Long)
-      session.execute(stmt).asScala.map { row => row.getBytes("partition") }.toSet.iterator
+      session.execute(stmt).iterator.asScala
+                           .map { row => row.getBytes("partition") }
+                           .toStream.distinct // removes duplicate consecutive partKeys
     }
   }
 
