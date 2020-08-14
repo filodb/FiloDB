@@ -381,7 +381,7 @@ case class ScalarBinaryOperation(operator: BinaryOperator,
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = {
     val updatedLhs = if (lhs.isRight) Right(lhs.right.get.replacePeriodicSeriesFilters(filters).
                       asInstanceOf[ScalarBinaryOperation]) else Left(lhs.left.get)
-    val updatedRhs = if (lhs.isRight) Right(rhs.right.get.replacePeriodicSeriesFilters(filters).
+    val updatedRhs = if (rhs.isRight) Right(rhs.right.get.replacePeriodicSeriesFilters(filters).
                       asInstanceOf[ScalarBinaryOperation]) else Left(rhs.left.get)
     this.copy(lhs = updatedLhs, rhs = updatedRhs)
   }
@@ -408,6 +408,8 @@ object LogicalPlan {
     */
   def findLeafLogicalPlans (logicalPlan: LogicalPlan) : Seq[LogicalPlan] = {
    logicalPlan match {
+     // scalarArg can have vector like scalar(http_requests_total)
+     case lp: ScalarVectorBinaryOperation => findLeafLogicalPlans(lp.vector) ++ findLeafLogicalPlans(lp.scalarArg)
      // Find leaf logical plans for all children and concatenate results
      case lp: NonLeafLogicalPlan => lp.children.flatMap(findLeafLogicalPlans)
      case _                      => Seq(logicalPlan)

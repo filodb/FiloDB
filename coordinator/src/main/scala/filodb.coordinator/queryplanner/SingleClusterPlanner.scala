@@ -75,7 +75,6 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   }
 
-
   private def shardsFromFilters(filters: Seq[ColumnFilter],
                                 qContext: QueryContext): Seq[Int] = {
 

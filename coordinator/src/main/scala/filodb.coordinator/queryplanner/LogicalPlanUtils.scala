@@ -1,5 +1,6 @@
 package filodb.coordinator.queryplanner
 
+import filodb.core.query.RangeParams
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
 import filodb.query._
@@ -62,7 +63,8 @@ object LogicalPlanUtils {
     * Used to change start and end time(TimeRange) of LogicalPlan
     * NOTE: Plan should be PeriodicSeriesPlan
     */
-  def copyWithUpdatedTimeRange(logicalPlan: LogicalPlan,
+  //scalastyle:off cyclomatic.complexity
+  def copyWithUpdatedTimeRange(logicalPlan: PeriodicSeriesPlan,
                                timeRange: TimeRange): PeriodicSeriesPlan = {
     logicalPlan match {
       case lp: PeriodicSeries => lp.copy(startMs = timeRange.startMs,
@@ -86,8 +88,25 @@ object LogicalPlanUtils {
                       lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
 
       case lp: ApplySortFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
-
-      case _ => throw new UnsupportedOperationException("Logical plan not supported for copy")
+      case lp: ApplyAbsentFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
+      case lp: ScalarVaryingDoublePlan => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
+      case lp: RawChunkMeta => lp.rangeSelector match {
+        case is: IntervalSelector => lp.copy(rangeSelector = is.copy(timeRange.startMs, timeRange.endMs))
+        case _ => throw new UnsupportedOperationException("Copy supported only for IntervalSelector")
+      }
+      case lp: VectorPlan    => lp.copy(scalars = copyWithUpdatedTimeRange(lp.scalars, timeRange).
+        asInstanceOf[ScalarPlan])
+      case lp: ScalarTimeBasedPlan => lp.copy(rangeParams = RangeParams(timeRange.startMs * 1000,
+        lp.rangeParams.stepSecs, timeRange.endMs * 1000))
+      case lp: ScalarFixedDoublePlan => lp.copy(timeStepParams = RangeParams(timeRange.startMs * 1000,
+        lp.timeStepParams.stepSecs, timeRange.endMs * 1000))
+      case lp: ScalarBinaryOperation =>  val updatedLhs = if (lp.lhs.isRight) Right(copyWithUpdatedTimeRange
+      (lp.lhs.right.get, timeRange).asInstanceOf[ScalarBinaryOperation]) else Left(lp.lhs.left.get)
+        val updatedRhs = if (lp.rhs.isRight) Right(copyWithUpdatedTimeRange(lp.rhs.right.get, timeRange).
+          asInstanceOf[ScalarBinaryOperation]) else Left(lp.rhs.left.get)
+        lp.copy(lhs = updatedLhs, rhs = updatedRhs, rangeParams = RangeParams(timeRange.startMs * 1000,
+          lp.rangeParams.stepSecs, timeRange.endMs * 1000))
+      case _ => throw new UnsupportedOperationException(s"Logical plan not supported for copy: $logicalPlan")
     }
   }
 
