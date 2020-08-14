@@ -249,8 +249,8 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     val ingestTime = 1594130687316L
     val chunksets = for {
       i <- 0 until 1050
-      partKey = partBuilder.partKeyFromObjects(Schemas.gauge, gaugeName + i, seriesTags)
       c <- 0 until 3
+      partKey = partBuilder.partKeyFromObjects(Schemas.gauge, gaugeName + i, seriesTags)
     } yield {
       val rows = Seq(TupleRowReader((Some(firstSampleTime + c), Some(0.0d))))
       ChunkSet(Schemas.gauge.data, partKey, ingestTime, rows, nativeMemoryManager)
