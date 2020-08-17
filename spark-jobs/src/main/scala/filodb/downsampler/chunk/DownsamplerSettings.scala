@@ -54,6 +54,8 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val batchSize = downsamplerConfig.getInt("cass-write-batch-size")
 
+  @transient lazy val cassFetchSize = downsamplerConfig.getInt("cass-read-fetch-size")
+
   @transient lazy val splitsPerNode = downsamplerConfig.getInt("splits-per-node")
 
   @transient lazy val cassWriteTimeout = downsamplerConfig.as[FiniteDuration]("cassandra-write-timeout")

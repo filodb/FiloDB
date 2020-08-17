@@ -265,7 +265,8 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
       firstSampleTime - 1,
       firstSampleTime + 5,
       10L,
-      100
+      100,
+      5000
     ).toList
 
     batches.size shouldEqual 11 // 100 rows per batch, 1050 rows => 11 batches

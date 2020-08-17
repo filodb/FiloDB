@@ -103,7 +103,8 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
 
   def scanPartKeysByIngestionTimeNoAsync(tokens: Seq[(String, String)],
                                          ingestionTimeStart: Long,
-                                         ingestionTimeEnd: Long): Iterator[ByteBuffer] = {
+                                         ingestionTimeEnd: Long,
+                                         fetchSize: Int): Iterator[ByteBuffer] = {
     tokens.iterator.flatMap { case (start, end) =>
       /*
        * FIXME conversion of tokens to Long works only for Murmur3Partitioner because it generates
@@ -114,6 +115,7 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
                                end.toLong: java.lang.Long,
                                ingestionTimeStart: java.lang.Long,
                                ingestionTimeEnd: java.lang.Long)
+                         .setFetchSize(fetchSize)
       try {
         session.execute(stmt).iterator.asScala
           .map { row => row.getBytes("partition") }

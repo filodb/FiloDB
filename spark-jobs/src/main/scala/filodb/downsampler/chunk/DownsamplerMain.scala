@@ -115,7 +115,8 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
           ingestionTimeEnd = ingestionTimeEnd,
           userTimeStart = userTimeStart, endTimeExclusive = userTimeEndExclusive,
           maxChunkTime = settings.rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
-          batchSize = settings.batchSize)
+          batchSize = settings.batchSize,
+          cassFetchSize = settings.cassFetchSize)
         batchIter
       }
       .foreach { rawPartsBatch =>
