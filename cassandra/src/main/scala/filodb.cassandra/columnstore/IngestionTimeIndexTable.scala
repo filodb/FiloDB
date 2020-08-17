@@ -4,8 +4,8 @@ import java.nio.ByteBuffer
 
 import scala.concurrent.{ExecutionContext, Future}
 
-import com.datastax.driver.core.exceptions.ReadTimeoutException
 import com.datastax.driver.core.{ConsistencyLevel, ResultSet, Row}
+import com.datastax.driver.core.exceptions.ReadTimeoutException
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
