@@ -89,10 +89,13 @@ object LogicalPlanUtils {
       case lp: ApplyAbsentFunction         => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
       case lp: ScalarVaryingDoublePlan     => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
       case lp: RawChunkMeta                => lp.rangeSelector match {
-                                              case is: IntervalSelector => lp.copy(rangeSelector = is.copy(
+                                              case is: IntervalSelector  => lp.copy(rangeSelector = is.copy(
                                                                             timeRange.startMs, timeRange.endMs))
-                                              case _ => throw new UnsupportedOperationException("Copy supported only " +
-                                                        "for IntervalSelector")
+                                              case AllChunksSelector |
+                                                   EncodedChunksSelector |
+                                                   InMemoryChunksSelector |
+                                                   WriteBufferSelector     => throw new UnsupportedOperationException(
+                                                                             "Copy supported only for IntervalSelector")
                                             }
       case lp: VectorPlan                  => lp.copy(scalars = copyWithUpdatedTimeRange(lp.scalars, timeRange).
                                             asInstanceOf[ScalarPlan])
