@@ -301,13 +301,13 @@ case class ApplySortFunction(vectors: PeriodicSeriesPlan,
   * Nested logical plan for argument of function
   * Example: clamp_max(node_info{job = "app"},scalar(http_requests_total{job = "app"}))
   */
-trait FunctionArgsPlan extends LogicalPlan with PeriodicSeriesPlan
+sealed trait FunctionArgsPlan extends LogicalPlan with PeriodicSeriesPlan
 
 /**
   * Generate scalar
   * Example: scalar(http_requests_total), time(), hour()
   */
-trait ScalarPlan extends FunctionArgsPlan
+sealed trait ScalarPlan extends FunctionArgsPlan
 
 /**
   * Generate scalar from vector
@@ -411,8 +411,17 @@ object LogicalPlan {
      // scalarArg can have vector like scalar(http_requests_total)
      case lp: ScalarVectorBinaryOperation => findLeafLogicalPlans(lp.vector) ++ findLeafLogicalPlans(lp.scalarArg)
      // Find leaf logical plans for all children and concatenate results
-     case lp: NonLeafLogicalPlan => lp.children.flatMap(findLeafLogicalPlans)
-     case _                      => Seq(logicalPlan)
+     case lp: NonLeafLogicalPlan          => lp.children.flatMap(findLeafLogicalPlans)
+     case lp: MetadataQueryPlan           => Seq(lp)
+     case lp: ScalarBinaryOperation       => val lhsLeafs = if (lp.lhs.isRight) findLeafLogicalPlans(lp.lhs.right.get)
+                                                             else Nil
+                                             val rhsLeafs = if (lp.rhs.isRight) findLeafLogicalPlans(lp.rhs.right.get)
+                                                             else Nil
+                                             lhsLeafs ++ rhsLeafs
+     case lp: ScalarFixedDoublePlan       => Seq(lp)
+     case lp: ScalarTimeBasedPlan         => Seq(lp)
+     case lp: RawSeries                   => Seq(lp)
+     case lp: RawChunkMeta                => Seq(lp)
    }
   }
 

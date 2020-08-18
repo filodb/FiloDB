@@ -67,46 +67,48 @@ object LogicalPlanUtils {
   def copyWithUpdatedTimeRange(logicalPlan: PeriodicSeriesPlan,
                                timeRange: TimeRange): PeriodicSeriesPlan = {
     logicalPlan match {
-      case lp: PeriodicSeries => lp.copy(startMs = timeRange.startMs,
-                                         endMs = timeRange.endMs,
-                                         rawSeries = copyNonPeriodicWithUpdatedTimeRange(lp.rawSeries, timeRange)
-                                                     .asInstanceOf[RawSeries])
+      case lp: PeriodicSeries              => lp.copy(startMs = timeRange.startMs,
+                                                     endMs = timeRange.endMs,
+                                                     rawSeries = copyNonPeriodicWithUpdatedTimeRange(lp.rawSeries,
+                                                       timeRange).asInstanceOf[RawSeries])
       case lp: PeriodicSeriesWithWindowing => lp.copy(startMs = timeRange.startMs,
                                                       endMs = timeRange.endMs,
                                                       series = copyNonPeriodicWithUpdatedTimeRange(lp.series,
                                                                timeRange))
-      case lp: ApplyInstantFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
+      case lp: ApplyInstantFunction        => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
 
-      case lp: Aggregate  => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
+      case lp: Aggregate                   => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
 
-      case lp: BinaryJoin => lp.copy(lhs = copyWithUpdatedTimeRange(lp.lhs, timeRange),
-                                     rhs = copyWithUpdatedTimeRange(lp.rhs, timeRange))
-      case lp: ScalarVectorBinaryOperation =>
-                      lp.copy(vector = copyWithUpdatedTimeRange(lp.vector, timeRange))
+      case lp: BinaryJoin                  => lp.copy(lhs = copyWithUpdatedTimeRange(lp.lhs, timeRange),
+                                               rhs = copyWithUpdatedTimeRange(lp.rhs, timeRange))
+      case lp: ScalarVectorBinaryOperation => lp.copy(vector = copyWithUpdatedTimeRange(lp.vector, timeRange))
 
-      case lp: ApplyMiscellaneousFunction =>
-                      lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
+      case lp: ApplyMiscellaneousFunction  => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
 
-      case lp: ApplySortFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
-      case lp: ApplyAbsentFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
-      case lp: ScalarVaryingDoublePlan => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
-      case lp: RawChunkMeta => lp.rangeSelector match {
-        case is: IntervalSelector => lp.copy(rangeSelector = is.copy(timeRange.startMs, timeRange.endMs))
-        case _ => throw new UnsupportedOperationException("Copy supported only for IntervalSelector")
-      }
-      case lp: VectorPlan    => lp.copy(scalars = copyWithUpdatedTimeRange(lp.scalars, timeRange).
-        asInstanceOf[ScalarPlan])
-      case lp: ScalarTimeBasedPlan => lp.copy(rangeParams = RangeParams(timeRange.startMs * 1000,
-        lp.rangeParams.stepSecs, timeRange.endMs * 1000))
-      case lp: ScalarFixedDoublePlan => lp.copy(timeStepParams = RangeParams(timeRange.startMs * 1000,
-        lp.timeStepParams.stepSecs, timeRange.endMs * 1000))
-      case lp: ScalarBinaryOperation =>  val updatedLhs = if (lp.lhs.isRight) Right(copyWithUpdatedTimeRange
-      (lp.lhs.right.get, timeRange).asInstanceOf[ScalarBinaryOperation]) else Left(lp.lhs.left.get)
-        val updatedRhs = if (lp.rhs.isRight) Right(copyWithUpdatedTimeRange(lp.rhs.right.get, timeRange).
-          asInstanceOf[ScalarBinaryOperation]) else Left(lp.rhs.left.get)
-        lp.copy(lhs = updatedLhs, rhs = updatedRhs, rangeParams = RangeParams(timeRange.startMs * 1000,
-          lp.rangeParams.stepSecs, timeRange.endMs * 1000))
-      case _ => throw new UnsupportedOperationException(s"Logical plan not supported for copy: $logicalPlan")
+      case lp: ApplySortFunction           => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
+      case lp: ApplyAbsentFunction         => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
+      case lp: ScalarVaryingDoublePlan     => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
+      case lp: RawChunkMeta                => lp.rangeSelector match {
+                                              case is: IntervalSelector => lp.copy(rangeSelector = is.copy(
+                                                                            timeRange.startMs, timeRange.endMs))
+                                              case _ => throw new UnsupportedOperationException("Copy supported only " +
+                                                        "for IntervalSelector")
+                                            }
+      case lp: VectorPlan                  => lp.copy(scalars = copyWithUpdatedTimeRange(lp.scalars, timeRange).
+                                            asInstanceOf[ScalarPlan])
+      case lp: ScalarTimeBasedPlan         => lp.copy(rangeParams = RangeParams(timeRange.startMs * 1000,
+                                              lp.rangeParams.stepSecs, timeRange.endMs * 1000))
+      case lp: ScalarFixedDoublePlan       => lp.copy(timeStepParams = RangeParams(timeRange.startMs * 1000,
+                                              lp.timeStepParams.stepSecs, timeRange.endMs * 1000))
+      case lp: ScalarBinaryOperation       =>  val updatedLhs = if (lp.lhs.isRight) Right(copyWithUpdatedTimeRange
+                                              (lp.lhs.right.get, timeRange).asInstanceOf[ScalarBinaryOperation]) else
+                                              Left(lp.lhs.left.get)
+                                              val updatedRhs = if (lp.rhs.isRight) Right(copyWithUpdatedTimeRange(
+                                                lp.rhs.right.get, timeRange).asInstanceOf[ScalarBinaryOperation])
+                                              else Left(lp.rhs.left.get)
+                                              lp.copy(lhs = updatedLhs, rhs = updatedRhs, rangeParams =
+                                                RangeParams(timeRange.startMs * 1000, lp.rangeParams.stepSecs,
+                                                  timeRange.endMs * 1000))
     }
   }
 

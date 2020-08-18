@@ -73,6 +73,7 @@ object LogicalPlanParser {
       case d: ScalarFixedDoublePlan   => d.scalar.toString
       case t: ScalarTimeBasedPlan     => s"${t.function.entryName}$OpeningRoundBracket$ClosingRoundBracket"
       case s: ScalarVaryingDoublePlan => convertToQuery(s.vectors)
+      case s: ScalarBinaryOperation   => scalarBinaryOperationToQuery(s)
     }
   }
 
