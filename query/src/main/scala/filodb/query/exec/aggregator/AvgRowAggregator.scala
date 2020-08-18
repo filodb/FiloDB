@@ -51,6 +51,6 @@ object AvgRowAggregator extends RowAggregator {
   }
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = {
     // drop last column with count
-    reductionSchema.copy(columns = reductionSchema.columns.take(reductionSchema.columns.size-1))
+    reductionSchema.copy(reductionSchema.columns.filterNot(_.name.equals("count")))
   }
 }
