@@ -8,6 +8,7 @@ import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.tag.TagSet
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import monix.execution.{Scheduler, UncaughtExceptionReporter}
 
 import filodb.core.DatasetRef
@@ -45,8 +46,9 @@ class QueryExecutor(ref: DatasetRef,
                     queryActor: ActorRef) extends StrictLogging {
 
   private val tags = TagSet.from(Map("dataset" -> ref.toString))
-  private val schedulerAssignmentDelay = Kamon.histogram("query-scheduler-assignment-delay").withTags(tags)
-  private val numWaitingQueryIds = Kamon.gauge("num-waiting-queryids").withTags(tags)
+  private val schedulerAssignmentDelay = Kamon.histogram("query-scheduler-assignment-delay",
+    MeasurementUnit.time.milliseconds).withTags(tags)
+  private val numWaitingQueryIds = Kamon.gauge("num-waiting-queryIds").withTags(tags)
 
   /**
    * Represents a query that is scheduled and waiting for execution
