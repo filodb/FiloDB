@@ -1,7 +1,8 @@
 package filodb.coordinator.queryplanner
 
+import scala.collection.mutable.ArrayBuffer
+
 import com.typesafe.scalalogging.StrictLogging
-import debox.Buffer
 
 import filodb.core.query.QueryContext
 import filodb.prometheus.ast.Vectors.PromMetricLabel
@@ -164,24 +165,27 @@ object LogicalPlanUtils extends StrictLogging {
 
   /**
     * Split query if the time range is greater than the threshold. It clones the given LogicalPlan with the smaller
-    * time ranges, creates an execPlan using the provided planner and finally returns Stitch ExecPlan
+    * time ranges, creates an execPlan using the provided planner and finally returns Stitch ExecPlan.
     * @param lPlan LogicalPlan to be split
     * @param qContext QueryContext
+    * @param timeSplitEnabled split based on longer time range
+    * @param minTimeRangeForSplitMs if time range is longer than this, plan will be split into multiple plans
+    * @param splitSizeMs time range for each split, if plan needed to be split
     */
   def splitPlans(lPlan: LogicalPlan,
                  qContext: QueryContext,
                  timeSplitEnabled: Boolean,
-                 splitThresholdMs: Long,
+                 minTimeRangeForSplitMs: Long,
                  splitSizeMs: Long): Seq[LogicalPlan] = {
     val lp = lPlan.asInstanceOf[PeriodicSeriesPlan]
-    if (timeSplitEnabled && lp.isSplittable && lp.endMs - lp.startMs > splitThresholdMs && lp.stepMs <= splitSizeMs) {
+    if (timeSplitEnabled && lp.isTimeSplittable && lp.endMs - lp.startMs > minTimeRangeForSplitMs
+        && lp.stepMs <= splitSizeMs) {
       logger.info(s"Splitting query queryId=${qContext.queryId} start=${lp.startMs}" +
-        s" end=${lp.endMs} step=${lp.stepMs} splitThresholdMs=$splitThresholdMs splitSizeMs=$splitSizeMs")
-      val windowSplits: Buffer[(Long, Long)] = Buffer.empty
+        s" end=${lp.endMs} step=${lp.stepMs} splitThresholdMs=$minTimeRangeForSplitMs splitSizeMs=$splitSizeMs")
       val numStepsPerSplit = splitSizeMs/lp.stepMs
       var startTime = lp.startMs
       var endTime = Math.min(lp.startMs + numStepsPerSplit * lp.stepMs, lp.endMs)
-      val splitPlans: Buffer[LogicalPlan] = Buffer.empty
+      val splitPlans: ArrayBuffer[LogicalPlan] = ArrayBuffer.empty
       while (endTime < lp.endMs ) {
         splitPlans += copyWithUpdatedTimeRange(lp, TimeRange(startTime, endTime))
         startTime = endTime + lp.stepMs
@@ -189,8 +193,8 @@ object LogicalPlanUtils extends StrictLogging {
       }
       // when endTime == lp.endMs - exit condition
       splitPlans += copyWithUpdatedTimeRange(lp, TimeRange(startTime, endTime))
-      logger.info(s"splitsize queryId=${qContext.queryId} numWindows=${windowSplits.length}")
-      splitPlans.toList
+      logger.info(s"splitsize queryId=${qContext.queryId} numWindows=${splitPlans.length}")
+      splitPlans
     } else {
       Seq(lp)
     }

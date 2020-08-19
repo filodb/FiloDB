@@ -63,9 +63,9 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     else
       Seq(logicalPlan)
     val materialized = logicalPlans match {
-      case Seq(one) => materializePlan(one, qContext)
+      case Seq(one) => materializeTimeSplitPlan(one, qContext)
       case many =>
-        val meterializedPlans = many.map(materializePlan(_, qContext))
+        val meterializedPlans = many.map(materializeTimeSplitPlan(_, qContext))
         val targetActor = pickDispatcher(meterializedPlans)
 
         // create SplitLocalPartitionDistConcatExec that will execute child execplanss sequentially and stitches
@@ -78,7 +78,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     materialized
   }
 
-  private def materializePlan(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+  private def materializeTimeSplitPlan(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     val materialized = walkLogicalPlanTree(logicalPlan, qContext)
     match {
       case PlanResult(Seq(justOne), stitch) =>
