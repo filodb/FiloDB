@@ -86,8 +86,6 @@ Also see the [ingeston doc](ingestion.md) for details on recovery and persistenc
 
 Contains off-heap memory management as well as columnar encoding/decoding/super fast binary vector logic.
 
-Also contains [OffheapLFSortedIDMap](../memory/src/main/scala/filodb.memory/data/OffheapLFSortedIDMap.scala), an efficient, lock-free, sorted offheap map data structure used to help track our chunks and ensure minimal heap usage. 
-
 ### Cassandra
 
 An implementation of ColumnStore and MetaStore for Apache Cassandra.

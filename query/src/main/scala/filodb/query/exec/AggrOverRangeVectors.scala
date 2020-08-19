@@ -190,10 +190,10 @@ object RangeVectorAggregator extends StrictLogging {
   }
 
   private def mapReduceInternal(rvs: List[RangeVector],
-                     rowAgg: RowAggregator,
-                     skipMapPhase: Boolean,
-                     grouping: RangeVector => RangeVectorKey):
-                          Map[RangeVectorKey, CloseableIterator[rowAgg.AggHolderType]] = {
+                                rowAgg: RowAggregator,
+                                skipMapPhase: Boolean,
+                                grouping: RangeVector => RangeVectorKey):
+                                Map[RangeVectorKey, CloseableIterator[rowAgg.AggHolderType]] = {
     logger.trace(s"mapReduceInternal on ${rvs.size} RangeVectors...")
     var acc = rowAgg.zero
     val mapInto = rowAgg.newRowToMapInto
