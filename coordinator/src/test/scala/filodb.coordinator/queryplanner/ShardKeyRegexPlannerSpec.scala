@@ -6,7 +6,6 @@ import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
@@ -205,5 +204,34 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec]
     execPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec].filters.
       contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+  }
+
+  it("should generate Exec plan for scalar - time()") {
+    val lp = Parser.queryToLogicalPlan("""scalar(test{_ws_ = "demo", _ns_ =~ "App.*"}) - time()""",
+      1000, 1000)
+    val promQlQueryParams = PromQlQueryParams("""scalar(test{_ws_ = "demo", _ns_ =~ "App.*"}) - time()""", 100, 1, 1000, None)
+    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-2"))))}
+    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[TimeScalarGeneratorExec] shouldEqual(true)
+    execPlan.rangeVectorTransformers.head.isInstanceOf[ScalarOperationMapper] shouldEqual true
+    execPlan.rangeVectorTransformers.head.asInstanceOf[ScalarOperationMapper].funcParams.head.
+      isInstanceOf[ExecPlanFuncArgs] shouldEqual true
+    execPlan.rangeVectorTransformers.head.asInstanceOf[ScalarOperationMapper].funcParams.head.
+      isInstanceOf[ExecPlanFuncArgs] shouldEqual true
+    execPlan.rangeVectorTransformers.head.asInstanceOf[ScalarOperationMapper].funcParams.head.
+      asInstanceOf[ExecPlanFuncArgs].execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual true
+
+    val multiPartitionExec = execPlan.rangeVectorTransformers.head.asInstanceOf[ScalarOperationMapper].funcParams.head.
+      asInstanceOf[ExecPlanFuncArgs].execPlan
+    multiPartitionExec.rangeVectorTransformers.head.isInstanceOf[ScalarFunctionMapper] shouldEqual true
+
+    // Child plans should have only inner query in PromQlQueryParams
+    multiPartitionExec.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
+      "test{_ws_=\"demo\",_ns_=\"App-1\"}"
+    multiPartitionExec.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
+      "test{_ws_=\"demo\",_ns_=\"App-2\"}"
   }
 }
