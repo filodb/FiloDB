@@ -371,7 +371,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // Create tasks for all results.
     // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
     val childTasks = Observable.fromIterable(children.zipWithIndex)
-                               .mapAsync(Runtime.getRuntime.availableProcessors()) { case (plan, i) =>
+                               .mapAsync(children.length) { case (plan, i) =>
                                  dispatchRemotePlan(plan, parentSpan).map((_, i))
                                }
 
