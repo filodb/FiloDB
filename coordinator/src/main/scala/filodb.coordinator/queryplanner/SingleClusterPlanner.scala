@@ -25,10 +25,13 @@ object SingleClusterPlanner {
 /**
   * Responsible for query planning within single FiloDB cluster
   *
-  * @param dsRef dataset
-  * @param schema schema instance, used to extract partKey schema
-  * @param spreadProvider used to get spread
+  * @param dsRef           dataset
+  * @param schema          schema instance, used to extract partKey schema
+  * @param spreadProvider  used to get spread
   * @param shardMapperFunc used to get shard locality
+  * @param timeSplitEnabled split based on longer time range
+  * @param minTimeRangeForSplitMs if time range is longer than this, plan will be split into multiple plans
+  * @param splitSizeMs time range for each split, if plan needed to be split
   */
 class SingleClusterPlanner(dsRef: DatasetRef,
                            schema: Schemas,
@@ -36,8 +39,8 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                            earliestRetainedTimestampFn: => Long,
                            queryConfig: QueryConfig,
                            spreadProvider: SpreadProvider = StaticSpreadProvider(),
-                           splitEnabled: Boolean = false,
-                           splitThresholdMs: => Long = 1.day.toMillis,
+                           timeSplitEnabled: Boolean = false,
+                           minTimeRangeForSplitMs: => Long = 1.day.toMillis,
                            splitSizeMs: => Long = 1.day.toMillis)
                                 extends QueryPlanner with StrictLogging with PlannerMaterializer {
 
@@ -59,7 +62,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
     if (shardMapperFunc.numShards <= 0) throw new IllegalStateException("No shards available")
     val logicalPlans = if (logicalPlan.isInstanceOf[PeriodicSeriesPlan])
-      LogicalPlanUtils.splitPlans(logicalPlan, qContext, splitEnabled, splitThresholdMs, splitSizeMs)
+      LogicalPlanUtils.splitPlans(logicalPlan, qContext, timeSplitEnabled, minTimeRangeForSplitMs, splitSizeMs)
     else
       Seq(logicalPlan)
     val materialized = logicalPlans match {
