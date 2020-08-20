@@ -3,6 +3,7 @@ package filodb.jmh
 import java.util.concurrent.TimeUnit
 
 import scala.concurrent.duration._
+
 import ch.qos.logback.classic.{Level, Logger}
 import org.openjdk.jmh.annotations._
 import spire.syntax.cfor._
