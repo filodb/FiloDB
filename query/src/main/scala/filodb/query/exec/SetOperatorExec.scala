@@ -59,10 +59,11 @@ final case class SetOperatorExec(queryContext: QueryContext,
       // NOTE: We can't require this any more, as multischema queries may result in not a QueryResult if the
       //       filter returns empty results.  The reason is that the schema will be undefined.
       // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
+      // Resp is segregated based on index of child plans
       val lhsRvs = resp.filter(_._3 < lhs.size).flatMap(_._2)
-      val rhs = resp.filter(_._3 >= lhs.size)
-      val rhsRvs = rhs.flatMap(_._2)
-      val rhsSchema = if (rhs.map(_._1).nonEmpty) rhs.map(_._1).head else ResultSchema.empty
+      val rhsResp = resp.filter(_._3 >= lhs.size)
+      val rhsRvs = rhsResp.flatMap(_._2)
+      val rhsSchema = if (rhsResp.map(_._1).nonEmpty) rhsResp.map(_._1).head else ResultSchema.empty
 
       val results: List[RangeVector] = binaryOp match {
         case LAND    => setOpAnd(lhsRvs, rhsRvs, rhsSchema)
@@ -95,6 +96,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
     var result = new ListBuffer[RangeVector]()
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
+      // Don't add range vector if it is empty
       if (jk.nonEmpty && !isEmpty(rv, rhsSchema))
         rhsKeysSet += jk
     }
