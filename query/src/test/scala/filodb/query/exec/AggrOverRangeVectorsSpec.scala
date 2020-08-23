@@ -3,7 +3,7 @@ package filodb.query.exec
 import scala.annotation.tailrec
 import scala.util.Random
 
-import com.tdunning.math.stats.TDigest
+import com.datadoghq.sketch.ddsketch.DDSketch
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
@@ -158,9 +158,11 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   }
 
   private def quantile(q: Double, items: List[Double]): Double = {
-    val tdig = TDigest.createArrayDigest(100)
-    items.foreach(i => tdig.add(i))
-    tdig.quantile(q)
+    val dds = DDSketch.balanced(0.5)
+    items.foreach(i => dds.accept(i))
+    //@TODO handle -ve
+    dds.getValueAtQuantile(q)
+
   }
 
   val ignoreKey = CustomRangeVectorKey(

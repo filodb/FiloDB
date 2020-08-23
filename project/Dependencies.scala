@@ -51,6 +51,7 @@ object Dependencies {
 
   lazy val memoryDeps = commonDeps ++ Seq(
     "com.github.jnr"       %  "jnr-ffi"          % "2.1.6",
+    "com.datadoghq"        % "sketches-java"     % "0.2.1",
     "joda-time"            % "joda-time"         % "2.2" withJavadoc(),
     "org.joda"             % "joda-convert"      % "1.2",
     "org.lz4"              %  "lz4-java"         % "1.4",
