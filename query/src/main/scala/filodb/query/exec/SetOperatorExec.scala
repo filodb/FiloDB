@@ -63,10 +63,10 @@ final case class SetOperatorExec(queryContext: QueryContext,
       val lhsRvs = resp.filter(_._3 < lhs.size).flatMap(_._2)
       val rhsResp = resp.filter(_._3 >= lhs.size)
       val rhsRvs = rhsResp.flatMap(_._2)
-      val rhsSchema = if (rhsResp.map(_._1).nonEmpty) rhsResp.map(_._1).head else ResultSchema.empty
 
       val results: List[RangeVector] = binaryOp match {
-        case LAND    => setOpAnd(lhsRvs, rhsRvs, rhsSchema)
+        case LAND    => val rhsSchema = if (rhsResp.map(_._1).nonEmpty) rhsResp.map(_._1).head else ResultSchema.empty
+                        setOpAnd(lhsRvs, rhsRvs, rhsSchema)
         case LOR     => setOpOr(lhsRvs, rhsRvs)
         case LUnless => setOpUnless(lhsRvs, rhsRvs)
         case _       => throw new IllegalArgumentException("requirement failed: Only and, or and unless are supported ")
