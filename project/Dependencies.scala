@@ -120,7 +120,7 @@ object Dependencies {
   lazy val cliDeps = Seq(
     logbackDep,
     "io.kamon"          %% "kamon-bundle"        % kamonBundleVersion,
-    "com.quantifind"    %% "sumac"               % "0.3.0"
+    "org.rogach"        %% "scallop"             % "3.1.1"
   )
 
   lazy val kafkaDeps = Seq(
