@@ -112,6 +112,8 @@ object PrometheusModel {
 
     typ match {
       case QueryResultType.RangeVectors =>
+        println("Adding tags to result:" + tags)
+        println("samples:" + samples)
         Result(tags,
           // remove NaN in HTTP results
           // Known Issue: Until we support NA in our vectors, we may not be able to return NaN as an end-of-time-series
@@ -151,6 +153,27 @@ object PrometheusModel {
       case QueryResultType.Scalar => ???
     }
   }
+
+  def toAvgResult(srv: RangeVector,
+                   verbose: Boolean,
+                   typ: QueryResultType,
+                   processMultiPartition: Boolean = true): Result = {
+    val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
+      (if (verbose) makeVerboseLabels(srv.key)
+      else Map.empty)
+    val samples = srv.rows.map { r => AvgSampl(r.getLong(0)/1000, r.getDouble(1),
+      r.getLong(2))
+    }.toSeq
+
+    typ match {
+      case QueryResultType.RangeVectors =>
+        Result(tags, if (samples.isEmpty) None else Some(samples), None)
+      case QueryResultType.InstantVector =>
+        Result(tags, None, samples.headOption)
+      case QueryResultType.Scalar => ???
+    }
+  }
+
 
   def makeVerboseLabels(rvk: RangeVectorKey): Map[String, String] = {
     Map("_shards_" -> rvk.sourceShards.mkString(","),

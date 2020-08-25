@@ -40,7 +40,6 @@ trait ReduceAggregateExec extends NonLeafExecPlan {
                }
     Observable.fromTask(task).flatten
   }
-
 }
 
 /**

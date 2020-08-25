@@ -30,7 +30,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     withFallback(routingConfig)
   private val queryConfig = new QueryConfig(config)
 
-  private val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000, None)
+  private val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000)
 
   private val localMapper = new ShardMapper(32)
   for {i <- 0 until 32} localMapper.registerNode(Seq(i), node)
@@ -61,7 +61,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       ColumnFilter("_ns_", Equals("App-2"))))}
     val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1,
-      1000, None)))
+      1000)))
     execPlan.isInstanceOf[MultiPartitionReduceAggregateExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
     execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
@@ -86,7 +86,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       ColumnFilter("_ns_", Equals("App-2"))))}
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = PromQlQueryParams("1 + test{_ws_ = \"demo\"," +
-      " _ns_ =~ \"App.*\", instance = \"Inst-1\" }", 100, 1, 1000, None)))
+      " _ns_ =~ \"App.*\", instance = \"Inst-1\" }", 100, 1, 1000)))
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
     execPlan.rangeVectorTransformers(0).isInstanceOf[ScalarOperationMapper] shouldEqual true
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
@@ -209,7 +209,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   it("should generate Exec plan for scalar - time()") {
     val lp = Parser.queryToLogicalPlan("""scalar(test{_ws_ = "demo", _ns_ =~ "App.*"}) - time()""",
       1000, 1000)
-    val promQlQueryParams = PromQlQueryParams("""scalar(test{_ws_ = "demo", _ns_ =~ "App.*"}) - time()""", 100, 1, 1000, None)
+    val promQlQueryParams = PromQlQueryParams("""scalar(test{_ws_ = "demo", _ns_ =~ "App.*"}) - time()""", 100, 1, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}

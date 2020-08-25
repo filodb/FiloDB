@@ -11,7 +11,8 @@ object PromCirceSupport {
   implicit val encodeSampl: Encoder[DataSampl] = Encoder.instance {
     case s @ Sampl(t, v)     => Json.fromValues(Seq(t.asJson, v.toString.asJson))
     case h @ HistSampl(t, b) => Json.fromValues(Seq(t.asJson, b.asJson))
-    case m @ MetadataSampl(v) => Json.fromValues(Seq(v.asJson))
+    case h @ AvgSampl(t, v, c) => Json.fromValues(Seq(t.asJson, v.toString.asJson, c.toString.asJson))
+    //case m @ MetadataSampl(v) => Json.fromValues(Seq(v.asJson))
   }
 
   implicit val decodeFoo: Decoder[DataSampl] = new Decoder[DataSampl] {

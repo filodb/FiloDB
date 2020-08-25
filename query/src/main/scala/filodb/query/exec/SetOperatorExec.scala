@@ -85,16 +85,19 @@ final case class SetOperatorExec(queryContext: QueryContext,
     var result = new ListBuffer[RangeVector]()
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
-      if (jk.nonEmpty)
+      println("Rhs jk:" + jk)
+      if (jk.nonEmpty &&  !rv.rows.filter(!_.getDouble(1).isNaN).isEmpty)
         rhsKeysSet += jk
     }
 
     lhsRvs.foreach { lhs =>
       val jk = joinKeys(lhs.key)
+      println("Lhs jk:" + jk)
       // Add range vectors from lhs which are present in lhs and rhs both
       // Result should also have range vectors for which rhs does not have any keys
       if (rhsKeysSet.contains(jk) || rhsKeysSet.isEmpty) {
         result += lhs
+        println("Added in result:" + jk)
       }
     }
     result.toList

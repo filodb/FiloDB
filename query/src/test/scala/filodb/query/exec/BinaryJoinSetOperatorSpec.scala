@@ -196,6 +196,12 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       BinaryOperator.LAND,
       Nil, Nil, "__name__")
 
+    println("sampleCanary:" + sampleCanary.toList.map(_.key))
+    println("sampleRhsShuffled:" + sampleRhsShuffled.map(_.key))
+
+    println("sampleCanary size:" + sampleCanary.size)
+    println("sampleRhsShuffled size:" + sampleRhsShuffled.size)
+
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializedRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))

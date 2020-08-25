@@ -11,9 +11,10 @@ trait TsdbQueryParams
   * This class provides PromQl query parameters
   * Config has routing parameters
   */
-case class PromQlQueryParams(promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long, spread: Option[Int] = None,
-                             remoteQueryPath: Option[String] = None, processFailure: Boolean = true,
-                             processMultiPartition: Boolean = false, verbose: Boolean = false) extends TsdbQueryParams
+case class PromQlQueryParams(promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long, skipAggregatePresent:
+                              Boolean = false, spread: Option[Int] = None, remoteQueryPath: Option[String] = None,
+                             processFailure: Boolean = true, processMultiPartition: Boolean = false,
+                             verbose: Boolean = false) extends TsdbQueryParams
 case object UnavailablePromQlQueryParams extends TsdbQueryParams
 
 /**
