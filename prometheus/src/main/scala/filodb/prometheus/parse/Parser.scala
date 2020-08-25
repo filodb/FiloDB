@@ -15,8 +15,45 @@ trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers wit
     "[a-zA-Z_:][a-zA-Z0-9_:\\-\\.]*".r ^^ { str => Identifier(str) }
   }
 
-  protected lazy val labelValueIdentifier: PackratParser[Identifier] =
-    "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str =>  Identifier(str.substring(1, str.size-1)) } //remove quotes
+  protected lazy val labelValueIdentifier: PackratParser[Identifier] = {
+    // Parse a quoted identifier, supporting escapes, with quotes removed.
+    new PackratParser[Identifier]() {
+      def apply(in: Input): ParseResult[Identifier] = {
+        val source = in.source
+        var offset = in.offset
+        val quote = source.charAt(offset); offset += 1
+
+        if (quote != '\'' && quote != '"') {
+          return Failure("quote character expected", in)
+        }
+
+        val bob = new StringBuilder()
+
+        while (offset < source.length) {
+          var c = source.charAt(offset); offset += 1
+
+          if (c == quote) {
+            return Success(Identifier(bob.toString()), in.drop(offset - in.offset))
+          }
+
+          if (c == '\\') {
+            val next = source.charAt(offset); offset += 1
+            c = next match {
+              case '\\' | '\'' | '"' => next
+              case 'n' => '\n'
+              case 'r' => '\r'
+              case 't' => '\t'
+              case _ => return Error("illegal string escape: " + next, in)
+            }
+          }
+
+          bob.append(c)
+        }
+
+        return Error("unfinished quoted identifier", in)
+      }
+    }
+  }
 
   protected val OFFSET = Keyword("OFFSET")
   protected val IGNORING = Keyword("IGNORING")
