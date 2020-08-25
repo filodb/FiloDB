@@ -8,7 +8,7 @@ import scala.reflect.ClassTag
 import org.agrona.DirectBuffer
 import org.agrona.concurrent.UnsafeBuffer
 import org.joda.time.DateTime
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.format.vectors.Histogram
 
@@ -88,7 +88,7 @@ trait SchemaRowReader extends RowReader {
   // or slow functional code here.
   override def hashCode: Int = {
     var hash = 0
-    for { i <- 0 until extractors.size optimized } {
+    cforRange { 0 until extractors.size } { i =>
       hash ^= extractors(i).getField(this, i).hashCode
     }
     hash
@@ -96,7 +96,7 @@ trait SchemaRowReader extends RowReader {
 
   override def equals(other: Any): Boolean = other match {
     case reader: RowReader =>
-      for { i <- 0 until extractors.size optimized } {
+      cforRange { 0 until extractors.size } { i =>
         if (extractors(i).compare(this, reader, i) != 0) return false
       }
       true

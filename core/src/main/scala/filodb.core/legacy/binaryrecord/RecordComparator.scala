@@ -1,6 +1,6 @@
 package filodb.core.legacy.binaryrecord
 
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.format.UnsafeUtils
 
@@ -129,7 +129,7 @@ final class RecordComparator(ingestSchema: RecordSchema) {
 
     // adjust offsets to var fields
     val adjustment = partVarAreaOffset - ingestVarAreaOffset
-    for { i <- 0 until fixedAreaNumWords optimized } {
+    cforRange { 0 until fixedAreaNumWords } { i =>
       if ((compareBitmap & (1 << i)) == 0) {    // not a primitive field, but an offset to String or Map
         builder.adjustFieldOffset(i, adjustment)
       }

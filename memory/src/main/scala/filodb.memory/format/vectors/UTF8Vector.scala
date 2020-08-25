@@ -3,7 +3,7 @@ package filodb.memory.format.vectors
 import java.nio.ByteBuffer
 
 import debox.Buffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
@@ -132,7 +132,7 @@ trait UTF8VectorDataReader extends VectorDataReader {
     val dataIt = iterate(acc, vector, startElement)
     val availIt = iterateAvailable(acc, vector, startElement)
     val len = length(acc, vector)
-    for { n <- startElement until len optimized } {
+    cforRange { startElement until len } { n =>
       val item = dataIt.next
       if (availIt.next) newBuf += item
     }
@@ -286,7 +286,7 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
   final def minMaxStrLen: (Int, Int) = {
     var min = Int.MaxValue
     var max = 0
-    for {index <- 0 until _len optimized} {
+    cforRange { 0 until _len } { index =>
       val fixedData = UnsafeUtils.getInt(addr + 12 + index * 4)
       if (fixedData != NABlob) {
         val utf8len = if (fixedData < 0) fixedData & MaxSmallLen else UnsafeUtils.getInt(addr + fixedData)
@@ -332,7 +332,7 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
 
   // WARNING: no checking for if delta pushes small offsets out.  Intended for compactions only.
   private def adjustOffsets(newBase: Any, newOff: Long, delta: Int): Unit = {
-    for {i <- 0 until _len optimized} {
+    cforRange { 0 until _len } { i =>
       val fixedData = UnsafeUtils.getInt(newBase, newOff + 12 + i * 4)
       val newData = if (fixedData < 0) {
         if (fixedData == NABlob) {
