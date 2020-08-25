@@ -6,9 +6,9 @@ import scala.concurrent.Future
 
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
-import kamon.tag.TagSet
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
+import kamon.tag.TagSet
 import monix.execution.{Scheduler, UncaughtExceptionReporter}
 
 import filodb.core.DatasetRef
@@ -61,23 +61,19 @@ class QueryExecutor(ref: DatasetRef,
                             replyTo: ActorRef,
                             execPlanFunc: (ExecPlan, ActorRef, Scheduler) => Future[Unit])
 
-  private case class ExecutingQueryId(sched: Scheduler, var numQueries: Int)
-
   /**
    * Map of executing queryIds to the details. It tracks number of plans currently executing for
    * each queryId. When the count drops to zero, the scheduler is free.
    * The assigned scheduler is also tracked.
    */
-  private val executingQueryIds = new mutable.HashMap[String, ExecutingQueryId]()
+  private val executingQueryIdToPlanCount = new mutable.HashMap[String, Int]()
 
   /**
    * Free scheduler pool. Number of schedulers depends on parallelism passed in.
    */
-  private val freeSchedulers = new mutable.Queue[Scheduler]()
-  (0 to parallelism).foreach { i =>
-    freeSchedulers += Scheduler.singleThread(name = s"${FiloSchedulers.QuerySchedName}-$ref-$i",
-      reporter = newExceptionHandler())
-  }
+  private val leafScheduler = Scheduler.computation(parallelism = parallelism,
+    name = s"${FiloSchedulers.QuerySchedName}-$ref-Leaf",
+    reporter = newExceptionHandler())
 
   /**
    * Ordered hash map of queryIds waiting to execute
@@ -98,15 +94,14 @@ class QueryExecutor(ref: DatasetRef,
               isLeafPlan: Boolean,
               replyTo: ActorRef,
               execPlanFunc: (ExecPlan, ActorRef, Scheduler) => Future[Unit]): Unit = {
-    lazy val executingOn = executingQueryIds.get(plan.queryContext.queryId)
+    lazy val executingOn = executingQueryIdToPlanCount.get(plan.queryContext.queryId)
     lazy val qte = QueryToExecute(plan, replyTo, execPlanFunc)
     if (!isLeafPlan) { // schedule immediately since not a leaf plan
       execPlanFunc(plan, replyTo, nonLeafSched)
     } else if (executingOn.isDefined) { // queryId already executing, so schedule right away
-      scheduleNow(qte, executingOn.get.sched)
-    } else if (freeSchedulers.nonEmpty) { // free scheduler available now, so schedule right away
-      val sched = freeSchedulers.dequeue()
-      scheduleNow(qte, sched)
+      scheduleNow(qte, leafScheduler)
+    } else if (executingQueryIdToPlanCount.size < parallelism) { // bandwidth available now, so schedule right away
+      scheduleNow(qte, leafScheduler)
     } else { // no free scheduler available, needs to be queued
       val waitingPlans = waitingQueryIdToPlans.getOrElseUpdate(plan.queryContext.queryId, ArrayBuffer.empty)
       waitingPlans += qte
@@ -119,8 +114,8 @@ class QueryExecutor(ref: DatasetRef,
    * On complete, it sends QueryCompletedScheduleNext to QueryActor.
    */
   private def scheduleNow(q: QueryToExecute, sched: Scheduler) = {
-    val executingQuery = executingQueryIds.getOrElseUpdate(q.plan.queryContext.queryId, ExecutingQueryId(sched, 0))
-    executingQuery.numQueries = executingQuery.numQueries + 1
+    val currentCount = executingQueryIdToPlanCount.getOrElseUpdate(q.plan.queryContext.queryId, 0)
+    executingQueryIdToPlanCount(q.plan.queryContext.queryId) = currentCount + 1
     schedulerAssignmentDelay.record(System.currentTimeMillis() - q.plan.submitTime)
     val f = q.execPlanFunc(q.plan, q.replyTo, sched)
     f.onComplete(_ => queryActor ! QueryCompletedScheduleNext(q.plan.queryContext.queryId, sched))(sched)
@@ -134,25 +129,17 @@ class QueryExecutor(ref: DatasetRef,
    * Note: The data structures in this not-thread-safe class are mutated in the context of query actor only.
    */
   def queryCompletedScheduleNext(qc: QueryCompletedScheduleNext): Unit = {
-    val executingQuery = executingQueryIds(qc.completedQueryId)
-    executingQuery.numQueries = executingQuery.numQueries - 1
-    if (executingQuery.numQueries == 0) { // the last plan with this queryId completed
-      executingQueryIds.remove(qc.completedQueryId)
-      scheduleNextWaitingQueryId(qc.sched)
-    }
-  }
-
-  /**
-   * If there is a waiting query, schedule it for execution
-   */
-  private def scheduleNextWaitingQueryId(sched: Scheduler): Unit = {
-    if (waitingQueryIdToPlans.nonEmpty) {
-      val (queryId, plans) = waitingQueryIdToPlans.head
-      plans.foreach(q => scheduleNow(q, sched))
-      waitingQueryIdToPlans.remove(queryId)
-      numWaitingQueryIds.update(waitingQueryIdToPlans.size)
+    val currentCount = executingQueryIdToPlanCount(qc.completedQueryId)
+    if (currentCount == 1) { // the last plan with this queryId completed
+      executingQueryIdToPlanCount.remove(qc.completedQueryId)
+      if (waitingQueryIdToPlans.nonEmpty) { // there are waiting leaf queries
+        val (queryId, plans) = waitingQueryIdToPlans.head
+        plans.foreach(q => scheduleNow(q, leafScheduler))
+        waitingQueryIdToPlans.remove(queryId)
+        numWaitingQueryIds.update(waitingQueryIdToPlans.size)
+      }
     } else {
-      freeSchedulers += sched
+      executingQueryIdToPlanCount(qc.completedQueryId) = currentCount - 1
     }
   }
 
