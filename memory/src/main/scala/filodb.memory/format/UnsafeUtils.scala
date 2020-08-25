@@ -4,6 +4,7 @@ import java.nio.ByteBuffer
 
 import com.kenai.jffi.MemoryIO
 import org.agrona.DirectBuffer
+import spire.implicits.cforRange
 // scalastyle:off number.of.methods
 object UnsafeUtils {
   val unsafe = scala.concurrent.util.Unsafe.instance
@@ -143,7 +144,7 @@ object UnsafeUtils {
     if (wordComp == 0) {
       var pointer1 = offset1 + minLenAligned
       var pointer2 = offset2 + minLenAligned
-      for { i <- minLenAligned until minLen } {
+      cforRange { minLenAligned until minLen } { _ =>
         val res = (getByte(base1, pointer1) & 0xff) - (getByte(base2, pointer2) & 0xff)
         if (res != 0) return res
         pointer1 += 1
