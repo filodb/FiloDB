@@ -2,7 +2,7 @@ language: scala
 dist: trusty
 env:
   global:
-   _JAVA_OPTIONS="-Dakka.test.timefactor=3 -XX:MaxMetaspaceSize=256m"
+   _JAVA_OPTIONS="-Dakka.test.timefactor=3 -XX:MaxMetaspaceSize=512m"
 scala:
   - 2.12.12
 jdk:
