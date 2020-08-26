@@ -90,7 +90,6 @@ final case class SetOperatorExec(queryContext: QueryContext,
 
   private def setOpAnd(lhsRvs: List[RangeVector], rhsRvs: List[RangeVector],
                        rhsSchema: ResultSchema): List[RangeVector] = {
-    //val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
     val rhsMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
     var result = new ListBuffer[RangeVector]()
     rhsRvs.foreach { rv =>
