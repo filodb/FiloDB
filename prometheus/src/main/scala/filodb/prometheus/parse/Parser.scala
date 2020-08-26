@@ -5,6 +5,10 @@ import scala.util.parsing.combinator.{JavaTokenParsers, PackratParsers, RegexPar
 import filodb.prometheus.ast.{Expressions, TimeRangeParams, TimeStepParams}
 import filodb.query._
 
+object BaseParser {
+  val whiteSpace = "[ \t\r\f\n]+".r
+}
+
 trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers with PackratParsers {
 
   lazy val labelNameIdentifier: PackratParser[Identifier] = {
@@ -21,6 +25,12 @@ trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers wit
       def apply(in: Input): ParseResult[Identifier] = {
         val source = in.source
         var offset = in.offset
+
+        (whiteSpace findPrefixMatchOf (source.subSequence(offset, source.length))) match {
+          case Some(matched) => offset += matched.end
+          case None =>
+        }
+
         val quote = source.charAt(offset); offset += 1
 
         if (quote != '\'' && quote != '"') {
@@ -40,6 +50,7 @@ trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers wit
             val next = source.charAt(offset); offset += 1
             c = next match {
               case '\\' | '\'' | '"' => next
+              case 'f' => '\f'
               case 'n' => '\n'
               case 'r' => '\r'
               case 't' => '\t'
@@ -357,7 +368,7 @@ object Parser extends Expression {
     */
   override lazy val skipWhitespace: Boolean = true
 
-  override val whiteSpace = "[ \t\r\f\n]+".r
+  override val whiteSpace = BaseParser.whiteSpace
 
   def parseQuery(query: String): Expression = {
     parseAll(expression, query) match {
