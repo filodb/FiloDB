@@ -185,7 +185,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
 
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
-        new TransientRow(1L, 100)).iterator
+        new TransientRow(1L, 100),
+        new TransientRow(2L, Double.NaN)).iterator
     },
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
@@ -199,6 +200,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, Double.NaN)).iterator
     })
+
   val sampleAllNaN : Array[RangeVector] = Array(
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
@@ -211,6 +213,34 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, Double.NaN)).iterator
+    })
+
+  val sampleMultipleRows: Array[RangeVector] = Array(
+    new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"http_requests".utf8,
+          "job".utf8 -> s"api-server".utf8,
+          "instance".utf8 -> "0".utf8,
+          "group".utf8 -> s"production".utf8)
+      )
+
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
+        new TransientRow(1L, 100),
+        new TransientRow(2L, 300)).iterator
+    },
+    new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"http_requests".utf8,
+          "job".utf8 -> s"api-server".utf8,
+          "instance".utf8 -> "1".utf8,
+          "group".utf8 -> s"production".utf8)
+      )
+
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
+        new TransientRow(1L, 200),
+        new TransientRow(2L, 400)).iterator
     })
 
   val sampleCanary = sampleHttpRequests.filter(_.key.labelValues.get(ZeroCopyUTF8String("group")).get.
@@ -935,5 +965,34 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     result.size shouldEqual 1 // second RV in sampleWithNaN has all Nan's
     result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
     result(0).rows.map(_.getDouble(1)).toList shouldEqual List(100)
+  }
+
+  it("AND should return NaN when rhs sample has Nan even when LHS is not NaN ") {
+
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
+      BinaryOperator.LAND,
+      Nil, Nil, "__name__")
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", tvSchema, sampleMultipleRows.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleWithNaN.map(rv => SerializedRangeVector(rv, schema)))
+    // scalastyle:on
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
+      .toListL.runAsync.futureValue
+
+    val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
+      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
+      ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("production")
+    ))
+
+    result.size shouldEqual 1 // second RV in sampleWithNaN has all Nan's
+    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
+    val rowValues = result(0).rows.map(_.getDouble(1)).toList
+    rowValues.head shouldEqual 100
+    // LHS second RV has value 300 for 2L, however RHS has Double.NaN for 2L so RHS value is picked
+    rowValues(1).isNaN shouldEqual true
   }
 }
