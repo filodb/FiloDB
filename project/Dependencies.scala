@@ -63,7 +63,7 @@ object Dependencies {
     "io.kamon"                     %% "kamon-zipkin"      % kamonZipkinVersion,
     "org.slf4j"                    % "slf4j-api"          % "1.7.10",
     "com.beachape"                 %% "enumeratum"        % "1.5.10",
-    "io.monix"                     %% "monix"             % "2.3.0",
+    "io.monix"                     %% "monix"             % "2.3.3",
     "com.googlecode.concurrentlinkedhashmap"              % "concurrentlinkedhashmap-lru" % "1.4",
     "com.iheart"                   %% "ficus"             % ficusVersion,
     "io.fastjson"                  % "boon"               % "0.33",
