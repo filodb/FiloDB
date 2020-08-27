@@ -422,4 +422,28 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     execPlan2.asInstanceOf[PromQlRemoteExec].params.startSecs shouldEqual(700)
     execPlan2.asInstanceOf[PromQlRemoteExec].params.endSecs shouldEqual(10000)
   }
+
+  it("should generate PromQlExec for metadata queries") {
+    val to = 10000
+    val from = 100
+    val intervalSelector = IntervalSelector(from, to)
+    val lp = Parser.metadataQueryToLogicalPlan("http_requests_total{job=\"prometheus\", method=\"GET\"}",
+      TimeStepParams(from, 20, to))
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef,
+          TimeRange(from * 1000, (from + 200) * 1000), false))
+      }
+    }
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual (true)
+    execPlan.asInstanceOf[MetadataRemoteExec].params.startSecs shouldEqual (from)
+    execPlan.asInstanceOf[MetadataRemoteExec].params.endSecs shouldEqual (to)
+
+  }
 }

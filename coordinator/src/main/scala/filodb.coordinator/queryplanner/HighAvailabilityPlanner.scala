@@ -1,11 +1,10 @@
 package filodb.coordinator.queryplanner
 
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.core.DatasetRef
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.query.LogicalPlan
-import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PromQlRemoteExec, StitchRvsExec}
+import filodb.query.{LabelValues, LogicalPlan, SeriesKeysByFilters}
+import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, LabelValuesDistConcatExec, MetadataRemoteExec, PartKeysDistConcatExec, PromQlRemoteExec, StitchRvsExec}
 
 /**
   * HighAvailabilityPlanner responsible for using underlying local planner and FailureProvider
@@ -59,15 +58,33 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
             (timeRange.startMs + offsetMs) / 1000, queryParams.stepSecs, (timeRange.endMs + offsetMs) / 1000,
             queryParams.spread, processFailure = false)
           logger.debug("PromQlExec params:" + promQlParams)
-          PromQlRemoteExec(remoteHttpEndpoint, remoteHttpTimeoutMs,
-            qContext, InProcessPlanDispatcher, dsRef, promQlParams)
+          rootLogicalPlan match {
+            case lp: LabelValues         => val urlParams =  Map("filter" -> lp.filters.map{f => f.column +
+                                           f.filter.operatorString + f.filter.valuesStrings.head}.mkString(","),
+                                           "labels" -> lp.labelNames.mkString(","))
+                                            MetadataRemoteExec(remoteHttpEndpoint, remoteHttpTimeoutMs,
+                                            urlParams, qContext, InProcessPlanDispatcher, dsRef, promQlParams)
+            case lp: SeriesKeysByFilters => val urlParams =  Map("match[]" -> queryParams.promQl)
+                                            MetadataRemoteExec(remoteHttpEndpoint, remoteHttpTimeoutMs,
+                                              urlParams, qContext, InProcessPlanDispatcher, dsRef, promQlParams)
+            case _                       => PromQlRemoteExec(remoteHttpEndpoint, remoteHttpTimeoutMs,
+                                            qContext, InProcessPlanDispatcher, dsRef, promQlParams)
+          }
+
       }
     }
 
     if (execPlans.size == 1) execPlans.head
-    else StitchRvsExec(qContext,
-                       InProcessPlanDispatcher,
-                       execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
+    else {
+      rootLogicalPlan match {
+        case lp: LabelValues         => LabelValuesDistConcatExec(qContext, InProcessPlanDispatcher,
+                                        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
+        case lp: SeriesKeysByFilters => PartKeysDistConcatExec(qContext, InProcessPlanDispatcher,
+                                        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
+        case _                       => StitchRvsExec(qContext, InProcessPlanDispatcher,
+                                         execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
+      }
+    }
     // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
     // Sort to move RemoteExec in end as it does not have schema
 

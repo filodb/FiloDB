@@ -61,9 +61,7 @@ sealed trait PeriodicSeriesPlan extends LogicalPlan {
   def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan
 }
 
-sealed trait MetadataQueryPlan extends LogicalPlan {
-  override def isRoutable: Boolean = false
-}
+sealed trait MetadataQueryPlan extends LogicalPlan
 
 /**
   * A selector is needed in the RawSeries logical plan to specify

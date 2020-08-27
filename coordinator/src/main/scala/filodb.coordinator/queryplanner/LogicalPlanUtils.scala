@@ -30,7 +30,12 @@ object LogicalPlanUtils {
       case lp: ApplyInstantFunction        => getTimeFromLogicalPlan(lp.vectors)
       case lp: Aggregate                   => getTimeFromLogicalPlan(lp.vectors)
       case lp: BinaryJoin                  => // can assume lhs & rhs have same time
-                                              getTimeFromLogicalPlan(lp.lhs)
+                                              val lhsTime = getTimeFromLogicalPlan(lp.lhs)
+                                              val rhsTime = getTimeFromLogicalPlan(lp.rhs)
+                                              if (lhsTime != rhsTime) throw new UnsupportedOperationException(
+                                                "Failure routing not supported for Binary Join when LHS and RHS times" +
+                                                  "are not equal")
+                                              else lhsTime
       case lp: ScalarVectorBinaryOperation => getTimeFromLogicalPlan(lp.vector)
       case lp: ApplyMiscellaneousFunction  => getTimeFromLogicalPlan(lp.vectors)
       case lp: ApplySortFunction           => getTimeFromLogicalPlan(lp.vectors)
@@ -42,7 +47,12 @@ object LogicalPlanUtils {
                                                 case i: IntervalSelector => TimeRange(i.from, i.to)
                                                 case _ => throw new BadQueryException(s"Invalid logical plan")
                                               }
-      case _                               => throw new BadQueryException(s"Invalid logical plan ${logicalPlan}")
+      case lp: LabelValues                 => TimeRange(lp.startMs, lp.endMs)
+      case lp: SeriesKeysByFilters         => TimeRange(lp.startMs, lp.endMs)
+      case lp: ApplyInstantFunctionRaw     => getTimeFromLogicalPlan(lp.vectors)
+      case lp: ScalarBinaryOperation       => TimeRange(lp.rangeParams.startSecs * 1000, lp.rangeParams.endSecs * 1000)
+      case lp: ScalarFixedDoublePlan       => TimeRange(lp.timeStepParams.startSecs * 1000, lp.timeStepParams.endSecs * 1000)
+      case lp: RawChunkMeta                => throw new UnsupportedOperationException(s"RawChunkMeta does not have time")
     }
   }
 
@@ -53,9 +63,10 @@ object LogicalPlanUtils {
   def copyLogicalPlanWithUpdatedTimeRange(logicalPlan: LogicalPlan,
                                           timeRange: TimeRange): LogicalPlan = {
     logicalPlan match {
-      case lp: PeriodicSeriesPlan => copyWithUpdatedTimeRange(lp, timeRange)
-      case lp: RawSeriesLikePlan => copyNonPeriodicWithUpdatedTimeRange(lp, timeRange)
-      case _ => throw new UnsupportedOperationException("Logical plan not supported for copy")
+      case lp: PeriodicSeriesPlan  => copyWithUpdatedTimeRange(lp, timeRange)
+      case lp: RawSeriesLikePlan   => copyNonPeriodicWithUpdatedTimeRange(lp, timeRange)
+      case lp: LabelValues         => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: SeriesKeysByFilters => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
     }
   }
 
@@ -68,8 +79,8 @@ object LogicalPlanUtils {
                                timeRange: TimeRange): PeriodicSeriesPlan = {
     logicalPlan match {
       case lp: PeriodicSeries              => lp.copy(startMs = timeRange.startMs,
-                                                     endMs = timeRange.endMs,
-                                                     rawSeries = copyNonPeriodicWithUpdatedTimeRange(lp.rawSeries,
+                                                      endMs = timeRange.endMs,
+                                                      rawSeries = copyNonPeriodicWithUpdatedTimeRange(lp.rawSeries,
                                                        timeRange).asInstanceOf[RawSeries])
       case lp: PeriodicSeriesWithWindowing => lp.copy(startMs = timeRange.startMs,
                                                       endMs = timeRange.endMs,
