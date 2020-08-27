@@ -23,6 +23,7 @@ object LogicalPlanUtils {
   /**
     * Retrieve start and end time from LogicalPlan
     */
+  // scalastyle:off cyclomatic.complexity
   def getTimeFromLogicalPlan(logicalPlan: LogicalPlan): TimeRange = {
     logicalPlan match {
       case lp: PeriodicSeries              => TimeRange(lp.startMs, lp.endMs)
@@ -51,10 +52,13 @@ object LogicalPlanUtils {
       case lp: SeriesKeysByFilters         => TimeRange(lp.startMs, lp.endMs)
       case lp: ApplyInstantFunctionRaw     => getTimeFromLogicalPlan(lp.vectors)
       case lp: ScalarBinaryOperation       => TimeRange(lp.rangeParams.startSecs * 1000, lp.rangeParams.endSecs * 1000)
-      case lp: ScalarFixedDoublePlan       => TimeRange(lp.timeStepParams.startSecs * 1000, lp.timeStepParams.endSecs * 1000)
-      case lp: RawChunkMeta                => throw new UnsupportedOperationException(s"RawChunkMeta does not have time")
+      case lp: ScalarFixedDoublePlan       => TimeRange(lp.timeStepParams.startSecs * 1000,
+                                              lp.timeStepParams.endSecs * 1000)
+      case lp: RawChunkMeta                => throw new UnsupportedOperationException(s"RawChunkMeta does not have " +
+                                              s"time")
     }
   }
+  // scalastyle:on cyclomatic.complexity
 
   /**
    * Used to change start and end time(TimeRange) of LogicalPlan

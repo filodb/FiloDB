@@ -1,10 +1,11 @@
 package filodb.coordinator.queryplanner
 
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.DatasetRef
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.query.{LabelValues, LogicalPlan, SeriesKeysByFilters}
-import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, LabelValuesDistConcatExec, MetadataRemoteExec, PartKeysDistConcatExec, PromQlRemoteExec, StitchRvsExec}
+import filodb.query.exec._
 
 /**
   * HighAvailabilityPlanner responsible for using underlying local planner and FailureProvider
@@ -30,6 +31,21 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
 
   val remoteHttpTimeoutMs: Long =
     queryConfig.routingConfig.config.as[Option[Long]]("remote.http.timeout").getOrElse(60000)
+
+  private def stitchPlans(rootLogicalPlan: LogicalPlan,
+                          execPlans: Seq[ExecPlan],
+                          queryContext: QueryContext)= {
+    rootLogicalPlan match {
+        case lp: LabelValues         => LabelValuesDistConcatExec(queryContext, InProcessPlanDispatcher,
+                                        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
+        case lp: SeriesKeysByFilters => PartKeysDistConcatExec(queryContext, InProcessPlanDispatcher,
+                                        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
+        case _                       => StitchRvsExec(queryContext, InProcessPlanDispatcher,
+                                         execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
+      // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
+      // Sort to move RemoteExec in end as it does not have schema
+    }
+  }
 
   /**
     * Converts Route objects returned by FailureProvider to ExecPlan
@@ -59,12 +75,12 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
             queryParams.spread, processFailure = false)
           logger.debug("PromQlExec params:" + promQlParams)
           rootLogicalPlan match {
-            case lp: LabelValues         => val urlParams =  Map("filter" -> lp.filters.map{f => f.column +
+            case lp: LabelValues         => val urlParams = Map("filter" -> lp.filters.map{f => f.column +
                                            f.filter.operatorString + f.filter.valuesStrings.head}.mkString(","),
                                            "labels" -> lp.labelNames.mkString(","))
                                             MetadataRemoteExec(remoteHttpEndpoint, remoteHttpTimeoutMs,
                                             urlParams, qContext, InProcessPlanDispatcher, dsRef, promQlParams)
-            case lp: SeriesKeysByFilters => val urlParams =  Map("match[]" -> queryParams.promQl)
+            case lp: SeriesKeysByFilters => val urlParams = Map("match[]" -> queryParams.promQl)
                                             MetadataRemoteExec(remoteHttpEndpoint, remoteHttpTimeoutMs,
                                               urlParams, qContext, InProcessPlanDispatcher, dsRef, promQlParams)
             case _                       => PromQlRemoteExec(remoteHttpEndpoint, remoteHttpTimeoutMs,
@@ -75,19 +91,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     }
 
     if (execPlans.size == 1) execPlans.head
-    else {
-      rootLogicalPlan match {
-        case lp: LabelValues         => LabelValuesDistConcatExec(qContext, InProcessPlanDispatcher,
-                                        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
-        case lp: SeriesKeysByFilters => PartKeysDistConcatExec(qContext, InProcessPlanDispatcher,
-                                        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
-        case _                       => StitchRvsExec(qContext, InProcessPlanDispatcher,
-                                         execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
-      }
-    }
-    // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
-    // Sort to move RemoteExec in end as it does not have schema
-
+    else stitchPlans(rootLogicalPlan, execPlans, qContext)
   }
 
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
