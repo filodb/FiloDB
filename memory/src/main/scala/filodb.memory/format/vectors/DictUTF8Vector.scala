@@ -2,7 +2,7 @@ package filodb.memory.format.vectors
 
 import java.util.HashMap
 
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.MemFactory
 import filodb.memory.format._
@@ -46,7 +46,7 @@ object DictUTF8Vector {
     val codeVect = IntBinaryVector.appendingVectorNoNA(memFactory, sourceLen)
     dictVect.addNA()   // first code point 0 == NA
 
-    for { i <- 0 until sourceLen optimized } {
+    cforRange { 0 until sourceLen } { i =>
       if (sourceVector.isAvailable(i)) {
         val item = sourceVector(i)
         val newCode = codeMap.size + 1

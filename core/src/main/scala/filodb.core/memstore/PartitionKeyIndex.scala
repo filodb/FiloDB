@@ -3,7 +3,7 @@ package filodb.core.memstore
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
 import org.jctools.maps.NonBlockingHashMap
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.Types.PartitionKey
 import filodb.core.binaryrecord2.MapItemConsumer
@@ -71,7 +71,7 @@ class PartitionKeyIndex(dataset: Dataset) extends StrictLogging {
    * Adds fields from a partition key to the index
    */
   def addPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
-    for { i <- 0 until numPartColumns optimized } {
+    cforRange { 0 until numPartColumns } { i =>
       indexers(i).fromPartKey(base, offset, partIndex)
     }
   }

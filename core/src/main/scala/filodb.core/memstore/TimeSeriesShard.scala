@@ -21,7 +21,7 @@ import monix.execution.{Scheduler, UncaughtExceptionReporter}
 import monix.execution.atomic.AtomicBoolean
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
@@ -114,7 +114,7 @@ object TimeSeriesShard {
   def writeMeta(addr: Long, partitionID: Int, info: ChunkSetInfo, vectors: Array[BinaryVectorPtr]): Unit = {
     UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, addr, partitionID)
     ChunkSetInfo.copy(info, addr + 4)
-    for { i <- 0 until vectors.size optimized } {
+    cforRange { 0 until vectors.size } { i =>
       ChunkSetInfo.setVectorPtr(addr + 4, i, vectors(i))
     }
   }
@@ -125,7 +125,7 @@ object TimeSeriesShard {
   def writeMeta(addr: Long, partitionID: Int, bytes: Array[Byte], vectors: Array[BinaryVectorPtr]): Unit = {
     UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, addr, partitionID)
     ChunkSetInfo.copy(bytes, addr + 4)
-    for { i <- 0 until vectors.size optimized } {
+    cforRange { 0 until vectors.size } { i =>
       ChunkSetInfo.setVectorPtr(addr + 4, i, vectors(i))
     }
   }
@@ -135,7 +135,7 @@ object TimeSeriesShard {
     */
   def writeMetaWithoutPartId(addr: Long, bytes: Array[Byte], vectors: Array[BinaryVectorPtr]): Unit = {
     ChunkSetInfo.copy(bytes, addr)
-    for { i <- 0 until vectors.size optimized } {
+    cforRange { 0 until vectors.size } { i =>
       ChunkSetInfo.setVectorPtr(addr, i, vectors(i))
     }
   }
@@ -809,7 +809,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     var newTimestamp = ingestionTime
 
     if (newTimestamp > oldTimestamp && oldTimestamp != Long.MinValue) {
-      for (group <- 0 until numGroups optimized) {
+      cforRange ( 0 until numGroups ) { group =>
         /* Logically, the task creation filter is as follows:
 
            // Compute the time offset relative to the group number. 0 min, 1 min, 2 min, etc.

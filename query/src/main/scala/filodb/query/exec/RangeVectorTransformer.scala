@@ -2,7 +2,7 @@ package filodb.query.exec
 
 import monix.reactive.Observable
 import scala.collection.mutable.ListBuffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
@@ -442,7 +442,7 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
       }
 
       timestamps += row.getLong(0)
-      for { b <- 0 until hist.numBuckets optimized } {
+      cforRange { 0 until hist.numBuckets } { b =>
         buckets(hist.bucketTop(b)) += hist.bucketValue(b)
       }
       emptyBuckets.foreach { b => buckets(b) += Double.NaN }

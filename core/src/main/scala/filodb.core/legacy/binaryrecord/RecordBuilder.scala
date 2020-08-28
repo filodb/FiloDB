@@ -2,7 +2,7 @@ package filodb.core.legacy.binaryrecord
 
 import com.typesafe.scalalogging.StrictLogging
 import org.agrona.DirectBuffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, LongColumn, MapColumn, StringColumn}
@@ -236,7 +236,7 @@ final class RecordBuilder(memFactory: MemFactory,
    */
   final def addFromReader(row: RowReader): Long = {
     startNewRecord()
-    for { pos <- 0 until schema.numFields optimized } {
+    cforRange { 0 until schema.numFields } { pos =>
       schema.builderAdders(pos)(row, this)
     }
     endRecord()
@@ -557,7 +557,7 @@ object RecordBuilder {
   final def sortAndComputeHashes(pairs: java.util.ArrayList[(String, String)]): Array[Int] = {
     pairs.sort(stringPairComparator)
     val hashes = new Array[Int](pairs.size)
-    for { i <- 0 until pairs.size optimized } {
+    cforRange { 0 until pairs.size } { i =>
       val (k, v) = pairs.get(i)
       // This is not very efficient, we have to convert String to bytes first to get the hash
       // TODO: work on different API which is far more efficient and saves memory allocation
@@ -586,7 +586,7 @@ object RecordBuilder {
                                  hashes: Array[Int],
                                  excludeKeys: Set[String]): Int = {
     var hash = 7
-    for { i <- 0 until sortedPairs.size optimized } {
+    cforRange { 0 until sortedPairs.size } { i =>
       if (!(excludeKeys contains sortedPairs.get(i)._1))
         hash = combineHash(hash, hashes(i))
     }

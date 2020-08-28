@@ -376,7 +376,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // whether child tasks need to be executed sequentially.
     // parallelism 1 means, only one worker thread to process underlying tasks.
     val parallelism: Int = if (parallelChildTasks)
-                              Runtime.getRuntime.availableProcessors()
+                              children.length
                            else
                               1
 
