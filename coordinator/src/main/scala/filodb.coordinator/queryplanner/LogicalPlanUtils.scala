@@ -30,12 +30,10 @@ object LogicalPlanUtils {
       case lp: PeriodicSeriesWithWindowing => TimeRange(lp.startMs, lp.endMs)
       case lp: ApplyInstantFunction        => getTimeFromLogicalPlan(lp.vectors)
       case lp: Aggregate                   => getTimeFromLogicalPlan(lp.vectors)
-      case lp: BinaryJoin                  => // can assume lhs & rhs have same time
-                                              val lhsTime = getTimeFromLogicalPlan(lp.lhs)
+      case lp: BinaryJoin                  => val lhsTime = getTimeFromLogicalPlan(lp.lhs)
                                               val rhsTime = getTimeFromLogicalPlan(lp.rhs)
                                               if (lhsTime != rhsTime) throw new UnsupportedOperationException(
-                                                "Failure routing not supported for Binary Join when LHS and RHS times" +
-                                                  "are not equal")
+                                                "Binary Join has different LHS and RHS times")
                                               else lhsTime
       case lp: ScalarVectorBinaryOperation => getTimeFromLogicalPlan(lp.vector)
       case lp: ApplyMiscellaneousFunction  => getTimeFromLogicalPlan(lp.vectors)

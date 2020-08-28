@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.DatasetRef
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.query.{ApplyInstantFunctionRaw, LabelValues, LogicalPlan, RawSeries, SeriesKeysByFilters}
+import filodb.query.{LabelValues, LogicalPlan, SeriesKeysByFilters}
 import filodb.query.exec._
 
 /**
