@@ -2,8 +2,10 @@ package filodb.query.exec
 
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
+
 import monix.eval.Task
 import monix.reactive.Observable
+
 import filodb.core.memstore.SchemaMismatch
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
