@@ -34,7 +34,7 @@ class FailureProviderSpec extends AnyFunSpec with Matchers {
 
   it("should check for PeriodicSeries plan") {
     summed1.isRoutable shouldEqual (true)
-    raw2.isRoutable shouldEqual (false)
+    raw2.isRoutable shouldEqual (true)
   }
 
   it("should not allow Binary Joins with different time ranges in lhs/rhs") {
