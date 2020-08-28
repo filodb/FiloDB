@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.DatasetRef
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.query.{LabelValues, LogicalPlan, SeriesKeysByFilters}
+import filodb.query.{ApplyInstantFunctionRaw, LabelValues, LogicalPlan, RawSeries, SeriesKeysByFilters}
 import filodb.query.exec._
 
 /**
@@ -74,16 +74,17 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
             (timeRange.startMs + offsetMs) / 1000, queryParams.stepSecs, (timeRange.endMs + offsetMs) / 1000,
             queryParams.spread, processFailure = false)
           logger.debug("PromQlExec params:" + promQlParams)
+          val httpEndpoint = remoteHttpEndpoint + queryParams.remoteQueryPath.getOrElse("")
           rootLogicalPlan match {
             case lp: LabelValues         => val urlParams = Map("filter" -> lp.filters.map{f => f.column +
                                            f.filter.operatorString + f.filter.valuesStrings.head}.mkString(","),
                                            "labels" -> lp.labelNames.mkString(","))
-                                            MetadataRemoteExec(remoteHttpEndpoint, remoteHttpTimeoutMs,
+                                            MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                             urlParams, qContext, InProcessPlanDispatcher, dsRef, promQlParams)
             case lp: SeriesKeysByFilters => val urlParams = Map("match[]" -> queryParams.promQl)
-                                            MetadataRemoteExec(remoteHttpEndpoint, remoteHttpTimeoutMs,
+                                            MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                               urlParams, qContext, InProcessPlanDispatcher, dsRef, promQlParams)
-            case _                       => PromQlRemoteExec(remoteHttpEndpoint, remoteHttpTimeoutMs,
+            case _                       => PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                             qContext, InProcessPlanDispatcher, dsRef, promQlParams)
           }
 
@@ -94,7 +95,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     else stitchPlans(rootLogicalPlan, execPlans, qContext)
   }
 
-  def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+  override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
     // lazy because we want to fetch failures only if needed
     lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)

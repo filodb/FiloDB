@@ -30,7 +30,6 @@ sealed trait LogicalPlan {
   * not in the same time cadence as user query windowing.
   */
 sealed trait RawSeriesLikePlan extends LogicalPlan {
-  override def isRoutable: Boolean = false
   def isRaw: Boolean = false
   def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan
 }
