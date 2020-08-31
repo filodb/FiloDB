@@ -20,7 +20,17 @@ trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers wit
   }
 
   protected lazy val labelValueIdentifier: PackratParser[Identifier] = {
-    // Parse a quoted identifier, supporting escapes, with quotes removed.
+    // Parse a quoted identifier, supporting escapes, with quotes removed. Note that this
+    // originally relied on a complex regex with capturing groups. The way capturing groups are
+    // processed by the Java regex class results in deep recursion and a stack overflow error
+    // for long identifiers. In addition, the regex could only detect escape patterns, but it
+    // couldn't replace them. As a result, an additional step was required to parse the string
+    // again, searching and replacing the escapes. Parsers for "real" programming languages
+    // never use regular expressions, because they are limited in capability. Custom code is
+    // certainly "bigger", but it's much more flexible overall. This also makes it easier to
+    // support additional types of promql strings that aren't supported as of yet. For example,
+    // additional escapes, and backtick quotes which don't do escape processing.
+
     new PackratParser[Identifier]() {
       def apply(in: Input): ParseResult[Identifier] = {
         val source = in.source
