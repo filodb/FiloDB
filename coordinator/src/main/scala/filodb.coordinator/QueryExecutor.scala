@@ -42,7 +42,8 @@ case class QueryCompletedScheduleNext(completedQueryId: String, sched: Scheduler
  * TODO: Add more docs describing necessity and strategy.
  */
 class QueryExecutor(ref: DatasetRef,
-                    parallelism: Int,
+                    fjpParallelism: Int,
+                    maxConcurrentQueryIds: Int,
                     queryActor: ActorRef) extends StrictLogging {
 
   private val tags = TagSet.from(Map("dataset" -> ref.toString))
@@ -71,7 +72,7 @@ class QueryExecutor(ref: DatasetRef,
   /**
    * Free scheduler pool. Number of schedulers depends on parallelism passed in.
    */
-  private val leafScheduler = Scheduler.computation(parallelism = parallelism,
+  private val leafScheduler = Scheduler.computation(parallelism = fjpParallelism,
     name = s"${FiloSchedulers.QuerySchedName}-$ref-Leaf",
     reporter = newExceptionHandler())
 
@@ -83,7 +84,7 @@ class QueryExecutor(ref: DatasetRef,
   /**
    * Non-Leaf Plan scheduler - plans are not queued but executed immediately.
    */
-  private val nonLeafSched = Scheduler.computation(parallelism = parallelism,
+  private val nonLeafSched = Scheduler.computation(parallelism = fjpParallelism,
                                            name = s"${FiloSchedulers.QuerySchedName}-$ref-NonLeaf",
                                            reporter = newExceptionHandler())
 
@@ -100,7 +101,8 @@ class QueryExecutor(ref: DatasetRef,
       execPlanFunc(plan, replyTo, nonLeafSched)
     } else if (executingOn.isDefined) { // queryId already executing, so schedule right away
       scheduleNow(qte, leafScheduler)
-    } else if (executingQueryIdToPlanCount.size < parallelism) { // bandwidth available now, so schedule right away
+    } else if (executingQueryIdToPlanCount.size < maxConcurrentQueryIds) {
+      // bandwidth available now, so schedule right away
       scheduleNow(qte, leafScheduler)
     } else { // no free scheduler available, needs to be queued
       val waitingPlans = waitingQueryIdToPlans.getOrElseUpdate(plan.queryContext.queryId, ArrayBuffer.empty)

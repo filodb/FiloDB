@@ -85,10 +85,11 @@ final class QueryActor(memStore: MemStore,
   val queryPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapFunc,
                                               earliestRawTimestampFn, queryConfig, functionalSpreadProvider)
 
-
-  val queryExecutionParallelism = Math.ceil(config.getDouble("filodb.query.threads-factor")
+  val queryFJPSchedulerParallelism = Math.ceil(config.getDouble("filodb.query.threads-factor")
                                 * sys.runtime.availableProcessors).toInt
-  val queryExecutor = new QueryExecutor(dsRef, queryExecutionParallelism, self)
+  val maxConcurrentQueryIds = Math.ceil(queryFJPSchedulerParallelism
+                                * config.getDouble("filodb.query.throttle-factor")).toInt
+  val queryExecutor = new QueryExecutor(dsRef, queryFJPSchedulerParallelism, maxConcurrentQueryIds, self)
 
   private val tags = Map("dataset" -> dsRef.toString)
   private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").withTags(TagSet.from(tags))
