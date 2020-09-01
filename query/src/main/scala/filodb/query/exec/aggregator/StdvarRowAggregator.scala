@@ -78,6 +78,6 @@ object StdvarRowAggregator extends RowAggregator {
   }
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = {
     // drop last two column with mean and count
-    reductionSchema.copy(reductionSchema.columns.dropRight(2))
+    reductionSchema.copy(reductionSchema.columns.filterNot(c => (c.name.equals("mean") || c.name.equals("count"))))
   }
 }

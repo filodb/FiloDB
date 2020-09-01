@@ -16,12 +16,12 @@ import filodb.query.exec.aggregator.RowAggregator
   * Reduce combined aggregates from children. Can be applied in a
   * hierarchical manner multiple times to arrive at result.
   */
-final case class ReduceAggregateExec(queryContext: QueryContext,
-                                     dispatcher: PlanDispatcher,
-                                     childAggregates: Seq[ExecPlan],
-                                     aggrOp: AggregationOperator,
-                                     aggrParams: Seq[Any]) extends NonLeafExecPlan {
+trait ReduceAggregateExec extends NonLeafExecPlan {
+  def childAggregates: Seq[ExecPlan]
+
   def children: Seq[ExecPlan] = childAggregates
+  def aggrOp: AggregationOperator
+  def aggrParams: Seq[Any]
 
   protected def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
@@ -40,7 +40,33 @@ final case class ReduceAggregateExec(queryContext: QueryContext,
                }
     Observable.fromTask(task).flatten
   }
+
 }
+
+/**
+  * Use when child ExecPlan's span single local partition
+  */
+final case class LocalPartitionReduceAggregateExec(queryContext: QueryContext,
+                                                   dispatcher: PlanDispatcher,
+                                                   childAggregates: Seq[ExecPlan],
+                                                   aggrOp: AggregationOperator,
+                                                   aggrParams: Seq[Any]) extends ReduceAggregateExec
+
+/**
+  * Use when child ExecPlan's span multiple partitions
+  */
+final case class MultiPartitionReduceAggregateExec(queryContext: QueryContext,
+                                                   dispatcher: PlanDispatcher,
+                                                   childAggregates: Seq[ExecPlan],
+                                                   aggrOp: AggregationOperator,
+                                                   aggrParams: Seq[Any]) extends ReduceAggregateExec {
+  // overriden since it can reduce schemas with different vector lengths as long as the columns are same
+  override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema =
+    IgnoreFixedVectorLenAndColumnNamesSchemaReducer.reduceSchema(rs, resp)
+}
+
+
+
 
 /**
   * Performs aggregation operation across RangeVectors within a shard
@@ -164,10 +190,10 @@ object RangeVectorAggregator extends StrictLogging {
   }
 
   private def mapReduceInternal(rvs: List[RangeVector],
-                     rowAgg: RowAggregator,
-                     skipMapPhase: Boolean,
-                     grouping: RangeVector => RangeVectorKey):
-                          Map[RangeVectorKey, CloseableIterator[rowAgg.AggHolderType]] = {
+                                rowAgg: RowAggregator,
+                                skipMapPhase: Boolean,
+                                grouping: RangeVector => RangeVectorKey):
+                                Map[RangeVectorKey, CloseableIterator[rowAgg.AggHolderType]] = {
     logger.trace(s"mapReduceInternal on ${rvs.size} RangeVectors...")
     var acc = rowAgg.zero
     val mapInto = rowAgg.newRowToMapInto

@@ -63,6 +63,13 @@ final case class RawChunkSet(infoBytes: Array[Byte], vectors: Array[ByteBuffer])
 final case class RawPartData(partitionKey: Array[Byte], chunkSetsTimeOrdered: Seq[RawChunkSet])
 
 trait ChunkSource extends RawChunkSource with StrictLogging {
+
+  /**
+    * True if this store is in the mode of serving downsampled data.
+    * This is used to switch ingestion and query behaviors for downsample cluster.
+    */
+  def isDownsampleStore: Boolean
+
   /**
    * Scans and returns data in partitions according to the method.  The partitions are ready to be queried.
    * FiloPartitions contains chunks in offheap memory.

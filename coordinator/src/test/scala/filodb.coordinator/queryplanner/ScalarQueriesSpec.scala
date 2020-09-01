@@ -3,7 +3,6 @@ package filodb.coordinator.queryplanner
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{FunSpec, Matchers}
 
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
@@ -13,8 +12,10 @@ import filodb.prometheus.parse.Parser
 import filodb.query._
 import filodb.query.ScalarFunctionId.Time
 import filodb.query.exec._
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class ScalarQueriesSpec extends FunSpec with Matchers {
+class ScalarQueriesSpec extends AnyFunSpec with Matchers {
 
   implicit val system = ActorSystem()
   val node = TestProbe().ref
@@ -53,17 +54,17 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate Scalar exec plan") {
-    val lp = Parser.queryToLogicalPlan("scalar(test{job = \"app\"})", 1000)
+    val lp = Parser.queryToLogicalPlan("scalar(test{job = \"app\"})", 1000, 1000)
 
     // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    execPlan.isInstanceOf[DistConcatExec] shouldEqual (true)
+    execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
     execPlan.rangeVectorTransformers.size shouldEqual (1)
     execPlan.rangeVectorTransformers.head.isInstanceOf[ScalarFunctionMapper] shouldEqual (true)
     execPlan.printTree()
     val expected =
       """T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-        |-E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1153666897])
+        |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1153666897])
         |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1153666897])
         |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -85,13 +86,13 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate ScalarOperationMapper exec plan for query http_requests_total + time()") {
-    val lp = Parser.queryToLogicalPlan("http_requests_total{job = \"app\"} + time()", 1000)
+    val lp = Parser.queryToLogicalPlan("http_requests_total{job = \"app\"} + time()", 1000, 1000)
 
     // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
-      """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1510751596])
+      """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1510751596])
         |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
         |--FA1~TimeFuncArgs(RangeParams(1000,1000,1000))
         |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -104,7 +105,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate ScalarOperationMapper for query having binary operation between scalar function and metric") {
-    val lp = Parser.queryToLogicalPlan("scalar(http_requests_total{job = \"app\"}) + node_info{job = \"app\"}", 1000)
+    val lp = Parser.queryToLogicalPlan("scalar(http_requests_total{job = \"app\"}) + node_info{job = \"app\"}", 1000, 1000)
 
     // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
@@ -114,11 +115,11 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val execPlanFuncArg = scalarOperationMapper.funcParams.head.asInstanceOf[ExecPlanFuncArgs]
     execPlanFuncArg.execPlan.rangeVectorTransformers.head.isInstanceOf[ScalarFunctionMapper]
     val expected =
-      """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1643642770])
+      """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1643642770])
         |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true)
         |--FA1~
         |--T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-        |---E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1643642770])
+        |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1643642770])
         |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1643642770])
         |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -128,7 +129,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
         |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true)
         |--FA1~
         |--T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-        |---E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1643642770])
+        |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1643642770])
         |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1643642770])
         |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -140,13 +141,13 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate ScalarOperationMapper exec plan for query 10 + http_requests_total") {
-    val lp = Parser.queryToLogicalPlan("10 + http_requests_total{job = \"app\"}", 1000)
+    val lp = Parser.queryToLogicalPlan("10 + http_requests_total{job = \"app\"}", 1000, 1000)
 
     // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
-      """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1110105620])
+      """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1110105620])
         |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true)
         |--FA1~StaticFuncArgs(10.0,RangeParams(1000,1000,1000))
         |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -160,7 +161,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate ScalarOperationMapper exec plan for query time() + 10") {
-    val lp = Parser.queryToLogicalPlan("time() + 10", 1000)
+    val lp = Parser.queryToLogicalPlan("time() + 10", 1000, 1000)
 
     // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
@@ -173,13 +174,13 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate ScalarOperationMapper exec plan for query  http_requests_total + 10") {
-    val lp = Parser.queryToLogicalPlan("http_requests_total{job = \"app\"} + 10", 1000)
+    val lp = Parser.queryToLogicalPlan("http_requests_total{job = \"app\"} + 10", 1000, 1000)
 
     // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
-      """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1245070935])
+      """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1245070935])
         |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
         |--FA1~StaticFuncArgs(10.0,RangeParams(1000,1000,1000))
         |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -193,14 +194,14 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate ScalarOperationMapper exec plan for query scalar(http_requests_total) + time()") {
-    val lp = Parser.queryToLogicalPlan("scalar(http_requests_total{job = \"app\"}) + time()", 1000)
+    val lp = Parser.queryToLogicalPlan("scalar(http_requests_total{job = \"app\"}) + time()", 1000, 1000)
     // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true)
         |-FA1~
         |-T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-        |--E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2114470773])
+        |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2114470773])
         |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2114470773])
         |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -210,20 +211,20 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate ScalarOperationMapper exec plan for query scalar(http_requests_total) - scalar(node_info)") {
-    val lp = Parser.queryToLogicalPlan("scalar(http_requests_total{job = \"app\"}) - scalar(node_info{job = \"app\"})", 1000)
+    val lp = Parser.queryToLogicalPlan("scalar(http_requests_total{job = \"app\"}) - scalar(node_info{job = \"app\"})", 1000, 1000)
     // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """T~ScalarOperationMapper(operator=SUB, scalarOnLhs=true)
         |-FA1~
         |-T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-        |--E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1081611650])
+        |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1081611650])
         |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1081611650])
         |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1081611650])
         |-T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-        |--E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1081611650])
+        |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1081611650])
         |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1081611650])
         |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -232,14 +233,14 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate ScalarOperationMapper exec plan for query scalar(http_requests_total) + 3") {
-    val lp = Parser.queryToLogicalPlan("scalar(http_requests_total{job = \"app\"}) + 3", 1000)
+    val lp = Parser.queryToLogicalPlan("scalar(http_requests_total{job = \"app\"}) + 3", 1000, 1000)
     // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
         |-FA1~StaticFuncArgs(3.0,RangeParams(1000,1000,1000))
         |-T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-        |--E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#856852588])
+        |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#856852588])
         |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#856852588])
         |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -249,7 +250,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate vector plan for vector(2000)") {
-    val lp = Parser.queryToLogicalPlan("vector(2000)", 1000)
+    val lp = Parser.queryToLogicalPlan("vector(2000)", 1000, 1000)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """T~VectorFunctionMapper(funcParams=List())
@@ -258,7 +259,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate vector plan for vector(time())") {
-    val lp = Parser.queryToLogicalPlan("vector(time())", 1000)
+    val lp = Parser.queryToLogicalPlan("vector(time())", 1000, 1000)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """T~VectorFunctionMapper(funcParams=List())
@@ -267,7 +268,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate InstantVectorFunctionMapper and VectorFunctionMapper for minute(vector(1136239445))") {
-    val lp = Parser.queryToLogicalPlan("minute(vector(1136239445))", 1000)
+    val lp = Parser.queryToLogicalPlan("minute(vector(1136239445))", 1000, 1000)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """T~InstantVectorFunctionMapper(function=Minute)
@@ -278,7 +279,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate vector plan for days_in_month(vector(1454284800))") {
-    val lp = Parser.queryToLogicalPlan("days_in_month(vector(1454284800))", 1000)
+    val lp = Parser.queryToLogicalPlan("days_in_month(vector(1454284800))", 1000, 1000)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """T~InstantVectorFunctionMapper(function=DaysInMonth)
@@ -288,7 +289,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate binary join for month(vector(1456790399)) + day_of_month(vector(1456790399))") {
-    val lp = Parser.queryToLogicalPlan("month(vector(1456790399)) + day_of_month(vector(1456790399))", 1000)
+    val lp = Parser.queryToLogicalPlan("month(vector(1456790399)) + day_of_month(vector(1456790399))", 1000, 1000)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher
@@ -302,14 +303,14 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate InstantFunctionMapper when parameter is scalar function") {
-    val lp = Parser.queryToLogicalPlan("clamp_max(node_info{job = \"app\"},scalar(http_requests_total{job = \"app\"}))", 1000)
+    val lp = Parser.queryToLogicalPlan("clamp_max(node_info{job = \"app\"},scalar(http_requests_total{job = \"app\"}))", 1000, 1000)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
-      """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#79055924])
+      """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#79055924])
         |-T~InstantVectorFunctionMapper(function=ClampMax)
         |--FA1~
         |--T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-        |---E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#79055924])
+        |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#79055924])
         |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#79055924])
         |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -319,7 +320,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
         |-T~InstantVectorFunctionMapper(function=ClampMax)
         |--FA1~
         |--T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-        |---E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#79055924])
+        |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#79055924])
         |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#79055924])
         |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -330,7 +331,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate ScalarBinaryOperationExec plan for query 1 + 3") {
-    val lp = Parser.queryToLogicalPlan("1 + 3", 1000)
+    val lp = Parser.queryToLogicalPlan("1 + 3", 1000, 1000)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
@@ -340,7 +341,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate ScalarBinaryOperationExec plan for query 1 < bool(3)") {
-    val lp = Parser.queryToLogicalPlan("1 < bool(3)", 1000)
+    val lp = Parser.queryToLogicalPlan("1 < bool(3)", 1000, 1000)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
@@ -350,12 +351,12 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate ScalarOperationMapper exec plan for query 1 < bool(2) + http_requests_total") {
-    val lp = Parser.queryToLogicalPlan("1 < bool(2) + http_requests_total{job = \"app\"}", 1000)
+    val lp = Parser.queryToLogicalPlan("1 < bool(2) + http_requests_total{job = \"app\"}", 1000, 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
-      """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1098511474])
+      """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1098511474])
         |-T~ScalarOperationMapper(operator=LSS_BOOL, scalarOnLhs=true)
         |--FA1~StaticFuncArgs(1.0,RangeParams(1000,1000,1000))
         |--T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true)
@@ -369,21 +370,21 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
         |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1098511474])
         |""".stripMargin
-    maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
+    maskDispatcher(execPlan.printTree()) shouldEqual maskDispatcher(expected)
   }
 
   it("should generate ScalarOperationMapper exec plan for query scalar(node_info) > bool(http_requests_total)") {
     val lp = Parser.queryToLogicalPlan("scalar(node_info{job = \"app\"}) > " +
-      "bool(http_requests_total{job = \"app\"})", 1000)
+      "bool(http_requests_total{job = \"app\"})", 1000, 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
-      """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
+      """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
         |-T~ScalarOperationMapper(operator=GTR_BOOL, scalarOnLhs=true)
         |--FA1~
         |--T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-        |---E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
+        |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
         |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
         |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -393,7 +394,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
         |-T~ScalarOperationMapper(operator=GTR_BOOL, scalarOnLhs=true)
         |--FA1~
         |--T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-        |---E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
+        |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
         |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
         |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -401,12 +402,12 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
         |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
         |""".stripMargin
-    maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
+    maskDispatcher(execPlan.printTree()) shouldEqual maskDispatcher(expected)
   }
 
   it("should generate BinaryJoinExec for query node_info > bool http_requests_total") {
     val lp = Parser.queryToLogicalPlan("node_info{job = \"app\"} > bool" +
-      "http_requests_total{job = \"app\"}", 1000)
+      "http_requests_total{job = \"app\"}", 1000, 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
@@ -425,7 +426,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate ScalarBinaryOperationExec plan for query (1 + 2) < bool 3 + 4") {
-    val lp = Parser.queryToLogicalPlan("(1 + 2) < bool 3 + 4", 1000)
+    val lp = Parser.queryToLogicalPlan("(1 + 2) < bool 3 + 4", 1000, 1000)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
@@ -437,7 +438,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate ScalarBinaryOperationExec plan for query 1 + 2 - 3") {
-    val lp = Parser.queryToLogicalPlan("1 + 2 - 3", 1000)
+    val lp = Parser.queryToLogicalPlan("1 + 2 - 3", 1000, 1000)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
@@ -448,7 +449,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate ScalarBinaryOperationExec plan for query 1 + 2 <bool 3 + 4") {
-    val lp = Parser.queryToLogicalPlan("1 + 2 <bool 3 + 4", 1000)
+    val lp = Parser.queryToLogicalPlan("1 + 2 <bool 3 + 4", 1000, 1000)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
@@ -460,7 +461,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   }
 
   it("should generate ScalarBinaryOperationExec plan for query (1 + 2) < bool (3 + 4)") {
-    val lp = Parser.queryToLogicalPlan("1 + 2 <bool 3 + 4", 1000)
+    val lp = Parser.queryToLogicalPlan("1 + 2 <bool 3 + 4", 1000, 1000)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =

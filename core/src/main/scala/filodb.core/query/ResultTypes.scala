@@ -57,6 +57,11 @@ final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
     other.columns == columns && other.numRowKeyColumns == numRowKeyColumns &&
       other.brSchemas == brSchemas
   }
+
+  def hasSameColumnTypes(other: ResultSchema): Boolean = {
+    // exclude column names
+    other.columns.map(_.colType) == columns.map(_.colType)
+  }
 }
 
 object ResultSchema {

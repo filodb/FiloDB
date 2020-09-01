@@ -7,7 +7,6 @@ import scala.concurrent.duration.FiniteDuration
 import com.typesafe.config.{Config, ConfigFactory}
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
-import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core.MetricsTestData
@@ -18,8 +17,10 @@ import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.ZeroCopyUTF8String
 import filodb.query.{exec, QueryResult, ScalarFunctionId}
 import filodb.query.exec.TimeScalarGeneratorExec
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
+class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
   val timeseriesDataset = Dataset.make("timeseries",
     Seq("tags:map"),
     Seq("timestamp:ts", "value:double:detectDrops=true"),

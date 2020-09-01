@@ -194,13 +194,14 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                                            userTimeStart: Long,
                                            endTimeExclusive: Long,
                                            maxChunkTime: Long,
-                                           batchSize: Int): Iterator[Seq[RawPartData]] = {
+                                           batchSize: Int,
+                                           cassFetchSize: Int): Iterator[Seq[RawPartData]] = {
     val partKeys = splits.flatMap {
       case split: CassandraTokenRangeSplit =>
         val indexTable = getOrCreateIngestionTimeIndexTable(datasetRef)
         logger.debug(s"Querying cassandra for partKeys for split=$split ingestionTimeStart=$ingestionTimeStart " +
           s"ingestionTimeEnd=$ingestionTimeEnd")
-        indexTable.scanPartKeysByIngestionTimeNoAsync(split.tokens, ingestionTimeStart, ingestionTimeEnd)
+        indexTable.scanPartKeysByIngestionTimeNoAsync(split.tokens, ingestionTimeStart, ingestionTimeEnd, cassFetchSize)
       case split => throw new UnsupportedOperationException(s"Unknown split type $split seen")
     }
 

@@ -10,7 +10,7 @@ import com.typesafe.config.{ConfigException, ConfigFactory}
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.spark.{SparkConf, SparkException}
-import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
+import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
@@ -32,12 +32,14 @@ import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
 import filodb.query.QueryResult
 import filodb.query.exec.{InProcessPlanDispatcher, MultiSchemaPartitionsExec}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 /**
   * Spec tests downsampling round trip.
   * Each item in the spec depends on the previous step. Hence entire spec needs to be run in order.
   */
-class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
+class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
 
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
@@ -404,7 +406,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       SinglePartitionScan(dsGaugePartKeyBytes))
       .toListL.runAsync.futureValue.head
 
-    val downsampledPart1 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0, downsampledPartData1)
+    val downsampledPart1 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0,
+      downsampledPartData1, Some(1.minute.toMillis))
 
     downsampledPart1.partKeyBytes shouldEqual dsGaugePartKeyBytes
 
@@ -439,7 +442,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       SinglePartitionScan(dsGaugeLowFreqPartKeyBytes))
       .toListL.runAsync.futureValue.head
 
-    val downsampledPart1 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0, downsampledPartData1)
+    val downsampledPart1 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0,
+      downsampledPartData1, Some(1.minute.toMillis))
 
     downsampledPart1.partKeyBytes shouldEqual dsGaugeLowFreqPartKeyBytes
 
@@ -465,7 +469,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       SinglePartitionScan(counterPartKeyBytes))
       .toListL.runAsync.futureValue.head
 
-    val downsampledPart1 = new PagedReadablePartition(Schemas.promCounter.downsample.get, 0, 0, downsampledPartData1)
+    val downsampledPart1 = new PagedReadablePartition(Schemas.promCounter.downsample.get, 0, 0,
+      downsampledPartData1, Some(1.minute.toMillis))
 
     downsampledPart1.partKeyBytes shouldEqual counterPartKeyBytes
 
@@ -506,7 +511,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       SinglePartitionScan(histPartKeyBytes))
       .toListL.runAsync.futureValue.head
 
-    val downsampledPart1 = new PagedReadablePartition(Schemas.promHistogram.downsample.get, 0, 0, downsampledPartData1)
+    val downsampledPart1 = new PagedReadablePartition(Schemas.promHistogram.downsample.get, 0, 0,
+      downsampledPartData1, Some(5.minutes.toMillis))
 
     downsampledPart1.partKeyBytes shouldEqual histPartKeyBytes
 
@@ -549,7 +555,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       SinglePartitionScan(dsGaugePartKeyBytes))
       .toListL.runAsync.futureValue.head
 
-    val downsampledPart2 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0, downsampledPartData2)
+    val downsampledPart2 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0,
+      downsampledPartData2, Some(5.minutes.toMillis))
 
     downsampledPart2.partKeyBytes shouldEqual dsGaugePartKeyBytes
 
@@ -574,7 +581,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       SinglePartitionScan(counterPartKeyBytes))
       .toListL.runAsync.futureValue.head
 
-    val downsampledPart1 = new PagedReadablePartition(Schemas.promCounter.downsample.get, 0, 0, downsampledPartData1)
+    val downsampledPart1 = new PagedReadablePartition(Schemas.promCounter.downsample.get, 0, 0,
+      downsampledPartData1, Some(5.minutes.toMillis))
 
     downsampledPart1.partKeyBytes shouldEqual counterPartKeyBytes
 
@@ -613,7 +621,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       SinglePartitionScan(histPartKeyBytes))
       .toListL.runAsync.futureValue.head
 
-    val downsampledPart1 = new PagedReadablePartition(Schemas.promHistogram.downsample.get, 0, 0, downsampledPartData1)
+    val downsampledPart1 = new PagedReadablePartition(Schemas.promHistogram.downsample.get, 0, 0,
+      downsampledPartData1, Some(5.minutes.toMillis))
 
     downsampledPart1.partKeyBytes shouldEqual histPartKeyBytes
 

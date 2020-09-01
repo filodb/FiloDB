@@ -1,13 +1,14 @@
 package filodb.gateway.conversion
 
 import org.jboss.netty.buffer.ChannelBuffers
-import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema, StringifyMapItemConsumer}
 import filodb.core.metadata.Schemas
 import filodb.memory.MemFactory
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class InfluxRecordSpec extends FunSpec with Matchers {
+class InfluxRecordSpec extends AnyFunSpec with Matchers {
   // First one has app tag
   // Second one does not
   // Third one is a histogram

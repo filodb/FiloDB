@@ -54,6 +54,8 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val batchSize = downsamplerConfig.getInt("cass-write-batch-size")
 
+  @transient lazy val cassFetchSize = downsamplerConfig.getInt("cass-read-fetch-size")
+
   @transient lazy val splitsPerNode = downsamplerConfig.getInt("splits-per-node")
 
   @transient lazy val cassWriteTimeout = downsamplerConfig.as[FiniteDuration]("cassandra-write-timeout")
@@ -62,22 +64,22 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val downsampleChunkDuration = downsampleStoreConfig.flushInterval.toMillis
 
-  @transient lazy val whitelist = downsamplerConfig.as[Seq[Map[String, String]]]("whitelist-filters").map(_.toSeq)
+  @transient lazy val allow = downsamplerConfig.as[Seq[Map[String, String]]]("allow-filters").map(_.toSeq)
 
-  @transient lazy val blacklist = downsamplerConfig.as[Seq[Map[String, String]]]("blacklist-filters").map(_.toSeq)
+  @transient lazy val block = downsamplerConfig.as[Seq[Map[String, String]]]("block-filters").map(_.toSeq)
 
   @transient lazy val trace = downsamplerConfig.as[Seq[Map[String, String]]]("trace-filters").map(_.toSeq)
 
   /**
     * Two conditions should satisfy for eligibility:
-    * (a) If whitelist is nonEmpty partKey should match a filter in the whitelist.
-    * (b) It should not match any filter in blacklist
+    * (a) If allow list is nonEmpty partKey should match a filter in the allow list.
+    * (b) It should not match any filter in block
     */
   def isEligibleForDownsample(pkPairs: Seq[(String, String)]): Boolean = {
-    if (whitelist.nonEmpty && !whitelist.exists(w => w.forall(pkPairs.contains))) {
+    if (allow.nonEmpty && !allow.exists(w => w.forall(pkPairs.contains))) {
       false
     } else {
-      blacklist.forall(w => !w.forall(pkPairs.contains))
+      block.forall(w => !w.forall(pkPairs.contains))
     }
   }
 
