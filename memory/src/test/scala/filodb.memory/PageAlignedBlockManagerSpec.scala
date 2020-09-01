@@ -3,7 +3,9 @@ package filodb.memory
 import scala.language.reflectiveCalls
 
 import com.kenai.jffi.PageManager
-import org.scalatest.{BeforeAndAfter, FlatSpec, Matchers}
+import org.scalatest.BeforeAndAfter
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 object PageAlignedBlockManagerSpec {
   val testReclaimer = new ReclaimListener {
@@ -16,7 +18,7 @@ object PageAlignedBlockManagerSpec {
   }
 }
 
-class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndAfter {
+class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfter {
   import PageAlignedBlockManagerSpec._
 
   val pageSize = PageManager.getInstance().pageSize()
@@ -82,7 +84,6 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
     //used 2 out of 2
     firstRequest.size should be(2)
     //simulate writing to the block
-    firstRequest.head.own()
     firstRequest.head.position(blockSize.toInt - 1)
     //mark them as reclaimable
     firstRequest.foreach(_.markReclaimable())

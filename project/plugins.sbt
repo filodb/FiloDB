@@ -8,6 +8,6 @@ addSbtPlugin("com.typesafe.sbt" % "sbt-multi-jvm" % "0.4.0")
 
 addSbtPlugin("net.virtual-void" % "sbt-dependency-graph" % "0.10.0-RC1")
 
-addSbtPlugin("io.kamon" % "sbt-kanela-runner" % "2.0.3")
+addSbtPlugin("io.kamon" % "sbt-kanela-runner" % "2.0.6")
 
 resolvers += "sonatype-releases" at "https://oss.sonatype.org/content/repositories/releases/"

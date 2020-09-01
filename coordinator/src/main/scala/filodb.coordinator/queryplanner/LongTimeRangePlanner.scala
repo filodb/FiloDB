@@ -38,30 +38,34 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
         lazy val lookbackMs = LogicalPlanUtils.getLookBackMillis(logicalPlan)
         lazy val startWithOffsetMs = p.startMs - offsetMillis
         lazy val endWithOffsetMs = p.endMs - offsetMillis
-        if (!logicalPlan.isRoutable) rawClusterPlanner.materialize(logicalPlan, qContext)
-        else if (endWithOffsetMs < earliestRawTime) downsampleClusterPlanner.materialize(logicalPlan, qContext)
-        else if (startWithOffsetMs - lookbackMs >= earliestRawTime)
+        if (!logicalPlan.isRoutable)
           rawClusterPlanner.materialize(logicalPlan, qContext)
-        else if (endWithOffsetMs - lookbackMs < earliestRawTime) {
+        else if (endWithOffsetMs < earliestRawTime) // full time range in downsampled cluster
+          downsampleClusterPlanner.materialize(logicalPlan, qContext)
+        else if (startWithOffsetMs - lookbackMs >= earliestRawTime) // full time range in raw cluster
+          rawClusterPlanner.materialize(logicalPlan, qContext)
+        else if (endWithOffsetMs - lookbackMs < earliestRawTime) {// raw/downsample overlapping query with long lookback
           val lastDownsampleSampleTime = latestDownsampleTimestampFn
           val downsampleLp = if (endWithOffsetMs < lastDownsampleSampleTime) {
             logicalPlan
           } else {
-            copyWithUpdatedTimeRange(logicalPlan,
+            copyLogicalPlanWithUpdatedTimeRange(logicalPlan,
               TimeRange(p.startMs, latestDownsampleTimestampFn + offsetMillis))
           }
           downsampleClusterPlanner.materialize(downsampleLp, qContext)
-        } else {
+        } else { // raw/downsample overlapping query without long lookback
           // Split the query between raw and downsample planners
+          // Note - should never arrive here when start == end (so step never 0)
+          require(p.stepMs > 0, "Step was 0 when trying to split query between raw and downsample cluster")
           val numStepsInDownsample = (earliestRawTime - startWithOffsetMs + lookbackMs) / p.stepMs
           val lastDownsampleInstant = p.startMs + numStepsInDownsample * p.stepMs
           val firstInstantInRaw = lastDownsampleInstant + p.stepMs
 
-          val downsampleLp = copyWithUpdatedTimeRange(logicalPlan,
+          val downsampleLp = copyLogicalPlanWithUpdatedTimeRange(logicalPlan,
                                                       TimeRange(p.startMs, lastDownsampleInstant))
           val downsampleEp = downsampleClusterPlanner.materialize(downsampleLp, qContext)
 
-          val rawLp = copyWithUpdatedTimeRange(logicalPlan, TimeRange(firstInstantInRaw, p.endMs))
+          val rawLp = copyLogicalPlanWithUpdatedTimeRange(logicalPlan, TimeRange(firstInstantInRaw, p.endMs))
           val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
           StitchRvsExec(qContext, stitchDispatcher, Seq(rawEp, downsampleEp))
         }

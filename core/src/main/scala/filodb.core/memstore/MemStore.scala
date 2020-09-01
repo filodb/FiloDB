@@ -1,6 +1,7 @@
 package filodb.core.memstore
 
 import scala.concurrent.Future
+import scala.concurrent.duration._
 
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler}
@@ -40,12 +41,6 @@ final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error 
  * each shard.
  */
 trait MemStore extends ChunkSource {
-
-  /**
-    * True if this store is in the mode of serving downsampled data.
-    * This is used to switch ingestion and query behaviors for downsample cluster.
-    */
-  def isDownsampleStore: Boolean
 
   /**
     * Persistent column store. Ingested data will eventually be poured into this sink for persistence, and
@@ -137,7 +132,7 @@ trait MemStore extends ChunkSource {
                     startOffset: Long,
                     endOffset: Long,
                     checkpoints: Map[Int, Long],
-                    reportingInterval: Long): Observable[Long]
+                    reportingInterval: Long) (implicit timeout: FiniteDuration = 60.seconds): Observable[Long]
 
   /**
    * Returns the names of tags or columns that are indexed at the partition level, across

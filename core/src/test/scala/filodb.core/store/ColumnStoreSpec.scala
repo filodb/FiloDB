@@ -5,7 +5,7 @@ import scala.concurrent.duration._
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.reactive.Observable
-import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FlatSpec, Matchers}
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
@@ -13,9 +13,11 @@ import filodb.core._
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, QuerySession}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 // TODO: figure out what to do with this..  most of the tests are really irrelevant
-trait ColumnStoreSpec extends FlatSpec with Matchers
+trait ColumnStoreSpec extends AnyFlatSpec with Matchers
 with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   import NamesTestData._
   import TestData._

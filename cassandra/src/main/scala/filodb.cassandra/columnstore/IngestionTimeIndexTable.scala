@@ -5,6 +5,7 @@ import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
 
 import com.datastax.driver.core.{ConsistencyLevel, ResultSet, Row}
+import com.datastax.driver.core.exceptions.ReadTimeoutException
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
@@ -102,7 +103,8 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
 
   def scanPartKeysByIngestionTimeNoAsync(tokens: Seq[(String, String)],
                                          ingestionTimeStart: Long,
-                                         ingestionTimeEnd: Long): Iterator[ByteBuffer] = {
+                                         ingestionTimeEnd: Long,
+                                         fetchSize: Int): Iterator[ByteBuffer] = {
     tokens.iterator.flatMap { case (start, end) =>
       /*
        * FIXME conversion of tokens to Long works only for Murmur3Partitioner because it generates
@@ -113,7 +115,16 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
                                end.toLong: java.lang.Long,
                                ingestionTimeStart: java.lang.Long,
                                ingestionTimeEnd: java.lang.Long)
-      session.execute(stmt).asScala.map { row => row.getBytes("partition") }.toSet.iterator
+                         .setFetchSize(fetchSize)
+      try {
+        session.execute(stmt).iterator.asScala
+          .map { row => row.getBytes("partition") }
+          .toStream.distinct // removes duplicate consecutive partKeys
+      } catch { case e: ReadTimeoutException =>
+        logger.error(s"Got read timeout when scanning Ingestion Index Table for tokenRange=($start,$end) " +
+                     s"ingestionTimeStart=$ingestionTimeStart ingestionTimeEnd=$ingestionTimeEnd")
+        throw e
+      }
     }
   }
 

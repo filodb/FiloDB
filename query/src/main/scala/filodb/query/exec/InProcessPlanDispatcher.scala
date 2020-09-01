@@ -69,5 +69,11 @@ case class UnsupportedChunkSource() extends ChunkSource {
                                  partMethod: PartitionScanMethod,
                                  chunkMethod: ChunkScanMethod): Observable[RawPartData] =
     throw new UnsupportedOperationException("This operation is not supported")
+
+  /**
+    * True if this store is in the mode of serving downsampled data.
+    * This is used to switch ingestion and query behaviors for downsample cluster.
+    */
+  override def isDownsampleStore: Boolean = false
 }
 

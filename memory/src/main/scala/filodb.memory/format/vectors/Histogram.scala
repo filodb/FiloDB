@@ -220,8 +220,9 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
    * If the scheme is different, then an approximation is used so that the resulting histogram has
    * an approximate sum of the individual distributions, with the original scheme.  Modifies itself.
    */
-  final def addNoCorrection(other: HistogramWithBuckets): Unit =
-    if (buckets == other.buckets) {
+  final def addNoCorrection(other: HistogramWithBuckets): Unit = {
+    // Allow addition when type of bucket is different
+    if (buckets.similarForMath(other.buckets)) {
       // If it was NaN before, reset to 0 to sum another hist
       if (values(0).isNaN) java.util.Arrays.fill(values, 0.0)
       for { b <- 0 until numBuckets optimized } {
@@ -241,6 +242,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
       //   }
       // }
     }
+  }
 
   /**
    * Adds the values from another Histogram, making a monotonic correction to ensure correctness
@@ -366,6 +368,11 @@ sealed trait HistogramBuckets {
    * @return the final position
    */
   def serialize(buf: MutableDirectBuffer, pos: Int): Int
+
+  /**
+    Returns true when buckets are similar for mathematical operations like addition
+   */
+  def similarForMath(other: HistogramBuckets): Boolean = this == other
 }
 
 object HistogramBuckets {
@@ -450,6 +457,13 @@ final case class GeometricBuckets(firstBucket: Double,
     buf.putDouble(numBucketsPos + OffsetBucketDetails + 8, multiplier, LITTLE_ENDIAN)
     pos + 2 + 2 + 8 + 8
   }
+
+  override def similarForMath(other: HistogramBuckets): Boolean = {
+    other match {
+      case c: CustomBuckets => c.allBucketTops.sameElements(other.allBucketTops)
+      case _                => this == other
+    }
+  }
 }
 
 /**
@@ -475,4 +489,11 @@ final case class CustomBuckets(les: Array[Double]) extends HistogramBuckets {
   }
 
   override def hashCode: Int = les.hashCode
+
+  override def similarForMath(other: HistogramBuckets): Boolean = {
+    other match {
+      case g: GeometricBuckets  => g.allBucketTops.sameElements(other.allBucketTops)
+      case _                    => this == other
+    }
+  }
 }

@@ -4,21 +4,25 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 
 import filodb.core.{MetricsTestData, QueryTimeoutException, TestData, MachineMetricsData => MMD}
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
 import filodb.core.query._
 import filodb.core.store.AllChunkScan
+import filodb.core.MachineMetricsData.defaultPartKey
 import filodb.memory._
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{TupleRowReader, vectors => bv}
+import filodb.memory.BinaryRegion.NativePointer
 import filodb.query.exec._
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
 /**
  * A common trait for windowing query tests which uses real chunks and real RawDataRangeVectors
  */
-trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
+trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
   import MetricsTestData._
 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
@@ -26,14 +30,15 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfter wit
   val storeConf = TestData.storeConf.copy(maxChunksSize = 200)
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, timeseriesSchema.data.blockMetaSize,
                                       MMD.dummyContext, true)
-  protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, timeseriesSchema.data, storeConf)
+  protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem,
+                                        timeseriesDatasetWithMetric.schema.data, storeConf)
 
   protected val ingestBlockHolder2 = new BlockMemFactory(blockStore, None, downsampleSchema.data.blockMetaSize,
                                       MMD.dummyContext, true)
   protected val tsBufferPool2 = new WriteBufferPool(TestData.nativeMem, downsampleSchema.data, storeConf)
 
   after {
-    ChunkMap.validateNoSharedLocks(getClass().toString(), true)
+    ChunkMap.validateNoSharedLocks(true)
   }
 
   override def afterAll(): Unit = {
@@ -145,8 +150,9 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfter wit
   def numWindows(data: Seq[Any], windowSize: Int, step: Int): Int = data.sliding(windowSize, step).length
 
   // Creates a RawDataRangeVector using Prometheus time-value schema and a given chunk size etc.
-  def timeValueRV(tuples: Seq[(Long, Double)]): RawDataRangeVector = {
-    val part = TimeSeriesPartitionSpec.makePart(0, timeseriesDataset, bufferPool = tsBufferPool)
+  def timeValueRVPk(tuples: Seq[(Long, Double)],
+                    partKey: NativePointer = defaultPartKey): RawDataRangeVector = {
+    val part = TimeSeriesPartitionSpec.makePart(0, timeseriesDatasetWithMetric, partKey, bufferPool = tsBufferPool)
     val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
     readers.foreach { row => part.ingest(0, row, ingestBlockHolder) }
     // Now flush and ingest the rest to ensure two separate chunks
@@ -170,7 +176,7 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfter wit
 
   def timeValueRV(data: Seq[Double], startTS: Long = defaultStartTS): RawDataRangeVector = {
     val tuples = data.zipWithIndex.map { case (d, t) => (startTS + t * pubFreq, d) }
-    timeValueRV(tuples)
+    timeValueRVPk(tuples)
   }
 
   // Adds more Time-Value tuples to a RawRangeVector as a new chunk
@@ -447,7 +453,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       aggregatedUneven(0) shouldEqual unevenSampleDataResponses(i) +- 0.0000000001
     }
     val emptyData = Seq()
-    var rv = timeValueRV(emptyData)
+    var rv = timeValueRVPk(emptyData)
     val chunkedItNoSample = new ChunkedWindowIteratorD(rv, 110000, 120000, 150000, 30000,
       new QuantileOverTimeChunkedFunctionD(Seq(StaticFuncArgs(0.5, rangeParams))), querySession)
     val aggregatedEmpty = chunkedItNoSample.map(_.getDouble(1)).toBuffer

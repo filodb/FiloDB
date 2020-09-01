@@ -23,7 +23,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
   @transient lazy private val sparkTasksFailed = Kamon.counter("spark-tasks-failed").withoutTags()
   @transient lazy private val numPartKeysNoDownsampleSchema = Kamon.counter("num-partkeys-no-downsample").withoutTags()
   @transient lazy private val numPartKeysMigrated = Kamon.counter("num-partkeys-migrated").withoutTags()
-  @transient lazy private val numPartKeysBlacklisted = Kamon.counter("num-partkeys-blacklisted").withoutTags()
+  @transient lazy private val numPartKeysBlocked = Kamon.counter("num-partkeys-blocked").withoutTags()
 
   @transient lazy private[downsampler] val schemas = Schemas.fromConfig(dsSettings.filodbConfig).get
 
@@ -95,14 +95,14 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
       val rawSchemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
       val schema = schemas(rawSchemaId)
       val pkPairs = schema.partKeySchema.toStringPairs(pk.partKey, UnsafeUtils.arayOffset)
-      val blacklisted = !dsSettings.isEligibleForDownsample(pkPairs)
+      val blocked = !dsSettings.isEligibleForDownsample(pkPairs)
       val hasDownsampleSchema = schema.downsample.isDefined
-      if (blacklisted) numPartKeysBlacklisted.increment()
+      if (blocked) numPartKeysBlocked.increment()
       if (!hasDownsampleSchema) numPartKeysNoDownsampleSchema.increment()
       DownsamplerContext.dsLogger.debug(s"Migrating partition partKey=$pkPairs schema=${schema.name} " +
-        s"startTime=${pk.startTime} endTime=${pk.endTime} blacklisted=$blacklisted shard=$shard " +
+        s"startTime=${pk.startTime} endTime=${pk.endTime} blocked=$blocked shard=$shard " +
         s"hasDownsampleSchema=$hasDownsampleSchema")
-      val eligible = hasDownsampleSchema && !blacklisted
+      val eligible = hasDownsampleSchema && !blocked
       if (eligible) count += 1
       eligible
     }.map(toDownsamplePkrWithHash)

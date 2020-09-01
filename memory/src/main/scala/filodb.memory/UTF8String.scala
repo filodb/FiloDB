@@ -39,7 +39,7 @@ trait BinaryString extends BinaryRegion {
     (base, offset)
   }
 
-  private def matchAt(base: Any, offset: Long, other: Any, otherOffset: Long, pos: Int): Boolean = {
+  def matchAt(base: Any, offset: Long, other: Any, otherOffset: Long, pos: Int): Boolean = {
     val numBytesUs = numBytes(base, offset)
     val numBytesOther = numBytes(other, otherOffset)
     if (numBytesOther + pos > numBytesUs || pos < 0) { false }

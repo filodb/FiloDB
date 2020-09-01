@@ -1,9 +1,10 @@
 package filodb.memory.format
 
-import org.scalatest.{FunSpec, Matchers}
-import org.scalatest.prop.PropertyChecks
+import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class ZeroCopyBinaryTest extends FunSpec with Matchers with PropertyChecks {
+class ZeroCopyBinaryTest extends AnyFunSpec with Matchers with ScalaCheckPropertyChecks {
   describe("ZeroCopyUTF8String") {
     it("should convert back and forth between regular strings") {
       ZeroCopyUTF8String("sheep").asNewString should equal ("sheep")

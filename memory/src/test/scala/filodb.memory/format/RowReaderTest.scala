@@ -2,13 +2,14 @@ package filodb.memory.format
 
 import java.sql.Timestamp
 
-import org.scalatest.{FunSpec, Matchers}
 
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format.MemoryReader._
 import filodb.memory.format.vectors.{IntBinaryVector, LongBinaryVector}
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 
-class RowReaderTest extends FunSpec with Matchers {
+class RowReaderTest extends AnyFunSpec with Matchers {
   val memFactory = new NativeMemoryManager(100000)
   val acc = nativePtrReader
   val rows = Seq(
