@@ -343,6 +343,10 @@ abstract class NonLeafExecPlan extends ExecPlan {
 
   final def submitTime: Long = children.head.queryContext.submitTime
 
+  // flag to override child task execution behavior. If it is false, child tasks get executed sequentially.
+  // Use-cases include splitting longer range query into multiple smaller range queries.
+  def parallelChildTasks: Boolean = true
+
   private def dispatchRemotePlan(plan: ExecPlan, span: kamon.trace.Span)
                                 (implicit sched: Scheduler) = {
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
@@ -368,10 +372,18 @@ abstract class NonLeafExecPlan extends ExecPlan {
                      (implicit sched: Scheduler): ExecResult = {
     val parentSpan = Kamon.currentSpan()
     parentSpan.mark("create-child-tasks")
+
+    // whether child tasks need to be executed sequentially.
+    // parallelism 1 means, only one worker thread to process underlying tasks.
+    val parallelism: Int = if (parallelChildTasks)
+                              children.length
+                           else
+                              1
+
     // Create tasks for all results.
     // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
     val childTasks = Observable.fromIterable(children.zipWithIndex)
-                               .mapAsync(children.length) { case (plan, i) =>
+                               .mapAsync(parallelism) { case (plan, i) =>
                                  dispatchRemotePlan(plan, parentSpan).map((_, i))
                                }
 
