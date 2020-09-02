@@ -1,6 +1,8 @@
 package filodb.akkabootstrapper.multijvm
 
 import scala.concurrent.duration._
+import scala.language.postfixOps
+
 import akka.actor.AddressFromURIString
 import akka.cluster.Cluster
 import akka.http.scaladsl.Http
