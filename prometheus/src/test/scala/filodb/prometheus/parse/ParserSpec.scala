@@ -383,6 +383,17 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("timestamp(some_metric, hello)") // reason : Expected only 1 arg, got 2
   }
 
+  it("parse long identifiers") {
+    // This should not cause a stack overflow error.
+
+    val bob = new StringBuilder().append("requests{job=\"")
+    for (i <- 1 to 100) {
+      bob.append("abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_")
+    }
+
+    parseSuccessfully(bob.append("\"}").toString())
+  }
+
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
       "http_requests_total + time()" -> "ScalarVectorBinaryOperation(ADD,ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),false)",

@@ -139,10 +139,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
           false
         } else true
       }.map { labelMatch =>
-        val labelVal = labelMatch.value.replace("\\\\", "\\")
-                                         .replace("\\\"", "\"")
-                                         .replace("\\n", "\n")
-                                         .replace("\\t", "\t")
+        val labelVal = labelMatch.value
         val labelValue = if (labelMatch.label == PromMetricLabel) {
           val (newValue, colNameOpt) = extractStripColumn(labelVal)
           colNameOpt.foreach { col => column = Some(col) }

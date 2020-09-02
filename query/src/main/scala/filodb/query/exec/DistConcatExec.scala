@@ -32,6 +32,17 @@ final case class LocalPartitionDistConcatExec(queryContext: QueryContext,
                                               children: Seq[ExecPlan]) extends DistConcatExec
 
 /**
+  * Wrapper/Nonleaf execplan to split long range PeriodicPlan to multiple smaller execs.
+  * It executes child plans sequentially and merges results using StitchRvsMapper
+  */
+final case class SplitLocalPartitionDistConcatExec(queryContext: QueryContext,
+                                     dispatcher: PlanDispatcher,
+                                     children: Seq[ExecPlan],
+                                    override val parallelChildTasks: Boolean = false) extends DistConcatExec {
+  addRangeVectorTransformer(StitchRvsMapper())
+}
+
+/**
   * Use when child ExecPlan's span multiple partitions
   */
 final case class MultiPartitionDistConcatExec(queryContext: QueryContext,

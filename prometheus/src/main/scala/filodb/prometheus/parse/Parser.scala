@@ -5,6 +5,10 @@ import scala.util.parsing.combinator.{JavaTokenParsers, PackratParsers, RegexPar
 import filodb.prometheus.ast.{Expressions, TimeRangeParams, TimeStepParams}
 import filodb.query._
 
+object BaseParser {
+  val whiteSpace = "[ \t\r\f\n]+".r
+}
+
 trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers with PackratParsers {
 
   lazy val labelNameIdentifier: PackratParser[Identifier] = {
@@ -15,8 +19,62 @@ trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers wit
     "[a-zA-Z_:][a-zA-Z0-9_:\\-\\.]*".r ^^ { str => Identifier(str) }
   }
 
-  protected lazy val labelValueIdentifier: PackratParser[Identifier] =
-    "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str =>  Identifier(str.substring(1, str.size-1)) } //remove quotes
+  protected lazy val labelValueIdentifier: PackratParser[Identifier] = {
+    // Parse a quoted identifier, supporting escapes, with quotes removed. Note that this
+    // originally relied on a complex regex with capturing groups. The way capturing groups are
+    // processed by the Java regex class results in deep recursion and a stack overflow error
+    // for long identifiers. In addition, the regex could only detect escape patterns, but it
+    // couldn't replace them. As a result, an additional step was required to parse the string
+    // again, searching and replacing the escapes. Parsers for "real" programming languages
+    // never use regular expressions, because they are limited in capability. Custom code is
+    // certainly "bigger", but it's much more flexible overall. This also makes it easier to
+    // support additional types of promql strings that aren't supported as of yet. For example,
+    // additional escapes, and backtick quotes which don't do escape processing.
+
+    new PackratParser[Identifier]() {
+      def apply(in: Input): ParseResult[Identifier] = {
+        val source = in.source
+        var offset = in.offset
+
+        (whiteSpace findPrefixMatchOf (source.subSequence(offset, source.length))) match {
+          case Some(matched) => offset += matched.end
+          case None =>
+        }
+
+        val quote = source.charAt(offset); offset += 1
+
+        if (quote != '\'' && quote != '"') {
+          return Failure("quote character expected", in)
+        }
+
+        val bob = new StringBuilder()
+
+        while (offset < source.length) {
+          var c = source.charAt(offset); offset += 1
+
+          if (c == quote) {
+            return Success(Identifier(bob.toString()), in.drop(offset - in.offset))
+          }
+
+          if (c == '\\') {
+            val next = source.charAt(offset); offset += 1
+            c = next match {
+              case '\\' | '\'' | '"' => next
+              case 'f' => '\f'
+              case 'n' => '\n'
+              case 'r' => '\r'
+              case 't' => '\t'
+              case _ => return Error("illegal string escape: " + next, in)
+            }
+          }
+
+          bob.append(c)
+        }
+
+        return Error("unfinished quoted identifier", in)
+      }
+    }
+  }
 
   protected val OFFSET = Keyword("OFFSET")
   protected val IGNORING = Keyword("IGNORING")
@@ -320,7 +378,7 @@ object Parser extends Expression {
     */
   override lazy val skipWhitespace: Boolean = true
 
-  override val whiteSpace = "[ \t\r\f\n]+".r
+  override val whiteSpace = BaseParser.whiteSpace
 
   def parseQuery(query: String): Expression = {
     parseAll(expression, query) match {

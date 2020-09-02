@@ -12,6 +12,13 @@ sealed trait LogicalPlan {
   def isRoutable: Boolean = true
 
   /**
+    * Whether to Time-Split queries into smaller range queries if the range exceeds configured limit.
+    * This flag will be overridden by plans, which either do not support splitting or will not help in improving
+    * performance. For e.g. metadata query plans.
+    */
+  def isTimeSplittable: Boolean = true
+
+  /**
     * Replace filters present in logical plan
     */
   def replaceFilters(filters: Seq[ColumnFilter]): LogicalPlan = {
@@ -60,7 +67,9 @@ sealed trait PeriodicSeriesPlan extends LogicalPlan {
   def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan
 }
 
-sealed trait MetadataQueryPlan extends LogicalPlan
+sealed trait MetadataQueryPlan extends LogicalPlan {
+  override def isTimeSplittable: Boolean = false
+}
 
 /**
   * A selector is needed in the RawSeries logical plan to specify
