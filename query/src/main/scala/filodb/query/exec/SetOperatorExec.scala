@@ -92,6 +92,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
 
   private def setOpAnd(lhsRvs: List[RangeVector], rhsRvs: List[RangeVector],
                        rhsSchema: ResultSchema): List[RangeVector] = {
+    require(rhsRvs.forall(_.isInstanceOf[SerializedRangeVector]), "RHS should be SerializedRangeVector")
     val rhsMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
     var result = new ListBuffer[RangeVector]()
     rhsRvs.foreach { rv =>
@@ -114,6 +115,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
           override def next(): RowReader = {
             val lhsRow = lhsRows.next()
             val rhsRow = rhsRows.next()
+            // LHS row should not be added to result if corresponding RHS row does not exist
             val res = if (rhsRow.getDouble(1).isNaN) Double.NaN else lhsRow.getDouble(1)
             cur.setValues(lhsRow.getLong(0), res)
             cur
