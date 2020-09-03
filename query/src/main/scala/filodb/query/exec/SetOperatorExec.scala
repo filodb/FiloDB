@@ -92,6 +92,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
 
   private def setOpAnd(lhsRvs: List[RangeVector], rhsRvs: List[RangeVector],
                        rhsSchema: ResultSchema): List[RangeVector] = {
+    // isEmpty method consumes rhs range vector
     require(rhsRvs.forall(_.isInstanceOf[SerializedRangeVector]), "RHS should be SerializedRangeVector")
     val rhsMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
     var result = new ListBuffer[RangeVector]()
