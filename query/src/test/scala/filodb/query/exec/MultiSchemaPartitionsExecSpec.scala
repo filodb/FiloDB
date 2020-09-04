@@ -119,7 +119,8 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
   it ("should read raw samples from Memstore using IntervalSelector") {
     import ZeroCopyUTF8String._
     val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
-      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)),
+      ColumnFilter("instance", Filter.NotEquals("SomeJob".utf8)))
     // read from an interval of 100000ms, resulting in 11 samples
     val startTime = now - numRawSamples * reportingInterval
     val endTime   = now - (numRawSamples-10) * reportingInterval
@@ -470,5 +471,21 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     thrown.getCause.getMessage shouldEqual "Query timeout in filodb.query.exec.MultiSchemaPartitionsExec after 180 seconds"
   }
 
+  it ("""should not return range vectors with !="" where column is not present""") {
+    import ZeroCopyUTF8String._
+    val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)),
+      ColumnFilter("host", Filter.NotEquals("".utf8)))
+    // read from an interval of 100000ms, resulting in 11 samples
+    val startTime = now - numRawSamples * reportingInterval
+    val endTime   = now - (numRawSamples-10) * reportingInterval
+
+    val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher,
+      dsRef, 0, filters, TimeRangeChunkScan(startTime, endTime))
+
+    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.result.size shouldEqual 0
+  }
 }
 
