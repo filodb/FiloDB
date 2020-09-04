@@ -8,7 +8,7 @@ import monix.reactive.Observable
 
 import filodb.core.memstore.SchemaMismatch
 import filodb.core.query._
-import filodb.memory.format.{ZeroCopyUTF8String => Utf8Str}
+import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.BinaryOperator.{LAND, LOR, LUnless}
@@ -92,20 +92,43 @@ final case class SetOperatorExec(queryContext: QueryContext,
 
   private def setOpAnd(lhsRvs: List[RangeVector], rhsRvs: List[RangeVector],
                        rhsSchema: ResultSchema): List[RangeVector] = {
-    val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
+    // isEmpty method consumes rhs range vector
+    require(rhsRvs.forall(_.isInstanceOf[SerializedRangeVector]), "RHS should be SerializedRangeVector")
+    val rhsMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
     var result = new ListBuffer[RangeVector]()
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
       // Don't add range vector if it is empty
       if (jk.nonEmpty && !isEmpty(rv, rhsSchema))
-        rhsKeysSet += jk
+        rhsMap.put(jk, rv)
     }
 
     lhsRvs.foreach { lhs =>
       val jk = joinKeys(lhs.key)
       // Add range vectors from lhs which are present in lhs and rhs both or when jk is empty
-      // "up AND ON (dummy) vector(1)" should be equivalent to up as there's no dummy label
-      if (rhsKeysSet.contains(jk) || jk.isEmpty) {
+      if (rhsMap.contains(jk)) {
+        val lhsRows = lhs.rows
+        val rhsRows = rhsMap.get(jk).get.rows
+
+        val rows = new RangeVectorCursor {
+          val cur = new TransientRow()
+          override def hasNext: Boolean = lhsRows.hasNext && rhsRows.hasNext
+          override def next(): RowReader = {
+            val lhsRow = lhsRows.next()
+            val rhsRow = rhsRows.next()
+            // LHS row should not be added to result if corresponding RHS row does not exist
+            val res = if (rhsRow.getDouble(1).isNaN) Double.NaN else lhsRow.getDouble(1)
+            cur.setValues(lhsRow.getLong(0), res)
+            cur
+          }
+          override def close(): Unit = {
+            lhsRows.close()
+            rhsRows.close()
+          }
+        }
+        result += IteratorBackedRangeVector(lhs.key, rows)
+      } else if (jk.isEmpty) {
+        // "up AND ON (dummy) vector(1)" should be equivalent to up as there's no dummy label
         result += lhs
       }
     }
