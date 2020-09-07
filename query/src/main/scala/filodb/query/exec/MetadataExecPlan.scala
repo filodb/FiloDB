@@ -94,7 +94,7 @@ final case class PartKeysExec(queryContext: QueryContext,
         Observable.empty
     }
     Kamon.currentSpan().mark("creating-resultschema")
-    val sch = new ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
+    val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
     ExecResult(rvs, Task.eval(sch))
   }
 
@@ -135,7 +135,7 @@ final case class LabelValuesExec(queryContext: QueryContext,
       Observable.empty
     }
     parentSpan.mark("creating-resultschema")
-    val sch = new ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
+    val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
     ExecResult(rvs, Task.eval(sch))
   }
 
