@@ -484,9 +484,9 @@ object LogicalPlan {
   /**
    * Returns all nonMetricShardKey column filters
    */
-  def getNonMetricShardKeyFilters(logicalPlan: LogicalPlan, nonMetricShardColumns: Seq[String]): Seq[Seq[ColumnFilter]] =
-    getRawSeriesFilters(logicalPlan)
-      .map { s => s.filter(f => nonMetricShardColumns.contains(f.column))}
+  def getNonMetricShardKeyFilters(logicalPlan: LogicalPlan,
+                                  nonMetricShardColumns: Seq[String]): Seq[Seq[ColumnFilter]] =
+    getRawSeriesFilters(logicalPlan).map { s => s.filter(f => nonMetricShardColumns.contains(f.column))}
 
   /**
    * Returns true when all shard key filters have Equals
