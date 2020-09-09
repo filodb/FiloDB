@@ -480,5 +480,20 @@ object LogicalPlan {
       }
     }
   }
+
+  /**
+   * Returns all nonMetricShardKey column filters
+   */
+  def getNonMetricShardKeyFilters(logicalPlan: LogicalPlan,
+                                  nonMetricShardColumns: Seq[String]): Seq[Seq[ColumnFilter]] =
+    getRawSeriesFilters(logicalPlan).map { s => s.filter(f => nonMetricShardColumns.contains(f.column))}
+
+  /**
+   * Returns true when all shard key filters have Equals
+   */
+  def hasShardKeyEqualsOnly(logicalPlan: LogicalPlan, nonMetricShardColumns: Seq[String]): Boolean =
+    getNonMetricShardKeyFilters(logicalPlan: LogicalPlan, nonMetricShardColumns: Seq[String]).
+      forall(_.forall(f => f.filter.isInstanceOf[filodb.core.query.Filter.Equals]))
+
 }
 //scalastyle:on number.of.types
