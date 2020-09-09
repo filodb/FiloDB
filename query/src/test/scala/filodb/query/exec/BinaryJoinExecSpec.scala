@@ -245,7 +245,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       Array(dummyPlan), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
       Cardinality.OneToMany,
-      Nil, ignoring = Seq("tag1"), Nil, "__name__")
+      Nil, ignoring = Seq("tag1"), include = Seq("tag2"), "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, Seq(lhs1, lhs2).map(rv => SerializedRangeVector(rv, schema)))
