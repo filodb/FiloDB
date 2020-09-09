@@ -51,7 +51,8 @@ final case class BinaryJoinExec(queryContext: QueryContext,
   require(!on.contains(metricColumn), "On cannot contain metric name")
 
   val onLabels = on.map(Utf8Str(_)).toSet
-  val withExtraOnLabels = onLabels ++ Seq("_pi_", "_step_") // needed since these are internal tags
+  // publishInterval and step tags always needs to be included in join key
+  val withExtraOnLabels = onLabels ++ Seq("_pi_", "_step_")
   val ignoringLabels = ignoring.map(Utf8Str(_)).toSet
   val ignoringLabelsForJoin = ignoringLabels + metricColumn.utf8
   // if onLabels is non-empty, we are doing matching based on on-label, otherwise we are

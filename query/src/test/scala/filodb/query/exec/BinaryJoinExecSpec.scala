@@ -143,6 +143,125 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     result.map(_.key).toSet.size shouldEqual 100
   }
 
+  it("should implictly add step and pi tag as join key on OneToOne joins") {
+    val lhs1: RangeVector = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"someMetricLhs".utf8, "_pi_".utf8 -> "0".utf8, "tag2".utf8 -> "tag2Val".utf8))
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(2).iterator
+    }
+
+    val lhs2: RangeVector = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"someMetricLhs".utf8, "_step_".utf8 -> "0".utf8, "tag2".utf8 -> "tag2Val".utf8))
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(2).iterator
+    }
+
+    val rhs1: RangeVector = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"someMetricRhs".utf8,"_pi_".utf8 -> "0".utf8, "tag2".utf8 -> "tag2Val".utf8))
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(2).iterator
+    }
+
+    val rhs2: RangeVector = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"someMetricRhs".utf8, "_step_".utf8 -> "0".utf8, "tag2".utf8 -> "tag2Val".utf8))
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(2).iterator
+    }
+
+    val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
+      Array(dummyPlan),       // cannot be empty as some compose's rely on the schema
+      Array(dummyPlan), // empty since we test compose, not execute or doExecute
+      BinaryOperator.ADD,
+      Cardinality.OneToOne,
+      Nil, Nil, Nil, "__name__")
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, Seq(lhs1, lhs2).map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, Seq(rhs1, rhs2).map(rv => SerializedRangeVector(rv, schema)))
+    // scalastyle:on
+
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
+      .toListL.runAsync.futureValue
+
+    result.size shouldEqual 2
+    result(0).key.labelValues.contains("_pi_".utf8) shouldEqual true
+    result(1).key.labelValues.contains("_step_".utf8) shouldEqual true
+
+  }
+
+  it("should implictly add step and pi tag as join key on OneToMany joins") {
+    val lhs1: RangeVector = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"someMetricLhs".utf8, "_pi_".utf8 -> "0".utf8, "tag2".utf8 -> "tag2Val".utf8))
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(2).iterator
+    }
+
+    val lhs2: RangeVector = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"someMetricLhs".utf8, "_step_".utf8 -> "0".utf8, "tag2".utf8 -> "tag2Val".utf8))
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(2).iterator
+    }
+
+    val rhs1: RangeVector = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"someMetricRhs".utf8, "_pi_".utf8 -> "0".utf8,
+          "tag2".utf8 -> "tag2Val".utf8, "tag1".utf8 -> "tag1Val1".utf8))
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(2).iterator
+    }
+
+    val rhs2: RangeVector = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"someMetricRhs".utf8, "_step_".utf8 -> "0".utf8,
+          "tag2".utf8 -> "tag2Val".utf8, "tag1".utf8 -> "tag1Val1".utf8))
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(2).iterator
+    }
+
+    val rhs3: RangeVector = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"someMetricRhs".utf8, "_pi_".utf8 -> "0".utf8,
+          "tag2".utf8 -> "tag2Val".utf8, "tag1".utf8 -> "tag1Val2".utf8))
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(2).iterator
+    }
+
+    val rhs4: RangeVector = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"someMetricRhs".utf8, "_step_".utf8 -> "0".utf8,
+          "tag2".utf8 -> "tag2Val".utf8, "tag1".utf8 -> "tag1Val2".utf8))
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = data(2).iterator
+    }
+
+    val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
+      Array(dummyPlan),       // cannot be empty as some compose's rely on the schema
+      Array(dummyPlan), // empty since we test compose, not execute or doExecute
+      BinaryOperator.ADD,
+      Cardinality.OneToMany,
+      Nil, ignoring = Seq("tag1"), Nil, "__name__")
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, Seq(lhs1, lhs2).map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, Seq(rhs1, rhs2, rhs3, rhs4).map(rv => SerializedRangeVector(rv, schema)))
+    // scalastyle:on
+
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
+      .toListL.runAsync.futureValue
+
+    result.size shouldEqual 4
+    Seq("_pi_".utf8, "tag1".utf8).forall(result(0).key.labelValues.contains) shouldEqual true
+    Seq("_step_".utf8, "tag1".utf8).forall(result(1).key.labelValues.contains) shouldEqual true
+    Seq("_pi_".utf8, "tag1".utf8).forall(result(2).key.labelValues.contains) shouldEqual true
+    Seq("_step_".utf8, "tag1".utf8).forall(result(3).key.labelValues.contains) shouldEqual true
+  }
+
   it("should throw error if OneToOne cardinality passed, but OneToMany") {
 
     val duplicate: RangeVector = new RangeVector {
