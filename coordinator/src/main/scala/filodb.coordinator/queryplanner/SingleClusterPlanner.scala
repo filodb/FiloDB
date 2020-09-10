@@ -5,6 +5,7 @@ import scala.concurrent.duration._
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+import kamon.tag.TagSet
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
@@ -48,6 +49,8 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   val shardColumns = dsOptions.shardKeyColumns.sorted
 
   import SingleClusterPlanner._
+  val bjBetweenAggAndNonAgg = Kamon.counter("join-between-agg-non-agg")
+    .withTags(TagSet.of("dataset", dsRef.toString))
 
   private def dispatcherForShard(shard: Int): PlanDispatcher = {
     val targetActor = shardMapperFunc.coordForShard(shard)
@@ -201,6 +204,19 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val rhs = walkLogicalPlanTree(lp.rhs, qContext)
     val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext, pickDispatcher(rhs.plans), rhs.plans))
     else rhs.plans
+
+    if (lhs.plans.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec]) &&
+             !rhs.plans.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec])) {
+      logger.info(s"Saw Binary Join between aggregate(lhs) and non-aggregate (rhs). ${qContext.origQueryParams}")
+      bjBetweenAggAndNonAgg.increment()
+    }
+
+    if (!lhs.plans.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec]) &&
+      rhs.plans.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec])) {
+      logger.info(s"Saw Binary Join between non-aggregate(lhs) and aggregate(rhs): ${qContext.origQueryParams}")
+      bjBetweenAggAndNonAgg.increment()
+    }
+
     // TODO Currently we create separate exec plan node for stitching.
     // Ideally, we can go one step further and add capability to NonLeafNode plans to pre-process
     // and transform child results individually before composing child results together.
