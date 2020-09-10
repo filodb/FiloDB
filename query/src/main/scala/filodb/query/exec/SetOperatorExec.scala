@@ -40,10 +40,11 @@ final case class SetOperatorExec(queryContext: QueryContext,
   require(!on.contains(metricColumn), "On cannot contain metric name")
 
   val onLabels = on.map(Utf8Str(_)).toSet
+  // TODO Add unit tests for automatic inclusion of _pi_ and _step_ in the join key
+  val withExtraOnLabels = onLabels ++ Seq("_pi_".utf8, "_step_".utf8)
   val ignoringLabels = ignoring.map(Utf8Str(_)).toSet + metricColumn.utf8
   // if onLabels is non-empty, we are doing matching based on on-label, otherwise we are
   // doing matching based on ignoringLabels even if it is empty
-  val onMatching = onLabels.nonEmpty
 
   def children: Seq[ExecPlan] = lhs ++ rhs
 
@@ -75,7 +76,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
   }
 
   private def joinKeys(rvk: RangeVectorKey): Map[Utf8Str, Utf8Str] = {
-    if (onLabels.nonEmpty) rvk.labelValues.filter(lv => onLabels.contains(lv._1))
+    if (onLabels.nonEmpty) rvk.labelValues.filter(lv => withExtraOnLabels.contains(lv._1))
     else rvk.labelValues.filterNot(lv => ignoringLabels.contains(lv._1))
   }
 
