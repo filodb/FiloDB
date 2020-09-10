@@ -40,6 +40,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
   require(!on.contains(metricColumn), "On cannot contain metric name")
 
   val onLabels = on.map(Utf8Str(_)).toSet
+  // TODO Add unit tests for automatic inclusion of _pi_ and _step_ in the join key
   val withExtraOnLabels = onLabels ++ Seq("_pi_".utf8, "_step_".utf8)
   val ignoringLabels = ignoring.map(Utf8Str(_)).toSet + metricColumn.utf8
   // if onLabels is non-empty, we are doing matching based on on-label, otherwise we are
