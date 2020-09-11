@@ -1,12 +1,15 @@
 package filodb.coordinator.queryplanner
 
+import com.typesafe.scalalogging.StrictLogging
 import java.util.concurrent.ThreadLocalRandom
+import kamon.Kamon
 
 import filodb.core.metadata.{DatasetOptions, Schemas}
 import filodb.core.query.{QueryContext, RangeParams}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query._
 import filodb.query.exec._
+
 
 /**
   * Intermediate Plan Result includes the exec plan(s) along with any state to be passed up the
@@ -16,7 +19,7 @@ import filodb.query.exec._
   */
 case class PlanResult(plans: Seq[ExecPlan], needsStitch: Boolean = false)
 
-trait  PlannerMaterializer {
+trait  PlannerMaterializer extends StrictLogging {
     def schemas: Schemas
     def dsOptions: DatasetOptions = schemas.part.options
 
@@ -138,4 +141,24 @@ trait  PlannerMaterializer {
         vectors
       }
     }
+}
+
+object PlannerUtil extends StrictLogging {
+
+  val bjBetweenAggAndNonAgg = Kamon.counter("join-between-agg-non-agg").withoutTags()
+
+  def validateBinaryJoin(lhs: Seq[ExecPlan], rhs: Seq[ExecPlan], queryContext: QueryContext): Any = {
+
+    if (lhs.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec]) &&
+      !rhs.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec])) {
+      logger.info(s"Saw Binary Join between aggregate(lhs) and non-aggregate (rhs). ${queryContext.origQueryParams}")
+      bjBetweenAggAndNonAgg.increment()
+    }
+
+    if (!lhs.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec]) &&
+      rhs.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec])) {
+      logger.info(s"Saw Binary Join between non-aggregate(lhs) and aggregate(rhs): ${queryContext.origQueryParams}")
+      bjBetweenAggAndNonAgg.increment()
+    }
+  }
 }
