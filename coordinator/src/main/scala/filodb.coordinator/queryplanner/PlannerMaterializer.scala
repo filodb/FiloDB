@@ -19,7 +19,7 @@ import filodb.query.exec._
   */
 case class PlanResult(plans: Seq[ExecPlan], needsStitch: Boolean = false)
 
-trait  PlannerMaterializer extends StrictLogging {
+trait  PlannerMaterializer {
     def schemas: Schemas
     def dsOptions: DatasetOptions = schemas.part.options
 

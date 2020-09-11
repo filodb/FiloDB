@@ -3,6 +3,7 @@ package filodb.coordinator.queryplanner
 import scala.concurrent.duration._
 
 import akka.actor.ActorRef
+import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 
 import filodb.coordinator.ShardMapper
@@ -41,7 +42,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                            timeSplitEnabled: Boolean = false,
                            minTimeRangeForSplitMs: => Long = 1.day.toMillis,
                            splitSizeMs: => Long = 1.day.toMillis)
-                                extends QueryPlanner with PlannerMaterializer {
+                           extends QueryPlanner with StrictLogging with PlannerMaterializer {
 
   override val schemas = schema
   val shardColumns = dsOptions.shardKeyColumns.sorted
