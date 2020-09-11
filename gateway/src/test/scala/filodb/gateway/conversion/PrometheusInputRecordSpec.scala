@@ -1,13 +1,13 @@
 package filodb.gateway.conversion
 
-
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 import remote.RemoteStorage.{LabelPair, Sample, TimeSeries}
 
 import filodb.core.binaryrecord2.{RecordBuilder, StringifyMapItemConsumer}
 import filodb.core.metadata.Schemas
 import filodb.memory.MemFactory
-import org.scalatest.funspec.AnyFunSpec
-import org.scalatest.matchers.should.Matchers
+import filodb.memory.format.ZeroCopyUTF8String._
 
 object TimeSeriesFixture {
   //  "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=0,_ws_=demo,_ns_=filodb counter=0 1536790212000000000",
@@ -50,6 +50,40 @@ class PrometheusInputRecordSpec extends AnyFunSpec with Matchers {
       val consumer = new StringifyMapItemConsumer()
       schema.ingestionSchema.consumeMapItems(base, offset, 3, consumer)
       consumer.stringPairs.toMap shouldEqual (baseTags + ("_ns_" -> "filodb", "_ws_" -> "demo"))
+    }
+  }
+
+  it("should be able to change the name of predefined tag and be able to read old part keys with new tag") {
+    val builder = new RecordBuilder(MemFactory.onHeapFactory)
+    val oldSchema = Schemas.promCounter.copy(
+      partition = Schemas.promCounter.partition.copy(
+        predefinedKeys = Schemas.promCounter.partition.predefinedKeys.updated(9, "_step_")))
+
+    val records = Seq(new MetricTagInputRecord(
+      Seq[Any](1000000L, 1.1d),
+      "num_partitions",
+      Map("_step_".utf8 -> "0".utf8, "_ns_".utf8 -> "filodb".utf8, "_ws_".utf8 -> "demo".utf8),
+      oldSchema
+    ))
+
+    records should have length (1)
+    val record1 = records.head
+    record1.getMetric shouldEqual "num_partitions"
+    record1.nonMetricShardValues shouldEqual Seq("filodb", "demo")
+
+    record1.shardKeyHash shouldEqual RecordBuilder.shardKeyHash(Seq("filodb", "demo"), "num_partitions")
+
+    record1.addToBuilder(builder)
+    builder.allContainers.head.foreach { case (base, offset) =>
+      schema.ingestionSchema.partitionHash(base, offset) should not equal (7)
+      schema.ingestionSchema.getLong(base, offset, 0) shouldEqual 1000000L
+      schema.ingestionSchema.getDouble(base, offset, 1) shouldEqual 1.1d
+      schema.ingestionSchema.asJavaString(base, offset, 2) shouldEqual "num_partitions"
+
+      val consumer = new StringifyMapItemConsumer()
+      schema.ingestionSchema.consumeMapItems(base, offset, 3, consumer)
+      // if there is an undefined key, it should result in empty tag
+      consumer.stringPairs.toMap shouldEqual Map("_pi_" -> "0", "_ns_" -> "filodb", "_ws_" -> "demo")
     }
   }
 
