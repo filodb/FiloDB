@@ -10,7 +10,6 @@ import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query._
 import filodb.query.exec._
 
-
 /**
   * Intermediate Plan Result includes the exec plan(s) along with any state to be passed up the
   * plan building call tree during query planning.
