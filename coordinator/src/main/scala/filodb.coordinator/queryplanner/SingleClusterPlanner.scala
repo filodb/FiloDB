@@ -371,15 +371,16 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val labelNames = if (metricLabelIndex > -1 && dsOptions.metricColumn != PromMetricLabel)
       lp.labelNames.updated(metricLabelIndex, dsOptions.metricColumn) else lp.labelNames
 
-    val shardsToHit = if (shardColumns.toSet.subsetOf(lp.filters.map(_.column).toSet)) {
-      shardsFromFilters(lp.filters, qContext)
+    val renamedFilters = renameMetricFilter(lp.filters)
+    val shardsToHit = if (shardColumns.toSet.subsetOf(renamedFilters.map(_.column).toSet)) {
+      shardsFromFilters(renamedFilters, qContext)
     } else {
       mdNoShardKeyFilterRequests.increment()
       shardMapperFunc.assignedShards
     }
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      exec.LabelValuesExec(qContext, dispatcher, dsRef, shard, lp.filters, labelNames, lp.startMs, lp.endMs)
+      exec.LabelValuesExec(qContext, dispatcher, dsRef, shard, renamedFilters, labelNames, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec, false)
   }

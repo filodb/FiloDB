@@ -473,10 +473,10 @@ object LogicalPlan {
 
   def getRawSeriesFilters(logicalPlan: LogicalPlan): Seq[Seq[ColumnFilter]] = {
     LogicalPlan.findLeafLogicalPlans(logicalPlan).map { l =>
-      l match
-      {
-        case lp: RawSeries => lp.filters
-        case _             => Seq.empty
+      l match {
+        case lp: RawSeries    => lp.filters
+        case lp: LabelValues  => lp.filters
+        case _                => Seq.empty
       }
     }
   }
