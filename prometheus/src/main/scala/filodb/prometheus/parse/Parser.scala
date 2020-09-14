@@ -2,6 +2,7 @@ package filodb.prometheus.parse
 
 import scala.util.parsing.combinator.{JavaTokenParsers, PackratParsers, RegexParsers}
 
+import filodb.core.query.{ColumnFilter, Filter}
 import filodb.prometheus.ast.{Expressions, TimeRangeParams, TimeStepParams}
 import filodb.query._
 
@@ -135,6 +136,11 @@ trait Operator extends BaseParser {
   lazy val labels: PackratParser[Seq[Identifier]] = "(" ~> repsep(labelNameIdentifier, ",") <~ ")" ^^ {
     Seq() ++ _
   }
+
+  lazy val labelValues: PackratParser[Seq[LabelMatch]] =
+    repsep(labelMatch, ",") ^^ {
+      Seq() ++ _
+    }
 
   lazy val add = "+" ^^ (_ => Add)
 
@@ -399,12 +405,39 @@ object Parser extends Expression {
     }
   }
 
+  def parseLabelValueFilter(query: String): Seq[LabelMatch] = {
+    parseAll(labelValues, query) match {
+      case s: Success[_] => s.get.asInstanceOf[Seq[LabelMatch]]
+      case e: Error => handleError(e, query)
+      case f: Failure => handleFailure(f, query)
+    }
+  }
+
   def metadataQueryToLogicalPlan(query: String, timeParams: TimeRangeParams,
                                  fetchFirstLastSampleTimes: Boolean = false): LogicalPlan = {
     val expression = parseQuery(query)
     expression match {
       case p: InstantExpression => p.toMetadataPlan(timeParams, fetchFirstLastSampleTimes)
       case _ => throw new UnsupportedOperationException()
+    }
+  }
+
+  def labelValuesQueryToLogicalPlan(labelNames: Seq[String], filterQuery: Option[String],
+                                    timeParams: TimeRangeParams): LogicalPlan = {
+    filterQuery match {
+      case Some(filter) =>
+        val columnFilters = parseLabelValueFilter(filter).map { l =>
+          l.labelMatchOp match {
+            case EqualMatch => ColumnFilter(l.label, Filter.Equals(l.value))
+            case NotRegexMatch => ColumnFilter(l.label, Filter.NotEqualsRegex(l.value))
+            case RegexMatch => ColumnFilter(l.label, Filter.EqualsRegex(l.value))
+            case NotEqual(false) => ColumnFilter(l.label, Filter.NotEquals(l.value))
+            case other: Any => throw new IllegalArgumentException(s"Unknown match operator $other")
+          }
+        }
+        LabelValues(labelNames, columnFilters, timeParams.start * 1000, timeParams.end * 1000)
+      case _ =>
+        LabelValues(labelNames, Seq.empty, timeParams.start * 1000, timeParams.end * 1000)
     }
   }
 
