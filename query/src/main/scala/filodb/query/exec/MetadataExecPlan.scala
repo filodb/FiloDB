@@ -9,7 +9,6 @@ import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.MemStore
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.PartitionSchema
 import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.memory.format.{UTF8MapIteratorRowReader, ZeroCopyUTF8String}
@@ -72,7 +71,6 @@ final case class PartKeysExec(queryContext: QueryContext,
                               dispatcher: PlanDispatcher,
                               dataset: DatasetRef,
                               shard: Int,
-                              partSchema: PartitionSchema,
                               filters: Seq[ColumnFilter],
                               fetchFirstLastSampleTimes: Boolean,
                               start: Long,
