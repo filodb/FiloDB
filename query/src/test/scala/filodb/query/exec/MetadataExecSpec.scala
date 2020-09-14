@@ -108,7 +108,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     val execPlan = PartKeysExec(QueryContext(), dummyDispatcher,
-      timeseriesDataset.ref, 0, Schemas.promCounter.partition, filters, false, now-5000, now)
+      timeseriesDataset.ref, 0, filters, false, now-5000, now)
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     resp match {
@@ -122,7 +122,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val filters = Seq (ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     val execPlan = PartKeysExec(QueryContext(), dummyDispatcher,
-      timeseriesDataset.ref, 0, Schemas.promCounter.partition, filters, false, now-5000, now)
+      timeseriesDataset.ref, 0, filters, false, now-5000, now)
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp match {
@@ -143,7 +143,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     //Reducing limit results in truncated metadata response
     val execPlan = PartKeysExec(QueryContext(sampleLimit = limit-1), dummyDispatcher,
-      timeseriesDataset.ref, 0, Schemas.promCounter.partition, filters, false, now-5000, now)
+      timeseriesDataset.ref, 0, filters, false, now-5000, now)
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp match {
