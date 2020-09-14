@@ -1,6 +1,6 @@
 package filodb.prometheus.ast
 
-import filodb.core.query.RangeParams
+import filodb.core.query.{ColumnFilter, RangeParams}
 import filodb.query._
 import filodb.query.RangeFunctionId.Timestamp
 
@@ -165,7 +165,8 @@ trait Functions extends Base with Operators with Vectors {
         val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)
         ApplySortFunction(periodicSeriesPlan, sortFunctionId)
       } else if (absentFunctionIdOpt.isDefined) {
-        val columnFilter = seriesParam.asInstanceOf[InstantExpression].columnFilters
+        val columnFilter = if (seriesParam.isInstanceOf[InstantExpression])
+          seriesParam.asInstanceOf[InstantExpression].columnFilters else Seq.empty[ColumnFilter]
         val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)
         ApplyAbsentFunction(periodicSeriesPlan, columnFilter, RangeParams(timeParams.start, timeParams.step,
           timeParams.end))
