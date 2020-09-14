@@ -398,7 +398,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      PartKeysExec(qContext, dispatcher, dsRef, shard, schemas.part, renamedFilters,
+      PartKeysExec(qContext, dispatcher, dsRef, shard, renamedFilters,
                    lp.fetchFirstLastSampleTimes, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec, false)
