@@ -7,6 +7,7 @@ import scala.collection.Iterator
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import kamon.Kamon
+import kamon.trace.Span
 import org.joda.time.DateTime
 
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
@@ -313,10 +314,15 @@ object SerializedRangeVector extends StrictLogging {
     * shared correctly.
     * The containers are sent whole as most likely more than one would be sent, so they should mostly be packed.
     */
+  // scalastyle:off null
   def apply(rv: RangeVector,
             builder: RecordBuilder,
             schema: RecordSchema,
-            execPlan: String): SerializedRangeVector = {
+            execPlanName: String,
+            span: Span = null): SerializedRangeVector = {
+    var spanBldr = Kamon.spanBuilder(s"execplan-scan-latency-$execPlanName")
+    if (span != null) { spanBldr = spanBldr.asChildOf(span) }
+    val scanSpan = spanBldr.start()
     var numRows = 0
     val oldContainerOpt = builder.currentContainer
     val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
@@ -339,8 +345,10 @@ object SerializedRangeVector extends StrictLogging {
       case None                 => builder.allContainers
       case Some(firstContainer) => builder.allContainers.dropWhile(_ != firstContainer)
     }
+    scanSpan.finish()
     new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo)
   }
+  // scalastyle:on null
 
   /**
     * Creates a SerializedRangeVector out of another RV and ColumnInfo schema.  Convenient but no sharing.
