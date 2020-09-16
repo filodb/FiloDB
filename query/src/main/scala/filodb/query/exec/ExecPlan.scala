@@ -387,25 +387,20 @@ abstract class NonLeafExecPlan extends ExecPlan {
                                  dispatchRemotePlan(plan, parentSpan).map((_, i))
                                }
 
-    // The first valid schema is returned as the Task.  If all results are empty, then return
+    // reduced schema is returned as the Task.  If all results are empty, then return
     // an empty schema.  Validate that the other schemas are the same.  Skip over empty schemas.
-    var sch = ResultSchema.empty
-    val processedTasks = childTasks.collect {
-      case (res @ QueryResult(_, schema, _), i) if schema != ResultSchema.empty =>
-        sch = reduceSchemas(sch, res)
-        (res, i.toInt)
-      case (e: QueryError, _) =>
-        throw e.t
-    // cache caches results so that multiple subscribers can process
-    }.cache
-
-    val outputSchema = processedTasks.collect {
-      case (QueryResult(_, schema, _), _) => schema
-    }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
+    var sch = childTasks.foldLeftL(ResultSchema.empty) { (acc, resp) =>
+      resp match {
+        case (res@QueryResult(_, schema, _), i) =>
+          reduceSchemas(acc, res)
+        case (e: QueryError, _) =>
+          throw e.t
+      }
+    }
     parentSpan.mark("output-compose")
-    val outputRvs = compose(processedTasks, outputSchema, querySession)
+    val outputRvs = compose(childTasks, sch, querySession)
     parentSpan.mark("return-results")
-    ExecResult(outputRvs, outputSchema)
+    ExecResult(outputRvs, sch)
   }
 
   /**
