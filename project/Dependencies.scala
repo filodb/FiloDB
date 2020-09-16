@@ -47,8 +47,6 @@ object Dependencies {
     scalaTestPlus % Test
   )
 
-  lazy val scalaxyDep = "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided"
-
   lazy val memoryDeps = commonDeps ++ Seq(
     "com.github.jnr"       %  "jnr-ffi"          % "2.1.6",
     "joda-time"            % "joda-time"         % "2.2" withJavadoc(),
@@ -57,8 +55,7 @@ object Dependencies {
     "org.agrona"           %  "agrona"           % "0.9.35",
     "org.jctools"          % "jctools-core"      % "2.0.1" withJavadoc(),
     "org.spire-math"       %% "debox"            % "0.8.0" withJavadoc(),
-    scalaLoggingDep,
-    scalaxyDep
+    scalaLoggingDep
   )
 
   lazy val coreDeps = commonDeps ++ Seq(
@@ -66,7 +63,7 @@ object Dependencies {
     "io.kamon"                     %% "kamon-zipkin"      % kamonZipkinVersion,
     "org.slf4j"                    % "slf4j-api"          % "1.7.10",
     "com.beachape"                 %% "enumeratum"        % "1.5.10",
-    "io.monix"                     %% "monix"             % "2.3.0",
+    "io.monix"                     %% "monix"             % "2.3.3",
     "com.googlecode.concurrentlinkedhashmap"              % "concurrentlinkedhashmap-lru" % "1.4",
     "com.iheart"                   %% "ficus"             % ficusVersion,
     "io.fastjson"                  % "boon"               % "0.33",
@@ -74,16 +71,14 @@ object Dependencies {
     "com.github.rholder.fauxflake" % "fauxflake-core"     % "1.1.0",
     "org.scalactic"                %% "scalactic"         % "3.2.0" withJavadoc(),
     "org.apache.lucene"            % "lucene-core"        % "7.3.0" withJavadoc(),
-    "com.github.alexandrnikitin"   %% "bloom-filter"      % "0.11.0",
-    scalaxyDep
+    "com.github.alexandrnikitin"   %% "bloom-filter"      % "0.11.0"
   )
 
   lazy val sparkJobsDeps = commonDeps ++ Seq(
     "org.apache.spark"       %%      "spark-core" % sparkVersion % Provided,
     "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Provided,
     "org.apache.spark"       %%      "spark-core" % sparkVersion % Test excludeAll(excludeNetty),
-    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Test excludeAll(excludeNetty),
-    scalaxyDep
+    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Test excludeAll(excludeNetty)
   )
 
   lazy val cassDeps = commonDeps ++ Seq(
@@ -99,8 +94,7 @@ object Dependencies {
     "com.softwaremill.sttp" %% "circe"                                % sttpVersion ,
     "com.softwaremill.sttp" %% "async-http-client-backend-future"     % sttpVersion,
     "com.softwaremill.sttp" %% "core"                                 % sttpVersion,
-    circeGeneric,
-    scalaxyDep
+    circeGeneric
   )
 
   lazy val coordDeps = commonDeps ++ Seq(
@@ -120,7 +114,7 @@ object Dependencies {
   lazy val cliDeps = Seq(
     logbackDep,
     "io.kamon"          %% "kamon-bundle"        % kamonBundleVersion,
-    "com.quantifind"    %% "sumac"               % "0.3.0"
+    "org.rogach"        %% "scallop"             % "3.1.1"
   )
 
   lazy val kafkaDeps = Seq(
@@ -137,7 +131,6 @@ object Dependencies {
   )
 
   lazy val gatewayDeps = commonDeps ++ Seq(
-    scalaxyDep,
     logbackDep,
     "io.monix"   %% "monix-kafka-1x" % monixKafkaVersion,
     "org.rogach" %% "scallop"        % "3.1.1"
@@ -190,7 +183,6 @@ object Dependencies {
   //  )
 
   lazy val jmhDeps = Seq(
-    scalaxyDep,
     "org.apache.spark" %% "spark-sql" % sparkVersion excludeAll(excludeSlf4jLog4j, excludeZK, excludeJersey)
   )
 

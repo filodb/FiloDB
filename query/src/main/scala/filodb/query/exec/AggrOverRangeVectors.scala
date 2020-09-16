@@ -5,7 +5,7 @@ import scala.collection.mutable.ArrayBuffer
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.reactive.Observable
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.query._
 import filodb.memory.format.ZeroCopyUTF8String
@@ -245,7 +245,7 @@ object RangeVectorAggregator extends StrictLogging {
         count += 1
         val rowIter = rv.rows
         toClose += rowIter
-        for { i <- 0 until outputLen optimized } {
+        cforRange { 0 until outputLen } { i =>
           accs(i) = rowAgg.reduceAggregate(accs(i), rowIter.next)
         }
         accs
@@ -256,7 +256,7 @@ object RangeVectorAggregator extends StrictLogging {
         count += 1
         val rowIter = rv.rows
         toClose += rowIter
-        for { i <- 0 until outputLen optimized } {
+        cforRange { 0 until outputLen } { i =>
           val mapped = rowAgg.map(rv.key, rowIter.next, mapIntos(i))
           accs(i) = rowAgg.reduceMappedRow(accs(i), mapped)
         }

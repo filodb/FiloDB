@@ -5,14 +5,13 @@ import io.circe.syntax._
 
 object PromCirceSupport {
   import cats.syntax.either._
-
   // necessary to encode sample in promql response as an array with long and double value as string
   // Specific encoders for *Sampl types
   implicit val encodeSampl: Encoder[DataSampl] = Encoder.instance {
     case s @ Sampl(t, v)     => Json.fromValues(Seq(t.asJson, v.toString.asJson))
     case h @ HistSampl(t, b) => Json.fromValues(Seq(t.asJson, b.asJson))
     case h @ AvgSampl(t, v, c) => Json.fromValues(Seq(t.asJson, v.toString.asJson, c.toString.asJson))
-    //case m @ MetadataSampl(v) => Json.fromValues(Seq(v.asJson))
+    case m @ MetadataSampl(v) => Json.fromValues(Seq(v.asJson))
   }
 
   implicit val decodeFoo: Decoder[DataSampl] = new Decoder[DataSampl] {

@@ -2,10 +2,8 @@ package filodb.jmh
 
 import java.util.concurrent.TimeUnit
 
-import scala.language.postfixOps
-
 import org.openjdk.jmh.annotations._
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 /**
  * Microbenchmark involving comparison of data structures for holding partition lists in a shard.
@@ -18,10 +16,10 @@ import scalaxy.loops._
 @State(Scope.Thread)
 class PartitionListBenchmark {
   val lhm = new collection.mutable.LinkedHashMap[Int, String]
-  for { i <- 0 until 1000000 optimized } { lhm(i) = "shoo" }
+  cforRange { 0 until 1000000 } { i => lhm(i) = "shoo" }
 
   val jlhm = new java.util.LinkedHashMap[Int, String]
-  for { i <- 0 until 1000000 optimized } { jlhm.put(i, "shoo") }
+  cforRange { 0 until 1000000 } { i => jlhm.put(i, "shoo") }
 
   val abuf = collection.mutable.ArrayBuffer.fill(1000000)("shoo")
 
@@ -52,7 +50,7 @@ class PartitionListBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def javaLinkedMapRemove100(): Unit = {
-    for { i <- 5100 to 5199 optimized } {
+    cforRange { 5100 to 5199 } { i =>
       jlhm.remove(i)
     }
   }

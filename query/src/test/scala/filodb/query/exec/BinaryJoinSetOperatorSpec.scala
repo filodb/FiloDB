@@ -173,6 +173,76 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
         new TransientRow(1L, 200)).iterator
     }
   )
+
+  val sampleWithNaN: Array[RangeVector] = Array(
+    new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"http_requests".utf8,
+          "job".utf8 -> s"api-server".utf8,
+          "instance".utf8 -> "0".utf8,
+          "group".utf8 -> s"production".utf8)
+      )
+
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
+        new TransientRow(1L, 100),
+        new TransientRow(2L, Double.NaN)).iterator
+    },
+    new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"http_requests".utf8,
+          "job".utf8 -> s"api-server".utf8,
+          "instance".utf8 -> "1".utf8,
+          "group".utf8 -> s"production".utf8)
+      )
+
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
+        new TransientRow(1L, Double.NaN)).iterator
+    })
+
+  val sampleAllNaN : Array[RangeVector] = Array(
+    new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"http_requests".utf8,
+          "job".utf8 -> s"api-server".utf8,
+          "instance".utf8 -> "0".utf8,
+          "group".utf8 -> s"production".utf8)
+      )
+
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
+        new TransientRow(1L, Double.NaN)).iterator
+    })
+
+  val sampleMultipleRows: Array[RangeVector] = Array(
+    new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"http_requests".utf8,
+          "job".utf8 -> s"api-server".utf8,
+          "instance".utf8 -> "0".utf8,
+          "group".utf8 -> s"production".utf8)
+      )
+
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
+        new TransientRow(1L, 100),
+        new TransientRow(2L, 300)).iterator
+    },
+    new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"http_requests".utf8,
+          "job".utf8 -> s"api-server".utf8,
+          "instance".utf8 -> "1".utf8,
+          "group".utf8 -> s"production".utf8)
+      )
+
+      import NoCloseCursor._
+      override def rows(): RangeVectorCursor = Seq(
+        new TransientRow(1L, 200),
+        new TransientRow(2L, 400)).iterator
+    })
+
   val sampleCanary = sampleHttpRequests.filter(_.key.labelValues.get(ZeroCopyUTF8String("group")).get.
     toString.equals("canary"))
   val sampleProduction = sampleHttpRequests.filter(_.key.labelValues.get(ZeroCopyUTF8String("group")).get.
@@ -203,8 +273,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     println("sampleRhsShuffled size:" + sampleRhsShuffled.size)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", tvSchema, sampleCanary.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -240,8 +310,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runAsync.futureValue
     // scalastyle:off
-    val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", tvSchema, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -277,8 +347,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runAsync.futureValue
     // scalastyle:off
-    val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", tvSchema, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -314,8 +384,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runAsync.futureValue
     // scalastyle:off
-    val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", tvSchema, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -350,8 +420,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runAsync.futureValue
     // scalastyle:off
-    val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", tvSchema, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -385,8 +455,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runAsync.futureValue
     // scalastyle:off
-    val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", tvSchema, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -418,8 +488,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Seq("dummy"), Nil, "__name__")
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleHttpRequests.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", tvSchema, sampleHttpRequests.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -440,8 +510,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Nil, Seq("group", "instance", "job"), "__name__")
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleHttpRequests.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", tvSchema, sampleHttpRequests.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -462,8 +532,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Nil, Nil, "__name__")
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", tvSchema, sampleCanary.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -492,8 +562,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runAsync.futureValue
     // scalastyle:off
-    val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", tvSchema, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -552,8 +622,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runAsync.futureValue
     // scalastyle:off
-    val lhs1 = QueryResult("someId", null, sampleHttpRequests.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs1 = QueryResult("someId", null, sampleVectorMatching.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs1 = QueryResult("someId", tvSchema, sampleHttpRequests.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs1 = QueryResult("someId", tvSchema, sampleVectorMatching.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result1 = execPlan1.compose(Observable.fromIterable(Seq((rhs1, 1), (lhs1, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -565,8 +635,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Seq("instance"), Nil, "__name__")
 
     // scalastyle:off
-    val lhs2 = QueryResult("someId", null, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs2 = QueryResult("someId", null, result1.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs2 = QueryResult("someId", tvSchema, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs2 = QueryResult("someId", tvSchema, result1.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result2 = execPlan2.compose(Observable.fromIterable(Seq((rhs2, 1), (lhs2, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -623,8 +693,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), querySession, 1000, resultSchema).
       toListL.runAsync.futureValue
     // scalastyle:off
-    val lhs1 = QueryResult("someId", null, sampleHttpRequests.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs1 = QueryResult("someId", null, sampleVectorMatching.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs1 = QueryResult("someId", tvSchema, sampleHttpRequests.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs1 = QueryResult("someId", tvSchema, sampleVectorMatching.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result1 = execPlan1.compose(Observable.fromIterable(Seq((rhs1, 1), (lhs1, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -636,8 +706,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Nil, Seq("l", "group", "job"), "__name__")
 
     // scalastyle:off
-    val lhs2 = QueryResult("someId", null, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs2 = QueryResult("someId", null, result1.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs2 = QueryResult("someId", tvSchema, canaryPlusOne.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs2 = QueryResult("someId", tvSchema, result1.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result2 = execPlan2.compose(Observable.fromIterable(Seq((rhs2, 1), (lhs2, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -691,8 +761,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Nil, Nil, "__name__")
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", tvSchema, sampleCanary.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -725,8 +795,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Seq("job"), Nil, "__name__")
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", tvSchema, sampleCanary.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -756,8 +826,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Seq("job", "instance"), Nil, "__name__")
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", tvSchema, sampleCanary.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -791,8 +861,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Seq("job"), Nil, "__name__")
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", tvSchema, sampleCanary.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -823,8 +893,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       Seq("job", "instance"), Nil, "__name__")
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", tvSchema, sampleCanary.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleRhsShuffled.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
@@ -846,5 +916,89 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
     result(0).rows.map(_.getDouble(1)).toList shouldEqual List(400)
     result(1).rows.map(_.getDouble(1)).toList shouldEqual List(800)
+  }
+
+  it("AND should not return rv's when RHS has only NaN") {
+
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
+      BinaryOperator.LAND,
+      Nil, Nil, "__name__")
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", tvSchema, sampleHttpRequests.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleAllNaN.map(rv => SerializedRangeVector(rv, schema)))
+    // scalastyle:on
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
+      .toListL.runAsync.futureValue
+
+    val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
+      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
+      ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+    ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
+        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
+        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+      ))
+
+    result.size shouldEqual 0
+  }
+
+  it("AND should return only non NaN RangeVectors") {
+
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
+      BinaryOperator.LAND,
+      Nil, Nil, "__name__")
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", tvSchema, sampleHttpRequests.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleWithNaN.map(rv => SerializedRangeVector(rv, schema)))
+    // scalastyle:on
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
+      .toListL.runAsync.futureValue
+
+    val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
+      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
+      ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("production")
+    ))
+
+    result.size shouldEqual 1 // second RV in sampleWithNaN has all Nan's
+    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
+    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(100)
+  }
+
+  it("AND should return NaN when rhs sample has Nan even when LHS is not NaN ") {
+
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
+      BinaryOperator.LAND,
+      Nil, Nil, "__name__")
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", tvSchema, sampleMultipleRows.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleWithNaN.map(rv => SerializedRangeVector(rv, schema)))
+    // scalastyle:on
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
+      .toListL.runAsync.futureValue
+
+    val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
+      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
+      ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("production")
+    ))
+
+    result.size shouldEqual 1 // second RV in sampleWithNaN has all Nan's
+    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
+    val rowValues = result(0).rows.map(_.getDouble(1)).toList
+    rowValues.head shouldEqual 100
+    // LHS second RV has value 300 for 2L, however RHS has Double.NaN for 2L so RHS value is picked
+    rowValues(1).isNaN shouldEqual true
   }
 }

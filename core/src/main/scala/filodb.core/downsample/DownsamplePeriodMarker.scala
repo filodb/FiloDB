@@ -1,7 +1,7 @@
 package filodb.core.downsample
 
 import enumeratum.{Enum, EnumEntry}
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.metadata.DataSchema
 import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}
@@ -125,7 +125,7 @@ class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePerio
         case r: DoubleVectorDataReader =>
           if (PrimitiveVectorReader.dropped(ctrVecAcc, ctrVecPtr)) { // counter dip detected
             val drops = r.asInstanceOf[CorrectingDoubleVectorReader].dropPositions(ctrVecAcc, ctrVecPtr)
-            for {i <- 0 until drops.length optimized} {
+            cforRange { 0 until drops.length } { i =>
               if (drops(i) <= endRow) {
                 result += drops(i) - 1
                 result += drops(i)

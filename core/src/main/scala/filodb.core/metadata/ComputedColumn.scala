@@ -1,7 +1,5 @@
 package filodb.core.metadata
 
-import scala.language.existentials
-
 import com.typesafe.config.Config
 import org.scalactic._
 

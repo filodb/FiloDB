@@ -23,6 +23,21 @@ class ParserSpec extends AnyFunSpec with Matchers {
     lp.toString shouldEqual queryToLpString._2
   }
 
+  it("labelvalues filter query") {
+    parseLabelValueSuccessfully("job=\"prometheus\", method=\"GET\"")
+    parseLabelValueSuccessfully("job=\"prometheus\", method=\"GET\"")
+    parseLabelValueSuccessfully("job=\"prometheus\", method!=\"GET\"")
+    parseLabelValueError("http_requests_total{job=\"prometheus\", method!=\"GET\"}")
+    parseLabelValueError("{__name__=\"prometheus\"}")
+    parseLabelValueError("job[__name__=\"prometheus\"]")
+    val queryToLpString = ("job=\"prometheus\", method!=\"GET\"" ->
+      "LabelValues(List(_ns_),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(method,NotEquals(GET))),1524855988000,1524855988000)")
+    val start: Long = 1524855988L
+    val end: Long = 1524855988L
+    val lp = Parser.labelValuesQueryToLogicalPlan(Seq("_ns_"), Some(queryToLpString._1), TimeStepParams(start, -1, end))
+    lp.toString shouldEqual queryToLpString._2
+  }
+
   it("parse basic scalar expressions") {
     parseSuccessfully("1")
     //    parse("+Inf")
@@ -383,6 +398,17 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("timestamp(some_metric, hello)") // reason : Expected only 1 arg, got 2
   }
 
+  it("parse long identifiers") {
+    // This should not cause a stack overflow error.
+
+    val bob = new StringBuilder().append("requests{job=\"")
+    for (i <- 1 to 100) {
+      bob.append("abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_")
+    }
+
+    parseSuccessfully(bob.append("\"}").toString())
+  }
+
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
       "http_requests_total + time()" -> "ScalarVectorBinaryOperation(ADD,ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),false)",
@@ -581,6 +607,16 @@ class ParserSpec extends AnyFunSpec with Matchers {
   private def parseError(query: String) = {
     intercept[IllegalArgumentException] {
       Parser.parseQuery(query)
+    }
+  }
+
+  private def parseLabelValueSuccessfully(query: String) = {
+    Parser.parseLabelValueFilter(query)
+  }
+
+  private def parseLabelValueError(query: String) = {
+    intercept[IllegalArgumentException] {
+      Parser.parseLabelValueFilter(query)
     }
   }
 }

@@ -121,7 +121,7 @@ object KeyFilter {
   //   val funcs = positionsAndFuncs.collect { case (pos, func) if pos >= 0 => func }.toArray
 
   //   def partFunc(p: PartitionKey): Boolean = {
-  //     for { i <- 0 until positions.size optimized } {
+  //     cforRange { 0 until positions.size } { i =>
   //       val bool = funcs(i)(p.getAny(positions(i)))
   //       // Short circuit when any filter returns false
   //       if (!bool) return false

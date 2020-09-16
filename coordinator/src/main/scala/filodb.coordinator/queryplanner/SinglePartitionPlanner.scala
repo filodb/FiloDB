@@ -1,6 +1,6 @@
 package filodb.coordinator.queryplanner
 
-import filodb.core.query.QueryContext
+import filodb.core.query.{PromQlQueryParams, QueryContext}
 import filodb.query.{BinaryJoin, LabelValues, LogicalPlan, SeriesKeysByFilters, SetOperator}
 import filodb.query.exec._
 
@@ -43,15 +43,22 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner], plannerSelecto
 
   private def materializeBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): ExecPlan = {
 
+    val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
+    val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
+
     val lhsExec = logicalPlan.lhs match {
-      case b: BinaryJoin => materializeBinaryJoin(b, qContext)
-      case _             => getPlanner(logicalPlan.lhs).materialize(logicalPlan.lhs, qContext)
+      case b: BinaryJoin => materializeBinaryJoin(b, lhsQueryContext)
+      case _             => getPlanner(logicalPlan.lhs).materialize(logicalPlan.lhs, lhsQueryContext)
     }
 
     val rhsExec = logicalPlan.rhs match {
-      case b: BinaryJoin => materializeBinaryJoin(b, qContext)
-      case _             => getPlanner(logicalPlan.rhs).materialize(logicalPlan.rhs, qContext)
+      case b: BinaryJoin => materializeBinaryJoin(b, rhsQueryContext)
+      case _             => getPlanner(logicalPlan.rhs).materialize(logicalPlan.rhs, rhsQueryContext)
     }
+
+    PlannerUtil.validateBinaryJoin(Seq(lhsExec), Seq(rhsExec), qContext)
 
     if (logicalPlan.operator.isInstanceOf[SetOperator])
       SetOperatorExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
