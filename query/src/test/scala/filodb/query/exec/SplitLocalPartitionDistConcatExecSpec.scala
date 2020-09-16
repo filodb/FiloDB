@@ -92,7 +92,7 @@ class SplitLocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers wit
     memStore.shutdown()
   }
 
-  it ("should stitch the child exec results, result schema should have fixedVectorLen of both results") {
+  it ("should stitch the child exec results with different splits, result schema should have fixedVectorLen of both results") {
     import ZeroCopyUTF8String._
 
     val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
