@@ -528,6 +528,6 @@ object DoubleLongWrapDataReader extends DoubleVectorDataReader {
     val ignorePrev = if (prev.isNaN) true
     else false
     val changes = LongBinaryVector(acc, vector).changes(acc, vector, start, end, prev.toLong, ignorePrev)
-    (changes._1.toDouble, changes._1.toDouble)
+    (changes._1.toDouble, changes._2.toDouble)
   }
 }
