@@ -6,12 +6,10 @@ import java.sql.Timestamp
 
 import scala.concurrent.duration._
 import scala.util.Try
-
 import com.opencsv.CSVWriter
 import monix.reactive.Observable
 import org.rogach.scallop.ScallopConf
 import org.scalactic._
-
 import filodb.coordinator._
 import filodb.coordinator.client._
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
@@ -25,41 +23,50 @@ import filodb.memory.format.{BinaryVector, Classes, MemoryReader, RowReader}
 import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
 import filodb.query._
+import org.rogach.scallop.exceptions.ScallopException
 
 // scalastyle:off
 class Arguments(args: Seq[String]) extends ScallopConf(args) {
+
+
   val dataset = opt[String]()
   val database = opt[String]()
   val command = opt[String]()
   val filename = opt[String]()
-  val configPath = opt[String]()
+  val configpath = opt[String]()
   // max # of results returned. Don't make it too high.
   val limit = opt[Int](default = Some(200))
-  val sampleLimit = opt[Int](default = Some(1000000))
-  val timeoutSeconds = opt[Int](default = Some(60))
+  val samplelimit = opt[Int](default = Some(1000000))
+  val timeoutseconds = opt[Int](default = Some(60))
   val outfile = opt[String]()
-  val delimiter = opt[String](default = Some(",")).apply()
-  val indexName = opt[String]()
+  val indexname = opt[String]()
   val host = opt[String]()
   val port = opt[Int](default = Some(2552))
   val promql = opt[String]()
   val schema = opt[String]()
-  val hexPk = opt[String]()
-  val hexVector = opt[String]()
-  val hexChunkInfo = opt[String]()
-  val vectorType = opt[String]()
+  val hexpk = opt[String]()
+  val hexvector = opt[String]()
+  val hexchunkinfo = opt[String]()
+  val vectortype = opt[String]()
   val matcher = opt[String]()
-  val labelNames = opt[List[String]](default = Some(List()))
-  val labelFilter = opt[Map[String, String]](default = Some(Map.empty))
-  val start: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
-  val end: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
+  val labelnames = opt[List[String]](default = Some(List()))
+  val labelfilter = opt[Map[String, String]](default = Some(Map.empty))
+  val start = opt[BigInt](default = Some(System.currentTimeMillis()/1000))// promql argument is seconds since epoch
+  val end = opt[BigInt](default = Some(System.currentTimeMillis()/1000))// promql argument is seconds since epoch
   val minutes = opt[String]()
   val step = opt[Long](default = Some(10)) // in seconds
   val chunks = opt[String]()   // select either "memory" or "buffers" chunks only
-  val everyNSeconds = opt[String]()
+  val everynseconds = opt[String]()
   val shards = opt[List[String]]()
   val spread = opt[Int]()
   verify()
+
+  override def onError(e: Throwable): Unit = e match {
+
+    case ScallopException(message) => throw e
+    case other => throw other
+  }
+
 }
 
 object CliMain extends FilodbClusterNode {
@@ -117,13 +124,14 @@ object CliMain extends FilodbClusterNode {
       args.minutes.map { minArg =>
         val end = System.currentTimeMillis() / 1000
         TimeStepParams(end - minArg.toInt * 60, args.step(), end)
-      }.getOrElse(TimeStepParams(args.start, args.step(), args.end))
+      }.getOrElse(TimeStepParams(args.start().longValue(), args.step(), args.end().longValue()))
     }
 
   def main(rawArgs: Array[String]): Unit = {
     val args = new Arguments(rawArgs)
+    println("After arguments")
     try {
-      val timeout = args.timeoutSeconds().seconds
+      val timeout = args.timeoutseconds().seconds
       args.command.toOption match {
         case Some("init") =>
           println("Initializing FiloDB Admin keyspace and tables...")
@@ -148,10 +156,10 @@ object CliMain extends FilodbClusterNode {
           names.foreach(println)
 
         case Some("indexvalues") =>
-          require(args.indexName.isDefined, "--indexName required")
+          require(args.indexname.isDefined, "--indexName required")
           require(args.shards.isDefined, "--shards required")
           val (remote, ref) = getClientAndRef(args)
-          val values = remote.getIndexValues(ref, args.indexName(), args.shards().head.toInt, args.limit())
+          val values = remote.getIndexValues(ref, args.indexname(), args.shards().head.toInt, args.limit())
           values.foreach { case (term, freq) => println(f"$term%40s\t$freq") }
 
         case Some("status") =>
@@ -165,31 +173,32 @@ object CliMain extends FilodbClusterNode {
           promFilterToPartKeyBr(args.promql(), args.schema())
 
         case Some("partKeyBrAsString") =>
-          require(args.hexPk.isDefined, "--hexPk must be defined")
-          partKeyBrAsString(args.hexPk())
+          require(args.hexpk.isDefined, "--hexPk must be defined")
+          partKeyBrAsString(args.hexpk())
 
         case Some("decodeChunkInfo") =>
-          require(args.hexChunkInfo.isDefined, "--hexChunkInfo must be defined")
-          decodeChunkInfo(args.hexChunkInfo())
+          require(args.hexchunkinfo.isDefined, "--hexChunkInfo must be defined")
+          decodeChunkInfo(args.hexchunkinfo())
 
         case Some("decodeVector") =>
-          require(args.hexVector.isDefined && args.vectorType.isDefined, "--hexVector and --vectorType must be defined")
-          decodeVector(args.hexVector(), args.vectorType())
+          println("inside decodeVector "+args.hexvector)
+          require(args.hexvector.isDefined && args.vectortype.isDefined, "--hexVector and --vectorType must be defined")
+          decodeVector(args.hexvector(), args.vectortype())
 
         case Some("timeseriesMetadata") =>
           require(args.host.isDefined && args.dataset.isDefined && args.matcher.isDefined, "--host, --dataset and --matcher must be defined")
           val remote = Client.standaloneClient(system, args.host(), args.port())
-          val options = QOptions(args.limit(), args.sampleLimit(), args.everyNSeconds.map(_.toInt).toOption,
+          val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
             timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
           parseTimeSeriesMetadataQuery(remote, args.matcher(), args.dataset(),
             getQueryRange(args), true, options)
 
         case Some("labelValues") =>
-          require(args.host.isDefined && args.dataset.isDefined && args.labelNames.isDefined, "--host, --dataset and --labelName must be defined")
+          require(args.host.isDefined && args.dataset.isDefined && args.labelnames.isDefined, "--host, --dataset and --labelName must be defined")
           val remote = Client.standaloneClient(system, args.host(), args.port())
-          val options = QOptions(args.limit(), args.sampleLimit(), args.everyNSeconds.map(_.toInt).toOption,
+          val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
             timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
-          parseLabelValuesQuery(remote, args.labelNames(), args.labelFilter(), args.dataset(),
+          parseLabelValuesQuery(remote, args.labelnames(), args.labelfilter(), args.dataset(),
             getQueryRange(args), options)
 
         case x: Any =>
@@ -197,7 +206,7 @@ object CliMain extends FilodbClusterNode {
           args.promql.map { query =>
             require(args.host.isDefined && args.dataset.isDefined, "--host and --dataset must be defined")
             val remote = Client.standaloneClient(system, args.host(), args.port())
-            val options = QOptions(args.limit(), args.sampleLimit(), args.everyNSeconds.toOption.map(_.toInt),
+            val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.toOption.map(_.toInt),
               timeout, args.shards.toOption.map(_.map(_.toInt)), args.spread.toOption.map(Integer.valueOf))
             parsePromQuery2(remote, query, args.dataset(), getQueryRange(args), options)
           }
