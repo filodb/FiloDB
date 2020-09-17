@@ -51,8 +51,9 @@ class Arguments(args: Seq[String]) extends ScallopConf(args) {
   val matcher = opt[String]()
   val labelnames = opt[List[String]](default = Some(List()))
   val labelfilter = opt[Map[String, String]](default = Some(Map.empty))
-  val start = opt[BigInt](default = Some(System.currentTimeMillis()/1000))// promql argument is seconds since epoch
-  val end = opt[BigInt](default = Some(System.currentTimeMillis()/1000))// promql argument is seconds since epoch
+  val currentTime = System.currentTimeMillis()/1000
+  val start = opt[BigInt](default = Some(currentTime)// promql argument is seconds since epoch
+  val end = opt[BigInt](default = Some(currentTime)// promql argument is seconds since epoch
   val minutes = opt[String]()
   val step = opt[Long](default = Some(10)) // in seconds
   val chunks = opt[String]()   // select either "memory" or "buffers" chunks only
