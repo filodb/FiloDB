@@ -96,11 +96,14 @@ trait ExecPlan extends QueryCommand {
               querySession: QuerySession)
              (implicit sched: Scheduler): Task[QueryResponse] = {
 
+    val startExecute = querySession.qContext.submitTime
+
     val parentSpan = Kamon.currentSpan()
     // NOTE: we launch the preparatory steps as a Task too.  This is important because scanPartitions,
     // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
     // we don't want these to happen in a single thread.
-    // Step 1: initiate doExecute, get schema
+
+    // Step 1: initiate doExecute: make result schema and set up the async monix pipeline to create RVs
     lazy val step1 = Task {
       val span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
         .asChildOf(parentSpan)
@@ -111,12 +114,19 @@ trait ExecPlan extends QueryCommand {
       // across threads. Note that task/observable will not run on the thread where span is present since
       // kamon uses thread-locals.
       Kamon.runWithSpan(span, true) {
-        doExecute(source, querySession)
+        val doEx = doExecute(source, querySession)
+        Kamon.histogram("query-execute-time-elapsed-step1-done")
+          .withTag("plan", getClass.getSimpleName)
+          .record(System.currentTimeMillis - startExecute)
+        doEx
       }
     }
 
-    // Step 2: Set up transformers and loop over all rangevectors, creating the result
+    // Step 2: Run connect monix pipeline to transformers, materialize the result
     def step2(res: ExecResult) = res.schema.map { resSchema =>
+      Kamon.histogram("query-execute-time-elapsed-step2-start")
+        .withTag("plan", getClass.getSimpleName)
+        .record(System.currentTimeMillis - startExecute)
       val span = Kamon.spanBuilder(s"execute-step2-${getClass.getSimpleName}")
         .asChildOf(parentSpan)
         .tag("query-id", queryContext.queryId)
@@ -137,6 +147,9 @@ trait ExecPlan extends QueryCommand {
             paramRangeVector), transf.schema(acc._2))
         }
         val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
+        Kamon.histogram("query-execute-time-elapsed-step2-transformer-pipeline-setup")
+          .withTag("plan", getClass.getSimpleName)
+          .record(System.currentTimeMillis - startExecute)
         val builder = SerializedRangeVector.newBuilder()
         @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
         finalRes._1
@@ -160,6 +173,9 @@ trait ExecPlan extends QueryCommand {
           }
           .toListL
           .map { r =>
+            Kamon.histogram("query-execute-time-elapsed-step2-result-materialized")
+              .withTag("plan", getClass.getSimpleName)
+              .record(System.currentTimeMillis - startExecute)
             val numBytes = builder.allContainers.map(_.numBytes).sum
             SerializedRangeVector.queryResultBytes.record(numBytes)
             span.mark(s"num-bytes: $numBytes")

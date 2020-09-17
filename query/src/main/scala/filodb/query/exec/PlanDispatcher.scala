@@ -35,7 +35,7 @@ case class ActorPlanDispatcher(target: ActorRef) extends PlanDispatcher {
     if (remainingTime < 1) {
       Task.raiseError(QueryTimeoutException(remainingTime, this.getClass.getName))
     } else {
-      val t = Timeout(FiniteDuration(remainingTime, TimeUnit.MILLISECONDS))
+      val t = Timeout(FiniteDuration(queryTimeElapsed, TimeUnit.MILLISECONDS))
       val fut = (target ? plan)(t).map {
         case resp: QueryResponse => resp
         case e =>  throw new IllegalStateException(s"Received bad response $e")
