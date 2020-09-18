@@ -33,9 +33,9 @@ case class ActorPlanDispatcher(target: ActorRef) extends PlanDispatcher {
     val remainingTime = plan.queryContext.queryTimeoutMillis - queryTimeElapsed
     // Don't send if time left is very small
     if (remainingTime < 1) {
-      Task.raiseError(QueryTimeoutException(remainingTime, this.getClass.getName))
+      Task.raiseError(QueryTimeoutException(queryTimeElapsed, this.getClass.getName))
     } else {
-      val t = Timeout(FiniteDuration(queryTimeElapsed, TimeUnit.MILLISECONDS))
+      val t = Timeout(FiniteDuration(remainingTime, TimeUnit.MILLISECONDS))
       val fut = (target ? plan)(t).map {
         case resp: QueryResponse => resp
         case e =>  throw new IllegalStateException(s"Received bad response $e")
