@@ -3,6 +3,7 @@ package filodb.query.exec
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
+import kamon.Kamon
 import monix.eval.Task
 import monix.reactive.Observable
 
@@ -57,6 +58,9 @@ final case class SetOperatorExec(queryContext: QueryContext,
       case (QueryResult(_, schema, result), i) => (schema, result, i)
       case (QueryError(_, ex), _)              => throw ex
     }.toListL.map { resp =>
+      Kamon.histogram("query-execute-time-elapsed-step2-child-results-available")
+        .withTag("plan", getClass.getSimpleName)
+        .record(System.currentTimeMillis - queryContext.submitTime)
       // NOTE: We can't require this any more, as multischema queries may result in not a QueryResult if the
       //       filter returns empty results.  The reason is that the schema will be undefined.
       // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
