@@ -14,20 +14,45 @@ object PromCirceSupport {
     case m @ MetadataSampl(v) => Json.fromValues(Seq(v.asJson))
   }
 
-  implicit val decodeFoo: Decoder[DataSampl] = new Decoder[DataSampl] {
-    final def apply(c: HCursor): Decoder.Result[DataSampl] = {
+  implicit val decodeAvgSample: Decoder[AvgSampl] = new Decoder[AvgSampl] {
+    final def apply(c: HCursor): Decoder.Result[AvgSampl] = {
+      for { timestamp <- c.downArray.as[Long]
+            value <- c.downArray.right.as[String]
+            count <- c.downArray.right.right.as[Long]
+            } yield {
+        AvgSampl(timestamp, value.toDouble, count)
+      }
+    }
+  }
+
+  implicit val decodeSample: Decoder[Sampl] = new Decoder[Sampl] {
+    final def apply(c: HCursor): Decoder.Result[Sampl] = {
+      for { timestamp <- c.downArray.as[Long]
+            value <- c.downArray.right.as[String]} yield {
+        Sampl(timestamp, value.toDouble)
+      }
+    }
+  }
+
+  implicit val decodeHistSampl: Decoder[HistSampl] = new Decoder[HistSampl] {
+    final def apply(c: HCursor): Decoder.Result[HistSampl] = {
       val tsResult = c.downArray.as[Long]
       val rightCurs = c.downArray.right
-      if (rightCurs.focus.get.isObject) {
         for { timestamp <- tsResult
-              buckets   <- rightCurs.as[Map[String, Double]] } yield {
+              buckets <- rightCurs.as[Map[String, Double]]
+             } yield {
           HistSampl(timestamp, buckets)
         }
-      } else {
-        for { timestamp <- tsResult
-              value     <- rightCurs.as[String] } yield {
-          Sampl(timestamp, value.toDouble)
-        }
+    }
+  }
+
+  implicit val decodeFoo: Decoder[DataSampl] = new Decoder[DataSampl] {
+    final def apply(c: HCursor): Decoder.Result[DataSampl] = {
+      c.values.get.toList.size match
+      {
+        case 3 =>  c.as[AvgSampl]
+        case 2 =>  c.as[Sampl]
+        case _ =>  c.as[HistSampl] // To do change default condition
       }
     }
   }

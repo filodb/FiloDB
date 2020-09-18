@@ -41,9 +41,6 @@ object AvgRowAggregator extends RowAggregator {
       val newMean = (acc.mean * acc.count + aggRes.getDouble(1) * aggRes.getLong(2)) / (acc.count + aggRes.getLong(2))
       acc.mean = newMean
       acc.count += aggRes.getLong(2)
-
-      println("acc.count:" + acc.count)
-      println("aggRes.getLong(2):" + aggRes.getLong(2))
     }
     acc
   }
