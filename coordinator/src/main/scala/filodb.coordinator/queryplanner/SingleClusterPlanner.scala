@@ -173,6 +173,10 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val rhs = walkLogicalPlanTree(lp.rhs, qContext)
     val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext, pickDispatcher(rhs.plans), rhs.plans))
     else rhs.plans
+
+
+    PlannerUtil.validateBinaryJoin(lhs.plans, rhs.plans, qContext)
+
     // TODO Currently we create separate exec plan node for stitching.
     // Ideally, we can go one step further and add capability to NonLeafNode plans to pre-process
     // and transform child results individually before composing child results together.
@@ -365,7 +369,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      PartKeysExec(qContext, dispatcher, dsRef, shard, schemas.part, renamedFilters,
+      PartKeysExec(qContext, dispatcher, dsRef, shard, renamedFilters,
                    lp.fetchFirstLastSampleTimes, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec, false)
