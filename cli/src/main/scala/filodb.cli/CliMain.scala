@@ -184,7 +184,6 @@ object CliMain extends FilodbClusterNode {
           decodeChunkInfo(args.hexchunkinfo())
 
         case Some("decodeVector") =>
-          println("inside decodeVector "+args.hexvector)
           require(args.hexvector.isDefined && args.vectortype.isDefined, "--hexVector and --vectorType must be defined")
           decodeVector(args.hexvector(), args.vectortype())
 
