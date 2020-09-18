@@ -227,12 +227,10 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
           val sclrVal = scalarRangeVector.getValue(timestamp)
           val newValue = if (scalarOnLhs) operatorFunction.calculate(sclrVal, nextVal)
                          else operatorFunction.calculate(nextVal, sclrVal)
-          println("newValue:" + newValue)
           result.setValues(timestamp, newValue)
           result
         }
       }
-      println(" ScalarOperationMapper adding.. rv.key:" + rv.key.labelValues)
       IteratorBackedRangeVector(rv.key, resultIterator)
     }
   }

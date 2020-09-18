@@ -112,8 +112,6 @@ object PrometheusModel {
 
     typ match {
       case QueryResultType.RangeVectors =>
-        println("Adding tags to result:" + tags)
-        println("samples:" + samples)
         Result(tags,
           // remove NaN in HTTP results
           // Known Issue: Until we support NA in our vectors, we may not be able to return NaN as an end-of-time-series

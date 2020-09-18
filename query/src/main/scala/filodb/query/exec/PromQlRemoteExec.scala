@@ -165,9 +165,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
             row
           }
         }
-
         override def numRows: Option[Int] = Option(samples.size)
-
       }
       SerializedRangeVector(rv, builder, defaultRecSchema, "PromQlRemoteExec-default")
       // TODO: Handle stitching with verbose flag
