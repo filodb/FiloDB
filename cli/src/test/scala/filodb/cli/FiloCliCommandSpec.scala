@@ -5,12 +5,11 @@ import org.scalatest.funspec.AnyFunSpec
 
 class FiloCliCommandSpec extends AnyFunSpec {
 
-
-  it("Testing for filo cli command to pass sallops options verification"){
+  it("Testing for filo cli command to pass scallops options verification"){
 
     parseSucessFully("--host localhost --command indexnames --dataset prometheus")
     parseSucessFully("--host localhost --port 6564 --command indexvalues --indexname asdasd --dataset prometheus --shards SS")
-    parseSucessFully("""--host localhost --port 6564 --dataset "adadasd" --promql "myMetricName{_ws_='myWs',_ns_='myNs'}" --start 1231313123123123 --step 5555 --end 12312313123123""")
+    parseSucessFully("""--host localhost --port 6564 --dataset "adadasd" --promql "myMetricName{_ws_='myWs',_ns_='myNs'}" --start 1212 --step 5555 --end 1212""")
     parseSucessFully("--host localhost --port 6564 --command timeseriesmetadata --matcher a=b --dataset prometheus --start 123123 --end 13123")
     parseSucessFully("--host localhost --port 6564 --command labelvalues --labelnames a --labelfilter a=b --dataset prometheus")
     parseSucessFully("""--command promFilterToPartKeyBR --promql "myMetricName{_ws_='myWs',_ns_='myNs'}" --schema prom-counter""")

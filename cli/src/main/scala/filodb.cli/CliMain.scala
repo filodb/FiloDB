@@ -6,10 +6,13 @@ import java.sql.Timestamp
 
 import scala.concurrent.duration._
 import scala.util.Try
+
 import com.opencsv.CSVWriter
 import monix.reactive.Observable
 import org.rogach.scallop.ScallopConf
+import org.rogach.scallop.exceptions.ScallopException
 import org.scalactic._
+
 import filodb.coordinator._
 import filodb.coordinator.client._
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
@@ -23,7 +26,6 @@ import filodb.memory.format.{BinaryVector, Classes, MemoryReader, RowReader}
 import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
 import filodb.query._
-import org.rogach.scallop.exceptions.ScallopException
 
 // scalastyle:off
 class Arguments(args: Seq[String]) extends ScallopConf(args) {
@@ -52,8 +54,10 @@ class Arguments(args: Seq[String]) extends ScallopConf(args) {
   val labelnames = opt[List[String]](default = Some(List()))
   val labelfilter = opt[Map[String, String]](default = Some(Map.empty))
   val currentTime = System.currentTimeMillis()/1000
-  val start = opt[BigInt](default = Some(currentTime)// promql argument is seconds since epoch
-  val end = opt[BigInt](default = Some(currentTime)// promql argument is seconds since epoch
+
+//  val starts = opt[Long](default = Some(currentTime))
+  val start = opt[Long](default = Some(currentTime))// promql argument is seconds since epoch
+  val end = opt[Long](default = Some(currentTime))// promql argument is seconds since epoch
   val minutes = opt[String]()
   val step = opt[Long](default = Some(10)) // in seconds
   val chunks = opt[String]()   // select either "memory" or "buffers" chunks only
@@ -124,12 +128,11 @@ object CliMain extends FilodbClusterNode {
       args.minutes.map { minArg =>
         val end = System.currentTimeMillis() / 1000
         TimeStepParams(end - minArg.toInt * 60, args.step(), end)
-      }.getOrElse(TimeStepParams(args.start().longValue(), args.step(), args.end().longValue()))
+      }.getOrElse(TimeStepParams(args.start(), args.step(), args.end()))
     }
 
   def main(rawArgs: Array[String]): Unit = {
     val args = new Arguments(rawArgs)
-    println("After arguments")
     try {
       val timeout = args.timeoutseconds().seconds
       args.command.toOption match {
