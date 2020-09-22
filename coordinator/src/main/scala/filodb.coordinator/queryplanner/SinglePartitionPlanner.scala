@@ -58,7 +58,7 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner], plannerSelecto
       case _             => getPlanner(logicalPlan.rhs).materialize(logicalPlan.rhs, rhsQueryContext)
     }
 
-    PlannerUtil.validateBinaryJoin(Seq(lhsExec), Seq(rhsExec), qContext)
+    PlannerUtil.logBinaryJoin(Seq(lhsExec), Seq(rhsExec), qContext)
 
     if (logicalPlan.operator.isInstanceOf[SetOperator])
       SetOperatorExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,

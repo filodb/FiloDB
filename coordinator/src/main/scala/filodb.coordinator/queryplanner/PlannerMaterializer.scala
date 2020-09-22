@@ -1,11 +1,12 @@
 package filodb.coordinator.queryplanner
 
-import com.typesafe.scalalogging.StrictLogging
 import java.util.concurrent.ThreadLocalRandom
+
+import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 
 import filodb.core.metadata.{DatasetOptions, Schemas}
-import filodb.core.query.{QueryContext, RangeParams}
+import filodb.core.query.{PromQlQueryParams, QueryContext, RangeParams}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query._
 import filodb.query.exec._
@@ -146,17 +147,19 @@ object PlannerUtil extends StrictLogging {
 
   val bjBetweenAggAndNonAgg = Kamon.counter("join-between-agg-non-agg").withoutTags()
 
-  def validateBinaryJoin(lhs: Seq[ExecPlan], rhs: Seq[ExecPlan], queryContext: QueryContext): Any = {
-
-    if (lhs.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec]) &&
-      !rhs.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec])) {
-      logger.info(s"Saw Binary Join between aggregate(lhs) and non-aggregate (rhs). ${queryContext.origQueryParams}")
-      bjBetweenAggAndNonAgg.increment()
-    }
-
-    if (!lhs.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec]) &&
-      rhs.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec])) {
-      logger.info(s"Saw Binary Join between non-aggregate(lhs) and aggregate(rhs): ${queryContext.origQueryParams}")
+  /**
+   * Temporarily log special queries which need to be inspected
+   */
+  def logBinaryJoin(lhs: Seq[ExecPlan], rhs: Seq[ExecPlan], queryContext: QueryContext): Any = {
+    if ( (lhs.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec]) &&
+          !rhs.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec]) &&
+          !rhs.exists(_.isInstanceOf[ScalarBinaryOperationExec]))  ||
+         (rhs.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec]) &&
+          !lhs.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec]) &&
+          !lhs.exists(_.isInstanceOf[ScalarBinaryOperationExec]))
+    ) {
+      logger.info(s"Saw Binary Join between aggregate and non-aggregate " +
+        s"${queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl} <EOL>")
       bjBetweenAggAndNonAgg.increment()
     }
   }

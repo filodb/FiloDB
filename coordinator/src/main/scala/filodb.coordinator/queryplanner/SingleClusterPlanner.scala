@@ -202,9 +202,6 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext, pickDispatcher(rhs.plans), rhs.plans))
     else rhs.plans
 
-
-    PlannerUtil.validateBinaryJoin(lhs.plans, rhs.plans, qContext)
-
     // TODO Currently we create separate exec plan node for stitching.
     // Ideally, we can go one step further and add capability to NonLeafNode plans to pre-process
     // and transform child results individually before composing child results together.
@@ -216,11 +213,13 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       Seq(exec.SetOperatorExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator,
         LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
         LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn), dsOptions.metricColumn))
-    else
+    else {
+      PlannerUtil.logBinaryJoin(lhs.plans, rhs.plans, qContext)
       Seq(BinaryJoinExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
         LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
         LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
         LogicalPlanUtils.renameLabels(lp.include, dsOptions.metricColumn), dsOptions.metricColumn))
+    }
     PlanResult(joined, false)
   }
 
