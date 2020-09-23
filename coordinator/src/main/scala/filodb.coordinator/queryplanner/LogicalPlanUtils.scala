@@ -24,14 +24,18 @@ object LogicalPlanUtils {
   /**
     * Retrieve start and end time from LogicalPlan
     */
+  // scalastyle:off cyclomatic.complexity
   def getTimeFromLogicalPlan(logicalPlan: LogicalPlan): TimeRange = {
     logicalPlan match {
       case lp: PeriodicSeries              => TimeRange(lp.startMs, lp.endMs)
       case lp: PeriodicSeriesWithWindowing => TimeRange(lp.startMs, lp.endMs)
       case lp: ApplyInstantFunction        => getTimeFromLogicalPlan(lp.vectors)
       case lp: Aggregate                   => getTimeFromLogicalPlan(lp.vectors)
-      case lp: BinaryJoin                  => // can assume lhs & rhs have same time
-                                              getTimeFromLogicalPlan(lp.lhs)
+      case lp: BinaryJoin                  => val lhsTime = getTimeFromLogicalPlan(lp.lhs)
+                                              val rhsTime = getTimeFromLogicalPlan(lp.rhs)
+                                              if (lhsTime != rhsTime) throw new UnsupportedOperationException(
+                                                "Binary Join has different LHS and RHS times")
+                                              else lhsTime
       case lp: ScalarVectorBinaryOperation => getTimeFromLogicalPlan(lp.vector)
       case lp: ApplyMiscellaneousFunction  => getTimeFromLogicalPlan(lp.vectors)
       case lp: ApplySortFunction           => getTimeFromLogicalPlan(lp.vectors)
@@ -43,9 +47,17 @@ object LogicalPlanUtils {
                                                 case i: IntervalSelector => TimeRange(i.from, i.to)
                                                 case _ => throw new BadQueryException(s"Invalid logical plan")
                                               }
-      case _                               => throw new BadQueryException(s"Invalid logical plan ${logicalPlan}")
+      case lp: LabelValues                 => TimeRange(lp.startMs, lp.endMs)
+      case lp: SeriesKeysByFilters         => TimeRange(lp.startMs, lp.endMs)
+      case lp: ApplyInstantFunctionRaw     => getTimeFromLogicalPlan(lp.vectors)
+      case lp: ScalarBinaryOperation       => TimeRange(lp.rangeParams.startSecs * 1000, lp.rangeParams.endSecs * 1000)
+      case lp: ScalarFixedDoublePlan       => TimeRange(lp.timeStepParams.startSecs * 1000,
+                                              lp.timeStepParams.endSecs * 1000)
+      case lp: RawChunkMeta                => throw new UnsupportedOperationException(s"RawChunkMeta does not have " +
+                                              s"time")
     }
   }
+  // scalastyle:on cyclomatic.complexity
 
   /**
    * Used to change start and end time(TimeRange) of LogicalPlan
