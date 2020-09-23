@@ -53,11 +53,10 @@ final case class SetOperatorExec(queryContext: QueryContext,
                               firstSchema: Task[ResultSchema],
                               querySession: QuerySession): Observable[RangeVector] = {
 
-    val queryParams = querySession.qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val onLabelsFinal =
-      if (QueryTimeRangeUtil.queryTimeRangeRequiresExtraKeys(queryParams, querySession.queryConfig))
-        onLabels ++ Seq("_pi_".utf8, "_step_".utf8)
-      else onLabels
+    val needExtraKeys = QueryTimeRangeUtil.queryTimeRangeRequiresExtraKeys(
+      querySession.qContext.origQueryParams,
+      querySession.queryConfig)
+    val onLabelsFinal = if (needExtraKeys) onLabels ++ QueryTimeRangeUtil.extraKeys else onLabels
 
     val taskOfResults = childResponses.map {
       case (QueryResult(_, schema, result), i) => (schema, result, i)
