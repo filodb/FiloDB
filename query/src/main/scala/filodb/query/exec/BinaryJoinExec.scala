@@ -52,8 +52,6 @@ final case class BinaryJoinExec(queryContext: QueryContext,
   require(!on.contains(metricColumn), "On cannot contain metric name")
 
   val onLabels = on.map(Utf8Str(_)).toSet
-  // publishInterval and step tags always needs to be included in join key
-  val withExtraOnLabels = onLabels ++ Seq("_pi_".utf8, "_step_".utf8)
   val ignoringLabels = ignoring.map(Utf8Str(_)).toSet
   val ignoringLabelsForJoin = ignoringLabels + metricColumn.utf8
   // if onLabels is non-empty, we are doing matching based on on-label, otherwise we are
@@ -67,6 +65,12 @@ final case class BinaryJoinExec(queryContext: QueryContext,
   protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],
                               firstSchema: Task[ResultSchema],
                               querySession: QuerySession): Observable[RangeVector] = {
+
+    val needExtraKeys = QueryTimeRangeUtil.queryTimeRangeRequiresExtraKeys(
+                                querySession.qContext.origQueryParams,
+                                querySession.queryConfig)
+    val onLabelsFinal = if (needExtraKeys) onLabels ++ QueryTimeRangeUtil.extraKeys else onLabels
+
     val taskOfResults = childResponses.map {
       case (QueryResult(_, _, result), _)
         if (result.size  > queryContext.joinQueryCardLimit && cardinality == Cardinality.OneToOne) =>
@@ -90,10 +94,10 @@ final case class BinaryJoinExec(queryContext: QueryContext,
       // load "one" side keys in a hashmap
       val oneSideMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
       oneSide.foreach { rv =>
-        val jk = joinKeys(rv.key)
+        val jk = joinKeys(rv.key, onLabelsFinal)
         if (oneSideMap.contains(jk)) {
           qLogger.info(s"BinaryJoinError: RV ${rv.key} (IDs ${rv.key.partIds}) produced $jk, but already in map: " +
-                      s"RV ${oneSideMap(jk).key} (IDs ${oneSideMap(jk).key.partIds})")
+            s"RV ${oneSideMap(jk).key} (IDs ${oneSideMap(jk).key.partIds})")
           throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk")
         }
         oneSideMap.put(jk, rv)
@@ -102,9 +106,9 @@ final case class BinaryJoinExec(queryContext: QueryContext,
       val resultKeySet = new mutable.HashSet[RangeVectorKey]()
       // iterate across the the "other" side which could be one or many and perform the binary operation
       val results = otherSide.flatMap { rvOther =>
-        val jk = joinKeys(rvOther.key)
+        val jk = joinKeys(rvOther.key, onLabelsFinal)
         oneSideMap.get(jk).map { rvOne =>
-          val resKey = resultKeys(rvOne.key, rvOther.key)
+          val resKey = resultKeys(rvOne.key, rvOther.key, onLabelsFinal)
           if (resultKeySet.contains(resKey))
             throw new BadQueryException(s"Non-unique result vectors found for $resKey. " +
               s"Use grouping to create unique matching")
@@ -124,12 +128,14 @@ final case class BinaryJoinExec(queryContext: QueryContext,
     Observable.fromTask(taskOfResults).flatten
   }
 
-  private def joinKeys(rvk: RangeVectorKey): Map[Utf8Str, Utf8Str] = {
-    if (onLabels.nonEmpty) rvk.labelValues.filter(lv => withExtraOnLabels.contains(lv._1))
+  private def joinKeys(rvk: RangeVectorKey, onLabelsFinal: Set[Utf8Str]): Map[Utf8Str, Utf8Str] = {
+    if (onLabels.nonEmpty) rvk.labelValues.filter(lv => onLabelsFinal.contains(lv._1))
     else rvk.labelValues.filterNot(lv => ignoringLabelsForJoin.contains(lv._1))
   }
 
-  private def resultKeys(oneSideKey: RangeVectorKey, otherSideKey: RangeVectorKey): RangeVectorKey = {
+  private def resultKeys(oneSideKey: RangeVectorKey,
+                         otherSideKey: RangeVectorKey,
+                         onLabelsFinal: Set[Utf8Str]): RangeVectorKey = {
     // start from otherSideKey which could be many or one
     var result = otherSideKey.labelValues
     // drop metric name if math operator
@@ -137,20 +143,20 @@ final case class BinaryJoinExec(queryContext: QueryContext,
 
     if (cardinality == Cardinality.OneToOne) {
       result =
-        if (onLabels.nonEmpty) result.filter(lv => withExtraOnLabels.contains(lv._1)) // retain what is in onLabel list
+        if (onLabels.nonEmpty) result.filter(lv => onLabelsFinal.contains(lv._1)) // retain what is in onLabel list
         else result.filterNot(lv => ignoringLabels.contains(lv._1)) // remove the labels in ignoring label list
     } else if (cardinality == Cardinality.OneToMany || cardinality == Cardinality.ManyToOne) {
       // For group_left/group_right add labels in include from one side. Result should have all keys from many side
       include.foreach { x =>
-          val labelVal = oneSideKey.labelValues.get(Utf8Str(x))
-          labelVal.foreach { v =>
-            if (v.toString.equals(""))
-              // If label value is empty do not propagate to result and
-              // also delete from result
-              result -= Utf8Str(x)
-            else
-              result += (Utf8Str(x) -> v)
-          }
+        val labelVal = oneSideKey.labelValues.get(Utf8Str(x))
+        labelVal.foreach { v =>
+          if (v.toString.equals(""))
+          // If label value is empty do not propagate to result and
+          // also delete from result
+          result -= Utf8Str(x)
+          else
+          result += (Utf8Str(x) -> v)
+        }
       }
     }
     CustomRangeVectorKey(result)
@@ -177,9 +183,9 @@ final case class BinaryJoinExec(queryContext: QueryContext,
   }
 
   /**
-    * overridden to allow schemas with different vector lengths, colids as long as the columns are same - to handle
-    * binary joins between scalar/rangevectors
-    */
+   * overridden to allow schemas with different vector lengths, colids as long as the columns are same - to handle
+   * binary joins between scalar/rangevectors
+   */
   override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema = {
     resp match {
       case QueryResult(_, schema, _) if rs == ResultSchema.empty =>
@@ -189,5 +195,27 @@ final case class BinaryJoinExec(queryContext: QueryContext,
         else rs
     }
   }
+}
+
+object QueryTimeRangeUtil {
+
+  val extraKeys = Seq("_pi_".utf8, "_step_".utf8)
+  /**
+   * Returns true if two time ranges (x1, x2) and (y1, y2) overlap
+   */
+  private def rangeOverlaps(x1: Long, x2: Long, y1: Long, y2: Long): Boolean = {
+    Math.max(x1, y1) <= Math.min(x2, y2)
+  }
+
+  def queryTimeRangeRequiresExtraKeys(queryParams: TsdbQueryParams, queryConfig: QueryConfig): Boolean = {
+    queryParams match {
+      case promQueryParams: PromQlQueryParams =>
+        queryConfig.addStepKeyTimeRanges.exists { r =>
+          rangeOverlaps(promQueryParams.startSecs * 1000, promQueryParams.endSecs * 1000, r(0), r(1))
+        }
+      case _ => false
+    }
+  }
+
 }
 

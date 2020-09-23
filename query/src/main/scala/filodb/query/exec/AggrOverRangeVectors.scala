@@ -88,13 +88,18 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]] = Nil): Observable[RangeVector] = {
+
+    val needExtraKeys = QueryTimeRangeUtil.queryTimeRangeRequiresExtraKeys(
+                                    querySession.qContext.origQueryParams,
+                                    querySession.queryConfig)
+    val byLabelsFinal = if (needExtraKeys) byLabels ++ QueryTimeRangeUtil.extraKeys else byLabels
+
     val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
 
     def grouping(rv: RangeVector): RangeVectorKey = {
       val groupBy: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] =
-        if (by.nonEmpty) rv.key.labelValues.filter(lv => byLabels.contains(lv._1))
-        else if (without.nonEmpty) rv.key.labelValues.filterNot(lv =>withoutLabels.contains(lv._1))
-        else Map.empty
+        if (without.nonEmpty) rv.key.labelValues.filterNot(lv =>withoutLabels.contains(lv._1))
+        else rv.key.labelValues.filter(lv => byLabelsFinal.contains(lv._1))
       CustomRangeVectorKey(groupBy)
     }
 

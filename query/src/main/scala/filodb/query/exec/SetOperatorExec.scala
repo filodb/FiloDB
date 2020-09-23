@@ -41,8 +41,6 @@ final case class SetOperatorExec(queryContext: QueryContext,
   require(!on.contains(metricColumn), "On cannot contain metric name")
 
   val onLabels = on.map(Utf8Str(_)).toSet
-  // TODO Add unit tests for automatic inclusion of _pi_ and _step_ in the join key
-  val withExtraOnLabels = onLabels ++ Seq("_pi_".utf8, "_step_".utf8)
   val ignoringLabels = ignoring.map(Utf8Str(_)).toSet + metricColumn.utf8
   // if onLabels is non-empty, we are doing matching based on on-label, otherwise we are
   // doing matching based on ignoringLabels even if it is empty
@@ -54,6 +52,13 @@ final case class SetOperatorExec(queryContext: QueryContext,
   protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],
                               firstSchema: Task[ResultSchema],
                               querySession: QuerySession): Observable[RangeVector] = {
+
+    val queryParams = querySession.qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val onLabelsFinal =
+      if (QueryTimeRangeUtil.queryTimeRangeRequiresExtraKeys(queryParams, querySession.queryConfig))
+        onLabels ++ Seq("_pi_".utf8, "_step_".utf8)
+      else onLabels
+
     val taskOfResults = childResponses.map {
       case (QueryResult(_, schema, result), i) => (schema, result, i)
       case (QueryError(_, ex), _)              => throw ex
@@ -71,9 +76,9 @@ final case class SetOperatorExec(queryContext: QueryContext,
 
       val results: List[RangeVector] = binaryOp match {
         case LAND    => val rhsSchema = if (rhsResp.map(_._1).nonEmpty) rhsResp.map(_._1).head else ResultSchema.empty
-                        setOpAnd(lhsRvs, rhsRvs, rhsSchema)
-        case LOR     => setOpOr(lhsRvs, rhsRvs)
-        case LUnless => setOpUnless(lhsRvs, rhsRvs)
+                        setOpAnd(lhsRvs, rhsRvs, rhsSchema, onLabelsFinal)
+        case LOR     => setOpOr(lhsRvs, rhsRvs, onLabelsFinal)
+        case LUnless => setOpUnless(lhsRvs, rhsRvs, onLabelsFinal)
         case _       => throw new IllegalArgumentException("requirement failed: Only and, or and unless are supported ")
       }
 
@@ -82,8 +87,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
     Observable.fromTask(taskOfResults).flatten
   }
 
-  private def joinKeys(rvk: RangeVectorKey): Map[Utf8Str, Utf8Str] = {
-    if (onLabels.nonEmpty) rvk.labelValues.filter(lv => withExtraOnLabels.contains(lv._1))
+  private def joinKeys(rvk: RangeVectorKey, onLabelsFinal: Set[Utf8Str]): Map[Utf8Str, Utf8Str] = {
+    if (onLabels.nonEmpty) rvk.labelValues.filter(lv => onLabelsFinal.contains(lv._1))
     else rvk.labelValues.filterNot(lv => ignoringLabels.contains(lv._1))
   }
 
@@ -96,20 +101,20 @@ final case class SetOperatorExec(queryContext: QueryContext,
   }
 
   private def setOpAnd(lhsRvs: List[RangeVector], rhsRvs: List[RangeVector],
-                       rhsSchema: ResultSchema): List[RangeVector] = {
+                       rhsSchema: ResultSchema, onLabelsFinal: Set[Utf8Str]): List[RangeVector] = {
     // isEmpty method consumes rhs range vector
     require(rhsRvs.forall(_.isInstanceOf[SerializedRangeVector]), "RHS should be SerializedRangeVector")
     val rhsMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
     var result = new ListBuffer[RangeVector]()
     rhsRvs.foreach { rv =>
-      val jk = joinKeys(rv.key)
+      val jk = joinKeys(rv.key, onLabelsFinal)
       // Don't add range vector if it is empty
       if (jk.nonEmpty && !isEmpty(rv, rhsSchema))
         rhsMap.put(jk, rv)
     }
 
     lhsRvs.foreach { lhs =>
-      val jk = joinKeys(lhs.key)
+      val jk = joinKeys(lhs.key, onLabelsFinal)
       // Add range vectors from lhs which are present in lhs and rhs both or when jk is empty
       if (rhsMap.contains(jk)) {
         val lhsRows = lhs.rows
@@ -140,19 +145,19 @@ final case class SetOperatorExec(queryContext: QueryContext,
     result.toList
   }
 
-  private def setOpOr(lhsRvs: List[RangeVector]
-                      , rhsRvs: List[RangeVector]): List[RangeVector] = {
+  private def setOpOr(lhsRvs: List[RangeVector],
+                      rhsRvs: List[RangeVector], onLabelsFinal: Set[Utf8Str]): List[RangeVector] = {
     val lhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
     var result = new ListBuffer[RangeVector]()
     // Add everything from left hand side range vector
     lhsRvs.foreach { rv =>
-      val jk = joinKeys(rv.key)
+      val jk = joinKeys(rv.key, onLabelsFinal)
       lhsKeysSet += jk
       result += rv
     }
     // Add range vectors from right hand side which are not present on lhs
     rhsRvs.foreach { rhs =>
-      val jk = joinKeys(rhs.key)
+      val jk = joinKeys(rhs.key, onLabelsFinal)
       if (!lhsKeysSet.contains(jk)) {
         result += rhs
       }
@@ -160,17 +165,17 @@ final case class SetOperatorExec(queryContext: QueryContext,
     result.toList
   }
 
-  private def setOpUnless(lhsRvs: List[RangeVector]
-                          , rhsRvs: List[RangeVector]): List[RangeVector] = {
+  private def setOpUnless(lhsRvs: List[RangeVector], rhsRvs: List[RangeVector],
+                          onLabelsFinal: Set[Utf8Str]): List[RangeVector] = {
     val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
     var result = new ListBuffer[RangeVector]()
     rhsRvs.foreach { rv =>
-      val jk = joinKeys(rv.key)
+      val jk = joinKeys(rv.key, onLabelsFinal)
       rhsKeysSet += jk
     }
     // Add range vectors which are not present in rhs
     lhsRvs.foreach { lhs =>
-      val jk = joinKeys(lhs.key)
+      val jk = joinKeys(lhs.key, onLabelsFinal)
       if (!rhsKeysSet.contains(jk)) {
         result += lhs
       }
