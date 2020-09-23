@@ -202,8 +202,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext, pickDispatcher(rhs.plans), rhs.plans))
     else rhs.plans
 
-
-    PlannerUtil.validateBinaryJoin(lhs.plans, rhs.plans, qContext)
+    val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(lp, queryConfig.addStepKeyTimeRanges)
 
     // TODO Currently we create separate exec plan node for stitching.
     // Ideally, we can go one step further and add capability to NonLeafNode plans to pre-process
@@ -214,11 +213,11 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val targetActor = pickDispatcher(stitchedLhs ++ stitchedRhs)
     val joined = if (lp.operator.isInstanceOf[SetOperator])
       Seq(exec.SetOperatorExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator,
-        LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
+        LogicalPlanUtils.renameLabels(onKeysReal, dsOptions.metricColumn),
         LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn), dsOptions.metricColumn))
     else
       Seq(BinaryJoinExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
-        LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
+        LogicalPlanUtils.renameLabels(onKeysReal, dsOptions.metricColumn),
         LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
         LogicalPlanUtils.renameLabels(lp.include, dsOptions.metricColumn), dsOptions.metricColumn))
     PlanResult(joined, false)
@@ -227,6 +226,8 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   private def materializeAggregate(qContext: QueryContext,
                                    lp: Aggregate): PlanResult = {
     val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, qContext)
+    val byKeysReal = ExtraOnByKeysUtil.getRealByLabels(lp, queryConfig.addStepKeyTimeRanges)
+
     // Now we have one exec plan per shard
     /*
      * Note that in order for same overlapping RVs to not be double counted when spread is increased,
@@ -242,7 +243,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     toReduceLevel1.plans.foreach {
       _.addRangeVectorTransformer(AggregateMapReduce(lp.operator, lp.params,
         LogicalPlanUtils.renameLabels(lp.without, dsOptions.metricColumn),
-        LogicalPlanUtils.renameLabels(lp.by, dsOptions.metricColumn)))
+        LogicalPlanUtils.renameLabels(byKeysReal, dsOptions.metricColumn)))
     }
 
     val toReduceLevel2 =

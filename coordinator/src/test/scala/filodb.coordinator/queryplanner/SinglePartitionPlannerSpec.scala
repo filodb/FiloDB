@@ -4,10 +4,11 @@ import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import monix.execution.Scheduler
+
 import filodb.coordinator.ShardMapper
 import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
+import filodb.core.query.{EmptyQueryConfig, PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.ChunkSource
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -80,7 +81,7 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
   val plannerSelector = (metricName: String) => { if (metricName.equals("rr1")) "rules1"
   else if (metricName.equals("rr2")) "rules2" else "local" }
 
-  val engine = new SinglePartitionPlanner(planners, plannerSelector, "_metric_")
+  val engine = new SinglePartitionPlanner(planners, plannerSelector, "_metric_", EmptyQueryConfig)
 
   it("should generate Exec plan for simple query") {
     val lp = Parser.queryToLogicalPlan("test{job = \"app\"}", 1000, 1000)
