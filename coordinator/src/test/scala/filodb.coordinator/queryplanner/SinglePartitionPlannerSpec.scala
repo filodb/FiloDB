@@ -81,7 +81,7 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
   val plannerSelector = (metricName: String) => { if (metricName.equals("rr1")) "rules1"
   else if (metricName.equals("rr2")) "rules2" else "local" }
 
-  val engine = new SinglePartitionPlanner(planners, plannerSelector, "_metric_")
+  val engine = new SinglePartitionPlanner(planners, plannerSelector, "_metric_", queryConfig)
 
   it("should generate Exec plan for simple query") {
     val lp = Parser.queryToLogicalPlan("test{job = \"app\"}", 1000, 1000)
