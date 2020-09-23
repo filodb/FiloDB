@@ -50,9 +50,10 @@ trait  PlannerMaterializer {
           param match {
             case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
             case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(materialize(s, qContext),
-              RangeParams(s.startMs, s.stepMs, s.endMs))
+                                               RangeParams(s.startMs, s.stepMs, s.endMs))
             case  t: ScalarTimeBasedPlan    => TimeFuncArgs(t.rangeParams)
-            case _                          => throw new UnsupportedOperationException("Invalid logical plan")
+            case s: ScalarBinaryOperation   => ExecPlanFuncArgs(materialize(s, qContext),
+                                               RangeParams(s.startMs, s.stepMs, s.endMs))
           }
         }
       }

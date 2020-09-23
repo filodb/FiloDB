@@ -3,7 +3,6 @@ package filodb.prometheus.ast
 import filodb.core.query.RangeParams
 import filodb.query._
 
-
 trait Expressions extends Aggregates with Functions {
 
   case class UnaryExpression(operator: Operator, operand: Expression) extends Expression {
@@ -38,6 +37,7 @@ trait Expressions extends Aggregates with Functions {
         case _                                  => false
       }
     }
+
     // scalastyle:off method.length
     override def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
       if (hasScalarResult(lhs) && hasScalarResult(rhs)) {
@@ -95,26 +95,34 @@ trait Expressions extends Aggregates with Functions {
 
           // node_info + http_requests
           case (lh: PeriodicSeries, rh: PeriodicSeries) =>
-            val seriesPlanLhs = lh.toSeriesPlan(timeParams)
-            val seriesPlanRhs = rh.toSeriesPlan(timeParams)
-            val cardinality = if (operator.getPlanOperator.isInstanceOf[SetOperator])
-              Cardinality.ManyToMany
-            else
-              vectorMatch.map(_.cardinality.cardinality).getOrElse(Cardinality.OneToOne)
+            //10/2 + foo
+            if (hasScalarResult(lh)) {
+              val scalar = lh.toSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
+              val seriesPlan = rh.toSeriesPlan(timeParams)
+              ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = true)
+            } else if (hasScalarResult(rh)) { // foo + 10/2
+              val scalar = rh.toSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
+              val seriesPlan = lh.toSeriesPlan(timeParams)
+              ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = false)
+            } else {
+              val seriesPlanLhs = lh.toSeriesPlan(timeParams)
+              val seriesPlanRhs = rh.toSeriesPlan(timeParams)
+              val cardinality = if (operator.getPlanOperator.isInstanceOf[SetOperator])
+                Cardinality.ManyToMany
+              else
+                vectorMatch.map(_.cardinality.cardinality).getOrElse(Cardinality.OneToOne)
 
-            val matcher = vectorMatch.flatMap(_.matching)
-            val onLabels = matcher.filter(_.isInstanceOf[On]).map(_.labels)
-            val ignoringLabels = matcher.filter(_.isInstanceOf[Ignoring]).map(_.labels)
-
-            BinaryJoin(seriesPlanLhs, operator.getPlanOperator, cardinality, seriesPlanRhs,
-              onLabels.getOrElse(Nil), ignoringLabels.getOrElse(Nil),
-              vectorMatch.flatMap(_.grouping).map(_.labels).getOrElse(Nil))
-
+              val matcher = vectorMatch.flatMap(_.matching)
+              val onLabels = matcher.filter(_.isInstanceOf[On]).map(_.labels)
+              val ignoringLabels = matcher.filter(_.isInstanceOf[Ignoring]).map(_.labels)
+              BinaryJoin(seriesPlanLhs, operator.getPlanOperator, cardinality, seriesPlanRhs,
+                onLabels.getOrElse(Nil), ignoringLabels.getOrElse(Nil),
+                vectorMatch.flatMap(_.grouping).map(_.labels).getOrElse(Nil))
+            }
           case _ => throw new UnsupportedOperationException("Invalid operands")
         }
       }
     }
     // scalastyle:on method.length
   }
-
 }
