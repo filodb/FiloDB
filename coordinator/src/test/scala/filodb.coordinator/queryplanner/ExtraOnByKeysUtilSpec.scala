@@ -15,7 +15,7 @@ class ExtraOnByKeysUtilSpec extends AnyFunSpec with Matchers {
 
   it("should add extra by keys for aggregate when no keys present") {
     val lp = Parser.queryRangeToLogicalPlan("""sum(rate(foo[5m]))""", TimeStepParams(20000, 100, 30000))
-    getRealByLabels(lp.asInstanceOf[Aggregate], extraKeysTimeRange) shouldEqual ExtraOnByKeysUtil.extraByOnKeys
+    getRealByLabels(lp.asInstanceOf[Aggregate], extraKeysTimeRange) shouldEqual extraByOnKeys
   }
 
   it("should not add extra by keys for aggregate when without present") {
@@ -27,19 +27,19 @@ class ExtraOnByKeysUtilSpec extends AnyFunSpec with Matchers {
   it("should add extra by keys for aggregate when on already keys present") {
     val lp = Parser.queryRangeToLogicalPlan("""sum(rate(foo[5m])) by (pod)""",
       TimeStepParams(20000, 100, 30000))
-    getRealByLabels(lp.asInstanceOf[Aggregate], extraKeysTimeRange) shouldEqual Seq("pod", "_pi_", "_step_")
+    getRealByLabels(lp.asInstanceOf[Aggregate], extraKeysTimeRange) shouldEqual Seq("pod") ++ extraByOnKeys
   }
 
   it("should add extra on keys for binary join when no keys present") {
     val lp = Parser.queryRangeToLogicalPlan("""foo + bar """,
       TimeStepParams(20000, 100, 30000))
-    getRealOnLabels(lp.asInstanceOf[BinaryJoin], extraKeysTimeRange) shouldEqual ExtraOnByKeysUtil.extraByOnKeys
+    getRealOnLabels(lp.asInstanceOf[BinaryJoin], extraKeysTimeRange) shouldEqual extraByOnKeys
   }
 
   it("should add extra on keys for binary join when on already keys present") {
     val lp = Parser.queryRangeToLogicalPlan("""foo + on(pod) bar """,
       TimeStepParams(20000, 100, 30000))
-    getRealOnLabels(lp.asInstanceOf[BinaryJoin], extraKeysTimeRange) shouldEqual Seq("pod", "_pi_", "_step_")
+    getRealOnLabels(lp.asInstanceOf[BinaryJoin], extraKeysTimeRange) shouldEqual Seq("pod") ++ extraByOnKeys
   }
 
   it("should not add extra on keys for binary join when ignoring present") {
@@ -50,7 +50,7 @@ class ExtraOnByKeysUtilSpec extends AnyFunSpec with Matchers {
 
   it("should add extra keys even with overlap is inside of the first lookback range") {
     val lp = Parser.queryRangeToLogicalPlan("""sum(rate(foo[5m]))""", TimeStepParams(30005L, 100, 40000))
-    getRealByLabels(lp.asInstanceOf[Aggregate], extraKeysTimeRange) shouldEqual ExtraOnByKeysUtil.extraByOnKeys
+    getRealByLabels(lp.asInstanceOf[Aggregate], extraKeysTimeRange) shouldEqual extraByOnKeys
   }
 
 }
