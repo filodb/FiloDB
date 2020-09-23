@@ -53,4 +53,9 @@ class ExtraOnByKeysUtilSpec extends AnyFunSpec with Matchers {
     getRealByLabels(lp.asInstanceOf[Aggregate], extraKeysTimeRange) shouldEqual extraByOnKeys
   }
 
+  it("should not add extra keys when no overlap with configured time ranges") {
+    val lp = Parser.queryRangeToLogicalPlan("""sum(rate(foo[5m]))""", TimeStepParams(40000L, 100, 50000))
+    getRealByLabels(lp.asInstanceOf[Aggregate], extraKeysTimeRange) shouldEqual Seq.empty
+  }
+
 }

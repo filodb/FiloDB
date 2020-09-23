@@ -202,7 +202,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext, pickDispatcher(rhs.plans), rhs.plans))
     else rhs.plans
 
-    val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(lp, queryConfig.addStepKeyTimeRanges)
+    val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(lp, queryConfig.addExtraOnByKeysTimeRanges)
 
     // TODO Currently we create separate exec plan node for stitching.
     // Ideally, we can go one step further and add capability to NonLeafNode plans to pre-process
@@ -226,7 +226,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   private def materializeAggregate(qContext: QueryContext,
                                    lp: Aggregate): PlanResult = {
     val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, qContext)
-    val byKeysReal = ExtraOnByKeysUtil.getRealByLabels(lp, queryConfig.addStepKeyTimeRanges)
+    val byKeysReal = ExtraOnByKeysUtil.getRealByLabels(lp, queryConfig.addExtraOnByKeysTimeRanges)
 
     // Now we have one exec plan per shard
     /*

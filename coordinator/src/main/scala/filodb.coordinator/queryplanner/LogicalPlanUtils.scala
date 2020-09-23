@@ -257,7 +257,7 @@ object ExtraOnByKeysUtil {
 
   def getRealByLabels(lp: Aggregate, addStepKeyTimeRanges: Seq[Seq[Long]]): Seq[String] = {
     if (shouldAddExtraKeys(lp, addStepKeyTimeRanges)) {
-      // add extra keys if ignoring clause is not specified
+      // add extra keys if without clause is not specified
       if (lp.without.isEmpty) lp.by ++ extraByOnKeys
       else lp.by
     } else {

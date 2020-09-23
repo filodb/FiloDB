@@ -15,8 +15,8 @@ class QueryConfig(queryConfig: Config) {
   lazy val minStepMs = queryConfig.getDuration("min-step").toMillis
   lazy val fastReduceMaxWindows = queryConfig.getInt("fastreduce-max-windows")
   lazy val routingConfig = queryConfig.getConfig("routing")
-  lazy val addStepKeyTimeRanges = {
-    val v = queryConfig.as[Seq[Seq[Long]]]("add-step-key-time-ranges")
+  lazy val addExtraOnByKeysTimeRanges = {
+    val v = queryConfig.as[Seq[Seq[Long]]]("add-extra-by-on-key-time-ranges")
     require(v.forall(r => r.size == 2 && r(0) < r(1)))
     v
   }
