@@ -39,6 +39,7 @@ trait Expressions extends Aggregates with Functions {
     }
 
     // scalastyle:off method.length
+    // scalastyle:off cyclomatic.complexity
     override def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
       if (hasScalarResult(lhs) && hasScalarResult(rhs)) {
         val rangeParams = RangeParams(timeParams.start, timeParams.step, timeParams.end)
@@ -124,5 +125,6 @@ trait Expressions extends Aggregates with Functions {
       }
     }
     // scalastyle:on method.length
+    // scalastyle:on cyclomatic.complexity
   }
 }
