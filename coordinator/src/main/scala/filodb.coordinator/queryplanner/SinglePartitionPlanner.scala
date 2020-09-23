@@ -1,6 +1,6 @@
 package filodb.coordinator.queryplanner
 
-import filodb.core.query.{PromQlQueryParams, QueryContext}
+import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.query.{BinaryJoin, LabelValues, LogicalPlan, SeriesKeysByFilters, SetOperator}
 import filodb.query.exec._
 
@@ -12,8 +12,10 @@ import filodb.query.exec._
   * @param plannerSelector a function that selects the planner name given the metric name
   *
   */
-class SinglePartitionPlanner(planners: Map[String, QueryPlanner], plannerSelector: String => String,
-                             datasetMetricColumn: String)
+class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
+                             plannerSelector: String => String,
+                             datasetMetricColumn: String,
+                             queryConfig: QueryConfig)
   extends QueryPlanner {
 
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
@@ -58,15 +60,15 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner], plannerSelecto
       case _             => getPlanner(logicalPlan.rhs).materialize(logicalPlan.rhs, rhsQueryContext)
     }
 
-    PlannerUtil.validateBinaryJoin(Seq(lhsExec), Seq(rhsExec), qContext)
+    val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
 
     if (logicalPlan.operator.isInstanceOf[SetOperator])
       SetOperatorExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-        LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
+        LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
     else
       BinaryJoinExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-        logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
+        logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn)
   }
