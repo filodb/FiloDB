@@ -30,10 +30,10 @@ class ExtraOnByKeysUtilSpec extends AnyFunSpec with Matchers {
     getRealByLabels(lp.asInstanceOf[Aggregate], extraKeysTimeRange) shouldEqual Seq("pod") ++ extraByOnKeys
   }
 
-  it("should add extra on keys for binary join when no keys present") {
+  it("should not add extra on keys for binary join when no join keys present") {
     val lp = Parser.queryRangeToLogicalPlan("""foo + bar """,
       TimeStepParams(20000, 100, 30000))
-    getRealOnLabels(lp.asInstanceOf[BinaryJoin], extraKeysTimeRange) shouldEqual extraByOnKeys
+    getRealOnLabels(lp.asInstanceOf[BinaryJoin], extraKeysTimeRange) shouldEqual Seq.empty
   }
 
   it("should add extra on keys for binary join when on already keys present") {
