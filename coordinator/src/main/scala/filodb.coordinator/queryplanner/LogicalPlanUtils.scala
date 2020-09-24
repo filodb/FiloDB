@@ -150,27 +150,36 @@ object LogicalPlanUtils {
     * NOTE: Plan should be PeriodicSeriesPlan
     */
   def getRawSeriesStartTime(logicalPlan: LogicalPlan): Option[Long] = {
-    LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
-      case lp: RawSeries => lp.rangeSelector match {
-        case rs: IntervalSelector => Some(rs.from)
-        case _ => None
+    val leaf = LogicalPlan.findLeafLogicalPlans(logicalPlan)
+    if (leaf.isEmpty) None else {
+      leaf.head match {
+        case lp: RawSeries => lp.rangeSelector match {
+          case rs: IntervalSelector => Some(rs.from)
+          case _ => None
+        }
+        case _ => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
       }
-      case _                      => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
     }
   }
 
   def getOffsetMillis(logicalPlan: LogicalPlan): Long = {
-    LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
-      case lp: RawSeries => lp.offsetMs.getOrElse(0)
-      case _             => 0
+    val leaf = LogicalPlan.findLeafLogicalPlans(logicalPlan)
+    if (leaf.isEmpty) 0 else {
+      leaf.head match {
+        case lp: RawSeries => lp.offsetMs.getOrElse(0)
+        case _ => 0
+      }
     }
   }
 
   def getLookBackMillis(logicalPlan: LogicalPlan): Long = {
     val staleDataLookbackMillis = WindowConstants.staleDataLookbackMillis
-    LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
-      case lp: RawSeries => lp.lookbackMs.getOrElse(staleDataLookbackMillis)
-      case _             => 0
+    val leaf = LogicalPlan.findLeafLogicalPlans(logicalPlan)
+    if (leaf.isEmpty) 0 else {
+      leaf.head match {
+        case lp: RawSeries => lp.lookbackMs.getOrElse(staleDataLookbackMillis)
+        case _ => 0
+      }
     }
   }
 
