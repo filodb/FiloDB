@@ -247,8 +247,8 @@ object ExtraOnByKeysUtil {
   def getRealOnLabels(lp: BinaryJoin, addStepKeyTimeRanges: Seq[Seq[Long]]): Seq[String] = {
     if (shouldAddExtraKeys(lp.lhs, addStepKeyTimeRanges: Seq[Seq[Long]]) ||
         shouldAddExtraKeys(lp.rhs, addStepKeyTimeRanges: Seq[Seq[Long]])) {
-      // add extra keys if ignoring clause is not specified
-      if (lp.ignoring.isEmpty) lp.on ++ extraByOnKeys
+      // add extra keys if ignoring clause is not specified and on is specified
+      if (lp.on.nonEmpty) lp.on ++ extraByOnKeys
       else lp.on
     } else {
       lp.on
