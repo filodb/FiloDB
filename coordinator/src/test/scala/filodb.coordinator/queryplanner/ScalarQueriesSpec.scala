@@ -471,4 +471,23 @@ class ScalarQueriesSpec extends AnyFunSpec with Matchers {
         |on InProcessPlanDispatcher""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
   }
+
+  it("should generate execPlan for binary join with nested scalar query") {
+    val lp = Parser.queryToLogicalPlan("""sum(http_requests_total{job = "app"}) - 10/2""", 1000, 1000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val expected =
+      """T~ScalarOperationMapper(operator=SUB, scalarOnLhs=false)
+        |-FA1~
+        |-E~ScalarBinaryOperationExec(params = RangeParams(700,1000,10000), operator = DIV, lhs = Left(10.0), rhs = Left(2.0)) on InProcessPlanDispatcher
+        |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List())
+        |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#874431161])
+        |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |----T~PeriodicSamplesMapper(start=700000, step=1000000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(400000,10000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#874431161])
+        |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |----T~PeriodicSamplesMapper(start=700000, step=1000000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(400000,10000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#874431161])""".stripMargin
+    maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
+  }
 }
