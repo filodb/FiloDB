@@ -1,5 +1,6 @@
 package filodb.coordinator.queryplanner
 
+import filodb.coordinator.queryplanner.LogicalPlanUtils.{getLookBackMillis, getTimeFromLogicalPlan}
 import filodb.core.query.RangeParams
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
@@ -23,14 +24,18 @@ object LogicalPlanUtils {
   /**
     * Retrieve start and end time from LogicalPlan
     */
+  // scalastyle:off cyclomatic.complexity
   def getTimeFromLogicalPlan(logicalPlan: LogicalPlan): TimeRange = {
     logicalPlan match {
       case lp: PeriodicSeries              => TimeRange(lp.startMs, lp.endMs)
       case lp: PeriodicSeriesWithWindowing => TimeRange(lp.startMs, lp.endMs)
       case lp: ApplyInstantFunction        => getTimeFromLogicalPlan(lp.vectors)
       case lp: Aggregate                   => getTimeFromLogicalPlan(lp.vectors)
-      case lp: BinaryJoin                  => // can assume lhs & rhs have same time
-                                              getTimeFromLogicalPlan(lp.lhs)
+      case lp: BinaryJoin                  => val lhsTime = getTimeFromLogicalPlan(lp.lhs)
+                                              val rhsTime = getTimeFromLogicalPlan(lp.rhs)
+                                              if (lhsTime != rhsTime) throw new UnsupportedOperationException(
+                                                "Binary Join has different LHS and RHS times")
+                                              else lhsTime
       case lp: ScalarVectorBinaryOperation => getTimeFromLogicalPlan(lp.vector)
       case lp: ApplyMiscellaneousFunction  => getTimeFromLogicalPlan(lp.vectors)
       case lp: ApplySortFunction           => getTimeFromLogicalPlan(lp.vectors)
@@ -42,9 +47,17 @@ object LogicalPlanUtils {
                                                 case i: IntervalSelector => TimeRange(i.from, i.to)
                                                 case _ => throw new BadQueryException(s"Invalid logical plan")
                                               }
-      case _                               => throw new BadQueryException(s"Invalid logical plan ${logicalPlan}")
+      case lp: LabelValues                 => TimeRange(lp.startMs, lp.endMs)
+      case lp: SeriesKeysByFilters         => TimeRange(lp.startMs, lp.endMs)
+      case lp: ApplyInstantFunctionRaw     => getTimeFromLogicalPlan(lp.vectors)
+      case lp: ScalarBinaryOperation       => TimeRange(lp.rangeParams.startSecs * 1000, lp.rangeParams.endSecs * 1000)
+      case lp: ScalarFixedDoublePlan       => TimeRange(lp.timeStepParams.startSecs * 1000,
+                                              lp.timeStepParams.endSecs * 1000)
+      case lp: RawChunkMeta                => throw new UnsupportedOperationException(s"RawChunkMeta does not have " +
+                                              s"time")
     }
   }
+  // scalastyle:on cyclomatic.complexity
 
   /**
    * Used to change start and end time(TimeRange) of LogicalPlan
@@ -181,4 +194,53 @@ object LogicalPlanUtils {
     } else {
       labels
     }
+}
+
+/**
+ * Temporary utility to modify plan to add extra join-on keys or group-by keys
+ * for specific time ranges.
+ */
+object ExtraOnByKeysUtil {
+
+  def getRealOnLabels(lp: BinaryJoin, addStepKeyTimeRanges: Seq[Seq[Long]]): Seq[String] = {
+    if (shouldAddExtraKeys(lp.lhs, addStepKeyTimeRanges: Seq[Seq[Long]]) ||
+        shouldAddExtraKeys(lp.rhs, addStepKeyTimeRanges: Seq[Seq[Long]])) {
+      // add extra keys if ignoring clause is not specified
+      if (lp.ignoring.isEmpty) lp.on ++ extraByOnKeys
+      else lp.on
+    } else {
+      lp.on
+    }
+  }
+
+  def getRealByLabels(lp: Aggregate, addStepKeyTimeRanges: Seq[Seq[Long]]): Seq[String] = {
+    if (shouldAddExtraKeys(lp, addStepKeyTimeRanges)) {
+      // add extra keys if without clause is not specified
+      if (lp.without.isEmpty) lp.by ++ extraByOnKeys
+      else lp.by
+    } else {
+      lp.by
+    }
+  }
+
+  private def shouldAddExtraKeys(lp: LogicalPlan, addStepKeyTimeRanges: Seq[Seq[Long]]): Boolean = {
+    // need to check if raw time range in query overlaps with configured addStepKeyTimeRanges
+    val range = getTimeFromLogicalPlan(lp)
+    val lookback = getLookBackMillis(lp)
+    queryTimeRangeRequiresExtraKeys(range.startMs - lookback, range.endMs, addStepKeyTimeRanges)
+  }
+
+  val extraByOnKeys = Seq("_pi_", "_step_")
+  /**
+   * Returns true if two time ranges (x1, x2) and (y1, y2) overlap
+   */
+  private def rangeOverlaps(x1: Long, x2: Long, y1: Long, y2: Long): Boolean = {
+    Math.max(x1, y1) <= Math.min(x2, y2)
+  }
+
+  private def queryTimeRangeRequiresExtraKeys(rawStartMs: Long,
+                                              rawEndMs: Long,
+                                              addStepKeyTimeRanges: Seq[Seq[Long]]): Boolean = {
+    addStepKeyTimeRanges.exists { r => rangeOverlaps(rawStartMs, rawEndMs, r(0), r(1)) }
+  }
 }
