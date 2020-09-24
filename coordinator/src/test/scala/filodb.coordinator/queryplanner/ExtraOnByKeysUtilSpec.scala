@@ -58,4 +58,10 @@ class ExtraOnByKeysUtilSpec extends AnyFunSpec with Matchers {
     getRealByLabels(lp.asInstanceOf[Aggregate], extraKeysTimeRange) shouldEqual Seq.empty
   }
 
+// TODO remove test when unnecessary binary join bug is fixed
+  it("should not add extra on keys for nested scalar queries") {
+    val lp = Parser.queryRangeToLogicalPlan("""foo + 10/2""",
+      TimeStepParams(20000, 100, 30000))
+    getRealOnLabels(lp.asInstanceOf[BinaryJoin], extraKeysTimeRange) shouldEqual Seq.empty
+  }
 }
