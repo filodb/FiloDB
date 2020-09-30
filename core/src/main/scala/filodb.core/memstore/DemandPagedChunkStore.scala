@@ -65,7 +65,7 @@ extends RawToPartitionMaker with StrictLogging {
   /**
    * Stores raw chunks into offheap memory and populates chunks into partition
    */
-  //scalastyle:off method.length
+  //scalastyle:off
   def populateRawChunks(rawPartition: RawPartData): Task[ReadablePartition] = Task {
     FiloSchedulers.assertThreadName(FiloSchedulers.PopulateChunksSched)
     // Find the right partition given the partition key
@@ -86,18 +86,14 @@ extends RawToPartitionMaker with StrictLogging {
           val chunkID = ChunkSetInfo.getChunkID(infoBytes)
 
           if (!tsPart.chunkmapContains(chunkID)) {
-            memFactory.startMetaSpan()
-            val chunkPtrs = try {
-              copyToOffHeap(rawVectors, memFactory)
-            } catch {
-              case e: Throwable => {
-                // Allow blocks allocated by copyToOffHeap to be reclaimed.
-                memFactory.discardMetaSpan()
-                throw e
-              }
+            var chunkPtrs: Array[BinaryVectorPtr] = null
+            var metaAddr: Long = 0
+            try {
+              chunkPtrs = copyToOffHeap(rawVectors, memFactory)
+            } finally {
+              metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
+                tsPart.schema.data.blockMetaSize.toShort)
             }
-            val metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
-              tsPart.schema.data.blockMetaSize.toShort)
             require(metaAddr != 0)
             val infoAddr = metaAddr + 4 // Important: don't point at partID
             val inserted = tsPart.addChunkInfoIfAbsent(chunkID, infoAddr)
@@ -118,7 +114,7 @@ extends RawToPartitionMaker with StrictLogging {
       throw new RuntimeException(s"Partition [${new String(rawPartition.partitionKey)}] not found, this is bad")
     }
   }
-  //scalastyle:on method.length
+  //scalastyle:on
 
   /**
     * For a given chunkset, this method calculates the time bucket the chunks fall in.
