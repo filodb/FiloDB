@@ -319,12 +319,15 @@ class BlockMemFactory(blockStore: BlockManager,
   def discardMetaSpan(): Unit = {
     if (metadataSpanActive) {
       metadataSpan.foreach { blk =>
-        if (markFullBlocksAsReclaimable) {
-          blk.markReclaimable()
-        } else synchronized {
-          fullBlocks += blk
+        if (blk != metadataSpan.last) {
+          if (markFullBlocksAsReclaimable) {
+            blk.markReclaimable()
+          } else synchronized {
+            fullBlocks += blk
+          }
         }
       }
+
       metadataSpan.clear()
       metadataSpanActive = false
     }
