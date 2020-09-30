@@ -311,6 +311,21 @@ class BlockMemFactory(blockStore: BlockManager,
     metaAddr
   }
 
+  /**
+    * Discards the current metadata span, to be called when a failure occurs during allocation.
+    * The blocks are then marked as reclaimable, and they are fully reclaimed later by the
+    * headroom task.
+    */
+  def discardMetaSpan(): Unit = {
+    if (metadataSpanActive) {
+      metadataSpan.foreach { blk =>
+        blk.markReclaimable()
+      }
+      metadataSpan.clear()
+      metadataSpanActive = false
+    }
+  }
+
   def markUsedBlocksReclaimable(): Unit = synchronized {
     fullBlocks.foreach(_.markReclaimable())
     fullBlocks.clear()
