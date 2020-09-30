@@ -122,8 +122,6 @@ class SplitLocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers wit
     result.result.size shouldEqual 1
     val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual partKeyKVWithMetric
-    result.resultSchema.fixedVectorLen shouldEqual Some(4 + 6) // first schema vectorLength
-    val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toList
-    dataRead.length shouldEqual result.resultSchema.fixedVectorLen.get
+    result.resultSchema.fixedVectorLen shouldEqual Some(4) // first schema vectorLength
   }
 }
