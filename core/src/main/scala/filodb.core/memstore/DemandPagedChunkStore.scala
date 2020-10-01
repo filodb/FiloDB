@@ -89,6 +89,7 @@ extends RawToPartitionMaker with StrictLogging {
 
           if (!tsPart.chunkmapContains(chunkID)) {
             val chunkPtrs = new ArrayBuffer[BinaryVectorPtr](rawVectors.length)
+            memFactory.startMetaSpan()
             var metaAddr: Long = 0
             try {
               copyToOffHeap(rawVectors, memFactory, chunkPtrs)
