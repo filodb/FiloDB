@@ -1500,7 +1500,21 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private def startHeadroomTask(sched: Scheduler): Unit = {
     sched.scheduleWithFixedDelay(1, 1, TimeUnit.MINUTES, new Runnable {
-      def run() = blockStore.ensureHeadroom(storeConfig.ensureHeadroomPercent)
+      var numFailures = 0
+
+      def run() = {
+        val numFree = blockStore.ensureHeadroom(storeConfig.ensureHeadroomPercent)
+        if (numFree > 0) {
+          numFailures = 0
+        } else {
+          numFailures += 1
+          if (numFailures >= 5) {
+            logger.error(s"Headroom task was unable to free memory for $numFailures consecutive attempts. " +
+              s"Shuting down process. shard=$shardNum")
+            Runtime.getRuntime.halt(1)
+          }
+        }
+      }
     })
   }
 
