@@ -30,6 +30,7 @@ import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
 import filodb.memory._
+import filodb.memory.data.ChunkMap
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -1500,7 +1501,21 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private def startHeadroomTask(sched: Scheduler): Unit = {
     sched.scheduleWithFixedDelay(1, 1, TimeUnit.MINUTES, new Runnable {
-      def run() = blockStore.ensureHeadroom(storeConfig.ensureHeadroomPercent)
+      var numFailures = 0
+
+      def run() = {
+        val numFree = blockStore.ensureHeadroom(storeConfig.ensureHeadroomPercent)
+        if (numFree > 0) {
+          numFailures = 0
+        } else {
+          numFailures += 1
+          if (numFailures >= 5) {
+            logger.error(s"Headroom task was unable to free memory for $numFailures consecutive attempts. " +
+              s"Shutting down process. shard=$shardNum")
+            ChunkMap.haltAndCatchFire()
+          }
+        }
+      }
     })
   }
 
