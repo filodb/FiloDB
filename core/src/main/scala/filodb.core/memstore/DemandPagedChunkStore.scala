@@ -2,11 +2,13 @@ package filodb.core.memstore
 
 import java.nio.ByteBuffer
 
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
 
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import org.jctools.maps.NonBlockingHashMapLong
+import spire.syntax.cfor._
 
 import filodb.core.store._
 import filodb.memory.{BlockManager, BlockMemFactory}
@@ -65,6 +67,7 @@ extends RawToPartitionMaker with StrictLogging {
   /**
    * Stores raw chunks into offheap memory and populates chunks into partition
    */
+  //scalastyle:off
   def populateRawChunks(rawPartition: RawPartData): Task[ReadablePartition] = Task {
     FiloSchedulers.assertThreadName(FiloSchedulers.PopulateChunksSched)
     // Find the right partition given the partition key
@@ -85,10 +88,15 @@ extends RawToPartitionMaker with StrictLogging {
           val chunkID = ChunkSetInfo.getChunkID(infoBytes)
 
           if (!tsPart.chunkmapContains(chunkID)) {
+            val chunkPtrs = new ArrayBuffer[BinaryVectorPtr](rawVectors.length)
             memFactory.startMetaSpan()
-            val chunkPtrs = copyToOffHeap(rawVectors, memFactory)
-            val metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
-              tsPart.schema.data.blockMetaSize.toShort)
+            var metaAddr: Long = 0
+            try {
+              copyToOffHeap(rawVectors, memFactory, chunkPtrs)
+            } finally {
+              metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
+                tsPart.schema.data.blockMetaSize.toShort)
+            }
             require(metaAddr != 0)
             val infoAddr = metaAddr + 4 // Important: don't point at partID
             val inserted = tsPart.addChunkInfoIfAbsent(chunkID, infoAddr)
@@ -109,6 +117,7 @@ extends RawToPartitionMaker with StrictLogging {
       throw new RuntimeException(s"Partition [${new String(rawPartition.partitionKey)}] not found, this is bad")
     }
   }
+  //scalastyle:on
 
   /**
     * For a given chunkset, this method calculates the time bucket the chunks fall in.
@@ -118,16 +127,20 @@ extends RawToPartitionMaker with StrictLogging {
     (ChunkSetInfo.getEndTime(infoBytes) / flushIntervalMillis) * flushIntervalMillis
 
   /**
-    * Copies the onHeap contents read from ColStore into off-heap using the given memFactory
+    * Copies the onHeap contents read from ColStore into off-heap using the given memFactory.
+    * If an exception is thrown by this method, the tail of chunkPtrs sequence isn't filled in.
+    *
+    * @param chunkPtrs filled in by this method
     */
   private def copyToOffHeap(buffers: Array[ByteBuffer],
-                            memFactory: BlockMemFactory): Array[BinaryVectorPtr] = {
-    buffers.map { buf =>
-      // TODO: if in case the buffer is offheap/direct buffer already, maybe we don't need to copy it?
+                            memFactory: BlockMemFactory,
+                            chunkPtrs: ArrayBuffer[BinaryVectorPtr]): Unit = {
+    cforRange { 0 until buffers.length } { i =>
+      val buf = buffers(i)
       val (bufBase, bufOffset, bufLen) = UnsafeUtils.BOLfromBuffer(buf)
       val vectorAddr = memFactory.allocateOffheap(bufLen)
       UnsafeUtils.unsafe.copyMemory(bufBase, bufOffset, UnsafeUtils.ZeroPointer, vectorAddr, bufLen)
-      vectorAddr
+      chunkPtrs += vectorAddr
     }
   }
 
