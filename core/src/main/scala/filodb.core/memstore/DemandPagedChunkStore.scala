@@ -2,11 +2,13 @@ package filodb.core.memstore
 
 import java.nio.ByteBuffer
 
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
 
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import org.jctools.maps.NonBlockingHashMapLong
+import spire.syntax.cfor._
 
 import filodb.core.store._
 import filodb.memory.{BlockManager, BlockMemFactory}
@@ -86,10 +88,10 @@ extends RawToPartitionMaker with StrictLogging {
           val chunkID = ChunkSetInfo.getChunkID(infoBytes)
 
           if (!tsPart.chunkmapContains(chunkID)) {
-            var chunkPtrs: Array[BinaryVectorPtr] = null
+            val chunkPtrs = new ArrayBuffer[BinaryVectorPtr](rawVectors.length)
             var metaAddr: Long = 0
             try {
-              chunkPtrs = copyToOffHeap(rawVectors, memFactory)
+              copyToOffHeap(rawVectors, memFactory, chunkPtrs)
             } finally {
               metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
                 tsPart.schema.data.blockMetaSize.toShort)
@@ -124,16 +126,20 @@ extends RawToPartitionMaker with StrictLogging {
     (ChunkSetInfo.getEndTime(infoBytes) / flushIntervalMillis) * flushIntervalMillis
 
   /**
-    * Copies the onHeap contents read from ColStore into off-heap using the given memFactory
+    * Copies the onHeap contents read from ColStore into off-heap using the given memFactory.
+    * If an exception is thrown by this method, the tail of chunkPtrs sequence isn't filled in.
+    *
+    * @param chunkPtrs filled in by this method
     */
   private def copyToOffHeap(buffers: Array[ByteBuffer],
-                            memFactory: BlockMemFactory): Array[BinaryVectorPtr] = {
-    buffers.map { buf =>
-      // TODO: if in case the buffer is offheap/direct buffer already, maybe we don't need to copy it?
+                            memFactory: BlockMemFactory,
+                            chunkPtrs: ArrayBuffer[BinaryVectorPtr]): Unit = {
+    cforRange { 0 until buffers.length } { i =>
+      val buf = buffers(i)
       val (bufBase, bufOffset, bufLen) = UnsafeUtils.BOLfromBuffer(buf)
       val vectorAddr = memFactory.allocateOffheap(bufLen)
       UnsafeUtils.unsafe.copyMemory(bufBase, bufOffset, UnsafeUtils.ZeroPointer, vectorAddr, bufLen)
-      vectorAddr
+      chunkPtrs += vectorAddr
     }
   }
 

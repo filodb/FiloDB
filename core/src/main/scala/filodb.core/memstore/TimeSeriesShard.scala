@@ -122,7 +122,7 @@ object TimeSeriesShard {
   /**
     * Copies serialized ChunkSetInfo bytes from persistent storage / on-demand paging.
     */
-  def writeMeta(addr: Long, partitionID: Int, bytes: Array[Byte], vectors: Array[BinaryVectorPtr]): Unit = {
+  def writeMeta(addr: Long, partitionID: Int, bytes: Array[Byte], vectors: ArrayBuffer[BinaryVectorPtr]): Unit = {
     UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, addr, partitionID)
     ChunkSetInfo.copy(bytes, addr + 4)
     cforRange { 0 until vectors.size } { i =>
