@@ -170,8 +170,10 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     execPlan.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual(true)
 
     // LHS should have only LHS query and RHS should have oly RHS query
-    execPlan.children(0).asInstanceOf[PromQlRemoteExec].params.promQl shouldEqual("""test1{job="app"}""")
-    execPlan.children(1).asInstanceOf[PromQlRemoteExec].params.promQl shouldEqual("""test2{job="app"}""")
+    execPlan.children(0).asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      promQl shouldEqual("""test1{job="app"}""")
+    execPlan.children(1).asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      promQl shouldEqual("""test2{job="app"}""")
   }
 }
 

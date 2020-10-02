@@ -3,6 +3,8 @@ package filodb.query
 import io.circe.{Decoder, Encoder, HCursor, Json}
 import io.circe.syntax._
 
+import filodb.query.AggregationOperator.Avg
+
 object PromCirceSupport {
   import cats.syntax.either._
   // necessary to encode sample in promql response as an array with long and double value as string
@@ -10,7 +12,7 @@ object PromCirceSupport {
   implicit val encodeSampl: Encoder[DataSampl] = Encoder.instance {
     case s @ Sampl(t, v)     => Json.fromValues(Seq(t.asJson, v.toString.asJson))
     case h @ HistSampl(t, b) => Json.fromValues(Seq(t.asJson, b.asJson))
-    case h @ AvgSampl(t, v, c) => Json.fromValues(Seq(t.asJson, v.toString.asJson, c.toString.asJson))
+    //case h @ AvgSampl(t, v, c) => Json.fromValues(Seq(t.asJson, v.toString.asJson, c.toString.asJson))
     case m @ MetadataSampl(v) => Json.fromValues(Seq(v.asJson))
   }
 
@@ -25,35 +27,38 @@ object PromCirceSupport {
     }
   }
 
-  implicit val decodeSample: Decoder[Sampl] = new Decoder[Sampl] {
-    final def apply(c: HCursor): Decoder.Result[Sampl] = {
-      for { timestamp <- c.downArray.as[Long]
-            value <- c.downArray.right.as[String]} yield {
-        Sampl(timestamp, value.toDouble)
-      }
-    }
-  }
-
-  implicit val decodeHistSampl: Decoder[HistSampl] = new Decoder[HistSampl] {
-    final def apply(c: HCursor): Decoder.Result[HistSampl] = {
-      val tsResult = c.downArray.as[Long]
-      val rightCurs = c.downArray.right
-        for { timestamp <- tsResult
-              buckets <- rightCurs.as[Map[String, Double]]
-             } yield {
-          HistSampl(timestamp, buckets)
-        }
-    }
-  }
-
   implicit val decodeFoo: Decoder[DataSampl] = new Decoder[DataSampl] {
     final def apply(c: HCursor): Decoder.Result[DataSampl] = {
-      c.values.get.toList.size match
-      {
-        case 3 =>  c.as[AvgSampl]
-        case 2 =>  c.as[Sampl]
-        case _ =>  c.as[HistSampl] // To do change default condition
+      val tsResult = c.downArray.as[Long]
+      val rightCurs = c.downArray.right
+      if (rightCurs.focus.get.isObject) {
+        for { timestamp <- tsResult
+              buckets   <- rightCurs.as[Map[String, Double]] } yield {
+          HistSampl(timestamp, buckets)
+        }
+      } else {
+        for { timestamp <- tsResult
+              value     <- rightCurs.as[String] } yield {
+          Sampl(timestamp, value.toDouble)
+        }
       }
+    }
+  }
+
+  implicit val decodeAggregate: Decoder[AggregateResponse] = new Decoder[AggregateResponse] {
+    final def apply(c: HCursor): Decoder.Result[AggregateResponse] = {
+      val functionName = c.downField("function").as[String] match {
+        case Right(fn) => fn
+        case Left(ex) => throw ex
+      }
+
+     val aggregateSamples = functionName match {
+        case Avg.entryName => c.downField ("aggregateValues").as[List[AvgSampl]]
+      }
+
+      for {
+       sample <- aggregateSamples
+      } yield  AggregateResponse(functionName, sample)
     }
   }
 }

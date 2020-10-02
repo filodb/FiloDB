@@ -7,6 +7,7 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query.{ColumnFilter, ColumnInfo, Filter, RangeVector, RangeVectorKey}
 import filodb.query.{QueryResult => FiloQueryResult, _}
+import filodb.query.AggregationOperator.Avg
 import filodb.query.exec.{ExecPlan, HistToPromSeriesMapper}
 
 object PrometheusModel {
@@ -163,13 +164,7 @@ object PrometheusModel {
       r.getLong(2))
     }.toSeq
 
-    typ match {
-      case QueryResultType.RangeVectors =>
-        Result(tags, if (samples.isEmpty) None else Some(samples), None)
-      case QueryResultType.InstantVector =>
-        Result(tags, None, samples.headOption)
-      case QueryResultType.Scalar => ???
-    }
+    Result(tags, None, None, Some(AggregateResponse(Avg.entryName, samples)))
   }
 
 

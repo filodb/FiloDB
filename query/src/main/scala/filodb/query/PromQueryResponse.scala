@@ -15,9 +15,14 @@ final case class Data(resultType: String, result: Seq[Result])
 final case class MetadataSuccessResponse(data: Seq[Map[String, String]],
                                          status: String = "success") extends PromQueryResponse
 
-final case class Result(metric: Map[String, String], values: Option[Seq[DataSampl]], value: Option[DataSampl] = None)
+final case class Result(metric: Map[String, String], values: Option[Seq[DataSampl]], value: Option[DataSampl] = None,
+                        aggregateResponse: Option[AggregateResponse] = None)
 
 sealed trait DataSampl
+
+sealed trait AggregateSampl
+
+case class AggregateResponse(function: String, aggregateSampl: Seq[AggregateSampl])
 
 /**
   * Metric value for a given timestamp
@@ -30,4 +35,5 @@ final case class HistSampl(timestamp: Long, buckets: Map[String, Double]) extend
 
 final case class MetadataSampl(values: Map[String, String]) extends DataSampl
 
-final case class AvgSampl(timestamp: Long, value: Double, count: Long) extends DataSampl
+final case class AvgSampl(timestamp: Long, value: Double, count: Long) extends AggregateSampl
+

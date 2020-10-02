@@ -24,16 +24,17 @@ import filodb.query._
 
 trait RemoteExec extends LeafExecPlan with StrictLogging {
 
-  val params: PromQlQueryParams
+  val queryContext: QueryContext
 
   val queryEndpoint: String
 
   val requestTimeoutMs: Long
 
   val urlParams: Map[String, Any]
+  val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
 
-  def args: String = s"${params.toString}, queryEndpoint=$queryEndpoint, " +
-    s"requestTimeoutMs=$requestTimeoutMs, limit=${queryContext.sampleLimit}"
+  def args: String = s"${promQlQueryParams.toString}, ${queryContext.plannerParam}, queryEndpoint=$queryEndpoint, " +
+    s"requestTimeoutMs=$requestTimeoutMs"
 
   def limit: Int = ???
 
@@ -69,16 +70,17 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
 
   def getUrlParams(): Map[String, Any] = {
     var finalUrlParams = urlParams ++
-      Map("start" -> params.startSecs,
-        "end" -> params.endSecs,
-        "time" -> params.endSecs,
-        "step" -> params.stepSecs,
-        "processFailure" -> params.processFailure,
-        "processMultiPartition" -> params.processMultiPartition,
+      Map("start" -> promQlQueryParams.startSecs,
+        "end" -> promQlQueryParams.endSecs,
+        "time" -> promQlQueryParams.endSecs,
+        "step" -> promQlQueryParams.stepSecs,
+        "processFailure" -> queryContext.plannerParam.processFailure,
+        "processMultiPartition" -> queryContext.plannerParam.processMultiPartition,
         "histogramMap" -> "true",
-        "skipAggregatePresent" -> params.skipAggregatePresent,
-        "verbose" -> params.verbose)
-    if (params.spread.isDefined) finalUrlParams = finalUrlParams + ("spread" -> params.spread.get)
+        "skipAggregatePresent" -> queryContext.plannerParam.skipAggregatePresent,
+        "verbose" -> promQlQueryParams.verbose)
+    if (queryContext.plannerParam.spread.isDefined) finalUrlParams = finalUrlParams + ("spread" -> queryContext.
+      plannerParam.spread.get)
     logger.debug("URLParams for RemoteExec:" + finalUrlParams)
     finalUrlParams
   }
@@ -89,8 +91,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
                             requestTimeoutMs: Long,
                             queryContext: QueryContext,
                             dispatcher: PlanDispatcher,
-                            dataset: DatasetRef,
-                            params: PromQlQueryParams) extends RemoteExec {
+                            dataset: DatasetRef) extends RemoteExec {
   private val defaultColumns = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
   private val defaultRecSchema = SerializedRangeVector.toSchema(defaultColumns)
@@ -105,7 +106,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
   private val avgResultSchema = ResultSchema(avgColumns, 1)
   private val builder = SerializedRangeVector.newBuilder()
 
-  override val urlParams = Map("query" -> params.promQl)
+  override val urlParams = Map("query" -> promQlQueryParams.promQl)
 
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                               (implicit sched: Scheduler): Future[QueryResponse] = {
@@ -131,16 +132,18 @@ case class PromQlRemoteExec(queryEndpoint: String,
       logger.debug("PromQlRemoteExec generating empty QueryResult as result is empty")
       QueryResult(id, ResultSchema.empty, Seq.empty)
     } else {
-      val samples = data.result.head.values.getOrElse(Seq(data.result.head.value.get))
-      if (samples.isEmpty) {
-        logger.debug("PromQlRemoteExec generating empty QueryResult as samples is empty")
-        QueryResult(id, ResultSchema.empty, Seq.empty)
-      } else {
-        samples.head match {
-          // Passing histogramMap = true so DataSampl will be HistSampl for histograms
-          case HistSampl(timestamp, buckets) => genHistQueryResult(data, id)
-          case AvgSampl(timestamp, value, count) => genAvgQueryResult(data, id)
-          case _ => genDefaultQueryResult(data, id)
+      if (data.result.head.aggregateResponse.isDefined) genAggregateResult(data, id)
+      else {
+        val samples = data.result.head.values.getOrElse(Seq(data.result.head.value.get))
+        if (samples.isEmpty) {
+          logger.debug("PromQlRemoteExec generating empty QueryResult as samples is empty")
+          QueryResult(id, ResultSchema.empty, Seq.empty)
+        } else {
+          samples.head match {
+            // Passing histogramMap = true so DataSampl will be HistSampl for histograms
+            case HistSampl(timestamp, buckets) => genHistQueryResult(data, id)
+            case _ => genDefaultQueryResult(data, id)
+          }
         }
       }
     }
@@ -148,6 +151,16 @@ case class PromQlRemoteExec(queryEndpoint: String,
     queryResponse
   }
 
+  def genAggregateResult(data: Data, id: String): QueryResult = {
+
+    val aggregateResponse = data.result.head.aggregateResponse.get
+    if (aggregateResponse.aggregateSampl.isEmpty) QueryResult(id, ResultSchema.empty, Seq.empty)
+    else {
+      aggregateResponse.aggregateSampl.head match {
+        case AvgSampl(timestamp, value, count) => genAvgQueryResult(data, id)
+      }
+    }
+  }
   def genDefaultQueryResult(data: Data, id: String): QueryResult = {
     val rangeVectors = data.result.map { r =>
       val samples = r.values.getOrElse(Seq(r.value.get))
@@ -166,6 +179,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
           }
         }
         override def numRows: Option[Int] = Option(samples.size)
+
       }
       SerializedRangeVector(rv, builder, defaultRecSchema, "PromQlRemoteExec-default")
       // TODO: Handle stitching with verbose flag
@@ -208,30 +222,30 @@ case class PromQlRemoteExec(queryEndpoint: String,
   }
 
   def genAvgQueryResult(data: Data, id: String): QueryResult = {
-    val rangeVectors = data.result.map { r =>
-      val samples = r.values.getOrElse(Seq(r.value.get))
+    val rangeVectors = data.result.map { d =>
 
-      val rv = new RangeVector {
-        val row = new AvgAggTransientRow()
+       // val samples = r.value
 
-        override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map(m => m._1.utf8 -> m._2.utf8))
+        val rv = new RangeVector {
+          val row = new AvgAggTransientRow()
 
-        override def rows(): RangeVectorCursor = {
-          import NoCloseCursor._
-          samples.iterator.collect { case v: AvgSampl =>
-            row.setLong(0, v.timestamp * 1000)
-            row.setDouble(1, v.value)
-            row.setLong(2, v.count)
-            row
+          override def key: RangeVectorKey = CustomRangeVectorKey(d.metric.map(m => m._1.utf8 -> m._2.utf8))
+
+          override def rows(): RangeVectorCursor = {
+            import NoCloseCursor._
+            d.aggregateResponse.get.aggregateSampl.iterator.collect { case a: AvgSampl =>
+              row.setLong(0, a.timestamp * 1000)
+              row.setDouble(1, a.value)
+              row.setLong(2, a.count)
+              row
+            }
           }
+          override def numRows: Option[Int] = Option(d.aggregateResponse.get.aggregateSampl.size)
+        }
+      SerializedRangeVector(rv, builder, avgRecSchema, printTree(useNewline = false))
         }
 
-        override def numRows: Option[Int] = Option(samples.size)
-
-      }
-      SerializedRangeVector(rv, builder, avgRecSchema, printTree(useNewline = false))
-      // TODO: Handle stitching with verbose flag
-    }
+        // TODO: Handle stitching with verbose flag
     QueryResult(id, avgResultSchema, rangeVectors)
   }
 

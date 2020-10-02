@@ -11,28 +11,39 @@ trait TsdbQueryParams
   * This class provides PromQl query parameters
   * Config has routing parameters
   */
-case class PromQlQueryParams(promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long, skipAggregatePresent:
-                              Boolean = false, spread: Option[Int] = None, remoteQueryPath: Option[String] = None,
-                             processFailure: Boolean = true, processMultiPartition: Boolean = false,
-                             verbose: Boolean = false) extends TsdbQueryParams
+case class PromQlQueryParams(promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long , remoteQueryPath:
+                            Option[String] = None, verbose: Boolean = false) extends TsdbQueryParams
+
 case object UnavailablePromQlQueryParams extends TsdbQueryParams
 
+case class PlannerParam(spread: Option[Int] = None,
+                        spreadOverride: Option[SpreadProvider] = None,
+                        shardOverrides: Option[Seq[Int]] = None,
+                        queryTimeoutMillis: Int = 30000,
+                        sampleLimit: Int = 1000000,
+                        groupByCardLimit: Int = 100000,
+                        joinQueryCardLimit: Int = 100000,
+                        skipAggregatePresent: Boolean = false,
+                        processFailure: Boolean = true,
+                        processMultiPartition: Boolean = false)
+object PlannerParam{
+  def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): PlannerParam =
+    PlannerParam(spreadOverride = constSpread, sampleLimit = sampleLimit)
+}
 /**
   * This class provides general query processing parameters
   */
 final case class QueryContext(origQueryParams: TsdbQueryParams = UnavailablePromQlQueryParams,
-                              spreadOverride: Option[SpreadProvider] = None,
-                              queryTimeoutMillis: Int = 30000,
-                              sampleLimit: Int = 1000000,
-                              groupByCardLimit: Int = 100000,
-                              joinQueryCardLimit: Int = 100000,
-                              shardOverrides: Option[Seq[Int]] = None,
                               queryId: String = UUID.randomUUID().toString,
-                              submitTime: Long = System.currentTimeMillis())
+                              submitTime: Long = System.currentTimeMillis(),
+                              plannerParam: PlannerParam = PlannerParam())
 
 object QueryContext {
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): QueryContext =
-    QueryContext(spreadOverride = constSpread, sampleLimit = sampleLimit)
+    QueryContext(plannerParam = PlannerParam(constSpread, sampleLimit))
+
+  def apply(queryParams: TsdbQueryParams, constSpread: Option[SpreadProvider]): QueryContext =
+    QueryContext(origQueryParams = queryParams, plannerParam = PlannerParam(spreadOverride = constSpread))
 
   /**
     * Creates a spreadFunc that looks for a particular filter with keyName Equals a value, and then maps values

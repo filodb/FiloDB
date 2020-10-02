@@ -68,9 +68,9 @@ final case class BinaryJoinExec(queryContext: QueryContext,
                               querySession: QuerySession): Observable[RangeVector] = {
     val taskOfResults = childResponses.map {
       case (QueryResult(_, _, result), _)
-        if (result.size  > queryContext.joinQueryCardLimit && cardinality == Cardinality.OneToOne) =>
-        throw new BadQueryException(s"This query results in more than ${queryContext.joinQueryCardLimit} " +
-          s"join cardinality. Try applying more filters.")
+        if (result.size  > queryContext.plannerParam.joinQueryCardLimit && cardinality == Cardinality.OneToOne) =>
+        throw new BadQueryException(s"This query results in more than ${queryContext.plannerParam.joinQueryCardLimit}" +
+          s" join cardinality. Try applying more filters.")
       case (QueryResult(_, _, result), i) => (result, i)
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
@@ -107,9 +107,9 @@ final case class BinaryJoinExec(queryContext: QueryContext,
           resultKeySet.add(resKey)
 
           // OneToOne cardinality case is already handled. this condition handles OneToMany case
-          if (resultKeySet.size > queryContext.joinQueryCardLimit)
-            throw new BadQueryException(s"This query results in more than ${queryContext.joinQueryCardLimit} " +
-              s"join cardinality. Try applying more filters.")
+          if (resultKeySet.size > queryContext.plannerParam.joinQueryCardLimit)
+            throw new BadQueryException(s"This query results in more than ${queryContext.plannerParam.
+              joinQueryCardLimit} " + s"join cardinality. Try applying more filters.")
 
           val res = if (lhsIsOneSide) binOp(rvOne.rows, rvOther.rows) else binOp(rvOther.rows, rvOne.rows)
           IteratorBackedRangeVector(resKey, res)

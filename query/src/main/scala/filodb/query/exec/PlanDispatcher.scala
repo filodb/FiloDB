@@ -30,7 +30,7 @@ case class ActorPlanDispatcher(target: ActorRef) extends PlanDispatcher {
 
   def dispatch(plan: ExecPlan)(implicit sched: Scheduler): Task[QueryResponse] = {
     val queryTimeElapsed = System.currentTimeMillis() - plan.queryContext.submitTime
-    val remainingTime = plan.queryContext.queryTimeoutMillis - queryTimeElapsed
+    val remainingTime = plan.queryContext.plannerParam.queryTimeoutMillis - queryTimeElapsed
     // Don't send if time left is very small
     if (remainingTime < 1) {
       Task.raiseError(QueryTimeoutException(remainingTime, this.getClass.getName))

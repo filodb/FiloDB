@@ -447,8 +447,8 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
 
     // Query returns n ("numRawSamples") samples - Applying Limit (n-1) to fail the query execution
     // with ResponseTooLargeException
-    val execPlan = MultiSchemaPartitionsExec(QueryContext(sampleLimit = 999), dummyDispatcher,
-                                             dsRef, 0, filters, AllChunkScan)
+    val execPlan = MultiSchemaPartitionsExec(QueryContext(plannerParam= PlannerParam(sampleLimit = 999)),
+                                             dummyDispatcher, dsRef, 0, filters, AllChunkScan)
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp.asInstanceOf[QueryError]
