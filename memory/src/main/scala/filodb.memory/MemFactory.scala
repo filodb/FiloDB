@@ -316,7 +316,6 @@ class BlockMemFactory(blockStore: BlockManager,
     fullBlocks.clear()
   }
 
-
   protected def ensureCapacity(forSize: Long): Block = synchronized {
     var block = accessCurrentBlock()
     if (block.hasCapacity(forSize)) {
@@ -326,10 +325,12 @@ class BlockMemFactory(blockStore: BlockManager,
       }
     } else {
       val newBlock = requestBlock()
-      if (markFullBlocksAsReclaimable) {
-        block.markReclaimable()
-      } else {
-        fullBlocks += block
+      if (!metadataSpanActive) {
+        if (markFullBlocksAsReclaimable) {
+          block.markReclaimable()
+        } else {
+          fullBlocks += block
+        }
       }
       block = newBlock
       currentBlock = block
