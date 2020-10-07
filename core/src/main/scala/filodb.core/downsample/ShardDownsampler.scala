@@ -1,11 +1,8 @@
 package filodb.core.downsample
 
-import scala.concurrent.{ExecutionContext, Future}
-
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 
-import filodb.core.{DatasetRef, ErrorResponse, Response, Success}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesShardStats}
 import filodb.core.metadata.Schema
@@ -34,20 +31,6 @@ object ShardDownsampler extends StrictLogging {
     }
   }
 
-  /**
-    * Publishes the current data in downsample builders, typically to Kafka
-    */
-  def publishToDownsampleDataset(dsRecords: Seq[DownsampleRecords],
-                                 publisher: DownsamplePublisher, ref: DatasetRef, shard: Int)
-                                (implicit sched: ExecutionContext): Future[Response] = {
-    val responses = dsRecords.map { rec =>
-      val containers = rec.builder.optimalContainerBytes(true)
-      logger.debug(s"Publishing ${containers.size} downsample record containers " +
-        s"of dataset=$ref shard=$shard for resolution ${rec.resolution}")
-      publisher.publish(shard, rec.resolution, containers)
-    }
-    Future.sequence(responses).map(_.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success))
-  }
 }
 
 /**
