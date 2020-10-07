@@ -217,7 +217,8 @@ class BlockMemFactory(blockStore: BlockManager,
   val optionSelf = Some(this)
 
   // tracks fully populated blocks not marked reclaimable yet (typically waiting for flush)
-  val fullBlocks = ListBuffer[Block]()
+  // NOT used in ODP block mem factories where markFullBlocksAsReclaimable = true
+  val fullBlocksToBeMarkedAsReclaimable = ListBuffer[Block]()
 
   // tracks block currently being populated
   var currentBlock = requestBlock()
@@ -250,14 +251,9 @@ class BlockMemFactory(blockStore: BlockManager,
     */
   def tryMarkReclaimable(): Unit = synchronized {
     if (now - lastUsedNanos > BlockMemFactory.USED_THRESHOLD_NANOS) {
-      markUsedBlocksReclaimable()
-      if (currentBlock != null) {
-        currentBlock.markReclaimable()
-        currentBlock = null
-      }
+      markAllBlocksReclaimable()
     }
   }
-  //scalastyle:on null
 
   /**
     * Starts tracking a span of multiple Blocks over which the same metadata should be applied.
@@ -293,10 +289,8 @@ class BlockMemFactory(blockStore: BlockManager,
       metaAddr = blk.allocMetadata(metaSize)
       metadataWriter(metaAddr)
       if (blk != metadataSpan.last) {
-        if (markFullBlocksAsReclaimable) {
-          blk.markReclaimable()
-        } else synchronized {
-          fullBlocks += blk
+        if (!markFullBlocksAsReclaimable) synchronized {
+          fullBlocksToBeMarkedAsReclaimable += blk
         }
       }
     }
@@ -311,10 +305,15 @@ class BlockMemFactory(blockStore: BlockManager,
     metaAddr
   }
 
-  def markUsedBlocksReclaimable(): Unit = synchronized {
-    fullBlocks.foreach(_.markReclaimable())
-    fullBlocks.clear()
+  def markAllBlocksReclaimable(): Unit = synchronized {
+    fullBlocksToBeMarkedAsReclaimable.foreach(_.markReclaimable())
+    fullBlocksToBeMarkedAsReclaimable.clear()
+    if (currentBlock != null) {
+      currentBlock.markReclaimable()
+      currentBlock = null
+    }
   }
+  //scalastyle:on null
 
   protected def ensureCapacity(forSize: Long): Block = synchronized {
     var block = accessCurrentBlock()
@@ -325,12 +324,10 @@ class BlockMemFactory(blockStore: BlockManager,
       }
     } else {
       val newBlock = requestBlock()
-      if (!metadataSpanActive) {
-        if (markFullBlocksAsReclaimable) {
-          block.markReclaimable()
-        } else {
-          fullBlocks += block
-        }
+      if (markFullBlocksAsReclaimable) {
+        block.markReclaimable()
+      } else {
+        fullBlocksToBeMarkedAsReclaimable += block
       }
       block = newBlock
       currentBlock = block

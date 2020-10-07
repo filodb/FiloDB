@@ -470,7 +470,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       val keys = usedBlocksTimeOrdered.headMap(upTo).keySet.asScala
       logger.info(s"timeBlockReclaim: Marking lists $keys as reclaimable")
       usedBlocksTimeOrdered.headMap(upTo).values.asScala.foreach { list =>
-        list.asScala.foreach(_.tryMarkReclaimable)
+        list.asScala.foreach(_.markReclaimable())
       }
     } finally {
       lock.unlock()
@@ -490,7 +490,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   def reclaimAll(): Unit = {
     logger.warn(s"Reclaiming all used blocks -- THIS BETTER BE A TEST!!!")
     markBucketedBlocksReclaimable(Long.MaxValue)
-    usedBlocks.asScala.foreach(_.markReclaimable)
+    usedBlocks.asScala.foreach(_.markReclaimable())
     tryReclaim(usedBlocks.size + numTimeOrderedBlocks)
   }
 
@@ -526,5 +526,5 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     }
   }
 
-  override def finalize(): Unit = releaseBlocks
+  override def finalize(): Unit = releaseBlocks()
 }
