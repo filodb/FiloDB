@@ -78,7 +78,7 @@ class BlockMemFactorySpec extends AnyFlatSpec with Matchers {
     blockManager.usedBlocks.isEmpty shouldEqual true
 
     // time ordered blocks is used in ODP mode
-    // 11 blocks are used, out of which 10 are reclaimable, excepti the "current block"
+    // 11 blocks are used, out of which 10 are reclaimable, except the "current block"
     Seq(10L, 20L, 30L).foreach { t =>
       blockManager.usedBlocksTimeOrdered.get(t).asScala.count(_.canReclaim) shouldEqual 10
     }
@@ -109,4 +109,53 @@ class BlockMemFactorySpec extends AnyFlatSpec with Matchers {
     blockManager.releaseBlocks()
   }
 
+
+  it should "Reclaim Ingestion and ODP blocks in right order when used together" in {
+    val stats = new MemoryStats(Map("test1" -> "test1"))
+    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1)
+
+    val ingestionFactory = new BlockMemFactory(blockManager, None, 50, Map("test" -> "val"), false)
+
+    // create block mem factories for different time buckets
+    val odpFactories = Seq(
+      new BlockMemFactory(blockManager, Some(10), 50, Map("test" -> "val"), true),
+      new BlockMemFactory(blockManager, Some(20), 50, Map("test" -> "val"), true),
+      new BlockMemFactory(blockManager, Some(30), 50, Map("test" -> "val"), true))
+
+    // simulate encoding of multiple ts partitions in flush group
+    for {tsParts <- 0 to 10} {
+      ingestionFactory.startMetaSpan()
+      for {chunks <- 0 to 3} {
+        ingestionFactory.allocateOffheap(1000)
+      }
+      ingestionFactory.endMetaSpan(d => {}, 45)
+    }
+
+    // simulate paging in chunks from cassandra
+    for {b <- odpFactories} {
+      for {tsParts <- 0 to 10} {
+        b.startMetaSpan()
+        for {chunks <- 0 to 3} {
+          b.allocateOffheap(1000)
+        }
+        b.endMetaSpan(d => {}, 45)
+      }
+    }
+
+    // we mark one time ordered bucket as reclaimable, and all ingestion blocks as reclaimable
+    ingestionFactory.markAllBlocksReclaimable()
+    blockManager.markBucketedBlocksReclaimable(10L)
+
+    // here are the use block counts before reclaim call
+    blockManager.usedBlocksTimeOrdered.asScala.values.map(_.size).sum shouldEqual 33
+    blockManager.usedBlocks.size shouldEqual 11
+    blockManager.tryReclaim(35) shouldEqual 35
+
+    // after reclaim, only 2 time ordered blocks which are not reclaimable should remain (since they are current blocks)
+    blockManager.usedBlocksTimeOrdered.asScala.values.map(_.size).sum shouldEqual 2
+
+    // ingestion blocks should be reclaimed only if we cannot get reclaim ODP blocks.
+    blockManager.usedBlocks.size shouldEqual 7
+
+  }
 }

@@ -425,7 +425,6 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       while ( reclaimed < num &&
               timeOrderedListIt.hasNext ) {
         val entry = timeOrderedListIt.next
-        val prevReclaimed = reclaimed
         val removed = reclaimFrom(entry.getValue, stats.timeOrderedBlocksReclaimedMetric, forced)
         if (removed.nonEmpty) {
           logger.info(s"timeBlockReclaim: Reclaimed ${removed.length} time ordered blocks " +
@@ -470,7 +469,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       logger.info(s"timeBlockReclaim: Marking ($upTo) - this is -${(System.currentTimeMillis - upTo)/3600000}hrs")
       val keys = usedBlocksTimeOrdered.headMap(upTo).keySet.asScala
       logger.info(s"timeBlockReclaim: Marking lists $keys as reclaimable")
-      usedBlocksTimeOrdered.headMap(upTo).values.asScala.foreach { list =>
+      usedBlocksTimeOrdered.headMap(upTo + 1).values.asScala.foreach { list =>
         list.asScala.foreach(_.markReclaimable())
       }
     } finally {
