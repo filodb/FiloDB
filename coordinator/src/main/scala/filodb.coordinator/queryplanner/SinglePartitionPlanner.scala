@@ -39,38 +39,58 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
     if(planner.isEmpty)  planners.values.head else planner.head
   }
 
+  private def getPlanner(binaryJoin: BinaryJoin) : Seq[QueryPlanner] = {
+    val lhsPlanners = binaryJoin.lhs match {
+      case b: BinaryJoin =>  getPlanner(b)
+      case _             => Seq(getPlanner(binaryJoin.lhs))
+
+    }
+
+    val rhsPlanners = binaryJoin.rhs match {
+      case b: BinaryJoin =>  getPlanner(b)
+      case _             => Seq(getPlanner(binaryJoin.rhs))
+
+    }
+    lhsPlanners ++ rhsPlanners
+  }
+
   private def materializeSimpleQuery(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     getPlanner(logicalPlan).materialize(logicalPlan, qContext)
   }
 
   private def materializeBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): ExecPlan = {
+    val allPlanners = getPlanner(logicalPlan)
+    if (allPlanners.forall(_.equals(allPlanners.head))) allPlanners.head.materialize(logicalPlan, qContext)
+    else {
 
-    val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
-      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
-    val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
-      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
+      val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+        copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
+      val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+        copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
 
-    val lhsExec = logicalPlan.lhs match {
-      case b: BinaryJoin => materializeBinaryJoin(b, lhsQueryContext)
-      case _             => getPlanner(logicalPlan.lhs).materialize(logicalPlan.lhs, lhsQueryContext)
+
+      val lhsExec = logicalPlan.lhs match {
+        case b: BinaryJoin => materializeBinaryJoin(b, lhsQueryContext)
+        case _ => getPlanner(logicalPlan.lhs).materialize(logicalPlan.lhs, lhsQueryContext)
+      }
+
+      val rhsExec = logicalPlan.rhs match {
+        case b: BinaryJoin => materializeBinaryJoin(b, rhsQueryContext)
+        case _ => getPlanner(logicalPlan.rhs).materialize(logicalPlan.rhs, rhsQueryContext)
+      }
+
+      val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
+
+      if (logicalPlan.operator.isInstanceOf[SetOperator])
+        SetOperatorExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+          LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
+      else
+        BinaryJoinExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+          logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn)
     }
-
-    val rhsExec = logicalPlan.rhs match {
-      case b: BinaryJoin => materializeBinaryJoin(b, rhsQueryContext)
-      case _             => getPlanner(logicalPlan.rhs).materialize(logicalPlan.rhs, rhsQueryContext)
-    }
-
-    val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
-
-    if (logicalPlan.operator.isInstanceOf[SetOperator])
-      SetOperatorExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-        LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
-        LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
-    else
-      BinaryJoinExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-        logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
-        LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
-        LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn)
   }
 
   private def materializeLabelValues(logicalPlan: LogicalPlan, qContext: QueryContext) = {

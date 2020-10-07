@@ -100,14 +100,12 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     execPlan.printTree()
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.children.foreach { l1 =>
-      l1.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
-      l1.children.foreach { l2 =>
-        l2.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-        l2.rangeVectorTransformers.size shouldEqual 1
-        l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+        l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
+        l1.rangeVectorTransformers.size shouldEqual 1
+        l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
       }
     }
-  }
+
 
   it("should generate exec plan for nested Binary Join query") {
     val lp = Parser.queryToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"} + test3{job = \"app\"}", 1000, 1000)
@@ -115,7 +113,7 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.asInstanceOf[BinaryJoinExec].lhs.head.isInstanceOf[BinaryJoinExec] shouldEqual true
-    execPlan.asInstanceOf[BinaryJoinExec].rhs.head.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
+    execPlan.asInstanceOf[BinaryJoinExec].rhs.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
   }
 
   it("should generate BinaryJoin Exec plan with remote and local cluster metrics") {
@@ -125,7 +123,7 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     execPlan.printTree()
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.asInstanceOf[BinaryJoinExec].rhs.head.asInstanceOf[MockExecPlan].name shouldEqual ("rules1")
-    execPlan.asInstanceOf[BinaryJoinExec].lhs.head.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
+    execPlan.asInstanceOf[BinaryJoinExec].lhs.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
   }
 
   it("should generate BinaryJoin Exec plan with remote cluster metrics") {
