@@ -33,7 +33,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
     if(!tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
       (tsdbQueryParams.isInstanceOf[PromQlQueryParams]
-        && !qContext.plannerParam.processMultiPartition)) // Query was part of routing
+        && !qContext.plannerParams.processMultiPartition)) // Query was part of routing
       localPartitionPlanner.materialize(logicalPlan, qContext)
 
     else logicalPlan match {
@@ -53,8 +53,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   private def generateRemoteExecParams(queryContext: QueryContext, startMs: Long, endMs: Long) = {
     val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryContext.copy(origQueryParams = queryParams.copy(startSecs = startMs/1000, endSecs = endMs / 1000), plannerParam
-      = queryContext.plannerParam.copy(processMultiPartition = false))
+    queryContext.copy(origQueryParams = queryParams.copy(startSecs = startMs/1000, endSecs = endMs / 1000),
+      plannerParams = queryContext.plannerParams.copy(processMultiPartition = false))
   }
 
   /**

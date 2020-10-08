@@ -155,7 +155,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
 
     // materialized exec plan
     val parentExecPlan = engine.materialize(logicalPlan,
-      QueryContext(promQlQueryParams, plannerParam = PlannerParam(spreadOverride =
+      QueryContext(promQlQueryParams, plannerParams = PlannerParams(spreadOverride =
         Some(StaticSpreadProvider(SpreadChange(0, 4))), queryTimeoutMillis = 1000000)))
 
     parentExecPlan.isInstanceOf[SplitLocalPartitionDistConcatExec] shouldEqual true
@@ -190,7 +190,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     }
 
     val parentExecPlan = engine.materialize(lp,
-      QueryContext(promQlQueryParams, plannerParam = PlannerParam(spreadOverride =
+      QueryContext(promQlQueryParams, plannerParams = PlannerParams(spreadOverride =
         Some(StaticSpreadProvider(SpreadChange(0, 4))), queryTimeoutMillis = 1000000)))
 
     info(s"First inner child plan: ${parentExecPlan.children.head.children.head.printTree()}")
@@ -222,8 +222,8 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
 
     // materialized exec plan
-    val parentExecPlan = engine.materialize(logicalPlan,  QueryContext(promQlQueryParams, plannerParam =
-      PlannerParam(spreadOverride = Some(FunctionalSpreadProvider(spreadFunc)), queryTimeoutMillis = 1000000)))
+    val parentExecPlan = engine.materialize(logicalPlan,  QueryContext(promQlQueryParams, plannerParams =
+      PlannerParams(spreadOverride = Some(FunctionalSpreadProvider(spreadFunc)), queryTimeoutMillis = 1000000)))
 
     parentExecPlan.printTree()
 
@@ -257,7 +257,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(350000, 2)) // spread change time is in ms
     }
-    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParam = PlannerParam(spreadOverride =
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams(spreadOverride =
       Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000)))
     execPlan.isInstanceOf[SplitLocalPartitionDistConcatExec] shouldEqual true
     execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true // Stitch split plans
@@ -276,7 +276,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(450000, 2)) // spread change time is in ms
     }
-    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParam = PlannerParam(spreadOverride =
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams(spreadOverride =
       Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000)))
     execPlan.isInstanceOf[SplitLocalPartitionDistConcatExec] shouldEqual true
     execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true // Stitch split plans
@@ -297,7 +297,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(350000, 2))
     }
-    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParam = PlannerParam(spreadOverride =
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams(spreadOverride =
       Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000)))
 
     execPlan.isInstanceOf[SplitLocalPartitionDistConcatExec] shouldEqual true
@@ -333,7 +333,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(450000, 2))
     }
-    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParam = PlannerParam(spreadOverride =
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams(spreadOverride =
       Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000)))
 
     execPlan.isInstanceOf[SplitLocalPartitionDistConcatExec] shouldEqual true

@@ -421,7 +421,7 @@ extends Iterator[ChunkSetInfoReader] {
     while (curWindowEnd > lastEndTime && infos.hasNext) {
       val next = infos.nextInfoReader
       val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
-      if (queryTimeElapsed >= queryContext.plannerParam.queryTimeoutMillis)
+      if (queryTimeElapsed >= queryContext.plannerParams.queryTimeoutMillis)
         throw QueryTimeoutException(queryTimeElapsed, this.getClass.getName)
 
       // Add if next chunkset is within window and not empty.  Otherwise keep going

@@ -14,7 +14,7 @@ import filodb.core.downsample.OffHeapMemory
 import filodb.core.memstore._
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.metadata.{Dataset, Schemas}
-import filodb.core.query.{ColumnFilter, PlannerParam, QueryConfig, QueryContext, QuerySession}
+import filodb.core.query.{ColumnFilter, PlannerParams, QueryConfig, QueryContext, QuerySession}
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{InMemoryMetaStore, PartKeyRecord, StoreConfig, TimeRangeChunkScan}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -185,7 +185,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
   def query(memStore: TimeSeriesMemStore): Future[QueryResponse] = {
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(gaugeName))
-    val exec = MultiSchemaPartitionsExec(QueryContext(plannerParam = PlannerParam(sampleLimit = numSamples * 2)),
+    val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams = PlannerParams(sampleLimit = numSamples * 2)),
       InProcessPlanDispatcher, dataset.ref, 0, queryFilters, TimeRangeChunkScan(firstSampleTime, firstSampleTime + 2 *
         numSamples))
     val queryConfig = new QueryConfig(config.getConfig("query"))

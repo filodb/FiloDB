@@ -113,8 +113,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
-    val queryParams = execPlan.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.
-      asInstanceOf[PromQlQueryParams]
+    val queryParams = execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     queryParams.startSecs shouldEqual(from/1000)
     queryParams.endSecs shouldEqual(to/1000)
   }
@@ -164,12 +163,12 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual (2000000)
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
-    val queryParams = child2.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.
+    val queryParams = child2.queryContext.origQueryParams.
       asInstanceOf[PromQlQueryParams]
 
     queryParams.startSecs shouldEqual from/1000
     queryParams.endSecs shouldEqual (1060000-1)/1000
-    child2.asInstanceOf[PromQlRemoteExec].queryContext.plannerParam.processFailure shouldEqual(false)
+    child2.queryContext.plannerParams.processFailure shouldEqual(false)
   }
 
   it("should generate only PromQlExec when local failure starts before query time") {
@@ -304,7 +303,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     queryParams.startSecs shouldEqual 900
     queryParams.endSecs shouldEqual 1020
     queryParams.stepSecs shouldEqual 60
-    child2.asInstanceOf[PromQlRemoteExec].queryContext.plannerParam.processFailure shouldEqual(false)
+    child2.asInstanceOf[PromQlRemoteExec].queryContext.plannerParams.processFailure shouldEqual(false)
   }
 
   it("should generate only PromQlExecPlan when second remote ends after query end time") {
@@ -338,7 +337,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     queryParams.startSecs shouldEqual 900
     queryParams.endSecs shouldEqual 1980
     queryParams.stepSecs shouldEqual 60
-    child.asInstanceOf[PromQlRemoteExec].queryContext.plannerParam.processFailure shouldEqual false
+    child.asInstanceOf[PromQlRemoteExec].queryContext.plannerParams.processFailure shouldEqual false
   }
 
   it("should not do routing for InstantQueries when there are local and remote failures") {
@@ -411,7 +410,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     queryParams.startSecs shouldEqual from
     queryParams.endSecs shouldEqual to
     queryParams.stepSecs shouldEqual step
-    child.asInstanceOf[PromQlRemoteExec].queryContext.plannerParam.processFailure shouldEqual false
+    child.asInstanceOf[PromQlRemoteExec].queryContext.plannerParams.processFailure shouldEqual false
   }
 
   it("should work with offset") {

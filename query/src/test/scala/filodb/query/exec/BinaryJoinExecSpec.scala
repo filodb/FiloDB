@@ -481,7 +481,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
   }
 
   it("should throw BadQueryException - one-to-one with ignoring - cardinality limit 1") {
-    val queryContext = QueryContext(plannerParam= PlannerParam(joinQueryCardLimit = 1)) // set join card limit to 1
+    val queryContext = QueryContext(plannerParams= PlannerParams(joinQueryCardLimit = 1)) // set join card limit to 1
     val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
@@ -506,7 +506,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
   }
 
   it("should throw BadQueryException - one-to-one with on - cardinality limit 1") {
-    val queryContext = QueryContext(plannerParam = PlannerParam(joinQueryCardLimit = 1)) // set join card limit to 1
+    val queryContext = QueryContext(plannerParams = PlannerParams(joinQueryCardLimit = 1)) // set join card limit to 1
     val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute

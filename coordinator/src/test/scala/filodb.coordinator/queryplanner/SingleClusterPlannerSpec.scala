@@ -9,7 +9,7 @@ import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, StaticSpreadProvider}
 import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, PlannerParam, PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query.{ColumnFilter, Filter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
@@ -112,7 +112,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     // materialized exec plan
     val execPlan = engine.materialize(logicalPlan,
-      QueryContext(promQlQueryParams, plannerParam = PlannerParam(spreadOverride = Some(StaticSpreadProvider(SpreadChange(0, 4))), queryTimeoutMillis =1000000)))
+      QueryContext(promQlQueryParams, plannerParams = PlannerParams(spreadOverride = Some(StaticSpreadProvider(SpreadChange(0, 4))), queryTimeoutMillis =1000000)))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
 
     // Now there should be multiple levels of reduce because we have 16 shards
@@ -140,7 +140,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case _ => throw new IllegalArgumentException(s"Unexpected LP $lp")
     }
 
-    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParam = PlannerParam(spreadOverride =
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams(spreadOverride =
       Some(StaticSpreadProvider(SpreadChange(0, 4))), queryTimeoutMillis =1000000)))
     info(s"First child plan: ${execPlan.children.head.printTree()}")
     execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
@@ -182,7 +182,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
 
     // materialized exec plan
-    val execPlan = engine.materialize(logicalPlan, QueryContext(promQlQueryParams, plannerParam = PlannerParam
+    val execPlan = engine.materialize(logicalPlan, QueryContext(promQlQueryParams, plannerParams = PlannerParams
     (spreadOverride = Some(FunctionalSpreadProvider(spreadFunc)), queryTimeoutMillis =1000000)))
     execPlan.printTree()
 
@@ -199,7 +199,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(25000000, 2)) // spread change time is in ms
     }
-    val execPlan = engine.materialize(lp,QueryContext(promQlQueryParams, plannerParam = PlannerParam
+    val execPlan = engine.materialize(lp,QueryContext(promQlQueryParams, plannerParams = PlannerParams
     (spreadOverride = Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000)))
     execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
   }
@@ -209,7 +209,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(35000000, 2))
     }
-    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParam = PlannerParam
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
     (spreadOverride = Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000)))
     execPlan.rangeVectorTransformers.isEmpty shouldEqual true
   }
@@ -220,7 +220,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(25000000, 2))
     }
-    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParam = PlannerParam
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
     (spreadOverride = Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000)))
     val binaryJoinNode = execPlan.children(0)
     binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
@@ -234,7 +234,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(35000000, 2))
     }
-    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParam = PlannerParam
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
     (spreadOverride = Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000)))
     val binaryJoinNode = execPlan.children(0)
     binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true

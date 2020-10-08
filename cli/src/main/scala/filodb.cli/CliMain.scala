@@ -339,7 +339,7 @@ object CliMain extends FilodbClusterNode {
     val ref = DatasetRef(dataset)
     val spreadProvider: Option[SpreadProvider] = options.spread.map(s => StaticSpreadProvider(SpreadChange(0, s)))
 
-    val qOpts = QueryContext(origQueryParams = tsdbQueryParams, plannerParam = PlannerParam(spreadOverride =
+    val qOpts = QueryContext(origQueryParams = tsdbQueryParams, plannerParams = PlannerParams(spreadOverride =
       spreadProvider, sampleLimit = options.sampleLimit, queryTimeoutMillis = options.timeout.toMillis.toInt, shardOverrides =
       options.shardOverrides))
     println(s"Sending query command to server for $ref with options $qOpts...")

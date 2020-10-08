@@ -58,7 +58,7 @@ trait QueryOps extends ClientBase with StrictLogging {
     // NOTE: It's very important to extend the query timeout for the ask itself, because the queryTimeoutMillis is
     // the internal FiloDB scatter-gather timeout.  We need additional time for the proper error to get transmitted
     // back in case of internal timeouts.
-    askCoordinator(qCmd, (qContext.plannerParam.queryTimeoutMillis + 10000).millis) { case r: QueryResponse2 => r }
+    askCoordinator(qCmd, (qContext.plannerParams.queryTimeoutMillis + 10000).millis) { case r: QueryResponse2 => r }
   }
 
 }

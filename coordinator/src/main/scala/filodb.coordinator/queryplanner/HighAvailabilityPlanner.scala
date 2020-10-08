@@ -76,7 +76,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           // Divide by 1000 to convert millis to seconds. PromQL params are in seconds.
           val promQlParams = PromQlQueryParams(queryParams.promQl,
             (timeRange.startMs + offsetMs) / 1000, queryParams.stepSecs, (timeRange.endMs + offsetMs) / 1000)
-          val newQueryContext = qContext.copy(origQueryParams = promQlParams, plannerParam = qContext.plannerParam.
+          val newQueryContext = qContext.copy(origQueryParams = promQlParams, plannerParams = qContext.plannerParams.
             copy(processFailure = false) )
           logger.debug("PromQlExec params:" + promQlParams)
           val httpEndpoint = remoteHttpEndpoint + queryParams.remoteQueryPath.getOrElse("")
@@ -116,7 +116,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     if (!logicalPlan.isRoutable ||
         !tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
         (tsdbQueryParams.isInstanceOf[PromQlQueryParams]
-          && !qContext.plannerParam.processFailure) || // This is a query that was
+          && !qContext.plannerParams.processFailure) || // This is a query that was
                                                                                  // part of failure routing
         !hasSingleTimeRange(logicalPlan) || // Sub queries have different time ranges (unusual)
         failures.isEmpty) { // no failures in query time range

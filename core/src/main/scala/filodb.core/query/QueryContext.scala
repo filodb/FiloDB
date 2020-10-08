@@ -16,7 +16,7 @@ case class PromQlQueryParams(promQl: String, startSecs: Long, stepSecs: Long, en
 
 case object UnavailablePromQlQueryParams extends TsdbQueryParams
 
-case class PlannerParam(spread: Option[Int] = None,
+case class PlannerParams(spread: Option[Int] = None,
                         spreadOverride: Option[SpreadProvider] = None,
                         shardOverrides: Option[Seq[Int]] = None,
                         queryTimeoutMillis: Int = 30000,
@@ -26,9 +26,9 @@ case class PlannerParam(spread: Option[Int] = None,
                         skipAggregatePresent: Boolean = false,
                         processFailure: Boolean = true,
                         processMultiPartition: Boolean = false)
-object PlannerParam{
-  def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): PlannerParam =
-    PlannerParam(spreadOverride = constSpread, sampleLimit = sampleLimit)
+object PlannerParams {
+  def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): PlannerParams =
+    PlannerParams(spreadOverride = constSpread, sampleLimit = sampleLimit)
 }
 /**
   * This class provides general query processing parameters
@@ -36,14 +36,14 @@ object PlannerParam{
 final case class QueryContext(origQueryParams: TsdbQueryParams = UnavailablePromQlQueryParams,
                               queryId: String = UUID.randomUUID().toString,
                               submitTime: Long = System.currentTimeMillis(),
-                              plannerParam: PlannerParam = PlannerParam())
+                              plannerParams: PlannerParams = PlannerParams())
 
 object QueryContext {
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): QueryContext =
-    QueryContext(plannerParam = PlannerParam(constSpread, sampleLimit))
+    QueryContext(plannerParams = PlannerParams(constSpread, sampleLimit))
 
   def apply(queryParams: TsdbQueryParams, constSpread: Option[SpreadProvider]): QueryContext =
-    QueryContext(origQueryParams = queryParams, plannerParam = PlannerParam(spreadOverride = constSpread))
+    QueryContext(origQueryParams = queryParams, plannerParams = PlannerParams(spreadOverride = constSpread))
 
   /**
     * Creates a spreadFunc that looks for a particular filter with keyName Equals a value, and then maps values

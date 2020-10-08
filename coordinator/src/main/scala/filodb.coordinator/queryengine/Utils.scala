@@ -60,7 +60,7 @@ object Utils extends StrictLogging {
       case FilteredPartitionQuery(filters) =>
         // get limited # of shards if shard key available, otherwise query all shards
         // TODO: monitor ratio of queries using shardKeyHash to queries that go to all shards
-        val shards = options.plannerParam.shardOverrides.getOrElse {
+        val shards = options.plannerParams.shardOverrides.getOrElse {
           val shardCols = dataset.options.shardKeyColumns
           if (shardCols.length > 0) {
             shardHashFromFilters(filters, shardCols, dataset) match {

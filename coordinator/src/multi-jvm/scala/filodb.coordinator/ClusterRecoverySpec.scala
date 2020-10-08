@@ -10,7 +10,7 @@ import com.typesafe.config.ConfigFactory
 import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.core._
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.query.{ColumnInfo, PlannerParam, QueryContext}
+import filodb.core.query.{ColumnInfo, PlannerParams, QueryContext}
 
 object ClusterRecoverySpecConfig extends MultiNodeConfig {
   // register the named roles (nodes) of the test
@@ -145,7 +145,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     // val query = LogicalPlanQuery(dataset6.ref,
     //               simpleAgg("count", childPlan=PartitionsRange.all(FilteredPartitionQuery(Nil), Seq("MonthYear"))))
 
-    val qOpt = QueryContext(plannerParam = PlannerParam(shardOverrides = Some(Seq(0, 1))))
+    val qOpt = QueryContext(plannerParams = PlannerParams(shardOverrides = Some(Seq(0, 1))))
     val q2 = LogicalPlan2Query(dataset6.ref,
                PeriodicSeriesWithWindowing(
                  RawSeries(AllChunksSelector, Nil, Seq("AvgTone"), Some(300000), None),
