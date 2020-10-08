@@ -4,6 +4,7 @@ import scala.collection.mutable.ArrayBuffer
 
 import com.typesafe.scalalogging.StrictLogging
 
+import filodb.coordinator.queryplanner.LogicalPlanUtils.{getLookBackMillis, getTimeFromLogicalPlan}
 import filodb.core.query.{QueryContext, RangeParams}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
@@ -154,27 +155,36 @@ object LogicalPlanUtils extends StrictLogging {
     * NOTE: Plan should be PeriodicSeriesPlan
     */
   def getRawSeriesStartTime(logicalPlan: LogicalPlan): Option[Long] = {
-    LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
-      case lp: RawSeries => lp.rangeSelector match {
-        case rs: IntervalSelector => Some(rs.from)
-        case _ => None
+    val leaf = LogicalPlan.findLeafLogicalPlans(logicalPlan)
+    if (leaf.isEmpty) None else {
+      leaf.head match {
+        case lp: RawSeries => lp.rangeSelector match {
+          case rs: IntervalSelector => Some(rs.from)
+          case _ => None
+        }
+        case _ => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
       }
-      case _                      => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
     }
   }
 
   def getOffsetMillis(logicalPlan: LogicalPlan): Long = {
-    LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
-      case lp: RawSeries => lp.offsetMs.getOrElse(0)
-      case _             => 0
+    val leaf = LogicalPlan.findLeafLogicalPlans(logicalPlan)
+    if (leaf.isEmpty) 0 else {
+      leaf.head match {
+        case lp: RawSeries => lp.offsetMs.getOrElse(0)
+        case _ => 0
+      }
     }
   }
 
   def getLookBackMillis(logicalPlan: LogicalPlan): Long = {
     val staleDataLookbackMillis = WindowConstants.staleDataLookbackMillis
-    LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
-      case lp: RawSeries => lp.lookbackMs.getOrElse(staleDataLookbackMillis)
-      case _             => 0
+    val leaf = LogicalPlan.findLeafLogicalPlans(logicalPlan)
+    if (leaf.isEmpty) 0 else {
+      leaf.head match {
+        case lp: RawSeries => lp.lookbackMs.getOrElse(staleDataLookbackMillis)
+        case _ => 0
+      }
     }
   }
 
@@ -234,5 +244,54 @@ object LogicalPlanUtils extends StrictLogging {
     } else {
       Seq(lp)
     }
+  }
+}
+
+/**
+ * Temporary utility to modify plan to add extra join-on keys or group-by keys
+ * for specific time ranges.
+ */
+object ExtraOnByKeysUtil {
+
+  def getRealOnLabels(lp: BinaryJoin, addStepKeyTimeRanges: Seq[Seq[Long]]): Seq[String] = {
+    if (shouldAddExtraKeys(lp.lhs, addStepKeyTimeRanges: Seq[Seq[Long]]) ||
+        shouldAddExtraKeys(lp.rhs, addStepKeyTimeRanges: Seq[Seq[Long]])) {
+      // add extra keys if ignoring clause is not specified and on is specified
+      if (lp.on.nonEmpty) lp.on ++ extraByOnKeys
+      else lp.on
+    } else {
+      lp.on
+    }
+  }
+
+  def getRealByLabels(lp: Aggregate, addStepKeyTimeRanges: Seq[Seq[Long]]): Seq[String] = {
+    if (shouldAddExtraKeys(lp, addStepKeyTimeRanges)) {
+      // add extra keys if without clause is not specified
+      if (lp.without.isEmpty) lp.by ++ extraByOnKeys
+      else lp.by
+    } else {
+      lp.by
+    }
+  }
+
+  private def shouldAddExtraKeys(lp: LogicalPlan, addStepKeyTimeRanges: Seq[Seq[Long]]): Boolean = {
+    // need to check if raw time range in query overlaps with configured addStepKeyTimeRanges
+    val range = getTimeFromLogicalPlan(lp)
+    val lookback = getLookBackMillis(lp)
+    queryTimeRangeRequiresExtraKeys(range.startMs - lookback, range.endMs, addStepKeyTimeRanges)
+  }
+
+  val extraByOnKeys = Seq("_pi_", "_step_")
+  /**
+   * Returns true if two time ranges (x1, x2) and (y1, y2) overlap
+   */
+  private def rangeOverlaps(x1: Long, x2: Long, y1: Long, y2: Long): Boolean = {
+    Math.max(x1, y1) <= Math.min(x2, y2)
+  }
+
+  private def queryTimeRangeRequiresExtraKeys(rawStartMs: Long,
+                                              rawEndMs: Long,
+                                              addStepKeyTimeRanges: Seq[Seq[Long]]): Boolean = {
+    addStepKeyTimeRanges.exists { r => rangeOverlaps(rawStartMs, rawEndMs, r(0), r(1)) }
   }
 }

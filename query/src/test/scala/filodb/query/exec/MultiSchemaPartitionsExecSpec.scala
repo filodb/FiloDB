@@ -51,7 +51,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
 
   val metric = "http_req_total"
-  val partKeyLabelValues = Map("job" -> "myCoolService", "instance" -> "someHost:8787")
+  val partKeyLabelValues = Map("job" -> "myCoolService", "instance" -> "someHost:8787", "host" -> "host-1")
   val partKeyKVWithMetric = partKeyLabelValues ++ Map("_metric_" -> metric)
   val partTagsUTF8 = partKeyLabelValues.map { case (k, v) => (k.utf8, v.utf8) }
   val now = System.currentTimeMillis()
@@ -119,7 +119,8 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
   it ("should read raw samples from Memstore using IntervalSelector") {
     import ZeroCopyUTF8String._
     val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
-      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)),
+      ColumnFilter("instance", Filter.NotEquals("SomeJob".utf8)))
     // read from an interval of 100000ms, resulting in 11 samples
     val startTime = now - numRawSamples * reportingInterval
     val endTime   = now - (numRawSamples-10) * reportingInterval
@@ -470,5 +471,36 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     thrown.getCause.getMessage shouldEqual "Query timeout in filodb.query.exec.MultiSchemaPartitionsExec after 180 seconds"
   }
 
+  it ("""should not return range vectors with !="" where column is not present""") {
+    import ZeroCopyUTF8String._
+    val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)),
+      ColumnFilter("dc", Filter.NotEquals("".utf8)))
+    val startTime = now - numRawSamples * reportingInterval
+    val endTime   = now - (numRawSamples-10) * reportingInterval
+
+    val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher,
+      dsRef, 0, filters, TimeRangeChunkScan(startTime, endTime))
+
+    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.result.size shouldEqual 0
+  }
+
+  it ("""should return range vectors when it satisfies NotEquals condition""") {
+    import ZeroCopyUTF8String._
+    val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)),
+      ColumnFilter("host", Filter.NotEquals("host".utf8)))
+    val startTime = now - numRawSamples * reportingInterval
+    val endTime   = now - (numRawSamples-10) * reportingInterval
+
+    val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher,
+      dsRef, 0, filters, TimeRangeChunkScan(startTime, endTime))
+
+    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.result.size shouldEqual 1
+  }
 }
 

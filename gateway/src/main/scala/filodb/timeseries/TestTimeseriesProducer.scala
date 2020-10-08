@@ -65,8 +65,8 @@ object TestTimeseriesProducer extends StrictLogging {
 
     logger.info(s"Finished producing $numSamples records for ${samplesDuration / 1000} seconds")
     val startQuery = startTime / 1000
-    val endQuery = startQuery + 300
-    val periodicPromQL = """heap_usage{dc="DC0",_ns_="App-0",_ws_="demo"}"""
+    val endQuery = startQuery + (numSamples / numTimeSeries) * 10
+    val periodicPromQL = """heap_usage{_ns_="App-0",_ws_="demo"}"""
     val query =
       s"""./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus """ +
       s"""--promql '$periodicPromQL' --start $startQuery --end $endQuery --limit 15"""
@@ -77,16 +77,10 @@ object TestTimeseriesProducer extends StrictLogging {
       s"query=$periodicSamplesQ&start=$startQuery&end=$endQuery&step=15"
     logger.info(s"Periodic Samples query URL: \n$periodicSamplesUrl")
 
-    val rawSamplesQ = URLEncoder.encode("""heap_usage{dc="DC0",_ws_="demo",_ns_="App-0"}[2m]""",
+    val rawSamplesQ = URLEncoder.encode("""heap_usage{_ws_="demo",_ns_="App-0"}[2m]""",
       StandardCharsets.UTF_8.toString)
     val rawSamplesUrl = s"http://localhost:8080/promql/prometheus/api/v1/query?query=$rawSamplesQ&time=$endQuery"
     logger.info(s"Raw Samples query URL: \n$rawSamplesUrl")
-
-    val downsampledQ = URLEncoder.encode("""heap_usage::sum{dc="DC0",_ws_="demo",_ns_="App-0"}[2m]""",
-      StandardCharsets.UTF_8.toString)
-    val downsampledSamplesUrl = s"http://localhost:8080/promql/prometheus_ds_1m/api/v1/query?" +
-      s"query=$downsampledQ&time=$endQuery"
-    logger.info(s"Downsampled Samples query URL: \n$downsampledSamplesUrl")
   }
 
   def metricsToContainerStream(startTime: Long,

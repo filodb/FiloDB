@@ -449,16 +449,21 @@ object Parser extends Expression {
 
   def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
     val expression = parseQuery(query)
-    val expressionWithPrecedence = expression match {
-      case binaryExpression: BinaryExpression => assignPrecedence(binaryExpression.lhs, binaryExpression.operator,
-                                                    binaryExpression.vectorMatch, binaryExpression.rhs)
-      case _                                  => expression
-    }
 
-    expressionWithPrecedence match {
+    assignPrecedence(expression) match {
       case p: PeriodicSeries => p.toSeriesPlan(timeParams)
       case r: SimpleSeries   => r.toSeriesPlan(timeParams, isRoot = true)
       case _ => throw new UnsupportedOperationException()
+    }
+  }
+
+  def assignPrecedence(expression: Expression): Expression = {
+   expression match {
+      case f: Function            => f.copy(allParams = f.allParams.map(assignPrecedence(_)))
+      case a: AggregateExpression => a.copy(params = a.params.map(assignPrecedence(_)), altFunctionParams = a.
+                                     altFunctionParams.map(assignPrecedence(_)))
+      case b: BinaryExpression    => assignPrecedence(b.lhs, b.operator, b.vectorMatch, b.rhs)
+      case _                      => expression
     }
   }
 

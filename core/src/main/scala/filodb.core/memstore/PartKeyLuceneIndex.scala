@@ -451,9 +451,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         new TermQuery(term)
       case NotEquals(value) =>
         val term = new Term(column, value.toString)
-        val allDocs = new MatchAllDocsQuery
         val booleanQuery = new BooleanQuery.Builder
-        booleanQuery.add(allDocs, Occur.FILTER)
+        val termAll = new Term(column, ".*")
+        booleanQuery.add(new RegexpQuery(termAll, RegExp.NONE), Occur.FILTER)
         booleanQuery.add(new TermQuery(term), Occur.MUST_NOT)
         booleanQuery.build()
       case In(values) =>

@@ -113,20 +113,12 @@ object ChunkMap extends StrictLogging {
   def validateNoSharedLocks(unitTest: Boolean = false): Unit = {
     val numLocksReleased = ChunkMap.releaseAllSharedLocks()
     if (numLocksReleased > 0) {
-      val msg = s"Number of locks was non-zero: $numLocksReleased. " +
-        s"This is indicative of a possible lock acquisition/release bug."
-      if (unitTest) {
-        throw new Error(msg)
-      }
-      logger.error(msg)
-      haltAndCatchFire()
+      val ex = new RuntimeException(s"Number of locks was non-zero: $numLocksReleased. " +
+        s"This is indicative of a possible lock acquisition/release bug.")
+      Shutdown.haltAndCatchFire(ex)
     }
   }
 
-  def haltAndCatchFire(): Unit = {
-    logger.error(s"Shutting down process since it may be in an unstable/corrupt state.")
-    Runtime.getRuntime.halt(1)
-  }
 }
 
 /**
@@ -273,8 +265,7 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
         warned = true
       } else if (warned && timeoutNanos >= MaxExclusiveRetryTimeoutNanos) {
         val lockState = UnsafeUtils.getIntVolatile(this, lockStateOffset)
-        _logger.error(s"Unable to acquire exclusive lock: $lockState")
-        haltAndCatchFire()
+        Shutdown.haltAndCatchFire(new RuntimeException(s"Unable to acquire exclusive lock: $lockState"))
       }
     }
   }

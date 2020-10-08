@@ -57,7 +57,6 @@ trait MemStore extends ChunkSource {
    * @param storeConf the store configuration for that dataset.  Each dataset may have a different mem config.
    *                  See sourceconfig.store section in conf/timeseries-dev-source.conf
    * @param downsampleConfig configuration for downsampling operation. By default it is disabled.
-   * @throws filodb.core.memstore.ShardAlreadySetup
    */
   def setup(ref: DatasetRef, schemas: Schemas, shard: Int,
             storeConf: StoreConfig,

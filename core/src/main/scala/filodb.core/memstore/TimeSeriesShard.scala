@@ -25,11 +25,11 @@ import spire.syntax.cfor._
 
 import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
-import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher, ShardDownsampler}
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
 import filodb.memory._
+import filodb.memory.data.Shutdown
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -122,7 +122,7 @@ object TimeSeriesShard {
   /**
     * Copies serialized ChunkSetInfo bytes from persistent storage / on-demand paging.
     */
-  def writeMeta(addr: Long, partitionID: Int, bytes: Array[Byte], vectors: Array[BinaryVectorPtr]): Unit = {
+  def writeMeta(addr: Long, partitionID: Int, bytes: Array[Byte], vectors: ArrayBuffer[BinaryVectorPtr]): Unit = {
     UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, addr, partitionID)
     ChunkSetInfo.copy(bytes, addr + 4)
     cforRange { 0 until vectors.size } { i =>
@@ -216,8 +216,6 @@ object SchemaMismatch {
   * @param bufferMemoryManager Unencoded/unoptimized ingested data is stored in buffers that are allocated from this
   *                            memory pool. This pool is also used to store partition keys.
   * @param storeConfig the store portion of the sourceconfig, not the global FiloDB application config
-  * @param downsampleConfig configuration for downsample operations
-  * @param downsamplePublisher is shared among all shards of the dataset on the node
   */
 class TimeSeriesShard(val ref: DatasetRef,
                       val schemas: Schemas,
@@ -226,9 +224,7 @@ class TimeSeriesShard(val ref: DatasetRef,
                       val bufferMemoryManager: MemFactory,
                       colStore: ColumnStore,
                       metastore: MetaStore,
-                      evictionPolicy: PartitionEvictionPolicy,
-                      downsampleConfig: DownsampleConfig,
-                      downsamplePublisher: DownsamplePublisher)
+                      evictionPolicy: PartitionEvictionPolicy)
                      (implicit val ioPool: ExecutionContext) extends StrictLogging {
   import collection.JavaConverters._
 
@@ -331,7 +327,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private[memstore] final val reclaimLock = blockStore.reclaimLock
 
   // Requires blockStore.
-  startHeadroomTask(ingestSched)
+  private val headroomTask = startHeadroomTask(ingestSched)
 
   // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
   // strictly during ingest() and switchBuffers().
@@ -403,17 +399,6 @@ class TimeSeriesShard(val ref: DatasetRef,
   // all flush at the same time. With an hourly boundary and 60 flush groups, flushes are
   // scheduled once a minute.
   private val flushOffsetMillis = flushBoundaryMillis / numGroups
-
-  /**
-    * Helper for downsampling ingested data for long term retention.
-    */
-  private final val shardDownsamplers = {
-    val downsamplers = schemas.schemas.values.map { s =>
-      s.schemaHash -> new ShardDownsampler(ref.dataset, shardNum,
-        s, s.downsample.getOrElse(s), downsampleConfig.enabled, shardStats)
-    }
-    DMap(downsamplers.toSeq: _*)
-  }
 
   private[memstore] val evictedPartKeys =
     BloomFilter[PartKey](storeConfig.evictedPkBfCapacity, falsePositiveRate = 0.01)(new CanGenerateHashFrom[PartKey] {
@@ -893,13 +878,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     // Only allocate the blockHolder when we actually have chunks/partitions to flush
     val blockHolder = blockFactoryPool.checkout(Map("flushGroup" -> flushGroup.groupNum.toString))
 
-    // This initializes the containers for the downsample records. Yes, we create new containers
-    // and not reuse them at the moment and there is allocation for every call of this method
-    // (once per minute). We can perhaps use a thread-local or a pool if necessary after testing.
-    val downsampleRecords = ShardDownsampler
-                               .newEmptyDownsampleRecords(downsampleConfig.resolutions.map(_.toMillis.toInt),
-                                                          downsampleConfig.enabled)
-
     val chunkSetIter = partitionIt.flatMap { p =>
       // TODO re-enable following assertion. Am noticing that monix uses TrampolineExecutionContext
       // causing the iterator to be consumed synchronously in some cases. It doesnt
@@ -912,10 +890,6 @@ class TimeSeriesShard(val ref: DatasetRef,
       /* VERY IMPORTANT: This block is lazy and is executed when chunkSetIter is consumed
          in writeChunksFuture below */
 
-      /* Step 3: Add downsample records for the chunks into the downsample record builders */
-      val ds = shardDownsamplers(p.schema.schemaHash)
-      ds.populateDownsampleRecords(p, p.infosToBeFlushed, downsampleRecords)
-
       /* Step 4: Update endTime of all partKeys that stopped ingesting in this flush period. */
       updateIndexWithEndTime(p, chunks, flushGroup.dirtyPartsToFlush)
       chunks
@@ -927,17 +901,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     /* Step 1: Kick off partition iteration to persist chunks to column store */
     val writeChunksFuture = writeChunks(flushGroup, chunkSetIter, partitionIt, blockHolder)
 
-    /* Step 5.1: Publish the downsample record data collected to the downsample dataset.
-     * We recover future since we want to proceed to publish downsample data even if chunk flush failed.
-     * This is done after writeChunksFuture because chunkSetIter is lazy. */
-    val pubDownsampleFuture = writeChunksFuture.recover {case _ => Success}
-      .flatMap { _ =>
-        assertThreadName(IOSchedName)
-        if (downsampleConfig.enabled)
-          ShardDownsampler.publishToDownsampleDataset(downsampleRecords, downsamplePublisher, ref, shardNum)
-        else Future.successful(Success)
-      }
-
     /* Step 5.2: We flush dirty part keys in the one designated group for each shard.
      * We recover future since we want to proceed to write dirty part keys even if chunk flush failed.
      * This is done after writeChunksFuture because chunkSetIter is lazy. More partKeys could
@@ -947,11 +910,10 @@ class TimeSeriesShard(val ref: DatasetRef,
       .flatMap( _=> writeDirtyPartKeys(flushGroup))
 
     /* Step 6: Checkpoint after dirty part keys and chunks are flushed */
-    val result = Future.sequence(Seq(writeChunksFuture, writeDirtyPartKeysFuture, pubDownsampleFuture)).map {
+    val result = Future.sequence(Seq(writeChunksFuture, writeDirtyPartKeysFuture)).map {
       _.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success)
     }.flatMap {
-      case Success           => blockHolder.markUsedBlocksReclaimable()
-                                commitCheckpoint(ref, shardNum, flushGroup)
+      case Success           => commitCheckpoint(ref, shardNum, flushGroup)
       case er: ErrorResponse => Future.successful(er)
     }.recover { case e =>
       logger.error(s"Internal Error when persisting chunks in dataset=$ref shard=$shardNum - should " +
@@ -961,6 +923,13 @@ class TimeSeriesShard(val ref: DatasetRef,
     result.onComplete { resp =>
       assertThreadName(IngestSchedName)
       try {
+        // COMMENTARY ON BUG FIX DONE: Mark used blocks as reclaimable even on failure. Even if cassandra write fails
+        // or other errors occur, we cannot leave blocks as not reclaimable and also release the factory back into pool.
+        // Earlier, we were not calling this with the hope that next use of the blockMemFactory will mark them
+        // as reclaimable. But the factory could be used for a different flush group. Not the same one. It can
+        // succeed, and the wrong blocks can be marked as reclaimable.
+        // Can try out tracking unreclaimed blockMemFactories without releasing, but it needs to be separate PR.
+        blockHolder.markUsedBlocksReclaimable()
         blockFactoryPool.release(blockHolder)
         flushDoneTasks(flushGroup, resp)
         tracer.finish()
@@ -1498,9 +1467,22 @@ class TimeSeriesShard(val ref: DatasetRef,
     })
   }
 
-  private def startHeadroomTask(sched: Scheduler): Unit = {
+  private def startHeadroomTask(sched: Scheduler) = {
     sched.scheduleWithFixedDelay(1, 1, TimeUnit.MINUTES, new Runnable {
-      def run() = blockStore.ensureHeadroom(storeConfig.ensureHeadroomPercent)
+      var numFailures = 0
+
+      def run() = {
+        val numFree = blockStore.ensureHeadroom(storeConfig.ensureHeadroomPercent)
+        if (numFree > 0) {
+          numFailures = 0
+        } else {
+          numFailures += 1
+          if (numFailures >= 5) {
+            Shutdown.haltAndCatchFire(new RuntimeException(s"Headroom task was unable to free memory " +
+              s"for $numFailures consecutive attempts. Shutting down process. shard=$shardNum"))
+          }
+        }
+      }
     })
   }
 
@@ -1541,6 +1523,7 @@ class TimeSeriesShard(val ref: DatasetRef,
        method to ensure that no threads are accessing the memory before it's freed.
     blockStore.releaseBlocks()
     */
+    headroomTask.cancel()
     ingestSched.shutdown()
   }
 }

@@ -1,8 +1,6 @@
 package filodb.coordinator.queryplanner
 
-import com.typesafe.scalalogging.StrictLogging
 import java.util.concurrent.ThreadLocalRandom
-import kamon.Kamon
 
 import filodb.core.metadata.{DatasetOptions, Schemas}
 import filodb.core.query.{QueryContext, RangeParams}
@@ -50,9 +48,10 @@ trait  PlannerMaterializer {
           param match {
             case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
             case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(materialize(s, qContext),
-              RangeParams(s.startMs, s.stepMs, s.endMs))
+                                               RangeParams(s.startMs, s.stepMs, s.endMs))
             case  t: ScalarTimeBasedPlan    => TimeFuncArgs(t.rangeParams)
-            case _                          => throw new UnsupportedOperationException("Invalid logical plan")
+            case s: ScalarBinaryOperation   => ExecPlanFuncArgs(materialize(s, qContext),
+                                               RangeParams(s.startMs, s.stepMs, s.endMs))
           }
         }
       }
@@ -140,24 +139,4 @@ trait  PlannerMaterializer {
         vectors
       }
     }
-}
-
-object PlannerUtil extends StrictLogging {
-
-  val bjBetweenAggAndNonAgg = Kamon.counter("join-between-agg-non-agg").withoutTags()
-
-  def validateBinaryJoin(lhs: Seq[ExecPlan], rhs: Seq[ExecPlan], queryContext: QueryContext): Any = {
-
-    if (lhs.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec]) &&
-      !rhs.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec])) {
-      logger.info(s"Saw Binary Join between aggregate(lhs) and non-aggregate (rhs). ${queryContext.origQueryParams}")
-      bjBetweenAggAndNonAgg.increment()
-    }
-
-    if (!lhs.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec]) &&
-      rhs.exists(_.isInstanceOf[LocalPartitionReduceAggregateExec])) {
-      logger.info(s"Saw Binary Join between non-aggregate(lhs) and aggregate(rhs): ${queryContext.origQueryParams}")
-      bjBetweenAggAndNonAgg.increment()
-    }
-  }
 }

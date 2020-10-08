@@ -143,7 +143,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     result.map(_.key).toSet.size shouldEqual 100
   }
 
-  it("should implictly add step and pi tag as join key on OneToOne joins") {
+  it("should deal with additional step and pi tag as join key on OneToOne joins") {
     val lhs1: RangeVector = new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
         Map("__name__".utf8 -> s"someMetricLhs".utf8, "_pi_".utf8 -> "0".utf8, "tag2".utf8 -> "tag2Val".utf8))
@@ -177,7 +177,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       Array(dummyPlan), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
       Cardinality.OneToOne,
-      Nil, Nil, Nil, "__name__")
+      Seq("_step_", "_pi_"), Nil, Nil, "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, Seq(lhs1, lhs2).map(rv => SerializedRangeVector(rv, schema)))
@@ -193,7 +193,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
   }
 
-  it("should implictly add step and pi tag as join key on OneToMany joins") {
+  it("should deal with implictly added step and pi tag as join key on OneToMany joins") {
     val lhs1: RangeVector = new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
         Map("__name__".utf8 -> s"someMetricLhs".utf8, "_pi_".utf8 -> "0".utf8, "tag2".utf8 -> "tag2Val".utf8))

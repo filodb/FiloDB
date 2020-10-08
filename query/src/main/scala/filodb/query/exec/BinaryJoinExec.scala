@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import scala.collection.mutable
 
+import kamon.Kamon
 import monix.eval.Task
 import monix.reactive.Observable
 
@@ -51,8 +52,6 @@ final case class BinaryJoinExec(queryContext: QueryContext,
   require(!on.contains(metricColumn), "On cannot contain metric name")
 
   val onLabels = on.map(Utf8Str(_)).toSet
-  // publishInterval and step tags always needs to be included in join key
-  val withExtraOnLabels = onLabels ++ Seq("_pi_".utf8, "_step_".utf8)
   val ignoringLabels = ignoring.map(Utf8Str(_)).toSet
   val ignoringLabelsForJoin = ignoringLabels + metricColumn.utf8
   // if onLabels is non-empty, we are doing matching based on on-label, otherwise we are
@@ -74,6 +73,9 @@ final case class BinaryJoinExec(queryContext: QueryContext,
       case (QueryResult(_, _, result), i) => (result, i)
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
+      Kamon.histogram("query-execute-time-elapsed-step2-child-results-available")
+        .withTag("plan", getClass.getSimpleName)
+        .record(System.currentTimeMillis - queryContext.submitTime)
       // NOTE: We can't require this any more, as multischema queries may result in not a QueryResult if the
       //       filter returns empty results.  The reason is that the schema will be undefined.
       // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
@@ -121,7 +123,7 @@ final case class BinaryJoinExec(queryContext: QueryContext,
   }
 
   private def joinKeys(rvk: RangeVectorKey): Map[Utf8Str, Utf8Str] = {
-    if (onLabels.nonEmpty) rvk.labelValues.filter(lv => withExtraOnLabels.contains(lv._1))
+    if (onLabels.nonEmpty) rvk.labelValues.filter(lv => onLabels.contains(lv._1))
     else rvk.labelValues.filterNot(lv => ignoringLabelsForJoin.contains(lv._1))
   }
 
@@ -132,9 +134,8 @@ final case class BinaryJoinExec(queryContext: QueryContext,
     if (binaryOp.isInstanceOf[MathOperator]) result = result - Utf8Str(metricColumn)
 
     if (cardinality == Cardinality.OneToOne) {
-      result =
-        if (onLabels.nonEmpty) result.filter(lv => withExtraOnLabels.contains(lv._1)) // retain what is in onLabel list
-        else result.filterNot(lv => ignoringLabels.contains(lv._1)) // remove the labels in ignoring label list
+      result = if (onLabels.nonEmpty) result.filter(lv => onLabels.contains(lv._1)) // retain what is in onLabel list
+               else result.filterNot(lv => ignoringLabels.contains(lv._1)) // remove the labels in ignoring label list
     } else if (cardinality == Cardinality.OneToMany || cardinality == Cardinality.ManyToOne) {
       // For group_left/group_right add labels in include from one side. Result should have all keys from many side
       include.foreach { x =>

@@ -3,6 +3,7 @@ package filodb.query.exec
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
+import kamon.Kamon
 import monix.eval.Task
 import monix.reactive.Observable
 
@@ -40,8 +41,6 @@ final case class SetOperatorExec(queryContext: QueryContext,
   require(!on.contains(metricColumn), "On cannot contain metric name")
 
   val onLabels = on.map(Utf8Str(_)).toSet
-  // TODO Add unit tests for automatic inclusion of _pi_ and _step_ in the join key
-  val withExtraOnLabels = onLabels ++ Seq("_pi_".utf8, "_step_".utf8)
   val ignoringLabels = ignoring.map(Utf8Str(_)).toSet + metricColumn.utf8
   // if onLabels is non-empty, we are doing matching based on on-label, otherwise we are
   // doing matching based on ignoringLabels even if it is empty
@@ -57,6 +56,9 @@ final case class SetOperatorExec(queryContext: QueryContext,
       case (QueryResult(_, schema, result), i) => (schema, result, i)
       case (QueryError(_, ex), _)              => throw ex
     }.toListL.map { resp =>
+      Kamon.histogram("query-execute-time-elapsed-step2-child-results-available")
+        .withTag("plan", getClass.getSimpleName)
+        .record(System.currentTimeMillis - queryContext.submitTime)
       // NOTE: We can't require this any more, as multischema queries may result in not a QueryResult if the
       //       filter returns empty results.  The reason is that the schema will be undefined.
       // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
@@ -79,7 +81,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
   }
 
   private def joinKeys(rvk: RangeVectorKey): Map[Utf8Str, Utf8Str] = {
-    if (onLabels.nonEmpty) rvk.labelValues.filter(lv => withExtraOnLabels.contains(lv._1))
+    if (onLabels.nonEmpty) rvk.labelValues.filter(lv => onLabels.contains(lv._1))
     else rvk.labelValues.filterNot(lv => ignoringLabels.contains(lv._1))
   }
 
