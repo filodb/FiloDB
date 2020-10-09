@@ -30,6 +30,7 @@ import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
 import filodb.memory._
+import filodb.memory.data.Shutdown
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -122,7 +123,7 @@ object TimeSeriesShard {
   /**
     * Copies serialized ChunkSetInfo bytes from persistent storage / on-demand paging.
     */
-  def writeMeta(addr: Long, partitionID: Int, bytes: Array[Byte], vectors: Array[BinaryVectorPtr]): Unit = {
+  def writeMeta(addr: Long, partitionID: Int, bytes: Array[Byte], vectors: ArrayBuffer[BinaryVectorPtr]): Unit = {
     UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, addr, partitionID)
     ChunkSetInfo.copy(bytes, addr + 4)
     for { i <- 0 until vectors.size optimized } {
@@ -331,7 +332,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private[memstore] final val reclaimLock = blockStore.reclaimLock
 
   // Requires blockStore.
-  startHeadroomTask(ingestSched)
+  private val headroomTask = startHeadroomTask(ingestSched)
 
   // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
   // strictly during ingest() and switchBuffers().
@@ -950,8 +951,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     val result = Future.sequence(Seq(writeChunksFuture, writeDirtyPartKeysFuture, pubDownsampleFuture)).map {
       _.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success)
     }.flatMap {
-      case Success           => blockHolder.markUsedBlocksReclaimable()
-                                commitCheckpoint(ref, shardNum, flushGroup)
+      case Success           => commitCheckpoint(ref, shardNum, flushGroup)
       case er: ErrorResponse => Future.successful(er)
     }.recover { case e =>
       logger.error(s"Internal Error when persisting chunks in dataset=$ref shard=$shardNum - should " +
@@ -961,6 +961,13 @@ class TimeSeriesShard(val ref: DatasetRef,
     result.onComplete { resp =>
       assertThreadName(IngestSchedName)
       try {
+        // COMMENTARY ON BUG FIX DONE: Mark used blocks as reclaimable even on failure. Even if cassandra write fails
+        // or other errors occur, we cannot leave blocks as not reclaimable and also release the factory back into pool.
+        // Earlier, we were not calling this with the hope that next use of the blockMemFactory will mark them
+        // as reclaimable. But the factory could be used for a different flush group. Not the same one. It can
+        // succeed, and the wrong blocks can be marked as reclaimable.
+        // Can try out tracking unreclaimed blockMemFactories without releasing, but it needs to be separate PR.
+        blockHolder.markUsedBlocksReclaimable()
         blockFactoryPool.release(blockHolder)
         flushDoneTasks(flushGroup, resp)
         tracer.finish()
@@ -1498,9 +1505,22 @@ class TimeSeriesShard(val ref: DatasetRef,
     })
   }
 
-  private def startHeadroomTask(sched: Scheduler): Unit = {
+  private def startHeadroomTask(sched: Scheduler) = {
     sched.scheduleWithFixedDelay(1, 1, TimeUnit.MINUTES, new Runnable {
-      def run() = blockStore.ensureHeadroom(storeConfig.ensureHeadroomPercent)
+      var numFailures = 0
+
+      def run() = {
+        val numFree = blockStore.ensureHeadroom(storeConfig.ensureHeadroomPercent)
+        if (numFree > 0) {
+          numFailures = 0
+        } else {
+          numFailures += 1
+          if (numFailures >= 5) {
+            Shutdown.haltAndCatchFire(new RuntimeException(s"Headroom task was unable to free memory " +
+              s"for $numFailures consecutive attempts. Shutting down process. shard=$shardNum"))
+          }
+        }
+      }
     })
   }
 
@@ -1541,6 +1561,7 @@ class TimeSeriesShard(val ref: DatasetRef,
        method to ensure that no threads are accessing the memory before it's freed.
     blockStore.releaseBlocks()
     */
+    headroomTask.cancel()
     ingestSched.shutdown()
   }
 }
