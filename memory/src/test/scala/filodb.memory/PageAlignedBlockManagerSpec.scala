@@ -35,7 +35,7 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
 //    val fbm = freeBlocksMetric(stats)
 //    fbm.max should be(512)
     val blockSize = blockManager.blockSizeInBytes
-    val blocks = blockManager.requestBlocks(blockSize * 10, None)
+    val blocks = blockManager.requestBlocks(blockSize * 10, false)
     blocks.size should be(10)
 //    val ubm = usedBlocksMetric(stats)
 //    ubm.max should be(10)
@@ -61,7 +61,7 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
     val blockSize = blockManager.blockSizeInBytes
 //    val fbm = freeBlocksMetric(stats)
 //    fbm.max should be(2)
-    val firstRequest = blockManager.requestBlocks(blockSize * 2, None)
+    val firstRequest = blockManager.requestBlocks(blockSize * 2, false)
     //used 2 out of 2
     firstRequest.size should be(2)
 //    val ubm = usedBlocksMetric(stats)
@@ -69,7 +69,7 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
     //cannot fulfill
 //    val fbm2 = freeBlocksMetric(stats)
 //    fbm2.min should be(0)
-    val secondRequest = blockManager.requestBlocks(blockSize * 2, None)
+    val secondRequest = blockManager.requestBlocks(blockSize * 2, false)
     secondRequest should be(Seq.empty)
 
     blockManager.releaseBlocks()
@@ -80,14 +80,14 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
     val stats = new MemoryStats(Map("test4" -> "test4"))
     val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, testReclaimer, 1)
     val blockSize = blockManager.blockSizeInBytes
-    val firstRequest = blockManager.requestBlocks(blockSize * 2, None)
+    val firstRequest = blockManager.requestBlocks(blockSize * 2, false)
     //used 2 out of 2
     firstRequest.size should be(2)
     //simulate writing to the block
     firstRequest.head.position(blockSize.toInt - 1)
     //mark them as reclaimable
     firstRequest.foreach(_.markReclaimable())
-    val secondRequest = blockManager.requestBlocks(blockSize * 2, None)
+    val secondRequest = blockManager.requestBlocks(blockSize * 2, false)
 //    val brm = reclaimedBlocksMetric(stats)
 //    brm.count should be(2)
     //this request will fulfill
@@ -102,11 +102,11 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
     val stats = new MemoryStats(Map("test5" -> "test5"))
     val blockManager = new PageAlignedBlockManager(4 * pageSize, stats, testReclaimer, 1)
     val blockSize = blockManager.blockSizeInBytes
-    val firstRequest = blockManager.requestBlocks(blockSize * 2, None)
+    val firstRequest = blockManager.requestBlocks(blockSize * 2, false)
     //used 2 out of 4
     firstRequest.size should be(2)
     //only 2 left - cannot fulfill request
-    val secondRequest = blockManager.requestBlocks(blockSize * 3, None)
+    val secondRequest = blockManager.requestBlocks(blockSize * 3, false)
 //    val brm = reclaimedBlocksMetric(stats)
 //    brm.count should be(0)
     secondRequest should be(Seq.empty)
@@ -176,28 +176,23 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
     // This block manager has 5 blocks capacity
     val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1)
 
-    blockManager.usedBlocks.size() shouldEqual 0
-    blockManager.numTimeOrderedBlocks shouldEqual 0
-    blockManager.usedBlocksTimeOrdered.size shouldEqual 0
+    blockManager.usedIngestionBlocks.size() shouldEqual 0
+    blockManager.usedOdpBlocks.size() shouldEqual 0
 
-    // first allocate non-time ordered block
-    blockManager.requestBlock(None).map(_.markReclaimable).isDefined shouldEqual true
-    blockManager.usedBlocks.size shouldEqual 1
+    // first allocate 1 regular block
+    blockManager.requestBlock(false).isDefined shouldEqual true
+    blockManager.usedIngestionBlocks.size shouldEqual 1
 
-    blockManager.requestBlock(Some(1000L)).map(_.markReclaimable).isDefined shouldEqual true
-    blockManager.requestBlock(Some(1000L)).map(_.markReclaimable).isDefined shouldEqual true
-    blockManager.requestBlock(Some(1000L)).isDefined shouldEqual true
-    blockManager.usedBlocksTimeOrdered.get(1000L).size() shouldEqual 3
+    // first allocate 4 odp blocks
+    blockManager.requestBlock(true).isDefined shouldEqual true
+    blockManager.requestBlock(true).isDefined shouldEqual true
+    blockManager.requestBlock(true).isDefined shouldEqual true
+    blockManager.requestBlock(true).isDefined shouldEqual true
+    blockManager.usedOdpBlocks.size() shouldEqual 4
 
-    blockManager.requestBlock(Some(9000L)).map(_.markReclaimable).isDefined shouldEqual true
-    blockManager.usedBlocksTimeOrdered.get(9000L).size() shouldEqual 1
-
-    blockManager.numTimeOrderedBlocks shouldEqual 4
-    blockManager.usedBlocksTimeOrdered.size shouldEqual 2
-
-    // reclaim from time ordered blocks should fail now
+    // reclaim should fail now because none of the blocks are reclaimable
     try {
-      blockManager.requestBlock(Some(10000L))
+      blockManager.requestBlock(true)
       fail
     } catch {
       case e: MemoryRequestException => // expected
@@ -211,34 +206,29 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
     // This block manager has 5 blocks capacity
     val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1)
 
-    blockManager.usedBlocks.size() shouldEqual 0
-    blockManager.numTimeOrderedBlocks shouldEqual 0
-    blockManager.usedBlocksTimeOrdered.size shouldEqual 0
+    blockManager.usedIngestionBlocks.size() shouldEqual 0
+    blockManager.usedOdpBlocks.size() shouldEqual 0
 
-    val factory = new BlockMemFactory(blockManager, Some(10000L), 24, Map("foo" -> "bar"), false)
+    val factory = new BlockMemFactory(blockManager, 24, Map("foo" -> "bar"), true)
 
     // There should be one time ordered block allocated, owned by factory
-    blockManager.usedBlocks.size shouldEqual 0
-    blockManager.numTimeOrderedBlocks shouldEqual 1
-    blockManager.hasTimeBucket(10000L) shouldEqual true
+    blockManager.usedIngestionBlocks.size shouldEqual 0
+    blockManager.usedOdpBlocks.size() shouldEqual 1
 
     factory.currentBlock.owner shouldEqual Some(factory)
 
     // Now allocate 4 more regular blocks, that will use up all blocks
-    blockManager.requestBlock(None).isDefined shouldEqual true
-    blockManager.requestBlock(None).isDefined shouldEqual true
-    blockManager.requestBlock(None).isDefined shouldEqual true
-    blockManager.requestBlock(None).isDefined shouldEqual true
-    blockManager.usedBlocks.size shouldEqual 4
-    blockManager.numTimeOrderedBlocks shouldEqual 1
+    blockManager.requestBlock(false).isDefined shouldEqual true
+    blockManager.requestBlock(false).isDefined shouldEqual true
+    blockManager.requestBlock(false).isDefined shouldEqual true
+    blockManager.requestBlock(false).isDefined shouldEqual true
+    blockManager.usedIngestionBlocks.size shouldEqual 4
+    blockManager.usedOdpBlocks.size() shouldEqual 1
 
     // Mark as reclaimable the blockMemFactory's block.  Then request more blocks, that one will be reclaimed.
     // Check ownership is now cleared.
     factory.currentBlock.markReclaimable
     blockManager.ensureFreeBlocks(1)
-    blockManager.requestBlock(Some(9000L)).isDefined shouldEqual true
-    blockManager.hasTimeBucket(10000L) shouldEqual false
-    blockManager.hasTimeBucket(9000L) shouldEqual true
 
     factory.currentBlock.owner shouldEqual None  // new requestor did not have owner
   }
@@ -252,23 +242,23 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
     blockManager.ensureFreePercent(50)
     blockManager.numFreeBlocks shouldEqual 5
 
-    blockManager.requestBlock(None).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.requestBlock(false).map(_.markReclaimable).isDefined shouldEqual true
     blockManager.numFreeBlocks shouldEqual 4
     blockManager.ensureFreePercent(50)
     blockManager.numFreeBlocks shouldEqual 4
 
-    blockManager.requestBlock(None).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.requestBlock(false).map(_.markReclaimable).isDefined shouldEqual true
     blockManager.numFreeBlocks shouldEqual 3
     blockManager.ensureFreePercent(50)
     blockManager.numFreeBlocks shouldEqual 3
 
-    blockManager.requestBlock(None).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.requestBlock(false).map(_.markReclaimable).isDefined shouldEqual true
     blockManager.numFreeBlocks shouldEqual 2
     blockManager.ensureFreePercent(50)
     // Should actually have done something this time.
     blockManager.numFreeBlocks shouldEqual 3
 
-    blockManager.requestBlock(None).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.requestBlock(false).map(_.markReclaimable).isDefined shouldEqual true
     blockManager.numFreeBlocks shouldEqual 2
     blockManager.ensureFreePercent(90)
     // Should reclaim multiple blocks.
