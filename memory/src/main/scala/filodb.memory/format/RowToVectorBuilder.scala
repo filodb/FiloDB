@@ -2,9 +2,7 @@ package filodb.memory.format
 
 import java.nio.ByteBuffer
 
-import scala.language.existentials
-
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.MemFactory
 import filodb.memory.format.Encodings.{AutoDetect, EncodingHint}
@@ -73,7 +71,7 @@ class RowToVectorBuilder(schema: Seq[VectorInfo], memFactory: MemFactory) {
     * @param row the row of data to transpose.  Each column will be added to the right Builders.
     */
   def addRow(row: RowReader): Unit = {
-    for { i <- 0 until numColumns optimized } {
+    cforRange { 0 until numColumns } { i =>
       builders(i).addFromReader(row, i)
     }
   }

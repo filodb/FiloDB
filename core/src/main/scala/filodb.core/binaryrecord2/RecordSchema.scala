@@ -4,7 +4,7 @@ import scala.collection.mutable.ArrayBuffer
 
 import org.agrona.DirectBuffer
 import org.agrona.concurrent.UnsafeBuffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.metadata.{Column, Schemas}
 import filodb.core.metadata.Column.ColumnType.{LongColumn, MapColumn, TimestampColumn}
@@ -430,7 +430,7 @@ object RecordSchema {
   // Creates a Long from a byte array
   private def eightBytesToLong(bytes: Array[Byte], index: Int, len: Int): Long = {
     var num = 0L
-    for { i <- 0 until len optimized } {
+    cforRange { 0 until len } { i =>
       num = (num << 8) ^ (bytes(index + i) & 0x00ff)
     }
     num

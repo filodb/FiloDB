@@ -2,10 +2,8 @@ package filodb.jmh
 
 import java.util.concurrent.TimeUnit
 
-import scala.language.postfixOps
-
 import org.openjdk.jmh.annotations._
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format._
@@ -58,7 +56,7 @@ class DictStringBenchmark {
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def rawStringLengthTotal(): Int = {
     var totalLen = 0
-    for { i <- 0 until numValues optimized } {
+    cforRange { 0 until numValues } { i =>
       totalLen += scNoNA(i).length
     }
     totalLen
@@ -75,7 +73,7 @@ class DictStringBenchmark {
 
     val reader = UTF8Vector(acc, scNAPtr)
     val it = reader.iterate(acc, scNAPtr)
-    for { i <- 0 until numValues optimized } {
+    cforRange { 0 until numValues } { i =>
       totalLen += it.next.length
     }
     totalLen

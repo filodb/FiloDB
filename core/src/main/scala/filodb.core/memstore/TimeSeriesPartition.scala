@@ -1,7 +1,7 @@
 package filodb.core.memstore
 
 import com.typesafe.scalalogging.StrictLogging
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.DatasetRef
 import filodb.core.Types._
@@ -140,7 +140,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       // we have reached maximum userTime in chunk. switch buffers, start a new chunk and ingest
       switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)
     } else {
-      for { col <- 0 until schema.numDataColumns optimized} {
+      cforRange { 0 until schema.numDataColumns } { col =>
         currentChunks(col).addFromReaderNoNA(row, col) match {
           case r: VectorTooSmall =>
             switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)

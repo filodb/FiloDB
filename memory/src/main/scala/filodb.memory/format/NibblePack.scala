@@ -3,7 +3,7 @@ package filodb.memory.format
 import java.nio.ByteOrder.LITTLE_ENDIAN
 
 import org.agrona.{DirectBuffer, MutableDirectBuffer}
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 /**
  * An implementation of the NibblePack algorithm for efficient encoding, see [compression.md](doc/compression.md).
@@ -56,7 +56,7 @@ object NibblePack {
   @inline
   private def packRemainder(input: Array[Long], buf: MutableDirectBuffer, pos: Int, i: Int): Int =
     if (i % 8 != 0) {
-      for { j <- (i % 8) until 8 optimized } { input(j) = 0 }
+      cforRange { (i % 8) until 8 } { j => input(j) = 0 }
       pack8(input, buf, pos)
     } else {
       pos
@@ -87,7 +87,7 @@ object NibblePack {
 
     // Flush remainder - if any left
     if (i % 8 != 0) {
-      for { j <- (i % 8) until 8 optimized } { inputArray(j) = 0 }
+      cforRange { (i % 8) until 8 } { j => inputArray(j) = 0 }
       pos = pack8(inputArray, buf, pos)
     }
 
@@ -108,7 +108,7 @@ object NibblePack {
 
     var bitmask = 0
     // Figure out which words are nonzero, pack bitmask
-    for { i <- 0 until 8 optimized } {
+    cforRange { 0 until 8 } { i =>
       if (input(i) != 0) bitmask |= 1 << i
     }
     buf.putByte(bufpos, bitmask.toByte)
@@ -118,7 +118,7 @@ object NibblePack {
       // figure out min # of nibbles to represent nonzero words
       var minLeadingZeros = 64
       var minTrailingZeros = 64
-      for { i <- 0 until 8 optimized } {
+      cforRange { 0 until 8 } { i =>
         minLeadingZeros = Math.min(minLeadingZeros, java.lang.Long.numberOfLeadingZeros(input(i)))
         minTrailingZeros = Math.min(minTrailingZeros, java.lang.Long.numberOfTrailingZeros(input(i)))
       }
@@ -145,7 +145,7 @@ object NibblePack {
     var outWord = 0L
     var bitCursor = 0
 
-    for { i <- 0 until 8 optimized } {
+    cforRange { 0 until 8 } { i =>
       val input = inputs(i)
       if (input != 0) {
         val remaining = 64 - bitCursor
@@ -210,7 +210,7 @@ object NibblePack {
       // user might not intuitively allocate output arrays in elements of 8.
       val numElems = Math.min(outArray.size - i, 8)
       require(numElems > 0)
-      for { n <- 0 until numElems optimized } {
+      cforRange { 0 until numElems } { n =>
         current += data(n)
         outArray(i + n) = current
       }
@@ -227,7 +227,7 @@ object NibblePack {
     private var pos: Int = 1
     def process(data: Array[Long]): Unit = {
       val numElems = Math.min(outArray.size - pos, 8)
-      for { n <- 0 until numElems optimized } {
+      cforRange { 0 until numElems } { n =>
         val nextBits = lastBits ^ data(n)
         outArray(pos + n) = java.lang.Double.longBitsToDouble(nextBits)
         lastBits = nextBits
@@ -271,7 +271,7 @@ object NibblePack {
 
     final def process(data: Array[Long]): Unit = {
       val numElems = Math.min(lastHistDeltas.size - i, 8)
-      for { n <- 0 until numElems optimized } {
+      cforRange { 0 until numElems } { n =>
         val diff = data(n) - lastHistDeltas(i + n)
         if (diff < 0) valueDropped = true
         packArray(n) = diff
@@ -310,7 +310,7 @@ object NibblePack {
 
     final def process(data: Array[Long]): Unit = {
       val numElems = Math.min(numBuckets - i, 8)
-      for { n <- 0 until numElems optimized } {
+      cforRange { 0 until numElems } { n =>
         if (data(n) < lastHistDeltas(i + n)) valueDropped = true
         packArray(n) = data(n) - originalDeltas(i + n)
       }
@@ -389,7 +389,7 @@ object NibblePack {
       var inWord = readLong(compressed, bufIndex)
       bufIndex += 8
 
-      for { bit <- 0 until 8 optimized } {
+      cforRange { 0 until 8 } { bit =>
         if ((nonzeroMask & (1 << bit)) != 0) {
           val remaining = 64 - bitCursor
 

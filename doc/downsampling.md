@@ -76,68 +76,22 @@ Additional configuration like downsample resolutions, how/where data is to be pu
 is supplied via the ingestion config file for the dataset. See 
 [timeseries-dev-source.conf](../conf/timeseries-dev-source.conf) for more details.
 
+## Downsampled Data Computation
 
-The downsample dataset needs to be created as follows with the downsample columns in the same
-order as the downsample type configuration. For the above example, we would create the downsample
-dataset as:
-
-```
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus_ds_1m --dataColumns timestamp:ts,min:double,max:double,sum:double,count:double,avg:double --partitionColumns tags:map --shardKeyColumns __name__,_ns_,_ws_
-```
-
-Note that there is no downsampling configuration here in the above dataset. Note that partition
-key for the downsample dataset is the same as the raw dataset's.  
-
-## Downsample Data Generation
-Downsampling is done at chunk flush time, when data is moved out of write buffers into block memory and cassandra.
-At this time, we iterate through all of the assigned downsampler algorithms and resolution
-combinations and do a query on the chunk for each period.
-
-For example, if the chunk spans from 10:07am to 11:08am with 10-secondly data 
-and we were to downsample (min, max, sum, count) at 15m interval, we'd
-have the following data
-
-* One row each corresponding to the 10:15am, 10:30am, 10:45am, 11am, 11:15am periods.
-* Timestamp on those rows would be the last timestamp found in the raw data for those
-periods.
-* One column for each downsampler chosen. In this case we would have 4 more data columns in
-the downsample dataset besides the timestamp.
-* Each row would be assigned the same partition key as the time series parition the chunk
-belonged to.
-
-## Best Practices
-
-* As a result of the downsample data being generated at chunk flush time, there may be a
-delay in the generation of downsample data, and it may extend up to the dataset's flush
-interval. Hence if you are thinking of cascading the downsample resolutions, you need to
-accept the delay in generation.
-* Cascading of downsampling can be done, but the implications should be understood clearly. For example,
-5m downsample is calculated from 1m data, 15m is calculated from 5m, 1hr is calculated from 15m etc.
-This is possible, but remember to choose the right downsamplers. For example, `dAvg` downsampling will
-not be accurate when done in a cascaded fashion since average of averages is not the correct average.
-Instead you would choose to calculate average using average and count columns by using the `dAvgAc`
-downsampler on the downsampled dataset.   
+This happens in a spark job that runs every 6 hours. There are two jobs:
+1. First Spark job downsamples the data ingested in last 6 hours by reading the raw data cassandra keyspace,
+   compresses it into one chunkset for each time series partition and writes them to the Cassandra 
+   tables of downsample keyspace. See [DownsamplerMain](spark-jobs/src/main/scala/filodb/downsampler/chunk/DownsamplerMain.scala)
+   for more details on how it works.
+2. Second Spark job copies the partition keys table updates from raw data keyspace, and copies any modified entries into the
+   downsample keyspace tables.
 
 ## Querying of Downsample Data
- 
-Downsampled data for individual time series can be queried from the downsampled dataset. The downsampled dataset schema varies by schema type.  For gauges, the min, max, sum, count, and avergage are computed and stored in separate columns in the `ds-gauge` schema. The FiloDB Query Engine automatically translates queries to select the right column under the hood.
-For example `min_over_time(heap_usage{_ws_="demo",_ns_="myApp"})` is roughly converted to something like `heap_usage::min{_ws_="demo",_ns_="myApp"}`.
 
-## Validation of Downsample Results
+A separate FiloDB cluster setup using [DonwsampledTimeSeriesStore](core/src/main/scala/filodb.core/downsample/DownsampledTimeSeriesStore.scala)
+configuration allows queries of downsampled data written by the downsampler jobs to the downsample cassandra keyspace.
 
-Run main class [filodb.prom.downsample.GaugeDownsampleValidator](../http/src/test/scala/filodb/prom/downsample/GaugeDownsampleValidator.scala) with following system property arguments:
+The FiloDB Chunk scans automatically translates queries to select the right column under the hood when querying downsampled
+data. For example `min_over_time(heap_usage{_ws_="demo",_ns_="myApp"})` is roughly converted to something like
+`heap_usage::min{_ws_="demo",_ns_="myApp"}` so the min column is chosen.
 
-```
--Dquery-endpoint=https://myFiloDbEndpoint.com
--Draw-data-promql=jvm_threads::value{_ws_=\"demo\",_ns_=\"myApplication\",measure=\"daemon\"}[@@@@s]
--Dflush-interval=12h
--Dquery-range=6h
-```
-
-Notes:
-* `raw-data-promql` system property value should end with `[@@@@s]`.
-* `raw-data-promql` needs to have `::value` column selector suffix at end of metric name as it gets replaced with diff column names
-* The lookback window `@@@@` is replaced with downsample period by validation tool when running the query.
-
-This will perform validation of min, max, sum and count downsamplers by issuing same query to both datasets
-and making sure results are consistent.

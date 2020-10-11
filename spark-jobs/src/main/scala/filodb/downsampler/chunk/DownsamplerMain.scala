@@ -96,10 +96,9 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
     DownsamplerContext.dsLogger.info(s"To rerun this job add the following spark config: " +
       s""""spark.filodb.downsampler.userTimeOverride": "${java.time.Instant.ofEpochMilli(userTimeInPeriod)}"""")
 
-    val splits = batchDownsampler.rawCassandraColStore.getScanSplits(batchDownsampler.rawDatasetRef,
-                                                                     settings.splitsPerNode)
+    val splits = batchDownsampler.rawCassandraColStore.getScanSplits(batchDownsampler.rawDatasetRef)
     DownsamplerContext.dsLogger.info(s"Cassandra split size: ${splits.size}. We will have this many spark " +
-      s"partitions. Tune splitsPerNode which was ${settings.splitsPerNode} if parallelism is low")
+      s"partitions. Tune num-token-range-splits-for-scans if parallelism is low or latency is high")
 
     KamonShutdownHook.registerShutdownHook()
 

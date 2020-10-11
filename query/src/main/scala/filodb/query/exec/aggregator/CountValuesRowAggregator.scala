@@ -88,7 +88,7 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
       ColumnInfo("value", ColumnType.DoubleColumn))
     val recSchema = SerializedRangeVector.toSchema(colSchema)
     val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
-    val span = Kamon.spanBuilder(s"execplan-scan-latency-TopBottomK").start()
+    val span = Kamon.spanBuilder(s"execplan-scan-latency-CountValues").start()
     try {
       FiloSchedulers.assertThreadName(QuerySchedName)
       // aggRangeVector.rows.take below triggers the ChunkInfoIterator which requires lock/release
