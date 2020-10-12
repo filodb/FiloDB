@@ -41,7 +41,7 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
 
   private def getPlanner(binaryJoin: BinaryJoin) : Seq[QueryPlanner] = {
     val lhsPlanners = binaryJoin.lhs match {
-      case b: BinaryJoin =>  getPlanner(b)
+      case b: BinaryJoin => getPlanner(b)
       case _             => Seq(getPlanner(binaryJoin.lhs))
 
     }
