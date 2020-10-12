@@ -50,16 +50,6 @@ class SingleClusterPlanner(val dsRef: DatasetRef,
 
   import SingleClusterPlanner._
 
-  override def equals(other: Any): Boolean = other match {
-    case s: SingleClusterPlanner => s.dsRef.equals(this.dsRef) && s.schemas.equals(schemas) &&
-      s.queryConfig.equals(queryConfig) && s.numShards.equals(shardMapperFunc.numShards)
-    case o: Any         => false
-  }
-
-  override def hashCode: Int = dsRef.hashCode() + schema.hashCode()+ queryConfig.hashCode() + shardMapperFunc.numShards.
-    hashCode()
-
-
   private def dispatcherForShard(shard: Int): PlanDispatcher = {
     val targetActor = shardMapperFunc.coordForShard(shard)
     if (targetActor == ActorRef.noSender) {

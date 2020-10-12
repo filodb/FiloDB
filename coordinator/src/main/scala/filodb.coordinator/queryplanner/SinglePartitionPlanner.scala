@@ -60,6 +60,7 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
 
   private def materializeBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): ExecPlan = {
     val allPlanners = getPlanner(logicalPlan)
+
     if (allPlanners.forall(_.equals(allPlanners.head))) allPlanners.head.materialize(logicalPlan, qContext)
     else {
 
@@ -67,7 +68,6 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
         copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
       val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
         copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
-
 
       val lhsExec = logicalPlan.lhs match {
         case b: BinaryJoin => materializeBinaryJoin(b, lhsQueryContext)
