@@ -707,4 +707,15 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
     } should have message "Query timeout in filodb.core.store.WindowedChunkIterator after 180 seconds"
   }
+
+  it("should return 0 for changes on constant value") {
+    val data = List.fill(1000)(1.586365307E9)
+    val startTS = 1599071100L
+    val tuples = data.zipWithIndex.map { case (d, t) => (startTS + t * 15, d) }
+    val rv = timeValueRVPk(tuples)
+    val chunkedIt = new ChunkedWindowIteratorD(rv, 1599073500L, 300000,  1599678300L, 10800000,
+      new ChangesChunkedFunctionD(), querySession)
+    val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
+    aggregated.foreach(x => x._2 shouldEqual(0))
+  }
 }

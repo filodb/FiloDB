@@ -6,7 +6,7 @@ import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import org.agrona.{DirectBuffer, ExpandableArrayBuffer, MutableDirectBuffer}
 import org.agrona.concurrent.UnsafeBuffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
@@ -544,7 +544,7 @@ class RowHistogramReader(val acc: MemoryReader, histVect: Ptr.U8) extends Histog
   final def sum(start: Int, end: Int): MutableHistogram = {
     require(length > 0 && start >= 0 && end < length)
     val summedHist = MutableHistogram.empty(buckets)
-    for { i <- start to end optimized } {
+    cforRange { start to end } { i =>
       summedHist.addNoCorrection(apply(i))
     }
     summedHist

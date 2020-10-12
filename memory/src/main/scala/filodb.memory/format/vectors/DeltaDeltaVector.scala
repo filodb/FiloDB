@@ -1,7 +1,7 @@
 package filodb.memory.format.vectors
 
 import debox.Buffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
@@ -119,7 +119,7 @@ object DeltaDeltaVector {
     var baseValue: Long = inputVect(0)
     var max = Int.MinValue
     var min = Int.MaxValue
-    for { i <- 1 until inputVect.length optimized } {
+    cforRange { 1 until inputVect.length } { i =>
       baseValue += slope
       val delta = inputVect(i) - baseValue
       if (delta > Int.MaxValue || delta < Int.MinValue) return None   // will not fit in 32 bits, just quit
@@ -216,7 +216,7 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
       val itr = iterate(acc, vector, start)
       var prevVector: Long = prev
       var changes = 0
-      for {i <- start until end + 1 optimized} {
+      cforRange { start until end + 1 } { i =>
         val cur = itr.next
         if (i == start && ignorePrev) //Initialize prev
           prevVector = cur

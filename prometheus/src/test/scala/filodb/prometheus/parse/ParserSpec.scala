@@ -23,6 +23,21 @@ class ParserSpec extends AnyFunSpec with Matchers {
     lp.toString shouldEqual queryToLpString._2
   }
 
+  it("labelvalues filter query") {
+    parseLabelValueSuccessfully("job=\"prometheus\", method=\"GET\"")
+    parseLabelValueSuccessfully("job=\"prometheus\", method=\"GET\"")
+    parseLabelValueSuccessfully("job=\"prometheus\", method!=\"GET\"")
+    parseLabelValueError("http_requests_total{job=\"prometheus\", method!=\"GET\"}")
+    parseLabelValueError("{__name__=\"prometheus\"}")
+    parseLabelValueError("job[__name__=\"prometheus\"]")
+    val queryToLpString = ("job=\"prometheus\", method!=\"GET\"" ->
+      "LabelValues(List(_ns_),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(method,NotEquals(GET))),1524855988000,1524855988000)")
+    val start: Long = 1524855988L
+    val end: Long = 1524855988L
+    val lp = Parser.labelValuesQueryToLogicalPlan(Seq("_ns_"), Some(queryToLpString._1), TimeStepParams(start, -1, end))
+    lp.toString shouldEqual queryToLpString._2
+  }
+
   it("parse basic scalar expressions") {
     parseSuccessfully("1")
     //    parse("+Inf")
@@ -383,6 +398,17 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("timestamp(some_metric, hello)") // reason : Expected only 1 arg, got 2
   }
 
+  it("parse long identifiers") {
+    // This should not cause a stack overflow error.
+
+    val bob = new StringBuilder().append("requests{job=\"")
+    for (i <- 1 to 100) {
+      bob.append("abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_")
+    }
+
+    parseSuccessfully(bob.append("\"}").toString())
+  }
+
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
       "http_requests_total + time()" -> "ScalarVectorBinaryOperation(ADD,ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),false)",
@@ -524,7 +550,12 @@ class ParserSpec extends AnyFunSpec with Matchers {
         "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),Some(2000000)),1524855988000,1000000,1524855988000,Some(2000000))",
       "sum(rate(foo{job=\"SNRT-App-0\"}[5i]))" -> "Aggregate(Sum,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(SNRT-App-0)), ColumnFilter(__name__,Equals(foo))),List(),Some(5000000),None),1524855988000,1000000,1524855988000,5000000,Rate,true,List(),None),List(),List(),List())",
       "rate(foo{job=\"SNRT-App-0\"}[5i]) + rate(bar{job=\"SNRT-App-0\"}[4i])" -> "BinaryJoin(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(SNRT-App-0)), ColumnFilter(__name__,Equals(foo))),List(),Some(5000000),None),1524855988000,1000000,1524855988000,5000000,Rate,true,List(),None),ADD,OneToOne,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(SNRT-App-0)), ColumnFilter(__name__,Equals(bar))),List(),Some(4000000),None),1524855988000,1000000,1524855988000,4000000,Rate,true,List(),None),List(),List(),List())",
-      "sum(rate(foo{job=\"SNRT-App-0\"}[0.5i]))" -> "Aggregate(Sum,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(SNRT-App-0)), ColumnFilter(__name__,Equals(foo))),List(),Some(500000),None),1524855988000,1000000,1524855988000,500000,Rate,true,List(),None),List(),List(),List())"
+      "sum(rate(foo{job=\"SNRT-App-0\"}[0.5i]))" -> "Aggregate(Sum,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(SNRT-App-0)), ColumnFilter(__name__,Equals(foo))),List(),Some(500000),None),1524855988000,1000000,1524855988000,500000,Rate,true,List(),None),List(),List(),List())",
+     "http_requests_total - 10/2" -> "ScalarVectorBinaryOperation(SUB,ScalarBinaryOperation(DIV,Left(10.0),Left(2.0),RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),false)",
+      "foo - http_requests_total * 2^3" -> "BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),SUB,OneToOne,ScalarVectorBinaryOperation(MUL,ScalarBinaryOperation(POW,Left(2.0),Left(3.0),RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),false),List(),List(),List())",
+      "sum(http_requests_total) - 10/2" -> "ScalarVectorBinaryOperation(SUB,ScalarBinaryOperation(DIV,Left(10.0),Left(2.0),RangeParams(1524855988,1000,1524855988)),Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),false)",
+      "ceil(vector(100) / 10 / 10)" -> "ApplyInstantFunction(ScalarVectorBinaryOperation(DIV,ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(DIV,ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988)),VectorPlan(ScalarFixedDoublePlan(100.0,RangeParams(1524855988,1000,1524855988))),false),false),Ceil,List())",
+      "ceil(sum(foo) / 10 / 10 / 10)" -> "ApplyInstantFunction(ScalarVectorBinaryOperation(DIV,ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(DIV,ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(DIV,ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988)),Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),false),false),false),Ceil,List())"
     )
 
     val qts: Long = 1524855988L
@@ -533,7 +564,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
       info(s"Parsing $q")
       val lp = Parser.queryToLogicalPlan(q, qts, step)
       if (lp.isInstanceOf[BinaryJoin])
-       printBinaryJoin(lp)
+        printBinaryJoin(lp)
       lp.toString shouldEqual (e)
     }
   }
@@ -581,6 +612,16 @@ class ParserSpec extends AnyFunSpec with Matchers {
   private def parseError(query: String) = {
     intercept[IllegalArgumentException] {
       Parser.parseQuery(query)
+    }
+  }
+
+  private def parseLabelValueSuccessfully(query: String) = {
+    Parser.parseLabelValueFilter(query)
+  }
+
+  private def parseLabelValueError(query: String) = {
+    intercept[IllegalArgumentException] {
+      Parser.parseLabelValueFilter(query)
     }
   }
 }

@@ -3,7 +3,7 @@ package filodb.memory.format.vectors
 import java.nio.ByteBuffer
 
 import debox.Buffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
@@ -178,7 +178,7 @@ trait LongVectorDataReader extends VectorDataReader {
     val dataIt = iterate(acc, vector, startElement)
     val availIt = iterateAvailable(acc, vector, startElement)
     val len = length(acc, vector)
-    for { n <- startElement until len optimized } {
+    cforRange { startElement until len } { n =>
       val item = dataIt.next
       if (availIt.next) newBuf += item
     }
@@ -313,7 +313,7 @@ extends PrimitiveAppendableVector[Long](addr, maxBytes, 64, true) {
   final def minMax: (Long, Long) = {
     var min = Long.MaxValue
     var max = Long.MinValue
-    for { index <- 0 until length optimized } {
+    cforRange { 0 until length } { index =>
       val data = apply(index)
       if (data < min) min = data
       if (data > max) max = data
@@ -355,7 +355,7 @@ BitmapMaskAppendableVector[Long](addr, maxElements) with OptimizingPrimitiveAppe
   final def minMax: (Long, Long) = {
     var min = Long.MaxValue
     var max = Long.MinValue
-    for { index <- 0 until length optimized } {
+    cforRange { 0 until length } { index =>
       if (isAvailable(index)) {
         val data = subVect.apply(index)
         if (data < min) min = data

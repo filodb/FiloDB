@@ -2,11 +2,10 @@ package filodb.core
 
 import java.sql.Timestamp
 
-import scala.language.postfixOps
 import scala.math.Ordering
 
 import org.joda.time.DateTime
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.format.{vectors => bv, RowReader, ZeroCopyUTF8String}
 import filodb.memory.format.RowReader._
@@ -60,7 +59,7 @@ abstract class SingleKeyTypeBase[K : Ordering : TypedFieldExtractor] extends Key
 case class CompositeOrdering(atomTypes: Seq[SingleKeyType]) extends Ordering[Seq[_]] {
   override def compare(x: Seq[_], y: Seq[_]): Int = {
     if (x.length == y.length && x.length == atomTypes.length) {
-      for { i <- 0 until x.length optimized } {
+      cforRange { 0 until x.length } { i =>
         val keyType = atomTypes(i)
         val res = keyType.ordering.compare(x(i).asInstanceOf[keyType.T],
                                            y(i).asInstanceOf[keyType.T])
@@ -76,7 +75,7 @@ case class CompositeReaderOrdering(atomTypes: Seq[SingleKeyType]) extends Orderi
   private final val extractors = atomTypes.map(_.extractor).toArray
   private final val numAtoms = atomTypes.length
   def compare(a: RowReader, b: RowReader): Int = {
-    for { i <- 0 until numAtoms optimized } {
+    cforRange { 0 until numAtoms } { i =>
       val res = extractors(i).compare(a, b, i)
       if (res != 0) return res
     }

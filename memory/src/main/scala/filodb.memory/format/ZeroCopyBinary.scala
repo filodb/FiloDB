@@ -1,7 +1,7 @@
 package filodb.memory.format
 
 import net.jpountz.xxhash.XXHashFactory
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.{MemFactory, UTF8StringMedium}
 
@@ -29,7 +29,7 @@ trait ZeroCopyBinary extends Ordered[ZeroCopyBinary] {
     val minLenAligned = minLen & -4
     val wordComp = UnsafeUtils.wordCompare(base, offset, other.base, other.offset, minLenAligned)
     if (wordComp == 0) {
-      for { i <- minLenAligned until minLen optimized } {
+      cforRange { minLenAligned until minLen } { i =>
         val res = getByte(i) - other.getByte(i)
         if (res != 0) return res
       }
@@ -174,7 +174,7 @@ final class ZeroCopyUTF8String(val base: Any, val offset: Long, val numBytes: In
     if (substring.numBytes == 0) { true }
     else {
       val firstByte = substring.getByte(0)
-      for { i <- 0 to (numBytes - substring.numBytes) optimized } {
+      cforRange { 0 to (numBytes - substring.numBytes) } { i =>
         if (getByte(i) == firstByte && matchAt(substring, i)) return true
       }
       false

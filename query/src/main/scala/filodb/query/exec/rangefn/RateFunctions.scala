@@ -1,6 +1,6 @@
 package filodb.query.exec.rangefn
 
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.query.{QueryConfig, TransientHistRow, TransientRow}
 import filodb.memory.format.{CounterVectorReader, MemoryReader}
@@ -272,7 +272,7 @@ abstract class HistogramRateFunctionBase extends CounterChunkedRangeFunction[Tra
       // TODO: handle case where schemas are different and we need to interpolate schemas
       if (highestValue.buckets == lowestValue.buckets) {
         val rateArray = new Array[Double](lowestValue.numBuckets)
-        for { b <- 0 until rateArray.size optimized } {
+        cforRange { 0 until rateArray.size } { b =>
           rateArray(b) = RateFunctions.extrapolatedRate(
                            windowStart - 1, windowEnd, numSamples,
                            lowestTime, lowestValue.bucketValue(b),

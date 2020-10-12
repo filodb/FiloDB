@@ -4,7 +4,7 @@ import scala.io.Source
 
 import org.agrona.{ExpandableArrayBuffer, ExpandableDirectByteBuffer}
 import org.agrona.concurrent.UnsafeBuffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format._
@@ -157,7 +157,7 @@ object HistogramIngestBench extends App with CompressorAnalyzer {
     ddsink.writePos = 0
     java.util.Arrays.fill(ddsink.lastHistDeltas, 0)
     var lastPos = 0
-    for { i <- 0 until numHist optimized } {
+    cforRange { 0 until numHist } { i =>
       ddSlice.wrap(increasingBuf, lastPos, increasingHistPos(i) - lastPos)
       val res = NibblePack.unpackToSink(ddSlice, ddsink, bucketDef.numBuckets)
       require(res == NibblePack.Ok)
@@ -189,7 +189,7 @@ object PromCompressor extends App with CompressorAnalyzer {
 
   histograms.foreach { h =>
     numRecords += 1
-    for { b <- 0 until bucketDef.numBuckets optimized } {
+    cforRange { 0 until bucketDef.numBuckets } { b =>
       appenders(b).addData(h.values(b)) match {
         case Ack =>    // data added, no problem
         case VectorTooSmall(_, _) =>   // not enough space.   Encode, aggregate, and add to a new appender

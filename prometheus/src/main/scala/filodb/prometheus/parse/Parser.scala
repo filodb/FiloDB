@@ -2,8 +2,13 @@ package filodb.prometheus.parse
 
 import scala.util.parsing.combinator.{JavaTokenParsers, PackratParsers, RegexParsers}
 
+import filodb.core.query.{ColumnFilter, Filter}
 import filodb.prometheus.ast.{Expressions, TimeRangeParams, TimeStepParams}
 import filodb.query._
+
+object BaseParser {
+  val whiteSpace = "[ \t\r\f\n]+".r
+}
 
 trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers with PackratParsers {
 
@@ -15,8 +20,62 @@ trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers wit
     "[a-zA-Z_:][a-zA-Z0-9_:\\-\\.]*".r ^^ { str => Identifier(str) }
   }
 
-  protected lazy val labelValueIdentifier: PackratParser[Identifier] =
-    "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str =>  Identifier(str.substring(1, str.size-1)) } //remove quotes
+  protected lazy val labelValueIdentifier: PackratParser[Identifier] = {
+    // Parse a quoted identifier, supporting escapes, with quotes removed. Note that this
+    // originally relied on a complex regex with capturing groups. The way capturing groups are
+    // processed by the Java regex class results in deep recursion and a stack overflow error
+    // for long identifiers. In addition, the regex could only detect escape patterns, but it
+    // couldn't replace them. As a result, an additional step was required to parse the string
+    // again, searching and replacing the escapes. Parsers for "real" programming languages
+    // never use regular expressions, because they are limited in capability. Custom code is
+    // certainly "bigger", but it's much more flexible overall. This also makes it easier to
+    // support additional types of promql strings that aren't supported as of yet. For example,
+    // additional escapes, and backtick quotes which don't do escape processing.
+
+    new PackratParser[Identifier]() {
+      def apply(in: Input): ParseResult[Identifier] = {
+        val source = in.source
+        var offset = in.offset
+
+        (whiteSpace findPrefixMatchOf (source.subSequence(offset, source.length))) match {
+          case Some(matched) => offset += matched.end
+          case None =>
+        }
+
+        val quote = source.charAt(offset); offset += 1
+
+        if (quote != '\'' && quote != '"') {
+          return Failure("quote character expected", in)
+        }
+
+        val bob = new StringBuilder()
+
+        while (offset < source.length) {
+          var c = source.charAt(offset); offset += 1
+
+          if (c == quote) {
+            return Success(Identifier(bob.toString()), in.drop(offset - in.offset))
+          }
+
+          if (c == '\\') {
+            val next = source.charAt(offset); offset += 1
+            c = next match {
+              case '\\' | '\'' | '"' => next
+              case 'f' => '\f'
+              case 'n' => '\n'
+              case 'r' => '\r'
+              case 't' => '\t'
+              case _ => return Error("illegal string escape: " + next, in)
+            }
+          }
+
+          bob.append(c)
+        }
+
+        return Error("unfinished quoted identifier", in)
+      }
+    }
+  }
 
   protected val OFFSET = Keyword("OFFSET")
   protected val IGNORING = Keyword("IGNORING")
@@ -77,6 +136,11 @@ trait Operator extends BaseParser {
   lazy val labels: PackratParser[Seq[Identifier]] = "(" ~> repsep(labelNameIdentifier, ",") <~ ")" ^^ {
     Seq() ++ _
   }
+
+  lazy val labelValues: PackratParser[Seq[LabelMatch]] =
+    repsep(labelMatch, ",") ^^ {
+      Seq() ++ _
+    }
 
   lazy val add = "+" ^^ (_ => Add)
 
@@ -320,7 +384,7 @@ object Parser extends Expression {
     */
   override lazy val skipWhitespace: Boolean = true
 
-  override val whiteSpace = "[ \t\r\f\n]+".r
+  override val whiteSpace = BaseParser.whiteSpace
 
   def parseQuery(query: String): Expression = {
     parseAll(expression, query) match {
@@ -341,12 +405,39 @@ object Parser extends Expression {
     }
   }
 
+  def parseLabelValueFilter(query: String): Seq[LabelMatch] = {
+    parseAll(labelValues, query) match {
+      case s: Success[_] => s.get.asInstanceOf[Seq[LabelMatch]]
+      case e: Error => handleError(e, query)
+      case f: Failure => handleFailure(f, query)
+    }
+  }
+
   def metadataQueryToLogicalPlan(query: String, timeParams: TimeRangeParams,
                                  fetchFirstLastSampleTimes: Boolean = false): LogicalPlan = {
     val expression = parseQuery(query)
     expression match {
       case p: InstantExpression => p.toMetadataPlan(timeParams, fetchFirstLastSampleTimes)
       case _ => throw new UnsupportedOperationException()
+    }
+  }
+
+  def labelValuesQueryToLogicalPlan(labelNames: Seq[String], filterQuery: Option[String],
+                                    timeParams: TimeRangeParams): LogicalPlan = {
+    filterQuery match {
+      case Some(filter) =>
+        val columnFilters = parseLabelValueFilter(filter).map { l =>
+          l.labelMatchOp match {
+            case EqualMatch => ColumnFilter(l.label, Filter.Equals(l.value))
+            case NotRegexMatch => ColumnFilter(l.label, Filter.NotEqualsRegex(l.value))
+            case RegexMatch => ColumnFilter(l.label, Filter.EqualsRegex(l.value))
+            case NotEqual(false) => ColumnFilter(l.label, Filter.NotEquals(l.value))
+            case other: Any => throw new IllegalArgumentException(s"Unknown match operator $other")
+          }
+        }
+        LabelValues(labelNames, columnFilters, timeParams.start * 1000, timeParams.end * 1000)
+      case _ =>
+        LabelValues(labelNames, Seq.empty, timeParams.start * 1000, timeParams.end * 1000)
     }
   }
 
@@ -358,16 +449,21 @@ object Parser extends Expression {
 
   def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
     val expression = parseQuery(query)
-    val expressionWithPrecedence = expression match {
-      case binaryExpression: BinaryExpression => assignPrecedence(binaryExpression.lhs, binaryExpression.operator,
-                                                    binaryExpression.vectorMatch, binaryExpression.rhs)
-      case _                                  => expression
-    }
 
-    expressionWithPrecedence match {
+    assignPrecedence(expression) match {
       case p: PeriodicSeries => p.toSeriesPlan(timeParams)
       case r: SimpleSeries   => r.toSeriesPlan(timeParams, isRoot = true)
       case _ => throw new UnsupportedOperationException()
+    }
+  }
+
+  def assignPrecedence(expression: Expression): Expression = {
+   expression match {
+      case f: Function            => f.copy(allParams = f.allParams.map(assignPrecedence(_)))
+      case a: AggregateExpression => a.copy(params = a.params.map(assignPrecedence(_)), altFunctionParams = a.
+                                     altFunctionParams.map(assignPrecedence(_)))
+      case b: BinaryExpression    => assignPrecedence(b.lhs, b.operator, b.vectorMatch, b.rhs)
+      case _                      => expression
     }
   }
 

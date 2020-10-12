@@ -4,8 +4,8 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.DatasetRef
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.query.LogicalPlan
-import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PromQlRemoteExec, StitchRvsExec}
+import filodb.query.{LabelValues, LogicalPlan, SeriesKeysByFilters}
+import filodb.query.exec._
 
 /**
   * HighAvailabilityPlanner responsible for using underlying local planner and FailureProvider
@@ -31,6 +31,25 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
 
   val remoteHttpTimeoutMs: Long =
     queryConfig.routingConfig.config.as[Option[Long]]("remote.http.timeout").getOrElse(60000)
+
+  private def stitchPlans(rootLogicalPlan: LogicalPlan,
+                          execPlans: Seq[ExecPlan],
+                          queryContext: QueryContext)= {
+    rootLogicalPlan match {
+        case lp: LabelValues         => LabelValuesDistConcatExec(queryContext, InProcessPlanDispatcher,
+                                        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
+        case lp: SeriesKeysByFilters => PartKeysDistConcatExec(queryContext, InProcessPlanDispatcher,
+                                        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
+        case _                       => StitchRvsExec(queryContext, InProcessPlanDispatcher,
+                                         execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
+      // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
+      // Sort to move RemoteExec in end as it does not have schema
+    }
+  }
+
+  private def getLabelValuesUrlParams(lp: LabelValues) = Map("filter" -> lp.filters.map{f => f.column +
+    f.filter.operatorString + f.filter.valuesStrings.head}.mkString(","),
+    "labels" -> lp.labelNames.mkString(","))
 
   /**
     * Converts Route objects returned by FailureProvider to ExecPlan
@@ -59,21 +78,26 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
             (timeRange.startMs + offsetMs) / 1000, queryParams.stepSecs, (timeRange.endMs + offsetMs) / 1000,
             queryParams.spread, processFailure = false)
           logger.debug("PromQlExec params:" + promQlParams)
-          PromQlRemoteExec(remoteHttpEndpoint, remoteHttpTimeoutMs,
-            qContext, InProcessPlanDispatcher, dsRef, promQlParams)
+          val httpEndpoint = remoteHttpEndpoint + queryParams.remoteQueryPath.getOrElse("")
+          rootLogicalPlan match {
+            case lp: LabelValues         => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
+                                            getLabelValuesUrlParams(lp), qContext, InProcessPlanDispatcher,
+                                            dsRef, promQlParams)
+            case lp: SeriesKeysByFilters => val urlParams = Map("match[]" -> queryParams.promQl)
+                                            MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
+                                              urlParams, qContext, InProcessPlanDispatcher, dsRef, promQlParams)
+            case _                       => PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
+                                            qContext, InProcessPlanDispatcher, dsRef, promQlParams)
+          }
+
       }
     }
 
     if (execPlans.size == 1) execPlans.head
-    else StitchRvsExec(qContext,
-                       InProcessPlanDispatcher,
-                       execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
-    // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
-    // Sort to move RemoteExec in end as it does not have schema
-
+    else stitchPlans(rootLogicalPlan, execPlans, qContext)
   }
 
-  def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+  override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
     // lazy because we want to fetch failures only if needed
     lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)

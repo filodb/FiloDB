@@ -21,11 +21,10 @@ import monix.execution.{Scheduler, UncaughtExceptionReporter}
 import monix.execution.atomic.AtomicBoolean
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
-import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher, ShardDownsampler}
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
@@ -115,7 +114,7 @@ object TimeSeriesShard {
   def writeMeta(addr: Long, partitionID: Int, info: ChunkSetInfo, vectors: Array[BinaryVectorPtr]): Unit = {
     UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, addr, partitionID)
     ChunkSetInfo.copy(info, addr + 4)
-    for { i <- 0 until vectors.size optimized } {
+    cforRange { 0 until vectors.size } { i =>
       ChunkSetInfo.setVectorPtr(addr + 4, i, vectors(i))
     }
   }
@@ -126,7 +125,7 @@ object TimeSeriesShard {
   def writeMeta(addr: Long, partitionID: Int, bytes: Array[Byte], vectors: ArrayBuffer[BinaryVectorPtr]): Unit = {
     UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, addr, partitionID)
     ChunkSetInfo.copy(bytes, addr + 4)
-    for { i <- 0 until vectors.size optimized } {
+    cforRange { 0 until vectors.size } { i =>
       ChunkSetInfo.setVectorPtr(addr + 4, i, vectors(i))
     }
   }
@@ -136,7 +135,7 @@ object TimeSeriesShard {
     */
   def writeMetaWithoutPartId(addr: Long, bytes: Array[Byte], vectors: Array[BinaryVectorPtr]): Unit = {
     ChunkSetInfo.copy(bytes, addr)
-    for { i <- 0 until vectors.size optimized } {
+    cforRange { 0 until vectors.size } { i =>
       ChunkSetInfo.setVectorPtr(addr, i, vectors(i))
     }
   }
@@ -217,8 +216,6 @@ object SchemaMismatch {
   * @param bufferMemoryManager Unencoded/unoptimized ingested data is stored in buffers that are allocated from this
   *                            memory pool. This pool is also used to store partition keys.
   * @param storeConfig the store portion of the sourceconfig, not the global FiloDB application config
-  * @param downsampleConfig configuration for downsample operations
-  * @param downsamplePublisher is shared among all shards of the dataset on the node
   */
 class TimeSeriesShard(val ref: DatasetRef,
                       val schemas: Schemas,
@@ -227,9 +224,7 @@ class TimeSeriesShard(val ref: DatasetRef,
                       val bufferMemoryManager: MemFactory,
                       colStore: ColumnStore,
                       metastore: MetaStore,
-                      evictionPolicy: PartitionEvictionPolicy,
-                      downsampleConfig: DownsampleConfig,
-                      downsamplePublisher: DownsamplePublisher)
+                      evictionPolicy: PartitionEvictionPolicy)
                      (implicit val ioPool: ExecutionContext) extends StrictLogging {
   import collection.JavaConverters._
 
@@ -404,17 +399,6 @@ class TimeSeriesShard(val ref: DatasetRef,
   // all flush at the same time. With an hourly boundary and 60 flush groups, flushes are
   // scheduled once a minute.
   private val flushOffsetMillis = flushBoundaryMillis / numGroups
-
-  /**
-    * Helper for downsampling ingested data for long term retention.
-    */
-  private final val shardDownsamplers = {
-    val downsamplers = schemas.schemas.values.map { s =>
-      s.schemaHash -> new ShardDownsampler(ref.dataset, shardNum,
-        s, s.downsample.getOrElse(s), downsampleConfig.enabled, shardStats)
-    }
-    DMap(downsamplers.toSeq: _*)
-  }
 
   private[memstore] val evictedPartKeys =
     BloomFilter[PartKey](storeConfig.evictedPkBfCapacity, falsePositiveRate = 0.01)(new CanGenerateHashFrom[PartKey] {
@@ -810,7 +794,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     var newTimestamp = ingestionTime
 
     if (newTimestamp > oldTimestamp && oldTimestamp != Long.MinValue) {
-      for (group <- 0 until numGroups optimized) {
+      cforRange ( 0 until numGroups ) { group =>
         /* Logically, the task creation filter is as follows:
 
            // Compute the time offset relative to the group number. 0 min, 1 min, 2 min, etc.
@@ -894,13 +878,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     // Only allocate the blockHolder when we actually have chunks/partitions to flush
     val blockHolder = blockFactoryPool.checkout(Map("flushGroup" -> flushGroup.groupNum.toString))
 
-    // This initializes the containers for the downsample records. Yes, we create new containers
-    // and not reuse them at the moment and there is allocation for every call of this method
-    // (once per minute). We can perhaps use a thread-local or a pool if necessary after testing.
-    val downsampleRecords = ShardDownsampler
-                               .newEmptyDownsampleRecords(downsampleConfig.resolutions.map(_.toMillis.toInt),
-                                                          downsampleConfig.enabled)
-
     val chunkSetIter = partitionIt.flatMap { p =>
       // TODO re-enable following assertion. Am noticing that monix uses TrampolineExecutionContext
       // causing the iterator to be consumed synchronously in some cases. It doesnt
@@ -913,10 +890,6 @@ class TimeSeriesShard(val ref: DatasetRef,
       /* VERY IMPORTANT: This block is lazy and is executed when chunkSetIter is consumed
          in writeChunksFuture below */
 
-      /* Step 3: Add downsample records for the chunks into the downsample record builders */
-      val ds = shardDownsamplers(p.schema.schemaHash)
-      ds.populateDownsampleRecords(p, p.infosToBeFlushed, downsampleRecords)
-
       /* Step 4: Update endTime of all partKeys that stopped ingesting in this flush period. */
       updateIndexWithEndTime(p, chunks, flushGroup.dirtyPartsToFlush)
       chunks
@@ -928,17 +901,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     /* Step 1: Kick off partition iteration to persist chunks to column store */
     val writeChunksFuture = writeChunks(flushGroup, chunkSetIter, partitionIt, blockHolder)
 
-    /* Step 5.1: Publish the downsample record data collected to the downsample dataset.
-     * We recover future since we want to proceed to publish downsample data even if chunk flush failed.
-     * This is done after writeChunksFuture because chunkSetIter is lazy. */
-    val pubDownsampleFuture = writeChunksFuture.recover {case _ => Success}
-      .flatMap { _ =>
-        assertThreadName(IOSchedName)
-        if (downsampleConfig.enabled)
-          ShardDownsampler.publishToDownsampleDataset(downsampleRecords, downsamplePublisher, ref, shardNum)
-        else Future.successful(Success)
-      }
-
     /* Step 5.2: We flush dirty part keys in the one designated group for each shard.
      * We recover future since we want to proceed to write dirty part keys even if chunk flush failed.
      * This is done after writeChunksFuture because chunkSetIter is lazy. More partKeys could
@@ -948,7 +910,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       .flatMap( _=> writeDirtyPartKeys(flushGroup))
 
     /* Step 6: Checkpoint after dirty part keys and chunks are flushed */
-    val result = Future.sequence(Seq(writeChunksFuture, writeDirtyPartKeysFuture, pubDownsampleFuture)).map {
+    val result = Future.sequence(Seq(writeChunksFuture, writeDirtyPartKeysFuture)).map {
       _.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success)
     }.flatMap {
       case Success           => commitCheckpoint(ref, shardNum, flushGroup)

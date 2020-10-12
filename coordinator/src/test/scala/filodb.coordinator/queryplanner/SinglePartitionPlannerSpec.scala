@@ -48,7 +48,7 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
   val failureProvider = new FailureProvider {
     override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
       Seq(FailureTimeRange("local", datasetRef,
-        TimeRange(100, 10000), false))
+        TimeRange(300000, 400000), false))
     }
   }
 
@@ -81,7 +81,7 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
   val plannerSelector = (metricName: String) => { if (metricName.equals("rr1")) "rules1"
   else if (metricName.equals("rr2")) "rules2" else "local" }
 
-  val engine = new SinglePartitionPlanner(planners, plannerSelector, "_metric_")
+  val engine = new SinglePartitionPlanner(planners, plannerSelector, "_metric_", queryConfig)
 
   it("should generate Exec plan for simple query") {
     val lp = Parser.queryToLogicalPlan("test{job = \"app\"}", 1000, 1000)
@@ -160,5 +160,19 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     execPlan.isInstanceOf[TimeScalarGeneratorExec] shouldEqual true
   }
 
+  it("should generate BinaryJoin Exec with remote exec's having lhs or rhs query") {
+    val lp = Parser.queryRangeToLogicalPlan("""test1{job = "app"} + test2{job = "app"}""", TimeStepParams(300, 20, 500))
+
+    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 300, 20, 500)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    println(execPlan.printTree())
+    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
+    execPlan.children(0).isInstanceOf[PromQlRemoteExec] shouldEqual(true)
+    execPlan.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual(true)
+
+    // LHS should have only LHS query and RHS should have oly RHS query
+    execPlan.children(0).asInstanceOf[PromQlRemoteExec].params.promQl shouldEqual("""test1{job="app"}""")
+    execPlan.children(1).asInstanceOf[PromQlRemoteExec].params.promQl shouldEqual("""test2{job="app"}""")
+  }
 }
 
