@@ -33,11 +33,11 @@ object SingleClusterPlanner {
   * @param minTimeRangeForSplitMs if time range is longer than this, plan will be split into multiple plans
   * @param splitSizeMs time range for each split, if plan needed to be split
   */
-class SingleClusterPlanner(val dsRef: DatasetRef,
+class SingleClusterPlanner(dsRef: DatasetRef,
                            schema: Schemas,
                            shardMapperFunc: => ShardMapper,
                            earliestRetainedTimestampFn: => Long,
-                           val queryConfig: QueryConfig,
+                           queryConfig: QueryConfig,
                            spreadProvider: SpreadProvider = StaticSpreadProvider(),
                            timeSplitEnabled: Boolean = false,
                            minTimeRangeForSplitMs: => Long = 1.day.toMillis,
@@ -46,7 +46,6 @@ class SingleClusterPlanner(val dsRef: DatasetRef,
 
   override val schemas = schema
   val shardColumns = dsOptions.shardKeyColumns.sorted
-  val numShards = shardMapperFunc.numShards
 
   import SingleClusterPlanner._
 

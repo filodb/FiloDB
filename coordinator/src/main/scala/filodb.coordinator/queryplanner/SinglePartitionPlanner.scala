@@ -71,12 +71,12 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
 
       val lhsExec = logicalPlan.lhs match {
         case b: BinaryJoin => materializeBinaryJoin(b, lhsQueryContext)
-        case _ => getPlanner(logicalPlan.lhs).materialize(logicalPlan.lhs, lhsQueryContext)
+        case               _ => getPlanner(logicalPlan.lhs).materialize(logicalPlan.lhs, lhsQueryContext)
       }
 
       val rhsExec = logicalPlan.rhs match {
         case b: BinaryJoin => materializeBinaryJoin(b, rhsQueryContext)
-        case _ => getPlanner(logicalPlan.rhs).materialize(logicalPlan.rhs, rhsQueryContext)
+        case _             => getPlanner(logicalPlan.rhs).materialize(logicalPlan.rhs, rhsQueryContext)
       }
 
       val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)

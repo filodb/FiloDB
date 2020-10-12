@@ -161,12 +161,11 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     execPlan.isInstanceOf[TimeScalarGeneratorExec] shouldEqual true
   }
 
-  it("should generate BinaryJoin Exec with remote exec's having lhs or rhs query") {
+  it("should generate BinaryJoin Exec with remote exec's having lhs and rhs query") {
     val lp = Parser.queryRangeToLogicalPlan("""test1{job = "app"} + test2{job = "app"}""", TimeStepParams(300, 20, 500))
     val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 300, 20, 500)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
-    println(execPlan.asInstanceOf[PromQlRemoteExec].params.promQl )
     execPlan.asInstanceOf[PromQlRemoteExec].params.promQl shouldEqual("""test1{job = "app"} + test2{job = "app"}""")
   }
 }
