@@ -33,33 +33,51 @@ class CardinalitySerializer extends Serializer[Cardinality] {
 }
 
 object RocksDbCardinalityStore {
+  private lazy val loadRocksDbLibrary = RocksDB.loadLibrary()
   private val LastKeySeparator: Char = 0x1E
   private val NotLastKeySeparator: Char = 0x1D
+  private val NotFound = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]
+
+  // ======= DB Tuning ===========
+  // not making them config intentionally since RocksDB tuning needs more care
+  private[ratelimit] val TOTAL_OFF_HEAP_SIZE = 64L << 20 // 64 MB
+  private[ratelimit] val LRU_CACHE_SIZE = 16L << 20 // 16 MB
+  private val BLOCK_SIZE = 4096L // 4 KB
+  private val NUM_WRITE_BUFFERS = 5
+  private val WRITE_BUF_SIZE = 8L << 20 // 8 MB
+
 }
 
 class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalityStore with StrictLogging {
 
-  val tags = Map("shard" -> shard.toString, "dataset" -> ref.toString)
-  val diskSpaceUsed = Kamon.gauge("card-store-disk-space-used", MeasurementUnit.information.bytes)
-    .withTags(TagSet.from(tags))
-  val memoryUsed = Kamon.gauge("card-store-offheap-mem-used")
-    .withTags(TagSet.from(tags))
-  val compactionBytesPending = Kamon.gauge("card-store-compaction-pending", MeasurementUnit.information.bytes)
-    .withTags(TagSet.from(tags))
-  val numRunningCompactions = Kamon.gauge("card-store-num-running-compactions")
-    .withTags(TagSet.from(tags))
-  val numKeys = Kamon.gauge("card-store-est-num-keys")
-    .withTags(TagSet.from(tags))
+  import RocksDbCardinalityStore._
+  loadRocksDbLibrary
 
-  private val options = new Options().setCreateIfMissing(true) // TODO fine tune options
+  // ======= DB Config ===========
+  private val cache = new LRUCache(LRU_CACHE_SIZE)
+  // caps total memory used by rocksdb memTables, blockCache
+  private val writeBufferManager = new WriteBufferManager(TOTAL_OFF_HEAP_SIZE, cache)
+  private val options = {
+    val opts = new Options().setCreateIfMissing(true)
+
+    val tableConfig = new BlockBasedTableConfig()
+    tableConfig.setBlockCache(cache)
+    tableConfig.setCacheIndexAndFilterBlocks(true)
+    tableConfig.setCacheIndexAndFilterBlocksWithHighPriority(true)
+    tableConfig.setPinTopLevelIndexAndFilter(true)
+    tableConfig.setBlockSize(BLOCK_SIZE)
+    opts.setTableFormatConfig(tableConfig)
+
+    opts.setWriteBufferManager(writeBufferManager)
+    opts.setMaxWriteBufferNumber(NUM_WRITE_BUFFERS) // number of memtables
+    opts.setWriteBufferSize(WRITE_BUF_SIZE) // size of each memtable
+
+    opts
+  }
+
   private val baseDir = new File(System.getProperty("java.io.tmpdir"))
   private val baseName = s"cardStore-$ref-$shard-${System.currentTimeMillis()}"
   private val dbDirInTmp = new File(baseDir, baseName)
-
-  private val metricsReporter = Observable.interval(1.minute)
-    .onErrorRestart(Int.MaxValue)
-    .foreach(_ => updateStats())(GlobalScheduler.globalImplicitScheduler)
-
   private val db = RocksDB.open(options, dbDirInTmp.getAbsolutePath)
   logger.info(s"Opening new Cardinality DB at ${dbDirInTmp.getAbsolutePath}")
 
@@ -71,26 +89,43 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
     }
   }
 
-  private val NotFound = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]
+  // ======= Metrics ===========
+  private val tags = Map("shard" -> shard.toString, "dataset" -> ref.toString)
+  private val diskSpaceUsedMetric = Kamon.gauge("card-store-disk-space-used", MeasurementUnit.information.bytes)
+    .withTags(TagSet.from(tags))
+  private val memoryUsedMetric = Kamon.gauge("card-store-offheap-mem-used")
+    .withTags(TagSet.from(tags))
+  private val compactionBytesPendingMetric = Kamon.gauge("card-store-compaction-pending",
+    MeasurementUnit.information.bytes).withTags(TagSet.from(tags))
+  private val numRunningCompactionsMetric = Kamon.gauge("card-store-num-running-compactions")
+    .withTags(TagSet.from(tags))
+  private val numKeysMetric = Kamon.gauge("card-store-est-num-keys")
+    .withTags(TagSet.from(tags))
 
-  def updateStats(): Unit = {
+  private val metricsReporter = Observable.interval(1.minute)
+    .onErrorRestart(Int.MaxValue)
+    .foreach(_ => updateMetrics())(GlobalScheduler.globalImplicitScheduler)
 
-    //  List of all RocksDB properties at https://github.com/facebook/rocksdb/blob/6.12.fb/include/rocksdb/db.h#L720
-
-    // Returns the total size, in bytes, of all the SST files.
-    // WAL files are not included in the calculation.
-    diskSpaceUsed.update(db.getLongProperty("rocksdb.total-sst-files-size"))
-    numKeys.update(db.getLongProperty("rocksdb.estimate-num-keys"))
-
-    val memTableSize = db.getLongProperty("rocksdb.size-all-mem-tables")
-    val blockCacheSize = db.getLongProperty("rocksdb.block-cache-usage")
-    val tableReadersSize = db.getLongProperty("rocksdb.estimate-table-readers-mem")
-    memoryUsed.update(memTableSize + blockCacheSize + tableReadersSize)
-
-    compactionBytesPending.update(db.getLongProperty("rocksdb.estimate-pending-compaction-bytes"))
-    numRunningCompactions.update(db.getLongProperty("rocksdb.num-running-compactions"))
-    // consider compaction-pending yes/no
+  private def updateMetrics(): Unit = {
+    diskSpaceUsedMetric.update(diskSpaceUsed)
+    numKeysMetric.update(estimatedNumKeys)
+    memoryUsedMetric.update(memTablesSize + blockCacheSize + tableReadersSize)
+    compactionBytesPendingMetric.update(compactionBytesPending)
+    numRunningCompactionsMetric.update(numRunningCompactions)
   }
+
+  //  List of all RocksDB properties at https://github.com/facebook/rocksdb/blob/6.12.fb/include/rocksdb/db.h#L720
+  def statsAsString: String = db.getProperty("rocksdb.stats")
+  def estimatedNumKeys: Long = db.getLongProperty("rocksdb.estimate-num-keys")
+  // Returns the total size, in bytes, of all the SST files.
+  // WAL files are not included in the calculation.
+  def diskSpaceUsed: Long = db.getLongProperty("rocksdb.total-sst-files-size")
+  def memTablesSize: Long = db.getLongProperty("rocksdb.size-all-mem-tables")
+  def blockCacheSize: Long = db.getLongProperty("rocksdb.block-cache-usage")
+  def tableReadersSize: Long = db.getLongProperty("rocksdb.estimate-table-readers-mem")
+  def compactionBytesPending: Long = db.getLongProperty("rocksdb.estimate-pending-compaction-bytes")
+  def numRunningCompactions: Long = db.getLongProperty("rocksdb.num-running-compactions")
+  // consider compaction-pending yes/no
 
   /**
    * In order to enable quick prefix search, we formulate string based keys to the RocksDB
@@ -199,6 +234,8 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   def close(): Unit = {
     db.cancelAllBackgroundWork(true)
     db.close()
+    writeBufferManager.close()
+    cache.close()
     options.close()
     val directory = new Directory(dbDirInTmp)
     directory.deleteRecursively()
