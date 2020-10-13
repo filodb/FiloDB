@@ -249,9 +249,14 @@ class BlockMemFactory(blockStore: BlockManager,
     */
   def tryMarkReclaimable(): Unit = synchronized {
     if (now - lastUsedNanos > BlockMemFactory.USED_THRESHOLD_NANOS) {
-      markAllBlocksReclaimable()
+      markFullBlocksReclaimable()
+      if (currentBlock != null) {
+        currentBlock.markReclaimable()
+        currentBlock = null
+      }
     }
   }
+  //scalastyle:on null
 
   /**
     * Starts tracking a span of multiple Blocks over which the same metadata should be applied.
@@ -287,7 +292,10 @@ class BlockMemFactory(blockStore: BlockManager,
       metaAddr = blk.allocMetadata(metaSize)
       metadataWriter(metaAddr)
       if (blk != metadataSpan.last) {
-        if (!markFullBlocksAsReclaimable) synchronized {
+        if (markFullBlocksAsReclaimable) {
+          // We know that all the blocks in the span except the last one is full, so mark them reclaimable
+          blk.markReclaimable()
+        } else synchronized {
           fullBlocksToBeMarkedAsReclaimable += blk
         }
       }
@@ -303,15 +311,10 @@ class BlockMemFactory(blockStore: BlockManager,
     metaAddr
   }
 
-  def markAllBlocksReclaimable(): Unit = synchronized {
+  def markFullBlocksReclaimable(): Unit = synchronized {
     fullBlocksToBeMarkedAsReclaimable.foreach(_.markReclaimable())
     fullBlocksToBeMarkedAsReclaimable.clear()
-    if (currentBlock != null) {
-      currentBlock.markReclaimable()
-      currentBlock = null
-    }
   }
-  //scalastyle:on null
 
   protected def ensureCapacity(forSize: Long): Block = synchronized {
     var block = accessCurrentBlock()
@@ -322,10 +325,12 @@ class BlockMemFactory(blockStore: BlockManager,
       }
     } else {
       val newBlock = requestBlock()
-      if (markFullBlocksAsReclaimable) {
-        block.markReclaimable()
-      } else {
-        fullBlocksToBeMarkedAsReclaimable += block
+      if (!metadataSpanActive || metadataSpan.isEmpty) {
+        if (markFullBlocksAsReclaimable) {
+          block.markReclaimable()
+        } else {
+          fullBlocksToBeMarkedAsReclaimable += block
+        }
       }
       block = newBlock
       currentBlock = block

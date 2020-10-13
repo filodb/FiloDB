@@ -18,32 +18,30 @@ class BlockMemFactorySpec extends AnyFlatSpec with Matchers {
     val bmf = new BlockMemFactory(blockManager, 50, Map("test" -> "val"), false)
 
     // simulate encoding of multiple ts partitions in flush group
-    for { tsParts <- 0 to 10 } {
-      bmf.startMetaSpan()
-      for { chunks <- 0 to 3 } {
-        bmf.allocateOffheap(1000)
+
+    for { flushGroup <- 0 to 1 } {
+      for {tsParts <- 0 to 5} {
+        bmf.startMetaSpan()
+        for {chunks <- 0 to 3} {
+          bmf.allocateOffheap(1000)
+        }
+        bmf.endMetaSpan(d => {}, 45)
       }
-      bmf.endMetaSpan(d => {}, 45)
+      // full blocks are tracked as they are allocated
+      flushGroup match {
+        case 0 => bmf.fullBlocksToBeMarkedAsReclaimable.size shouldEqual 5
+        case 1 => bmf.fullBlocksToBeMarkedAsReclaimable.size shouldEqual 6
+      }
+      // full blocks are marked as reclaimable
+      bmf.markFullBlocksReclaimable()
     }
 
-    // full blocks are tracked as they are allocated
-    bmf.fullBlocksToBeMarkedAsReclaimable.size shouldEqual 10
+    // only the current block is not reclaimable
+    blockManager.usedIngestionBlocks.asScala.count(!_.canReclaim) shouldEqual 1
 
-    // none of the blocks are marked as reclaimable
-    blockManager.usedIngestionBlocks.asScala.count(!_.canReclaim) shouldEqual 11 // currentBlock is also not reclaimable
-
-    // tryReclaim should not yield anything
-    blockManager.tryReclaim(3) shouldEqual 0
-
-    // after flush task is done, simulate marking as reclaimable
-    bmf.markAllBlocksReclaimable()
-    // now all the blocks, including currentBlock should be reclaimable
-    blockManager.usedIngestionBlocks.asScala.forall(_.canReclaim) shouldEqual true
-
-    // reclaim call should now yield blocks
-    blockManager.usedIngestionBlocks.size shouldEqual 11
+    blockManager.usedIngestionBlocks.size shouldEqual 12
     blockManager.tryReclaim(3) shouldEqual 3
-    blockManager.usedIngestionBlocks.size shouldEqual 8 // 3 are reclaimed
+    blockManager.usedIngestionBlocks.size shouldEqual 9 // 3 are reclaimed
 
     blockManager.releaseBlocks()
   }
@@ -99,36 +97,42 @@ class BlockMemFactorySpec extends AnyFlatSpec with Matchers {
     val odpFactory = new BlockMemFactory(blockManager, 50, Map("test" -> "val"), true)
 
     // simulate encoding of multiple ts partitions in flush group
-    for {tsParts <- 0 to 10} {
-      ingestionFactory.startMetaSpan()
-      for {chunks <- 0 to 3} {
-        ingestionFactory.allocateOffheap(1000)
+    for { flushGroup <- 0 to 1 } {
+      for {tsParts <- 0 to 5} {
+        ingestionFactory.startMetaSpan()
+        for {chunks <- 0 to 3} {
+          ingestionFactory.allocateOffheap(1000)
+        }
+        ingestionFactory.endMetaSpan(d => {}, 45)
       }
-      ingestionFactory.endMetaSpan(d => {}, 45)
+      // full blocks are tracked as they are allocated
+      flushGroup match {
+        case 0 => ingestionFactory.fullBlocksToBeMarkedAsReclaimable.size shouldEqual 5
+        case 1 => ingestionFactory.fullBlocksToBeMarkedAsReclaimable.size shouldEqual 6
+      }
+      // full blocks are marked as reclaimable
+      ingestionFactory.markFullBlocksReclaimable()
     }
 
     // simulate paging in chunks from cassandra
-      for {tsParts <- 0 to 10} {
-        odpFactory.startMetaSpan()
-        for {chunks <- 0 to 3} {
-          odpFactory.allocateOffheap(1000)
-        }
-        odpFactory.endMetaSpan(d => {}, 45)
+    for {tsParts <- 0 to 10} {
+      odpFactory.startMetaSpan()
+      for {chunks <- 0 to 3} {
+        odpFactory.allocateOffheap(1000)
       }
-
-    // we mark all ingestion blocks as reclaimable
-    ingestionFactory.markAllBlocksReclaimable()
+      odpFactory.endMetaSpan(d => {}, 45)
+    }
 
     // here are the use block counts before reclaim call
     blockManager.usedOdpBlocks.size shouldEqual 11
-    blockManager.usedIngestionBlocks.size shouldEqual 11
+    blockManager.usedIngestionBlocks.size shouldEqual 12
     blockManager.tryReclaim(15) shouldEqual 15
 
     // after reclaim, only 1 odp block
     blockManager.usedOdpBlocks.asScala.size shouldEqual 1
 
     // ingestion blocks should be reclaimed only if we cannot get reclaim ODP blocks.
-    blockManager.usedIngestionBlocks.asScala.size shouldEqual 6
+    blockManager.usedIngestionBlocks.asScala.size shouldEqual 7
 
   }
 }

@@ -967,7 +967,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         // as reclaimable. But the factory could be used for a different flush group. Not the same one. It can
         // succeed, and the wrong blocks can be marked as reclaimable.
         // Can try out tracking unreclaimed blockMemFactories without releasing, but it needs to be separate PR.
-        blockHolder.markAllBlocksReclaimable()
+        blockHolder.markFullBlocksReclaimable()
         blockFactoryPool.release(blockHolder)
         flushDoneTasks(flushGroup, resp)
         tracer.finish()
