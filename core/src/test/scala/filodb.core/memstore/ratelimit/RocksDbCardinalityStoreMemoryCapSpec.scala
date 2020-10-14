@@ -13,7 +13,7 @@ class RocksDbCardinalityStoreMemoryCapSpec  extends AnyFunSpec with Matchers {
   val db = new RocksDbCardinalityStore(ref, 0)
   val tracker = new CardinalityTracker(ref, 0, 3, Seq(100, 100, 1000, 1000), db)
 
-  it("should be able to write keys and cap memory") {
+  it("should be able to write keys quickly and cap memory usage") {
 
     def dumpStats() = {
       println(db.statsAsString)
@@ -33,8 +33,8 @@ class RocksDbCardinalityStoreMemoryCapSpec  extends AnyFunSpec with Matchers {
     val start = System.nanoTime()
     for { ws <- 0 until 5
           ns <- 0 until 20
-          name <- 0 until 100
-          ts <- 0 until 50 } {
+          name <- 0 until 50
+          ts <- 0 until 100 } {
       val mName = s"name_really_really_really_really_very_really_long_metric_name_$name"
       tracker.incrementCount(Seq( s"ws_prefix_$ws", s"ns_prefix_$ns", mName))
       if (name == 0 && ts ==0 ) assertStats()
@@ -44,9 +44,11 @@ class RocksDbCardinalityStoreMemoryCapSpec  extends AnyFunSpec with Matchers {
     assertStats()
     dumpStats()
     val numTimeSeries = 5 * 20 * 100 * 50
-    val timePerIncrement = (end-start) / numTimeSeries / 1000
-    println(s"Was able to increment $numTimeSeries time series, $timePerIncrement microseconds each increment")
-    timePerIncrement should be < 100L
+    val totalTimeSecs = (end-start) / 1000000000L
+    val timePerIncrementMicroSecs = (end-start) / numTimeSeries / 1000
+    println(s"Was able to increment $numTimeSeries time series, $timePerIncrementMicroSecs" +
+      s"us each increment total of ${totalTimeSecs}s")
+    timePerIncrementMicroSecs should be < 100L
 
   }
 

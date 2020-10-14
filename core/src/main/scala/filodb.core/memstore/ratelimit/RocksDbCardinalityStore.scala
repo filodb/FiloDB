@@ -40,11 +40,11 @@ object RocksDbCardinalityStore {
 
   // ======= DB Tuning ===========
   // not making them config intentionally since RocksDB tuning needs more care
-  private[ratelimit] val TOTAL_OFF_HEAP_SIZE = 64L << 20 // 64 MB
+  private[ratelimit] val TOTAL_OFF_HEAP_SIZE = 32L << 20 // 32 MB
   private[ratelimit] val LRU_CACHE_SIZE = 16L << 20 // 16 MB
   private val BLOCK_SIZE = 4096L // 4 KB
-  private val NUM_WRITE_BUFFERS = 5
-  private val WRITE_BUF_SIZE = 8L << 20 // 8 MB
+  private val NUM_WRITE_BUFFERS = 4
+  private val WRITE_BUF_SIZE = 4L << 20 // 4 MB
 
 }
 
@@ -106,7 +106,14 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
     .onErrorRestart(Int.MaxValue)
     .foreach(_ => updateMetrics())(GlobalScheduler.globalImplicitScheduler)
 
+  var lastMetricsReportTime = 0L
   private def updateMetrics(): Unit = {
+    val now = System.currentTimeMillis()
+    // dump DB stats every 5 minutes
+    if (now - lastMetricsReportTime > 1000 * 60 * 5 ) {
+      logger.info(s"Card Store Stats dataset=$ref shard=$shard $statsAsString")
+      lastMetricsReportTime = now
+    }
     diskSpaceUsedMetric.update(diskSpaceUsed)
     numKeysMetric.update(estimatedNumKeys)
     memoryUsedMetric.update(memTablesSize + blockCacheSize + tableReadersSize)
