@@ -39,15 +39,18 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
     if(planner.isEmpty)  planners.values.head else planner.head
   }
 
-  private def getPlanner(binaryJoin: BinaryJoin) : Seq[QueryPlanner] = {
+  /**
+   * Returns lhs and rhs planners of BinaryJoin
+   */
+  private def getBinaryJoinPlanners(binaryJoin: BinaryJoin) : Seq[QueryPlanner] = {
     val lhsPlanners = binaryJoin.lhs match {
-      case b: BinaryJoin => getPlanner(b)
+      case b: BinaryJoin => getBinaryJoinPlanners(b)
       case _             => Seq(getPlanner(binaryJoin.lhs))
 
     }
 
     val rhsPlanners = binaryJoin.rhs match {
-      case b: BinaryJoin =>  getPlanner(b)
+      case b: BinaryJoin => getBinaryJoinPlanners(b)
       case _             => Seq(getPlanner(binaryJoin.rhs))
 
     }
@@ -59,7 +62,7 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
   }
 
   private def materializeBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): ExecPlan = {
-    val allPlanners = getPlanner(logicalPlan)
+    val allPlanners = getBinaryJoinPlanners(logicalPlan)
 
     if (allPlanners.forall(_.equals(allPlanners.head))) allPlanners.head.materialize(logicalPlan, qContext)
     else {
@@ -70,7 +73,7 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
         copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
 
       val lhsExec = logicalPlan.lhs match {
-        case b: BinaryJoin => materializeBinaryJoin(b, lhsQueryContext)
+        case b: BinaryJoin   => materializeBinaryJoin(b, lhsQueryContext)
         case               _ => getPlanner(logicalPlan.lhs).materialize(logicalPlan.lhs, lhsQueryContext)
       }
 
