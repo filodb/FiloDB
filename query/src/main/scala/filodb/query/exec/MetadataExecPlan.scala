@@ -136,6 +136,6 @@ final case class LabelValuesExec(queryContext: QueryContext,
     ExecResult(rvs, Task.eval(sch))
   }
 
-  def args: String = s"shard=$shard, filters=$filters, col=$columns, limit=${queryContext.plannerParams.sampleLimit},"+
+  def args: String = s"shard=$shard, filters=$filters, col=$columns, limit=${queryContext.plannerParams.sampleLimit}," +
     s" startMs=$startMs, endMs=$endMs"
 }
