@@ -7,7 +7,7 @@ import spire.syntax.cfor._
 import filodb.core.metadata.DataSchema
 import filodb.core.store.{ChunkSetInfo, StoreConfig}
 import filodb.memory.BinaryRegion.NativePointer
-import filodb.memory.MemFactory
+import filodb.memory.NativeMemoryManager
 
 object WriteBufferPool {
   /**
@@ -31,7 +31,7 @@ object WriteBufferPool {
  *
  * @param storeConf the StoreConfig containing parameters for configuring write buffers, etc.
  */
-class WriteBufferPool(memFactory: MemFactory,
+class WriteBufferPool(memFactory: NativeMemoryManager,
                       val schema: DataSchema,
                       storeConf: StoreConfig) extends StrictLogging {
   import TimeSeriesPartition._

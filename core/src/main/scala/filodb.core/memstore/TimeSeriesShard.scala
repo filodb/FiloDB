@@ -221,7 +221,7 @@ class TimeSeriesShard(val ref: DatasetRef,
                       val schemas: Schemas,
                       val storeConfig: StoreConfig,
                       val shardNum: Int,
-                      val bufferMemoryManager: MemFactory,
+                      val bufferMemoryManager: NativeMemoryManager,
                       colStore: ColumnStore,
                       metastore: MetaStore,
                       evictionPolicy: PartitionEvictionPolicy)
