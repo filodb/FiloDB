@@ -127,6 +127,7 @@ object ChunkMap extends StrictLogging {
 class ChunkMap(val memFactory: NativeMemoryManager, var capacity: Int) {
   require(capacity > 0)
 
+  private var lockState: Int = 0
   private var size: Int = 0
   private var first: Int = 0
   private var arrayPtr = memFactory.allocateOffheap(capacity << 3, zero = true)
