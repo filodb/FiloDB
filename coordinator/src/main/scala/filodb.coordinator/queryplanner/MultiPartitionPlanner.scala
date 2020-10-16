@@ -180,7 +180,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                      // ^^Filter value should be enclosed in quotes
                       else lp.filters.map{ f => f.column + f.filter.operatorString + f.filter.valuesStrings.head }.
                         mkString(",")
-        createMetadataRemoteExec(qContext, queryParams, p,  Map("filter" ->filters, "labels" ->
+        createMetadataRemoteExec(qContext, queryParams, p, Map("filter" -> filters, "labels" ->
           lp.labelNames.mkString(",")))
       }
     }
