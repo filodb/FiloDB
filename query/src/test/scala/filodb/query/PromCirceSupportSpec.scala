@@ -56,6 +56,11 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
                   |						1601491709,
                   |						"14.843819532173134",
                   |						7
+                  |					],
+                  |         [
+                  |						1601491719,
+                  |						"NaN",
+                  |						7
                   |					]
                   |
                   |				],
@@ -66,11 +71,20 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
                   |	"errorType": null,
                   |	"error": null
                   |}]""".stripMargin
-    val expectedResult =AggregateResponse("avg",List(AvgSampl(1601491649,15.186417982460787,5),
-      AvgSampl(1601491679,14.891293858511071,6), AvgSampl(1601491709,14.843819532173134,7)))
+    val expectedResult =List(AvgSampl(1601491649,15.186417982460787,5),
+      AvgSampl(1601491679,14.891293858511071,6), AvgSampl(1601491709,14.843819532173134,7), AvgSampl(1601491719,
+        Double.NaN, 7))
 
     parser.decode[List[SuccessResponse]](input) match {
-      case Right(successResponse) => successResponse.head.data.result.head.aggregateResponse.get.shouldEqual(expectedResult)
+      case Right(successResponse) => val aggregateResponse = successResponse.head.data.result.head.aggregateResponse.get
+        aggregateResponse.function shouldEqual("avg")
+        aggregateResponse.aggregateSampl.map(_.asInstanceOf[AvgSampl]).zip(expectedResult).foreach {
+          case (res, ex) => if (res.value.isNaN) {
+            ex.value.isNaN shouldEqual(true)
+            ex.count shouldEqual(res.count)
+            ex.timestamp shouldEqual(ex.timestamp)
+          } else ex shouldEqual(res)
+        }
       case Left(ex) => println(ex)
     }
   }
