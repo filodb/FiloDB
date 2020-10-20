@@ -255,7 +255,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     part.unflushedChunksets shouldEqual 1
 
      val currBlock = blockHolder.currentBlock // hang on to these; we'll later test reclaiming them manually
-     blockHolder.markUsedBlocksReclaimable()
+     blockHolder.markFullBlocksReclaimable()
 
      // Now, switch buffers and flush again, ingesting 5 more rows
      // There should now be 3 chunks total, the current write buffers plus the two flushed ones
