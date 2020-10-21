@@ -174,14 +174,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
       if (p.partitionName.equals(localPartitionName))
         localPartitionPlanner.materialize(lp.copy(startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
-      else {
-        val quote = if (queryParams.remoteQueryPath.get.contains("""/v2/label/""")) """"""" else ""
-        // ^^Filter value should be enclosed in quotes for label values V2 endpoint
-        val filters = lp.filters.map{ f => s"""${f.column}${f.filter.operatorString}$quote${f.filter.
-          valuesStrings.head}$quote"""}.mkString(",")
-        createMetadataRemoteExec(qContext, queryParams, p, Map("filter" -> filters, "labels" ->
-          lp.labelNames.mkString(",")))
-      }
+      else
+        createMetadataRemoteExec(qContext, queryParams, p, PlannerUtil.getLabelValuesUrlParams(lp, queryParams))
     }
     if (execPlans.size == 1) execPlans.head
     else LabelValuesDistConcatExec(qContext, InProcessPlanDispatcher,

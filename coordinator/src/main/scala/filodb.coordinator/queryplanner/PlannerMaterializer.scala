@@ -3,7 +3,7 @@ package filodb.coordinator.queryplanner
 import java.util.concurrent.ThreadLocalRandom
 
 import filodb.core.metadata.{DatasetOptions, Schemas}
-import filodb.core.query.{QueryContext, RangeParams}
+import filodb.core.query.{PromQlQueryParams, QueryContext, RangeParams}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query._
 import filodb.query.exec._
@@ -139,4 +139,17 @@ trait  PlannerMaterializer {
         vectors
       }
     }
+}
+
+object PlannerUtil {
+   /**
+   * Returns URL params for label values which is used to create Metadata remote exec plan
+   */
+   def getLabelValuesUrlParams(lp: LabelValues, queryParams: PromQlQueryParams): Map[String, String] = {
+    val quote = if (queryParams.remoteQueryPath.get.contains("""/v2/label/""")) """"""" else ""
+    // Filter value should be enclosed in quotes for label values v2 endpoint
+    val filters = lp.filters.map{ f => s"""${f.column}${f.filter.operatorString}$quote${f.filter.valuesStrings.
+      head}$quote"""}.mkString(",")
+    Map("filter" -> filters, "labels" -> lp.labelNames.mkString(","))
+  }
 }
