@@ -47,10 +47,6 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     }
   }
 
-  private def getLabelValuesUrlParams(lp: LabelValues) = Map("filter" -> lp.filters.map{f => f.column +
-    f.filter.operatorString + f.filter.valuesStrings.head}.mkString(","),
-    "labels" -> lp.labelNames.mkString(","))
-
   /**
     * Converts Route objects returned by FailureProvider to ExecPlan
     */
@@ -81,8 +77,8 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           val httpEndpoint = remoteHttpEndpoint + queryParams.remoteQueryPath.getOrElse("")
           rootLogicalPlan match {
             case lp: LabelValues         => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                            getLabelValuesUrlParams(lp), qContext, InProcessPlanDispatcher,
-                                            dsRef, promQlParams)
+                                            PlannerUtil.getLabelValuesUrlParams(lp, queryParams), qContext,
+                                            InProcessPlanDispatcher, dsRef, promQlParams)
             case lp: SeriesKeysByFilters => val urlParams = Map("match[]" -> queryParams.promQl)
                                             MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                               urlParams, qContext, InProcessPlanDispatcher, dsRef, promQlParams)
