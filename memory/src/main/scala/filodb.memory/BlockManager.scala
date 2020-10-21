@@ -398,7 +398,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   }
 
   //scalastyle:off
-  protected def tryReclaim(num: Int): Unit = {
+  protected[memory] def tryReclaim(num: Int): Int = {
     var reclaimed = 0
 
     // First reclaim time-ordered blocks which are marked as reclaimable.
@@ -456,6 +456,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       }
       removed
     }
+    reclaimed
   }
   //scalastyle:on
 

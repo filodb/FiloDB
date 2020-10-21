@@ -16,7 +16,7 @@ import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
-import filodb.memory.{MemFactory, NativeMemoryManager}
+import filodb.memory.NativeMemoryManager
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class TimeSeriesMemStore(config: Config,
@@ -29,7 +29,7 @@ extends MemStore with StrictLogging {
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
-  private val datasetMemFactories = new HashMap[DatasetRef, MemFactory]
+  private val datasetMemFactories = new HashMap[DatasetRef, NativeMemoryManager]
 
   val stats = new ChunkSourceStats
 
