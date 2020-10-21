@@ -9,6 +9,8 @@ trait Expressions extends Aggregates with Functions {
     //TODO Need to pass an operator to a series
   }
 
+  case class PrecedenceExpression(expression: Expression) extends Expression
+
   case class BinaryExpression(lhs: Expression,
                               operator: Operator,
                               vectorMatch: Option[VectorMatch],
@@ -41,10 +43,22 @@ trait Expressions extends Aggregates with Functions {
     // scalastyle:off method.length
     // scalastyle:off cyclomatic.complexity
     override def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
-      if (hasScalarResult(lhs) && hasScalarResult(rhs)) {
+      val lhsWithPrecedence = lhs match {
+       case p: PrecedenceExpression  => p.expression
+       case _                        => lhs
+
+     }
+
+      val rhsWithPrecedence = rhs match {
+        case p: PrecedenceExpression  => p.expression
+        case _                        => rhs
+
+      }
+
+      if (hasScalarResult(lhsWithPrecedence) && hasScalarResult(rhsWithPrecedence)) {
         val rangeParams = RangeParams(timeParams.start, timeParams.step, timeParams.end)
 
-        (lhs, rhs) match {
+        (lhsWithPrecedence, rhsWithPrecedence) match {
           // 3 + 4
           case (lh: ScalarExpression, rh: ScalarExpression) =>
             ScalarBinaryOperation(operator.getPlanOperator, Left(lh.toScalar), Left(rh.toScalar), rangeParams)
@@ -60,8 +74,7 @@ trait Expressions extends Aggregates with Functions {
             Right(rh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]), rangeParams)
         }
       } else {
-
-        (lhs, rhs) match {
+        (lhsWithPrecedence, rhsWithPrecedence) match {
           // scalar(http_requests) + scalar(node_info)
           case (lh: Function, rh: Function) if lh.isScalarFunction() && rh.isScalarFunction() =>
             val scalar = lh.toSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
@@ -123,8 +136,8 @@ trait Expressions extends Aggregates with Functions {
           case _ => throw new UnsupportedOperationException("Invalid operands")
         }
       }
+   }
     }
     // scalastyle:on method.length
     // scalastyle:on cyclomatic.complexity
-  }
 }
