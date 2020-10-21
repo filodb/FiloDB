@@ -7,7 +7,7 @@ import filodb.core.DatasetRef
 import filodb.core.Types._
 import filodb.core.metadata.{Column, PartitionSchema, Schema}
 import filodb.core.store._
-import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory, MemFactory}
+import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory, NativeMemoryManager}
 import filodb.memory.data.{ChunkMap, Shutdown}
 import filodb.memory.format._
 import filodb.memory.format.MemoryReader._
@@ -67,7 +67,7 @@ class TimeSeriesPartition(val partID: Int,
                           val shard: Int,
                           bufferPool: WriteBufferPool,
                           val shardStats: TimeSeriesShardStats,
-                          memFactory: MemFactory,
+                          memFactory: NativeMemoryManager,
                           initMapSize: Int)
 extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   import TimeSeriesPartition._
@@ -462,7 +462,7 @@ class TracingTimeSeriesPartition(partID: Int,
                                  shard: Int,
                                  bufferPool: WriteBufferPool,
                                  shardStats: TimeSeriesShardStats,
-                                 memFactory: MemFactory,
+                                 memFactory: NativeMemoryManager,
                                  initMapSize: Int) extends
 TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats, memFactory, initMapSize) {
   import TimeSeriesPartition._
