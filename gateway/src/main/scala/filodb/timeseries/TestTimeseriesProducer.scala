@@ -66,7 +66,7 @@ object TestTimeseriesProducer extends StrictLogging {
     logger.info(s"Finished producing $numSamples records for ${samplesDuration / 1000} seconds")
     val startQuery = startTime / 1000
     val endQuery = startQuery + (numSamples / numTimeSeries) * 10
-    val periodicPromQL = """heap_usage{_ns_="App-0",_ws_="demo"}"""
+    val periodicPromQL = """heap_usage{_ns_="App-0",_ws_="filodb-demo"}"""
     val query =
       s"""./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus """ +
       s"""--promql '$periodicPromQL' --start $startQuery --end $endQuery --limit 15"""
@@ -77,7 +77,7 @@ object TestTimeseriesProducer extends StrictLogging {
       s"query=$periodicSamplesQ&start=$startQuery&end=$endQuery&step=15"
     logger.info(s"Periodic Samples query URL: \n$periodicSamplesUrl")
 
-    val rawSamplesQ = URLEncoder.encode("""heap_usage{_ws_="demo",_ns_="App-0"}[2m]""",
+    val rawSamplesQ = URLEncoder.encode("""heap_usage{_ws_="filodb-demo",_ns_="App-0"}[2m]""",
       StandardCharsets.UTF_8.toString)
     val rawSamplesUrl = s"http://localhost:8080/promql/prometheus/api/v1/query?query=$rawSamplesQ&time=$endQuery"
     logger.info(s"Raw Samples query URL: \n$rawSamplesUrl")
@@ -123,7 +123,7 @@ object TestTimeseriesProducer extends StrictLogging {
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
 
       val tags = Map("dc"       -> s"DC$dc",
-                     "_ws_"      -> "demo",
+                     "_ws_"      -> "filodb-demo",
                      "_ns_"      -> s"App-$app",
                      "partition" -> s"partition-$partition",
                      "host"     -> s"H$host",
@@ -178,7 +178,7 @@ object TestTimeseriesProducer extends StrictLogging {
       val sum = buckets.sum
 
       val tags = Map(dcUTF8   -> s"DC$dc".utf8,
-                     wsUTF8   -> "demo".utf8,
+                     wsUTF8   -> "filodb-demo".utf8,
                      nsUTF8   -> s"App-$app".utf8,
                      partUTF8 -> s"partition-$partition".utf8,
                      hostUTF8 -> s"H$host".utf8,
