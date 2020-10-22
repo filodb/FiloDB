@@ -234,4 +234,18 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     multiPartitionExec.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
       "test{_ws_=\"demo\",_ns_=\"App-2\"}"
   }
+
+  it ("should generate Exec plan for Metadata Label values query") {
+    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => Seq.empty
+    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn)
+    val lp = Parser.labelValuesQueryToLogicalPlan(Seq("""__metric__"""), Some("""_ws_="demo", _ns_=~".*" """),
+      TimeStepParams(1000, 20, 5000) )
+
+    val promQlQueryParams = PromQlQueryParams(
+      "", 1000, 20, 5000, None, Some("/api/v2/label/values"),
+      processMultiPartition = true)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[LabelValuesDistConcatExec] shouldEqual (true)
+  }
 }
