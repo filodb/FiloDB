@@ -6,9 +6,8 @@ import scala.concurrent.duration._
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 
+import filodb.memory.{NativeMemoryManager, OutOfOffheapMemoryException}
 import filodb.memory.BinaryRegion.NativePointer
-import filodb.memory.MemFactory
-import filodb.memory.OutOfOffheapMemoryException
 import filodb.memory.format.UnsafeUtils
 
 /**
@@ -125,7 +124,7 @@ object ChunkMap extends StrictLogging {
  * @param memFactory a THREAD-SAFE factory for allocating offheap space
  * @param capacity initial capacity of the map; must be more than 0
  */
-class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
+class ChunkMap(val memFactory: NativeMemoryManager, var capacity: Int) {
   require(capacity > 0)
 
   private var lockState: Int = 0

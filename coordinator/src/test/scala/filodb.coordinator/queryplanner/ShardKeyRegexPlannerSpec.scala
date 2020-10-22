@@ -9,7 +9,7 @@ import org.scalatest.matchers.should.Matchers
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.core.query.Filter.Equals
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -233,5 +233,20 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       "test{_ws_=\"demo\",_ns_=\"App-1\"}"
     multiPartitionExec.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
       "test{_ws_=\"demo\",_ns_=\"App-2\"}"
+  }
+
+  it ("should generate Exec plan for Metadata Label values query") {
+    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => Seq.empty
+    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn)
+    val lp = Parser.labelValuesQueryToLogicalPlan(Seq("""__metric__"""), Some("""_ws_="demo", _ns_=~".*" """),
+      TimeStepParams(1000, 20, 5000) )
+
+    val promQlQueryParams = PromQlQueryParams(
+      "", 1000, 20, 5000, Some("/api/v2/label/values"))
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[LabelValuesDistConcatExec] shouldEqual (true)
   }
 }
