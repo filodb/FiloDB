@@ -17,8 +17,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
                               urlParams: Map[String, Any],
                               queryContext: QueryContext,
                               dispatcher: PlanDispatcher,
-                              dataset: DatasetRef,
-                              params: PromQlQueryParams) extends RemoteExec {
+                              dataset: DatasetRef) extends RemoteExec {
 
   private val columns = Seq(ColumnInfo("Labels", ColumnType.MapColumn))
   private val resultSchema = ResultSchema(columns, 1)

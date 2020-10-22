@@ -349,9 +349,10 @@ object CliMain extends FilodbClusterNode {
                     options: QOptions, tsdbQueryParams: TsdbQueryParams): Unit = {
     val ref = DatasetRef(dataset)
     val spreadProvider: Option[SpreadProvider] = options.spread.map(s => StaticSpreadProvider(SpreadChange(0, s)))
-    val qOpts = QueryContext(tsdbQueryParams, spreadProvider, options.sampleLimit)
-                             .copy(queryTimeoutMillis = options.timeout.toMillis.toInt,
-                                   shardOverrides = options.shardOverrides)
+
+    val qOpts = QueryContext(origQueryParams = tsdbQueryParams, plannerParams = PlannerParams(spreadOverride =
+      spreadProvider, sampleLimit = options.sampleLimit, queryTimeoutMillis = options.timeout.toMillis.toInt, shardOverrides =
+      options.shardOverrides))
     println(s"Sending query command to server for $ref with options $qOpts...")
     println(s"Query Plan:\n$plan")
     options.everyN match {

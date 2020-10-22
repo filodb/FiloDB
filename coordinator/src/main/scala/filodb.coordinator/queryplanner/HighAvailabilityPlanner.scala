@@ -71,19 +71,20 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
           // Divide by 1000 to convert millis to seconds. PromQL params are in seconds.
           val promQlParams = PromQlQueryParams(queryParams.promQl,
-            (timeRange.startMs + offsetMs) / 1000, queryParams.stepSecs, (timeRange.endMs + offsetMs) / 1000,
-            queryParams.spread, processFailure = false)
+            (timeRange.startMs + offsetMs) / 1000, queryParams.stepSecs, (timeRange.endMs + offsetMs) / 1000)
+          val newQueryContext = qContext.copy(origQueryParams = promQlParams, plannerParams = qContext.plannerParams.
+            copy(processFailure = false) )
           logger.debug("PromQlExec params:" + promQlParams)
           val httpEndpoint = remoteHttpEndpoint + queryParams.remoteQueryPath.getOrElse("")
           rootLogicalPlan match {
             case lp: LabelValues         => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                            PlannerUtil.getLabelValuesUrlParams(lp, queryParams), qContext,
-                                            InProcessPlanDispatcher, dsRef, promQlParams)
+                                            PlannerUtil.getLabelValuesUrlParams(lp, queryParams), newQueryContext,
+                                            InProcessPlanDispatcher, dsRef)
             case lp: SeriesKeysByFilters => val urlParams = Map("match[]" -> queryParams.promQl)
                                             MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                              urlParams, qContext, InProcessPlanDispatcher, dsRef, promQlParams)
+                                              urlParams, newQueryContext, InProcessPlanDispatcher, dsRef)
             case _                       => PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                            qContext, InProcessPlanDispatcher, dsRef, promQlParams)
+                                            newQueryContext, InProcessPlanDispatcher, dsRef)
           }
 
       }
@@ -111,7 +112,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     if (!logicalPlan.isRoutable ||
         !tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
         (tsdbQueryParams.isInstanceOf[PromQlQueryParams]
-          && !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processFailure) || // This is a query that was
+          && !qContext.plannerParams.processFailure) || // This is a query that was
                                                                                  // part of failure routing
         !hasSingleTimeRange(logicalPlan) || // Sub queries have different time ranges (unusual)
         failures.isEmpty) { // no failures in query time range

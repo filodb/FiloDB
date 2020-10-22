@@ -36,11 +36,10 @@ trait ReduceAggregateExec extends NonLeafExecPlan {
                yield {
                  val aggregator = RowAggregator(aggrOp, aggrParams, schema)
                  RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key,
-                   querySession.qContext.groupByCardLimit)
+                   querySession.qContext.plannerParams.groupByCardLimit)
                }
     Observable.fromTask(task).flatten
   }
-
 }
 
 /**
@@ -104,11 +103,11 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
         RangeVectorAggregator.fastReduce(aggregator, false, source, numWindows)
       }.getOrElse {
         RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping,
-          querySession.qContext.groupByCardLimit)
+          querySession.qContext.plannerParams.groupByCardLimit)
       }
     } else {
       RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping,
-        querySession.qContext.groupByCardLimit)
+        querySession.qContext.plannerParams.groupByCardLimit)
     }
   }
 

@@ -143,7 +143,7 @@ trait ExecPlan extends QueryCommand {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
           span.mark(transf.getClass.getSimpleName)
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
-          (transf.apply(acc._1, querySession, queryContext.sampleLimit, acc._2,
+          (transf.apply(acc._1, querySession, queryContext.plannerParams.sampleLimit, acc._2,
             paramRangeVector), transf.schema(acc._2))
         }
         val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
@@ -157,18 +157,18 @@ trait ExecPlan extends QueryCommand {
             case srv: SerializableRangeVector =>
               numResultSamples += srv.numRowsInt
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-              if (enforceLimit && numResultSamples > queryContext.sampleLimit)
-                throw new BadQueryException(s"This query results in more than ${queryContext.sampleLimit} samples. " +
-                  s"Try applying more filters or reduce time range.")
+              if (enforceLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
+                throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
+                  sampleLimit} samples.Try applying more filters or reduce time range.")
               srv
             case rv: RangeVector =>
               // materialize, and limit rows per RV
               val srv = SerializedRangeVector(rv, builder, recSchema, getClass.getSimpleName, span)
               numResultSamples += srv.numRowsInt
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-              if (enforceLimit && numResultSamples > queryContext.sampleLimit)
-                throw new BadQueryException(s"This query results in more than ${queryContext.sampleLimit} samples. " +
-                  s"Try applying more filters or reduce time range.")
+              if (enforceLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
+                throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
+                  sampleLimit} samples. Try applying more filters or reduce time range.")
               srv
           }
           .toListL
@@ -184,7 +184,7 @@ trait ExecPlan extends QueryCommand {
               // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
               // is < 2MB
               qLogger.warn(s"queryId: ${queryContext.queryId} result was large size $numBytes. May need to " +
-                s"tweak limits. ExecPlan was: ${printTree()} ; Limit was: ${queryContext.sampleLimit}")
+                s"tweak limits. ExecPlan was: ${printTree()} ; Limit was: ${queryContext.plannerParams.sampleLimit}")
             }
             span.mark(s"num-result-samples: $numResultSamples")
             span.mark(s"num-range-vectors: ${r.size}")
