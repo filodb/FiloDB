@@ -2,6 +2,12 @@ package filodb.coordinator.queryplanner
 
 import java.util.concurrent.ThreadLocalRandom
 
+import scala.concurrent.Future
+
+import com.softwaremill.sttp.SttpBackend
+import com.typesafe.config.Config
+import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.metadata.{DatasetOptions, Schemas}
 import filodb.core.query.{PromQlQueryParams, QueryContext, RangeParams}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
@@ -141,7 +147,8 @@ trait  PlannerMaterializer {
     }
 }
 
-object PlannerUtil {
+object PlannerUtil extends StrictLogging {
+
    /**
    * Returns URL params for label values which is used to create Metadata remote exec plan
    */
@@ -152,4 +159,15 @@ object PlannerUtil {
       head}$quote"""}.mkString(",")
     Map("filter" -> filters, "labels" -> lp.labelNames.mkString(","))
   }
+
+  def getSttpBackend(queryConfig: Config): SttpBackend[Future, Nothing] = {
+    val sttpBackendConfig = queryConfig.getConfig("remote.http.client.sttp-backend")
+    val sttpBackendFactoryClass = sttpBackendConfig.getString("factory")
+    val sttBackendConstructor = Class.forName(sttpBackendFactoryClass).getConstructors.head
+    val sttpBackendFactory = sttBackendConstructor.newInstance().asInstanceOf[RemoteExecSttpBackendFactory]
+    logger.info(s"Using sttpBackend factory $sttpBackendFactory with config ${sttpBackendConfig}")
+    val sttpBackend = sttpBackendFactory.create(sttpBackendConfig)
+    sttpBackend
+  }
+
 }

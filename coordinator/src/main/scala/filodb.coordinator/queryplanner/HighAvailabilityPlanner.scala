@@ -27,6 +27,8 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   import LogicalPlanUtils._
   import QueryFailureRoutingStrategy._
 
+  val sttpBackend = PlannerUtil.getSttpBackend(queryConfig.routingConfig)
+
   val remoteHttpEndpoint: String = queryConfig.routingConfig.getString("remote.http.endpoint")
 
   val remoteHttpTimeoutMs: Long =
@@ -79,12 +81,12 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           rootLogicalPlan match {
             case lp: LabelValues         => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                             PlannerUtil.getLabelValuesUrlParams(lp, queryParams), newQueryContext,
-                                            InProcessPlanDispatcher, dsRef)
+                                            InProcessPlanDispatcher, dsRef, sttpBackend)
             case lp: SeriesKeysByFilters => val urlParams = Map("match[]" -> queryParams.promQl)
                                             MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                              urlParams, newQueryContext, InProcessPlanDispatcher, dsRef)
+                                              urlParams, newQueryContext, InProcessPlanDispatcher, dsRef, sttpBackend)
             case _                       => PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                            newQueryContext, InProcessPlanDispatcher, dsRef)
+                                            newQueryContext, InProcessPlanDispatcher, dsRef, sttpBackend)
           }
 
       }
