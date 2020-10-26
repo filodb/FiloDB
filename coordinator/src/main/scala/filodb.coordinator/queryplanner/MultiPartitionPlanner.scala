@@ -20,11 +20,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                             localPartitionPlanner: QueryPlanner,
                             localPartitionName: String,
                             dataset: Dataset,
-                            queryConfig: QueryConfig) extends QueryPlanner with StrictLogging {
+                            queryConfig: QueryConfig,
+                            remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.default)
+  extends QueryPlanner with StrictLogging {
 
   import net.ceedubs.ficus.Ficus._
-
-  val sttpBackend = PlannerUtil.getSttpBackend(queryConfig.routingConfig)
 
   val remoteHttpTimeoutMs: Long =
     queryConfig.routingConfig.config.as[Option[Long]]("remote.http.timeout").getOrElse(60000)
@@ -120,7 +120,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         else {
           val httpEndpoint = p.endPoint + queryParams.remoteQueryPath.getOrElse("")
           PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, generateRemoteExecParams(qContext, startMs, endMs),
-            InProcessPlanDispatcher, dataset.ref, sttpBackend)
+            InProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
         }
       }
       if (execPlans.size == 1) execPlans.head
@@ -146,8 +146,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         else {
           val httpEndpoint = partitions.head.endPoint + queryParams.remoteQueryPath.getOrElse("")
           PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, generateRemoteExecParams(qContext,
-            queryParams.startSecs * 1000, queryParams.endSecs * 1000), InProcessPlanDispatcher, dataset.ref, sttpBackend
-            )
+            queryParams.startSecs * 1000, queryParams.endSecs * 1000),
+            InProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
         }
       }
       else throw new UnsupportedOperationException("Binary Join across multiple partitions not supported")
@@ -193,6 +193,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val httpEndpoint = partitionAssignment.endPoint + finalQueryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       remoteQueryPath.getOrElse("")
     MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-      urlParams, finalQueryContext, InProcessPlanDispatcher, dataset.ref, sttpBackend)
+      urlParams, finalQueryContext, InProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
   }
 }

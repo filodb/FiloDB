@@ -2,7 +2,6 @@ package filodb.query.exec
 
 import scala.concurrent.Future
 
-import com.softwaremill.sttp.SttpBackend
 import kamon.Kamon
 import kamon.trace.Span
 import monix.execution.Scheduler
@@ -20,7 +19,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
                             queryContext: QueryContext,
                             dispatcher: PlanDispatcher,
                             dataset: DatasetRef,
-                            sttpBackend: SttpBackend[Future, Nothing] = DefaultSttpBackend()) extends RemoteExec {
+                            remoteExecHttpClient: RemoteExecHttpClient) extends RemoteExec {
   private val defaultColumns = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
 
@@ -44,7 +43,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                               (implicit sched: Scheduler): Future[QueryResponse] = {
-    RemoteHttpClient(sttpBackend).httpGet(queryEndpoint, requestTimeoutMs, queryContext.submitTime, getUrlParams())
+    remoteExecHttpClient.httpGet(queryEndpoint, requestTimeoutMs, queryContext.submitTime, getUrlParams())
       .map { response =>
         response.unsafeBody match {
           case Left(error) => QueryError(queryContext.queryId, error.error)

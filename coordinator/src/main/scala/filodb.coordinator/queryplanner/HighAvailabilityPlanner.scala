@@ -21,13 +21,13 @@ import filodb.query.exec._
 class HighAvailabilityPlanner(dsRef: DatasetRef,
                               localPlanner: QueryPlanner,
                               failureProvider: FailureProvider,
-                              queryConfig: QueryConfig) extends QueryPlanner with StrictLogging {
+                              queryConfig: QueryConfig,
+                              remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.default)
+  extends QueryPlanner with StrictLogging {
 
   import net.ceedubs.ficus.Ficus._
   import LogicalPlanUtils._
   import QueryFailureRoutingStrategy._
-
-  val sttpBackend = PlannerUtil.getSttpBackend(queryConfig.routingConfig)
 
   val remoteHttpEndpoint: String = queryConfig.routingConfig.getString("remote.http.endpoint")
 
@@ -81,12 +81,13 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           rootLogicalPlan match {
             case lp: LabelValues         => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                             PlannerUtil.getLabelValuesUrlParams(lp, queryParams), newQueryContext,
-                                            InProcessPlanDispatcher, dsRef, sttpBackend)
+                                            InProcessPlanDispatcher, dsRef, remoteExecHttpClient)
             case lp: SeriesKeysByFilters => val urlParams = Map("match[]" -> queryParams.promQl)
                                             MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                              urlParams, newQueryContext, InProcessPlanDispatcher, dsRef, sttpBackend)
+                                              urlParams, newQueryContext, InProcessPlanDispatcher,
+                                              dsRef, remoteExecHttpClient)
             case _                       => PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                            newQueryContext, InProcessPlanDispatcher, dsRef, sttpBackend)
+                                            newQueryContext, InProcessPlanDispatcher, dsRef, remoteExecHttpClient)
           }
 
       }

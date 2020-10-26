@@ -5,6 +5,7 @@ import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
@@ -26,8 +27,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
   private val dataset = MetricsTestData.timeseriesDataset
   private val schemas = Schemas(dataset.schema)
 
-  private val routingConfigString = "routing {\n  remote {\n    http {\n      timeout = 10000\n" +
-    "      client.sttp-backend.factory = \"filodb.query.exec.AsyncHttpClientBackendFactory\"\n    }\n  }\n}"
+  private val routingConfigString = "routing {\n  remote {\n    http {\n      timeout = 10000\n    }\n  }\n}"
   private val routingConfig = ConfigFactory.parseString(routingConfigString)
 
   private val config = ConfigFactory.load("application_test.conf")

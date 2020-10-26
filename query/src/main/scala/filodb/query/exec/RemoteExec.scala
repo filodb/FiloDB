@@ -6,7 +6,7 @@ import scala.concurrent.Future
 import scala.concurrent.duration.FiniteDuration
 import scala.sys.ShutdownHookThread
 
-import com.softwaremill.sttp.SttpBackend
+import com.softwaremill.sttp.{DeserializationError, Response, SttpBackend}
 import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
 import com.softwaremill.sttp.circe.asJson
 import com.typesafe.config.{Config, ConfigFactory}
@@ -24,7 +24,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
 
   def queryEndpoint: String
 
-  def sttpBackend: SttpBackend[Future, Nothing]
+  def remoteExecHttpClient: RemoteExecHttpClient
 
   def requestTimeoutMs: Long
 
@@ -119,7 +119,22 @@ object DefaultSttpBackend {
 
 }
 
-class RemoteHttpClient private(sttpBackend: SttpBackend[Future, Nothing]) extends StrictLogging {
+/**
+ * A trait for remoteExec GET Queries.
+ */
+trait RemoteExecHttpClient extends StrictLogging {
+
+  def httpGet(httpEndpoint: String, httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
+             (implicit scheduler: Scheduler):
+  Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]]
+
+  def httpMetadataGet(httpEndpoint: String, httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
+                     (implicit scheduler: Scheduler):
+  Future[Response[scala.Either[DeserializationError[io.circe.Error], MetadataSuccessResponse]]]
+
+}
+
+class RemoteHttpClient private(sttpBackend: SttpBackend[Future, Nothing]) extends RemoteExecHttpClient {
 
   import com.softwaremill.sttp._
   import io.circe.generic.auto._
@@ -127,7 +142,7 @@ class RemoteHttpClient private(sttpBackend: SttpBackend[Future, Nothing]) extend
   // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
   // Needed to override Sampl case class Encoder.
   import PromCirceSupport._
-  implicit val backend = sttpBackend
+  private implicit val backend = sttpBackend
 
   ShutdownHookThread(shutdown())
 
@@ -167,6 +182,8 @@ class RemoteHttpClient private(sttpBackend: SttpBackend[Future, Nothing]) extend
 }
 
 object RemoteHttpClient {
+
+  val default = RemoteHttpClient(DefaultSttpBackend())
 
   def apply(backend: SttpBackend[Future, Nothing]): RemoteHttpClient = new RemoteHttpClient(backend)
 

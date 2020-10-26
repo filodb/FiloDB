@@ -2,9 +2,6 @@ package filodb.coordinator.queryplanner
 
 import java.util.concurrent.ThreadLocalRandom
 
-import scala.concurrent.Future
-
-import com.softwaremill.sttp.SttpBackend
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 
@@ -160,14 +157,19 @@ object PlannerUtil extends StrictLogging {
     Map("filter" -> filters, "labels" -> lp.labelNames.mkString(","))
   }
 
-  def getSttpBackend(queryConfig: Config): SttpBackend[Future, Nothing] = {
+  /**
+   * Create a HttpClient that will be used for RemoteExec planner.
+   * Note: Create single HttpClient and reuse the same instead of creating multiple instances of RemoteHttpClient.
+   * @param queryConfig - SttpBackend config
+   * @return - RemoteExecHttpClient
+   */
+  def createRemoteExecHttpClient(queryConfig: Config): RemoteExecHttpClient = {
     val sttpBackendConfig = queryConfig.getConfig("remote.http.client.sttp-backend")
     val sttpBackendFactoryClass = sttpBackendConfig.getString("factory")
     val sttBackendConstructor = Class.forName(sttpBackendFactoryClass).getConstructors.head
     val sttpBackendFactory = sttBackendConstructor.newInstance().asInstanceOf[RemoteExecSttpBackendFactory]
-    logger.info(s"Using sttpBackend factory $sttpBackendFactory with config ${sttpBackendConfig}")
-    val sttpBackend = sttpBackendFactory.create(sttpBackendConfig)
-    sttpBackend
+    logger.info(s"Using sttpBackend factory $sttpBackendFactory with config $sttpBackendConfig")
+    RemoteHttpClient(sttpBackendFactory.create(sttpBackendConfig))
   }
 
 }
