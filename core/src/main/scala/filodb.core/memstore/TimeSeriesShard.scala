@@ -282,12 +282,11 @@ class TimeSeriesShard(val ref: DatasetRef,
         // the process to be safe and log details for further debugging.
         val chunkID = UnsafeUtils.getLong(metaAddr + 4)
         if (numBytes != partition.schema.data.blockMetaSize) {
-          logger.error(f"POSSIBLE CORRUPTION DURING onReclaim(metaAddr=0x$metaAddr%08x, numBytes=$numBytes)" +
+          Shutdown.haltAndCatchFire( new RuntimeException(f"POSSIBLE CORRUPTION DURING onReclaim(" +
+                       f"metaAddr=0x$metaAddr%08x, numBytes=$numBytes)" +
                        s"Expected meta size: ${partition.schema.data.blockMetaSize} for schema=${partition.schema}" +
                        s"  Reclaiming chunk chunkID=$chunkID from shard=$shardNum " +
-                       s"partID=$partID ${partition.stringPartition}")
-          logger.warn("Halting FiloDB...")
-          sys.exit(33)   // Special onReclaim corruption exit code
+                       s"partID=$partID ${partition.stringPartition}"))
         }
         partition.removeChunksAt(chunkID)
         logger.debug(s"Reclaiming chunk chunkID=$chunkID from shard=$shardNum " +
