@@ -22,7 +22,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
                               localPlanner: QueryPlanner,
                               failureProvider: FailureProvider,
                               queryConfig: QueryConfig,
-                              remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.default)
+                              remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient)
   extends QueryPlanner with StrictLogging {
 
   import net.ceedubs.ficus.Ficus._

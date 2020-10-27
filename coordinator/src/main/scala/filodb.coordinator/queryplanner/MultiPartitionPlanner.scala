@@ -21,7 +21,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                             localPartitionName: String,
                             dataset: Dataset,
                             queryConfig: QueryConfig,
-                            remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.default)
+                            remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient)
   extends QueryPlanner with StrictLogging {
 
   import net.ceedubs.ficus.Ficus._

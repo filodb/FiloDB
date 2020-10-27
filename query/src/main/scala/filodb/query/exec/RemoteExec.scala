@@ -6,15 +6,17 @@ import scala.concurrent.Future
 import scala.concurrent.duration.FiniteDuration
 import scala.sys.ShutdownHookThread
 
-import com.softwaremill.sttp.{DeserializationError, Response, SttpBackend}
+import com.softwaremill.sttp.{DeserializationError, Response, SttpBackendOptions}
+import com.softwaremill.sttp.SttpBackendOptions.ProxyType.{Http, Socks}
 import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
 import com.softwaremill.sttp.circe.asJson
-import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
 import monix.execution.Scheduler
+import org.asynchttpclient.{AsyncHttpClientConfig, DefaultAsyncHttpClientConfig}
+import org.asynchttpclient.proxy.ProxyServer
 
 import filodb.core.query.{PromQlQueryParams, QuerySession}
 import filodb.core.store.ChunkSource
@@ -87,39 +89,6 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
 }
 
 /**
- * A zero-arg constructor class that knows how to create an HttpClient for Prom Remote Queries.
- */
-trait RemoteExecSttpBackendFactory {
-
-  /**
-   * Returns an SttpBackend that can be used to create sttp for remote Http requests.
-   * @param config the configuration for the http client
-   */
-  def create(config: Config): SttpBackend[Future, Nothing]
-
-}
-
-class AsyncHttpClientBackendFactory extends RemoteExecSttpBackendFactory {
-
-  /**
-   * Returns an AsyncHttpClientFutureBackend that can be used to create sttp for remote Http requests.
-   *
-   * @param config the configuration for the http client
-   */
-  override def create(config: Config): SttpBackend[Future, Nothing] = AsyncHttpClientFutureBackend()
-
-}
-
-/**
- * A default prom remote http client backend from DefaultPromRemoteHttpClientFactory.
- */
-object DefaultSttpBackend {
-
-  def apply(): SttpBackend[Future, Nothing] = new AsyncHttpClientBackendFactory().create(ConfigFactory.empty())
-
-}
-
-/**
  * A trait for remoteExec GET Queries.
  */
 trait RemoteExecHttpClient extends StrictLogging {
@@ -134,7 +103,7 @@ trait RemoteExecHttpClient extends StrictLogging {
 
 }
 
-class RemoteHttpClient private(sttpBackend: SttpBackend[Future, Nothing]) extends RemoteExecHttpClient {
+class RemoteHttpClient private(asyncHttpClientConfig: AsyncHttpClientConfig) extends RemoteExecHttpClient {
 
   import com.softwaremill.sttp._
   import io.circe.generic.auto._
@@ -142,7 +111,7 @@ class RemoteHttpClient private(sttpBackend: SttpBackend[Future, Nothing]) extend
   // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
   // Needed to override Sampl case class Encoder.
   import PromCirceSupport._
-  private implicit val backend = sttpBackend
+  private implicit val backend = AsyncHttpClientFutureBackend.usingConfig(asyncHttpClientConfig)
 
   ShutdownHookThread(shutdown())
 
@@ -183,8 +152,36 @@ class RemoteHttpClient private(sttpBackend: SttpBackend[Future, Nothing]) extend
 
 object RemoteHttpClient {
 
-  val default = RemoteHttpClient(DefaultSttpBackend())
+  import scala.collection.JavaConverters._
 
-  def apply(backend: SttpBackend[Future, Nothing]): RemoteHttpClient = new RemoteHttpClient(backend)
+  /**
+   * A default prom remote http client backend from DefaultPromRemoteHttpClientFactory.
+   */
+  def configBuilder(): DefaultAsyncHttpClientConfig.Builder = {
+    // A copy of private AsyncHttpClientBackend.defaultClient.
+    var configBuilder = new DefaultAsyncHttpClientConfig.Builder()
+      .setConnectTimeout(SttpBackendOptions.Default.connectionTimeout.toMillis.toInt)
+    configBuilder = SttpBackendOptions.Default.proxy match {
+      case None => configBuilder
+      case Some(p) =>
+        val proxyType: org.asynchttpclient.proxy.ProxyType =
+          p.proxyType match {
+            case Socks => org.asynchttpclient.proxy.ProxyType.SOCKS_V5
+            case Http  => org.asynchttpclient.proxy.ProxyType.HTTP
+          }
+
+        configBuilder.setProxyServer(
+          new ProxyServer.Builder(p.host, p.port)
+            .setProxyType(proxyType) // Fix issue #145
+            .setNonProxyHosts(p.nonProxyHosts.asJava)
+            .build())
+    }
+    configBuilder
+  }
+
+  val defaultClient = RemoteHttpClient(configBuilder().build())
+
+  def apply(asyncHttpClientConfig: AsyncHttpClientConfig): RemoteHttpClient =
+    new RemoteHttpClient(asyncHttpClientConfig)
 
 }
