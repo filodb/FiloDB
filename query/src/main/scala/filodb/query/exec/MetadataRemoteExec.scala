@@ -1,9 +1,10 @@
 package filodb.query.exec
 
+import scala.concurrent.Future
+
 import kamon.Kamon
 import kamon.trace.Span
 import monix.execution.Scheduler
-import scala.concurrent.Future
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.Column.ColumnType
@@ -17,7 +18,8 @@ case class MetadataRemoteExec(queryEndpoint: String,
                               urlParams: Map[String, Any],
                               queryContext: QueryContext,
                               dispatcher: PlanDispatcher,
-                              dataset: DatasetRef) extends RemoteExec {
+                              dataset: DatasetRef,
+                              remoteExecHttpClient: RemoteExecHttpClient) extends RemoteExec {
 
   private val columns = Seq(ColumnInfo("Labels", ColumnType.MapColumn))
   private val resultSchema = ResultSchema(columns, 1)
@@ -26,7 +28,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
 
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                               (implicit sched: Scheduler): Future[QueryResponse] = {
-    PromRemoteExec.httpMetadataGet(queryEndpoint, httpTimeoutMs, queryContext.submitTime, getUrlParams())
+    remoteExecHttpClient.httpMetadataGet(queryEndpoint, httpTimeoutMs, queryContext.submitTime, getUrlParams())
       .map { response =>
         response.unsafeBody match {
           case Left(error) => QueryError(queryContext.queryId, error.error)

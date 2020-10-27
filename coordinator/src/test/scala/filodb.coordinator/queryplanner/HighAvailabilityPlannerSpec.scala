@@ -31,8 +31,8 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
   private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
 
-  private val routingConfigString = "routing {\n  remote {\n   " +
-    " http {\n      endpoint = localhost\n timeout = 10000\n    }\n  }\n}"
+  private val routingConfigString = "routing {\n  remote {\n    http {\n" +
+      "      endpoint = localhost\n      timeout = 10000\n    }\n  }\n}"
 
   private val routingConfig = ConfigFactory.parseString(routingConfigString)
 
