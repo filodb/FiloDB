@@ -337,7 +337,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       qParams)
     val  param = PromQlQueryParams("test", 1000, 200, 5000)
     val execPlan = engine.materialize(logicalPlan, QueryContext(origQueryParams = param,
-      spreadOverride = Some(new StaticSpreadProvider(SpreadChange(0, 0)))))
+      plannerParams = PlannerParams(spreadOverride = Some(new StaticSpreadProvider(SpreadChange(0, 0))))))
     roundTrip(execPlan) shouldEqual execPlan
   }
 }

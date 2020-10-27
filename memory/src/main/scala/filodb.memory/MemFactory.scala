@@ -316,6 +316,11 @@ class BlockMemFactory(blockStore: BlockManager,
     fullBlocksToBeMarkedAsReclaimable.clear()
   }
 
+  /**
+   * If current block has the capacity, no-op
+   * Otherwise, move to next block. As a result, "currentBlock"
+   * now points to a new block
+   */
   protected def ensureCapacity(forSize: Long): Block = synchronized {
     var block = accessCurrentBlock()
     if (block.hasCapacity(forSize)) {

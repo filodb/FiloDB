@@ -56,6 +56,8 @@ class ShardKeyRegexPlanner(dataset: Dataset,
       case lp: VectorPlan                  => materializeVectorPlan(qContext, lp)
       case lp: Aggregate                   => materializeAggregate(lp, qContext)
       case lp: BinaryJoin                  => materializeBinaryJoin(lp, qContext)
+      case lp: LabelValues                 => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
+      case lp: SeriesKeysByFilters         => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
       case _                               => materializeOthers(logicalPlan, qContext)
     }
   }
@@ -69,7 +71,8 @@ class ShardKeyRegexPlanner(dataset: Dataset,
         // For example for exp(sum(test{_ws_ = "demo", _ns_ =~ "App.*"})), sub queries should be
         // sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
         val newQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
-        val newQueryContext = qContext.copy(origQueryParams = newQueryParams)
+        val newQueryContext = qContext.copy(origQueryParams = newQueryParams, plannerParams = qContext.plannerParams.
+          copy(skipAggregatePresent = true))
         queryPlanner.materialize(logicalPlan.replaceFilters(result), newQueryContext)
       }
   }

@@ -9,7 +9,7 @@ import org.scalatest.matchers.should.Matchers
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.core.query.Filter.Equals
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -30,7 +30,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     withFallback(routingConfig)
   private val queryConfig = new QueryConfig(config)
 
-  private val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000, None)
+  private val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000)
 
   private val localMapper = new ShardMapper(32)
   for {i <- 0 until 32} localMapper.registerNode(Seq(i), node)
@@ -61,7 +61,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       ColumnFilter("_ns_", Equals("App-2"))))}
     val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1,
-      1000, None)))
+      1000)))
     execPlan.isInstanceOf[MultiPartitionReduceAggregateExec] shouldEqual(true)
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
     execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
@@ -86,7 +86,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       ColumnFilter("_ns_", Equals("App-2"))))}
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = PromQlQueryParams("1 + test{_ws_ = \"demo\"," +
-      " _ns_ =~ \"App.*\", instance = \"Inst-1\" }", 100, 1, 1000, None)))
+      " _ns_ =~ \"App.*\", instance = \"Inst-1\" }", 100, 1, 1000)))
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
     execPlan.rangeVectorTransformers(0).isInstanceOf[ScalarOperationMapper] shouldEqual true
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
@@ -209,7 +209,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   it("should generate Exec plan for scalar - time()") {
     val lp = Parser.queryToLogicalPlan("""scalar(test{_ws_ = "demo", _ns_ =~ "App.*"}) - time()""",
       1000, 1000)
-    val promQlQueryParams = PromQlQueryParams("""scalar(test{_ws_ = "demo", _ns_ =~ "App.*"}) - time()""", 100, 1, 1000, None)
+    val promQlQueryParams = PromQlQueryParams("""scalar(test{_ws_ = "demo", _ns_ =~ "App.*"}) - time()""", 100, 1, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
@@ -233,5 +233,20 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       "test{_ws_=\"demo\",_ns_=\"App-1\"}"
     multiPartitionExec.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
       "test{_ws_=\"demo\",_ns_=\"App-2\"}"
+  }
+
+  it ("should generate Exec plan for Metadata Label values query") {
+    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => Seq.empty
+    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn)
+    val lp = Parser.labelValuesQueryToLogicalPlan(Seq("""__metric__"""), Some("""_ws_="demo", _ns_=~".*" """),
+      TimeStepParams(1000, 20, 5000) )
+
+    val promQlQueryParams = PromQlQueryParams(
+      "", 1000, 20, 5000, Some("/api/v2/label/values"))
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[LabelValuesDistConcatExec] shouldEqual (true)
   }
 }

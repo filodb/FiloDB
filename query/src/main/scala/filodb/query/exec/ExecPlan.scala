@@ -4,6 +4,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.control.NonFatal
 
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -115,7 +116,8 @@ trait ExecPlan extends QueryCommand {
       // kamon uses thread-locals.
       Kamon.runWithSpan(span, true) {
         val doEx = doExecute(source, querySession)
-        Kamon.histogram("query-execute-time-elapsed-step1-done")
+        Kamon.histogram("query-execute-time-elapsed-step1-done",
+          MeasurementUnit.time.milliseconds)
           .withTag("plan", getClass.getSimpleName)
           .record(System.currentTimeMillis - startExecute)
         doEx
@@ -124,7 +126,8 @@ trait ExecPlan extends QueryCommand {
 
     // Step 2: Run connect monix pipeline to transformers, materialize the result
     def step2(res: ExecResult) = res.schema.map { resSchema =>
-      Kamon.histogram("query-execute-time-elapsed-step2-start")
+      Kamon.histogram("query-execute-time-elapsed-step2-start",
+        MeasurementUnit.time.milliseconds)
         .withTag("plan", getClass.getSimpleName)
         .record(System.currentTimeMillis - startExecute)
       val span = Kamon.spanBuilder(s"execute-step2-${getClass.getSimpleName}")
@@ -143,11 +146,12 @@ trait ExecPlan extends QueryCommand {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
           span.mark(transf.getClass.getSimpleName)
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
-          (transf.apply(acc._1, querySession, queryContext.sampleLimit, acc._2,
+          (transf.apply(acc._1, querySession, queryContext.plannerParams.sampleLimit, acc._2,
             paramRangeVector), transf.schema(acc._2))
         }
         val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
-        Kamon.histogram("query-execute-time-elapsed-step2-transformer-pipeline-setup")
+        Kamon.histogram("query-execute-time-elapsed-step2-transformer-pipeline-setup",
+                    MeasurementUnit.time.milliseconds)
           .withTag("plan", getClass.getSimpleName)
           .record(System.currentTimeMillis - startExecute)
         val builder = SerializedRangeVector.newBuilder()
@@ -157,23 +161,24 @@ trait ExecPlan extends QueryCommand {
             case srv: SerializableRangeVector =>
               numResultSamples += srv.numRowsInt
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-              if (enforceLimit && numResultSamples > queryContext.sampleLimit)
-                throw new BadQueryException(s"This query results in more than ${queryContext.sampleLimit} samples. " +
-                  s"Try applying more filters or reduce time range.")
+              if (enforceLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
+                throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
+                  sampleLimit} samples.Try applying more filters or reduce time range.")
               srv
             case rv: RangeVector =>
               // materialize, and limit rows per RV
               val srv = SerializedRangeVector(rv, builder, recSchema, getClass.getSimpleName, span)
               numResultSamples += srv.numRowsInt
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-              if (enforceLimit && numResultSamples > queryContext.sampleLimit)
-                throw new BadQueryException(s"This query results in more than ${queryContext.sampleLimit} samples. " +
-                  s"Try applying more filters or reduce time range.")
+              if (enforceLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
+                throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
+                  sampleLimit} samples. Try applying more filters or reduce time range.")
               srv
           }
           .toListL
           .map { r =>
-            Kamon.histogram("query-execute-time-elapsed-step2-result-materialized")
+            Kamon.histogram("query-execute-time-elapsed-step2-result-materialized",
+              MeasurementUnit.time.milliseconds)
               .withTag("plan", getClass.getSimpleName)
               .record(System.currentTimeMillis - startExecute)
             val numBytes = builder.allContainers.map(_.numBytes).sum
@@ -184,7 +189,7 @@ trait ExecPlan extends QueryCommand {
               // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
               // is < 2MB
               qLogger.warn(s"queryId: ${queryContext.queryId} result was large size $numBytes. May need to " +
-                s"tweak limits. ExecPlan was: ${printTree()} ; Limit was: ${queryContext.sampleLimit}")
+                s"tweak limits. ExecPlan was: ${printTree()} ; Limit was: ${queryContext.plannerParams.sampleLimit}")
             }
             span.mark(s"num-result-samples: $numResultSamples")
             span.mark(s"num-range-vectors: ${r.size}")
@@ -387,7 +392,6 @@ abstract class NonLeafExecPlan extends ExecPlan {
                       querySession: QuerySession)
                      (implicit sched: Scheduler): ExecResult = {
     val parentSpan = Kamon.currentSpan()
-    parentSpan.mark("create-child-tasks")
 
     // whether child tasks need to be executed sequentially.
     // parallelism 1 means, only one worker thread to process underlying tasks.
@@ -418,9 +422,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     val outputSchema = processedTasks.collect {
       case (QueryResult(_, schema, _), _) => schema
     }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
-    parentSpan.mark("output-compose")
     val outputRvs = compose(processedTasks, outputSchema, querySession)
-    parentSpan.mark("return-results")
     ExecResult(outputRvs, outputSchema)
   }
 
