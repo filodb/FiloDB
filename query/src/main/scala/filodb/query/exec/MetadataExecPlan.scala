@@ -84,19 +84,18 @@ final case class PartKeysExec(queryContext: QueryContext,
     val rvs = source match {
       case memStore: MemStore =>
         val response = memStore.partKeysWithFilters(dataset, shard, filters,
-          fetchFirstLastSampleTimes, end, start, queryContext.sampleLimit)
+          fetchFirstLastSampleTimes, end, start, queryContext.plannerParams.sampleLimit)
         import NoCloseCursor._
         Observable.now(IteratorBackedRangeVector(
           new CustomRangeVectorKey(Map.empty), UTF8MapIteratorRowReader(response)))
       case other =>
         Observable.empty
     }
-    Kamon.currentSpan().mark("creating-resultschema")
     val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
     ExecResult(rvs, Task.eval(sch))
   }
 
-  def args: String = s"shard=$shard, filters=$filters, limit=${queryContext.sampleLimit}"
+  def args: String = s"shard=$shard, filters=$filters, limit=${queryContext.plannerParams.sampleLimit}"
 }
 
 final case class LabelValuesExec(queryContext: QueryContext,
@@ -118,13 +117,12 @@ final case class LabelValuesExec(queryContext: QueryContext,
       val memStore = source.asInstanceOf[MemStore]
       val response = filters.isEmpty match {
         // retrieves label values for a single label - no column filter
-        case true if (columns.size == 1) => memStore.labelValues(dataset, shard, columns.head, queryContext.sampleLimit)
-          .map(termInfo => Map(columns.head.utf8 -> termInfo.term))
-          .toIterator
+        case true if (columns.size == 1) => memStore.labelValues(dataset, shard, columns.head, queryContext.
+          plannerParams.sampleLimit).map(termInfo => Map(columns.head.utf8 -> termInfo.term)).toIterator
         case true => throw new BadQueryException("either label name is missing " +
           "or there are multiple label names without filter")
         case false => memStore.labelValuesWithFilters(dataset, shard, filters, columns, endMs, startMs,
-          queryContext.sampleLimit)
+          queryContext.plannerParams.sampleLimit)
       }
       import NoCloseCursor._
       Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
@@ -132,11 +130,10 @@ final case class LabelValuesExec(queryContext: QueryContext,
     } else {
       Observable.empty
     }
-    parentSpan.mark("creating-resultschema")
     val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
     ExecResult(rvs, Task.eval(sch))
   }
 
-  def args: String = s"shard=$shard, filters=$filters, col=$columns, limit=${queryContext.sampleLimit}, " +
-    s"startMs=$startMs, endMs=$endMs"
+  def args: String = s"shard=$shard, filters=$filters, col=$columns, limit=${queryContext.plannerParams.sampleLimit}," +
+    s" startMs=$startMs, endMs=$endMs"
 }

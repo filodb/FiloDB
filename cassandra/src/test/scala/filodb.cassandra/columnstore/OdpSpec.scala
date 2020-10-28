@@ -1,14 +1,12 @@
 package filodb.cassandra.columnstore
 
 import scala.concurrent.Future
-
 import com.typesafe.config.ConfigFactory
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.core.{MachineMetricsData, TestData}
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder}
@@ -16,7 +14,7 @@ import filodb.core.downsample.OffHeapMemory
 import filodb.core.memstore._
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.metadata.{Dataset, Schemas}
-import filodb.core.query.{ColumnFilter, QueryConfig, QueryContext, QuerySession}
+import filodb.core.query.{ColumnFilter, PlannerParams, QueryConfig, QueryContext, QuerySession}
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{InMemoryMetaStore, PartKeyRecord, StoreConfig, TimeRangeChunkScan}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -187,8 +185,9 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
   def query(memStore: TimeSeriesMemStore): Future[QueryResponse] = {
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(gaugeName))
-    val exec = MultiSchemaPartitionsExec(QueryContext(sampleLimit = numSamples * 2), InProcessPlanDispatcher,
-      dataset.ref, 0, queryFilters, TimeRangeChunkScan(firstSampleTime, firstSampleTime + 2 * numSamples))
+    val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams = PlannerParams(sampleLimit = numSamples * 2)),
+      InProcessPlanDispatcher, dataset.ref, 0, queryFilters, TimeRangeChunkScan(firstSampleTime, firstSampleTime + 2 *
+        numSamples))
     val queryConfig = new QueryConfig(config.getConfig("query"))
     val querySession = QuerySession(QueryContext(), queryConfig)
     exec.execute(memStore, querySession)(queryScheduler).runAsync(queryScheduler)

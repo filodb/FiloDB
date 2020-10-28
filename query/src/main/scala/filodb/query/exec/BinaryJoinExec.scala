@@ -3,6 +3,7 @@ package filodb.query.exec
 import scala.collection.mutable
 
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.reactive.Observable
 
@@ -65,17 +66,20 @@ final case class BinaryJoinExec(queryContext: QueryContext,
   protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],
                               firstSchema: Task[ResultSchema],
                               querySession: QuerySession): Observable[RangeVector] = {
+    val span = Kamon.currentSpan()
     val taskOfResults = childResponses.map {
       case (QueryResult(_, _, result), _)
-        if (result.size  > queryContext.joinQueryCardLimit && cardinality == Cardinality.OneToOne) =>
-        throw new BadQueryException(s"This query results in more than ${queryContext.joinQueryCardLimit} " +
-          s"join cardinality. Try applying more filters.")
+        if (result.size  > queryContext.plannerParams.joinQueryCardLimit && cardinality == Cardinality.OneToOne) =>
+        throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.joinQueryCardLimit}"
+          + s" join cardinality. Try applying more filters.")
       case (QueryResult(_, _, result), i) => (result, i)
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
-      Kamon.histogram("query-execute-time-elapsed-step2-child-results-available")
+      span.mark("binary-join-child-results-available")
+      Kamon.histogram("query-execute-time-elapsed-step1-child-results-available",
+        MeasurementUnit.time.milliseconds)
         .withTag("plan", getClass.getSimpleName)
-        .record(System.currentTimeMillis - queryContext.submitTime)
+        .record(Math.max(0, System.currentTimeMillis - queryContext.submitTime))
       // NOTE: We can't require this any more, as multischema queries may result in not a QueryResult if the
       //       filter returns empty results.  The reason is that the schema will be undefined.
       // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
@@ -109,9 +113,9 @@ final case class BinaryJoinExec(queryContext: QueryContext,
           resultKeySet.add(resKey)
 
           // OneToOne cardinality case is already handled. this condition handles OneToMany case
-          if (resultKeySet.size > queryContext.joinQueryCardLimit)
-            throw new BadQueryException(s"This query results in more than ${queryContext.joinQueryCardLimit} " +
-              s"join cardinality. Try applying more filters.")
+          if (resultKeySet.size > queryContext.plannerParams.joinQueryCardLimit)
+            throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
+              joinQueryCardLimit} " + s"join cardinality. Try applying more filters.")
 
           val res = if (lhsIsOneSide) binOp(rvOne.rows, rvOther.rows) else binOp(rvOther.rows, rvOne.rows)
           IteratorBackedRangeVector(resKey, res)

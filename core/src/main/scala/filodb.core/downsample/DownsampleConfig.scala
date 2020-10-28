@@ -8,8 +8,6 @@ import net.ceedubs.ficus.Ficus._
 import filodb.core.DatasetRef
 
 final case class DownsampleConfig(config: Config) {
-  val enabled = config.hasPath("enabled") && config.getBoolean("enabled")
-
   /**
     * Resolutions to downsample at
     */
@@ -37,16 +35,6 @@ final case class DownsampleConfig(config: Config) {
     }
   }
 
-  def makePublisher(): DownsamplePublisher = {
-    if (!enabled) {
-      NoOpDownsamplePublisher
-    } else {
-      val publisherClass = config.getString("publisher-class")
-      val pub = Class.forName(publisherClass).getDeclaredConstructor(classOf[Config])
-        .newInstance(config).asInstanceOf[DownsamplePublisher]
-      pub
-    }
-  }
 }
 
 object DownsampleConfig {

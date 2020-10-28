@@ -106,12 +106,12 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   private def shardsFromFilters(filters: Seq[ColumnFilter],
                                 qContext: QueryContext): Seq[Int] = {
 
-    val spreadProvToUse = qContext.spreadOverride.getOrElse(spreadProvider)
+    val spreadProvToUse = qContext.plannerParams.spreadOverride.getOrElse(spreadProvider)
 
-    require(shardColumns.nonEmpty || qContext.shardOverrides.nonEmpty,
+    require(shardColumns.nonEmpty || qContext.plannerParams.shardOverrides.nonEmpty,
       s"Dataset $dsRef does not have shard columns defined, and shard overrides were not mentioned")
 
-    qContext.shardOverrides.getOrElse {
+    qContext.plannerParams.shardOverrides.getOrElse {
       val shardVals = shardColumns.map { shardCol =>
         // So to compute the shard hash we need shardCol == value filter (exact equals) for each shardColumn
         filters.find(f => f.column == shardCol) match {
@@ -258,7 +258,8 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
     val reduceDispatcher = pickDispatcher(toReduceLevel2)
     val reducer = LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
-    reducer.addRangeVectorTransformer(AggregatePresenter(lp.operator, lp.params))
+    if (!qContext.plannerParams.skipAggregatePresent)
+      reducer.addRangeVectorTransformer(AggregatePresenter(lp.operator, lp.params))
     PlanResult(Seq(reducer), false) // since we have aggregated, no stitching
   }
 
@@ -342,7 +343,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   private def materializeRawSeries(qContext: QueryContext,
                                    lp: RawSeries): PlanResult = {
-    val spreadProvToUse = qContext.spreadOverride.getOrElse(spreadProvider)
+    val spreadProvToUse = qContext.plannerParams.spreadOverride.getOrElse(spreadProvider)
     val offsetMillis: Long = lp.offsetMs.getOrElse(0)
     val colName = lp.columns.headOption
     val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))

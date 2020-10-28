@@ -51,6 +51,7 @@ final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
   def isHistDouble: Boolean = columns.length == 3 &&
                               columns(1).colType == HistogramColumn && columns(2).colType == DoubleColumn
   def isHistogram: Boolean = columns.length == 2 && columns(1).colType == HistogramColumn
+  def isAvgAggregator: Boolean = columns.length == 3 && columns(2).name.equals("count")
 
   def hasSameColumnsAs(other: ResultSchema): Boolean = {
     // exclude fixedVectorLen & colIDs

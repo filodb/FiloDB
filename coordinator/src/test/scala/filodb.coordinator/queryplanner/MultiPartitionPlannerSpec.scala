@@ -9,7 +9,7 @@ import org.scalatest.matchers.should.Matchers
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
-import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query.{PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.LogicalPlan
@@ -58,9 +58,10 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(1000, 100, 2000))
 
-    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", 1000, 100, 2000, processMultiPartition = true)
+    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", 1000, 100, 2000)
 
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
 
     execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
     execPlan.children.length shouldEqual 2
@@ -87,23 +88,23 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
 
-    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds,
-      processMultiPartition = true)
+    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
 
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
 
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual (2)
     stitchRvsExec.children(0).isInstanceOf[PromQlRemoteExec] shouldEqual true
     stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual true
 
-
     val remoteExec1 = stitchRvsExec.children(0).asInstanceOf[PromQlRemoteExec]
-    remoteExec1.params.startSecs shouldEqual startSeconds
-    remoteExec1.params.endSecs shouldEqual (localPartitionStart - 1)
-    remoteExec1.params.stepSecs shouldEqual step
-    remoteExec1.params.processFailure shouldEqual true
-    remoteExec1.params.processMultiPartition shouldEqual false
+    val queryParams1 = remoteExec1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    queryParams1.startSecs shouldEqual startSeconds
+    queryParams1.endSecs shouldEqual (localPartitionStart - 1)
+    queryParams1.stepSecs shouldEqual step
+    remoteExec1.queryContext.plannerParams.processFailure shouldEqual true
+    remoteExec1.queryContext.plannerParams.processMultiPartition shouldEqual false
     remoteExec1.queryEndpoint shouldEqual "remote-url"
 
     val expectedStartMs = ((startSeconds*1000) to (endSeconds*1000) by (step*1000)).find { instant =>
@@ -111,11 +112,12 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
     }.get
 
     val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
-    remoteExec2.params.startSecs shouldEqual (expectedStartMs / 1000)
-    remoteExec2.params.endSecs shouldEqual endSeconds
-    remoteExec2.params.stepSecs shouldEqual step
-    remoteExec2.params.processFailure shouldEqual true
-    remoteExec2.params.processMultiPartition shouldEqual false
+    val queryParams2 = remoteExec2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    queryParams2.startSecs shouldEqual (expectedStartMs / 1000)
+    queryParams2.endSecs shouldEqual endSeconds
+    queryParams2.stepSecs shouldEqual step
+    remoteExec2.queryContext.plannerParams.processFailure shouldEqual true
+    remoteExec2.queryContext.plannerParams.processMultiPartition shouldEqual false
     remoteExec2.queryEndpoint shouldEqual "remote-url2"
 
   }
@@ -132,9 +134,10 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     val lp = Parser.queryRangeToLogicalPlan("time()", TimeStepParams(1000, 100, 2000))
 
-    val promQlQueryParams = PromQlQueryParams("time()", 1000, 100, 2000, processMultiPartition = true)
+    val promQlQueryParams = PromQlQueryParams("time()", 1000, 100, 2000)
 
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
 
     execPlan.isInstanceOf[TimeScalarGeneratorExec] shouldEqual (true)
   }
@@ -152,10 +155,10 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
     val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
       TimeStepParams(1000, 100, 2000))
 
-    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 100, 2000,
-      processMultiPartition = true)
+    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 100, 2000)
 
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
 
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
   }
@@ -196,14 +199,16 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
     val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
       TimeStepParams(1000, 100, 10000))
 
-    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 100, 10000,
-      processMultiPartition = true)
+    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 100, 10000)
 
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
 
     execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlRemoteExec].params.startSecs shouldEqual 1000
-    execPlan.asInstanceOf[PromQlRemoteExec].params.endSecs shouldEqual 10000
+    val queryParams = execPlan.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.
+      asInstanceOf[PromQlQueryParams]
+    queryParams.startSecs shouldEqual 1000
+    queryParams.endSecs shouldEqual 10000
   }
 
   it ("should generate Exec plan for Metadata query") {
@@ -225,17 +230,20 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
       TimeStepParams(startSeconds, step, endSeconds))
 
     val promQlQueryParams = PromQlQueryParams(
-      "http_requests_total{job=\"prometheus\", method=\"GET\"}", startSeconds, step, endSeconds,
-      processMultiPartition = true)
+      "http_requests_total{job=\"prometheus\", method=\"GET\"}", startSeconds, step, endSeconds)
 
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
 
     execPlan.isInstanceOf[PartKeysDistConcatExec] shouldEqual (true)
     execPlan.children(0).isInstanceOf[PartKeysDistConcatExec] shouldEqual(true)
     execPlan.children(1).isInstanceOf[MetadataRemoteExec] shouldEqual(true)
 
-    execPlan.children(1).asInstanceOf[MetadataRemoteExec].params.startSecs shouldEqual(startSeconds)
-    execPlan.children(1).asInstanceOf[MetadataRemoteExec].params.endSecs shouldEqual(localPartitionStart - 1)
+    val queryParams = execPlan.children(1).asInstanceOf[MetadataRemoteExec].queryContext.origQueryParams.
+      asInstanceOf[PromQlQueryParams]
+
+    queryParams.startSecs shouldEqual(startSeconds)
+    queryParams.endSecs shouldEqual(localPartitionStart - 1)
     execPlan.children(0).asInstanceOf[PartKeysDistConcatExec].children(0).asInstanceOf[PartKeysExec].start shouldEqual
       (localPartitionStart * 1000)
     execPlan.children(0).asInstanceOf[PartKeysDistConcatExec].children(0).asInstanceOf[PartKeysExec].end shouldEqual
@@ -268,20 +276,21 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
     }
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
-    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds,
-      processMultiPartition = true)
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual (3)
     stitchRvsExec.children(0).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
     stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
     stitchRvsExec.children(2).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
     val remoteExec1 = stitchRvsExec.children(0).asInstanceOf[PromQlRemoteExec]
-    remoteExec1.params.startSecs shouldEqual startSeconds
-    remoteExec1.params.endSecs shouldEqual 3999
-    remoteExec1.params.stepSecs shouldEqual step
-    remoteExec1.params.processFailure shouldEqual true
-    remoteExec1.params.processMultiPartition shouldEqual false
+    val queryParams1 = remoteExec1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    queryParams1.startSecs shouldEqual startSeconds
+    queryParams1.endSecs shouldEqual 3999
+    queryParams1.stepSecs shouldEqual step
+    remoteExec1.queryContext.plannerParams.processFailure shouldEqual true
+    remoteExec1.queryContext.plannerParams.processMultiPartition shouldEqual false
     remoteExec1.queryEndpoint shouldEqual "remote-url1"
     val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
 
@@ -293,19 +302,21 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
       instant - lookbackMs > (thirdPartitionStart * 1000)
     }.get
 
-    remoteExec2.params.startSecs shouldEqual expectedStartMs1 / 1000
-    remoteExec2.params.endSecs shouldEqual 6999
-    remoteExec2.params.stepSecs shouldEqual step
-    remoteExec2.params.processFailure shouldEqual true
-    remoteExec2.params.processMultiPartition shouldEqual false
+    val queryParams2 = remoteExec2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    queryParams2.startSecs shouldEqual expectedStartMs1 / 1000
+    queryParams2.endSecs shouldEqual 6999
+    queryParams2.stepSecs shouldEqual step
+    remoteExec2.queryContext.plannerParams.processFailure shouldEqual true
+    remoteExec2.queryContext.plannerParams.processMultiPartition shouldEqual false
     remoteExec2.queryEndpoint shouldEqual "remote-url2"
 
     val remoteExec3 = stitchRvsExec.children(2).asInstanceOf[PromQlRemoteExec]
-    remoteExec3.params.startSecs shouldEqual expectedStartMs2 / 1000
-    remoteExec3.params.endSecs shouldEqual endSeconds
-    remoteExec3.params.stepSecs shouldEqual step
-    remoteExec3.params.processFailure shouldEqual true
-    remoteExec3.params.processMultiPartition shouldEqual false
+    val queryParams3 = remoteExec3.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    queryParams3.startSecs shouldEqual expectedStartMs2 / 1000
+    queryParams3.endSecs shouldEqual endSeconds
+    queryParams3.stepSecs shouldEqual step
+    remoteExec3.queryContext.plannerParams.processFailure shouldEqual true
+    remoteExec3.queryContext.plannerParams.processMultiPartition shouldEqual false
     remoteExec3.queryEndpoint shouldEqual "remote-url3"
 
   }
@@ -334,10 +345,10 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}[100s]", TimeStepParams(startSeconds, step, endSeconds))
 
-    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds,
-      processMultiPartition = true)
+    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
 
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,
+      plannerParams = PlannerParams(processMultiPartition = true)))
 
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual (2)
@@ -347,19 +358,21 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
 
     // Instant/Raw queries will have same start and end point in all partitions as we want to fetch raw data
     val remoteExec1 = stitchRvsExec.children(0).asInstanceOf[PromQlRemoteExec]
-    remoteExec1.params.startSecs shouldEqual startSeconds
-    remoteExec1.params.endSecs shouldEqual endSeconds
-    remoteExec1.params.stepSecs shouldEqual step
-    remoteExec1.params.processFailure shouldEqual true
-    remoteExec1.params.processMultiPartition shouldEqual false
+    val queryParams1 = remoteExec1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    queryParams1.startSecs shouldEqual startSeconds
+    queryParams1.endSecs shouldEqual endSeconds
+    queryParams1.stepSecs shouldEqual step
+    remoteExec1.queryContext.plannerParams.processFailure shouldEqual true
+    remoteExec1.queryContext.plannerParams.processMultiPartition shouldEqual false
     remoteExec1.queryEndpoint shouldEqual "remote-url1"
 
     val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
-    remoteExec2.params.startSecs shouldEqual startSeconds
-    remoteExec2.params.endSecs shouldEqual endSeconds
-    remoteExec2.params.stepSecs shouldEqual step
-    remoteExec2.params.processFailure shouldEqual true
-    remoteExec2.params.processMultiPartition shouldEqual false
+    val queryParams2 = remoteExec1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    queryParams2.startSecs shouldEqual startSeconds
+    queryParams2.endSecs shouldEqual endSeconds
+    queryParams2.stepSecs shouldEqual step
+    remoteExec2.queryContext.plannerParams.processFailure shouldEqual true
+    remoteExec2.queryContext.plannerParams.processMultiPartition shouldEqual false
     remoteExec2.queryEndpoint shouldEqual "remote-url2"
 
   }
@@ -390,10 +403,10 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
 
-    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds,
-      processMultiPartition = true)
+    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
 
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual (2)
     stitchRvsExec.children(0).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
@@ -401,21 +414,61 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
 
 
     val remoteExec = stitchRvsExec.children(0).asInstanceOf[PromQlRemoteExec]
-    remoteExec.params.startSecs shouldEqual startSeconds
-    remoteExec.params.endSecs shouldEqual (localPartitionStartMs - 1) / 1000
-    remoteExec.params.stepSecs shouldEqual step
-    remoteExec.params.processFailure shouldEqual true
-    remoteExec.params.processMultiPartition shouldEqual false
+    val queryParams = remoteExec.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    queryParams.startSecs shouldEqual startSeconds
+    queryParams.endSecs shouldEqual (localPartitionStartMs - 1) / 1000
+    queryParams.stepSecs shouldEqual step
+    remoteExec.queryContext.plannerParams.processFailure shouldEqual true
+    remoteExec.queryContext.plannerParams.processMultiPartition shouldEqual false
     remoteExec.queryEndpoint shouldEqual "remote-url"
 
     val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
-    remoteExec2.params.startSecs shouldEqual endSeconds
-    remoteExec2.params.endSecs shouldEqual endSeconds
-    remoteExec2.params.stepSecs shouldEqual step
-    remoteExec2.params.processFailure shouldEqual true
-    remoteExec2.params.processMultiPartition shouldEqual false
+    val queryParams2 = remoteExec2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    queryParams2.startSecs shouldEqual endSeconds
+    queryParams2.endSecs shouldEqual endSeconds
+    queryParams2.stepSecs shouldEqual step
+    remoteExec2.queryContext.plannerParams.processFailure shouldEqual true
+    remoteExec2.queryContext.plannerParams.processMultiPartition shouldEqual false
     remoteExec2.queryEndpoint shouldEqual "remote-url"
 
+  }
+
+  it ("should generate Exec plan for Metadata Label values query") {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] =
+      List(PartitionAssignment("remote", "remote-url",
+        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
+        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+
+      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+
+    val lp = Parser.labelValuesQueryToLogicalPlan(Seq("""__metric__"""), Some("""_ws_="demo""""), TimeStepParams(startSeconds, step, endSeconds) )
+
+    val promQlQueryParams = PromQlQueryParams("", startSeconds, step, endSeconds, Some("/api/v2/label/values"))
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[LabelValuesDistConcatExec] shouldEqual (true)
+    execPlan.children(0).isInstanceOf[LabelValuesDistConcatExec] shouldEqual(true)
+    execPlan.children(1).isInstanceOf[MetadataRemoteExec] shouldEqual(true)
+
+    val expectedUrlParams = Map("filter" -> """_ws_="demo"""", "labels" -> "__metric__")
+    execPlan.children(1).asInstanceOf[MetadataRemoteExec].urlParams shouldEqual(expectedUrlParams) // Filter values
+                                                                                                  // should have quotes
+    execPlan.children(1).asInstanceOf[MetadataRemoteExec].queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      endSecs shouldEqual(localPartitionStart - 1)
+    execPlan.children(0).asInstanceOf[LabelValuesDistConcatExec].children(0).asInstanceOf[LabelValuesExec].startMs shouldEqual
+      (localPartitionStart * 1000)
+    execPlan.children(0).asInstanceOf[LabelValuesDistConcatExec].children(0).asInstanceOf[LabelValuesExec].endMs shouldEqual
+      (endSeconds * 1000)
   }
 
 }

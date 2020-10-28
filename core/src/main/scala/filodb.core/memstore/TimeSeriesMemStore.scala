@@ -12,11 +12,11 @@ import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response, Types}
-import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
+import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
-import filodb.memory.{MemFactory, NativeMemoryManager}
+import filodb.memory.NativeMemoryManager
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class TimeSeriesMemStore(config: Config,
@@ -29,12 +29,7 @@ extends MemStore with StrictLogging {
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
-  private val datasetMemFactories = new HashMap[DatasetRef, MemFactory]
-
-  /**
-    * The Downsample Publisher is per dataset on the memstore and is shared among all shards of the dataset
-    */
-  private val downsamplePublishers = new HashMap[DatasetRef, DownsamplePublisher]
+  private val datasetMemFactories = new HashMap[DatasetRef, NativeMemoryManager]
 
   val stats = new ChunkSourceStats
 
@@ -45,12 +40,6 @@ extends MemStore with StrictLogging {
   }
 
   def isDownsampleStore: Boolean = false
-
-  private def makeAndStartPublisher(downsample: DownsampleConfig): DownsamplePublisher = {
-    val pub = downsample.makePublisher()
-    pub.start()
-    pub
-  }
 
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
   def setup(ref: DatasetRef, schemas: Schemas, shard: Int, storeConf: StoreConfig,
@@ -66,9 +55,8 @@ extends MemStore with StrictLogging {
         new NativeMemoryManager(bufferMemorySize, tags)
       })
 
-      val publisher = downsamplePublishers.getOrElseUpdate(ref, makeAndStartPublisher(downsample))
       val tsdb = new OnDemandPagingShard(ref, schemas, storeConf, shard, memFactory, store, metastore,
-                              partEvictionPolicy, downsample, publisher)
+                              partEvictionPolicy)
       shards.put(shard, tsdb)
     }
   }
@@ -254,8 +242,6 @@ extends MemStore with StrictLogging {
 
   def reset(): Unit = {
     datasets.clear()
-    downsamplePublishers.valuesIterator.foreach { _.stop() }
-    downsamplePublishers.clear()
     store.reset()
   }
 

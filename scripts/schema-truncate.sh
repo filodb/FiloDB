@@ -39,7 +39,7 @@ done
 
 if [[ "${KEYSP}" != "${FILO_DOWNSAMPLE_KEYSPACE}" ]]; then
 cat << EOF
-TRUNCATE ${KEYSP}.${DSET}_pks_by_update_time
+TRUNCATE ${KEYSP}.${DSET}_pks_by_update_time;
 EOF
 fi
 
