@@ -7,7 +7,6 @@ import scala.collection.Iterator
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import kamon.Kamon
-import kamon.trace.Span
 import org.joda.time.DateTime
 
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
@@ -317,12 +316,7 @@ object SerializedRangeVector extends StrictLogging {
   // scalastyle:off null
   def apply(rv: RangeVector,
             builder: RecordBuilder,
-            schema: RecordSchema,
-            execPlanName: String,
-            span: Span = null): SerializedRangeVector = {
-    var spanBldr = Kamon.spanBuilder(s"execplan-scan-latency-$execPlanName")
-    if (span != null) { spanBldr = spanBldr.asChildOf(span) }
-    val scanSpan = spanBldr.start()
+            schema: RecordSchema): SerializedRangeVector = {
     var numRows = 0
     val oldContainerOpt = builder.currentContainer
     val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
@@ -345,7 +339,6 @@ object SerializedRangeVector extends StrictLogging {
       case None                 => builder.allContainers
       case Some(firstContainer) => builder.allContainers.dropWhile(_ != firstContainer)
     }
-    scanSpan.finish()
     new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo)
   }
   // scalastyle:on null
@@ -356,7 +349,7 @@ object SerializedRangeVector extends StrictLogging {
     */
   def apply(rv: RangeVector, cols: Seq[ColumnInfo]): SerializedRangeVector = {
     val schema = toSchema(cols)
-    apply(rv, newBuilder(), schema, "Test-Only-Plan")
+    apply(rv, newBuilder(), schema)
   }
 
   // TODO: make this configurable....
