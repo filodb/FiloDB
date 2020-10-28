@@ -410,7 +410,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
     val childTasks = Observable.fromIterable(children.zipWithIndex)
                                .mapAsync(parallelism) { case (plan, i) =>
-                                 dispatchRemotePlan(plan, span).map((_, i))
+                                 val task = dispatchRemotePlan(plan, span).map((_, i))
+                                 span.mark(s"plan-dispatched-${plan.getClass.getSimpleName}")
+                                 task
                                }
 
     // The first valid schema is returned as the Task.  If all results are empty, then return
