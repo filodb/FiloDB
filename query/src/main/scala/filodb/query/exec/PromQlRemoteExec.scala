@@ -27,7 +27,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
   val columns= Map("histogram" -> Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("h", ColumnType.HistogramColumn)),
   Avg.entryName -> (defaultColumns :+  ColumnInfo("count", ColumnType.LongColumn)) ,
-  "default" -> defaultColumns, QueryFunctionConstants.stdVal -> (defaultColumns ++  Seq(ColumnInfo("mean", ColumnType.LongColumn),
+  "default" -> defaultColumns, QueryFunctionConstants.stdVal -> (defaultColumns ++  Seq(ColumnInfo("mean", ColumnType.DoubleColumn),
     ColumnInfo("count", ColumnType.LongColumn))))
 
   val recordSchema = Map("histogram" -> SerializedRangeVector.toSchema(columns.get("histogram").get),
