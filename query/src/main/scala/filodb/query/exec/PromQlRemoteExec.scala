@@ -27,8 +27,8 @@ case class PromQlRemoteExec(queryEndpoint: String,
   val columns= Map("histogram" -> Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("h", ColumnType.HistogramColumn)),
   Avg.entryName -> (defaultColumns :+  ColumnInfo("count", ColumnType.LongColumn)) ,
-  "default" -> defaultColumns, QueryFunctionConstants.stdVal -> (defaultColumns ++  Seq(ColumnInfo("mean", ColumnType.DoubleColumn),
-    ColumnInfo("count", ColumnType.LongColumn))))
+  "default" -> defaultColumns, QueryFunctionConstants.stdVal -> (defaultColumns ++
+      Seq(ColumnInfo("mean", ColumnType.DoubleColumn), ColumnInfo("count", ColumnType.LongColumn))))
 
   val recordSchema = Map("histogram" -> SerializedRangeVector.toSchema(columns.get("histogram").get),
     Avg.entryName -> SerializedRangeVector.toSchema(columns.get(Avg.entryName).get),
@@ -93,8 +93,8 @@ case class PromQlRemoteExec(queryEndpoint: String,
     if (aggregateResponse.aggregateSampl.isEmpty) QueryResult(id, ResultSchema.empty, Seq.empty)
     else {
       aggregateResponse.aggregateSampl.head match {
-        case AvgSampl(timestamp, value, count) => genAvgQueryResult(data, id)
-        case StdValSampl(timestamp, stddev, mean, count) => genStdValQueryResult(data,id)
+        case AvgSampl(timestamp, value, count)           => genAvgQueryResult(data, id)
+        case StdValSampl(timestamp, stddev, mean, count) => genStdValQueryResult(data, id)
       }
     }
   }
@@ -194,7 +194,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
         override def rows(): RangeVectorCursor = {
           import NoCloseCursor._
           d.aggregateResponse.get.aggregateSampl.iterator.collect { case a: StdValSampl =>
-            row.setLong(0, a.timestamp)
+            row.setLong(0, a.timestamp * 1000)
             row.setDouble(1, a.stddev)
             row.setDouble(2, a.mean)
             row.setLong(3, a.count)
@@ -210,4 +210,3 @@ case class PromQlRemoteExec(queryEndpoint: String,
     QueryResult(id, resultSchema.get("stdval").get, rangeVectors)
   }
 }
-

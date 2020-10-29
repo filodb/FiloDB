@@ -64,7 +64,7 @@ object PromCirceSupport {
       }
 
      val aggregateSamples = functionName match {
-        case Avg.entryName => c.downField ("aggregateValues").as[List[AvgSampl]]
+        case Avg.entryName                 => c.downField ("aggregateValues").as[List[AvgSampl]]
         case QueryFunctionConstants.stdVal => c.downField("aggregateValues").as[List[StdValSampl]]
       }
 
