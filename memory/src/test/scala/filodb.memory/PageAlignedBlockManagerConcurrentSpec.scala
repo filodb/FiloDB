@@ -23,7 +23,7 @@ with ConductorFixture with Matchers with BeforeAndAfterAll {
 
       threadNamed("Random guy") {
         //1 page
-        val blocks = blockManager.requestBlocks(pageSize, None)
+        val blocks = blockManager.requestBlocks(pageSize, false)
         blocks.size should be(1)
         val block = blocks.head
         block.position(block.position() + 1)
@@ -31,7 +31,7 @@ with ConductorFixture with Matchers with BeforeAndAfterAll {
       }
       threadNamed("Another dude") {
         //2 page
-        val blocks = blockManager.requestBlocks(2 * pageSize, None)
+        val blocks = blockManager.requestBlocks(2 * pageSize, false)
         blocks.size should be(2)
         val block = blocks.head
         block.position(block.position() + 1)
@@ -39,7 +39,7 @@ with ConductorFixture with Matchers with BeforeAndAfterAll {
       }
       threadNamed("Yet another dude") {
         //3 page
-        val blocks = blockManager.requestBlocks(3 * pageSize, None)
+        val blocks = blockManager.requestBlocks(3 * pageSize, false)
         blocks.size should be(3)
         val block = blocks.head
         block.position(block.position() + 1)
