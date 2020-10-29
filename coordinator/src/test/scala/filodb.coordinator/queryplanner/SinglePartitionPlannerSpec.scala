@@ -97,32 +97,32 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     val lp = Parser.queryToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    execPlan.printTree()
+    execPlan.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual true // Since all metrics belong to same cluster
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.children.foreach { l1 =>
-      l1.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
-      l1.children.foreach { l2 =>
-        l2.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-        l2.rangeVectorTransformers.size shouldEqual 1
-        l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+        l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
+        l1.rangeVectorTransformers.size shouldEqual 1
+        l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
       }
     }
-  }
+
 
   it("should generate exec plan for nested Binary Join query") {
     val lp = Parser.queryToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"} + test3{job = \"app\"}", 1000, 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    execPlan.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual true // Since all metrics belong to same cluster
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.asInstanceOf[BinaryJoinExec].lhs.head.isInstanceOf[BinaryJoinExec] shouldEqual true
-    execPlan.asInstanceOf[BinaryJoinExec].rhs.head.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
+    execPlan.asInstanceOf[BinaryJoinExec].rhs.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
   }
 
   it("should generate BinaryJoin Exec plan with remote and local cluster metrics") {
     val lp = Parser.queryToLogicalPlan("test{job = \"app\"} + rr1{job = \"app\"}", 1000, 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    execPlan.printTree()
+    execPlan.dispatcher shouldEqual (InProcessPlanDispatcher) //rr1 and test belong to different clusters
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.asInstanceOf[BinaryJoinExec].rhs.head.asInstanceOf[MockExecPlan].name shouldEqual ("rules1")
     execPlan.asInstanceOf[BinaryJoinExec].lhs.head.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
@@ -132,6 +132,7 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     val lp = Parser.queryToLogicalPlan("rr1{job = \"app\"} + rr2{job = \"app\"}", 1000, 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.dispatcher shouldEqual (InProcessPlanDispatcher) //rr1 and rr2 belong to different clusters
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.asInstanceOf[BinaryJoinExec].lhs.head.asInstanceOf[MockExecPlan].name shouldEqual ("rules1")
     execPlan.asInstanceOf[BinaryJoinExec].rhs.head.asInstanceOf[MockExecPlan].name shouldEqual ("rules2")
@@ -160,21 +161,13 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     execPlan.isInstanceOf[TimeScalarGeneratorExec] shouldEqual true
   }
 
-  it("should generate BinaryJoin Exec with remote exec's having lhs or rhs query") {
+  it("should generate BinaryJoin Exec with remote exec's having lhs and rhs query") {
     val lp = Parser.queryRangeToLogicalPlan("""test1{job = "app"} + test2{job = "app"}""", TimeStepParams(300, 20, 500))
-
     val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 300, 20, 500)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    println(execPlan.printTree())
-    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
-    execPlan.children(0).isInstanceOf[PromQlRemoteExec] shouldEqual(true)
-    execPlan.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual(true)
-
-    // LHS should have only LHS query and RHS should have oly RHS query
-    execPlan.children(0).asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
-      promQl shouldEqual("""test1{job="app"}""")
-    execPlan.children(1).asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
-      promQl shouldEqual("""test2{job="app"}""")
+    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+    execPlan.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      promQl shouldEqual("""test1{job = "app"} + test2{job = "app"}""")
   }
 }
 
