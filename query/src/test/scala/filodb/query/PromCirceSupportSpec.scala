@@ -161,5 +161,4 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
        case Left(ex) => throw ex
      }
   }
-
 }
