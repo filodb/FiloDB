@@ -20,7 +20,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                             localPartitionPlanner: QueryPlanner,
                             localPartitionName: String,
                             dataset: Dataset,
-                            queryConfig: QueryConfig) extends QueryPlanner with StrictLogging {
+                            queryConfig: QueryConfig,
+                            remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient)
+  extends QueryPlanner with StrictLogging {
 
   import net.ceedubs.ficus.Ficus._
 
@@ -118,7 +120,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         else {
           val httpEndpoint = p.endPoint + queryParams.remoteQueryPath.getOrElse("")
           PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, generateRemoteExecParams(qContext, startMs, endMs),
-            InProcessPlanDispatcher, dataset.ref)
+            InProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
         }
       }
       if (execPlans.size == 1) execPlans.head
@@ -144,8 +146,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         else {
           val httpEndpoint = partitions.head.endPoint + queryParams.remoteQueryPath.getOrElse("")
           PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, generateRemoteExecParams(qContext,
-            queryParams.startSecs * 1000, queryParams.endSecs * 1000), InProcessPlanDispatcher, dataset.ref
-            )
+            queryParams.startSecs * 1000, queryParams.endSecs * 1000),
+            InProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
         }
       }
       else throw new UnsupportedOperationException("Binary Join across multiple partitions not supported")
@@ -191,6 +193,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val httpEndpoint = partitionAssignment.endPoint + finalQueryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       remoteQueryPath.getOrElse("")
     MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-      urlParams, finalQueryContext, InProcessPlanDispatcher, dataset.ref)
+      urlParams, finalQueryContext, InProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
   }
 }

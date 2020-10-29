@@ -21,7 +21,9 @@ import filodb.query.exec._
 class HighAvailabilityPlanner(dsRef: DatasetRef,
                               localPlanner: QueryPlanner,
                               failureProvider: FailureProvider,
-                              queryConfig: QueryConfig) extends QueryPlanner with StrictLogging {
+                              queryConfig: QueryConfig,
+                              remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient)
+  extends QueryPlanner with StrictLogging {
 
   import net.ceedubs.ficus.Ficus._
   import LogicalPlanUtils._
@@ -79,12 +81,13 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           rootLogicalPlan match {
             case lp: LabelValues         => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                             PlannerUtil.getLabelValuesUrlParams(lp, queryParams), newQueryContext,
-                                            InProcessPlanDispatcher, dsRef)
+                                            InProcessPlanDispatcher, dsRef, remoteExecHttpClient)
             case lp: SeriesKeysByFilters => val urlParams = Map("match[]" -> queryParams.promQl)
                                             MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                              urlParams, newQueryContext, InProcessPlanDispatcher, dsRef)
+                                              urlParams, newQueryContext, InProcessPlanDispatcher,
+                                              dsRef, remoteExecHttpClient)
             case _                       => PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                            newQueryContext, InProcessPlanDispatcher, dsRef)
+                                            newQueryContext, InProcessPlanDispatcher, dsRef, remoteExecHttpClient)
           }
 
       }
