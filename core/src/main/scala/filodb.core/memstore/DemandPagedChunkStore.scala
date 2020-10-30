@@ -65,13 +65,15 @@ extends RawToPartitionMaker with StrictLogging {
 
           if (!tsPart.chunkmapContains(chunkID)) {
             val chunkPtrs = new ArrayBuffer[BinaryVectorPtr](rawVectors.length)
-            memFactory.startMetaSpan()
             var metaAddr: Long = 0
-            try {
-              copyToOffHeap(rawVectors, memFactory, chunkPtrs)
-            } finally {
-              metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
-                tsPart.schema.data.blockMetaSize.toShort)
+            memFactory.synchronized {
+              memFactory.startMetaSpan()
+              try {
+                copyToOffHeap(rawVectors, memFactory, chunkPtrs)
+              } finally {
+                metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
+                  tsPart.schema.data.blockMetaSize.toShort)
+              }
             }
             require(metaAddr != 0)
             val infoAddr = metaAddr + 4 // Important: don't point at partID

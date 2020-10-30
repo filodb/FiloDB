@@ -220,39 +220,40 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
    * Optimized chunks as well as chunk metadata are written into offheap block memory so they no longer consume
    */
   private def encodeOneChunkset(info: ChunkSetInfo, appenders: AppenderArray, blockHolder: BlockMemFactory) = {
-    blockHolder.startMetaSpan()
-    val frozenVectors = try {
-      // optimize and compact chunks
-      appenders.zipWithIndex.map { case (appender, i) =>
-        // This assumption cannot break. We should ensure one vector can be written
-        // to one block always atleast as per the current design.
-        // If this gets triggered, decrease the max writebuffer size so smaller chunks are encoded
-        require(blockHolder.blockAllocationSize() > appender.frozenSize)
-        val optimized = appender.optimize(blockHolder)
-        shardStats.encodedBytes.increment(BinaryVector.totalBytes(nativePtrReader, optimized))
-        if (schema.data.columns(i).columnType == Column.ColumnType.HistogramColumn)
-          shardStats.encodedHistBytes.increment(BinaryVector.totalBytes(nativePtrReader, optimized))
-        optimized
+    blockHolder.synchronized {
+      val frozenVectors = try {
+        // optimize and compact chunks
+        appenders.zipWithIndex.map { case (appender, i) =>
+          // This assumption cannot break. We should ensure one vector can be written
+          // to one block always atleast as per the current design.
+          // If this gets triggered, decrease the max writebuffer size so smaller chunks are encoded
+          require(blockHolder.blockAllocationSize() > appender.frozenSize)
+          val optimized = appender.optimize(blockHolder)
+          shardStats.encodedBytes.increment(BinaryVector.totalBytes(nativePtrReader, optimized))
+          if (schema.data.columns(i).columnType == Column.ColumnType.HistogramColumn)
+            shardStats.encodedHistBytes.increment(BinaryVector.totalBytes(nativePtrReader, optimized))
+          optimized
+        }
+      } catch { case e: Exception =>
+        // Shutdown process right away! Reaching this state means that we could not reclaim
+        // a whole bunch of blocks possibly because they were not marked as reclaimable,
+        // because of some bug. Cleanup or rollback at this point is not viable.
+        Shutdown.haltAndCatchFire(new RuntimeException("Error occurred when encoding vectors", e))
+        throw e
       }
-    } catch { case e: Exception =>
-      // Shutdown process right away! Reaching this state means that we could not reclaim
-      // a whole bunch of blocks possibly because they were not marked as reclaimable,
-      // because of some bug. Cleanup or rollback at this point is not viable.
-      Shutdown.haltAndCatchFire(new RuntimeException("Error occurred when encoding vectors", e))
-      throw e
+      shardStats.numSamplesEncoded.increment(info.numRows)
+      // Now, write metadata into offheap block metadata space and update infosChunks
+      val metaAddr = blockHolder.endMetaSpan(TimeSeriesShard.writeMeta(_, partID, info, frozenVectors),
+        schema.data.blockMetaSize.toShort)
+
+      val newInfo = ChunkSetInfo(metaAddr + 4)
+      _log.trace(s"Adding new chunk ${newInfo.debugString} to part $stringPartition")
+      infoPut(newInfo)
+
+      // release older write buffers back to pool.  Nothing at this point should reference the older appenders.
+      bufferPool.release(info.infoAddr, appenders)
+      frozenVectors
     }
-    shardStats.numSamplesEncoded.increment(info.numRows)
-    // Now, write metadata into offheap block metadata space and update infosChunks
-    val metaAddr = blockHolder.endMetaSpan(TimeSeriesShard.writeMeta(_, partID, info, frozenVectors),
-                                           schema.data.blockMetaSize.toShort)
-
-    val newInfo = ChunkSetInfo(metaAddr + 4)
-    _log.trace(s"Adding new chunk ${newInfo.debugString} to part $stringPartition")
-    infoPut(newInfo)
-
-    // release older write buffers back to pool.  Nothing at this point should reference the older appenders.
-    bufferPool.release(info.infoAddr, appenders)
-    frozenVectors
   }
 
   /**
