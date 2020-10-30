@@ -262,7 +262,7 @@ class BlockMemFactory(blockStore: BlockManager,
     * Starts tracking a span of multiple Blocks over which the same metadata should be applied.
     * An example would be chunk metadata for chunks written to potentially more than 1 block.
     */
-  def startMetaSpan(): Unit = {
+  def startMetaSpan(): Unit = synchronized {
     metadataSpan.clear()
     metadataSpanActive = true
   }
@@ -276,7 +276,7 @@ class BlockMemFactory(blockStore: BlockManager,
     * throws IllegalStateException if startMetaSpan wasn't called, or if metaSize is larger
     * than max allowed, or if nothing was allocated
     */
-  def endMetaSpan(metadataWriter: Long => Unit, metaSize: Short): Long = {
+  def endMetaSpan(metadataWriter: Long => Unit, metaSize: Short): Long = synchronized {
     if (!metadataSpanActive) {
       throw new IllegalStateException("Not in a metadata span")
     }
@@ -295,7 +295,7 @@ class BlockMemFactory(blockStore: BlockManager,
         if (markFullBlocksAsReclaimable) {
           // We know that all the blocks in the span except the last one is full, so mark them reclaimable
           blk.markReclaimable()
-        } else synchronized {
+        } else {
           fullBlocksToBeMarkedAsReclaimable += blk
         }
       }
