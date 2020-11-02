@@ -16,7 +16,8 @@ case class PromQlQueryParams(promQl: String, startSecs: Long, stepSecs: Long, en
 
 case object UnavailablePromQlQueryParams extends TsdbQueryParams
 
-case class PlannerParams(spread: Option[Int] = None,
+case class PlannerParams(applicationId: String = "filodb",
+                        spread: Option[Int] = None,
                         spreadOverride: Option[SpreadProvider] = None,
                         shardOverrides: Option[Seq[Int]] = None,
                         queryTimeoutMillis: Int = 30000,

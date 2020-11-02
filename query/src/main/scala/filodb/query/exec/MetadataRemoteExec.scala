@@ -28,7 +28,8 @@ case class MetadataRemoteExec(queryEndpoint: String,
 
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                               (implicit sched: Scheduler): Future[QueryResponse] = {
-    remoteExecHttpClient.httpMetadataGet(queryEndpoint, httpTimeoutMs, queryContext.submitTime, getUrlParams())
+    remoteExecHttpClient.httpMetadataGet(queryContext.plannerParams.applicationId, queryEndpoint,
+      httpTimeoutMs, queryContext.submitTime, getUrlParams())
       .map { response =>
         response.unsafeBody match {
           case Left(error) => QueryError(queryContext.queryId, error.error)

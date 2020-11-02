@@ -93,11 +93,13 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
  */
 trait RemoteExecHttpClient extends StrictLogging {
 
-  def httpGet(httpEndpoint: String, httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
+  def httpGet(applicationId: String, httpEndpoint: String,
+              httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
              (implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]]
 
-  def httpMetadataGet(httpEndpoint: String, httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
+  def httpMetadataGet(applicationId: String, httpEndpoint: String,
+                      httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
                      (implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], MetadataSuccessResponse]]]
 
@@ -115,7 +117,8 @@ class RemoteHttpClient private(asyncHttpClientConfig: AsyncHttpClientConfig) ext
 
   ShutdownHookThread(shutdown())
 
-  def httpGet(httpEndpoint: String, httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
+  def httpGet(applicationId: String, httpEndpoint: String,
+              httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
              (implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
     val queryTimeElapsed = System.currentTimeMillis() - submitTime
@@ -123,13 +126,15 @@ class RemoteHttpClient private(asyncHttpClientConfig: AsyncHttpClientConfig) ext
     val url = uri"$httpEndpoint?$urlParams"
     logger.debug("promQlExec url={}", url)
     sttp
+      .header(HeaderNames.UserAgent, applicationId)
       .get(url)
       .readTimeout(readTimeout)
       .response(asJson[SuccessResponse])
       .send()
   }
 
-  def httpMetadataGet(httpEndpoint: String, httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
+  def httpMetadataGet(applicationId: String, httpEndpoint: String,
+                      httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
                      (implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], MetadataSuccessResponse]]] = {
     val queryTimeElapsed = System.currentTimeMillis() - submitTime
@@ -137,6 +142,7 @@ class RemoteHttpClient private(asyncHttpClientConfig: AsyncHttpClientConfig) ext
     val url = uri"$httpEndpoint?$urlParams"
     logger.debug("promMetadataExec url={}", url)
     sttp
+      .header(HeaderNames.UserAgent, applicationId)
       .get(url)
       .readTimeout(readTimeout)
       .response(asJson[MetadataSuccessResponse])
