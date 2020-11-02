@@ -50,7 +50,7 @@ class RangeVectorSpec  extends AnyFunSpec with Matchers {
     val builder = SerializedRangeVector.newBuilder()
 
     // Sharing one builder across multiple input RangeVectors
-    val srvs = rvs.map(rv => SerializedRangeVector(rv, builder, schema, "Unit-test"))
+    val srvs = rvs.map(rv => SerializedRangeVector(rv, builder, schema, "RangeVectorSpec"))
 
     // Now verify each of them
     val observedTs = srvs(0).rows.toSeq.map(_.getLong(0))
