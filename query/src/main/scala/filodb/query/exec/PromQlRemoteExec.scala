@@ -43,7 +43,8 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                               (implicit sched: Scheduler): Future[QueryResponse] = {
-    remoteExecHttpClient.httpGet(queryEndpoint, requestTimeoutMs, queryContext.submitTime, getUrlParams())
+    remoteExecHttpClient.httpGet(queryContext.plannerParams.applicationId, queryEndpoint,
+      requestTimeoutMs, queryContext.submitTime, getUrlParams())
       .map { response =>
         response.unsafeBody match {
           case Left(error) => QueryError(queryContext.queryId, error.error)
