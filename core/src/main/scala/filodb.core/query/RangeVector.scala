@@ -316,12 +316,15 @@ object SerializedRangeVector extends StrictLogging {
   // scalastyle:off null
   def apply(rv: RangeVector,
             builder: RecordBuilder,
-            schema: RecordSchema): SerializedRangeVector = {
+            schema: RecordSchema,
+            execPlan: String): SerializedRangeVector = {
     var numRows = 0
     val oldContainerOpt = builder.currentContainer
     val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
+    // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
+    // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
     try {
-      ChunkMap.validateNoSharedLocks()
+      ChunkMap.validateNoSharedLocks(execPlan)
       val rows = rv.rows
       while (rows.hasNext) {
         numRows += 1
@@ -349,7 +352,7 @@ object SerializedRangeVector extends StrictLogging {
     */
   def apply(rv: RangeVector, cols: Seq[ColumnInfo]): SerializedRangeVector = {
     val schema = toSchema(cols)
-    apply(rv, newBuilder(), schema)
+    apply(rv, newBuilder(), schema, "Test-Only-Plan")
   }
 
   // TODO: make this configurable....
