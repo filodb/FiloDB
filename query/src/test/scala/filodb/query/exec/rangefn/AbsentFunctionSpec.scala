@@ -18,7 +18,7 @@ import org.scalatest.matchers.should.Matchers
 
 class AbsentFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures with BeforeAndAfter {
   after {
-    ChunkMap.validateNoSharedLocks(true)
+    ChunkMap.validateNoSharedLocks("AbsentFunctionSpec", true)
   }
 
   val config: Config = ConfigFactory.load("application_test.conf").getConfig("filodb")

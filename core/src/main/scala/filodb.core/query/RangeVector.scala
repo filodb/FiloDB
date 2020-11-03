@@ -327,7 +327,7 @@ object SerializedRangeVector extends StrictLogging {
     val oldContainerOpt = builder.currentContainer
     val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
     try {
-      ChunkMap.validateNoSharedLocks()
+      ChunkMap.validateNoSharedLocks(execPlanName)
       val rows = rv.rows
       while (rows.hasNext) {
         numRows += 1
