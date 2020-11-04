@@ -50,7 +50,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
   }
 
   after {
-    ChunkMap.validateNoSharedLocks("InProcessPlanDispatcherSpec", true)
+    ChunkMap.validateNoSharedLocks(true)
   }
 
   override def afterAll(): Unit = {

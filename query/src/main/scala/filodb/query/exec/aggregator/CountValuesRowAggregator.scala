@@ -2,6 +2,8 @@ package filodb.query.exec.aggregator
 
 import scala.collection.mutable
 
+import kamon.Kamon
+
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.FiloSchedulers
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
@@ -86,10 +88,11 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
       ColumnInfo("value", ColumnType.DoubleColumn))
     val recSchema = SerializedRangeVector.toSchema(colSchema)
     val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
+    val span = Kamon.spanBuilder(s"execplan-scan-latency-TopBottomK").start()
     try {
       FiloSchedulers.assertThreadName(QuerySchedName)
       // aggRangeVector.rows.take below triggers the ChunkInfoIterator which requires lock/release
-      ChunkMap.validateNoSharedLocks(s"CountValues-$label")
+      ChunkMap.validateNoSharedLocks()
       aggRangeVector.rows.take(limit).foreach { row =>
         val rowMap = CountValuesSerDeser.deserialize(row.getBlobBase(1),
           row.getBlobNumBytes(1), row.getBlobOffset(1))
@@ -108,6 +111,7 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
       aggRangeVector.rows.close()
       ChunkMap.releaseAllSharedLocks()
     }
+    span.finish()
     resRvs.map { case (key, builder) =>
       val numRows = builder.allContainers.map(_.countRecords()).sum
       new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0)

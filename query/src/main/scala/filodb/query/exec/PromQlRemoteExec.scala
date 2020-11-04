@@ -162,7 +162,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
         override def numRows: Option[Int] = Option(samples.size)
 
       }
-      SerializedRangeVector(rv, builder, defaultRecSchema, printTree(false))
+      SerializedRangeVector(rv, builder, defaultRecSchema, "PromQlRemoteExec-default")
       // TODO: Handle stitching with verbose flag
     }
     QueryResult(id, defaultResultSchema, rangeVectors)
@@ -196,7 +196,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
         override def numRows: Option[Int] = Option(samples.size)
 
       }
-      SerializedRangeVector(rv, builder, histRecSchema, printTree(false))
+      SerializedRangeVector(rv, builder, histRecSchema, "PromQlRemoteExec-hist")
       // TODO: Handle stitching with verbose flag
     }
     QueryResult(id, histResultSchema, rangeVectors)

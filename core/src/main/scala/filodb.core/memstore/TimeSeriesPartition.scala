@@ -444,10 +444,6 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     memFactory.freeMemory(partKeyOffset)
     if (currentInfo != nullInfo) bufferPool.release(currentInfo.infoAddr, currentChunks)
   }
-
-  override def toString: String = {
-    s"TimeSeriesPartition(shard=$shard,partId=$partID){$stringPartition}"
-  }
 }
 
 /**
