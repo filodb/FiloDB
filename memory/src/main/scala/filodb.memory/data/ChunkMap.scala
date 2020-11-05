@@ -132,6 +132,8 @@ object ChunkMap extends StrictLogging {
       for ((inst, amt) <- countMap) {
         if (amt > 0) {
           total += amt
+          sharedLockLingering.increment(amt)
+          _logger.warn(s"THIS IS A BUG. ChunkMap shared locks was not released for: $inst, amount: $amt")
         }
       }
     }
