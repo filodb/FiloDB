@@ -789,8 +789,8 @@ class TimeSeriesShard(val ref: DatasetRef,
       if (!p.ingesting) {
         logger.debug(s"Purging partition with partId=${p.partID}  ${p.stringPartition} from " +
           s"memory in dataset=$ref shard=$shardNum")
-        val schema = p.schema
         if (storeConfig.meteringEnabled) {
+          val schema = p.schema
           val shardKey = schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset, schema.options.shardKeyColumns)
           cardTracker.decrementCount(shardKey)
         }
@@ -1125,11 +1125,11 @@ class TimeSeriesShard(val ref: DatasetRef,
   private def addPartitionForIngestion(recordBase: Any, recordOff: Long, schema: Schema, group: Int) = {
     assertThreadName(IngestSchedName)
     // TODO: remove when no longer needed - or figure out how to log only for tracing partitions
-//    logger.debug(s"Adding ingestion record details: ${schema.ingestionSchema.debugString(recordBase, recordOff)}")
+    logger.trace(s"Adding ingestion record details: ${schema.ingestionSchema.debugString(recordBase, recordOff)}")
     val partKeyOffset = schema.comparator.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
     val previousPartId = lookupPreviouslyAssignedPartId(partKeyArray, partKeyOffset)
     // TODO: remove when no longer needed
-//    logger.debug(s"Adding part key details: ${schema.partKeySchema.debugString(partKeyArray, partKeyOffset)}")
+    logger.trace(s"Adding part key details: ${schema.partKeySchema.debugString(partKeyArray, partKeyOffset)}")
     val newPart = createNewPartition(partKeyArray, partKeyOffset, group, previousPartId, schema)
     if (newPart != OutOfMemPartition) {
       val partId = newPart.partID
@@ -1531,6 +1531,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     ingestSched.executeTrampolined { () =>
       partitions.values.asScala.foreach(removePartition)
     }
+    partKeyIndex.reset()
     // TODO unable to reset/clear bloom filter
     ingested = 0L
     for { group <- 0 until numGroups } {
@@ -1543,7 +1544,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     if (storeConfig.meteringEnabled) {
       cardTracker.close()
     }
-    partKeyIndex.closeIndex()
     evictedPartKeys.synchronized {
       if (!evictedPartKeysDisposed) {
         evictedPartKeysDisposed = true
@@ -1551,6 +1551,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       }
     }
     reset()   // Not really needed, but clear everything just to be consistent
+    partKeyIndex.closeIndex()
     logger.info(s"Shutting down dataset=$ref shard=$shardNum")
     /* Don't explcitly free the memory just yet. These classes instead rely on a finalize
        method to ensure that no threads are accessing the memory before it's freed.

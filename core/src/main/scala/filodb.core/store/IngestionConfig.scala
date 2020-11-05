@@ -99,7 +99,7 @@ object StoreConfig {
                                            |evicted-pk-bloom-filter-capacity = 5000000
                                            |ensure-headroom-percent = 5.0
                                            |trace-filters = {}
-                                           |metering-enabled = true
+                                           |metering-enabled = false
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
   def apply(storeConfig: Config): StoreConfig = {
