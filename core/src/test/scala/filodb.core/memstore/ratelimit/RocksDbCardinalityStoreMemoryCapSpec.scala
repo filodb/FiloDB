@@ -48,7 +48,7 @@ class RocksDbCardinalityStoreMemoryCapSpec  extends AnyFunSpec with Matchers {
     val timePerIncrementMicroSecs = (end-start) / numTimeSeries / 1000
     println(s"Was able to increment $numTimeSeries time series, $timePerIncrementMicroSecs" +
       s"us each increment total of ${totalTimeSecs}s")
-    timePerIncrementMicroSecs should be < 100L
+    timePerIncrementMicroSecs should be < 200L
 
   }
 
