@@ -221,6 +221,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
    */
   private def encodeOneChunkset(info: ChunkSetInfo, appenders: AppenderArray, blockHolder: BlockMemFactory) = {
     blockHolder.synchronized {
+      blockHolder.startMetaSpan()
       val frozenVectors = try {
         // optimize and compact chunks
         appenders.zipWithIndex.map { case (appender, i) =>
