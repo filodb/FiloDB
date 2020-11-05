@@ -37,6 +37,11 @@ extends RawToPartitionMaker with StrictLogging {
 
   private val baseContext = Map("dataset" -> tsShard.ref.toString,
                                 "shard"   -> tsShard.shardNum.toString)
+
+  /*
+   * Only one BlockMemFactory for ODP per shard needed (pooling not needed) since all ODP
+   * allocations happen on a single thread
+   */
   val memFactory = new BlockMemFactory(blockManager,
     tsShard.maxMetaSize, baseContext ++ Map("odp" -> "true"),
     markFullBlocksAsReclaimable = true)
