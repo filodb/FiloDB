@@ -1,11 +1,10 @@
 package filodb.coordinator.queryplanner
 
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.Dataset
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.query.{BinaryJoin, LabelValues, LogicalPlan, SeriesKeysByFilters}
+import filodb.query.{BinaryJoin, LabelValues, LogicalPlan, SeriesKeysByFilters, SetOperator}
 import filodb.query.exec._
 
 case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange)
@@ -29,6 +28,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   val remoteHttpTimeoutMs: Long =
     queryConfig.routingConfig.config.as[Option[Long]]("remote.http.timeout").getOrElse(60000)
 
+  val datasetMetricColumn: String = dataset.options.metricColumn
+
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
     val tsdbQueryParams = qContext.origQueryParams
@@ -49,8 +50,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   private def getRoutingKeys(logicalPlan: LogicalPlan) = {
     val columnFilterGroup = LogicalPlan.getColumnFilterGroup(logicalPlan)
-    dataset.options.nonMetricShardColumns
+    val routingKeys = dataset.options.nonMetricShardColumns
       .map(x => (x, LogicalPlan.getColumnValues(columnFilterGroup, x)))
+    if (routingKeys.flatMap(_._2).isEmpty) Seq.empty else routingKeys
   }
 
   private def generateRemoteExecParams(queryContext: QueryContext, startMs: Long, endMs: Long) = {
@@ -59,15 +61,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       plannerParams = queryContext.plannerParams.copy(processMultiPartition = false))
   }
 
-  /**
-    *
-    * @param routingKeys Non Metric ShardColumns of dataset and value in logicalPlan
-    * @param queryParams PromQlQueryParams having query details
-    * @param logicalPlan Logical plan
-    */
-  private def partitionUtil(routingKeys: Seq[(String, Set[String])], queryParams: PromQlQueryParams,
-                            logicalPlan: LogicalPlan) = {
-    val routingKeyMap = routingKeys.map(x => (x._1, x._2.head)).toMap
+
+  private def partitionUtilNonBinaryJoin(logicalPlan: LogicalPlan, queryParams: PromQlQueryParams) = {
+
+    val routingKeys = getRoutingKeys(logicalPlan)
+
     val offsetMs = LogicalPlanUtils.getOffsetMillis(logicalPlan)
     val periodicSeriesTimeWithOffset = TimeRange((queryParams.startSecs * 1000) - offsetMs,
       (queryParams.endSecs * 1000) - offsetMs)
@@ -78,26 +76,51 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackMs,
       periodicSeriesTimeWithOffset.endMs)
 
-    val partitions = partitionLocationProvider.getPartitions(routingKeyMap, queryTimeRange).
-      sortBy(_.timeRange.startMs)
-    if (partitions.isEmpty) new UnsupportedOperationException("No partitions found for routing keys: " + routingKeyMap)
+    val partitions = if (routingKeys.isEmpty) List.empty
+    else {
+      val routingKeyMap = routingKeys.map(x => (x._1, x._2.head)).toMap
+      partitionLocationProvider.getPartitions(routingKeyMap, queryTimeRange).
+        sortBy(_.timeRange.startMs)
+    }
+    if (partitions.isEmpty && !routingKeys.isEmpty) new UnsupportedOperationException("No partitions found for routing keys: " + routingKeys)
 
-    (partitions, lookBackMs, offsetMs)
+    (partitions, lookBackMs, offsetMs, routingKeys)
   }
+  /**
+    * @param queryParams PromQlQueryParams having query details
+    * @param logicalPlan Logical plan
+    */
+  private def partitionUtil(queryParams: PromQlQueryParams,
+                            logicalPlan: BinaryJoin): (List[PartitionAssignment], Seq[(String, Set[String])]) = {
+
+  val lhsPartitionsAndRoutingKeys = logicalPlan.lhs match {
+    case b: BinaryJoin => partitionUtil(queryParams, b)
+    case _             => val p = partitionUtilNonBinaryJoin(logicalPlan.lhs, queryParams)
+                          (p._1, p._4)
+  }
+
+    val rhsPartitionsAndRoutingKeys = logicalPlan.rhs match {
+      case b: BinaryJoin => partitionUtil(queryParams, b)
+      case _             => val p = partitionUtilNonBinaryJoin(logicalPlan.rhs, queryParams)
+        (p._1, p._4)
+    }
+    (lhsPartitionsAndRoutingKeys._1 ++ rhsPartitionsAndRoutingKeys._1,
+      rhsPartitionsAndRoutingKeys._2 ++ rhsPartitionsAndRoutingKeys._2)
+  }
+
 
   /**
     * Materialize all queries except Binary Join and Metadata
     */
   def materializeSimpleQuery(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
-    val routingKeys = getRoutingKeys(logicalPlan)
+    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val (partitions, lookBackMs, offsetMs, routingKeys) = partitionUtilNonBinaryJoin(logicalPlan, queryParams)
     if (routingKeys.forall(_._2.isEmpty)) localPartitionPlanner.materialize(logicalPlan, qContext)
     else {
-      val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
       val stepMs = queryParams.stepSecs * 1000
       val isInstantQuery: Boolean = if (queryParams.startSecs == queryParams.endSecs) true else false
 
-      val (partitions, lookBackMs, offsetMs) = partitionUtil(routingKeys, queryParams, logicalPlan)
       var prevPartitionStart = queryParams.startSecs * 1000
       val execPlans = partitions.zipWithIndex.map { case (p, i) =>
         // First partition should start from query start time
@@ -131,16 +154,44 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     }
   }
 
-  def materializeBinaryJoin(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+  def materializeMultiPartitionBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): ExecPlan = {
+    val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
+    val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
 
-    val routingKeys = getRoutingKeys(logicalPlan)
+    val lhsExec = logicalPlan.lhs match {
+      case b: BinaryJoin   => materializeBinaryJoin(b, lhsQueryContext)
+      case               _ => materializeSimpleQuery(logicalPlan.lhs, lhsQueryContext)
+    }
+
+    val rhsExec = logicalPlan.rhs match {
+      case b: BinaryJoin => materializeBinaryJoin(b, rhsQueryContext)
+      case _             => materializeSimpleQuery(logicalPlan.rhs, rhsQueryContext)
+    }
+
+    val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
+
+    if (logicalPlan.operator.isInstanceOf[SetOperator])
+      SetOperatorExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+        LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
+        LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
+    else
+      BinaryJoinExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+        logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
+        LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
+        LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn)
+
+  }
+
+  def materializeBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): ExecPlan = {
+
+    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val (partitions, routingKeys) = partitionUtil(queryParams, logicalPlan)
     if (routingKeys.forall(_._2.isEmpty)) localPartitionPlanner.materialize(logicalPlan, qContext)
     else {
-      val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-      val partitions = partitionUtil(routingKeys, queryParams, logicalPlan)._1
       val partitionName = partitions.head.partitionName
-
-      // Binary Join supported only for single partition now
+      // Binary Join for single partition
       if (partitions.forall(_.partitionName.equals((partitionName)))) {
         if (partitionName.equals(localPartitionName)) localPartitionPlanner.materialize(logicalPlan, qContext)
         else {
@@ -150,9 +201,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             InProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
         }
       }
-      else throw new UnsupportedOperationException("Binary Join across multiple partitions not supported")
+      else materializeMultiPartitionBinaryJoin(logicalPlan, qContext)
     }
   }
+
 
   def materializeSeriesKeysFilters(lp: SeriesKeysByFilters, qContext: QueryContext): ExecPlan = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]

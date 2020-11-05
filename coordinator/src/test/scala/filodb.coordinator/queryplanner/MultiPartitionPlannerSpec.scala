@@ -471,4 +471,49 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
       (endSeconds * 1000)
   }
 
+
+  it ("should generate multipartition BinaryJoin") {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
+      TimeRange(timeRange.startMs, timeRange.endMs)))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        if (routingKey.equals(Map("job" -> "app1"))) List(
+          PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs,
+            timeRange.endMs)))
+        else List(
+          PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,
+            timeRange.endMs)))
+      }
+
+
+      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("""test1{job = "app1"} + test2{job = "app2"}""",
+      TimeStepParams(1000, 100, 10000))
+
+    val promQlQueryParams = PromQlQueryParams("""test1{job = "app1"} + test2{job = "app2"}""", 1000, 100, 10000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+println(execPlan.printTree())
+    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
+    execPlan.asInstanceOf[BinaryJoinExec].lhs.head.isInstanceOf[PromQlRemoteExec] shouldEqual(true)
+    execPlan.asInstanceOf[BinaryJoinExec].rhs.head.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual(true)
+
+    println("promql:"+ execPlan.asInstanceOf[BinaryJoinExec].lhs.head.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf
+      [PromQlQueryParams].promQl)
+
+    execPlan.asInstanceOf[BinaryJoinExec].lhs.head.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf
+      [PromQlQueryParams].promQl shouldEqual("""test1{job="app1"}"""")
+
+
+//    val queryParams = execPlan.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.
+//      asInstanceOf[PromQlQueryParams]
+//    queryParams.startSecs shouldEqual 1000
+//    queryParams.endSecs shouldEqual 10000
+  }
 }
