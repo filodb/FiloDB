@@ -9,7 +9,6 @@ import filodb.core.metadata.{Column, PartitionSchema, Schema}
 import filodb.core.store._
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory, NativeMemoryManager}
 import filodb.memory.data.{ChunkMap, Shutdown}
-import filodb.memory.data.ChunkMap._logger
 import filodb.memory.format._
 import filodb.memory.format.MemoryReader._
 
@@ -515,7 +514,7 @@ TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats,
 
   override def chunkmapReleaseExclusive(): Unit = {
     super.chunkmapReleaseExclusive()
-    _log.info(s"EXCLUSIVE LOCK ACQUIRED for shard=$shard partId=$partID $stringPartition", new RuntimeException)
+    _log.info(s"EXCLUSIVE LOCK RELEASED for shard=$shard partId=$partID $stringPartition", new RuntimeException)
   }
 
 }
