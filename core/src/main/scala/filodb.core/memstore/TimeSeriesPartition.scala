@@ -9,6 +9,7 @@ import filodb.core.metadata.{Column, PartitionSchema, Schema}
 import filodb.core.store._
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory, NativeMemoryManager}
 import filodb.memory.data.{ChunkMap, Shutdown}
+import filodb.memory.data.ChunkMap._logger
 import filodb.memory.format._
 import filodb.memory.format.MemoryReader._
 
@@ -496,8 +497,28 @@ TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats,
     _log.info(s"dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition - " +
                s"newly created ChunkInfo ${currentInfo.debugString}")
   }
-}
 
+  override def chunkmapAcquireShared(): Unit = {
+    super.chunkmapAcquireShared()
+    _log.info(s"SHARED LOCK ACQUIRED for shard=$shard partId=$partID $stringPartition", new RuntimeException)
+  }
+
+  override def chunkmapReleaseShared(): Unit = {
+    super.chunkmapReleaseShared()
+    _log.info(s"SHARED LOCK RELEASED for shard=$shard partId=$partID $stringPartition", new RuntimeException)
+  }
+
+  override def chunkmapAcquireExclusive(): Unit = {
+    super.chunkmapAcquireExclusive()
+    _log.info(s"EXCLUSIVE LOCK ACQUIRED for shard=$shard partId=$partID $stringPartition", new RuntimeException)
+  }
+
+  override def chunkmapReleaseExclusive(): Unit = {
+    super.chunkmapReleaseExclusive()
+    _log.info(s"EXCLUSIVE LOCK ACQUIRED for shard=$shard partId=$partID $stringPartition", new RuntimeException)
+  }
+
+}
 
 final case class PartKeyRowReader(records: Iterator[PartKeyWithTimes]) extends Iterator[RowReader] {
   var currVal: PartKeyWithTimes = _
