@@ -258,7 +258,7 @@ class ChunkMap(val memFactory: NativeMemoryManager, var capacity: Int) {
   /**
    * Acquire exclusive access to this map, spinning if necessary. Exclusive lock isn't re-entrant.
    */
-  final def chunkmapAcquireExclusive(): Unit = {
+  def chunkmapAcquireExclusive(): Unit = {
     // Spin-lock implementation. Because the owner of the shared lock might be blocked by this
     // thread as it waits for an exclusive lock, deadlock is possible. To mitigate this problem,
     // timeout and retry, allowing shared lock waiters to make progress. The timeout doubles
@@ -352,7 +352,7 @@ class ChunkMap(val memFactory: NativeMemoryManager, var capacity: Int) {
   /**
    * Release an acquired exclusive lock.
    */
-  final def chunkmapReleaseExclusive(): Unit = {
+  def chunkmapReleaseExclusive(): Unit = {
     UnsafeUtils.setIntVolatile(this, lockStateOffset, 0)
   }
 
@@ -371,7 +371,7 @@ class ChunkMap(val memFactory: NativeMemoryManager, var capacity: Int) {
   /**
    * Acquire shared access to this map, spinning if necessary.
    */
-  final def chunkmapAcquireShared(): Unit = {
+  def chunkmapAcquireShared(): Unit = {
     // Spin-lock implementation.
 
     var lockState = 0
@@ -391,7 +391,7 @@ class ChunkMap(val memFactory: NativeMemoryManager, var capacity: Int) {
   /**
    * Release an acquired shared lock.
    */
-  final def chunkmapReleaseShared(): Unit = {
+  def chunkmapReleaseShared(): Unit = {
     var lockState = 0
     do {
       lockState = UnsafeUtils.getIntVolatile(this, lockStateOffset)
