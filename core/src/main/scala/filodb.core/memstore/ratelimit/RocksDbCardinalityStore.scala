@@ -79,7 +79,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   private val baseName = s"cardStore-$ref-$shard-${System.currentTimeMillis()}"
   private val dbDirInTmp = new File(baseDir, baseName)
   private val db = RocksDB.open(options, dbDirInTmp.getAbsolutePath)
-  logger.info(s"Opening new Cardinality DB at ${dbDirInTmp.getAbsolutePath}")
+  logger.info(s"Opening new Cardinality DB for shard=$shard dataset=$ref at ${dbDirInTmp.getAbsolutePath}")
 
   private val kryo = new ThreadLocal[Kryo]() {
     override def initialValue(): Kryo = {
@@ -205,7 +205,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
 
   override def store(shardKeyPrefix: Seq[String], card: Cardinality): Unit = {
     val key = toStringKey(shardKeyPrefix, false).getBytes()
-    logger.debug(s"Storing ${new String(key)} with $card")
+    logger.debug(s"Storing shard=$shard dataset=$ref ${new String(key)} with $card")
     db.put(key, cardinalityToBytes(card))
   }
 
@@ -221,7 +221,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   override def scanChildren(shardKeyPrefix: Seq[String]): Seq[Cardinality] = {
     val it = db.newIterator()
     val searchPrefix = toStringKey(shardKeyPrefix, true)
-    logger.debug(s"Scanning ${new String(searchPrefix)}")
+    logger.debug(s"Scanning shard=$shard dataset=$ref ${new String(searchPrefix)}")
     it.seek(searchPrefix.getBytes())
     val buf = ArrayBuffer[Cardinality]()
     import scala.util.control.Breaks._

@@ -41,8 +41,7 @@ object Submodules {
       libraryDependencies ++= coordDeps,
       libraryDependencies +=
       "com.typesafe.akka" %% "akka-contrib" % akkaVersion exclude(
-        "com.typesafe.akka", s"akka-persistence-experimental_${scalaBinaryVersion.value}"),
-      allExcludeDependencies ++= Seq(excludeMinlog)
+        "com.typesafe.akka", s"akka-persistence-experimental_${scalaBinaryVersion.value}")
     )
 
   lazy val prometheus = (project in file("prometheus"))
