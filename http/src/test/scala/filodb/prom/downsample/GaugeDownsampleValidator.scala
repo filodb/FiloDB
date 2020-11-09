@@ -31,6 +31,8 @@ import filodb.query.SuccessResponse
   * raw-data-promql property value should end with '}[@@@@s]'.
   * The lookback window is replaced by validation tool when running the query.
   *
+  * TODO This validator needs to be modified to reflect the newer approach to store downsampled data
+  *
   */
 object GaugeDownsampleValidator extends App with StrictLogging {
 

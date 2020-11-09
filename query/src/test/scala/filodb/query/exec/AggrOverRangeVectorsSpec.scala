@@ -287,7 +287,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val recSchema = SerializedRangeVector.toSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
                                                          ColumnInfo("tdig", ColumnType.StringColumn)))
     val builder = SerializedRangeVector.newBuilder()
-    val srv = SerializedRangeVector(result7(0), builder, recSchema, "Unit-Test")
+    val srv = SerializedRangeVector(result7(0), builder, recSchema)
 
     val resultObs7b = RangeVectorAggregator.present(agg7, Observable.now(srv), 1000)
     val finalResult = resultObs7b.toListL.runAsync.futureValue

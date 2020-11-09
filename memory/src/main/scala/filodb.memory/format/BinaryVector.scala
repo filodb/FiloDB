@@ -3,7 +3,7 @@ package filodb.memory.format
 import java.nio.ByteBuffer
 
 import debox.Buffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format.Encodings._
@@ -331,7 +331,7 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] {
    * The default implementation is generic but inefficient: does not take advantage of data layout
    */
   def addVector(other: BinaryAppendableVector[A]): Unit = {
-    for { i <- 0 until other.length optimized } {
+    cforRange { 0 until other.length } { i =>
       if (other.isAvailable(i)) { addData(other(i))}
       else                      { addNA() }
     }
@@ -571,7 +571,7 @@ extends OptimizingPrimitiveAppender[A] {
       // Optimization: this vector does not support NAs so just add the data
       require(numBytes + (nbits * v.length / 8) <= maxBytes,
              s"Not enough space to add ${v.length} elems; nbits=$nbits; need ${maxBytes-numBytes} bytes")
-      for { i <- 0 until v.length optimized } { addData(v(i)) }
+      cforRange { 0 until v.length } { i => addData(v(i)) }
   }
 
   final def isAllNA: Boolean = (length == 0)
@@ -669,7 +669,7 @@ extends BinaryAppendableVector[A] {
   }
 
   final def isAllNA: Boolean = {
-    for { word <- 0 until curBitmapOffset/8 optimized } {
+    cforRange { 0 until curBitmapOffset/8 } { word =>
       if (nativePtrReader.getLong(bitmapOffset + word * 8) != -1L) return false
     }
     val naMask = curMask - 1
@@ -677,7 +677,7 @@ extends BinaryAppendableVector[A] {
   }
 
   final def noNAs: Boolean = {
-    for { word <- 0 until curBitmapOffset/8 optimized } {
+    cforRange { 0 until curBitmapOffset/8 } { word =>
       if (nativePtrReader.getLong(bitmapOffset + word * 8) != 0) return false
     }
     val naMask = curMask - 1

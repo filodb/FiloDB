@@ -38,7 +38,8 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     * @return materialized Execution Plan which can be dispatched
     */
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
-    if (hasShardKeyEqualsOnly(logicalPlan)) queryPlanner.materialize(logicalPlan, qContext)
+    if (LogicalPlan.hasShardKeyEqualsOnly(logicalPlan, dataset.options.nonMetricShardColumns))
+      queryPlanner.materialize(logicalPlan, qContext)
     else walkLogicalPlanTree(logicalPlan, qContext).plans.head
   }
 
@@ -55,19 +56,11 @@ class ShardKeyRegexPlanner(dataset: Dataset,
       case lp: VectorPlan                  => materializeVectorPlan(qContext, lp)
       case lp: Aggregate                   => materializeAggregate(lp, qContext)
       case lp: BinaryJoin                  => materializeBinaryJoin(lp, qContext)
+      case lp: LabelValues                 => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
+      case lp: SeriesKeysByFilters         => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
       case _                               => materializeOthers(logicalPlan, qContext)
     }
   }
-
-  private def getNonMetricShardKeyFilters(logicalPlan: LogicalPlan): Seq[Seq[ColumnFilter]] =
-    LogicalPlan.getRawSeriesFilters(logicalPlan)
-      .map { s => s.filter(f => dataset.options.nonMetricShardColumns.contains(f.column))}
-
-  /**
-    * Returns true when all shard key filters have Equals
-    */
-  private def hasShardKeyEqualsOnly(logicalPlan: LogicalPlan) = getNonMetricShardKeyFilters(logicalPlan).
-    forall(_.forall(f => f.filter.isInstanceOf[filodb.core.query.Filter.Equals]))
 
   private def generateExecWithoutRegex(logicalPlan: LogicalPlan, nonMetricShardKeyFilters: Seq[ColumnFilter],
                                        qContext: QueryContext): Seq[ExecPlan] = {
@@ -87,7 +80,8 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     * For binary join queries like test1{_ws_ = "demo", _ns_ =~ "App.*"} + test2{_ws_ = "demo", _ns_ =~ "App.*"})
     */
   private def materializeBinaryJoin(binaryJoin: BinaryJoin, qContext: QueryContext): PlanResult = {
-   if (hasShardKeyEqualsOnly(binaryJoin)) PlanResult(Seq(queryPlanner.materialize(binaryJoin, qContext)))
+   if (LogicalPlan.hasShardKeyEqualsOnly(binaryJoin, dataset.options.nonMetricShardColumns))
+     PlanResult(Seq(queryPlanner.materialize(binaryJoin, qContext)))
    else throw new UnsupportedOperationException("Regex not supported for Binary Join")
   }
 
@@ -97,7 +91,8 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     * Sub query could be across multiple partitions so aggregate using MultiPartitionReduceAggregateExec
     * */
   private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext): PlanResult = {
-    val execPlans = generateExecWithoutRegex(aggregate, getNonMetricShardKeyFilters(aggregate).head, queryContext)
+    val execPlans = generateExecWithoutRegex(aggregate,
+      LogicalPlan.getNonMetricShardKeyFilters(aggregate, dataset.options.nonMetricShardColumns).head, queryContext)
     val exec = if (execPlans.size == 1) execPlans.head
     else {
       val reducer = MultiPartitionReduceAggregateExec(queryContext, InProcessPlanDispatcher,
@@ -114,7 +109,8 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     * Sub query could be across multiple partitions so concatenate using MultiPartitionDistConcatExec
     * */
   private def materializeOthers(logicalPlan: LogicalPlan, queryContext: QueryContext): PlanResult = {
-    val nonMetricShardKeyFilters = getNonMetricShardKeyFilters(logicalPlan)
+    val nonMetricShardKeyFilters =
+      LogicalPlan.getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
     // For queries which don't have RawSeries filters like metadata and fixed scalar queries
     val exec = if (nonMetricShardKeyFilters.head.isEmpty) queryPlanner.materialize(logicalPlan, queryContext)
     else {

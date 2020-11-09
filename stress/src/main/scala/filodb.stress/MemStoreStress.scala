@@ -2,8 +2,6 @@ package filodb.stress
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.language.postfixOps
-
 import akka.pattern.ask
 import akka.util.Timeout
 import monix.eval.Task

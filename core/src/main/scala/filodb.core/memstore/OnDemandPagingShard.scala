@@ -1,11 +1,10 @@
 package filodb.core.memstore
 
-import java.util
-
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext
 
 import debox.Buffer
+import java.util
 import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
@@ -14,11 +13,10 @@ import monix.reactive.{Observable, OverflowStrategy}
 
 import filodb.core.{DatasetRef, Types}
 import filodb.core.binaryrecord2.RecordSchema
-import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
 import filodb.core.metadata.Schemas
 import filodb.core.query.QuerySession
 import filodb.core.store._
-import filodb.memory.MemFactory
+import filodb.memory.NativeMemoryManager
 
 /**
  * Extends TimeSeriesShard with on-demand paging functionality by populating in-memory partitions with chunks from
@@ -28,15 +26,12 @@ class OnDemandPagingShard(ref: DatasetRef,
                           schemas: Schemas,
                           storeConfig: StoreConfig,
                           shardNum: Int,
-                          bufferMemoryManager: MemFactory,
+                          bufferMemoryManager: NativeMemoryManager,
                           rawStore: ColumnStore,
                           metastore: MetaStore,
-                          evictionPolicy: PartitionEvictionPolicy,
-                          downsampleConfig: DownsampleConfig,
-                          downsamplePublisher: DownsamplePublisher)
+                          evictionPolicy: PartitionEvictionPolicy)
                          (implicit ec: ExecutionContext) extends
-TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawStore, metastore, evictionPolicy,
-                downsampleConfig, downsamplePublisher)(ec) {
+TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawStore, metastore, evictionPolicy)(ec) {
   import TimeSeriesShard._
   import FiloSchedulers._
 

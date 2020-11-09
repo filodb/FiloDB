@@ -5,7 +5,6 @@ import io.circe.syntax._
 
 object PromCirceSupport {
   import cats.syntax.either._
-
   // necessary to encode sample in promql response as an array with long and double value as string
   // Specific encoders for *Sampl types
   implicit val encodeSampl: Encoder[DataSampl] = Encoder.instance {

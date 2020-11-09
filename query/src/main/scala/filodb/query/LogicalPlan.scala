@@ -12,6 +12,13 @@ sealed trait LogicalPlan {
   def isRoutable: Boolean = true
 
   /**
+    * Whether to Time-Split queries into smaller range queries if the range exceeds configured limit.
+    * This flag will be overridden by plans, which either do not support splitting or will not help in improving
+    * performance. For e.g. metadata query plans.
+    */
+  def isTimeSplittable: Boolean = true
+
+  /**
     * Replace filters present in logical plan
     */
   def replaceFilters(filters: Seq[ColumnFilter]): LogicalPlan = {
@@ -30,7 +37,6 @@ sealed trait LogicalPlan {
   * not in the same time cadence as user query windowing.
   */
 sealed trait RawSeriesLikePlan extends LogicalPlan {
-  override def isRoutable: Boolean = false
   def isRaw: Boolean = false
   def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan
 }
@@ -62,7 +68,7 @@ sealed trait PeriodicSeriesPlan extends LogicalPlan {
 }
 
 sealed trait MetadataQueryPlan extends LogicalPlan {
-  override def isRoutable: Boolean = false
+  override def isTimeSplittable: Boolean = false
 }
 
 /**
@@ -467,12 +473,27 @@ object LogicalPlan {
 
   def getRawSeriesFilters(logicalPlan: LogicalPlan): Seq[Seq[ColumnFilter]] = {
     LogicalPlan.findLeafLogicalPlans(logicalPlan).map { l =>
-      l match
-      {
-        case lp: RawSeries => lp.filters
-        case _             => Seq.empty
+      l match {
+        case lp: RawSeries    => lp.filters
+        case lp: LabelValues  => lp.filters
+        case _                => Seq.empty
       }
     }
   }
+
+  /**
+   * Returns all nonMetricShardKey column filters
+   */
+  def getNonMetricShardKeyFilters(logicalPlan: LogicalPlan,
+                                  nonMetricShardColumns: Seq[String]): Seq[Seq[ColumnFilter]] =
+    getRawSeriesFilters(logicalPlan).map { s => s.filter(f => nonMetricShardColumns.contains(f.column))}
+
+  /**
+   * Returns true when all shard key filters have Equals
+   */
+  def hasShardKeyEqualsOnly(logicalPlan: LogicalPlan, nonMetricShardColumns: Seq[String]): Boolean =
+    getNonMetricShardKeyFilters(logicalPlan: LogicalPlan, nonMetricShardColumns: Seq[String]).
+      forall(_.forall(f => f.filter.isInstanceOf[filodb.core.query.Filter.Equals]))
+
 }
 //scalastyle:on number.of.types

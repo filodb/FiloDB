@@ -3,11 +3,10 @@ package filodb.jmh
 import java.util.concurrent.TimeUnit
 
 import scala.concurrent.duration._
-import scala.language.postfixOps
 
 import ch.qos.logback.classic.{Level, Logger}
 import org.openjdk.jmh.annotations._
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.RecordBuilder
@@ -53,7 +52,7 @@ class PartKeyIndexBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def partIdsLookupWithEqualsFilters(): Unit = {
-    for ( i <- 0 until 8 optimized) {
+    cforRange ( 0 until 8 ) { i =>
       partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
             ColumnFilter("_ws_", Filter.Equals("demo")),
@@ -68,7 +67,7 @@ class PartKeyIndexBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def emptyPartIdsLookupWithEqualsFilters(): Unit = {
-    for ( i <- 0 until 8 optimized) {
+    cforRange ( 0 until 8 ) { i =>
       partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-${i + 200}")),
           ColumnFilter("_ws_", Filter.Equals("demo")),
@@ -83,7 +82,7 @@ class PartKeyIndexBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def partIdsLookupWithSuffixRegexFilters(): Unit = {
-    for ( i <- 0 until 8 optimized) {
+    cforRange ( 0 until 8 ) { i =>
       partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
           ColumnFilter("_ws_", Filter.Equals("demo")),
@@ -98,7 +97,7 @@ class PartKeyIndexBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def partIdsLookupWithPrefixRegexFilters(): Unit = {
-    for ( i <- 0 until 8 optimized) {
+    cforRange ( 0 until 8 ) { i =>
       partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
           ColumnFilter("_ws_", Filter.Equals("demo")),
@@ -113,9 +112,9 @@ class PartKeyIndexBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def startTimeLookupWithPartId(): Unit = {
-    for ( i <- 0 until 8 optimized) {
+    cforRange ( 0 until 8 ) { i =>
       val pIds = debox.Buffer.empty[Int]
-      for ( j <- i * 1000 to i * 1000 + 1000 optimized) { pIds += j }
+      cforRange ( i * 1000 to i * 1000 + 1000 ) { j => pIds += j }
       partKeyIndex.startTimeFromPartIds(pIds.iterator())
     }
   }

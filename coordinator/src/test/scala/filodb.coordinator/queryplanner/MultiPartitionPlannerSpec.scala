@@ -418,4 +418,41 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
 
   }
 
+  it ("should generate Exec plan for Metadata Label values query") {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] =
+      List(PartitionAssignment("remote", "remote-url",
+        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
+        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+
+      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.labelValuesQueryToLogicalPlan(Seq("""__metric__"""), Some("""_ws_="demo""""), TimeStepParams(startSeconds, step, endSeconds) )
+
+    val promQlQueryParams = PromQlQueryParams(
+      "", startSeconds, step, endSeconds, None, Some("/api/v2/label/values"),
+      processMultiPartition = true)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+    execPlan.isInstanceOf[LabelValuesDistConcatExec] shouldEqual (true)
+    execPlan.children(0).isInstanceOf[LabelValuesDistConcatExec] shouldEqual(true)
+    execPlan.children(1).isInstanceOf[MetadataRemoteExec] shouldEqual(true)
+
+    val expectedUrlParams = Map("filter" -> """_ws_="demo"""", "labels" -> "__metric__")
+    execPlan.children(1).asInstanceOf[MetadataRemoteExec].urlParams shouldEqual(expectedUrlParams) // Filter values
+                                                                                                  // should have quotes
+    execPlan.children(1).asInstanceOf[MetadataRemoteExec].params.endSecs shouldEqual(localPartitionStart - 1)
+    execPlan.children(0).asInstanceOf[LabelValuesDistConcatExec].children(0).asInstanceOf[LabelValuesExec].startMs shouldEqual
+      (localPartitionStart * 1000)
+    execPlan.children(0).asInstanceOf[LabelValuesDistConcatExec].children(0).asInstanceOf[LabelValuesExec].endMs shouldEqual
+      (endSeconds * 1000)
+  }
+
 }
