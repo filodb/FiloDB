@@ -2,7 +2,7 @@ package filodb.query.exec
 
 import monix.reactive.Observable
 import scala.collection.mutable.ListBuffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
@@ -279,7 +279,7 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
 
       // Create SerializedRangeVector so that sorting does not consume rows iterator
       val resultRv = source.toListL.map { rvs =>
-         rvs.map(SerializedRangeVector(_, builder, recSchema, getClass.getSimpleName)).
+         rvs.map(SerializedRangeVector(_, builder, recSchema)).
            sortBy { rv => if (rv.rows.hasNext) rv.rows.next().getDouble(1) else Double.NaN
         }(ordering)
 
@@ -442,7 +442,7 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
       }
 
       timestamps += row.getLong(0)
-      for { b <- 0 until hist.numBuckets optimized } {
+      cforRange { 0 until hist.numBuckets } { b =>
         buckets(hist.bucketTop(b)) += hist.bucketValue(b)
       }
       emptyBuckets.foreach { b => buckets(b) += Double.NaN }

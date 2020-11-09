@@ -6,7 +6,7 @@ import scala.concurrent.duration.FiniteDuration
 
 import kamon.Kamon
 import monix.reactive.Observable
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, ErrorResponse, Instance}
@@ -305,12 +305,12 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
             try {
               // for each downsample period
               var first = startRow
-              for {i <- 0 until downsamplePeriods.length optimized} {
+              cforRange { 0 until downsamplePeriods.length } { i =>
                 val last = downsamplePeriods(i)
 
                 dsRecordBuilder.startNewRecord(part.schema)
                 // for each column, add downsample column value
-                for {col <- 0 until downsamplers.length optimized} {
+                cforRange { 0 until downsamplers.length } { col =>
                   val downsampler = downsamplers(col)
                   downsampler match {
                     case t: TimeChunkDownsampler =>

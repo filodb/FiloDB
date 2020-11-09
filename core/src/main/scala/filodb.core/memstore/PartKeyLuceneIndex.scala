@@ -21,7 +21,7 @@ import org.apache.lucene.search.BooleanClause.Occur
 import org.apache.lucene.store.MMapDirectory
 import org.apache.lucene.util.{BytesRef, InfoStream}
 import org.apache.lucene.util.automaton.RegExp
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.{concurrentCache, DatasetRef}
 import filodb.core.Types.PartitionKey
@@ -184,7 +184,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     */
   def removePartKeys(partIds: debox.Buffer[Int]): Unit = {
     val terms = new util.ArrayList[BytesRef]()
-    for { i <- 0 until partIds.length optimized } {
+    cforRange { 0 until partIds.length } { i =>
       terms.add(new BytesRef(partIds(i).toString.getBytes))
     }
     indexWriter.deleteDocuments(new TermInSetQuery(PART_ID, terms))
@@ -317,7 +317,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     // Currently there is a bit of leak in abstraction of Binary Record processing in this class.
 
     luceneDocument.set(document) // threadlocal since we are not able to pass the document into mapconsumer
-    for { i <- 0 until numPartColumns optimized } {
+    cforRange { 0 until numPartColumns } { i =>
       indexers(i).fromPartKey(partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset), partId)
     }
     // partId
@@ -451,9 +451,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         new TermQuery(term)
       case NotEquals(value) =>
         val term = new Term(column, value.toString)
-        val allDocs = new MatchAllDocsQuery
         val booleanQuery = new BooleanQuery.Builder
-        booleanQuery.add(allDocs, Occur.FILTER)
+        val termAll = new Term(column, ".*")
+        booleanQuery.add(new RegexpQuery(termAll, RegExp.NONE), Occur.FILTER)
         booleanQuery.add(new TermQuery(term), Occur.MUST_NOT)
         booleanQuery.build()
       case In(values) =>

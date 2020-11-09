@@ -1,5 +1,7 @@
 package filodb.coordinator.queryplanner
 
+import scala.concurrent.duration._
+
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
@@ -13,8 +15,8 @@ import filodb.core.query.{ColumnFilter, Filter, QueryConfig, QueryContext}
 import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
-import filodb.query._
-import filodb.query.exec._
+import filodb.query.{exec, _}
+import filodb.query.exec.{LocalPartitionDistConcatExec, _}
 
 object SingleClusterPlanner {
   private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests").withoutTags
@@ -23,18 +25,24 @@ object SingleClusterPlanner {
 /**
   * Responsible for query planning within single FiloDB cluster
   *
-  * @param dsRef dataset
-  * @param schema schema instance, used to extract partKey schema
-  * @param spreadProvider used to get spread
+  * @param dsRef           dataset
+  * @param schema          schema instance, used to extract partKey schema
+  * @param spreadProvider  used to get spread
   * @param shardMapperFunc used to get shard locality
+  * @param timeSplitEnabled split based on longer time range
+  * @param minTimeRangeForSplitMs if time range is longer than this, plan will be split into multiple plans
+  * @param splitSizeMs time range for each split, if plan needed to be split
   */
 class SingleClusterPlanner(dsRef: DatasetRef,
                            schema: Schemas,
                            shardMapperFunc: => ShardMapper,
                            earliestRetainedTimestampFn: => Long,
                            queryConfig: QueryConfig,
-                           spreadProvider: SpreadProvider = StaticSpreadProvider())
-                                extends QueryPlanner with StrictLogging with PlannerMaterializer {
+                           spreadProvider: SpreadProvider = StaticSpreadProvider(),
+                           timeSplitEnabled: Boolean = false,
+                           minTimeRangeForSplitMs: => Long = 1.day.toMillis,
+                           splitSizeMs: => Long = 1.day.toMillis)
+                           extends QueryPlanner with StrictLogging with PlannerMaterializer {
 
   override val schemas = schema
   val shardColumns = dsOptions.shardKeyColumns.sorted
@@ -53,6 +61,27 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
     if (shardMapperFunc.numShards <= 0) throw new IllegalStateException("No shards available")
+    val logicalPlans = if (logicalPlan.isInstanceOf[PeriodicSeriesPlan])
+      LogicalPlanUtils.splitPlans(logicalPlan, qContext, timeSplitEnabled, minTimeRangeForSplitMs, splitSizeMs)
+    else
+      Seq(logicalPlan)
+    val materialized = logicalPlans match {
+      case Seq(one) => materializeTimeSplitPlan(one, qContext)
+      case many =>
+        val meterializedPlans = many.map(materializeTimeSplitPlan(_, qContext))
+        val targetActor = pickDispatcher(meterializedPlans)
+
+        // create SplitLocalPartitionDistConcatExec that will execute child execplanss sequentially and stitches
+        // results back with StitchRvsMapper transformer.
+        val stitchPlan = SplitLocalPartitionDistConcatExec(qContext, targetActor, meterializedPlans)
+        stitchPlan
+    }
+    logger.debug(s"Materialized logical plan for dataset=$dsRef :" +
+      s" $logicalPlan to \n${materialized.printTree()}")
+    materialized
+  }
+
+  private def materializeTimeSplitPlan(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     val materialized = walkLogicalPlanTree(logicalPlan, qContext)
     match {
       case PlanResult(Seq(justOne), stitch) =>
@@ -72,7 +101,6 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     logger.debug(s"Materialized logical plan for dataset=$dsRef :" +
       s" $logicalPlan to \n${materialized.printTree()}")
     materialized
-
   }
 
   private def shardsFromFilters(filters: Seq[ColumnFilter],
@@ -344,15 +372,16 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val labelNames = if (metricLabelIndex > -1 && dsOptions.metricColumn != PromMetricLabel)
       lp.labelNames.updated(metricLabelIndex, dsOptions.metricColumn) else lp.labelNames
 
-    val shardsToHit = if (shardColumns.toSet.subsetOf(lp.filters.map(_.column).toSet)) {
-      shardsFromFilters(lp.filters, qContext)
+    val renamedFilters = renameMetricFilter(lp.filters)
+    val shardsToHit = if (shardColumns.toSet.subsetOf(renamedFilters.map(_.column).toSet)) {
+      shardsFromFilters(renamedFilters, qContext)
     } else {
       mdNoShardKeyFilterRequests.increment()
       shardMapperFunc.assignedShards
     }
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      exec.LabelValuesExec(qContext, dispatcher, dsRef, shard, lp.filters, labelNames, lp.startMs, lp.endMs)
+      exec.LabelValuesExec(qContext, dispatcher, dsRef, shard, renamedFilters, labelNames, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec, false)
   }

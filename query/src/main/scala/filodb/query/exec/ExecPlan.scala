@@ -4,6 +4,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.control.NonFatal
 
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -96,11 +97,14 @@ trait ExecPlan extends QueryCommand {
               querySession: QuerySession)
              (implicit sched: Scheduler): Task[QueryResponse] = {
 
+    val startExecute = querySession.qContext.submitTime
+
     val parentSpan = Kamon.currentSpan()
     // NOTE: we launch the preparatory steps as a Task too.  This is important because scanPartitions,
     // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
     // we don't want these to happen in a single thread.
-    // Step 1: initiate doExecute, get schema
+
+    // Step 1: initiate doExecute: make result schema and set up the async monix pipeline to create RVs
     lazy val step1 = Task {
       val span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
         .asChildOf(parentSpan)
@@ -111,12 +115,20 @@ trait ExecPlan extends QueryCommand {
       // across threads. Note that task/observable will not run on the thread where span is present since
       // kamon uses thread-locals.
       Kamon.runWithSpan(span, true) {
-        doExecute(source, querySession)
+        val doEx = doExecute(source, querySession)
+        Kamon.histogram("query-execute-time-elapsed-step1-done",
+          MeasurementUnit.time.milliseconds)
+          .withTag("plan", getClass.getSimpleName)
+          .record(Math.max(0, System.currentTimeMillis - startExecute))
+        doEx
       }
     }
 
-    // Step 2: Set up transformers and loop over all rangevectors, creating the result
+    // Step 2: Run connect monix pipeline to transformers, materialize the result
     def step2(res: ExecResult) = res.schema.map { resSchema =>
+      Kamon.histogram("query-execute-time-elapsed-step2-start", MeasurementUnit.time.milliseconds)
+        .withTag("plan", getClass.getSimpleName)
+        .record(Math.max(0, System.currentTimeMillis - startExecute))
       val span = Kamon.spanBuilder(s"execute-step2-${getClass.getSimpleName}")
         .asChildOf(parentSpan)
         .tag("query-id", queryContext.queryId)
@@ -131,15 +143,20 @@ trait ExecPlan extends QueryCommand {
         Task.eval(QueryResult(queryContext.queryId, resSchema, Nil))
       } else {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
-          span.mark(transf.getClass.getSimpleName)
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
           (transf.apply(acc._1, querySession, queryContext.sampleLimit, acc._2,
             paramRangeVector), transf.schema(acc._2))
         }
         val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
+        Kamon.histogram("query-execute-time-elapsed-step2-transformer-pipeline-setup",
+                    MeasurementUnit.time.milliseconds)
+          .withTag("plan", getClass.getSimpleName)
+          .record(Math.max(0, System.currentTimeMillis - startExecute))
+        span.mark("step2-transformer-pipeline-setup")
         val builder = SerializedRangeVector.newBuilder()
         @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
         finalRes._1
+          .doOnStart(_ => span.mark("before-first-materialized-result-rv"))
           .map {
             case srv: SerializableRangeVector =>
               numResultSamples += srv.numRowsInt
@@ -150,7 +167,7 @@ trait ExecPlan extends QueryCommand {
               srv
             case rv: RangeVector =>
               // materialize, and limit rows per RV
-              val srv = SerializedRangeVector(rv, builder, recSchema, getClass.getSimpleName, span)
+              val srv = SerializedRangeVector(rv, builder, recSchema)
               numResultSamples += srv.numRowsInt
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
               if (enforceLimit && numResultSamples > queryContext.sampleLimit)
@@ -158,8 +175,13 @@ trait ExecPlan extends QueryCommand {
                   s"Try applying more filters or reduce time range.")
               srv
           }
+          .doOnTerminate(_ => span.mark("after-last-materialized-result-rv"))
           .toListL
           .map { r =>
+            Kamon.histogram("query-execute-time-elapsed-step2-result-materialized",
+                  MeasurementUnit.time.milliseconds)
+              .withTag("plan", getClass.getSimpleName)
+              .record(Math.max(0, System.currentTimeMillis - startExecute))
             val numBytes = builder.allContainers.map(_.numBytes).sum
             SerializedRangeVector.queryResultBytes.record(numBytes)
             span.mark(s"num-bytes: $numBytes")
@@ -343,6 +365,10 @@ abstract class NonLeafExecPlan extends ExecPlan {
 
   final def submitTime: Long = children.head.queryContext.submitTime
 
+  // flag to override child task execution behavior. If it is false, child tasks get executed sequentially.
+  // Use-cases include splitting longer range query into multiple smaller range queries.
+  def parallelChildTasks: Boolean = true
+
   private def dispatchRemotePlan(plan: ExecPlan, span: kamon.trace.Span)
                                 (implicit sched: Scheduler) = {
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
@@ -367,18 +393,35 @@ abstract class NonLeafExecPlan extends ExecPlan {
                       querySession: QuerySession)
                      (implicit sched: Scheduler): ExecResult = {
     val parentSpan = Kamon.currentSpan()
-    parentSpan.mark("create-child-tasks")
+
+    val span = Kamon.spanBuilder(s"execute-step1-child-result-composition-${getClass.getSimpleName}")
+      .asChildOf(parentSpan)
+      .tag("query-id", queryContext.queryId)
+      .start()
+
+    // whether child tasks need to be executed sequentially.
+    // parallelism 1 means, only one worker thread to process underlying tasks.
+    val parallelism: Int = if (parallelChildTasks)
+                              children.length
+                           else
+                              1
+
     // Create tasks for all results.
     // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
     val childTasks = Observable.fromIterable(children.zipWithIndex)
-                               .mapAsync(Runtime.getRuntime.availableProcessors()) { case (plan, i) =>
-                                 dispatchRemotePlan(plan, parentSpan).map((_, i))
+                               .mapAsync(parallelism) { case (plan, i) =>
+                                 val task = dispatchRemotePlan(plan, span).map((_, i))
+                                 span.mark(s"plan-dispatched-${plan.getClass.getSimpleName}")
+                                 task
                                }
 
     // The first valid schema is returned as the Task.  If all results are empty, then return
     // an empty schema.  Validate that the other schemas are the same.  Skip over empty schemas.
     var sch = ResultSchema.empty
-    val processedTasks = childTasks.collect {
+    val processedTasks = childTasks
+      .doOnStart(_ => span.mark("first-child-result-received"))
+      .doOnTerminate(_ => span.mark("last-child-result-received"))
+      .collect {
       case (res @ QueryResult(_, schema, _), i) if schema != ResultSchema.empty =>
         sch = reduceSchemas(sch, res)
         (res, i.toInt)
@@ -390,10 +433,11 @@ abstract class NonLeafExecPlan extends ExecPlan {
     val outputSchema = processedTasks.collect {
       case (QueryResult(_, schema, _), _) => schema
     }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
-    parentSpan.mark("output-compose")
-    val outputRvs = compose(processedTasks, outputSchema, querySession)
-    parentSpan.mark("return-results")
-    ExecResult(outputRvs, outputSchema)
+      Kamon.runWithSpan(span, false) {
+        val outputRvs = compose(processedTasks, outputSchema, querySession)
+          .doOnTerminate(_ => span.finish())
+        ExecResult(outputRvs, outputSchema)
+      }
   }
 
   /**

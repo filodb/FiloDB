@@ -1,6 +1,6 @@
 package filodb.core.query
 
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.core.metadata.Dataset
 import filodb.core.store.{ChunkInfoIterator, ChunkSetInfoReader, ReadablePartition}
@@ -45,7 +45,7 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
 
   private def populateIterators(info: ChunkSetInfoReader): Unit = {
     setChunkStartEnd(info)
-    for { pos <- 0 until columnIDs.size optimized } {
+    cforRange { 0 until columnIDs.size } { pos =>
       val colID = columnIDs(pos)
       if (Dataset.isPartitionID(colID)) {
         // Look up the TypedIterator for that partition key

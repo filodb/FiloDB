@@ -3,7 +3,7 @@ package filodb.memory.format.vectors
 import java.nio.ByteOrder.LITTLE_ENDIAN
 
 import org.agrona.{DirectBuffer, MutableDirectBuffer}
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.format._
 
@@ -93,10 +93,10 @@ trait Histogram extends Ordered[Histogram] {
    */
   def compare(other: Histogram): Int = {
     if (numBuckets != other.numBuckets) return topBucketValue compare other.topBucketValue
-    for { b <- 0 until numBuckets optimized } {
+    cforRange { 0 until numBuckets } { b =>
       if (bucketTop(b) != other.bucketTop(b)) return topBucketValue compare other.topBucketValue
     }
-    for { b <- (numBuckets - 1) to 0 by -1 optimized } {
+    cforRange { (numBuckets - 1) to 0 by -1 } {b =>
       val countComp = bucketValue(b) compare other.bucketValue(b)
       if (countComp != 0) return countComp
     }
@@ -113,7 +113,7 @@ trait Histogram extends Ordered[Histogram] {
 
   override def hashCode: Int = {
     var hash = 7.0
-    for { b <- 0 until numBuckets optimized } {
+    cforRange { 0 until numBuckets } { b =>
       hash = (31 * bucketTop(b) + hash) * 31 + bucketValue(b)
     }
     java.lang.Double.doubleToLongBits(hash).toInt
@@ -130,7 +130,7 @@ trait HistogramWithBuckets extends Histogram {
   final def bucketTop(no: Int): Double = buckets.bucketTop(no)
   final def valueArray: Array[Double] = {
     val values = new Array[Double](numBuckets)
-    for { b <- 0 until numBuckets optimized } {
+    cforRange { 0 until numBuckets } { b =>
       values(b) = bucketValue(b)
     }
     values
@@ -155,7 +155,7 @@ final case class LongHistogram(buckets: HistogramBuckets, values: Array[Long]) e
    */
   final def add(other: LongHistogram): Unit = {
     assert(other.buckets == buckets)
-    for { b <- 0 until numBuckets optimized } {
+    cforRange { 0 until numBuckets } { b =>
       values(b) += other.values(b)
     }
   }
@@ -208,7 +208,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
       case m: MutableHistogram =>
         System.arraycopy(m.values, 0, values, 0, values.size)
       case l: LongHistogram    =>
-        for { n <- 0 until values.size optimized } {
+        cforRange { 0 until values.size } { n =>
           values(n) = l.values(n).toDouble
         }
     }
@@ -225,7 +225,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
     if (buckets.similarForMath(other.buckets)) {
       // If it was NaN before, reset to 0 to sum another hist
       if (values(0).isNaN) java.util.Arrays.fill(values, 0.0)
-      for { b <- 0 until numBuckets optimized } {
+      cforRange { 0 until numBuckets } { b =>
         values(b) += other.bucketValue(b)
       }
     } else {
@@ -234,7 +234,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
       // NOTE: there are two issues here: below add picks the existing bucket scheme (not commutative)
       //       and the newer different buckets are lost (one may want more granularity)
       // var ourBucketNo = 0
-      // for { b <- 0 until other.numBuckets optimized } {
+      // cforRange { 0 until other.numBuckets } { b =>
       //   // Find our first bucket greater than or equal to their bucket
       //   while (ourBucketNo < numBuckets && bucketTop(ourBucketNo) < other.bucketTop(b)) ourBucketNo += 1
       //   if (ourBucketNo < numBuckets) {
@@ -260,7 +260,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
     */
   final def makeMonotonic(): Unit = {
     var max = 0d
-    for { b <- 0 until values.size optimized } {
+    cforRange { 0 until values.size } { b =>
       // When bucket no longer used NaN will be seen. Non-increasing values can be seen when
       // newer buckets are introduced and not all instances are updated with that bucket.
       if (values(b) < max || values(b).isNaN) values(b) = max // assign previous max
@@ -345,7 +345,7 @@ sealed trait HistogramBuckets {
    */
   final def allBucketTops: Array[Double] = {
     val tops = new Array[Double](numBuckets)
-    for { b <- 0 until numBuckets optimized } {
+    cforRange { 0 until numBuckets } { b =>
       tops(b) = bucketTop(b)
     }
     tops
@@ -353,7 +353,7 @@ sealed trait HistogramBuckets {
 
   final def bucketSet: debox.Set[Double] = {
     val tops = debox.Set.empty[Double]
-    for { b <- 0 until numBuckets optimized } {
+    cforRange { 0 until numBuckets } { b =>
       tops += bucketTop(b)
     }
     tops

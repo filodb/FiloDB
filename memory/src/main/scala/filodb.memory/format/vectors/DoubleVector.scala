@@ -3,7 +3,7 @@ package filodb.memory.format.vectors
 import java.nio.ByteBuffer
 
 import debox.Buffer
-import scalaxy.loops._
+import spire.syntax.cfor._
 
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
@@ -167,7 +167,7 @@ trait DoubleVectorDataReader extends CounterVectorReader {
     val dataIt = iterate(acc, vector, startElement)
     val availIt = iterateAvailable(acc, vector, startElement)
     val len = length(acc, vector)
-    for { n <- startElement until len optimized } {
+    cforRange { startElement until len } { n =>
       val item = dataIt.next
       if (availIt.next) newBuf += item
     }
@@ -320,7 +320,7 @@ extends DoubleVectorDataReader {
     val _corrected = new Array[Double](length(acc, vect))
     val it = iterate(acc, vect, 0)
     var last = Double.MinValue
-    for { pos <- 0 until length(acc, vect) optimized } {
+    cforRange { 0 until length(acc, vect) } { pos =>
       val nextVal = it.next
       if (nextVal < last) {   // reset!
         _correction += last
@@ -400,7 +400,7 @@ extends PrimitiveAppendableVector[Double](addr, maxBytes, 64, true) {
   final def minMax: (Double, Double) = {
     var min = Double.MaxValue
     var max = Double.MinValue
-    for { index <- 0 until length optimized } {
+    cforRange { 0 until length } { index =>
       val data = apply(index)
       if (data < min) min = data
       if (data > max) max = data
@@ -457,7 +457,7 @@ BitmapMaskAppendableVector[Double](addr, maxElements) with OptimizingPrimitiveAp
   final def minMax: (Double, Double) = {
     var min = Double.MaxValue
     var max = Double.MinValue
-    for { index <- 0 until length optimized } {
+    cforRange { 0 until length } { index =>
       if (isAvailable(index)) {
         val data = subVect.apply(index)
         if (data < min) min = data
@@ -489,7 +489,7 @@ extends AppendableVectorWrapper[Long, Double] {
   val MaxLongDouble = Long.MaxValue.toDouble
   final def nonIntegrals: Int = {
     var nonInts = 0
-    for { index <- 0 until length optimized } {
+    cforRange { 0 until length } { index =>
       if (inner.isAvailable(index)) {
         val data = inner.apply(index)
         if (data > MaxLongDouble || (Math.rint(data) != data)) nonInts += 1
@@ -528,6 +528,6 @@ object DoubleLongWrapDataReader extends DoubleVectorDataReader {
     val ignorePrev = if (prev.isNaN) true
     else false
     val changes = LongBinaryVector(acc, vector).changes(acc, vector, start, end, prev.toLong, ignorePrev)
-    (changes._1.toDouble, changes._1.toDouble)
+    (changes._1.toDouble, changes._2.toDouble)
   }
 }

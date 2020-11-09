@@ -217,7 +217,7 @@ class BlockMemFactory(blockStore: BlockManager,
   val optionSelf = Some(this)
 
   // tracks fully populated blocks not marked reclaimable yet (typically waiting for flush)
-  val fullBlocks = ListBuffer[Block]()
+  val fullBlocksToBeMarkedAsReclaimable = ListBuffer[Block]()
 
   // tracks block currently being populated
   var currentBlock = requestBlock()
@@ -250,7 +250,7 @@ class BlockMemFactory(blockStore: BlockManager,
     */
   def tryMarkReclaimable(): Unit = synchronized {
     if (now - lastUsedNanos > BlockMemFactory.USED_THRESHOLD_NANOS) {
-      markUsedBlocksReclaimable()
+      markFullBlocksReclaimable()
       if (currentBlock != null) {
         currentBlock.markReclaimable()
         currentBlock = null
@@ -294,9 +294,10 @@ class BlockMemFactory(blockStore: BlockManager,
       metadataWriter(metaAddr)
       if (blk != metadataSpan.last) {
         if (markFullBlocksAsReclaimable) {
+          // We know that all the blocks in the span except the last one is full, so mark them reclaimable
           blk.markReclaimable()
         } else synchronized {
-          fullBlocks += blk
+          fullBlocksToBeMarkedAsReclaimable += blk
         }
       }
     }
@@ -311,11 +312,16 @@ class BlockMemFactory(blockStore: BlockManager,
     metaAddr
   }
 
-  def markUsedBlocksReclaimable(): Unit = synchronized {
-    fullBlocks.foreach(_.markReclaimable())
-    fullBlocks.clear()
+  def markFullBlocksReclaimable(): Unit = synchronized {
+    fullBlocksToBeMarkedAsReclaimable.foreach(_.markReclaimable())
+    fullBlocksToBeMarkedAsReclaimable.clear()
   }
 
+  /**
+   * If current block has the capacity, no-op
+   * Otherwise, move to next block. As a result, "currentBlock"
+   * now points to a new block
+   */
   protected def ensureCapacity(forSize: Long): Block = synchronized {
     var block = accessCurrentBlock()
     if (block.hasCapacity(forSize)) {
@@ -325,11 +331,11 @@ class BlockMemFactory(blockStore: BlockManager,
       }
     } else {
       val newBlock = requestBlock()
-      if (!metadataSpanActive) {
+      if (!metadataSpanActive || metadataSpan.isEmpty) {
         if (markFullBlocksAsReclaimable) {
           block.markReclaimable()
         } else {
-          fullBlocks += block
+          fullBlocksToBeMarkedAsReclaimable += block
         }
       }
       block = newBlock

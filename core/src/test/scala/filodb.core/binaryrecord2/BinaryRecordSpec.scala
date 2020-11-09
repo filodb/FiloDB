@@ -558,10 +558,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
     it("should copy ingest BRs to partition key BRs correctly when data columns have a blob/histogram") {
       val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory)
       val data = linearHistSeries().take(3)
-      data.foreach { row =>
-        val offset = ingestBuilder.addFromReader(SeqRowReader(row), histDataset.schema)
-        println(histDataset.schema.ingestionSchema.debugString(ingestBuilder.curContainerBase, offset))
-      }
+      data.foreach { row => ingestBuilder.addFromReader(SeqRowReader(row), histDataset.schema) }
 
       records.clear()
       ingestBuilder.allContainers.head.consumeRecords(consumer)

@@ -64,6 +64,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   private val pkByUTNumSplits = cassandraConfig.getInt("pk-by-updated-time-table-num-splits")
   private val pkByUTTtlSeconds = cassandraConfig.getDuration("pk-by-updated-time-table-ttl", TimeUnit.SECONDS).toInt
   private val createTablesEnabled = cassandraConfig.getBoolean("create-tables-enabled")
+  private val numTokenRangeSplitsForScans = cassandraConfig.getInt("num-token-range-splits-for-scans")
 
   val sinkStats = new ChunkSinkStats
 
@@ -316,7 +317,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
    * @param splitsPerNode  - how much parallelism or ways to divide a token range on each node
    * @return each split will have token_start, token_end, replicas filled in
    */
-  def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = 1): Seq[ScanSplit] = {
+  def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = numTokenRangeSplitsForScans): Seq[ScanSplit] = {
     val keyspace = clusterConnector.keyspace
     require(splitsPerNode >= 1, s"Must specify at least 1 splits_per_node, got $splitsPerNode")
 
