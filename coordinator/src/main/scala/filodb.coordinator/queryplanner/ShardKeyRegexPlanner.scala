@@ -1,7 +1,7 @@
 package filodb.coordinator.queryplanner
 
 import filodb.core.metadata.{Dataset, Schemas}
-import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryContext}
+import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryContext, RangeParams}
 import filodb.query._
 import filodb.query.exec._
 
@@ -98,7 +98,9 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     else {
       val reducer = MultiPartitionReduceAggregateExec(queryContext, InProcessPlanDispatcher,
         execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
-      reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params))
+      val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+      reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
+        RangeParams(promQlQueryParams.startSecs, promQlQueryParams.stepSecs, promQlQueryParams.endSecs)))
       reducer
     }
     PlanResult(Seq(exec))

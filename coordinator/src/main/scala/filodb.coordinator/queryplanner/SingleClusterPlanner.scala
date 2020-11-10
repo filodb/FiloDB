@@ -11,10 +11,10 @@ import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{DatasetRef, SpreadProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, QueryConfig, QueryContext}
+import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
 import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
-import filodb.prometheus.ast.WindowConstants
+import filodb.prometheus.ast. WindowConstants
 import filodb.query.{exec, _}
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
 
@@ -258,8 +258,11 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
     val reduceDispatcher = pickDispatcher(toReduceLevel2)
     val reducer = LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
+    val promQlQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+
     if (!qContext.plannerParams.skipAggregatePresent)
-      reducer.addRangeVectorTransformer(AggregatePresenter(lp.operator, lp.params))
+      reducer.addRangeVectorTransformer(AggregatePresenter(lp.operator, lp.params, RangeParams(
+        promQlQueryParams.startSecs, promQlQueryParams.stepSecs, promQlQueryParams.endSecs)))
     PlanResult(Seq(reducer), false) // since we have aggregated, no stitching
   }
 
