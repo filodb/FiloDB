@@ -320,7 +320,8 @@ object MachineMetricsData {
     }
   }
 
-  val dataset2 = Dataset("metrics2", Seq("series:string", "tags:map"), columns)
+  val dataset2 = Dataset("metrics2", Seq("series:string", "tags:map"), columns,
+    options = DatasetOptions(shardKeyColumns = Seq("_ws_", "_ns_", "_metric_"), "_metric_"))
   val schema2 = dataset2.schema
 
   def withMap(data: Stream[Seq[Any]], n: Int = 5, extraTags: UTF8Map = Map.empty): Stream[Seq[Any]] =
@@ -339,7 +340,7 @@ object MachineMetricsData {
 
   val histDataset = Dataset("histogram", Seq("metric:string", "tags:map"),
                             Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=false"),
-                            DatasetOptions.DefaultOptions.copy(metricColumn = "metric"))
+                            options = DatasetOptions(shardKeyColumns = Seq("_ws_", "_ns_", "metric"), "metric"))
 
   var histBucketScheme: bv.HistogramBuckets = _
   def linearHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8,
@@ -398,9 +399,9 @@ object MachineMetricsData {
   val histPartKey = histKeyBuilder.partKeyFromObjects(histDataset.schema, "request-latency", extraTags)
 
   val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16)
-  val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.schema.data.blockMetaSize,
+  val histIngestBH = new BlockMemFactory(blockStore, histDataset.schema.data.blockMetaSize,
                                          dummyContext, true)
-  val histMaxBH = new BlockMemFactory(blockStore, None, histMaxDS.schema.data.blockMetaSize,
+  val histMaxBH = new BlockMemFactory(blockStore, histMaxDS.schema.data.blockMetaSize,
                                       dummyContext, true)
   private val histBufferPool = new WriteBufferPool(TestData.nativeMem, histDataset.schema.data, TestData.storeConf)
 

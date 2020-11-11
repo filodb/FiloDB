@@ -3,11 +3,9 @@ package filodb.core.memstore
 import java.nio.ByteBuffer
 
 import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.duration._
 
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
-import org.jctools.maps.NonBlockingHashMapLong
 import spire.syntax.cfor._
 
 import filodb.core.store._
@@ -30,39 +28,23 @@ import filodb.memory.format.UnsafeUtils
   *
   * @param tsShard the TimeSeriesShard containing the time series for the given shard
   * @param blockManager The block manager to be used for block allocation
-  * @param chunkRetentionHours number of hours chunks need to be retained for. Beyond this time, ODP blocks will be
-  *                    marked as reclaimable even if they are not full, so they can be reused for newer data.
   */
 class DemandPagedChunkStore(tsShard: TimeSeriesShard,
-                            val blockManager: BlockManager,
-                            chunkRetentionHours: Int)
+                            val blockManager: BlockManager)
 extends RawToPartitionMaker with StrictLogging {
-  val flushIntervalMillis = tsShard.storeConfig.flushInterval.toMillis
-  val retentionMillis = chunkRetentionHours * (1.hour.toMillis)
-
-  // block factories for each time bucket
-  private val memFactories = new NonBlockingHashMapLong[BlockMemFactory](chunkRetentionHours, false)
 
   import TimeSeriesShard._
-  import collection.JavaConverters._
 
   private val baseContext = Map("dataset" -> tsShard.ref.toString,
                                 "shard"   -> tsShard.shardNum.toString)
 
-  private def getMemFactory(bucket: Long): BlockMemFactory = {
-    val factory = memFactories.get(bucket)
-    if (factory == UnsafeUtils.ZeroPointer) {
-      val newFactory = new BlockMemFactory(blockManager,
-                                           Some(bucket),
-                                           tsShard.maxMetaSize,
-                                           baseContext ++ Map("bucket" -> bucket.toString),
-                                           markFullBlocksAsReclaimable = true)
-      memFactories.put(bucket, newFactory)
-      newFactory
-    } else {
-      factory
-    }
-  }
+  /*
+   * Only one BlockMemFactory for ODP per shard needed (pooling not needed) since all ODP
+   * allocations happen on a single thread
+   */
+  val memFactory = new BlockMemFactory(blockManager,
+    tsShard.maxMetaSize, baseContext ++ Map("odp" -> "true"),
+    markFullBlocksAsReclaimable = true)
 
   /**
    * Stores raw chunks into offheap memory and populates chunks into partition
@@ -84,18 +66,19 @@ extends RawToPartitionMaker with StrictLogging {
         // possible to guard against this by forcing an allocation, but it doesn't make sense
         // to allocate a block just for storing an unnecessary metadata entry.
         if (!rawVectors.isEmpty) {
-          val memFactory = getMemFactory(timeBucketForChunkSet(infoBytes))
           val chunkID = ChunkSetInfo.getChunkID(infoBytes)
 
           if (!tsPart.chunkmapContains(chunkID)) {
             val chunkPtrs = new ArrayBuffer[BinaryVectorPtr](rawVectors.length)
-            memFactory.startMetaSpan()
             var metaAddr: Long = 0
-            try {
-              copyToOffHeap(rawVectors, memFactory, chunkPtrs)
-            } finally {
-              metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
-                tsPart.schema.data.blockMetaSize.toShort)
+            memFactory.synchronized {
+              memFactory.startMetaSpan()
+              try {
+                copyToOffHeap(rawVectors, memFactory, chunkPtrs)
+              } finally {
+                metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
+                  tsPart.schema.data.blockMetaSize.toShort)
+              }
             }
             require(metaAddr != 0)
             val infoAddr = metaAddr + 4 // Important: don't point at partID
@@ -120,13 +103,6 @@ extends RawToPartitionMaker with StrictLogging {
   //scalastyle:on
 
   /**
-    * For a given chunkset, this method calculates the time bucket the chunks fall in.
-    * It is used in deciding which BlockMemFactory to use while allocating off-heap memory for this chunk.
-    */
-  private def timeBucketForChunkSet(infoBytes: Array[Byte]): Long =
-    (ChunkSetInfo.getEndTime(infoBytes) / flushIntervalMillis) * flushIntervalMillis
-
-  /**
     * Copies the onHeap contents read from ColStore into off-heap using the given memFactory.
     * If an exception is thrown by this method, the tail of chunkPtrs sequence isn't filled in.
     *
@@ -144,15 +120,4 @@ extends RawToPartitionMaker with StrictLogging {
     }
   }
 
-  /**
-   * Ensures the oldest ODP time buckets, blocks, and BlockMemFactory's are reclaimable and cleaned up
-   * so we don't leak memory and blocks.  Call this ideally every flushInterval.
-   */
-  def cleanupOldestBuckets(): Unit = {
-    blockManager.markBucketedBlocksReclaimable(System.currentTimeMillis - retentionMillis)
-    // Now, iterate through memFactories and clean up ones with no blocks
-    memFactories.keySet.asScala.foreach { bucket =>
-      if (!blockManager.hasTimeBucket(bucket)) memFactories.remove(bucket)
-    }
-  }
 }

@@ -9,6 +9,7 @@ import monix.reactive.Observable
 
 import filodb.core._
 import filodb.core.memstore.{PartLookupResult, SchemaMismatch, TimeSeriesShard}
+import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.query._
 
@@ -167,6 +168,9 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
       RawDataRangeVector(key, partition, lookupRes.chunkMethod, ids)
     }
   }
+
+  def topKCardinality(ref: DatasetRef, shard: Seq[Int], shardKeyPrefix: Seq[String], k: Int): Seq[CardinalityRecord]
+
 }
 
 /**
