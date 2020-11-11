@@ -82,6 +82,10 @@ object FiloFunctionId extends Enum[FiloFunctionId] {
 
 sealed abstract class AggregationOperator(override val entryName: String) extends EnumEntry
 
+object QueryFunctionConstants {
+  val stdVal = "stdval"
+}
+
 object AggregationOperator extends Enum[AggregationOperator] {
   val values = findValues
 

@@ -2,7 +2,6 @@ package filodb.query
 
 import io.circe.parser
 import io.circe.generic.auto._
-//import io.circe.syntax.EncoderOps
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -88,6 +87,59 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
       case Left(ex) => println(ex)
     }
   }
+
+  it("should parse sttdev aggregateResponse") {
+    val input = """[{
+                  |  "status": "success",
+                  |  "data": {
+                  |    "resultType": "matrix",
+                  |    "result": [
+                  |      {
+                  |        "metric": {
+                  |
+                  |        },
+                  |        "aggregateResponse": {
+                  |          "aggregateValues": [
+                  |            [
+                  |              1603920650,
+                  |              "NaN",
+                  |              "NaN",
+                  |              0
+                  |            ],
+                  |            [
+                  |              1603920740,
+                  |              "0.0",
+                  |              "16.068496952984738",
+                  |              1
+                  |            ]
+                  |          ],
+                  |          "function": "stdval"
+                  |        }
+                  |      }
+                  |    ]
+                  |  },
+                  |  "errorType": null,
+                  |  "error": null
+                  |}]""".stripMargin
+    val expectedResult =List(StdValSampl(1603920650,Double.NaN, Double.NaN, 0),
+      StdValSampl(1603920740,0,16.068496952984738,1)
+      )
+
+    parser.decode[List[SuccessResponse]](input) match {
+      case Right(successResponse) => val aggregateResponse = successResponse.head.data.result.head.aggregateResponse.get
+        aggregateResponse.function shouldEqual("stdval")
+        aggregateResponse.aggregateSampl.map(_.asInstanceOf[StdValSampl]).zip(expectedResult).foreach {
+          case (res, ex) => if (res.mean.isNaN) {
+            ex.mean.isNaN shouldEqual(true)
+            ex.stddev.isNaN shouldEqual true
+            ex.count shouldEqual(res.count)
+            ex.timestamp shouldEqual(res.timestamp)
+          } else ex shouldEqual(res)
+        }
+      case Left(ex) => println(ex)
+    }
+  }
+
 
    def parseAndValidate(input: String, expectedResult: List[DataSampl]): Unit = {
      parser.decode[List[DataSampl]](input) match {
