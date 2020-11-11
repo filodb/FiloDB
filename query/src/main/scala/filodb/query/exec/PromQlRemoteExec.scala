@@ -204,7 +204,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
         }
         override def numRows: Option[Int] = Option(d.aggregateResponse.get.aggregateSampl.size)
       }
-      SerializedRangeVector(rv, builder, recordSchema.get(QueryFunctionConstants.stdVal).get)
+      SerializedRangeVector(rv, builder, recordSchema.get(QueryFunctionConstants.stdVal).get, printTree(false))
     }
 
     // TODO: Handle stitching with verbose flag
