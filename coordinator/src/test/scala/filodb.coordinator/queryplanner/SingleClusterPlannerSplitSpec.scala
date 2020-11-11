@@ -471,7 +471,8 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     val logicalPlan = Parser.queryRangeToLogicalPlan("""sum(rate(foo{job="bar"}[3d]))""",
       TimeStepParams(nowSeconds, 1.minute.toSeconds, nowSeconds))
 
-    val ep = planner.materialize(logicalPlan, QueryContext()).asInstanceOf[LocalPartitionReduceAggregateExec]
+    val ep = planner.materialize(logicalPlan, QueryContext(origQueryParams = PromQlQueryParams
+    ("""sum(rate(foo{job="bar"}[3d]))""",1000, 100, 1000))).asInstanceOf[LocalPartitionReduceAggregateExec]
     val psm = ep.children.head.asInstanceOf[MultiSchemaPartitionsExec]
       .rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
     psm.start shouldEqual (nowSeconds * 1000)
