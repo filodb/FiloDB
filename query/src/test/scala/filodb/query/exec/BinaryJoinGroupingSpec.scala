@@ -391,7 +391,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
   }
 
   it("should throw BadQueryException - many-to-one with on - cardinality limit 1") {
-    val queryContext = QueryContext(joinQueryCardLimit = 1) // set join card limit to 1
+    val queryContext = QueryContext(plannerParams= PlannerParams(joinQueryCardLimit = 1)) // set join card limit to 1
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
@@ -418,7 +418,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
   }
 
   it("should throw BadQueryException - many-to-one with ignoring - cardinality limit 1") {
-    val queryContext = QueryContext(joinQueryCardLimit = 1) // set join card limit to 1
+    val queryContext = QueryContext(plannerParams= PlannerParams(joinQueryCardLimit = 1)) // set join card limit to 1
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
@@ -445,7 +445,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
   }
 
   it("should throw BadQueryException - many-to-one with by and grouping without arguments - cardinality limit 1") {
-    val queryContext = QueryContext(joinQueryCardLimit = 3) // set join card limit to 3
+    val queryContext = QueryContext(plannerParams= PlannerParams(joinQueryCardLimit = 3)) // set join card limit to 3
     val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
     val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Seq("instance", "job"))
     val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), querySession, 1000, tvSchema)

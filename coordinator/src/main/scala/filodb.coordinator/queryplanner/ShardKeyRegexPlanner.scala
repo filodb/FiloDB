@@ -71,7 +71,8 @@ class ShardKeyRegexPlanner(dataset: Dataset,
         // For example for exp(sum(test{_ws_ = "demo", _ns_ =~ "App.*"})), sub queries should be
         // sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
         val newQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
-        val newQueryContext = qContext.copy(origQueryParams = newQueryParams)
+        val newQueryContext = qContext.copy(origQueryParams = newQueryParams, plannerParams = qContext.plannerParams.
+          copy(skipAggregatePresent = true))
         queryPlanner.materialize(logicalPlan.replaceFilters(result), newQueryContext)
       }
   }

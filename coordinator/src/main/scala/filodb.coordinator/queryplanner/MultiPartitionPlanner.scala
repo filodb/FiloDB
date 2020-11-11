@@ -20,7 +20,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                             localPartitionPlanner: QueryPlanner,
                             localPartitionName: String,
                             dataset: Dataset,
-                            queryConfig: QueryConfig) extends QueryPlanner with StrictLogging {
+                            queryConfig: QueryConfig,
+                            remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient)
+  extends QueryPlanner with StrictLogging {
 
   import net.ceedubs.ficus.Ficus._
 
@@ -33,7 +35,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
     if(!tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
       (tsdbQueryParams.isInstanceOf[PromQlQueryParams]
-        && !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processMultiPartition)) // Query was part of routing
+        && !qContext.plannerParams.processMultiPartition)) // Query was part of routing
       localPartitionPlanner.materialize(logicalPlan, qContext)
 
     else logicalPlan match {
@@ -51,9 +53,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       .map(x => (x, LogicalPlan.getColumnValues(columnFilterGroup, x)))
   }
 
-  private def generateRemoteExecParams(queryParams: PromQlQueryParams, startMs: Long, endMs: Long) = {
-    PromQlQueryParams(queryParams.promQl, startMs / 1000, queryParams.stepSecs, endMs / 1000, queryParams.spread,
-      queryParams.remoteQueryPath, queryParams.processFailure, processMultiPartition = false, queryParams.verbose)
+  private def generateRemoteExecParams(queryContext: QueryContext, startMs: Long, endMs: Long) = {
+    val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    queryContext.copy(origQueryParams = queryParams.copy(startSecs = startMs/1000, endSecs = endMs / 1000),
+      plannerParams = queryContext.plannerParams.copy(processMultiPartition = false))
   }
 
   /**
@@ -116,8 +119,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             copyLogicalPlanWithUpdatedTimeRange(logicalPlan, TimeRange(startMs, endMs)), qContext)
         else {
           val httpEndpoint = p.endPoint + queryParams.remoteQueryPath.getOrElse("")
-          PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, qContext, InProcessPlanDispatcher, dataset.ref,
-            generateRemoteExecParams(queryParams, startMs, endMs))
+          PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, generateRemoteExecParams(qContext, startMs, endMs),
+            InProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
         }
       }
       if (execPlans.size == 1) execPlans.head
@@ -142,8 +145,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         if (partitionName.equals(localPartitionName)) localPartitionPlanner.materialize(logicalPlan, qContext)
         else {
           val httpEndpoint = partitions.head.endPoint + queryParams.remoteQueryPath.getOrElse("")
-          PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, qContext, InProcessPlanDispatcher, dataset.ref,
-            generateRemoteExecParams(queryParams, queryParams.startSecs * 1000, queryParams.endSecs * 1000))
+          PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, generateRemoteExecParams(qContext,
+            queryParams.startSecs * 1000, queryParams.endSecs * 1000),
+            InProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
         }
       }
       else throw new UnsupportedOperationException("Binary Join across multiple partitions not supported")
@@ -184,10 +188,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   private def createMetadataRemoteExec(qContext: QueryContext, queryParams: PromQlQueryParams,
                                        partitionAssignment: PartitionAssignment, urlParams: Map[String, String]) = {
-    val finalQueryParams = generateRemoteExecParams(
-      queryParams, partitionAssignment.timeRange.startMs, partitionAssignment.timeRange.endMs)
-    val httpEndpoint = partitionAssignment.endPoint + finalQueryParams.remoteQueryPath.getOrElse("")
+    val finalQueryContext = generateRemoteExecParams(
+      qContext, partitionAssignment.timeRange.startMs, partitionAssignment.timeRange.endMs)
+    val httpEndpoint = partitionAssignment.endPoint + finalQueryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      remoteQueryPath.getOrElse("")
     MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-      urlParams, qContext, InProcessPlanDispatcher, dataset.ref, finalQueryParams)
+      urlParams, finalQueryContext, InProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
   }
 }

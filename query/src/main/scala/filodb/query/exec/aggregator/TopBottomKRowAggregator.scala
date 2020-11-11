@@ -2,8 +2,6 @@ package filodb.query.exec.aggregator
 
 import scala.collection.mutable
 
-import kamon.Kamon
-
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.FiloSchedulers
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
@@ -88,10 +86,9 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
       ColumnInfo("value", ColumnType.DoubleColumn))
     val recSchema = SerializedRangeVector.toSchema(colSchema)
     val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
-    val span = Kamon.spanBuilder(s"execplan-scan-latency-TopBottomK").start()
     try {
       FiloSchedulers.assertThreadName(QuerySchedName)
-      ChunkMap.validateNoSharedLocks()
+      ChunkMap.validateNoSharedLocks(s"TopkQuery-$k-$bottomK")
       // We limit the results wherever it is materialized first. So it is done here.
       aggRangeVector.rows.take(limit).foreach { row =>
         var i = 1
@@ -111,7 +108,6 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
       aggRangeVector.rows().close()
       ChunkMap.releaseAllSharedLocks()
     }
-    span.finish()
     resRvs.map { case (key, builder) =>
       val numRows = builder.allContainers.map(_.countRecords).sum
       new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0)

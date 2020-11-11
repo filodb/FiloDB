@@ -58,13 +58,7 @@ class DemandPagedChunkStoreSpec extends AnyFunSpec with AsyncTest {
       tsPartition.numChunks shouldEqual 10          // write buffers + 9 chunks above
     }
 
-    pageManager.numTimeOrderedBlocks should be > 1
     pageManager.numFreeBlocks should be >= (initFreeBlocks - 12)
-    val buckets = pageManager.timeBuckets
-    buckets.foreach { b => pageManager.hasTimeBucket(b) shouldEqual true }
-
-    // Now, reclaim four time buckets, even if they are not full
-    pageManager.markBucketedBlocksReclaimable(buckets(4))
 
     // try and ODP more data.  Load older data than chunk retention, should still be able to load
     val data2 = linearMultiSeries(start - 2.hours.toMillis, timeStep=100000).take(20)
