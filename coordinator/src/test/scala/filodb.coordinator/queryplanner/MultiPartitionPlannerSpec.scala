@@ -5,11 +5,11 @@ import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
-import filodb.core.query.{PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query.Filter.Equals
+import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.LogicalPlan
@@ -499,21 +499,15 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
       PlannerParams(processMultiPartition = true)))
-println(execPlan.printTree())
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.asInstanceOf[BinaryJoinExec].lhs.head.isInstanceOf[PromQlRemoteExec] shouldEqual(true)
     execPlan.asInstanceOf[BinaryJoinExec].rhs.head.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual(true)
 
-    println("promql:"+ execPlan.asInstanceOf[BinaryJoinExec].lhs.head.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf
-      [PromQlQueryParams].promQl)
-
     execPlan.asInstanceOf[BinaryJoinExec].lhs.head.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf
-      [PromQlQueryParams].promQl shouldEqual("""test1{job="app1"}"""")
+      [PromQlQueryParams].promQl shouldEqual("""test1{job="app1"}""")
 
+    execPlan.asInstanceOf[BinaryJoinExec].rhs.head.asInstanceOf[LocalPartitionDistConcatExec].children.head.
+      asInstanceOf[MultiSchemaPartitionsExec].filters.contains(ColumnFilter("job", Equals("app2"))) shouldEqual(true)
 
-//    val queryParams = execPlan.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.
-//      asInstanceOf[PromQlQueryParams]
-//    queryParams.startSecs shouldEqual 1000
-//    queryParams.endSecs shouldEqual 10000
   }
 }

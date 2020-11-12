@@ -1,6 +1,7 @@
 package filodb.coordinator.queryplanner
 
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.Dataset
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
@@ -44,7 +45,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case lp: LabelValues         => materializeLabelValues(lp, qContext)
       case lp: SeriesKeysByFilters => materializeSeriesKeysFilters(lp, qContext)
       case _                       => materializeSimpleQuery(logicalPlan, qContext)
-
     }
   }
 
@@ -60,7 +60,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     queryContext.copy(origQueryParams = queryParams.copy(startSecs = startMs/1000, endSecs = endMs / 1000),
       plannerParams = queryContext.plannerParams.copy(processMultiPartition = false))
   }
-
 
   private def partitionUtilNonBinaryJoin(logicalPlan: LogicalPlan, queryParams: PromQlQueryParams) = {
 
@@ -82,7 +81,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       partitionLocationProvider.getPartitions(routingKeyMap, queryTimeRange).
         sortBy(_.timeRange.startMs)
     }
-    if (partitions.isEmpty && !routingKeys.isEmpty) new UnsupportedOperationException("No partitions found for routing keys: " + routingKeys)
+    if (partitions.isEmpty && !routingKeys.isEmpty)
+      new UnsupportedOperationException("No partitions found for routing keys: " + routingKeys)
 
     (partitions, lookBackMs, offsetMs, routingKeys)
   }
