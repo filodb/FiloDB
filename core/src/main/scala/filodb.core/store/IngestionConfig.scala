@@ -109,7 +109,7 @@ object StoreConfig {
     val config = storeConfig.withFallback(defaults)
     val flushInterval = config.as[FiniteDuration]("flush-interval")
 
-    // createChunkAtFlushBoundary - switch buffers and create chunk when current sample's timestamp crosses flush boundary
+    // switch buffers and create chunk when current sample's timestamp crosses flush boundary.
     // e.g. for a flush-interval of 1hour, if new sample falls in different hour than last sample, then switch buffers
     // and create chunk. This helps in aligning chunks across Active/Active HA clusters and facilitates chunk migration
     // between the clusters during disaster recovery.
