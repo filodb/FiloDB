@@ -102,9 +102,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val rhsPartitionsAndRoutingKeys = logicalPlan.rhs match {
       case b: BinaryJoin => partitionUtil(queryParams, b)
       case _             => val p = partitionUtilNonBinaryJoin(logicalPlan.rhs, queryParams)
-        (p._1, p._4)
+                            (p._1, p._4)
     }
-    (lhsPartitionsAndRoutingKeys._1 ++ rhsPartitionsAndRoutingKeys._1,
+    (lhsPartitionsAndRoutingKeys._1 ++ lhsPartitionsAndRoutingKeys._1,
       rhsPartitionsAndRoutingKeys._2 ++ rhsPartitionsAndRoutingKeys._2)
   }
 
