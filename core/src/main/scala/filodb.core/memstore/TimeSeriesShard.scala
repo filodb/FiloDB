@@ -1184,7 +1184,8 @@ class TimeSeriesShard(val ref: DatasetRef,
         val tsp = part.asInstanceOf[TimeSeriesPartition]
         brRowReader.schema = schema.ingestionSchema
         brRowReader.recordOffset = recordOff
-        tsp.ingest(ingestionTime, brRowReader, overflowBlockFactory, maxChunkTime)
+        tsp.ingest(ingestionTime, brRowReader, overflowBlockFactory,
+          storeConfig.createChunkAtFlushBoundary, Option(flushBoundaryMillis), maxChunkTime)
         // Below is coded to work concurrently with logic in updateIndexWithEndTime
         // where we try to de-activate an active time series
         if (!tsp.ingesting) {

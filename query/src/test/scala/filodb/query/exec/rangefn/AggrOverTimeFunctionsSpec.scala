@@ -154,7 +154,8 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
                     partKey: NativePointer = defaultPartKey): RawDataRangeVector = {
     val part = TimeSeriesPartitionSpec.makePart(0, timeseriesDatasetWithMetric, partKey, bufferPool = tsBufferPool)
     val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
-    readers.foreach { row => part.ingest(0, row, ingestBlockHolder) }
+    readers.foreach { row => part.ingest(0, row, ingestBlockHolder, createChunkAtFlushBoundary = false,
+      flushIntervalMillis = Option.empty) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(ingestBlockHolder, encode = true)
     // part.encodeAndReleaseBuffers(ingestBlockHolder)
@@ -167,7 +168,8 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
     val readers = tuples.map { case (ts, d1, d2, d3, d4, d5) =>
       TupleRowReader((Some(ts), Some(d1), Some(d2), Some(d3), Some(d4), Some(d5)))
     }
-    readers.foreach { row => part.ingest(0, row, ingestBlockHolder2) }
+    readers.foreach { row => part.ingest(0, row, ingestBlockHolder2, createChunkAtFlushBoundary = false,
+      flushIntervalMillis = Option.empty) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(ingestBlockHolder2, encode = true)
     // part.encodeAndReleaseBuffers(ingestBlockHolder)
@@ -184,7 +186,8 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
     val part = rv.partition.asInstanceOf[TimeSeriesPartition]
     val startingNumChunks = part.numChunks
     val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
-    readers.foreach { row => part.ingest(0, row, ingestBlockHolder) }
+    readers.foreach { row => part.ingest(0, row, ingestBlockHolder, createChunkAtFlushBoundary = false,
+      flushIntervalMillis = Option.empty) }
     part.switchBuffers(ingestBlockHolder, encode = true)
     part.numChunks shouldEqual (startingNumChunks + 1)
   }

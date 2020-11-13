@@ -82,7 +82,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
 
     MachineMetricsData.records(dataset, rawSamples).records.foreach { case (base, offset) =>
       val rr = new BinaryRecordRowReader(Schemas.gauge.ingestionSchema, base, offset)
-      part.ingest( System.currentTimeMillis(), rr, offheapMem.blockMemFactory)
+      part.ingest( System.currentTimeMillis(), rr, offheapMem.blockMemFactory, false, Option.empty)
       part.switchBuffers(offheapMem.blockMemFactory, true)
     }
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
