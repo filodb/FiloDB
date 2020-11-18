@@ -12,7 +12,6 @@ object PromCirceSupport {
   implicit val encodeSampl: Encoder[DataSampl] = Encoder.instance {
     case s @ Sampl(t, v)     => Json.fromValues(Seq(t.asJson, v.toString.asJson))
     case h @ HistSampl(t, b) => Json.fromValues(Seq(t.asJson, b.asJson))
-    //case h @ AvgSampl(t, v, c) => Json.fromValues(Seq(t.asJson, v.toString.asJson, c.toString.asJson))
     case m @ MetadataSampl(v) => Json.fromValues(Seq(v.asJson))
   }
 
@@ -26,6 +25,18 @@ object PromCirceSupport {
       }
     }
   }
+
+    implicit val decodeStdValSampl: Decoder[StdValSampl] = new Decoder[StdValSampl] {
+      final def apply(c: HCursor): Decoder.Result[StdValSampl] = {
+        for {timestamp <- c.downArray.as[Long]
+             stddev <- c.downArray.right.as[String]
+             mean <- c.downArray.right.right.as[String]
+             count <- c.downArray.right.right.right.as[Long]
+             } yield {
+          StdValSampl(timestamp, stddev.toDouble, mean.toDouble, count)
+        }
+      }
+    }
 
   implicit val decodeFoo: Decoder[DataSampl] = new Decoder[DataSampl] {
     final def apply(c: HCursor): Decoder.Result[DataSampl] = {
@@ -53,7 +64,8 @@ object PromCirceSupport {
       }
 
      val aggregateSamples = functionName match {
-        case Avg.entryName => c.downField ("aggregateValues").as[List[AvgSampl]]
+        case Avg.entryName                 => c.downField ("aggregateValues").as[List[AvgSampl]]
+        case QueryFunctionConstants.stdVal => c.downField("aggregateValues").as[List[StdValSampl]]
       }
 
       for {

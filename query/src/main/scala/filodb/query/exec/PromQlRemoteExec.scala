@@ -27,15 +27,18 @@ case class PromQlRemoteExec(queryEndpoint: String,
   val columns= Map("histogram" -> Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("h", ColumnType.HistogramColumn)),
   Avg.entryName -> (defaultColumns :+  ColumnInfo("count", ColumnType.LongColumn)) ,
-  "default" -> defaultColumns)
+  "default" -> defaultColumns, QueryFunctionConstants.stdVal -> (defaultColumns ++
+      Seq(ColumnInfo("mean", ColumnType.DoubleColumn), ColumnInfo("count", ColumnType.LongColumn))))
 
   val recordSchema = Map("histogram" -> SerializedRangeVector.toSchema(columns.get("histogram").get),
     Avg.entryName -> SerializedRangeVector.toSchema(columns.get(Avg.entryName).get),
-    "default" -> SerializedRangeVector.toSchema(columns.get("default").get))
+    "default" -> SerializedRangeVector.toSchema(columns.get("default").get),
+    QueryFunctionConstants.stdVal -> SerializedRangeVector.toSchema(columns.get(QueryFunctionConstants.stdVal).get))
 
   val resultSchema = Map("histogram" -> ResultSchema(columns.get("histogram").get, 1),
     Avg.entryName -> ResultSchema(columns.get(Avg.entryName).get, 1),
-    "default" -> ResultSchema(columns.get("default").get, 1))
+    "default" -> ResultSchema(columns.get("default").get, 1),
+    QueryFunctionConstants.stdVal -> ResultSchema(columns.get(QueryFunctionConstants.stdVal).get, 1))
 
   private val builder = SerializedRangeVector.newBuilder()
 
@@ -91,7 +94,8 @@ case class PromQlRemoteExec(queryEndpoint: String,
     if (aggregateResponse.aggregateSampl.isEmpty) QueryResult(id, ResultSchema.empty, Seq.empty)
     else {
       aggregateResponse.aggregateSampl.head match {
-        case AvgSampl(timestamp, value, count) => genAvgQueryResult(data, id)
+        case AvgSampl(timestamp, value, count)           => genAvgQueryResult(data, id)
+        case StdValSampl(timestamp, stddev, mean, count) => genStdValQueryResult(data, id)
       }
     }
   }
@@ -177,8 +181,33 @@ case class PromQlRemoteExec(queryEndpoint: String,
       SerializedRangeVector(rv, builder, recordSchema.get(Avg.entryName).get, printTree(false))
     }
 
-        // TODO: Handle stitching with verbose flag
+    // TODO: Handle stitching with verbose flag
     QueryResult(id, resultSchema.get(Avg.entryName).get, rangeVectors)
   }
 
+  def genStdValQueryResult(data: Data, id: String): QueryResult = {
+    val rangeVectors = data.result.map { d =>
+      val rv = new RangeVector {
+        val row = new StdValAggTransientRow()
+
+        override def key: RangeVectorKey = CustomRangeVectorKey(d.metric.map(m => m._1.utf8 -> m._2.utf8))
+
+        override def rows(): RangeVectorCursor = {
+          import NoCloseCursor._
+          d.aggregateResponse.get.aggregateSampl.iterator.collect { case a: StdValSampl =>
+            row.setLong(0, a.timestamp * 1000)
+            row.setDouble(1, a.stddev)
+            row.setDouble(2, a.mean)
+            row.setLong(3, a.count)
+            row
+          }
+        }
+        override def numRows: Option[Int] = Option(d.aggregateResponse.get.aggregateSampl.size)
+      }
+      SerializedRangeVector(rv, builder, recordSchema.get(QueryFunctionConstants.stdVal).get, printTree(false))
+    }
+
+    // TODO: Handle stitching with verbose flag
+    QueryResult(id, resultSchema.get("stdval").get, rangeVectors)
+  }
 }

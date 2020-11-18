@@ -260,7 +260,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   def toStringPairs(base: Any, offset: Long): Seq[(String, String)] = {
     import Column.ColumnType._
     val result = new collection.mutable.ArrayBuffer[(String, String)]()
-    columnTypes.zipWithIndex.map {
+    columnTypes.zipWithIndex.foreach {
       case (IntColumn, i)    => result += ((colNames(i), getInt(base, offset, i).toString))
       case (LongColumn, i)   => result += ((colNames(i), getLong(base, offset, i).toString))
       case (DoubleColumn, i) => result += ((colNames(i), getDouble(base, offset, i).toString))
@@ -279,6 +279,30 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
         result += ((colNames(i), bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i)).toString))
     }
     result
+  }
+
+  def colValues(base: Any, offset: Long, cols: Seq[String]): Seq[String] = {
+    import Column.ColumnType._
+    val res = collection.mutable.ArrayBuffer.fill[String](cols.size)(UnsafeUtils.ZeroPointer.asInstanceOf[String])
+    columnTypes.zipWithIndex.foreach {
+      case (IntColumn, i) if cols.contains(colNames(i)) =>
+                              res(cols.indexOf(colNames(i))) = getInt(base, offset, i).toString
+      case (LongColumn, i) if cols.contains(colNames(i)) =>
+                              res(cols.indexOf(colNames(i))) = getLong(base, offset, i).toString
+      case (DoubleColumn, i) if cols.contains(colNames(i)) =>
+                              res(cols.indexOf(colNames(i))) = getDouble(base, offset, i).toString
+      case (StringColumn, i) if cols.contains(colNames(i)) =>
+                              res(cols.indexOf(colNames(i))) = asJavaString(base, offset, i).toString
+      case (TimestampColumn, i) if cols.contains(colNames(i)) =>
+                              res(cols.indexOf(colNames(i))) = getLong(base, offset, i).toString
+      case (MapColumn, i)    => val consumer = new SelectColsMapItemConsumer(cols, res)
+                                consumeMapItems(base, offset, i, consumer)
+      case (BinaryRecordColumn, i) => ???
+      case (HistogramColumn, i) => ???
+      case _ => // column not selected
+    }
+    res
+
   }
 
   /**
@@ -414,6 +438,18 @@ class DebugStringMapItemConsumer(baseOffset: Long) extends MapItemConsumer {
              f"Value: +${valueOffset - baseOffset}%05d [${UTF8StringMedium.toString(valueBase, valueOffset)}]"
   }
 }
+
+
+/**
+  * A MapItemConsumer which selects col values from map
+  */
+class SelectColsMapItemConsumer(cols: Seq[String], buf: ArrayBuffer[String]) extends MapItemConsumer {
+  def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+    val key = UTF8StringShort.toString(keyBase, keyOffset)
+    if (cols.contains(key)) buf(cols.indexOf(key)) = UTF8StringMedium.toString(valueBase, valueOffset)
+  }
+}
+
 
 object RecordSchema {
   import Column.ColumnType._
