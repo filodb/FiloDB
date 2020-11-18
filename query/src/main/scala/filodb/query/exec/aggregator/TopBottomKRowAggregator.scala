@@ -1,6 +1,6 @@
 package filodb.query.exec.aggregator
 
-import scala.collection.{ mutable}
+import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
 import filodb.core.binaryrecord2.RecordBuilder
@@ -86,63 +86,55 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
     acc
   }
 
-  case class Builder(builder: RecordBuilder, timeList: ListBuffer[Long])
-
-  object Builder {
-    def apply(rangeParams: RangeParams): Builder = {
-     val timesList: ListBuffer[Long] = ListBuffer()
-      for (i <- rangeParams.startSecs to rangeParams.endSecs by rangeParams.stepSecs)
-        timesList += i
-      Builder(SerializedRangeVector.newBuilder(), timesList)
-    }
+  private def addRecordToBuilder(builder: RecordBuilder, value: Double, timeStampMs: Long): Unit = {
+    builder.startNewRecord(recSchema)
+    builder.addLong(timeStampMs)
+    builder.addDouble(value)
+    builder.endRecord()
   }
 
-  def addNaNRecords(builderAndTimes: TopBottomKRowAggregator.this.Builder, rangeParams: RangeParams): Unit =
-  {
-    for (t <- rangeParams.startSecs to rangeParams.endSecs by rangeParams.stepSecs) {
-      if (builderAndTimes.timeList.contains(t)) {
-        builderAndTimes.builder.startNewRecord(recSchema)
-        builderAndTimes.builder.addLong(t * 1000)
-        builderAndTimes.builder.addDouble(Double.NaN)
-        builderAndTimes.builder.endRecord()
-        builderAndTimes.timeList -= t
-      }
+  /**
+   Create new builder and add NaN till current time
+   */
+  private def createBuilder(rangeParams: RangeParams, currentTime: Long): RecordBuilder= {
+    val builder = SerializedRangeVector.newBuilder();
+    for (t <- rangeParams.startSecs to (currentTime - rangeParams.stepSecs) by rangeParams.stepSecs) {
+      addRecordToBuilder(builder, Double.NaN, t * 1000)
     }
+    builder
   }
+
   def present(aggRangeVector: RangeVector, limit: Int, rangeParams: RangeParams): Seq[RangeVector] = {
-    val resRvs = mutable.Map[RangeVectorKey, Builder]()
+    val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
     try {
       FiloSchedulers.assertThreadName(QuerySchedName)
       ChunkMap.validateNoSharedLocks(s"TopkQuery-$k-$bottomK")
       // We limit the results wherever it is materialized first. So it is done here.
-      aggRangeVector.rows.take(limit).foreach { row =>
+      val rows = aggRangeVector.rows.take(limit)
+      for (t <- rangeParams.startSecs to rangeParams.endSecs by rangeParams.stepSecs) {
+        val rvkSeen = new ListBuffer[RangeVectorKey]
+        val row = rows.next()
         var i = 1
         while (row.notNull(i)) {
           if (row.filoUTF8String(i) != CustomRangeVectorKey.emptyAsZcUtf8) {
             val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
-            val builderAndTimes= resRvs.getOrElseUpdate(rvk, Builder(rangeParams))
-            val currentTime = row.getLong(0)
-            // Add NaN if rows are not present for previous timestamps
-            if (builderAndTimes.timeList.contains(currentTime/1000 - rangeParams.stepSecs ))
-              addNaNRecords(builderAndTimes, rangeParams.copy(endSecs = currentTime/1000 - rangeParams.stepSecs))
-            builderAndTimes.builder.startNewRecord(recSchema)
-            builderAndTimes.builder.addLong(row.getLong(0))
-            builderAndTimes.builder.addDouble(row.getDouble(i + 1))
-            builderAndTimes.builder.endRecord()
-            builderAndTimes.timeList -= (row.getLong(0)/1000)
+            rvkSeen += rvk
+            val builder = resRvs.getOrElseUpdate(rvk, createBuilder(rangeParams, t))
+            addRecordToBuilder(builder, row.getDouble(i + 1), row.getLong(0))
           }
-          i += 2
+           i += 2
+        }
+        resRvs.keySet.foreach { rvs =>
+          if (!rvkSeen.contains(rvs)) addRecordToBuilder(resRvs.get(rvs).get, Double.NaN, t * 1000)
         }
       }
     } finally {
       aggRangeVector.rows().close()
       ChunkMap.releaseAllSharedLocks()
     }
-
-    resRvs.map { case (key, builderAndTimes) =>
-      if (!builderAndTimes.timeList.isEmpty) addNaNRecords(builderAndTimes, rangeParams)
-      val numRows = builderAndTimes.builder.allContainers.map(_.countRecords).sum
-      new SerializedRangeVector(key, numRows, builderAndTimes.builder.allContainers, recSchema, 0)
+    resRvs.map { case (key, builder) =>
+      val numRows = builder.allContainers.map(_.countRecords).sum
+      new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0)
     }.toSeq
   }
 

@@ -366,9 +366,9 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   it("should return NaN when all values are NaN for a timestamp ") {
 
     val samples: Array[RangeVector] = Array(
-      toRv(Seq((1L, Double.NaN), (2L, 5.6d))),
-      toRv(Seq((1L, Double.NaN), (2L, 4.4d))),
-      toRv(Seq((1L, Double.NaN), (2L, 5.4d)))
+      toRv(Seq((1000L, Double.NaN), (2000L, 5.6d))),
+      toRv(Seq((1000L, Double.NaN), (2000L, 4.4d))),
+      toRv(Seq((1000L, Double.NaN), (2000L, 5.4d)))
     )
 
     // Sum
@@ -409,7 +409,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val agg5 = RowAggregator(AggregationOperator.BottomK, Seq(2.0), tvSchema)
     val resultObs5a = RangeVectorAggregator.mapReduce(agg5, false, Observable.fromIterable(samples), noGrouping)
     val resultObs5 = RangeVectorAggregator.mapReduce(agg5, true, resultObs5a, rv=>rv.key)
-    val resultObs5b = RangeVectorAggregator.present(agg5, resultObs5, 1000, RangeParams(0,1,0))
+    val resultObs5b = RangeVectorAggregator.present(agg5, resultObs5, 1000, RangeParams(1,1,2))
     val result5 = resultObs5.toListL.runAsync.futureValue
     result5.size shouldEqual 1
     result5(0).key shouldEqual noKey
@@ -419,14 +419,14 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val result5b = resultObs5b.toListL.runAsync.futureValue
     result5b.size shouldEqual 1
     result5b(0).key shouldEqual ignoreKey
-    // present removes the range vector which has all values as Double.Max
-    compareIter(result5b(0).rows.map(_.getDouble(1)), Seq(5.4d, 4.4d).iterator)
+
+    compareIter(result5b(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 5.4d, 4.4d).iterator)
 
     // TopK
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(2.0), tvSchema)
     val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping)
     val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv.key)
-    val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000, RangeParams(0,1,0))
+    val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000, RangeParams(1,1,2))
     val result6 = resultObs6.toListL.runAsync.futureValue
     result6.size shouldEqual 1
     result6(0).key shouldEqual noKey
@@ -435,7 +435,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val result6b = resultObs6b.toListL.runAsync.futureValue
     result6b.size shouldEqual 1
     result6b(0).key shouldEqual ignoreKey
-    compareIter(result6b(0).rows.map(_.getDouble(1)), Seq(5.4d,5.6d).iterator)
+    compareIter(result6b(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 5.4d, 5.6d).iterator)
 
     // Stdvar
     val agg8 = RowAggregator(AggregationOperator.Stdvar, Nil, tvSchema)
@@ -460,14 +460,14 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // The value before NaN should not get carried over. Topk result for timestamp 1556744173L should have Double.NaN
     val samples: Array[RangeVector] = Array(
-      toRv(Seq((1556744143L, 42d), (1556744158L, 42d),(1556744173L, Double.NaN)))
+      toRv(Seq((1556744143L, 42d), (1556745158L, 42d),(1556745173L, Double.NaN)))
     )
 
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(5.0), tvSchema)
     val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping)
     val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv
       .key)
-    val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000, RangeParams(1556744,1,1556744))
+    val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000, RangeParams(1556744,1,1556745))
     val result6 = resultObs6.toListL.runAsync.futureValue
     result6(0).key shouldEqual noKey
     val result6b = resultObs6b.toListL.runAsync.futureValue
