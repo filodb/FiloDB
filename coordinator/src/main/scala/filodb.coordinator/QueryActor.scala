@@ -25,20 +25,6 @@ import filodb.core.store.CorruptVectorException
 import filodb.query._
 import filodb.query.exec.ExecPlan
 
-object QueryCommandPriority extends java.util.Comparator[Envelope] {
-  override def compare(o1: Envelope, o2: Envelope): Int = {
-    (o1.message, o2.message) match {
-      case (q1: QueryCommand, q2: QueryCommand) => q1.submitTime.compareTo(q2.submitTime)
-      case (_, _: QueryCommand) => -1 // non-query commands are admin and have higher priority
-      case (_: QueryCommand, _) => 1 // non-query commands are admin and have higher priority
-      case _ => 0
-    }
-  }
-}
-
-class QueryActorMailbox(settings: ActorSystem.Settings, config: Config)
-  extends UnboundedStablePriorityMailbox(QueryCommandPriority)
-
 object QueryActor {
   final case class ThrowException(dataset: DatasetRef)
 
@@ -46,7 +32,7 @@ object QueryActor {
             schemas: Schemas, shardMapFunc: => ShardMapper,
             earliestRawTimestampFn: => Long): Props =
     Props(new QueryActor(memStore, dsRef, schemas,
-                         shardMapFunc, earliestRawTimestampFn)).withMailbox("query-actor-mailbox")
+                         shardMapFunc, earliestRawTimestampFn))
 }
 
 /**
@@ -136,6 +122,7 @@ final class QueryActor(memStore: MemStore,
       Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
       Kamon.currentSpan().tag("query-id", q.queryContext.queryId)
       val querySession = QuerySession(q.queryContext, queryConfig)
+      Kamon.currentSpan().mark("query-actor-received-scheduling-into-executor")
       q.execute(memStore, querySession)(queryScheduler)
         .foreach { res =>
           FiloSchedulers.assertThreadName(QuerySchedName)
