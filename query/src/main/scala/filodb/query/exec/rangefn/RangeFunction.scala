@@ -6,8 +6,8 @@ import filodb.core.query._
 import filodb.core.store.ChunkSetInfoReader
 import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
-import filodb.query.exec._
 import filodb.query.Query
+import filodb.query.exec._
 
 /**
   * Container for samples within a window of samples
