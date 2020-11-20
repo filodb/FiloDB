@@ -10,7 +10,7 @@ import filodb.core.{DatasetRef, IngestionKeys}
 import filodb.core.downsample.DownsampleConfig
 
 final case class StoreConfig(flushInterval: FiniteDuration,
-                             createChunkAtFlushBoundary: Boolean,
+                             timeAlignedChunksEnabled: Boolean,
                              diskTTLSeconds: Int,
                              demandPagedRetentionPeriod: FiniteDuration,
                              maxChunksSize: Int,
@@ -43,7 +43,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
-                               "create-chunk-at-flush-boundary" -> createChunkAtFlushBoundary,
+                               "time-aligned-chunks-enabled" -> timeAlignedChunksEnabled,
                                "disk-time-to-live" -> (diskTTLSeconds + "s"),
                                "demand-paged-chunk-retention-period" -> (demandPagedRetentionPeriod.toSeconds + "s"),
                                "max-chunks-size" -> maxChunksSize,
@@ -102,7 +102,7 @@ object StoreConfig {
                                            |ensure-headroom-percent = 5.0
                                            |trace-filters = {}
                                            |metering-enabled = false
-                                           |create-chunk-at-flush-boundary = false
+                                           |time-aligned-chunks-enabled = false
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
   def apply(storeConfig: Config): StoreConfig = {
@@ -114,14 +114,14 @@ object StoreConfig {
     // and create chunk. This helps in aligning chunks across Active/Active HA clusters and facilitates chunk migration
     // between the clusters during disaster recovery.
     // Note: Enabling this might result into creation of smaller suboptimal chunks.
-    val createChunkAtFlushInterval = config.getBoolean("create-chunk-at-flush-boundary")
+    val timeAlignedChunksEnabled = config.getBoolean("time-aligned-chunks-enabled")
 
     // maxChunkTime should atleast be length of flush interval to accommodate all data within one chunk.
     // better to be slightly greater so if more samples arrive within that flush period, two chunks are not created.
     val fallbackMaxChunkTime = (flushInterval.toMillis * 1.1).toLong.millis
     val maxChunkTime = config.as[Option[FiniteDuration]]("max-chunk-time").getOrElse(fallbackMaxChunkTime)
     StoreConfig(flushInterval,
-                createChunkAtFlushInterval,
+                timeAlignedChunksEnabled,
                 config.as[FiniteDuration]("disk-time-to-live").toSeconds.toInt,
                 config.as[FiniteDuration]("demand-paged-chunk-retention-period"),
                 config.getInt("max-chunks-size"),
