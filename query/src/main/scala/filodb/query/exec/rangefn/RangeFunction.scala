@@ -7,6 +7,7 @@ import filodb.core.store.ChunkSetInfoReader
 import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.query.exec._
+import filodb.query.Query
 
 /**
   * Container for samples within a window of samples
@@ -143,8 +144,13 @@ trait CounterChunkedRangeFunction[R <: MutableRowReader] extends ChunkedRangeFun
 
     // At least one sample is present
     if (startRowNum <= endRowNum) {
-      addTimeChunks(valueVectorAcc, valueVector, ccReader, startRowNum, endRowNum,
-                    tsReader(tsVectorAcc, tsVector, startRowNum), tsReader(tsVectorAcc, tsVector, endRowNum))
+      try {
+        addTimeChunks(valueVectorAcc, valueVector, ccReader, startRowNum, endRowNum,
+          tsReader(tsVectorAcc, tsVector, startRowNum), tsReader(tsVectorAcc, tsVector, endRowNum))
+      } catch { case e: ArrayIndexOutOfBoundsException =>
+        Query.qLogger.error(s"ArrayIndexOutOfBoundsException startRowNum=$startRowNum endRowNum=$endRowNum")
+        throw e
+      }
     }
 
     // Add any corrections from this chunk, pass on lastValue also to next chunk computation
