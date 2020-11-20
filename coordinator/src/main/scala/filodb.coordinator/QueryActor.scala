@@ -5,9 +5,7 @@ import java.util.concurrent.{ForkJoinPool, ForkJoinWorkerThread}
 
 import scala.util.control.NonFatal
 
-import akka.actor.{ActorRef, ActorSystem, Props}
-import akka.dispatch.{Envelope, UnboundedStablePriorityMailbox}
-import com.typesafe.config.Config
+import akka.actor.{ActorRef, Props}
 import kamon.Kamon
 import kamon.instrumentation.executor.ExecutorInstrumentation
 import kamon.tag.TagSet
