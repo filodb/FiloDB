@@ -237,10 +237,12 @@ extends WrappedCursor(rv.rows()) with StrictLogging {
           val valReader = rv.partition.schema.data.reader(rv.valueColID,
                                                           nextInfo.getValueVectorAccessor,
                                                           nextInfo.getValueVectorAddr)
-          qLogger.error(s"addChunks Exception: info.numRows=${nextInfo.numRows} " +
-            s"info.endTime=${nextInfo.endTime} curWindowEnd=${wit.curWindowEnd} tsReader=$tsReader " +
+          qLogger.error(s"addChunks Exception: ChunkInfo=[${nextInfo.debugString}] " +
+            s"curWinStart=${wit.curWindowStart} curWindowEnd=${wit.curWindowEnd} tsReader=$tsReader " +
             s"timestampVectorLength=${tsReader.length(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)} " +
-            s"valueVectorLength=${valReader.length(nextInfo.getValueVectorAccessor, nextInfo.getValueVectorAddr)}", e)
+            s"valueVectorLength=${valReader.length(nextInfo.getValueVectorAccessor, nextInfo.getValueVectorAddr)} " +
+            s"partition ${rv.partition.stringPartition} " +
+            s"start=$start end=$end step=$step", e)
           throw e
       }
     }

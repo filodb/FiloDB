@@ -8,6 +8,7 @@ import scala.concurrent.duration._
 import akka.actor.{ActorRef, OneForOneStrategy, PoisonPill, Props, Terminated}
 import akka.actor.SupervisorStrategy.{Restart, Stop}
 import akka.event.LoggingReceive
+import kamon.Kamon
 import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.client.MiscCommands
@@ -195,6 +196,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   def queryHandlers: Receive = LoggingReceive {
     case q: QueryCommand =>
       val originator = sender()
+      Kamon.currentSpan().mark("NodeCoordinatorActor received query")
       withQueryActor(originator, q.dataset) { _.tell(q, originator) }
     case QueryActor.ThrowException(dataset) =>
       val originator = sender()
