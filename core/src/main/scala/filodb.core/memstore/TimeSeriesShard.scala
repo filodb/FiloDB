@@ -407,12 +407,12 @@ class TimeSeriesShard(val ref: DatasetRef,
   // Flush groups when ingestion time is observed to cross a time boundary (typically an hour),
   // plus a group-specific offset. This simplifies disaster recovery -- chunks can be copied
   // without concern that they may overlap in time.
-  private val flushBoundaryMillis = storeConfig.flushInterval.toMillis
+  private val flushBoundaryMillis = Option(storeConfig.flushInterval.toMillis)
 
   // Defines the group-specific flush offset, to distribute the flushes around such they don't
   // all flush at the same time. With an hourly boundary and 60 flush groups, flushes are
   // scheduled once a minute.
-  private val flushOffsetMillis = flushBoundaryMillis / numGroups
+  private val flushOffsetMillis = flushBoundaryMillis.get / numGroups
 
   private[memstore] val evictedPartKeys =
     BloomFilter[PartKey](storeConfig.evictedPkBfCapacity, falsePositiveRate = 0.01)(new CanGenerateHashFrom[PartKey] {
@@ -837,7 +837,7 @@ class TimeSeriesShard(val ref: DatasetRef,
            As written the code the same thing but with fewer operations. It's also a bit
            shorter, but you also had to read this comment...
          */
-        if (oldTimestamp / flushBoundaryMillis != newTimestamp / flushBoundaryMillis) {
+        if (oldTimestamp / flushBoundaryMillis.get != newTimestamp / flushBoundaryMillis.get) {
           // Flush out the group before ingesting records for a new hour (by group offset).
           tasks += createFlushTask(prepareFlushGroup(group))
         }
@@ -1184,7 +1184,8 @@ class TimeSeriesShard(val ref: DatasetRef,
         val tsp = part.asInstanceOf[TimeSeriesPartition]
         brRowReader.schema = schema.ingestionSchema
         brRowReader.recordOffset = recordOff
-        tsp.ingest(ingestionTime, brRowReader, overflowBlockFactory, maxChunkTime)
+        tsp.ingest(ingestionTime, brRowReader, overflowBlockFactory,
+          storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, maxChunkTime)
         // Below is coded to work concurrently with logic in updateIndexWithEndTime
         // where we try to de-activate an active time series
         if (!tsp.ingesting) {
