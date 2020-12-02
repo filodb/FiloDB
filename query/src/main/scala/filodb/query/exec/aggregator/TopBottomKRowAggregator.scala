@@ -86,7 +86,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
     acc
   }
 
-  private def addRecordToBuilder(builder: RecordBuilder, value: Double, timeStampMs: Long): Unit = {
+  private def addRecordToBuilder(builder: RecordBuilder, timeStampMs: Long, value: Double): Unit = {
     builder.startNewRecord(recSchema)
     builder.addLong(timeStampMs)
     builder.addDouble(value)
@@ -99,7 +99,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
   private def createBuilder(rangeParams: RangeParams, currentTime: Long): RecordBuilder= {
     val builder = SerializedRangeVector.newBuilder();
     for (t <- rangeParams.startSecs to (currentTime - rangeParams.stepSecs) by rangeParams.stepSecs) {
-      addRecordToBuilder(builder, Double.NaN, t * 1000)
+      addRecordToBuilder(builder, t * 1000, Double.NaN)
     }
     builder
   }
@@ -120,12 +120,12 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
             val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
             rvkSeen += rvk
             val builder = resRvs.getOrElseUpdate(rvk, createBuilder(rangeParams, t))
-            addRecordToBuilder(builder, row.getDouble(i + 1), row.getLong(0))
+            addRecordToBuilder(builder, t, row.getDouble(i + 1))
           }
-           i += 2
+          i += 2
         }
         resRvs.keySet.foreach { rvs =>
-          if (!rvkSeen.contains(rvs)) addRecordToBuilder(resRvs.get(rvs).get, Double.NaN, t * 1000)
+          if (!rvkSeen.contains(rvs)) addRecordToBuilder(resRvs.get(rvs).get, t * 1000, Double.NaN)
         }
       }
     } finally {

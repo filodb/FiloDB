@@ -528,14 +528,17 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   it ("should add NaN in topK") {
 
     val samples: Array[RangeVector] = Array(
-      toRv(Seq((1000L,5.1), (2000L, 5.6d), (3000L, 4.0d))),
-      toRv(Seq((1000L,5.0), (2000L, 5.7d), (3000L, 4.4d)), ignoreKey2)
+      toRv(Seq((1000L, Double.NaN), (2000L, 5.1), (3000L, Double.NaN), (4000L, 5.6d), (5000L, 4.0d), (6000L,
+        Double.NaN))),
+      toRv(Seq((1000L, Double.NaN), (2000L, 5.0), (3000L, Double.NaN), (4000L, 5.7d), (5000L, 4.4d),
+        (6000L, Double.NaN)), ignoreKey2)
     )
 
-    val rangeParams = RangeParams(1,1,3)
+    val rangeParams = RangeParams(1,1,6)
 
     val agg = RowAggregator(AggregationOperator.TopK, Seq(1.0), tvSchema)
-    val resultObsa = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), noGrouping)
+    val resultObsa = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples),
+      noGrouping)
     val resultObsb = RangeVectorAggregator.mapReduce(agg, true, resultObsa, rv=>rv.key)
     val resultObsc = RangeVectorAggregator.present(agg, resultObsb, 1000, rangeParams)
     val result = resultObsc.toListL.runAsync.futureValue
@@ -544,9 +547,10 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result(0).key shouldEqual ignoreKey2
     result(1).key shouldEqual ignoreKey
 
-
-   compareIter(result.flatMap(_.rows.map(_.getDouble(1))).toIterator,
-      Seq(Double.NaN, 5.7, 4.4, 5.1, Double.NaN, Double.NaN).toIterator)
+    compareIter(result(0).rows.map(_.getDouble(1)).toIterator,
+      Seq(Double.NaN, Double.NaN, Double.NaN, 5.7, 4.4, Double.NaN).toIterator)
+    compareIter(result(1).rows.map(_.getDouble(1)).toIterator,
+      Seq(Double.NaN, 5.1, Double.NaN, Double.NaN, Double.NaN, Double.NaN).toIterator)
   }
 
     it("should sum and compute max of histogram & max RVs") {
