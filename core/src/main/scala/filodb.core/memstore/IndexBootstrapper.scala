@@ -1,6 +1,7 @@
 package filodb.core.memstore
 
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.reactive.Observable
 
@@ -28,11 +29,12 @@ class IndexBootstrapper(colStore: ColumnStore) {
                      shardNum: Int,
                      ref: DatasetRef)
                      (assignPartId: PartKeyRecord => Int): Task[Long] = {
-    val tracer = Kamon.spanBuilder("memstore-recover-index-latency")
-      .asChildOf(Kamon.currentSpan())
-      .tag("dataset", ref.dataset)
-      .tag("shard", shardNum).start()
 
+    val recoverIndexLatency = Kamon.histogram("shard-recover-index-latency",
+      MeasurementUnit.time.milliseconds)
+      .withTag("dataset", ref.dataset)
+      .withTag("shard", shardNum)
+    val start = System.currentTimeMillis()
     colStore.scanPartKeys(ref, shardNum)
       .map { pk =>
         val partId = assignPartId(pk)
@@ -41,7 +43,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
       .countL
       .map { count =>
         index.refreshReadersBlocking()
-        tracer.finish()
+        recoverIndexLatency.record(System.currentTimeMillis() - start)
         count
       }
   }
@@ -64,11 +66,11 @@ class IndexBootstrapper(colStore: ColumnStore) {
                    schemas: Schemas,
                    parallelism: Int = Runtime.getRuntime.availableProcessors())
                    (lookUpOrAssignPartId: Array[Byte] => Int): Task[Long] = {
-    val tracer = Kamon.spanBuilder("downsample-store-refresh-index-latency")
-      .asChildOf(Kamon.currentSpan())
-      .tag("dataset", ref.dataset)
-      .tag("shard", shardNum).start()
-
+    val recoverIndexLatency = Kamon.histogram("shard-recover-index-latency",
+      MeasurementUnit.time.milliseconds)
+      .withTag("dataset", ref.dataset)
+      .withTag("shard", shardNum)
+    val start = System.currentTimeMillis()
     Observable.fromIterable(fromHour to toHour).flatMap { hour =>
       colStore.getPartKeysByUpdateHour(ref, shardNum, hour)
     }.mapAsync(parallelism) { pk =>
@@ -83,7 +85,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
      .countL
      .map { count =>
        index.refreshReadersBlocking()
-       tracer.finish()
+       recoverIndexLatency.record(System.currentTimeMillis() - start)
        count
      }
   }

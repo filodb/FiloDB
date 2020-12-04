@@ -49,11 +49,6 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
   override def execute(source: ChunkSource,
                        querySession: QuerySession)
                       (implicit sched: Scheduler): Task[QueryResponse] = {
-    val execPlan2Span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
-      .asChildOf(Kamon.currentSpan())
-      .tag("query-id", queryContext.queryId)
-      .start()
-
     if (queryEndpoint == null) {
       throw new BadQueryException("Remote Query endpoint can not be null in RemoteExec.")
     }
@@ -61,8 +56,9 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since
     // kamon uses thread-locals.
-    Kamon.runWithSpan(execPlan2Span, true) {
-      Task.fromFuture(sendHttpRequest(execPlan2Span, requestTimeoutMs))
+    val span = Kamon.currentSpan()
+    Kamon.runWithSpan(span, true) {
+      Task.fromFuture(sendHttpRequest(span, requestTimeoutMs))
     }
   }
 

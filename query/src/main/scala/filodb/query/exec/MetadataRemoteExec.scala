@@ -2,7 +2,6 @@ package filodb.query.exec
 
 import scala.concurrent.Future
 
-import kamon.Kamon
 import kamon.trace.Span
 import monix.execution.Scheduler
 
@@ -39,20 +38,14 @@ case class MetadataRemoteExec(queryEndpoint: String,
   }
 
   def toQueryResponse(data: Seq[Map[String, String]], id: String, parentSpan: kamon.trace.Span): QueryResponse = {
-    val span = Kamon.spanBuilder(s"create-queryresponse-${getClass.getSimpleName}")
-      .asChildOf(parentSpan)
-      .tag("query-id", id)
-      .start()
-
     val iteratorMap = data.map { r => r.map { v => (v._1.utf8, v._2.utf8) }}
 
     import NoCloseCursor._
     val rangeVector = IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-      new UTF8MapIteratorRowReader(iteratorMap.toIterator))
+      UTF8MapIteratorRowReader(iteratorMap.toIterator))
 
     val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, recordSchema, printTree(false)))
 
-    span.finish()
     QueryResult(id, resultSchema, srvSeq)
   }
 }

@@ -3,6 +3,7 @@ package filodb.downsampler.index
 import scala.concurrent.Await
 
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import monix.reactive.Observable
 
 import filodb.cassandra.columnstore.CassandraColumnStore
@@ -54,15 +55,15 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
       dsSettings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
   @transient lazy private val dsDatasetRef = downsampleRefsByRes(highestDSResolution)
 
+  @transient val perShardIndexMigrationLatency = Kamon.histogram("per-shard-index-migration-latency",
+    MeasurementUnit.time.milliseconds).withoutTags()
+
   def updateDSPartKeyIndex(shard: Int, fromHour: Long, toHourExcl: Long, fullIndexMigration: Boolean): Unit = {
     sparkTasksStarted.increment
     val rawDataSource = rawCassandraColStore
     @volatile var count = 0
     try {
-      val span = Kamon.spanBuilder("per-shard-index-migration-latency")
-        .asChildOf(Kamon.currentSpan())
-        .tag("shard", shard)
-        .start
+      val start = System.currentTimeMillis()
       if (fullIndexMigration) {
         DownsamplerContext.dsLogger.info(s"Starting Full PartKey Migration for shard=$shard")
         val partKeys = rawDataSource.scanPartKeys(ref = rawDatasetRef,
@@ -80,7 +81,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
           s"count=$count fromHour=$fromHour toHourExcl=$toHourExcl")
       }
       sparkForeachTasksCompleted.increment()
-      span.finish()
+      perShardIndexMigrationLatency.record(System.currentTimeMillis() - start)
     } catch { case e: Exception =>
       DownsamplerContext.dsLogger.error(s"Exception in task count=$count " +
         s"shard=$shard fromHour=$fromHour toHourExcl=$toHourExcl fullIndexMigration=$fullIndexMigration", e)

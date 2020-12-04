@@ -11,6 +11,7 @@ import scala.util.control.NonFatal
 import akka.actor.{ActorRef, Props}
 import akka.event.LoggingReceive
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
 import monix.reactive.Observable
@@ -293,10 +294,12 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
   private def doRecovery(shard: Int, startOffset: Long, endOffset: Long, interval: Long,
                          checkpoints: Map[Int, Long]): Future[Option[Long]] = {
     val futTry = create(shard, Some(startOffset)) map { ingestionStream =>
-      val recoveryTrace = Kamon.spanBuilder("ingestion-recovery-trace")
-                               .asChildOf(Kamon.currentSpan())
-                               .tag("shard", shard.toString)
-                               .tag("dataset", ref.toString).start()
+
+      val ingestionRecoveryLatency = Kamon.histogram("ingestion-recovery-latency", MeasurementUnit.time.milliseconds)
+                                                  .withTag("dataset", ref.dataset)
+                                                  .withTag("shard", shard)
+
+      val recoveryStart = System.currentTimeMillis()
       val stream = ingestionStream.get
       statusActor ! RecoveryInProgress(ref, shard, nodeCoord, 0)
 
@@ -317,12 +320,11 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
           logger.info(s"Finished recovery for dataset=$ref shard=$shard")
           ingestionStream.teardown()
           streams.remove(shard)
-          recoveryTrace.finish()
+          ingestionRecoveryLatency.record(System.currentTimeMillis() - recoveryStart)
         case Failure(ex) =>
-          recoveryTrace.fail(s"Recovery failed for dataset=$ref shard=$shard", ex)
           logger.error(s"Recovery failed for dataset=$ref shard=$shard", ex)
           handleError(ref, shard, ex)
-          recoveryTrace.finish()
+          ingestionRecoveryLatency.record(System.currentTimeMillis() - recoveryStart)
       }(actorDispatcher)
       fut
     }
