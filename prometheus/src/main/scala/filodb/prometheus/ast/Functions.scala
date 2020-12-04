@@ -6,7 +6,8 @@ import filodb.query.RangeFunctionId.Timestamp
 
 trait Functions extends Base with Operators with Vectors {
 
-  case class Function(name: String, allParams: Seq[Expression]) extends Expression with PeriodicSeries {
+  case class Function(name: String, allParams: Seq[Expression], subquery: Option[Subquery])
+    extends Expression with PeriodicSeries {
     private val ignoreChecks = name.equalsIgnoreCase("vector") || name.equalsIgnoreCase("time")
 
     if (!ignoreChecks &&
@@ -19,6 +20,10 @@ trait Functions extends Base with Operators with Vectors {
       AbsentFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty) {
 
       throw new IllegalArgumentException(s"Invalid function name [$name]")
+    }
+
+    if (!ignoreChecks && subquery.isDefined && RangeFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty) {
+      throw new IllegalArgumentException(s"Only range functions can have subquery clause defined [$name]")
     }
 
     // Below code is for validating the syntax of promql functions belonging to RangeFunctionID.
@@ -183,8 +188,8 @@ trait Functions extends Base with Operators with Vectors {
           PeriodicSeriesWithWindowing(
             rangeExpression.toSeriesPlan(timeParams, isRoot = false),
             timeParams.start * 1000 , timeParams.step * 1000, timeParams.end * 1000,
-            rangeExpression.window.millis(timeParams.step * 1000),
-            rangeFunctionId, rangeExpression.window.timeUnit == IntervalMultiple,
+            rangeExpression.rangeProducer.interval.millis(timeParams.step * 1000),
+            rangeFunctionId, rangeExpression.rangeProducer.interval.timeUnit == IntervalMultiple,
             otherParams, rangeExpression.offset.map(_.millis(timeParams.step * 1000)))
         }
       }

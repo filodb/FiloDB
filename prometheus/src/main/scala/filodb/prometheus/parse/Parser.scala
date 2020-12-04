@@ -194,6 +194,17 @@ trait Unit extends BaseParser {
   lazy val duration: PackratParser[Duration] = decimalNumber ~ timeUnit ^^ {
     case d ~ tu => Duration(d.toDouble, tu)
   }
+
+  lazy val subquery: PackratParser[Subquery] = "[" ~ duration ~ ":" ~ duration.? ~ "]" ^^ {
+    case leftBracket ~ timeRange ~ colon ~ step ~ rightBracket => Subquery(timeRange, step)
+  }
+
+  lazy val timeInterval: PackratParser[TimeInterval] = "[" ~ duration ~ "]" ^^ {
+    case leftBracket ~ timeRange ~ rightBracket => TimeInterval(timeRange)
+  }
+
+  lazy val rangeProducer = subquery | timeInterval
+
   lazy val offset: PackratParser[Offset] = OFFSET ~ duration ^^ {
     case ignore ~ t => Offset(t)
   }
@@ -265,14 +276,14 @@ trait Selector extends Operator with Unit with BaseParser {
   }
 
   lazy val rangeVectorSelector: PackratParser[RangeExpression] =
-    metricNameIdentifier ~ labelSelection.? ~ "[" ~ duration ~ "]" ~ offset.? ^^ {
-      case metricName ~ ls ~ leftBracket ~ td ~ rightBracket ~ opt =>
-        RangeExpression(Some(metricName.str), ls.getOrElse(Seq.empty), td, opt.map(_.duration))
+    metricNameIdentifier ~ labelSelection.? ~ rangeProducer ~ offset.? ^^ {
+      case metricName ~ ls ~  rp ~  opt =>
+        RangeExpression(Some(metricName.str), ls.getOrElse(Seq.empty), rp, opt.map(_.duration))
     }
 
   lazy val rangeVectorSelector2: PackratParser[RangeExpression] =
-    labelSelection ~ "[" ~ duration ~ "]" ~ offset.? ^^ {
-      case ls ~ leftBracket ~ td ~ rightBracket ~ opt =>
+    labelSelection ~ rangeProducer ~ offset.? ^^ {
+      case ls ~ td ~ opt =>
         RangeExpression(None, ls, td, opt.map(_.duration))
     }
 
@@ -354,8 +365,8 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
       Seq() ++ _
     }
 
-  lazy val function: PackratParser[Function] = labelNameIdentifier ~ functionParams ^^ {
-    case name ~ params => Function(name.str, params)
+  lazy val function: PackratParser[Function] = labelNameIdentifier ~ functionParams ~ subquery.? ^^ {
+    case name ~ params ~ subquery => Function(name.str, params, subquery)
   }
 
   // For queries with aggregateGrouping before metric name

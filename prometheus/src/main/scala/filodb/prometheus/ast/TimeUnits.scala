@@ -57,4 +57,15 @@ trait TimeUnits {
 
   case class Offset(duration: Duration)
 
+  sealed trait RangeProducer {
+    def interval: Duration
+  }
+
+  case class TimeInterval(interval: Duration) extends RangeProducer {
+  }
+
+  case class Subquery(interval: Duration, step: Option[Duration]) extends RangeProducer {
+  }
+
+
 }
