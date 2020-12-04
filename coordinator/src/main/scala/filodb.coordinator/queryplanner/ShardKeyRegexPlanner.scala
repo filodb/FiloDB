@@ -65,14 +65,17 @@ class ShardKeyRegexPlanner(dataset: Dataset,
   private def generateExecWithoutRegex(logicalPlan: LogicalPlan, nonMetricShardKeyFilters: Seq[ColumnFilter],
                                        qContext: QueryContext): Seq[ExecPlan] = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    shardKeyMatcher(nonMetricShardKeyFilters).map { result =>
+    val shardKeyMatches = shardKeyMatcher(nonMetricShardKeyFilters)
+    // Filters like _ns_ =~ "App" will result in only one sub query
+    val skipAggregatePresentValue= if (shardKeyMatches.length == 1) false else true
+    shardKeyMatches.map { result =>
         val newLogicalPlan = logicalPlan.replaceFilters(result)
         // Querycontext should just have the part of query which has regex
         // For example for exp(sum(test{_ws_ = "demo", _ns_ =~ "App.*"})), sub queries should be
         // sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
         val newQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
         val newQueryContext = qContext.copy(origQueryParams = newQueryParams, plannerParams = qContext.plannerParams.
-          copy(skipAggregatePresent = true))
+          copy(skipAggregatePresent = skipAggregatePresentValue))
         queryPlanner.materialize(logicalPlan.replaceFilters(result), newQueryContext)
       }
   }
@@ -96,6 +99,9 @@ class ShardKeyRegexPlanner(dataset: Dataset,
       LogicalPlan.getNonMetricShardKeyFilters(aggregate, dataset.options.nonMetricShardColumns).head, queryContext)
     val exec = if (execPlans.size == 1) execPlans.head
     else {
+      if (aggregate.operator.equals(AggregationOperator.TopK) || aggregate.operator.equals(AggregationOperator.BottomK)
+        || aggregate.operator.equals(AggregationOperator.CountValues))
+         throw new UnsupportedOperationException(s"Shard Key regex not supported for ${aggregate.operator}")
       val reducer = MultiPartitionReduceAggregateExec(queryContext, InProcessPlanDispatcher,
         execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
       val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
