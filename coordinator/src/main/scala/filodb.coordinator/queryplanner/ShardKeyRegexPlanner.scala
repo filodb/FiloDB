@@ -66,8 +66,7 @@ class ShardKeyRegexPlanner(dataset: Dataset,
                                        qContext: QueryContext): Seq[ExecPlan] = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val shardKeyMatches = shardKeyMatcher(nonMetricShardKeyFilters)
-    // Filters like _ns_ =~ "App" will result in only one sub query
-    val skipAggregatePresentValue= if (shardKeyMatches.length == 1) false else true
+    val skipAggregatePresentValue = if (shardKeyMatches.length == 1) false else true
     shardKeyMatches.map { result =>
         val newLogicalPlan = logicalPlan.replaceFilters(result)
         // Querycontext should just have the part of query which has regex
