@@ -547,6 +547,10 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result(0).key shouldEqual ignoreKey2
     result(1).key shouldEqual ignoreKey
 
+    result(0).rows.map(_.getLong(0)).
+      sameElements(Seq(1000L, 2000L, 3000L, 4000L, 5000L, 6000L).toIterator) shouldEqual true
+    result(1).rows.map(_.getLong(0)).
+      sameElements(Seq(1000L, 2000L, 3000L, 4000L, 5000L, 6000L).toIterator) shouldEqual true
     compareIter(result(0).rows.map(_.getDouble(1)).toIterator,
       Seq(Double.NaN, Double.NaN, Double.NaN, 5.7, 4.4, Double.NaN).toIterator)
     compareIter(result(1).rows.map(_.getDouble(1)).toIterator,
