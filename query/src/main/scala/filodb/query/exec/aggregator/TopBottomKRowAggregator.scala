@@ -1,5 +1,7 @@
 package filodb.query.exec.aggregator
 
+import java.util.concurrent.TimeUnit
+
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
@@ -120,7 +122,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
             val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
             rvkSeen += rvk
             val builder = resRvs.getOrElseUpdate(rvk, createBuilder(rangeParams, t))
-            addRecordToBuilder(builder, t*1000, row.getDouble(i + 1))
+            addRecordToBuilder(builder, TimeUnit.SECONDS.toMillis(t), row.getDouble(i + 1))
           }
           i += 2
         }
