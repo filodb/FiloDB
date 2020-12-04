@@ -274,7 +274,6 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn)
     the[UnsupportedOperationException] thrownBy {
       val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-      execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
     } should have message "Shard Key regex not supported for TopK"
   }
 }
