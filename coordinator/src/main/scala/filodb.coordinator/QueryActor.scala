@@ -8,7 +8,6 @@ import scala.util.control.NonFatal
 import akka.actor.{ActorRef, Props}
 import kamon.Kamon
 import kamon.instrumentation.executor.ExecutorInstrumentation
-import kamon.metric.MeasurementUnit
 import kamon.tag.TagSet
 import monix.execution.Scheduler
 import monix.execution.schedulers.SchedulerService
@@ -80,8 +79,6 @@ final class QueryActor(memStore: MemStore,
   private val epRequests = Kamon.counter("queryactor-execplan-requests").withTags(TagSet.from(tags))
   private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").withTags(TagSet.from(tags))
   private val queryErrors = Kamon.counter("queryactor-query-errors").withTags(TagSet.from(tags))
-  private val queryExecuteLatency = Kamon.histogram("queryactor-execute-latency", MeasurementUnit.time.milliseconds)
-                                                    .withTags(TagSet.from(tags))
 
   /**
     * Instrumentation adds following metrics on the Query Scheduler
@@ -120,36 +117,39 @@ final class QueryActor(memStore: MemStore,
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
     if (checkTimeout(q.queryContext, replyTo)) {
       epRequests.increment()
-      Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
-      Kamon.currentSpan().tag("query-id", q.queryContext.queryId)
-      val querySession = QuerySession(q.queryContext, queryConfig)
-      Kamon.currentSpan().mark("query-actor-received-execute-start")
-      val startExecute = System.currentTimeMillis()
-      q.execute(memStore, querySession)(queryScheduler)
-        .foreach { res =>
-          FiloSchedulers.assertThreadName(QuerySchedName)
-          querySession.close()
-          queryExecuteLatency.record(System.currentTimeMillis() - startExecute)
-          Kamon.currentSpan().mark("query-actor-received-execute-end")
-          replyTo ! res
-          res match {
-            case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
-            case e: QueryError =>
-              queryErrors.increment()
-              logger.debug(s"queryId ${q.queryContext.queryId} Normal QueryError returned from query execution: $e")
-              e.t match {
-                case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dsRef, cve)
-                case t: Throwable =>
-              }
-          }
-        }(queryScheduler).recover { case ex =>
-          querySession.close()
-          // Unhandled exception in query, should be rare
-          logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
-          Kamon.currentSpan().mark("query-actor-received-execute-failed-end")
-          queryExecuteLatency.record(System.currentTimeMillis() - startExecute)
-          replyTo ! QueryError(q.queryContext.queryId, ex)
-        }(queryScheduler)
+      val queryExecuteSpan = Kamon.spanBuilder(s"query-actor-exec-plan-execute-${q.getClass.getSimpleName}")
+        .asChildOf(Kamon.currentSpan())
+        .start()
+      // Dont finish span since we finish it asynchronously when response is received
+      Kamon.runWithSpan(queryExecuteSpan, false) {
+        Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
+        Kamon.currentSpan().tag("query-id", q.queryContext.queryId)
+        val querySession = QuerySession(q.queryContext, queryConfig)
+        Kamon.currentSpan().mark("query-actor-received-execute-start")
+        q.execute(memStore, querySession)(queryScheduler)
+          .foreach { res =>
+            FiloSchedulers.assertThreadName(QuerySchedName)
+            querySession.close()
+            queryExecuteSpan.finish()
+            replyTo ! res
+            res match {
+              case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
+              case e: QueryError =>
+                queryErrors.increment()
+                logger.debug(s"queryId ${q.queryContext.queryId} Normal QueryError returned from query execution: $e")
+                e.t match {
+                  case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dsRef, cve)
+                  case t: Throwable =>
+                }
+            }
+          }(queryScheduler).recover { case ex =>
+            querySession.close()
+            // Unhandled exception in query, should be rare
+            logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
+            queryExecuteSpan.finish()
+            replyTo ! QueryError(q.queryContext.queryId, ex)
+          }(queryScheduler)
+      }
     }
   }
 

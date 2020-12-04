@@ -111,7 +111,8 @@ trait ExecPlan extends QueryCommand {
       // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
       // across threads. Note that task/observable will not run on the thread where span is present since
       // kamon uses thread-locals.
-      Kamon.runWithSpan(span, true) {
+      // Dont finish span since this code didnt create it
+      Kamon.runWithSpan(span, false) {
         val doEx = doExecute(source, querySession)
         Kamon.histogram("query-execute-time-elapsed-step1-done",
           MeasurementUnit.time.milliseconds)
@@ -134,6 +135,7 @@ trait ExecPlan extends QueryCommand {
       val resultTask = if (resSchema == ResultSchema.empty && dontRunTransformers) {
         qLogger.debug(s"queryId: ${queryContext.queryId} Empty plan $this, returning empty results")
         span.mark("empty-plan")
+        span.mark(s"execute-step2-end-${getClass.getSimpleName}")
         Task.eval(QueryResult(queryContext.queryId, resSchema, Nil))
       } else {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
@@ -367,6 +369,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since
     // kamon uses thread-locals.
+    // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
         qLogger.error(s"queryId: ${queryContext.queryId} Execution failed for sub-query ${plan.printTree()}", ex)
@@ -400,7 +403,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     val childTasks = Observable.fromIterable(children.zipWithIndex)
                                .mapAsync(parallelism) { case (plan, i) =>
                                  val task = dispatchRemotePlan(plan, span).map((_, i))
-                                 span.mark(s"plan-dispatched-${plan.getClass.getSimpleName}")
+                                 span.mark(s"child-plan-$i-dispatched-${plan.getClass.getSimpleName}")
                                  task
                                }
 
@@ -422,6 +425,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     val outputSchema = processedTasks.collect {
       case (QueryResult(_, schema, _), _) => schema
     }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
+      // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {
         val outputRvs = compose(processedTasks, outputSchema, querySession)
           .doOnTerminate(_ => span.mark(s"execute-step1-child-result-composition-end-${getClass.getSimpleName}"))

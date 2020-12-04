@@ -57,7 +57,8 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     // across threads. Note that task/observable will not run on the thread where span is present since
     // kamon uses thread-locals.
     val span = Kamon.currentSpan()
-    Kamon.runWithSpan(span, true) {
+    // Dont finish span since this code didnt create it
+    Kamon.runWithSpan(span, false) {
       Task.fromFuture(sendHttpRequest(span, requestTimeoutMs))
     }
   }
