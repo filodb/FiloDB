@@ -1,6 +1,5 @@
 package filodb.query.exec
 
-import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -124,15 +123,12 @@ final case class SelectRawPartitionsExec(queryContext: QueryContext,
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
-
-    Kamon.currentSpan().mark(s"doExecute-start-${getClass.getSimpleName}")
     Query.qLogger.debug(s"queryId=${queryContext.queryId} on dataset=$datasetRef shard=" +
       s"${lookupRes.map(_.shard).getOrElse("")} " + s"schema=" +
       s"${dataSchema.map(_.name)} is configured to use columnIDs=$colIds")
     val rvs = dataSchema.map { sch =>
       source.rangeVectors(datasetRef, lookupRes.get, colIds, sch, filterSchemas, querySession)
     }.getOrElse(Observable.empty)
-    Kamon.currentSpan().mark(s"doExecute-end-${getClass.getSimpleName}")
     ExecResult(rvs, Task.eval(schemaOfDoExecute()))
   }
 

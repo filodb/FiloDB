@@ -385,9 +385,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
   final def doExecute(source: ChunkSource,
                       querySession: QuerySession)
                      (implicit sched: Scheduler): ExecResult = {
-    val parentSpan = Kamon.currentSpan()
+    val span = Kamon.currentSpan()
 
-    parentSpan.mark(s"execute-step1-child-result-composition-start-${getClass.getSimpleName}")
+    span.mark(s"execute-step1-child-result-composition-start-${getClass.getSimpleName}")
     // whether child tasks need to be executed sequentially.
     // parallelism 1 means, only one worker thread to process underlying tasks.
     val parallelism: Int = if (parallelChildTasks)
@@ -399,8 +399,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
     val childTasks = Observable.fromIterable(children.zipWithIndex)
                                .mapAsync(parallelism) { case (plan, i) =>
-                                 val task = dispatchRemotePlan(plan, parentSpan).map((_, i))
-                                 parentSpan.mark(s"plan-dispatched-${plan.getClass.getSimpleName}")
+                                 val task = dispatchRemotePlan(plan, span).map((_, i))
+                                 span.mark(s"plan-dispatched-${plan.getClass.getSimpleName}")
                                  task
                                }
 
@@ -408,8 +408,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // an empty schema.  Validate that the other schemas are the same.  Skip over empty schemas.
     var sch = ResultSchema.empty
     val processedTasks = childTasks
-      .doOnStart(_ => parentSpan.mark("first-child-result-received"))
-      .doOnTerminate(_ => parentSpan.mark("last-child-result-received"))
+      .doOnStart(_ => span.mark("first-child-result-received"))
+      .doOnTerminate(_ => span.mark("last-child-result-received"))
       .collect {
       case (res @ QueryResult(_, schema, _), i) if schema != ResultSchema.empty =>
         sch = reduceSchemas(sch, res)
@@ -422,9 +422,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
     val outputSchema = processedTasks.collect {
       case (QueryResult(_, schema, _), _) => schema
     }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
-      Kamon.runWithSpan(parentSpan, false) {
+      Kamon.runWithSpan(span, false) {
         val outputRvs = compose(processedTasks, outputSchema, querySession)
-          .doOnTerminate(_ => parentSpan.mark(s"execute-step1-child-result-composition-end-${getClass.getSimpleName}"))
+          .doOnTerminate(_ => span.mark(s"execute-step1-child-result-composition-end-${getClass.getSimpleName}"))
         ExecResult(outputRvs, outputSchema)
       }
   }

@@ -379,7 +379,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
     val startExecute = System.currentTimeMillis()
     val span = Kamon.currentSpan()
-    span.mark("index-startTimes-for-odp-lookup-latency-start")
     val collector = new PartIdStartTimeCollector()
     val terms = new util.ArrayList[BytesRef]()
     partIds.foreach { pId =>
@@ -389,8 +388,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     // more efficient within Lucene
     withNewSearcher(s => s.search(new TermInSetQuery(PART_ID, terms), collector))
     span.tag(s"num-partitions-to-page", terms.size())
-    span.mark("index-startTimes-for-odp-lookup-latency-end")
-    startTimeLookupLatency.record(Math.max(0, System.currentTimeMillis - startExecute))
+    val latency = System.currentTimeMillis - startExecute
+    span.mark(s"index-startTimes-for-odp-lookup-latency=${latency}ms")
+    startTimeLookupLatency.record(latency)
     collector.startTimes
   }
 
@@ -512,7 +512,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
     val startExecute = System.currentTimeMillis()
     val span = Kamon.currentSpan()
-    span.mark("index-partition-lookup-latency-start")
     val booleanQuery = new BooleanQuery.Builder
     columnFilters.foreach { filter =>
       val q = leafFilter(filter.column, filter.filter)
@@ -523,9 +522,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     val query = booleanQuery.build()
     logger.debug(s"Querying dataset=$ref shard=$shardNum partKeyIndex with: $query")
     withNewSearcher(s => s.search(query, collector))
-    span.mark("index-partition-lookup-latency-end")
-    queryIndexLookupLatency.record(Math.max(0, System.currentTimeMillis - startExecute))
-
+    val latency = System.currentTimeMillis - startExecute
+    span.mark(s"index-partition-lookup-latency=${latency}ms")
+    queryIndexLookupLatency.record(latency)
   }
 
   def partIdFromPartKeySlow(partKeyBase: Any,
