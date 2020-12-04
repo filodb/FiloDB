@@ -25,6 +25,8 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
   @transient lazy private val numPartKeysNoDownsampleSchema = Kamon.counter("num-partkeys-no-downsample").withoutTags()
   @transient lazy private val numPartKeysMigrated = Kamon.counter("num-partkeys-migrated").withoutTags()
   @transient lazy private val numPartKeysBlocked = Kamon.counter("num-partkeys-blocked").withoutTags()
+  @transient lazy val perShardIndexMigrationLatency = Kamon.histogram("per-shard-index-migration-latency",
+    MeasurementUnit.time.milliseconds).withoutTags()
 
   @transient lazy private[downsampler] val schemas = Schemas.fromConfig(dsSettings.filodbConfig).get
 
@@ -54,9 +56,6 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
   @transient lazy private val highestDSResolution =
       dsSettings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
   @transient lazy private val dsDatasetRef = downsampleRefsByRes(highestDSResolution)
-
-  @transient val perShardIndexMigrationLatency = Kamon.histogram("per-shard-index-migration-latency",
-    MeasurementUnit.time.milliseconds).withoutTags()
 
   def updateDSPartKeyIndex(shard: Int, fromHour: Long, toHourExcl: Long, fullIndexMigration: Boolean): Unit = {
     sparkTasksStarted.increment

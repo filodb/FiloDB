@@ -50,11 +50,11 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
   @transient lazy val numRawChunksDownsampled = Kamon.counter("num-raw-chunks-downsampled").withoutTags()
   @transient lazy val numDownsampledChunksWritten = Kamon.counter("num-downsampled-chunks-written").withoutTags()
 
-  @transient val downsampleBatchLatency = Kamon.histogram("downsample-batch-latency",
+  @transient lazy val downsampleBatchLatency = Kamon.histogram("downsample-batch-latency",
                                               MeasurementUnit.time.milliseconds).withoutTags()
-  @transient val downsampleSinglePartLatency = Kamon.histogram("downsample-single-partition-latency",
+  @transient lazy val downsampleSinglePartLatency = Kamon.histogram("downsample-single-partition-latency",
     MeasurementUnit.time.milliseconds).withoutTags()
-  @transient val downsampleBatchPersistLatency = Kamon.histogram("cassandra-downsample-batch-persist-latency",
+  @transient lazy val downsampleBatchPersistLatency = Kamon.histogram("cassandra-downsample-batch-persist-latency",
     MeasurementUnit.time.milliseconds).withoutTags()
 
   @transient lazy private val session = DownsamplerContext.getOrCreateCassandraSession(settings.cassandraConfig)
