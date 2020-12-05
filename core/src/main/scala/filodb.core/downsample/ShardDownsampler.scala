@@ -1,7 +1,6 @@
 package filodb.core.downsample
 
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
 
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesShardStats}
@@ -64,10 +63,6 @@ class ShardDownsampler(datasetName: String,
                                 chunksets: ChunkInfoIterator,
                                 records: Seq[DownsampleRecords]): Unit = {
     if (enabled) {
-      val downsampleTrace = Kamon.spanBuilder("memstore-downsample-records-trace")
-        .asChildOf(Kamon.currentSpan())
-        .tag("dataset", datasetName)
-        .tag("shard", shardNum).start()
       while (chunksets.hasNext) {
         val chunkset = chunksets.nextInfoReader
         val startTime = chunkset.startTime
@@ -103,7 +98,6 @@ class ShardDownsampler(datasetName: String,
           }
         }
       }
-      downsampleTrace.finish()
     }
   }
 }

@@ -5,6 +5,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration.FiniteDuration
 
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import monix.reactive.Observable
 import spire.syntax.cfor._
 
@@ -48,6 +49,13 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
   @transient lazy val numRawChunksSkipped = Kamon.counter("num-raw-chunks-skipped").withoutTags()
   @transient lazy val numRawChunksDownsampled = Kamon.counter("num-raw-chunks-downsampled").withoutTags()
   @transient lazy val numDownsampledChunksWritten = Kamon.counter("num-downsampled-chunks-written").withoutTags()
+
+  @transient lazy val downsampleBatchLatency = Kamon.histogram("downsample-batch-latency",
+                                              MeasurementUnit.time.milliseconds).withoutTags()
+  @transient lazy val downsampleSinglePartLatency = Kamon.histogram("downsample-single-partition-latency",
+    MeasurementUnit.time.milliseconds).withoutTags()
+  @transient lazy val downsampleBatchPersistLatency = Kamon.histogram("cassandra-downsample-batch-persist-latency",
+    MeasurementUnit.time.milliseconds).withoutTags()
 
   @transient lazy private val session = DownsamplerContext.getOrCreateCassandraSession(settings.cassandraConfig)
 
@@ -110,7 +118,6 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
   def downsampleBatch(rawPartsBatch: Seq[RawPartData],
                       userTimeStart: Long,
                       userTimeEndExclusive: Long): Unit = {
-    val batchSpan = Kamon.spanBuilder("downsample-batch-latency").start()
     DownsamplerContext.dsLogger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
       s"rawDataset=${settings.rawDatasetName} for " +
       s"userTimeStart=${java.time.Instant.ofEpochMilli(userTimeStart)} " +
@@ -158,7 +165,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
       numBatchesFailed.increment()
       throw e // will be logged by spark
     } finally {
-      batchSpan.finish()
+      downsampleBatchLatency.record(System.currentTimeMillis() - startedAt)
       offHeapMem.free()   // free offheap mem
       pagedPartsToFree.clear()
       downsampledPartsToFree.clear()
@@ -221,7 +228,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
             res -> part
         }.toMap
 
-        val downsamplePartSpan = Kamon.spanBuilder("downsample-single-partition-latency").start()
+        val downsamplePartStart = System.currentTimeMillis()
         downsampleChunks(offHeapMem, rawReadablePart, downsamplers, periodMarker, downsampledParts,
                          userTimeStart, userTimeEndExclusive, dsRecordBuilder, shouldTrace)
 
@@ -233,7 +240,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
           val newIt = downsampledChunksToPersist(res) ++ dsPartition.makeFlushChunks(offHeapMem.blockMemFactory)
           downsampledChunksToPersist(res) = newIt
         }
-        downsamplePartSpan.finish()
+        downsampleSinglePartLatency.record(System.currentTimeMillis() - downsamplePartStart)
       case None =>
         numPartitionsNoDownsampleSchema.increment()
         DownsamplerContext.dsLogger.debug(s"Skipping downsampling of partition " +
@@ -363,7 +370,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
     * Persist chunks in `downsampledChunksToPersist` to Cassandra.
     */
   private def persistDownsampledChunks(downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]]): Int = {
-    val batchWriteSpan = Kamon.spanBuilder("cassandra-downsample-batch-persist-latency").start()
+    val start = System.currentTimeMillis()
     @volatile var numChunks = 0
     // write all chunks to cassandra
     val writeFut = downsampledChunksToPersist.map { case (res, chunks) =>
@@ -385,7 +392,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
         DownsamplerContext.dsLogger.error(s"Got response $response when writing to Cassandra")
     }
     numDownsampledChunksWritten.increment(numChunks)
-    batchWriteSpan.finish()
+    downsampleBatchPersistLatency.record(System.currentTimeMillis() - start)
     numChunks
   }
 

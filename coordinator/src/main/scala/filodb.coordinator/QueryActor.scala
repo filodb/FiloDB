@@ -117,31 +117,39 @@ final class QueryActor(memStore: MemStore,
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
     if (checkTimeout(q.queryContext, replyTo)) {
       epRequests.increment()
-      Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
-      Kamon.currentSpan().tag("query-id", q.queryContext.queryId)
-      val querySession = QuerySession(q.queryContext, queryConfig)
-      Kamon.currentSpan().mark("query-actor-received-scheduling-into-executor")
-      q.execute(memStore, querySession)(queryScheduler)
-        .foreach { res =>
-          FiloSchedulers.assertThreadName(QuerySchedName)
-          querySession.close()
-          replyTo ! res
-          res match {
-            case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
-            case e: QueryError =>
-              queryErrors.increment()
-              logger.debug(s"queryId ${q.queryContext.queryId} Normal QueryError returned from query execution: $e")
-              e.t match {
-                case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dsRef, cve)
-                case t: Throwable =>
-              }
-          }
-        }(queryScheduler).recover { case ex =>
-          querySession.close()
-          // Unhandled exception in query, should be rare
-          logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
-          replyTo ! QueryError(q.queryContext.queryId, ex)
-        }(queryScheduler)
+      val queryExecuteSpan = Kamon.spanBuilder(s"query-actor-exec-plan-execute-${q.getClass.getSimpleName}")
+        .asChildOf(Kamon.currentSpan())
+        .start()
+      // Dont finish span since we finish it asynchronously when response is received
+      Kamon.runWithSpan(queryExecuteSpan, false) {
+        Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
+        Kamon.currentSpan().tag("query-id", q.queryContext.queryId)
+        val querySession = QuerySession(q.queryContext, queryConfig)
+        Kamon.currentSpan().mark("query-actor-received-execute-start")
+        q.execute(memStore, querySession)(queryScheduler)
+          .foreach { res =>
+            FiloSchedulers.assertThreadName(QuerySchedName)
+            querySession.close()
+            queryExecuteSpan.finish()
+            replyTo ! res
+            res match {
+              case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
+              case e: QueryError =>
+                queryErrors.increment()
+                logger.debug(s"queryId ${q.queryContext.queryId} Normal QueryError returned from query execution: $e")
+                e.t match {
+                  case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dsRef, cve)
+                  case t: Throwable =>
+                }
+            }
+          }(queryScheduler).recover { case ex =>
+            querySession.close()
+            // Unhandled exception in query, should be rare
+            logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
+            queryExecuteSpan.finish()
+            replyTo ! QueryError(q.queryContext.queryId, ex)
+          }(queryScheduler)
+      }
     }
   }
 

@@ -9,6 +9,7 @@ import scala.concurrent.duration._
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import kamon.tag.TagSet
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
@@ -35,6 +36,10 @@ class DownsampledTimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val indexPurgeFailed = Kamon.counter("index-purge-failed").withTags(TagSet.from(tags))
   val indexEntries = Kamon.gauge("downsample-store-index-entries").withTags(TagSet.from(tags))
   val indexRamBytes = Kamon.gauge("downsample-store-index-ram-bytes").withTags(TagSet.from(tags))
+  val singlePartCassFetchLatency = Kamon.histogram("single-partition-cassandra-latency",
+                                        MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+  val purgeIndexEntriesLatency = Kamon.histogram("downsample-store-purge-index-entries-latency",
+                                        MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
 }
 
 class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
@@ -138,10 +143,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   }
 
   private def purgeExpiredIndexEntries(): Unit = {
-    val tracer = Kamon.spanBuilder("downsample-store-purge-index-entries-latency")
-      .asChildOf(Kamon.currentSpan())
-      .tag("dataset", rawDatasetRef.toString)
-      .tag("shard", shardNum).start()
+    val start = System.currentTimeMillis()
     try {
       val partsToPurge = partKeyIndex.partIdsEndedBefore(System.currentTimeMillis() - downsampleTtls.last.toMillis)
       partKeyIndex.removePartKeys(partsToPurge)
@@ -152,7 +154,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       logger.error(s"Error occurred when purging index entries dataset=$rawDatasetRef shard=$shardNum", e)
       stats.indexPurgeFailed.increment()
     } finally {
-      tracer.finish()
+      stats.purgeIndexEntriesLatency.record(System.currentTimeMillis() - start)
     }
   }
 
@@ -251,11 +253,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     // when query is complete.
     Observable.fromIterable(lookup.pkRecords)
       .mapAsync(downsampleStoreConfig.demandPagingParallelism) { partRec =>
-        val partLoadSpan = Kamon.spanBuilder(s"single-partition-cassandra-latency")
-          .asChildOf(Kamon.currentSpan())
-          .tag("dataset", rawDatasetRef.toString)
-          .tag("shard", shardNum)
-          .start()
+        val startExecute = System.currentTimeMillis()
         // TODO test multi-partition scan if latencies are high
         store.readRawPartitions(downsampledDataset,
                                 downsampleStoreConfig.maxChunkTime.toMillis,
@@ -265,7 +263,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
             val part = makePagedPartition(pd, lookup.firstSchemaId.get, Some(resolution), colIds)
             stats.partitionsQueried.increment()
             stats.chunksQueried.increment(part.numChunks)
-            partLoadSpan.finish()
+            stats.singlePartCassFetchLatency.record(Math.max(0, System.currentTimeMillis - startExecute))
             part
           }
           .defaultIfEmpty(makePagedPartition(RawPartData(partRec.partKey, Seq.empty),
