@@ -99,27 +99,26 @@ trait ExecPlan extends QueryCommand {
 
     val startExecute = querySession.qContext.submitTime
 
-    val parentSpan = Kamon.currentSpan()
+    val span = Kamon.currentSpan()
     // NOTE: we launch the preparatory steps as a Task too.  This is important because scanPartitions,
     // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
     // we don't want these to happen in a single thread.
 
     // Step 1: initiate doExecute: make result schema and set up the async monix pipeline to create RVs
     lazy val step1 = Task {
-      val span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
-        .asChildOf(parentSpan)
-        .tag("query-id", queryContext.queryId)
-        .start()
+      span.mark(s"execute-step1-start-${getClass.getSimpleName}")
       FiloSchedulers.assertThreadName(QuerySchedName)
       // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
       // across threads. Note that task/observable will not run on the thread where span is present since
       // kamon uses thread-locals.
-      Kamon.runWithSpan(span, true) {
+      // Dont finish span since this code didnt create it
+      Kamon.runWithSpan(span, false) {
         val doEx = doExecute(source, querySession)
         Kamon.histogram("query-execute-time-elapsed-step1-done",
           MeasurementUnit.time.milliseconds)
           .withTag("plan", getClass.getSimpleName)
           .record(Math.max(0, System.currentTimeMillis - startExecute))
+        span.mark(s"execute-step1-end-${getClass.getSimpleName}")
         doEx
       }
     }
@@ -129,17 +128,14 @@ trait ExecPlan extends QueryCommand {
       Kamon.histogram("query-execute-time-elapsed-step2-start", MeasurementUnit.time.milliseconds)
         .withTag("plan", getClass.getSimpleName)
         .record(Math.max(0, System.currentTimeMillis - startExecute))
-      val span = Kamon.spanBuilder(s"execute-step2-${getClass.getSimpleName}")
-        .asChildOf(parentSpan)
-        .tag("query-id", queryContext.queryId)
-        .start()
+      span.mark(s"execute-step2-start-${getClass.getSimpleName}")
       FiloSchedulers.assertThreadName(QuerySchedName)
       val dontRunTransformers = if (allTransformers.isEmpty) true else !allTransformers.forall(_.canHandleEmptySchemas)
-      span.tag("dontRunTransformers", dontRunTransformers)
       // It is possible a null schema is returned (due to no time series). In that case just return empty results
       val resultTask = if (resSchema == ResultSchema.empty && dontRunTransformers) {
         qLogger.debug(s"queryId: ${queryContext.queryId} Empty plan $this, returning empty results")
         span.mark("empty-plan")
+        span.mark(s"execute-step2-end-${getClass.getSimpleName}")
         Task.eval(QueryResult(queryContext.queryId, resSchema, Nil))
       } else {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
@@ -152,7 +148,6 @@ trait ExecPlan extends QueryCommand {
                     MeasurementUnit.time.milliseconds)
           .withTag("plan", getClass.getSimpleName)
           .record(Math.max(0, System.currentTimeMillis - startExecute))
-        span.mark("step2-transformer-pipeline-setup")
         val builder = SerializedRangeVector.newBuilder()
         @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
         finalRes._1
@@ -194,7 +189,7 @@ trait ExecPlan extends QueryCommand {
             }
             span.mark(s"num-result-samples: $numResultSamples")
             span.mark(s"num-range-vectors: ${r.size}")
-            span.finish()
+            span.mark(s"execute-step2-end-${getClass.getSimpleName}")
             QueryResult(queryContext.queryId, finalRes._2, r)
           }
       }
@@ -374,6 +369,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since
     // kamon uses thread-locals.
+    // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
         qLogger.error(s"queryId: ${queryContext.queryId} Execution failed for sub-query ${plan.printTree()}", ex)
@@ -392,13 +388,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
   final def doExecute(source: ChunkSource,
                       querySession: QuerySession)
                      (implicit sched: Scheduler): ExecResult = {
-    val parentSpan = Kamon.currentSpan()
+    val span = Kamon.currentSpan()
 
-    val span = Kamon.spanBuilder(s"execute-step1-child-result-composition-${getClass.getSimpleName}")
-      .asChildOf(parentSpan)
-      .tag("query-id", queryContext.queryId)
-      .start()
-
+    span.mark(s"execute-step1-child-result-composition-start-${getClass.getSimpleName}")
     // whether child tasks need to be executed sequentially.
     // parallelism 1 means, only one worker thread to process underlying tasks.
     val parallelism: Int = if (parallelChildTasks)
@@ -411,7 +403,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     val childTasks = Observable.fromIterable(children.zipWithIndex)
                                .mapAsync(parallelism) { case (plan, i) =>
                                  val task = dispatchRemotePlan(plan, span).map((_, i))
-                                 span.mark(s"plan-dispatched-${plan.getClass.getSimpleName}")
+                                 span.mark(s"child-plan-$i-dispatched-${plan.getClass.getSimpleName}")
                                  task
                                }
 
@@ -433,9 +425,10 @@ abstract class NonLeafExecPlan extends ExecPlan {
     val outputSchema = processedTasks.collect {
       case (QueryResult(_, schema, _), _) => schema
     }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
+      // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {
         val outputRvs = compose(processedTasks, outputSchema, querySession)
-          .doOnTerminate(_ => span.finish())
+          .doOnTerminate(_ => span.mark(s"execute-step1-child-result-composition-end-${getClass.getSimpleName}"))
         ExecResult(outputRvs, outputSchema)
       }
   }

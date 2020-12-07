@@ -74,7 +74,7 @@ class ShardDownsamplerSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
   def timeValueRV(tuples: Seq[(Long, Double)]): RawDataRangeVector = {
     val part = TimeSeriesPartitionSpec.makePart(0, promDataset, partKeyOffset, bufferPool = tsBufferPool)
     val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
-    readers.foreach { row => part.ingest(0, row, ingestBlockHolder) }
+    readers.foreach { row => part.ingest(0, row, ingestBlockHolder, false, Option.empty) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(ingestBlockHolder, encode = true)
 //    part.encodeAndReleaseBuffers(ingestBlockHolder)
