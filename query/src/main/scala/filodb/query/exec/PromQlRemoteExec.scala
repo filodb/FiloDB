@@ -2,7 +2,6 @@ package filodb.query.exec
 
 import scala.concurrent.Future
 
-import kamon.Kamon
 import kamon.trace.Span
 import monix.execution.Scheduler
 
@@ -60,11 +59,6 @@ case class PromQlRemoteExec(queryEndpoint: String,
   //   schema.  Would need to detect ahead of time to use TransientHistRow(), so we'd need to add schema to output,
   //   and detect it in execute() above.  Need to discuss compatibility issues with Prometheus.
   def toQueryResponse(data: Data, id: String, parentSpan: kamon.trace.Span): QueryResponse = {
-    val span = Kamon.spanBuilder(s"create-queryresponse-${getClass.getSimpleName}")
-      .asChildOf(parentSpan)
-      .tag("query-id", id)
-      .start()
-
     val queryResponse = if (data.result.isEmpty) {
       logger.debug("PromQlRemoteExec generating empty QueryResult as result is empty")
       QueryResult(id, ResultSchema.empty, Seq.empty)
@@ -84,7 +78,6 @@ case class PromQlRemoteExec(queryEndpoint: String,
         }
       }
     }
-    span.finish()
     queryResponse
   }
 

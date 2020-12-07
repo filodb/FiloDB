@@ -7,7 +7,7 @@ import com.kenai.jffi.{MemoryIO, PageManager}
 import com.typesafe.scalalogging.StrictLogging
 import java.util
 import kamon.Kamon
-import kamon.metric.Counter
+import kamon.metric.{Counter, Gauge}
 import kamon.tag.TagSet
 
 final case class MemoryRequestException(msg: String) extends Exception(msg)
@@ -377,15 +377,18 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
 
   protected[memory] def tryReclaim(num: Int): Int = {
     var reclaimed = 0
-    reclaimFrom(usedOdpBlocks, stats.odpBlocksReclaimedMetric)
-    if (reclaimed < num) reclaimFrom(usedIngestionBlocks, stats.ingestionBlocksReclaimedMetric)
+    reclaimFrom(usedOdpBlocks, stats.odpBlocksReclaimedMetric, stats.usedOdpBlocksMetric)
+    if (reclaimed < num)
+      reclaimFrom(usedIngestionBlocks, stats.ingestionBlocksReclaimedMetric, stats.usedIngestionBlocksMetric)
     // if we do not get required blocks even after reclaim call
     if (reclaimed < num) {
       logger.warn(s"$num blocks to reclaim but only reclaimed $reclaimed. " +
         s"usedIngestionBlocks=${usedIngestionBlocks.size} usedOdpBlocks=${usedOdpBlocks.size()}")
     }
 
-    def reclaimFrom(list: util.ArrayDeque[Block], reclaimedCounter: Counter): Seq[Block] = {
+    def reclaimFrom(list: util.ArrayDeque[Block],
+                    reclaimedCounter: Counter,
+                    usedBlocksStats: Gauge): Seq[Block] = {
       val entries = list.iterator
       val removed = new collection.mutable.ArrayBuffer[Block]
       while (entries.hasNext && reclaimed < num) {
@@ -402,6 +405,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
           reclaimed = reclaimed + 1
         }
       }
+      usedBlocksStats.update(list.size())
       removed
     }
     reclaimed

@@ -45,7 +45,7 @@ object AvgRowAggregator extends RowAggregator {
     acc
   }
   // ignore last count column. we rely on schema change
-  def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = Seq(aggRangeVector)
+  def present(aggRangeVector: RangeVector, limit: Int, rangeParams: RangeParams): Seq[RangeVector] = Seq(aggRangeVector)
   def reductionSchema(source: ResultSchema): ResultSchema = {
     source.copy(columns = source.columns :+ ColumnInfo("count", ColumnType.LongColumn))
   }

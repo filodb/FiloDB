@@ -28,7 +28,7 @@ object MinRowAggregator extends RowAggregator {
     }
     acc
   }
-  def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = Seq(aggRangeVector)
+  def present(aggRangeVector: RangeVector, limit: Int, rangeParams: RangeParams): Seq[RangeVector] = Seq(aggRangeVector)
   def reductionSchema(source: ResultSchema): ResultSchema = source
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = reductionSchema
 }

@@ -249,4 +249,31 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     execPlan.isInstanceOf[LabelValuesDistConcatExec] shouldEqual (true)
   }
+
+  it("should generate Exec plan for topk query with single matching value for regex") {
+    val lp = Parser.queryToLogicalPlan(s"""topk(2, test{_ws_ = "demo", _ns_ =~ "App-1"})""",
+      1000, 1000)
+    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
+      Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
+        ColumnFilter("_ns_", Equals("App-1"))))
+    }
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
+  }
+
+  it("should throw UnsupportedOperationException for topk query with multiple matching values for regex") {
+    val lp = Parser.queryToLogicalPlan(s"""topk(2, test{_ws_ = "demo", _ns_ =~ "App.*"})""",
+      1000, 1000)
+    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
+      Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
+        ColumnFilter("_ns_", Equals("App-1"))),
+        Seq(ColumnFilter("_ws_", Equals("demo")),
+          ColumnFilter("_ns_", Equals("App-2"))))
+    }
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn)
+    the[UnsupportedOperationException] thrownBy {
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    } should have message "Shard Key regex not supported for TopK"
+  }
 }

@@ -120,6 +120,7 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
 
 final case class AggregatePresenter(aggrOp: AggregationOperator,
                                     aggrParams: Seq[Any],
+                                    rangeParams: RangeParams,
                                     funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
 
   protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
@@ -130,7 +131,7 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
-    RangeVectorAggregator.present(aggregator, source, limit)
+    RangeVectorAggregator.present(aggregator, source, limit, rangeParams)
   }
 
   override def schema(source: ResultSchema): ResultSchema = {
@@ -184,8 +185,9 @@ object RangeVectorAggregator extends StrictLogging {
     */
   def present(aggregator: RowAggregator,
               source: Observable[RangeVector],
-              limit: Int): Observable[RangeVector] = {
-    source.flatMap(rv => Observable.fromIterable(aggregator.present(rv, limit)))
+              limit: Int,
+              rangeParams: RangeParams): Observable[RangeVector] = {
+    source.flatMap(rv => Observable.fromIterable(aggregator.present(rv, limit, rangeParams)))
   }
 
   private def mapReduceInternal(rvs: List[RangeVector],
