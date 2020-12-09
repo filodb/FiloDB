@@ -328,7 +328,8 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
               for {c <- dsRecordBuilder.allContainers
                    row <- c.iterate(part.schema.ingestionSchema)
               } {
-                part.ingest(userTimeEndExclusive, row, offHeapMem.blockMemFactory)
+                part.ingest(userTimeEndExclusive, row, offHeapMem.blockMemFactory, createChunkAtFlushBoundary = false,
+                  flushIntervalMillis = Option.empty)
               }
             } catch {
               case e: Exception =>

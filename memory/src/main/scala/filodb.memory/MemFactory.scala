@@ -261,6 +261,9 @@ class BlockMemFactory(blockStore: BlockManager,
   /**
     * Starts tracking a span of multiple Blocks over which the same metadata should be applied.
     * An example would be chunk metadata for chunks written to potentially more than 1 block.
+    *
+    * IMPORTANT: Acquire blockMemFactory.synchronized before calling startMetaSpan and release after endMetaSpan
+    *
     */
   def startMetaSpan(): Unit = {
     metadataSpan.clear()
@@ -270,6 +273,8 @@ class BlockMemFactory(blockStore: BlockManager,
   /**
     * Stops tracking the blocks that the same metadata should be applied to, and allocates and writes metadata
     * for those spanned blocks.
+    * IMPORTANT: Acquire blockMemFactory.synchronized before calling startMetaSpan and release after endMetaSpan
+    *
     * @param metadataWriter the function to write metadata to each block.  Param is the long metadata address.
     * @param metaSize the number of bytes the piece of metadata takes
     * @return the Long native address of the last metadata block written
@@ -295,7 +300,7 @@ class BlockMemFactory(blockStore: BlockManager,
         if (markFullBlocksAsReclaimable) {
           // We know that all the blocks in the span except the last one is full, so mark them reclaimable
           blk.markReclaimable()
-        } else synchronized {
+        } else {
           fullBlocksToBeMarkedAsReclaimable += blk
         }
       }

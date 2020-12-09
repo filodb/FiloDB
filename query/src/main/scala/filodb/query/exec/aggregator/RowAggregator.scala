@@ -1,7 +1,7 @@
 package filodb.query.exec.aggregator
 
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.query.{MutableRowReader, RangeVector, RangeVectorKey, ResultSchema}
+import filodb.core.query.{MutableRowReader, RangeParams, RangeVector, RangeVectorKey, ResultSchema}
 import filodb.memory.format.RowReader
 import filodb.query.AggregationOperator
 import filodb.query.AggregationOperator._
@@ -97,7 +97,7 @@ trait RowAggregator {
     *              Apply limit only on iterators that are NOT lazy and need to be
     *              materialized.
     */
-  def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector]
+  def present(aggRangeVector: RangeVector, limit: Int, rangeParams: RangeParams): Seq[RangeVector]
 
   /**
     * Schema of the RowReader returned by toRowReader

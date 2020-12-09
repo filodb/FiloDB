@@ -167,6 +167,19 @@ object PrometheusModel {
     Result(tags, None, None, Some(AggregateResponse(Avg.entryName, samples)))
   }
 
+  def toStdValResult(srv: RangeVector,
+                  verbose: Boolean,
+                  typ: QueryResultType,
+                  processMultiPartition: Boolean = true): Result = {
+    val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
+      (if (verbose) makeVerboseLabels(srv.key)
+      else Map.empty)
+    val samples = srv.rows.map { r => StdValSampl(r.getLong(0)/1000, r.getDouble(1),
+      r.getDouble(2), r.getLong(3))
+    }.toSeq
+
+    Result(tags, None, None, Some(AggregateResponse(QueryFunctionConstants.stdVal, samples)))
+  }
 
   def makeVerboseLabels(rvk: RangeVectorKey): Map[String, String] = {
     Map("_shards_" -> rvk.sourceShards.mkString(","),

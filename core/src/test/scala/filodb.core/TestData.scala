@@ -320,7 +320,8 @@ object MachineMetricsData {
     }
   }
 
-  val dataset2 = Dataset("metrics2", Seq("series:string", "tags:map"), columns)
+  val dataset2 = Dataset("metrics2", Seq("series:string", "tags:map"), columns,
+    options = DatasetOptions(shardKeyColumns = Seq("_ws_", "_ns_", "_metric_"), "_metric_"))
   val schema2 = dataset2.schema
 
   def withMap(data: Stream[Seq[Any]], n: Int = 5, extraTags: UTF8Map = Map.empty): Stream[Seq[Any]] =
@@ -339,7 +340,7 @@ object MachineMetricsData {
 
   val histDataset = Dataset("histogram", Seq("metric:string", "tags:map"),
                             Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=false"),
-                            DatasetOptions.DefaultOptions.copy(metricColumn = "metric"))
+                            options = DatasetOptions(shardKeyColumns = Seq("_ws_", "_ns_", "metric"), "metric"))
 
   var histBucketScheme: bv.HistogramBuckets = _
   def linearHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8,
@@ -411,7 +412,8 @@ object MachineMetricsData {
     val histData = linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets, infBucket).take(numSamples)
     val container = records(ds, histData).records
     val part = TimeSeriesPartitionSpec.makePart(0, ds, partKey=histPartKey, bufferPool=pool)
-    container.iterate(ds.ingestionSchema).foreach { row => part.ingest(0, row, histIngestBH, 1.hour.toMillis) }
+    container.iterate(ds.ingestionSchema).foreach { row => part.ingest(0, row, histIngestBH,
+      false, Option.empty, 1.hour.toMillis) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histIngestBH, encode = true)
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3)))  // select timestamp and histogram columns only
@@ -425,7 +427,8 @@ object MachineMetricsData {
     val histData = histMax(linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets)).take(numSamples)
     val container = records(histMaxDS, histData).records
     val part = TimeSeriesPartitionSpec.makePart(0, histMaxDS, partKey=histPartKey, bufferPool=histMaxBP)
-    container.iterate(histMaxDS.ingestionSchema).foreach { row => part.ingest(0, row, histMaxBH, 1.hour.toMillis) }
+    container.iterate(histMaxDS.ingestionSchema).foreach { row => part.ingest(0, row, histMaxBH, false,
+      Option.empty, 1.hour.toMillis) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histMaxBH, encode = true)
     // Select timestamp, hist, max

@@ -210,7 +210,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   /**
     * Fetch values/terms for a specific column/key/field, in order from most frequent on down.
-    * Note that it iterates through all docs up to a certain limit only, so if there are too many terms
+   * Note that it iterates through all docs up to a certain limit only, so if there are too many terms
     * it will not report an accurate top k in exchange for not running too long.
     * @param fieldName the name of the column/field/key to get terms for
     * @param topK the number of top k results to fetch

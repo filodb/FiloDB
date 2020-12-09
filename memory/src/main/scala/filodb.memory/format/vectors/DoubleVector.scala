@@ -341,10 +341,18 @@ extends DoubleVectorDataReader {
   override def correctedValue(acc2: MemoryReader, vector: BinaryVectorPtr,
                               n: Int, correctionMeta: CorrectionMeta): Double = {
     assert(vector == vect && acc == acc2)
-    correctionMeta match {
-      // corrected value + any carryover correction
-      case DoubleCorrection(_, corr) => corrected(n) + corr
-      case NoCorrection              => corrected(n)
+    try {
+      correctionMeta match {
+        // corrected value + any carryover correction
+        case DoubleCorrection(_, corr) => corrected(n) + corr
+        case NoCorrection => corrected(n)
+      }
+    } catch { case e: ArrayIndexOutOfBoundsException =>
+      MemoryLogger.mLogger.error(s"ArrayIndexOutOfBoundsException Vector is [${toHexString(acc2, vector)}] ")
+      MemoryLogger.mLogger.error(s"ArrayIndexOutOfBoundsException corrected is ${corrected.mkString(",")}")
+      MemoryLogger.mLogger.error(s"ArrayIndexOutOfBoundsException vectorLength is ${length(acc2, vector)}")
+      MemoryLogger.mLogger.error(s"ArrayIndexOutOfBoundsException _drops is ${_drops}")
+      throw e
     }
   }
 

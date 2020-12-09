@@ -5,9 +5,7 @@ import java.util.concurrent.{ForkJoinPool, ForkJoinWorkerThread}
 
 import scala.util.control.NonFatal
 
-import akka.actor.{ActorRef, ActorSystem, Props}
-import akka.dispatch.{Envelope, UnboundedStablePriorityMailbox}
-import com.typesafe.config.Config
+import akka.actor.{ActorRef, Props}
 import kamon.Kamon
 import kamon.instrumentation.executor.ExecutorInstrumentation
 import kamon.tag.TagSet
@@ -25,20 +23,6 @@ import filodb.core.store.CorruptVectorException
 import filodb.query._
 import filodb.query.exec.ExecPlan
 
-object QueryCommandPriority extends java.util.Comparator[Envelope] {
-  override def compare(o1: Envelope, o2: Envelope): Int = {
-    (o1.message, o2.message) match {
-      case (q1: QueryCommand, q2: QueryCommand) => q1.submitTime.compareTo(q2.submitTime)
-      case (_, _: QueryCommand) => -1 // non-query commands are admin and have higher priority
-      case (_: QueryCommand, _) => 1 // non-query commands are admin and have higher priority
-      case _ => 0
-    }
-  }
-}
-
-class QueryActorMailbox(settings: ActorSystem.Settings, config: Config)
-  extends UnboundedStablePriorityMailbox(QueryCommandPriority)
-
 object QueryActor {
   final case class ThrowException(dataset: DatasetRef)
 
@@ -46,7 +30,7 @@ object QueryActor {
             schemas: Schemas, shardMapFunc: => ShardMapper,
             earliestRawTimestampFn: => Long): Props =
     Props(new QueryActor(memStore, dsRef, schemas,
-                         shardMapFunc, earliestRawTimestampFn)).withMailbox("query-actor-mailbox")
+                         shardMapFunc, earliestRawTimestampFn))
 }
 
 /**
@@ -136,6 +120,7 @@ final class QueryActor(memStore: MemStore,
       Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
       Kamon.currentSpan().tag("query-id", q.queryContext.queryId)
       val querySession = QuerySession(q.queryContext, queryConfig)
+      Kamon.currentSpan().mark("query-actor-received-scheduling-into-executor")
       q.execute(memStore, querySession)(queryScheduler)
         .foreach { res =>
           FiloSchedulers.assertThreadName(QuerySchedName)
@@ -202,6 +187,15 @@ final class QueryActor(memStore: MemStore,
     }
   }
 
+  private def execTopkCardinalityQuery(q: GetTopkCardinality, sender: ActorRef): Unit = {
+    try {
+      val ret = memStore.topKCardinality(q.dataset, q.shards, q.shardKeyPrefix, q.k)
+      sender ! ret
+    } catch { case e: Exception =>
+      sender ! QueryError(s"Error Occurred", e)
+    }
+  }
+
   def checkTimeout(queryContext: QueryContext, replyTo: ActorRef): Boolean = {
     // timeout can occur here if there is a build up in actor mailbox queue and delayed delivery
     val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
@@ -218,6 +212,7 @@ final class QueryActor(memStore: MemStore,
     case q: ExplainPlan2Query      => val replyTo = sender()
                                       processExplainPlanQuery(q, replyTo)
     case q: ExecPlan              =>  execPhysicalPlan2(q, sender())
+    case q: GetTopkCardinality     => execTopkCardinalityQuery(q, sender())
 
     case GetIndexNames(ref, limit, _) =>
       sender() ! memStore.indexNames(ref, limit).map(_._1).toBuffer

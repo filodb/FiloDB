@@ -13,6 +13,7 @@ import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.downsample.DownsampleConfig
+import filodb.core.memstore.ratelimit.{CardinalityRecord, ConfigQuotaSource}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
@@ -30,6 +31,7 @@ extends MemStore with StrictLogging {
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
   private val datasetMemFactories = new HashMap[DatasetRef, NativeMemoryManager]
+  private val quotaSources = new HashMap[DatasetRef, ConfigQuotaSource]
 
   val stats = new ChunkSourceStats
 
@@ -45,6 +47,8 @@ extends MemStore with StrictLogging {
   def setup(ref: DatasetRef, schemas: Schemas, shard: Int, storeConf: StoreConfig,
             downsample: DownsampleConfig = DownsampleConfig.disabled): Unit = synchronized {
     val shards = datasets.getOrElseUpdate(ref, new NonBlockingHashMapLong[TimeSeriesShard](32, false))
+    val quotaSource = quotaSources.getOrElseUpdate(ref,
+      new ConfigQuotaSource(config, schemas.part.options.shardKeyColumns.length))
     if (shards.containsKey(shard)) {
       throw ShardAlreadySetup(ref, shard)
     } else {
@@ -55,12 +59,21 @@ extends MemStore with StrictLogging {
         new NativeMemoryManager(bufferMemorySize, tags)
       })
 
-      val tsdb = new OnDemandPagingShard(ref, schemas, storeConf, shard, memFactory, store, metastore,
+      val tsdb = new OnDemandPagingShard(ref, schemas, storeConf, quotaSource, shard, memFactory, store, metastore,
                               partEvictionPolicy)
       shards.put(shard, tsdb)
     }
   }
 
+  def topKCardinality(ref: DatasetRef, shards: Seq[Int],
+                      shardKeyPrefix: Seq[String], k: Int): Seq[CardinalityRecord] = {
+    datasets.get(ref).toSeq
+      .flatMap { ts =>
+        ts.values().asScala
+          .filter(s => shards.isEmpty || shards.contains(s.shardNum))
+          .flatMap(_.topKCardinality(k, shardKeyPrefix))
+      }
+  }
   /**
     * WARNING: use only for testing. Not performant
     */
@@ -242,6 +255,7 @@ extends MemStore with StrictLogging {
 
   def reset(): Unit = {
     datasets.clear()
+    quotaSources.clear()
     store.reset()
   }
 
@@ -256,8 +270,8 @@ extends MemStore with StrictLogging {
 
   // Release memory etc.
   def shutdown(): Unit = {
+    quotaSources.clear()
     datasets.values.foreach(_.values.asScala.foreach(_.shutdown()))
-    datasets.values.foreach(_.values().asScala.foreach(_.closePartKeyIndex()))
     reset()
   }
 

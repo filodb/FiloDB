@@ -121,10 +121,19 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
    * If ingesting a new row causes WriteBuffers to overflow, then the current chunks are encoded, a new set
    * of appending chunks are obtained, and we re-ingest into the new chunks.
    *
+   * createChunkAtFlushBoundary - switch buffers and create chunk when current sample's timestamp crosses flush boundary
+   * e.g. for a flush-interval of 1hour, if new sample falls in different hour than last sample, then switch buffers
+   * and create chunk. This helps in aligning chunks across Active/Active HA clusters and facilitates chunk migration
+   * between the clusters during disaster recovery.
+   * Note: Enabling this might result into creation of smaller suboptimal chunks.
+   *
    * @param ingestionTime time (as milliseconds from 1970) at the data source
    * @param blockHolder the BlockMemFactory to use for encoding chunks in case of WriteBuffer overflow
+   * @param createChunkAtFlushBoundary create time bucketed (flush-interval) chunks
+   * @param flushIntervalMillis flush-interval in milliseconds
    */
   def ingest(ingestionTime: Long, row: RowReader, blockHolder: BlockMemFactory,
+             createChunkAtFlushBoundary: Boolean, flushIntervalMillis: Option[Long],
              maxChunkTime: Long = Long.MaxValue): Unit = {
     // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
     val ts = schema.timestamp(row)
@@ -136,18 +145,26 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     val newChunk = currentChunks == nullChunks
     if (newChunk) initNewChunk(ts, ingestionTime)
 
-    if (ts - currentInfo.startTime > maxChunkTime) {
+    if(!newChunk && createChunkAtFlushBoundary
+      && ts/flushIntervalMillis.get != timestampOfLatestSample/flushIntervalMillis.get) {
       // we have reached maximum userTime in chunk. switch buffers, start a new chunk and ingest
-      switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)
+      switchBuffersAndIngest(ingestionTime, ts, row, blockHolder,
+        createChunkAtFlushBoundary, flushIntervalMillis, maxChunkTime)
+    } else if (ts - currentInfo.startTime > maxChunkTime) {
+      // we have reached maximum userTime in chunk. switch buffers, start a new chunk and ingest
+      switchBuffersAndIngest(ingestionTime, ts, row, blockHolder,
+        createChunkAtFlushBoundary, flushIntervalMillis, maxChunkTime)
     } else {
       cforRange { 0 until schema.numDataColumns } { col =>
         currentChunks(col).addFromReaderNoNA(row, col) match {
           case r: VectorTooSmall =>
-            switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)
+            switchBuffersAndIngest(ingestionTime, ts, row, blockHolder,
+              createChunkAtFlushBoundary, flushIntervalMillis, maxChunkTime)
             return
           // Different histogram bucket schema: need a new vector here
           case BucketSchemaMismatch =>
-            switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)
+            switchBuffersAndIngest(ingestionTime, ts, row, blockHolder,
+              createChunkAtFlushBoundary, flushIntervalMillis, maxChunkTime)
             return
           case other: AddResponse =>
         }
@@ -168,12 +185,15 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
                                      userTime: Long,
                                      row: RowReader,
                                      blockHolder: BlockMemFactory,
-                                     maxChunkTime: Long): Unit = {
+                                     createChunkAtFlushBoundary: Boolean,
+                                     flushIntervalMillis: Option[Long],
+                                     maxChunkTime: Long = Long.MaxValue): Unit = {
     // NOTE: a very bad infinite loop is possible if switching buffers fails (if the # rows is 0) but one of the
     // vectors fills up.  This is possible if one vector fills up but the other one does not for some reason.
     // So we do not call ingest again unless switcing buffers succeeds.
     // re-ingest every element, allocating new WriteBuffers
-    if (switchBuffers(blockHolder, encode = true)) { ingest(ingestionTime, row, blockHolder, maxChunkTime) }
+    if (switchBuffers(blockHolder, encode = true)) { ingest(ingestionTime, row, blockHolder,
+      createChunkAtFlushBoundary, flushIntervalMillis, maxChunkTime) }
     else { _log.warn("EMPTY WRITEBUFFERS when switchBuffers called!  Likely a severe bug!!! " +
       s"Part=$stringPartition userTime=$userTime numRows=${currentInfo.numRows}") }
   }
@@ -220,39 +240,41 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
    * Optimized chunks as well as chunk metadata are written into offheap block memory so they no longer consume
    */
   private def encodeOneChunkset(info: ChunkSetInfo, appenders: AppenderArray, blockHolder: BlockMemFactory) = {
-    blockHolder.startMetaSpan()
-    val frozenVectors = try {
-      // optimize and compact chunks
-      appenders.zipWithIndex.map { case (appender, i) =>
-        // This assumption cannot break. We should ensure one vector can be written
-        // to one block always atleast as per the current design.
-        // If this gets triggered, decrease the max writebuffer size so smaller chunks are encoded
-        require(blockHolder.blockAllocationSize() > appender.frozenSize)
-        val optimized = appender.optimize(blockHolder)
-        shardStats.encodedBytes.increment(BinaryVector.totalBytes(nativePtrReader, optimized))
-        if (schema.data.columns(i).columnType == Column.ColumnType.HistogramColumn)
-          shardStats.encodedHistBytes.increment(BinaryVector.totalBytes(nativePtrReader, optimized))
-        optimized
+    blockHolder.synchronized {
+      blockHolder.startMetaSpan()
+      val frozenVectors = try {
+        // optimize and compact chunks
+        appenders.zipWithIndex.map { case (appender, i) =>
+          // This assumption cannot break. We should ensure one vector can be written
+          // to one block always atleast as per the current design.
+          // If this gets triggered, decrease the max writebuffer size so smaller chunks are encoded
+          require(blockHolder.blockAllocationSize() > appender.frozenSize)
+          val optimized = appender.optimize(blockHolder)
+          shardStats.encodedBytes.increment(BinaryVector.totalBytes(nativePtrReader, optimized))
+          if (schema.data.columns(i).columnType == Column.ColumnType.HistogramColumn)
+            shardStats.encodedHistBytes.increment(BinaryVector.totalBytes(nativePtrReader, optimized))
+          optimized
+        }
+      } catch { case e: Exception =>
+        // Shutdown process right away! Reaching this state means that we could not reclaim
+        // a whole bunch of blocks possibly because they were not marked as reclaimable,
+        // because of some bug. Cleanup or rollback at this point is not viable.
+        Shutdown.haltAndCatchFire(new RuntimeException("Error occurred when encoding vectors", e))
+        throw e
       }
-    } catch { case e: Exception =>
-      // Shutdown process right away! Reaching this state means that we could not reclaim
-      // a whole bunch of blocks possibly because they were not marked as reclaimable,
-      // because of some bug. Cleanup or rollback at this point is not viable.
-      Shutdown.haltAndCatchFire(new RuntimeException("Error occurred when encoding vectors", e))
-      throw e
+      shardStats.numSamplesEncoded.increment(info.numRows)
+      // Now, write metadata into offheap block metadata space and update infosChunks
+      val metaAddr = blockHolder.endMetaSpan(TimeSeriesShard.writeMeta(_, partID, info, frozenVectors),
+        schema.data.blockMetaSize.toShort)
+
+      val newInfo = ChunkSetInfo(metaAddr + 4)
+      _log.trace(s"Adding new chunk ${newInfo.debugString} to part $stringPartition")
+      infoPut(newInfo)
+
+      // release older write buffers back to pool.  Nothing at this point should reference the older appenders.
+      bufferPool.release(info.infoAddr, appenders)
+      frozenVectors
     }
-    shardStats.numSamplesEncoded.increment(info.numRows)
-    // Now, write metadata into offheap block metadata space and update infosChunks
-    val metaAddr = blockHolder.endMetaSpan(TimeSeriesShard.writeMeta(_, partID, info, frozenVectors),
-                                           schema.data.blockMetaSize.toShort)
-
-    val newInfo = ChunkSetInfo(metaAddr + 4)
-    _log.trace(s"Adding new chunk ${newInfo.debugString} to part $stringPartition")
-    infoPut(newInfo)
-
-    // release older write buffers back to pool.  Nothing at this point should reference the older appenders.
-    bufferPool.release(info.infoAddr, appenders)
-    frozenVectors
   }
 
   /**
@@ -473,12 +495,14 @@ TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats,
 
   _log.info(s"Creating TracingTimeSeriesPartition dataset=$ref schema=${schema.name} partId=$partID $stringPartition")
 
-  override def ingest(ingestionTime: Long, row: RowReader, blockHolder: BlockMemFactory, maxChunkTime: Long): Unit = {
+  override def ingest(ingestionTime: Long, row: RowReader, blockHolder: BlockMemFactory,
+                      createChunkAtFlushBoundary: Boolean, flushIntervalMillis: Option[Long],
+                      maxChunkTime: Long = Long.MaxValue): Unit = {
     val ts = row.getLong(0)
     _log.info(s"Ingesting dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition " +
                s"ingestionTime=$ingestionTime ts=$ts " +
                (1 until schema.numDataColumns).map(row.getAny).mkString("[", ",", "]"))
-    super.ingest(ingestionTime, row, blockHolder, maxChunkTime)
+    super.ingest(ingestionTime, row, blockHolder, createChunkAtFlushBoundary, flushIntervalMillis, maxChunkTime)
   }
 
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
@@ -494,8 +518,28 @@ TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats,
     _log.info(s"dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition - " +
                s"newly created ChunkInfo ${currentInfo.debugString}")
   }
-}
 
+  override def chunkmapAcquireShared(): Unit = {
+    super.chunkmapAcquireShared()
+    _log.info(s"SHARED LOCK ACQUIRED for shard=$shard partId=$partID $stringPartition", new RuntimeException)
+  }
+
+  override def chunkmapReleaseShared(): Unit = {
+    super.chunkmapReleaseShared()
+    _log.info(s"SHARED LOCK RELEASED for shard=$shard partId=$partID $stringPartition", new RuntimeException)
+  }
+
+  override def chunkmapAcquireExclusive(): Unit = {
+    super.chunkmapAcquireExclusive()
+    _log.info(s"EXCLUSIVE LOCK ACQUIRED for shard=$shard partId=$partID $stringPartition", new RuntimeException)
+  }
+
+  override def chunkmapReleaseExclusive(): Unit = {
+    super.chunkmapReleaseExclusive()
+    _log.info(s"EXCLUSIVE LOCK RELEASED for shard=$shard partId=$partID $stringPartition", new RuntimeException)
+  }
+
+}
 
 final case class PartKeyRowReader(records: Iterator[PartKeyWithTimes]) extends Iterator[RowReader] {
   var currVal: PartKeyWithTimes = _

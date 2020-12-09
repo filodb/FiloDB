@@ -61,6 +61,12 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       plannerParams = queryContext.plannerParams.copy(processMultiPartition = false))
   }
 
+  /**
+   *
+   * @param logicalPlan Logical plan
+   * @param queryParams PromQlQueryParams having query details
+   * @return Returns PartitionAssignment, lookback, offset and routing keys
+   */
   private def partitionUtilNonBinaryJoin(logicalPlan: LogicalPlan, queryParams: PromQlQueryParams) = {
 
     val routingKeys = getRoutingKeys(logicalPlan)
@@ -89,7 +95,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   /**
     * @param queryParams PromQlQueryParams having query details
     * @param logicalPlan Logical plan
-    */
+   *  @return Returns PartitionAssignment and routing keys
+   */
   private def partitionUtil(queryParams: PromQlQueryParams,
                             logicalPlan: BinaryJoin): (List[PartitionAssignment], Seq[(String, Set[String])]) = {
 

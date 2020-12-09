@@ -25,6 +25,7 @@ import spire.syntax.cfor._
 
 import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
+import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaSource, RocksDbCardinalityStore}
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
@@ -220,6 +221,7 @@ object SchemaMismatch {
 class TimeSeriesShard(val ref: DatasetRef,
                       val schemas: Schemas,
                       val storeConfig: StoreConfig,
+                      quotaSource: QuotaSource,
                       val shardNum: Int,
                       val bufferMemoryManager: NativeMemoryManager,
                       colStore: ColumnStore,
@@ -250,6 +252,19 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, shardNum,
     storeConfig.demandPagedRetentionPeriod)
+
+  private val cardTracker: CardinalityTracker = if (storeConfig.meteringEnabled) {
+    // FIXME switch this to some local-disk based store when we graduate out of POC mode
+    val cardStore = new RocksDbCardinalityStore(ref, shardNum)
+
+    val defaultQuota = quotaSource.getDefaults(ref)
+    val tracker = new CardinalityTracker(ref, shardNum, schemas.part.options.shardKeyColumns.length,
+                                                     defaultQuota, cardStore)
+    quotaSource.getQuotas(ref).foreach { q =>
+      tracker.setQuota(q.shardKeyPrefix, q.quota)
+    }
+    tracker
+  } else UnsafeUtils.ZeroPointer.asInstanceOf[CardinalityTracker]
 
   /**
     * Keeps track of count of rows ingested into memstore, not necessarily flushed.
@@ -392,12 +407,12 @@ class TimeSeriesShard(val ref: DatasetRef,
   // Flush groups when ingestion time is observed to cross a time boundary (typically an hour),
   // plus a group-specific offset. This simplifies disaster recovery -- chunks can be copied
   // without concern that they may overlap in time.
-  private val flushBoundaryMillis = storeConfig.flushInterval.toMillis
+  private val flushBoundaryMillis = Option(storeConfig.flushInterval.toMillis)
 
   // Defines the group-specific flush offset, to distribute the flushes around such they don't
   // all flush at the same time. With an hourly boundary and 60 flush groups, flushes are
   // scheduled once a minute.
-  private val flushOffsetMillis = flushBoundaryMillis / numGroups
+  private val flushOffsetMillis = flushBoundaryMillis.get / numGroups
 
   private[memstore] val evictedPartKeys =
     BloomFilter[PartKey](storeConfig.evictedPkBfCapacity, falsePositiveRate = 0.01)(new CanGenerateHashFrom[PartKey] {
@@ -532,6 +547,11 @@ class TimeSeriesShard(val ref: DatasetRef,
     _offset
   }
 
+  def topKCardinality(k: Int, shardKeyPrefix: Seq[String]): Seq[CardinalityRecord] = {
+    if (storeConfig.meteringEnabled) cardTracker.topk(k, shardKeyPrefix)
+    else throw new IllegalArgumentException("Metering is not enabled")
+  }
+
   def startFlushingIndex(): Unit =
     partKeyIndex.startFlushThread(storeConfig.partIndexFlushMinDelaySeconds, storeConfig.partIndexFlushMaxDelaySeconds)
 
@@ -555,11 +575,11 @@ class TimeSeriesShard(val ref: DatasetRef,
   // scalastyle:off method.length
   private[memstore] def bootstrapPartKey(pk: PartKeyRecord): Int = {
     assertThreadName(IngestSchedName)
+    val schemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
+    val schema = schemas(schemaId)
     val partId = if (pk.endTime == Long.MaxValue) {
       // this is an actively ingesting partition
       val group = partKeyGroup(schemas.part.binSchema, pk.partKey, UnsafeUtils.arayOffset, numGroups)
-      val schemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
-      val schema = schemas(schemaId)
       if (schema != Schemas.UnknownSchema) {
         val part = createNewPartition(pk.partKey, UnsafeUtils.arayOffset, group, CREATE_NEW_PARTID, schema, 4)
         // In theory, we should not get an OutOfMemPartition here since
@@ -600,6 +620,10 @@ class TimeSeriesShard(val ref: DatasetRef,
       else activelyIngesting -= partId
     }
     shardStats.indexRecoveryNumRecordsProcessed.increment()
+    if (storeConfig.meteringEnabled) {
+      val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
+      cardTracker.incrementCount(shardKey)
+    }
     partId
   }
 
@@ -715,8 +739,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   def refreshPartKeyIndexBlocking(): Unit = partKeyIndex.refreshReadersBlocking()
 
-  def closePartKeyIndex(): Unit = partKeyIndex.closeIndex()
-
   def numRowsIngested: Long = ingested
 
   def numActivePartitions: Int = partSet.size
@@ -767,6 +789,11 @@ class TimeSeriesShard(val ref: DatasetRef,
       if (!p.ingesting) {
         logger.debug(s"Purging partition with partId=${p.partID}  ${p.stringPartition} from " +
           s"memory in dataset=$ref shard=$shardNum")
+        if (storeConfig.meteringEnabled) {
+          val schema = p.schema
+          val shardKey = schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset, schema.options.shardKeyColumns)
+          cardTracker.decrementCount(shardKey)
+        }
         removePartition(p)
         removedParts += p.partID
         numDeleted += 1
@@ -810,7 +837,7 @@ class TimeSeriesShard(val ref: DatasetRef,
            As written the code the same thing but with fewer operations. It's also a bit
            shorter, but you also had to read this comment...
          */
-        if (oldTimestamp / flushBoundaryMillis != newTimestamp / flushBoundaryMillis) {
+        if (oldTimestamp / flushBoundaryMillis.get != newTimestamp / flushBoundaryMillis.get) {
           // Flush out the group before ingesting records for a new hour (by group offset).
           tasks += createFlushTask(prepareFlushGroup(group))
         }
@@ -1098,11 +1125,11 @@ class TimeSeriesShard(val ref: DatasetRef,
   private def addPartitionForIngestion(recordBase: Any, recordOff: Long, schema: Schema, group: Int) = {
     assertThreadName(IngestSchedName)
     // TODO: remove when no longer needed - or figure out how to log only for tracing partitions
-    logger.debug(s"Adding ingestion record details: ${schema.ingestionSchema.debugString(recordBase, recordOff)}")
+    logger.trace(s"Adding ingestion record details: ${schema.ingestionSchema.debugString(recordBase, recordOff)}")
     val partKeyOffset = schema.comparator.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
     val previousPartId = lookupPreviouslyAssignedPartId(partKeyArray, partKeyOffset)
     // TODO: remove when no longer needed
-    logger.debug(s"Adding part key details: ${schema.partKeySchema.debugString(partKeyArray, partKeyOffset)}")
+    logger.trace(s"Adding part key details: ${schema.partKeySchema.debugString(partKeyArray, partKeyOffset)}")
     val newPart = createNewPartition(partKeyArray, partKeyOffset, group, previousPartId, schema)
     if (newPart != OutOfMemPartition) {
       val partId = newPart.partID
@@ -1111,6 +1138,11 @@ class TimeSeriesShard(val ref: DatasetRef,
         // add new lucene entry if this partKey was never seen before
         // causes endTime to be set to Long.MaxValue
         partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
+        if (storeConfig.meteringEnabled) {
+          val shardKey = schema.partKeySchema.colValues(newPart.partKeyBase, newPart.partKeyOffset,
+            schema.options.shardKeyColumns)
+          cardTracker.incrementCount(shardKey)
+        }
       } else {
         // newly created partition is re-ingesting now, so update endTime
         updatePartEndTimeInIndex(newPart, Long.MaxValue)
@@ -1152,7 +1184,8 @@ class TimeSeriesShard(val ref: DatasetRef,
         val tsp = part.asInstanceOf[TimeSeriesPartition]
         brRowReader.schema = schema.ingestionSchema
         brRowReader.recordOffset = recordOff
-        tsp.ingest(ingestionTime, brRowReader, overflowBlockFactory, maxChunkTime)
+        tsp.ingest(ingestionTime, brRowReader, overflowBlockFactory,
+          storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, maxChunkTime)
         // Below is coded to work concurrently with logic in updateIndexWithEndTime
         // where we try to de-activate an active time series
         if (!tsp.ingesting) {
@@ -1509,6 +1542,9 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   def shutdown(): Unit = {
+    if (storeConfig.meteringEnabled) {
+      cardTracker.close()
+    }
     evictedPartKeys.synchronized {
       if (!evictedPartKeysDisposed) {
         evictedPartKeysDisposed = true
@@ -1516,6 +1552,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       }
     }
     reset()   // Not really needed, but clear everything just to be consistent
+    partKeyIndex.closeIndex()
     logger.info(s"Shutting down dataset=$ref shard=$shardNum")
     /* Don't explcitly free the memory just yet. These classes instead rely on a finalize
        method to ensure that no threads are accessing the memory before it's freed.
