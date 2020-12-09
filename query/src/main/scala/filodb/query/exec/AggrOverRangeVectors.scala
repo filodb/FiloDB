@@ -1,7 +1,5 @@
 package filodb.query.exec
 
-import scala.collection.mutable.ArrayBuffer
-
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.reactive.Observable
