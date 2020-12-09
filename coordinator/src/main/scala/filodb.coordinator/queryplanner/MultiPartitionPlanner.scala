@@ -111,8 +111,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case _             => val p = partitionUtilNonBinaryJoin(logicalPlan.rhs, queryParams)
                             (p._1, p._4)
     }
-    (lhsPartitionsAndRoutingKeys._1 ++ lhsPartitionsAndRoutingKeys._1,
-      rhsPartitionsAndRoutingKeys._2 ++ rhsPartitionsAndRoutingKeys._2)
+    (lhsPartitionsAndRoutingKeys._1 ++ rhsPartitionsAndRoutingKeys._1,
+      lhsPartitionsAndRoutingKeys._2 ++ rhsPartitionsAndRoutingKeys._2)
   }
 
 

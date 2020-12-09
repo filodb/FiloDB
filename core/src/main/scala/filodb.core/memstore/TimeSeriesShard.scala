@@ -105,7 +105,10 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
     * expected), then the delay reflects the delay between the generation of the samples and
     * receiving them, assuming that the clocks are in sync.
     */
-  val ingestionClockDelay = Kamon.gauge("ingestion-clock-delay").withTags(TagSet.from(tags))
+  val ingestionClockDelay = Kamon.gauge("ingestion-clock-delay",
+    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+  val chunkFlushTaskLatency = Kamon.histogram("chunk-flush-task-latency-after-retries",
+    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
 }
 
 object TimeSeriesShard {
@@ -895,11 +898,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private def doFlushSteps(flushGroup: FlushGroup,
                            partitionIt: Iterator[TimeSeriesPartition]): Task[Response] = {
     assertThreadName(IngestSchedName)
-
-    val tracer = Kamon.spanBuilder("chunk-flush-task-latency-after-retries")
-      .asChildOf(Kamon.currentSpan())
-      .tag("dataset", ref.dataset)
-      .tag("shard", shardNum).start()
+    val flushStart = System.currentTimeMillis()
 
     // Only allocate the blockHolder when we actually have chunks/partitions to flush
     val blockHolder = blockFactoryPool.checkout(Map("flushGroup" -> flushGroup.groupNum.toString))
@@ -958,7 +957,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         blockHolder.markFullBlocksReclaimable()
         blockFactoryPool.release(blockHolder)
         flushDoneTasks(flushGroup, resp)
-        tracer.finish()
+        shardStats.chunkFlushTaskLatency.record(System.currentTimeMillis() - flushStart)
       } catch { case e: Throwable =>
         logger.error(s"Error when wrapping up doFlushSteps in dataset=$ref shard=$shardNum", e)
       }

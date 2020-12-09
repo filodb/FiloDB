@@ -486,7 +486,6 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
             timeRange.endMs)))
       }
 
-
       override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
