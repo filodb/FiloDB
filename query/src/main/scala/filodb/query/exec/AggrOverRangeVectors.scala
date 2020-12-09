@@ -270,10 +270,12 @@ object RangeVectorAggregator extends StrictLogging {
       }
     }
 
+    // convert the aggregations to range vectors
     aggObs.flatMap { _ =>
       if (count > 0) {
-        import NoCloseCursor._ // The base range vectors are already closed
-        Observable.now(IteratorBackedRangeVector(CustomRangeVectorKey.empty, accs.toIterator.map(_.toRowReader)))
+        import NoCloseCursor._ // The base range vectors are already closed, so no close propagation needed
+        Observable.now(IteratorBackedRangeVector(CustomRangeVectorKey.empty,
+          NoCloseCursor(accs.toIterator.map(_.toRowReader))))
       } else {
         Observable.empty
       }
