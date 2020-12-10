@@ -142,7 +142,7 @@ final class QueryActor(memStore: MemStore,
                   case _: BadQueryException => // dont log user errors
                   case _: AskTimeoutException => // dont log ask timeouts. useless - let it simply flow up
                   case e: QueryTimeoutException => // log just message, no need for stacktrace
-                    logger.error(s"queryId: ${q.queryContext.queryId} Query timed out: " +
+                    logger.error(s"queryId: ${q.queryContext.queryId} QueryTimeoutException: " +
                       s"${q.queryContext.origQueryParams} ${e.getMessage}")
                   case e: Throwable =>
                     logger.error(s"queryId: ${q.queryContext.queryId} Query Error: " +
