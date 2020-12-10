@@ -37,7 +37,6 @@ case object InProcessPlanDispatcher extends PlanDispatcher {
       plan.execute(source, querySession)
     }
   }
-
 }
 
 /**

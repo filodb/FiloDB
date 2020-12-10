@@ -195,17 +195,10 @@ trait ExecPlan extends QueryCommand {
           }
       }
       resultTask.onErrorHandle { case ex: Throwable =>
-        if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
-          qLogger.error(s"queryId: ${queryContext.queryId} Exception during execution of query: " +
-            s"${queryContext.origQueryParams}", ex)
-        span.fail(ex)
         QueryError(queryContext.queryId, ex)
       }
     }.flatten
     .onErrorRecover { case NonFatal(ex) =>
-      if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
-        qLogger.error(s"queryId: ${queryContext.queryId} Exception during orchestration of query:" +
-          s" ${queryContext.origQueryParams}", ex)
       QueryError(queryContext.queryId, ex)
     }
 
@@ -318,21 +311,19 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
   override def getResult(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.fromTask(
       execPlan.dispatcher.dispatch(execPlan).onErrorHandle { case ex: Throwable =>
-      qLogger.error(s"queryId: ${execPlan.queryContext.queryId} Execution failed for sub-query" +
-        s" ${execPlan.queryContext.origQueryParams}", ex)
-      QueryError(execPlan.queryContext.queryId, ex)
-    }.map {
-      case QueryResult(_, _, result)  =>  // Result is empty because of NaN so create ScalarFixedDouble with NaN
-                                            if (result.isEmpty) {
-                                              ScalarFixedDouble(timeStepParams, Double.NaN)
-                                            } else {
-                                              result.head match {
-                                                case f: ScalarFixedDouble   => f
-                                                case s: ScalarVaryingDouble => s
+        QueryError(execPlan.queryContext.queryId, ex)
+      }.map {
+        case QueryResult(_, _, result)  =>  // Result is empty because of NaN so create ScalarFixedDouble with NaN
+                                              if (result.isEmpty) {
+                                                ScalarFixedDouble(timeStepParams, Double.NaN)
+                                              } else {
+                                                result.head match {
+                                                  case f: ScalarFixedDouble   => f
+                                                  case s: ScalarVaryingDouble => s
+                                                }
                                               }
-                                            }
-      case QueryError(_, ex)          =>  throw ex
-    })
+        case QueryError(_, ex)          =>  throw ex
+      })
   }
 
   override def toString: String = execPlan.printTree() + "\n"
@@ -377,8 +368,6 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
-        qLogger.error(s"queryId: ${queryContext.queryId} Execution failed for sub-query " +
-          s"${queryContext.origQueryParams}", ex)
         QueryError(queryContext.queryId, ex)
       }
     }
