@@ -113,7 +113,8 @@ case class PromQlRemoteExec(queryEndpoint: String,
         override def numRows: Option[Int] = Option(samples.size)
 
       }
-      SerializedRangeVector(rv, builder, recordSchema.get("default").get, printTree(false))
+      SerializedRangeVector(rv, builder, recordSchema.get("default").get,
+        queryWithPlanName(queryContext))
       // TODO: Handle stitching with verbose flag
     }
     QueryResult(id, resultSchema.get("default").get, rangeVectors)
@@ -147,7 +148,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
         override def numRows: Option[Int] = Option(samples.size)
 
       }
-      SerializedRangeVector(rv, builder, recordSchema.get("histogram").get, printTree(false))
+      SerializedRangeVector(rv, builder, recordSchema.get("histogram").get, queryContext.origQueryParams.toString)
       // TODO: Handle stitching with verbose flag
     }
     QueryResult(id, resultSchema.get("histogram").get, rangeVectors)
@@ -171,7 +172,8 @@ case class PromQlRemoteExec(queryEndpoint: String,
           }
           override def numRows: Option[Int] = Option(d.aggregateResponse.get.aggregateSampl.size)
         }
-      SerializedRangeVector(rv, builder, recordSchema.get(Avg.entryName).get, printTree(false))
+      SerializedRangeVector(rv, builder, recordSchema.get(Avg.entryName).get,
+        queryWithPlanName(queryContext))
     }
 
     // TODO: Handle stitching with verbose flag
@@ -197,7 +199,8 @@ case class PromQlRemoteExec(queryEndpoint: String,
         }
         override def numRows: Option[Int] = Option(d.aggregateResponse.get.aggregateSampl.size)
       }
-      SerializedRangeVector(rv, builder, recordSchema.get(QueryFunctionConstants.stdVal).get, printTree(false))
+      SerializedRangeVector(rv, builder, recordSchema.get(QueryFunctionConstants.stdVal).get,
+        queryWithPlanName(queryContext))
     }
 
     // TODO: Handle stitching with verbose flag
