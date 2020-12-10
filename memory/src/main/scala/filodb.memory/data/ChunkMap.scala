@@ -105,7 +105,7 @@ object ChunkMap extends StrictLogging {
           var lockState = 0
           do {
             lockState = UnsafeUtils.getIntVolatile(inst, lockStateOffset)
-            if (lockState - amt < 0) {
+            if ((lockState & Int.MaxValue) - amt < 0) {
               _logger.error(s"Negative lock state while releasing all shared locks for pk: $inst, amount=$amt " +
                 s"Contents of execPlanTracker for current thread: ${execPlanTracker.get(Thread.currentThread())}",
                 new RuntimeException)
@@ -404,7 +404,7 @@ class ChunkMap(val memFactory: NativeMemoryManager, var capacity: Int) {
     var lockState = 0
     do {
       lockState = UnsafeUtils.getIntVolatile(this, lockStateOffset)
-      if (lockState - 1 < 0) {
+      if ((lockState & Int.MaxValue) - 1 < 0) {
         _logger.error(s"Negative lock state while releasing single shared lock for pk: $this " +
           s"Contents of execPlanTracker for current thread: ${execPlanTracker.get(Thread.currentThread())}",
           new RuntimeException)
