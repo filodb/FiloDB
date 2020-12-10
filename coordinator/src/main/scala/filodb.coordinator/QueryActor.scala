@@ -145,7 +145,8 @@ final class QueryActor(memStore: MemStore,
           }(queryScheduler).recover { case ex =>
             querySession.close()
             // Unhandled exception in query, should be rare
-            logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
+            logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error," +
+              s" query was ${q.queryContext.origQueryParams}", ex)
             queryExecuteSpan.finish()
             replyTo ! QueryError(q.queryContext.queryId, ex)
           }(queryScheduler)

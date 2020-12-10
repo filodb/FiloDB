@@ -162,7 +162,7 @@ trait ExecPlan extends QueryCommand {
               srv
             case rv: RangeVector =>
               // materialize, and limit rows per RV
-              val srv = SerializedRangeVector(rv, builder, recSchema, printTree(false))
+              val srv = SerializedRangeVector(rv, builder, recSchema, queryWithPlanName(queryContext))
               numResultSamples += srv.numRowsInt
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
               if (enforceLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
@@ -185,7 +185,8 @@ trait ExecPlan extends QueryCommand {
               // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
               // is < 2MB
               qLogger.warn(s"queryId: ${queryContext.queryId} result was large size $numBytes. May need to " +
-                s"tweak limits. ExecPlan was: ${printTree()} ; Limit was: ${queryContext.plannerParams.sampleLimit}")
+                s"tweak limits. Query was: ${queryContext.origQueryParams}" +
+                s"; Limit was: ${queryContext.plannerParams.sampleLimit}")
             }
             span.mark(s"num-result-samples: $numResultSamples")
             span.mark(s"num-range-vectors: ${r.size}")
@@ -196,7 +197,7 @@ trait ExecPlan extends QueryCommand {
       resultTask.onErrorHandle { case ex: Throwable =>
         if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
           qLogger.error(s"queryId: ${queryContext.queryId} Exception during execution of query: " +
-            s"${printTree(false)}", ex)
+            s"${queryContext.origQueryParams}", ex)
         span.fail(ex)
         QueryError(queryContext.queryId, ex)
       }
@@ -204,7 +205,7 @@ trait ExecPlan extends QueryCommand {
     .onErrorRecover { case NonFatal(ex) =>
       if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
         qLogger.error(s"queryId: ${queryContext.queryId} Exception during orchestration of query:" +
-          s" ${printTree(false)}", ex)
+          s" ${queryContext.origQueryParams}", ex)
       QueryError(queryContext.queryId, ex)
     }
 
@@ -243,6 +244,10 @@ trait ExecPlan extends QueryCommand {
     val curNode = curNodeText(nextLevel)
     val childr = children.map(_.printTree(useNewline, nextLevel + 1))
     ((transf :+ curNode) ++ childr).mkString(if (useNewline) "\n" else " @@@ ")
+  }
+
+  protected def queryWithPlanName(queryContext: QueryContext): String = {
+    s"${this.getClass.getSimpleName}-${queryContext.origQueryParams}"
   }
 
   def curNodeText(level: Int): String =
@@ -314,7 +319,7 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
     Observable.fromTask(
       execPlan.dispatcher.dispatch(execPlan).onErrorHandle { case ex: Throwable =>
       qLogger.error(s"queryId: ${execPlan.queryContext.queryId} Execution failed for sub-query" +
-        s" ${execPlan.printTree()}", ex)
+        s" ${execPlan.queryContext.origQueryParams}", ex)
       QueryError(execPlan.queryContext.queryId, ex)
     }.map {
       case QueryResult(_, _, result)  =>  // Result is empty because of NaN so create ScalarFixedDouble with NaN
@@ -372,7 +377,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
-        qLogger.error(s"queryId: ${queryContext.queryId} Execution failed for sub-query ${plan.printTree()}", ex)
+        qLogger.error(s"queryId: ${queryContext.queryId} Execution failed for sub-query " +
+          s"${queryContext.origQueryParams}", ex)
         QueryError(queryContext.queryId, ex)
       }
     }
