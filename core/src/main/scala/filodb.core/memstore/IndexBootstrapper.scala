@@ -66,7 +66,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
                    schemas: Schemas,
                    parallelism: Int = Runtime.getRuntime.availableProcessors())
                    (lookUpOrAssignPartId: Array[Byte] => Int): Task[Long] = {
-    val recoverIndexLatency = Kamon.histogram("shard-recover-index-latency",
+    val recoverIndexLatency = Kamon.histogram("downsample-store-refresh-index-latency",
       MeasurementUnit.time.milliseconds)
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum)
