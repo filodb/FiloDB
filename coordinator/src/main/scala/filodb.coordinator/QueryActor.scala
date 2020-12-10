@@ -6,6 +6,7 @@ import java.util.concurrent.{ForkJoinPool, ForkJoinWorkerThread}
 import scala.util.control.NonFatal
 
 import akka.actor.{ActorRef, Props}
+import akka.pattern.AskTimeoutException
 import kamon.Kamon
 import kamon.instrumentation.executor.ExecutorInstrumentation
 import kamon.tag.TagSet
@@ -122,30 +123,43 @@ final class QueryActor(memStore: MemStore,
         .start()
       // Dont finish span since we finish it asynchronously when response is received
       Kamon.runWithSpan(queryExecuteSpan, false) {
-        Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
-        Kamon.currentSpan().tag("query-id", q.queryContext.queryId)
+        queryExecuteSpan.tag("query", q.getClass.getSimpleName)
+        queryExecuteSpan.tag("query-id", q.queryContext.queryId)
         val querySession = QuerySession(q.queryContext, queryConfig)
-        Kamon.currentSpan().mark("query-actor-received-execute-start")
+        queryExecuteSpan.mark("query-actor-received-execute-start")
         q.execute(memStore, querySession)(queryScheduler)
           .foreach { res =>
             FiloSchedulers.assertThreadName(QuerySchedName)
             querySession.close()
-            queryExecuteSpan.finish()
             replyTo ! res
             res match {
               case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
               case e: QueryError =>
                 queryErrors.increment()
-                logger.debug(s"queryId ${q.queryContext.queryId} Normal QueryError returned from query execution: $e")
+                queryExecuteSpan.fail(e.t.getMessage)
+                // error logging
+                e.t match {
+                  case _: BadQueryException => // dont log user errors
+                  case _: AskTimeoutException => // dont log ask timeouts. useless - let it simply flow up
+                  case e: QueryTimeoutException => // log just message, no need for stacktrace
+                    logger.error(s"queryId: ${q.queryContext.queryId} QueryTimeoutException: " +
+                      s"${q.queryContext.origQueryParams} ${e.getMessage}")
+                  case e: Throwable =>
+                    logger.error(s"queryId: ${q.queryContext.queryId} Query Error: " +
+                      s"${q.queryContext.origQueryParams}", e)
+                }
+                // debug logging
                 e.t match {
                   case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dsRef, cve)
                   case t: Throwable =>
                 }
+                queryExecuteSpan.finish()
             }
           }(queryScheduler).recover { case ex =>
             querySession.close()
             // Unhandled exception in query, should be rare
-            logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
+            logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error," +
+              s" query was ${q.queryContext.origQueryParams}", ex)
             queryExecuteSpan.finish()
             replyTo ! QueryError(q.queryContext.queryId, ex)
           }(queryScheduler)
