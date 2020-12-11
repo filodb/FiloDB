@@ -194,6 +194,17 @@ trait Unit extends BaseParser {
   lazy val duration: PackratParser[Duration] = decimalNumber ~ timeUnit ^^ {
     case d ~ tu => Duration(d.toDouble, tu)
   }
+
+  lazy val subquery: PackratParser[Subquery] = "[" ~ duration ~ ":" ~ duration.? ~ "]" ^^ {
+    case leftBracket ~ timeRange ~ colon ~ step ~ rightBracket => Subquery(timeRange, step)
+  }
+
+  lazy val timeInterval: PackratParser[TimeInterval] = "[" ~ duration ~ "]" ^^ {
+    case leftBracket ~ timeRange ~ rightBracket => TimeInterval(timeRange)
+  }
+
+  //lazy val rangeProducer = subquery | timeInterval
+
   lazy val offset: PackratParser[Offset] = OFFSET ~ duration ^^ {
     case ignore ~ t => Offset(t)
   }
@@ -249,31 +260,31 @@ trait Join extends Numeric {
 ////////////////////// SELECTORS ///////////////////////////////////////////
 trait Selector extends Operator with Unit with BaseParser {
   protected lazy val simpleSeries: PackratParser[InstantExpression] =
-    "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str => InstantExpression(Some(str), Seq.empty, None) }
+    "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str => InstantExpression(Some(str), Seq.empty, None, None) }
 
 
   lazy val instantVectorSelector: PackratParser[InstantExpression]
-  = metricNameIdentifier ~ labelSelection.? ~ offset.? ^^ {
-    case metricName ~ ls ~ opt =>
-      InstantExpression(Some(metricName.str), ls.getOrElse(Seq.empty), opt.map(_.duration))
+  = metricNameIdentifier ~ labelSelection.? ~ subquery.? ~ offset.? ^^ {
+    case metricName ~ ls ~ subquery ~ opt =>
+      InstantExpression(Some(metricName.str), ls.getOrElse(Seq.empty), subquery, opt.map(_.duration))
   }
 
   lazy val instantVectorSelector2: PackratParser[InstantExpression]
-  = labelSelection ~ offset.? ^^ {
-    case ls ~ opt =>
-      InstantExpression(None, ls, opt.map(_.duration))
+  = labelSelection ~ subquery.? ~offset.? ^^ {
+    case ls ~ subquery ~ opt =>
+      InstantExpression(None, ls, subquery, opt.map(_.duration))
   }
 
   lazy val rangeVectorSelector: PackratParser[RangeExpression] =
-    metricNameIdentifier ~ labelSelection.? ~ "[" ~ duration ~ "]" ~ offset.? ^^ {
-      case metricName ~ ls ~ leftBracket ~ td ~ rightBracket ~ opt =>
-        RangeExpression(Some(metricName.str), ls.getOrElse(Seq.empty), td, opt.map(_.duration))
+    metricNameIdentifier ~ labelSelection.? ~ timeInterval ~ offset.? ^^ {
+      case metricName ~ ls ~  timeInterval ~  opt =>
+        RangeExpression(Some(metricName.str), ls.getOrElse(Seq.empty), timeInterval, opt.map(_.duration))
     }
 
   lazy val rangeVectorSelector2: PackratParser[RangeExpression] =
-    labelSelection ~ "[" ~ duration ~ "]" ~ offset.? ^^ {
-      case ls ~ leftBracket ~ td ~ rightBracket ~ opt =>
-        RangeExpression(None, ls, td, opt.map(_.duration))
+    labelSelection ~ timeInterval ~ offset.? ^^ {
+      case ls ~ timeInterval ~ opt =>
+        RangeExpression(None, ls, timeInterval, opt.map(_.duration))
     }
 
   lazy val vector: PackratParser[Vector] =
@@ -354,8 +365,8 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
       Seq() ++ _
     }
 
-  lazy val function: PackratParser[Function] = labelNameIdentifier ~ functionParams ^^ {
-    case name ~ params => Function(name.str, params)
+  lazy val function: PackratParser[Function] = labelNameIdentifier ~ functionParams ~ subquery.? ^^ {
+    case name ~ params ~ subquery => Function(name.str, params, subquery)
   }
 
   // For queries with aggregateGrouping before metric name

@@ -168,6 +168,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
     */
   case class InstantExpression(metricName: Option[String],
                                labelSelection: Seq[LabelMatch],
+                               subquery: Option[Subquery],
                                offset: Option[Duration]) extends Vector with PeriodicSeries {
 
     import WindowConstants._
@@ -177,11 +178,54 @@ trait Vectors extends Scalars with TimeUnits with Base {
     def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
       // we start from 5 minutes earlier that provided start time in order to include last sample for the
       // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
+
+      // If we have subquery defined and timeParams (1) step defined or (2) end
+      // different from the start. This is certainly a situation when we should throw an exception.
+      // For top level InstantExpression this means if we have a range_query API called with
+      // a subquery in top level, this is obviously invalid as top level of a range query should be returning an
+      // instant vector but subqueries by definition return range vectors.
+      // In the existing codebase, however, it could be that timeParams are globabl top level params and they indeed
+      // could differ from the subquery parameter, suppose we have
+      //    sum_over_time(metric{}[10:1m])[1d:1h]
+      // the meaning of the above is we produce a range vector with 25 values which would be sum_over_time of 10 samples
+      // of last 10 minutes of last 25 hours.This means that metric{}[10:1m] InstantExpression needs to be executed with
+      // 25 different start timestamps and no step and end defined.
+      // I have not finished reviewing the code to understand whether we indeed have capability of passing
+      // proper timeParams from the top level to the lower level. If it is not done
+      // now, we MUST implement it, ie timeParam are not immutable params coming all the way from the HTTP API call
+      // parameters. The top level expression should be filled out with HTTP API params, however, if the tope level
+      // expression happens to be a subquery it should pass appropriate timeparams (not the top level original time
+      // params).
+      // For now, I only test this code for subquery in top level InstantExpression. The work to verify that it works
+      // in the lower levels will come later. TODO
+      // b) we should throw an exception if timeParams that we pass in have anything but start timestamp defined.
+      var timeParamsToUse = timeParams;
+      if (subquery.isDefined) {
+        if (timeParams.step != 0 || timeParams.start != timeParams.end) {
+          throw new UnsupportedOperationException("Subquery is not allowed as a top level expression for query_range")
+        }
+        //How do I know what's the default step? TODO
+        //for now, let's put step 10 seconds
+        var stepToUse = 10L
+        if (subquery.get.step.isDefined) {
+          stepToUse = subquery.get.step.get.millis(1L) / 1000
+        }
+        timeParamsToUse = TimeStepParams(
+          timeParams.start,
+          stepToUse,
+          timeParams.start + (subquery.get.interval.millis(1L) / 1000) //don't understand why I need to pass 1
+        );
+      }
       val ps = PeriodicSeries(
-        RawSeries(timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
-          offset.map(_.millis(timeParams.step * 1000))),
-        timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
-        offset.map(_.millis(timeParams.step * 1000))
+        RawSeries(
+          timeParamToSelector(timeParamsToUse),
+          columnFilters,
+          column.toSeq,
+          Some(staleDataLookbackMillis),
+          offset.map(_.millis(timeParamsToUse.step * 1000))
+        ),
+        timeParamsToUse.start * 1000, timeParamsToUse.step * 1000, timeParamsToUse.end * 1000,
+        offset.map(_.millis(timeParamsToUse.step * 1000))
       )
       bucketOpt.map { bOpt =>
         // It's a fixed value, the range params don't matter at all
@@ -209,7 +253,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
     */
   case class RangeExpression(metricName: Option[String],
                              labelSelection: Seq[LabelMatch],
-                             window: Duration,
+                             timeInterval: TimeInterval,
                              offset: Option[Duration]) extends Vector with SimpleSeries {
 
     private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
@@ -218,15 +262,20 @@ trait Vectors extends Scalars with TimeUnits with Base {
       if (isRoot && timeParams.start != timeParams.end) {
         throw new UnsupportedOperationException("Range expression is not allowed in query_range")
       }
-      // multiply by 1000 to convert unix timestamp in seconds to millis
-      val rs = RawSeries(timeParamToSelector(timeParams), columnFilters, column.toSeq,
-        Some(window.millis(timeParams.step * 1000)),
-        offset.map(_.millis(timeParams.step * 1000)))
-      bucketOpt.map { bOpt =>
-        // It's a fixed value, the range params don't matter at all
-        val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
-        ApplyInstantFunctionRaw(rs, InstantFunctionId.HistogramBucket, Seq(param))
-      }.getOrElse(rs)
+        // multiply by 1000 to convert unix timestamp in seconds to millis
+        val rs = RawSeries(
+          timeParamToSelector(timeParams),
+          columnFilters,
+          column.toSeq,
+          Some(timeInterval.duration.millis(timeParams.step * 1000)),
+          offset.map(_.millis(timeParams.step * 1000))
+        )
+        bucketOpt.map { bOpt =>
+          // It's a fixed value, the range params don't matter at all
+          val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
+          ApplyInstantFunctionRaw(rs, InstantFunctionId.HistogramBucket, Seq(param))
+        }.getOrElse(rs)
+
     }
 
   }

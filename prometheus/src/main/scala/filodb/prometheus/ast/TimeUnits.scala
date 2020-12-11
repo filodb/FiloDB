@@ -57,4 +57,11 @@ trait TimeUnits {
 
   case class Offset(duration: Duration)
 
+  case class TimeInterval(duration: Duration) {
+  }
+
+  case class Subquery(interval: Duration, step: Option[Duration]) {
+  }
+
+
 }
