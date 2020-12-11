@@ -153,8 +153,8 @@ final class QueryActor(memStore: MemStore,
                   case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dsRef, cve)
                   case t: Throwable =>
                 }
-                queryExecuteSpan.finish()
             }
+            queryExecuteSpan.finish()
           }(queryScheduler).recover { case ex =>
             querySession.close()
             // Unhandled exception in query, should be rare
