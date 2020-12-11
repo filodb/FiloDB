@@ -2,6 +2,8 @@ package filodb.coordinator.queryplanner
 
 import java.util.concurrent.ThreadLocalRandom
 
+import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.metadata.{DatasetOptions, Schemas}
 import filodb.core.query.{PromQlQueryParams, QueryContext, RangeParams}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
@@ -141,7 +143,8 @@ trait  PlannerMaterializer {
     }
 }
 
-object PlannerUtil {
+object PlannerUtil extends StrictLogging {
+
    /**
    * Returns URL params for label values which is used to create Metadata remote exec plan
    */
@@ -152,4 +155,5 @@ object PlannerUtil {
       head}$quote"""}.mkString(",")
     Map("filter" -> filters, "labels" -> lp.labelNames.mkString(","))
   }
+
 }

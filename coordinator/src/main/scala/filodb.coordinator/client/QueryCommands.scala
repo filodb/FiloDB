@@ -32,9 +32,11 @@ object QueryCommands {
                                   limit: Int = 100,
                                   submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
-
-
-
+  final case class GetTopkCardinality(dataset: DatasetRef,
+                                      shards: Seq[Int],
+                                      shardKeyPrefix: Seq[String],
+                                      k: Int,
+                                      submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
   final case class StaticSpreadProvider(spreadChange: SpreadChange = SpreadChange()) extends SpreadProvider {
     def spreadFunc(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {

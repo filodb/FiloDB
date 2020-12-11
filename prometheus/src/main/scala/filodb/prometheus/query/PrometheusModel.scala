@@ -7,6 +7,7 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query.{ColumnFilter, ColumnInfo, Filter, RangeVector, RangeVectorKey}
 import filodb.query.{QueryResult => FiloQueryResult, _}
+import filodb.query.AggregationOperator.Avg
 import filodb.query.exec.{ExecPlan, HistToPromSeriesMapper}
 
 object PrometheusModel {
@@ -150,6 +151,34 @@ object PrometheusModel {
         Result(tags, None, samples.headOption)
       case QueryResultType.Scalar => ???
     }
+  }
+
+  def toAvgResult(srv: RangeVector,
+                   verbose: Boolean,
+                   typ: QueryResultType,
+                   processMultiPartition: Boolean = true): Result = {
+    val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
+      (if (verbose) makeVerboseLabels(srv.key)
+      else Map.empty)
+    val samples = srv.rows.map { r => AvgSampl(r.getLong(0)/1000, r.getDouble(1),
+      r.getLong(2))
+    }.toSeq
+
+    Result(tags, None, None, Some(AggregateResponse(Avg.entryName, samples)))
+  }
+
+  def toStdValResult(srv: RangeVector,
+                  verbose: Boolean,
+                  typ: QueryResultType,
+                  processMultiPartition: Boolean = true): Result = {
+    val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
+      (if (verbose) makeVerboseLabels(srv.key)
+      else Map.empty)
+    val samples = srv.rows.map { r => StdValSampl(r.getLong(0)/1000, r.getDouble(1),
+      r.getDouble(2), r.getLong(3))
+    }.toSeq
+
+    Result(tags, None, None, Some(AggregateResponse(QueryFunctionConstants.stdVal, samples)))
   }
 
   def makeVerboseLabels(rvk: RangeVectorKey): Map[String, String] = {

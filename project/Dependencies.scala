@@ -71,7 +71,10 @@ object Dependencies {
     "com.github.rholder.fauxflake" % "fauxflake-core"     % "1.1.0",
     "org.scalactic"                %% "scalactic"         % "3.2.0" withJavadoc(),
     "org.apache.lucene"            % "lucene-core"        % "7.3.0" withJavadoc(),
-    "com.github.alexandrnikitin"   %% "bloom-filter"      % "0.11.0"
+    "com.github.alexandrnikitin"   %% "bloom-filter"      % "0.11.0",
+    "org.rocksdb"                  % "rocksdbjni"         % "6.11.4",
+    "com.esotericsoftware"         % "kryo"               % "4.0.0" excludeAll(excludeMinlog),
+    "com.dorkbox"            % "MinLog-SLF4J"                 % "1.12"
   )
 
   lazy val sparkJobsDeps = commonDeps ++ Seq(

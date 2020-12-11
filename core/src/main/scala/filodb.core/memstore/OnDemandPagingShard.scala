@@ -13,6 +13,7 @@ import monix.reactive.{Observable, OverflowStrategy}
 
 import filodb.core.{DatasetRef, Types}
 import filodb.core.binaryrecord2.RecordSchema
+import filodb.core.memstore.ratelimit.QuotaSource
 import filodb.core.metadata.Schemas
 import filodb.core.query.QuerySession
 import filodb.core.store._
@@ -25,13 +26,15 @@ import filodb.memory.NativeMemoryManager
 class OnDemandPagingShard(ref: DatasetRef,
                           schemas: Schemas,
                           storeConfig: StoreConfig,
+                          quotaSource: QuotaSource,
                           shardNum: Int,
                           bufferMemoryManager: NativeMemoryManager,
                           rawStore: ColumnStore,
                           metastore: MetaStore,
                           evictionPolicy: PartitionEvictionPolicy)
                          (implicit ec: ExecutionContext) extends
-TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawStore, metastore, evictionPolicy)(ec) {
+TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryManager, rawStore,
+                metastore, evictionPolicy)(ec) {
   import TimeSeriesShard._
   import FiloSchedulers._
 

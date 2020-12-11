@@ -1,7 +1,5 @@
 package filodb.query.exec
 
-import scala.collection.mutable.ArrayBuffer
-
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.reactive.Observable
@@ -36,11 +34,10 @@ trait ReduceAggregateExec extends NonLeafExecPlan {
                yield {
                  val aggregator = RowAggregator(aggrOp, aggrParams, schema)
                  RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key,
-                   querySession.qContext.groupByCardLimit)
+                   querySession.qContext.plannerParams.groupByCardLimit)
                }
     Observable.fromTask(task).flatten
   }
-
 }
 
 /**
@@ -104,11 +101,11 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
         RangeVectorAggregator.fastReduce(aggregator, false, source, numWindows)
       }.getOrElse {
         RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping,
-          querySession.qContext.groupByCardLimit)
+          querySession.qContext.plannerParams.groupByCardLimit)
       }
     } else {
       RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping,
-        querySession.qContext.groupByCardLimit)
+        querySession.qContext.plannerParams.groupByCardLimit)
     }
   }
 
@@ -121,6 +118,7 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
 
 final case class AggregatePresenter(aggrOp: AggregationOperator,
                                     aggrParams: Seq[Any],
+                                    rangeParams: RangeParams,
                                     funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
 
   protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
@@ -131,7 +129,7 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
-    RangeVectorAggregator.present(aggregator, source, limit)
+    RangeVectorAggregator.present(aggregator, source, limit, rangeParams)
   }
 
   override def schema(source: ResultSchema): ResultSchema = {
@@ -185,8 +183,9 @@ object RangeVectorAggregator extends StrictLogging {
     */
   def present(aggregator: RowAggregator,
               source: Observable[RangeVector],
-              limit: Int): Observable[RangeVector] = {
-    source.flatMap(rv => Observable.fromIterable(aggregator.present(rv, limit)))
+              limit: Int,
+              rangeParams: RangeParams): Observable[RangeVector] = {
+    source.flatMap(rv => Observable.fromIterable(aggregator.present(rv, limit, rangeParams)))
   }
 
   private def mapReduceInternal(rvs: List[RangeVector],
@@ -236,8 +235,6 @@ object RangeVectorAggregator extends StrictLogging {
     // Can't use an Array here because rowAgg.AggHolderType does not have a ClassTag
     val accs = collection.mutable.ArrayBuffer.fill(outputLen)(rowAgg.zero)
     var count = 0
-    // keeps track of all iters to close
-    val toClose = ArrayBuffer.empty[RangeVectorCursor]
 
     // FoldLeft means we create the source PeriodicMapper etc and process immediately.  We can release locks right away
     // NOTE: ChunkedWindowIterator automatically releases locks after last window.  So it should all just work.  :)
@@ -245,9 +242,12 @@ object RangeVectorAggregator extends StrictLogging {
       source.foldLeftF(accs) { case (_, rv) =>
         count += 1
         val rowIter = rv.rows
-        toClose += rowIter
-        cforRange { 0 until outputLen } { i =>
-          accs(i) = rowAgg.reduceAggregate(accs(i), rowIter.next)
+        try {
+          cforRange { 0 until outputLen } { i =>
+            accs(i) = rowAgg.reduceAggregate(accs(i), rowIter.next)
+          }
+        } finally {
+          rowIter.close()
         }
         accs
       }
@@ -256,19 +256,24 @@ object RangeVectorAggregator extends StrictLogging {
       source.foldLeftF(accs) { case (_, rv) =>
         count += 1
         val rowIter = rv.rows
-        toClose += rowIter
-        cforRange { 0 until outputLen } { i =>
-          val mapped = rowAgg.map(rv.key, rowIter.next, mapIntos(i))
-          accs(i) = rowAgg.reduceMappedRow(accs(i), mapped)
+        try {
+          cforRange { 0 until outputLen } { i =>
+            val mapped = rowAgg.map(rv.key, rowIter.next, mapIntos(i))
+            accs(i) = rowAgg.reduceMappedRow(accs(i), mapped)
+          }
+        } finally {
+          rowIter.close()
         }
         accs
       }
     }
 
+    // convert the aggregations to range vectors
     aggObs.flatMap { _ =>
       if (count > 0) {
-        val iter = new CustomCloseCursor(accs.toIterator.map(_.toRowReader))(toClose.foreach(_.close()))
-        Observable.now(IteratorBackedRangeVector(CustomRangeVectorKey.empty, iter))
+        import NoCloseCursor._ // The base range vectors are already closed, so no close propagation needed
+        Observable.now(IteratorBackedRangeVector(CustomRangeVectorKey.empty,
+          NoCloseCursor(accs.toIterator.map(_.toRowReader))))
       } else {
         Observable.empty
       }

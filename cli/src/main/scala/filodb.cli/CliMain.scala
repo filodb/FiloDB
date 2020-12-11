@@ -30,7 +30,6 @@ import filodb.query._
 // scalastyle:off
 class Arguments(args: Seq[String]) extends ScallopConf(args) {
 
-
   val dataset = opt[String]()
   val database = opt[String]()
   val command = opt[String]()
@@ -64,6 +63,9 @@ class Arguments(args: Seq[String]) extends ScallopConf(args) {
   val everynseconds = opt[String]()
   val shards = opt[List[String]]()
   val spread = opt[Int]()
+  val k = opt[Int]()
+  val shardkeyprefix = opt[List[String]](default = Some(List()))
+
   verify()
 
   override def onError(e: Throwable): Unit = e match {
@@ -101,6 +103,7 @@ object CliMain extends FilodbClusterNode {
     println("  --host <hostname/IP> [--port ...] --command list")
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labelvalues --labelName <lable-names> --labelfilter <label-filter> --dataset <dataset>")
+    println("  --host <hostname/IP> [--port ...] --command topkcard --dataset prometheus --k 2 --shardkeyprefix demo App-0")
     println("""  --command promFilterToPartKeyBR --promql "myMetricName{_ws_='myWs',_ns_='myNs'}" --schema prom-counter""")
     println("""  --command partKeyBrAsString --hexpk 0x2C0000000F1712000000200000004B8B36940C006D794D65747269634E616D650E00C104006D794E73C004006D795773""")
     println("""  --command decodeChunkInfo --hexchunkinfo 0x12e8253a267ea2db060000005046fc896e0100005046fc896e010000""")
@@ -132,8 +135,8 @@ object CliMain extends FilodbClusterNode {
     }
 
   def main(rawArgs: Array[String]): Unit = {
-    val args = new Arguments(rawArgs)
     try {
+      val args = new Arguments(rawArgs)
       val timeout = args.timeoutseconds().seconds
       args.command.toOption match {
         case Some("init") =>
@@ -164,6 +167,23 @@ object CliMain extends FilodbClusterNode {
           val (remote, ref) = getClientAndRef(args)
           val values = remote.getIndexValues(ref, args.indexname(), args.shards().head.toInt, args.limit())
           values.foreach { case (term, freq) => println(f"$term%40s\t$freq") }
+
+        case Some("topkcard") =>
+          require(args.host.isDefined && args.dataset.isDefined && args.k.isDefined,
+            "--host, --dataset, --k must be defined")
+          val (remote, ref) = getClientAndRef(args)
+          val res = remote.getTopkCardinality(ref, args.shards.getOrElse(Nil).map(_.toInt),
+                                                 args.shardkeyprefix(), args.k())
+          println(s"ShardKeyPrefix: ${args.shardkeyprefix}")
+          res.groupBy(_.shard).foreach { crs =>
+            println(s"Shard: ${crs._1}")
+            printf("%40s %12s %10s %10s\n", "Child", "TimeSeries", "Children", "Children")
+            printf("%40s %12s %10s %10s\n", "Name", "Count", "Count", "Quota")
+            println("===================================================================================")
+            crs._2.foreach { cr =>
+              printf("%40s %12d %10d %10d\n", cr.childName, cr.timeSeriesCount, cr.childrenCount, cr.childrenQuota)
+            }
+          }
 
         case Some("status") =>
           val (remote, ref) = getClientAndRef(args)
@@ -349,9 +369,11 @@ object CliMain extends FilodbClusterNode {
                     options: QOptions, tsdbQueryParams: TsdbQueryParams): Unit = {
     val ref = DatasetRef(dataset)
     val spreadProvider: Option[SpreadProvider] = options.spread.map(s => StaticSpreadProvider(SpreadChange(0, s)))
-    val qOpts = QueryContext(tsdbQueryParams, spreadProvider, options.sampleLimit)
-                             .copy(queryTimeoutMillis = options.timeout.toMillis.toInt,
-                                   shardOverrides = options.shardOverrides)
+
+    val qOpts = QueryContext(origQueryParams = tsdbQueryParams,
+      plannerParams = PlannerParams(applicationId = "filodb-cli", spreadOverride = spreadProvider,
+        sampleLimit = options.sampleLimit, queryTimeoutMillis = options.timeout.toMillis.toInt,
+        shardOverrides = options.shardOverrides))
     println(s"Sending query command to server for $ref with options $qOpts...")
     println(s"Query Plan:\n$plan")
     options.everyN match {

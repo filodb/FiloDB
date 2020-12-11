@@ -1,8 +1,9 @@
 package filodb.query.exec.aggregator
 
-import scala.collection.mutable
+import java.util.concurrent.TimeUnit
 
-import kamon.Kamon
+import scala.collection.mutable
+import scala.collection.mutable.ListBuffer
 
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.FiloSchedulers
@@ -26,6 +27,10 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
   private val rvkStringCache = mutable.HashMap[RangeVectorKey, ZeroCopyUTF8String]()
 
   case class RVKeyAndValue(rvk: ZeroCopyUTF8String, value: Double)
+  val colSchema = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+    ColumnInfo("value", ColumnType.DoubleColumn))
+  val recSchema = SerializedRangeVector.toSchema(colSchema)
+
   class TopKHolder(var timestamp: Long = 0L) extends AggregateHolder {
     val valueOrdering = Ordering.by[RVKeyAndValue, Double](kr => kr.value)
     implicit val ordering = if (bottomK) valueOrdering else valueOrdering.reverse
@@ -58,7 +63,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
   def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = {
     val rvkString = rvkStringCache.getOrElseUpdate(rvk, CustomRangeVectorKey.toZcUtf8(rvk))
     mapInto.setLong(0, item.getLong(0))
-    // TODO: Use setBlob instead of setString once RowReeder has the support for blob
+    // TODO: Use setBlob instead of setString once RowReader has the support for blob
     mapInto.setString(1, rvkString)
     mapInto.setDouble(2, item.getDouble(1))
     var i = 3
@@ -83,35 +88,52 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
     acc
   }
 
-  def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = {
-    val colSchema = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
-      ColumnInfo("value", ColumnType.DoubleColumn))
-    val recSchema = SerializedRangeVector.toSchema(colSchema)
+  private def addRecordToBuilder(builder: RecordBuilder, timeStampMs: Long, value: Double): Unit = {
+    builder.startNewRecord(recSchema)
+    builder.addLong(timeStampMs)
+    builder.addDouble(value)
+    builder.endRecord()
+  }
+
+  /**
+   Create new builder and add NaN till current time
+   */
+  private def createBuilder(rangeParams: RangeParams, currentTime: Long): RecordBuilder= {
+    val builder = SerializedRangeVector.newBuilder();
+    for (t <- rangeParams.startSecs to (currentTime - rangeParams.stepSecs) by rangeParams.stepSecs) {
+      addRecordToBuilder(builder, t * 1000, Double.NaN)
+    }
+    builder
+  }
+
+  def present(aggRangeVector: RangeVector, limit: Int, rangeParams: RangeParams): Seq[RangeVector] = {
     val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
-    val span = Kamon.spanBuilder(s"execplan-scan-latency-TopBottomK").start()
     try {
       FiloSchedulers.assertThreadName(QuerySchedName)
-      ChunkMap.validateNoSharedLocks()
+      ChunkMap.validateNoSharedLocks(s"TopkQuery-$k-$bottomK")
       // We limit the results wherever it is materialized first. So it is done here.
-      aggRangeVector.rows.take(limit).foreach { row =>
+      val rows = aggRangeVector.rows.take(limit)
+      for (t <- rangeParams.startSecs to rangeParams.endSecs by rangeParams.stepSecs) {
+        val rvkSeen = new ListBuffer[RangeVectorKey]
+        val row = rows.next()
         var i = 1
         while (row.notNull(i)) {
           if (row.filoUTF8String(i) != CustomRangeVectorKey.emptyAsZcUtf8) {
             val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
-            val builder = resRvs.getOrElseUpdate(rvk, SerializedRangeVector.newBuilder())
-            builder.startNewRecord(recSchema)
-            builder.addLong(row.getLong(0))
-            builder.addDouble(row.getDouble(i + 1))
-            builder.endRecord()
+            rvkSeen += rvk
+            val builder = resRvs.getOrElseUpdate(rvk, createBuilder(rangeParams, t))
+            addRecordToBuilder(builder, TimeUnit.SECONDS.toMillis(t), row.getDouble(i + 1))
           }
           i += 2
+        }
+        resRvs.keySet.foreach { rvs =>
+          if (!rvkSeen.contains(rvs)) addRecordToBuilder(resRvs.get(rvs).get, t * 1000, Double.NaN)
         }
       }
     } finally {
       aggRangeVector.rows().close()
       ChunkMap.releaseAllSharedLocks()
     }
-    span.finish()
     resRvs.map { case (key, builder) =>
       val numRows = builder.allContainers.map(_.countRecords).sum
       new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0)
