@@ -5,11 +5,11 @@ import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
-import filodb.core.query.{PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query.Filter.Equals
+import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.LogicalPlan
@@ -471,4 +471,42 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
       (endSeconds * 1000)
   }
 
+
+  it ("should generate multipartition BinaryJoin") {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
+      TimeRange(timeRange.startMs, timeRange.endMs)))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        if (routingKey.equals(Map("job" -> "app1"))) List(
+          PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs,
+            timeRange.endMs)))
+        else List(
+          PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,
+            timeRange.endMs)))
+      }
+
+      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("""test1{job = "app1"} + test2{job = "app2"}""",
+      TimeStepParams(1000, 100, 10000))
+
+    val promQlQueryParams = PromQlQueryParams("""test1{job = "app1"} + test2{job = "app2"}""", 1000, 100, 10000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
+    execPlan.asInstanceOf[BinaryJoinExec].lhs.head.isInstanceOf[PromQlRemoteExec] shouldEqual(true)
+    execPlan.asInstanceOf[BinaryJoinExec].rhs.head.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual(true)
+
+    execPlan.asInstanceOf[BinaryJoinExec].lhs.head.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf
+      [PromQlQueryParams].promQl shouldEqual("""test1{job="app1"}""")
+
+    execPlan.asInstanceOf[BinaryJoinExec].rhs.head.asInstanceOf[LocalPartitionDistConcatExec].children.head.
+      asInstanceOf[MultiSchemaPartitionsExec].filters.contains(ColumnFilter("job", Equals("app2"))) shouldEqual(true)
+
+  }
 }
