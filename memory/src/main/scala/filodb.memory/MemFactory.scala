@@ -202,14 +202,12 @@ object BlockMemFactory {
   *
   * @param blockStore The BlockManager which is used to request more blocks when the current
   *                   block is full.
-  * @param bucketTime the timebucket (timestamp) from which to allocate block(s), or None for the general list
   * @param metadataAllocSize the additional size in bytes to ensure is free for writing metadata, per chunk
   * @param tags a set of keys/values to identify the purpose of this MemFactory for debugging
   * @param markFullBlocksAsReclaimable Immediately mark and fully used block as reclaimable.
   *                                    Typically true during on-demand paging of optimized chunks from persistent store
   */
 class BlockMemFactory(blockStore: BlockManager,
-                      bucketTime: Option[Long],
                       metadataAllocSize: Int,
                       var tags: Map[String, String],
                       markFullBlocksAsReclaimable: Boolean = false) extends MemFactory with StrictLogging {
@@ -217,12 +215,13 @@ class BlockMemFactory(blockStore: BlockManager,
   val optionSelf = Some(this)
 
   // tracks fully populated blocks not marked reclaimable yet (typically waiting for flush)
+  // NOT used in ODP block mem factories where markFullBlocksAsReclaimable = true
   val fullBlocksToBeMarkedAsReclaimable = ListBuffer[Block]()
 
   // tracks block currently being populated
   var currentBlock = requestBlock()
 
-  private def requestBlock() = blockStore.requestBlock(bucketTime, optionSelf).get
+  private def requestBlock() = blockStore.requestBlock(markFullBlocksAsReclaimable, optionSelf).get
 
   // tracks blocks that should share metadata
   private val metadataSpan: ListBuffer[Block] = ListBuffer[Block]()
@@ -262,6 +261,9 @@ class BlockMemFactory(blockStore: BlockManager,
   /**
     * Starts tracking a span of multiple Blocks over which the same metadata should be applied.
     * An example would be chunk metadata for chunks written to potentially more than 1 block.
+    *
+    * IMPORTANT: Acquire blockMemFactory.synchronized before calling startMetaSpan and release after endMetaSpan
+    *
     */
   def startMetaSpan(): Unit = {
     metadataSpan.clear()
@@ -271,6 +273,8 @@ class BlockMemFactory(blockStore: BlockManager,
   /**
     * Stops tracking the blocks that the same metadata should be applied to, and allocates and writes metadata
     * for those spanned blocks.
+    * IMPORTANT: Acquire blockMemFactory.synchronized before calling startMetaSpan and release after endMetaSpan
+    *
     * @param metadataWriter the function to write metadata to each block.  Param is the long metadata address.
     * @param metaSize the number of bytes the piece of metadata takes
     * @return the Long native address of the last metadata block written
@@ -296,7 +300,7 @@ class BlockMemFactory(blockStore: BlockManager,
         if (markFullBlocksAsReclaimable) {
           // We know that all the blocks in the span except the last one is full, so mark them reclaimable
           blk.markReclaimable()
-        } else synchronized {
+        } else {
           fullBlocksToBeMarkedAsReclaimable += blk
         }
       }
@@ -385,7 +389,8 @@ class BlockMemFactory(blockStore: BlockManager,
   def shutdown(): Unit = {}
 
   def debugString: String =
-    s"BlockMemFactory($bucketTime, $metadataAllocSize) ${tags.map { case (k, v) => s"$k=$v" }.mkString(" ")}"
+    s"BlockMemFactory($markFullBlocksAsReclaimable, $metadataAllocSize) " +
+      s"${tags.map { case (k, v) => s"$k=$v" }.mkString(" ")}"
 }
 
 

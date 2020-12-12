@@ -13,6 +13,7 @@ import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -56,7 +57,6 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   import collection.JavaConverters._
 
   import filodb.core.store._
-  import Perftools._
 
   logger.info(s"Starting CassandraColumnStore with config ${cassandraConfig.withoutPath("password")}")
 
@@ -67,6 +67,13 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   private val numTokenRangeSplitsForScans = cassandraConfig.getInt("num-token-range-splits-for-scans")
 
   val sinkStats = new ChunkSinkStats
+
+  val writeChunksetLatency = Kamon.histogram("cass-write-chunkset-latency", MeasurementUnit.time.milliseconds)
+                                              .withoutTags()
+  val writePksLatency = Kamon.histogram("cass-write-part-keys-latency", MeasurementUnit.time.milliseconds)
+                                              .withoutTags()
+  val readChunksBatchLatency = Kamon.histogram("cassandra-per-batch-chunk-read-latency",
+                            MeasurementUnit.time.milliseconds).withoutTags()
 
   def initialize(dataset: DatasetRef, numShards: Int): Future[Response] = {
       val chunkTable = getOrCreateChunkTable(dataset)
@@ -133,49 +140,45 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
             chunksets: Observable[ChunkSet],
             diskTimeToLiveSeconds: Int = 259200): Future[Response] = {
     chunksets.mapAsync(writeParallelism) { chunkset =>
-               val span = Kamon.spanBuilder("write-chunkset").asChildOf(Kamon.currentSpan()).start()
-               val partBytes = BinaryRegionLarge.asNewByteArray(chunkset.partition)
-               val future =
-                 for { writeChunksResp   <- writeChunks(ref, partBytes, chunkset, diskTimeToLiveSeconds)
-                       if writeChunksResp == Success
-                       writeIndicesResp  <- writeIndices(ref, partBytes, chunkset, diskTimeToLiveSeconds)
-                       if writeIndicesResp == Success
-                 } yield {
-                   span.finish()
-                   sinkStats.chunksetWrite()
-                   writeIndicesResp
-                 }
-               Task.fromFuture(future)
+      val start = System.currentTimeMillis()
+      val partBytes = BinaryRegionLarge.asNewByteArray(chunkset.partition)
+           val future =
+             for { writeChunksResp   <- writeChunks(ref, partBytes, chunkset, diskTimeToLiveSeconds)
+                   if writeChunksResp == Success
+                   writeIndicesResp  <- writeIndices(ref, partBytes, chunkset, diskTimeToLiveSeconds)
+                   if writeIndicesResp == Success
+             } yield {
+               writeChunksetLatency.record(System.currentTimeMillis() - start)
+               sinkStats.chunksetWrite()
+               writeIndicesResp
              }
-             .countL.runAsync
-             .map { chunksWritten =>
-               if (chunksWritten > 0) Success else NotApplied
-             }
+           Task.fromFuture(future)
+         }
+         .countL.runAsync
+         .map { chunksWritten =>
+           if (chunksWritten > 0) Success else NotApplied
+         }
   }
 
   private def writeChunks(ref: DatasetRef,
                           partition: Array[Byte],
                           chunkset: ChunkSet,
                           diskTimeToLiveSeconds: Int): Future[Response] = {
-    asyncSubtrace("write-chunks", "ingestion") {
-      val chunkTable = getOrCreateChunkTable(ref)
-      chunkTable.writeChunks(partition, chunkset.info, chunkset.chunks, sinkStats, diskTimeToLiveSeconds)
-        .collect {
-          case Success => chunkset.invokeFlushListener(); Success
-        }
-    }
+    val chunkTable = getOrCreateChunkTable(ref)
+    chunkTable.writeChunks(partition, chunkset.info, chunkset.chunks, sinkStats, diskTimeToLiveSeconds)
+      .collect {
+        case Success => chunkset.invokeFlushListener(); Success
+      }
   }
 
   private def writeIndices(ref: DatasetRef,
                            partition: Array[Byte],
                            chunkset: ChunkSet,
                            diskTimeToLiveSeconds: Int): Future[Response] = {
-    asyncSubtrace("write-index", "ingestion") {
-      val indexTable = getOrCreateIngestionTimeIndexTable(ref)
-      val info = chunkset.info
-      val infos = Seq((info.ingestionTime, info.startTime, ChunkSetInfo.toBytes(info)))
-      indexTable.writeIndices(partition, infos, sinkStats, diskTimeToLiveSeconds)
-    }
+    val indexTable = getOrCreateIngestionTimeIndexTable(ref)
+    val info = chunkset.info
+    val infos = Seq((info.ingestionTime, info.startTime, ChunkSetInfo.toBytes(info)))
+    indexTable.writeIndices(partition, infos, sinkStats, diskTimeToLiveSeconds)
   }
 
   /**
@@ -212,11 +215,11 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
         s"endTimeExclusive=$endTimeExclusive maxChunkTime=$maxChunkTime")
       // This could be more parallel, but decision was made to control parallelism at one place: In spark (via its
       // parallelism configuration. Revisit if needed later.
-      val batchReadSpan = Kamon.spanBuilder("cassandra-per-batch-data-read-latency").start()
+      val start = System.currentTimeMillis()
       try {
         chunksTable.readRawPartitionRangeBBNoAsync(parts, userTimeStart - maxChunkTime, endTimeExclusive)
       } finally {
-        batchReadSpan.finish()
+        readChunksBatchLatency.record(System.currentTimeMillis() - start)
       }
     }
   }
@@ -376,7 +379,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                     writeToPkUTTable: Boolean = true): Future[Response] = {
     val pkTable = getOrCreatePartitionKeysTable(ref, shard)
     val pkByUTTable = getOrCreatePartitionKeysByUpdateTimeTable(ref)
-    val span = Kamon.spanBuilder("write-part-keys").asChildOf(Kamon.currentSpan()).start()
+    val start = System.currentTimeMillis()
     val ret = partKeys.mapAsync(writeParallelism) { pk =>
       val ttl = if (pk.endTime == Long.MaxValue) -1 else diskTTLSeconds
       // caller needs to supply hash for partKey - cannot be None
@@ -393,7 +396,9 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
         resp
       }
     }.findL(_.isInstanceOf[ErrorResponse]).map(_.getOrElse(Success)).runAsync
-    ret.onComplete(_ => span.finish())
+    ret.onComplete { _ =>
+      writePksLatency.record(System.currentTimeMillis() - start)
+    }
     ret
   }
 

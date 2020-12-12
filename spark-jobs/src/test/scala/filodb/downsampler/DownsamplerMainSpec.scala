@@ -132,7 +132,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
       val rr = new BinaryRecordRowReader(Schemas.untyped.ingestionSchema, base, offset)
-      part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory)
+      part.ingest(lastSampleTime, rr, offheapMem.blockMemFactory, createChunkAtFlushBoundary = false,
+        flushIntervalMillis = Option.empty)
     }
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
@@ -174,7 +175,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
       val rr = new BinaryRecordRowReader(Schemas.gauge.ingestionSchema, base, offset)
-      part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory)
+      part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory, createChunkAtFlushBoundary = false,
+        flushIntervalMillis = Option.empty)
     }
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
@@ -214,7 +216,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
       val rr = new BinaryRecordRowReader(Schemas.gauge.ingestionSchema, base, offset)
-      part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory)
+      part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory, createChunkAtFlushBoundary = false,
+        flushIntervalMillis = Option.empty)
     }
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
@@ -260,7 +263,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
       val rr = new BinaryRecordRowReader(Schemas.promCounter.ingestionSchema, base, offset)
-      part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory)
+      part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory, createChunkAtFlushBoundary = false,
+        flushIntervalMillis = Option.empty)
     }
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
@@ -307,7 +311,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
       val rr = new BinaryRecordRowReader(Schemas.promHistogram.ingestionSchema, base, offset)
-      part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory)
+      part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory, createChunkAtFlushBoundary = false,
+        flushIntervalMillis = Option.empty)
     }
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
@@ -665,8 +670,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     Seq(gaugeName, gaugeLowFreqName, counterName, histName).foreach { metricName =>
       val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(metricName))
-      val exec = MultiSchemaPartitionsExec(QueryContext(sampleLimit = 1000), InProcessPlanDispatcher,
-        batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
+      val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams = PlannerParams(sampleLimit = 1000)),
+        InProcessPlanDispatcher, batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
 
       val querySession = QuerySession(QueryContext(), queryConfig)
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
@@ -693,8 +698,9 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
 
       val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(untypedName))
-      val exec = MultiSchemaPartitionsExec(QueryContext(sampleLimit = 1000), InProcessPlanDispatcher,
-        batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
+      val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams
+        = PlannerParams(sampleLimit = 1000)), InProcessPlanDispatcher, batchDownsampler.rawDatasetRef, 0,
+        queryFilters, AllChunkScan)
 
       val querySession = QuerySession(QueryContext(), queryConfig)
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
@@ -715,9 +721,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(gaugeName))
-    val exec = MultiSchemaPartitionsExec(QueryContext(sampleLimit = 1000), InProcessPlanDispatcher,
-      batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan,
-      colName = Option("sum"))
+    val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams = PlannerParams(sampleLimit = 1000)),
+      InProcessPlanDispatcher, batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan, colName = Option("sum"))
     val querySession = QuerySession(QueryContext(), queryConfig)
     val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
     val res = exec.execute(downsampleTSStore, querySession)(queryScheduler)

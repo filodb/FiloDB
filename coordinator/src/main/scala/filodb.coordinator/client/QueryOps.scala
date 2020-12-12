@@ -5,8 +5,9 @@ import scala.concurrent.duration._
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core._
+import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.query.QueryContext
-import filodb.query.{LogicalPlan => LogicalPlan2, QueryResponse => QueryResponse2}
+import filodb.query.{LogicalPlan => LogicalPlan2, QueryError, QueryResponse => QueryResponse2}
 
 trait QueryOps extends ClientBase with StrictLogging {
   import QueryCommands._
@@ -44,6 +45,16 @@ trait QueryOps extends ClientBase with StrictLogging {
       case s: Seq[(String, Int)] @unchecked => s
     }
 
+  def getTopkCardinality(dataset: DatasetRef,
+                     shards: Seq[Int],
+                     shardKeyPrefix: Seq[String],
+                     k: Int,
+                     timeout: FiniteDuration = 15.seconds): Seq[CardinalityRecord] =
+    askCoordinator(GetTopkCardinality(dataset, shards, shardKeyPrefix, k), timeout) {
+      case s: Seq[CardinalityRecord] @unchecked => s
+      case e: QueryError => throw e.t
+    }
+
   /**
     * Asks the FiloDB node to perform a query using a LogicalPlan.
     * @param dataset the Dataset (and Database) to query
@@ -58,7 +69,7 @@ trait QueryOps extends ClientBase with StrictLogging {
     // NOTE: It's very important to extend the query timeout for the ask itself, because the queryTimeoutMillis is
     // the internal FiloDB scatter-gather timeout.  We need additional time for the proper error to get transmitted
     // back in case of internal timeouts.
-    askCoordinator(qCmd, (qContext.queryTimeoutMillis + 10000).millis) { case r: QueryResponse2 => r }
+    askCoordinator(qCmd, (qContext.plannerParams.queryTimeoutMillis + 10000).millis) { case r: QueryResponse2 => r }
   }
 
 }

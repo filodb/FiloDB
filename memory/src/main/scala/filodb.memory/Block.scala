@@ -108,16 +108,6 @@ class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimL
   }
 
   /**
-   * Marks this block as reclaimable if unowned, or if the owner hasn't used the block in a while.
-   */
-  def tryMarkReclaimable(): Unit = {
-    owner match {
-      case None => markReclaimable
-      case Some(bmf) => bmf.tryMarkReclaimable
-    }
-  }
-
-  /**
     * Marks this memory as free. Also zeroes all the bytes from the beginning address until capacity
     */
   override protected def free(): Unit = {

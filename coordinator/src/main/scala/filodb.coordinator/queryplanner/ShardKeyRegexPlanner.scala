@@ -1,7 +1,7 @@
 package filodb.coordinator.queryplanner
 
 import filodb.core.metadata.{Dataset, Schemas}
-import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryContext}
+import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
 import filodb.query._
 import filodb.query.exec._
 
@@ -26,10 +26,13 @@ case class ShardKeyMatcher(columnFilters: Seq[ColumnFilter], query: String)
 
 class ShardKeyRegexPlanner(dataset: Dataset,
                            queryPlanner: QueryPlanner,
-                           shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]])
+                           shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]],
+                           queryConfig: QueryConfig)
   extends QueryPlanner with PlannerMaterializer {
+  val datasetMetricColumn = dataset.options.metricColumn
 
   override val schemas = Schemas(dataset.schema)
+
   /**
     * Converts a logical plan to execution plan.
     *
@@ -65,24 +68,45 @@ class ShardKeyRegexPlanner(dataset: Dataset,
   private def generateExecWithoutRegex(logicalPlan: LogicalPlan, nonMetricShardKeyFilters: Seq[ColumnFilter],
                                        qContext: QueryContext): Seq[ExecPlan] = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    shardKeyMatcher(nonMetricShardKeyFilters).map { result =>
+    val shardKeyMatches = shardKeyMatcher(nonMetricShardKeyFilters)
+    val skipAggregatePresentValue = if (shardKeyMatches.length == 1) false else true
+    shardKeyMatches.map { result =>
         val newLogicalPlan = logicalPlan.replaceFilters(result)
         // Querycontext should just have the part of query which has regex
         // For example for exp(sum(test{_ws_ = "demo", _ns_ =~ "App.*"})), sub queries should be
         // sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
         val newQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
-        val newQueryContext = qContext.copy(origQueryParams = newQueryParams)
+        val newQueryContext = qContext.copy(origQueryParams = newQueryParams, plannerParams = qContext.plannerParams.
+          copy(skipAggregatePresent = skipAggregatePresentValue))
         queryPlanner.materialize(logicalPlan.replaceFilters(result), newQueryContext)
       }
   }
 
   /**
     * For binary join queries like test1{_ws_ = "demo", _ns_ =~ "App.*"} + test2{_ws_ = "demo", _ns_ =~ "App.*"})
+    * LHS and RHS could be across multiple partitions
     */
-  private def materializeBinaryJoin(binaryJoin: BinaryJoin, qContext: QueryContext): PlanResult = {
-   if (LogicalPlan.hasShardKeyEqualsOnly(binaryJoin, dataset.options.nonMetricShardColumns))
-     PlanResult(Seq(queryPlanner.materialize(binaryJoin, qContext)))
-   else throw new UnsupportedOperationException("Regex not supported for Binary Join")
+  private def materializeBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): PlanResult = {
+    val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
+    val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
+
+    val lhsExec = materialize(logicalPlan.lhs, lhsQueryContext)
+    val rhsExec = materialize(logicalPlan.rhs, rhsQueryContext)
+
+    val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
+
+    val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
+         SetOperatorExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+          LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
+      else
+         BinaryJoinExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+          logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn)
+     PlanResult(Seq(execPlan))
   }
 
   /***
@@ -95,9 +119,14 @@ class ShardKeyRegexPlanner(dataset: Dataset,
       LogicalPlan.getNonMetricShardKeyFilters(aggregate, dataset.options.nonMetricShardColumns).head, queryContext)
     val exec = if (execPlans.size == 1) execPlans.head
     else {
+      if (aggregate.operator.equals(AggregationOperator.TopK) || aggregate.operator.equals(AggregationOperator.BottomK)
+        || aggregate.operator.equals(AggregationOperator.CountValues))
+         throw new UnsupportedOperationException(s"Shard Key regex not supported for ${aggregate.operator}")
       val reducer = MultiPartitionReduceAggregateExec(queryContext, InProcessPlanDispatcher,
         execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
-      reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params))
+      val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+      reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
+        RangeParams(promQlQueryParams.startSecs, promQlQueryParams.stepSecs, promQlQueryParams.endSecs)))
       reducer
     }
     PlanResult(Seq(exec))

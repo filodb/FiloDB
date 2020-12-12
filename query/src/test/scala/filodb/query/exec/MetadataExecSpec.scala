@@ -2,7 +2,6 @@ package filodb.query.exec
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
-
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.execution.Scheduler
@@ -10,13 +9,12 @@ import monix.execution.Scheduler.Implicits.global
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.core.MetricsTestData._
 import filodb.core.TestData
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, QueryConfig, QueryContext, QuerySession, SerializedRangeVector}
+import filodb.core.query.{ColumnFilter, Filter, PlannerParams, QueryConfig, QueryContext, QuerySession, SerializedRangeVector}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
@@ -142,7 +140,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val filters = Seq (ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     //Reducing limit results in truncated metadata response
-    val execPlan = PartKeysExec(QueryContext(sampleLimit = limit-1), dummyDispatcher,
+    val execPlan = PartKeysExec(QueryContext(plannerParams= PlannerParams(sampleLimit = limit - 1)), dummyDispatcher,
       timeseriesDataset.ref, 0, filters, false, now-5000, now)
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
