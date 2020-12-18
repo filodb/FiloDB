@@ -378,7 +378,7 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
        }
 
       // address step == 0 case
-      if (rangeParams.startSecs == rangeParams.endSecs) it.take(1).toList else it.toList
+      if (rangeParams.startSecs == rangeParams.endSecs || rangeParams.stepSecs == 0) it.take(1).toList else it.toList
       new RangeVector {
         override def key: RangeVectorKey = if (rowList.isEmpty) CustomRangeVectorKey.empty else keysFromFilter
         override def rows(): RangeVectorCursor = {

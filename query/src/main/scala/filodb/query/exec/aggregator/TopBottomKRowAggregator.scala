@@ -137,7 +137,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
         }
       }
       // address step == 0 case
-      if (rangeParams.startSecs == rangeParams.endSecs) it.take(1).toList else it.toList
+      if (rangeParams.startSecs == rangeParams.endSecs || rangeParams.stepSecs == 0) it.take(1).toList else it.toList
     } finally {
       aggRangeVector.rows().close()
       ChunkMap.releaseAllSharedLocks()
