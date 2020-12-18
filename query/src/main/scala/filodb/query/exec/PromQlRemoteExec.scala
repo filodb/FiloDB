@@ -43,14 +43,26 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
   override val urlParams = Map("query" -> promQlQueryParams.promQl)
 
-  override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
+  override def sendHttpRequest(execPlan2Span: Span, pTimeoutMs: Long)
                               (implicit sched: Scheduler): Future[QueryResponse] = {
+
+    import PromCirceSupport._
+    import io.circe.parser
     remoteExecHttpClient.httpGet(queryContext.plannerParams.applicationId, queryEndpoint,
       requestTimeoutMs, queryContext.submitTime, getUrlParams())
       .map { response =>
-        response.unsafeBody match {
-          case Left(error) => QueryError(queryContext.queryId, error.error)
-          case Right(successResponse) => toQueryResponse(successResponse.data, queryContext.queryId, execPlan2Span)
+        if (response.body.isLeft)
+        {
+          parser.decode[RemoteErrorResponse](response.body.left.get) match {
+              case Right(errorResponse) => RemoteQueryError(queryContext.queryId, errorResponse, response.code.toInt)
+              case Left(ex)             => QueryError(queryContext.queryId, ex)
+            }
+        }
+        else {
+          response.unsafeBody match {
+            case Left(error)            => QueryError(queryContext.queryId, error.error)
+            case Right(successResponse) => toQueryResponse(successResponse.data, queryContext.queryId, execPlan2Span)
+          }
         }
       }
   }
