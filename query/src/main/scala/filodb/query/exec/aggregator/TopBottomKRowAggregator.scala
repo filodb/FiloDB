@@ -2,7 +2,7 @@ package filodb.query.exec.aggregator
 
 import java.util.concurrent.TimeUnit
 
-import scala.collection.mutable
+import scala.collection.{mutable, Iterator}
 import scala.collection.mutable.ListBuffer
 
 import filodb.core.binaryrecord2.RecordBuilder
@@ -67,7 +67,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
     mapInto.setString(1, rvkString)
     mapInto.setDouble(2, item.getDouble(1))
     var i = 3
-    while(i<numRowReaderColumns) {
+    while(i < numRowReaderColumns) {
       mapInto.setString(i, CustomRangeVectorKey.emptyAsZcUtf8)
       mapInto.setDouble(i + 1, if (bottomK) Double.MaxValue else Double.MinValue)
       i += 2
@@ -100,9 +100,13 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
    */
   private def createBuilder(rangeParams: RangeParams, currentTime: Long): RecordBuilder= {
     val builder = SerializedRangeVector.newBuilder();
-    for (t <- rangeParams.startSecs to (currentTime - rangeParams.stepSecs) by rangeParams.stepSecs) {
+    val it = Iterator.from(0, rangeParams.stepSecs.toInt)
+      .takeWhile(_ <= (currentTime - rangeParams.stepSecs) - rangeParams.startSecs).map { i =>
+      val t = i + rangeParams.startSecs
       addRecordToBuilder(builder, t * 1000, Double.NaN)
     }
+    // when step == 0 we don't need to add to builder
+    if (rangeParams.startSecs != rangeParams.endSecs) it.toList
     builder
   }
 
@@ -113,7 +117,9 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
       ChunkMap.validateNoSharedLocks(s"TopkQuery-$k-$bottomK")
       // We limit the results wherever it is materialized first. So it is done here.
       val rows = aggRangeVector.rows.take(limit)
-      for (t <- rangeParams.startSecs to rangeParams.endSecs by rangeParams.stepSecs) {
+      val it = Iterator.from(0, rangeParams.stepSecs.toInt)
+        .takeWhile(_ <= (rangeParams.endSecs - rangeParams.startSecs)).map { t =>
+        val timestamp = t + rangeParams.startSecs
         val rvkSeen = new ListBuffer[RangeVectorKey]
         val row = rows.next()
         var i = 1
@@ -121,19 +127,22 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
           if (row.filoUTF8String(i) != CustomRangeVectorKey.emptyAsZcUtf8) {
             val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
             rvkSeen += rvk
-            val builder = resRvs.getOrElseUpdate(rvk, createBuilder(rangeParams, t))
-            addRecordToBuilder(builder, TimeUnit.SECONDS.toMillis(t), row.getDouble(i + 1))
+            val builder = resRvs.getOrElseUpdate(rvk, createBuilder(rangeParams, timestamp))
+            addRecordToBuilder(builder, TimeUnit.SECONDS.toMillis(timestamp), row.getDouble(i + 1))
           }
           i += 2
         }
         resRvs.keySet.foreach { rvs =>
-          if (!rvkSeen.contains(rvs)) addRecordToBuilder(resRvs.get(rvs).get, t * 1000, Double.NaN)
+          if (!rvkSeen.contains(rvs)) addRecordToBuilder(resRvs.get(rvs).get, timestamp * 1000, Double.NaN)
         }
       }
+      // address step == 0 case
+      if (rangeParams.startSecs == rangeParams.endSecs || rangeParams.stepSecs == 0) it.take(1).toList else it.toList
     } finally {
       aggRangeVector.rows().close()
       ChunkMap.releaseAllSharedLocks()
     }
+
     resRvs.map { case (key, builder) =>
       val numRows = builder.allContainers.map(_.countRecords).sum
       new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0)
