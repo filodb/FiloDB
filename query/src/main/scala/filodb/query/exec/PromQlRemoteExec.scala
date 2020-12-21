@@ -51,8 +51,9 @@ case class PromQlRemoteExec(queryEndpoint: String,
     remoteExecHttpClient.httpGet(queryContext.plannerParams.applicationId, queryEndpoint,
       requestTimeoutMs, queryContext.submitTime, getUrlParams())
       .map { response =>
-        if (response.body.isLeft)
-        {
+        // Error response from remote partition is a nested json present in response.body
+        // as response status code is not 2xx
+        if (response.body.isLeft) {
           parser.decode[RemoteErrorResponse](response.body.left.get) match {
               case Right(errorResponse) => RemoteQueryError(queryContext.queryId, errorResponse, response.code.toInt)
               case Left(ex)             => QueryError(queryContext.queryId, ex)

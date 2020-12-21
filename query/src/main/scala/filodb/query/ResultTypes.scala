@@ -22,7 +22,7 @@ final case class QueryError(id: String, t: Throwable) extends QueryResponse with
 final case class RemoteQueryError(id: String,
                                   errorResponse: RemoteErrorResponse,
                                   statusCode: Int) extends QueryResponse {
-  override def toString: String = s"RemoteQueryError id=$id RemoteErrorResponse=$errorResponse"
+  override def toString: String = s"RemoteQueryError id=$id RemoteErrorResponse=$errorResponse StatusCode=$statusCode"
 }
 /**
   * Use this exception to raise user errors when inside the context of an observable.
