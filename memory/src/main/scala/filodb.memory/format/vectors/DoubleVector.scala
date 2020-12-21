@@ -317,10 +317,11 @@ extends DoubleVectorDataReader {
   // Lazily correct - not all queries want corrected data
   lazy val corrected = {
     // if asked, lazily create corrected values and resets list
-    val _corrected = new Array[Double](length(acc, vect))
+    val len = length(acc, vect) // remember length can mutate during method
+    val _corrected = new Array[Double](len)
     val it = iterate(acc, vect, 0)
     var last = Double.MinValue
-    cforRange { 0 until length(acc, vect) } { pos =>
+    cforRange { 0 until len } { pos =>
       val nextVal = it.next
       if (nextVal < last) {   // reset!
         _correction += last
