@@ -198,11 +198,11 @@ object CliMain extends FilodbClusterNode {
 
         case Some("partKeyBrAsString") =>
           require(args.hexpk.isDefined, "--hexPk must be defined")
-          partKeyBrAsString(args.hexpk())
+          printPartKeyBrAsString(args.hexpk())
 
         case Some("decodeChunkInfo") =>
           require(args.hexchunkinfo.isDefined, "--hexChunkInfo must be defined")
-          decodeChunkInfo(args.hexchunkinfo())
+          printDecodedChunkInfo(args.hexchunkinfo())
 
         case Some("decodeVector") =>
           require(args.hexvector.isDefined && args.vectortype.isDefined, "--hexVector and --vectorType must be defined")
@@ -332,16 +332,26 @@ object CliMain extends FilodbClusterNode {
     }
   }
 
-  def partKeyBrAsString(brHex: String): Unit = {
+  def printPartKeyBrAsString(brHex: String): Unit = {
     val pkBytes = hexStringToByteArray(brHex)
     val partSchema = Schemas.fromConfig(config).get.part
-    println(partSchema.binSchema.stringify(pkBytes))
+    println(partKeyBrAsString(brHex))
   }
 
-  def decodeChunkInfo(hexChunkInfo: String): Unit = {
-    val array = hexStringToByteArray(hexChunkInfo)
-    val ci = ChunkSetInfoOnHeap(array, Array.empty)
+  def partKeyBrAsString(brHex: String): String = {
+    val pkBytes = hexStringToByteArray(brHex)
+    val partSchema = Schemas.fromConfig(config).get.part
+    partSchema.binSchema.stringify(pkBytes)
+  }
+
+  def printDecodedChunkInfo(hexChunkInfo: String): Unit = {
+    val ci = decodeChunkInfo(hexChunkInfo)
     println(s"ChunkSetInfo id=${ci.id} numRows=${ci.numRows} startTime=${ci.startTime} endTime=${ci.endTime}")
+  }
+
+  def decodeChunkInfo(hexChunkInfo: String): ChunkSetInfoOnHeap = {
+    val array = hexStringToByteArray(hexChunkInfo)
+    ChunkSetInfoOnHeap(array, Array.empty)
   }
 
   def decodeVector(hexVector: String, vectorType: String): Unit = {
