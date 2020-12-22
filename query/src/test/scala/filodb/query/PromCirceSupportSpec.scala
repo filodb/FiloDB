@@ -161,4 +161,19 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
        case Left(ex) => throw ex
      }
   }
+
+  it("should parse remote error response") {
+    val input = """[{
+                  |  "status" : "error",
+                  |  "data" : null,
+                  |  "errorType" : "query_materialization_failed",
+                  |  "error" : "Shard: 2 is not available"
+                  |}]""".stripMargin
+
+    parser.decode[List[RemoteErrorResponse]](input) match {
+      case Right(errorResponse) => errorResponse.head shouldEqual(RemoteErrorResponse("error",
+                                   "query_materialization_failed", "Shard: 2 is not available"))
+      case Left(ex)             => throw ex
+    }
+  }
 }

@@ -19,6 +19,11 @@ final case class QueryError(id: String, t: Throwable) extends QueryResponse with
     t.getStackTrace.map(_.toString).mkString("\n")
 }
 
+final case class RemoteQueryError(id: String,
+                                  errorResponse: RemoteErrorResponse,
+                                  statusCode: Int) extends QueryResponse {
+  override def toString: String = s"RemoteQueryError id=$id RemoteErrorResponse=$errorResponse StatusCode=$statusCode"
+}
 /**
   * Use this exception to raise user errors when inside the context of an observable.
   * Currently no other way to raise user errors when returning an observable
