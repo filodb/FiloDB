@@ -188,6 +188,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       case lp: ScalarFixedDoublePlan       => materializeFixedScalar(qContext, lp)
       case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
       case lp: ScalarBinaryOperation       => materializeScalarBinaryOperation(qContext, lp)
+      case lp: SubqueryPlan                => materializeSubQuery(qContext, lp)
       case _                               => throw new BadQueryException("Invalid logical plan")
     }
   }
@@ -343,6 +344,21 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
     (newFilters, schemaOpt)
   }
+
+
+  private def materializeSubQuery(qContext: QueryContext,
+                                   lp: SubqueryPlan): PlanResult = {
+
+    // we have inner plan, inner range and outer range
+
+    // calculate suquery range by GCD (innerStep, outerStep)
+    // subquery: rate(foo[5m])
+    // innerRange = 5m:1m
+    // outerRange =
+    // nestedExecPlan = walkLogicalPlanTree(inner plan with new range params) // dont use outer range here instead use GCD
+    // return nestedExecPlan
+  }
+
 
   private def materializeRawSeries(qContext: QueryContext,
                                    lp: RawSeries): PlanResult = {

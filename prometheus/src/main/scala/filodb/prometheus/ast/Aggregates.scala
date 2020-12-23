@@ -13,6 +13,15 @@ trait Aggregates extends Vectors with TimeUnits with Base {
 
   case class By(labels: Seq[String]) extends AggregateGrouping
 
+
+  case class SubqueryExpression(subquery: Expression, sqr: SubqueryRange) extends Expression with PeriodicSeries {
+    // TODO
+    override def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
+      println(this)
+      ???
+    }
+}
+
   case class AggregateExpression(name: String, params: Seq[Expression],
                                  aggregateGrouping: Option[AggregateGrouping],
                                  altFunctionParams: Seq[Expression]) extends Expression with PeriodicSeries {

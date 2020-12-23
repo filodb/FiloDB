@@ -89,6 +89,21 @@ class MaxOverTimeChunkedFunctionD(var max: Double = Double.NaN) extends ChunkedD
       rowNum += 1
     }
   }
+//
+//  final def addTimeDoubleChunks2(doubleVectAcc: MemoryReader,
+//                                doubleVect: Array[BinaryVector.BinaryVectorPtr],
+//                                doubleReader: bv.DoubleVectorDataReader,
+//                                startRowNum: Array[Int],
+//                                endRowNum: Array[Int]): Unit = {
+//    var rowNum = startRowNum
+//    val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
+//    while (rowNum <= endRowNum) {
+//      val nextVal = it.next
+//      max = if (max.isNaN) nextVal else Math.max(max, nextVal) // cannot compare NaN, always < anything else
+//      rowNum += 1
+//    }
+//  }
+
 }
 
 class MaxOverTimeChunkedFunctionL(var max: Long = Long.MinValue) extends ChunkedLongRangeFunction {

@@ -373,6 +373,32 @@ final case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with
     scalars.replacePeriodicSeriesFilters(filters).asInstanceOf[ScalarPlan])
 }
 
+// rate(foo[5m])[5m:1m]
+// foo[5m:1m] == this should not translate to a subquery. should be treated differently
+// sum(foo)[5m:1m]
+case class SubqueryRangePlan(nestedPlan: PeriodicSeriesPlan, // rate(foo[5m])
+                             innerRange: RangeParams, // [5m:1m]
+                             outerRange: RangeParams // whatever was provided in start/step/end http args
+                            ) extends PeriodicSeriesPlan {
+  override def startMs: Long = outerRange.startSecs * 1000
+  override def stepMs: Long = outerRange.stepSecs * 1000
+  override def endMs: Long = outerRange.endSecs * 1000
+  override def isRoutable: Boolean = false
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = ???
+}
+
+// max_over_time(rate(foo[5m])[5m:1m])
+case class RangeFunctionOverSubQuery(function: RangeFunctionId,
+                                     subQueryPlan: SubqueryRangePlan,
+                                     outerRange: RangeParams
+                                    ) extends PeriodicSeriesPlan {
+  override def startMs: Long = outerRange.startSecs * 1000
+  override def stepMs: Long = outerRange.stepSecs * 1000
+  override def endMs: Long = outerRange.endSecs * 1000
+  override def isRoutable: Boolean = false
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = ???
+}
+
 /**
   * Apply Binary operation between two fixed scalars
   */

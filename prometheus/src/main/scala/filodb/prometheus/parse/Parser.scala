@@ -380,6 +380,18 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
     binaryExpression | aggregateExpression2 | aggregateExpression1 |
       function | unaryExpression | vector | numericalExpression | simpleSeries | precedenceExpression
 
+  lazy val subQueryableExpression: PackratParser[Expression] =
+    binaryExpression | aggregateExpression1 | function | instantVectorSelector
+
+  lazy val subqueryRange: PackratParser[SubqueryRange] = "[" ~ duration ~ ":" ~ duration.? ~ "]" ^^ {
+    case leftBracket ~ timeRange ~ colon ~ step ~ rightBracket => SubqueryRange(timeRange, step)
+  }
+
+  lazy val subQueryRangeExpression: PackratParser[Expression] =
+    subQueryableExpression ~ subqueryRange ^^ {
+      case sqe ~ sqr => SubqueryExpression( sqe, sqr)
+    }
+
 }
 
 ////////////////////// END EXPRESSIONS ///////////////////////////////////////////

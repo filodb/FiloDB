@@ -411,6 +411,13 @@ class ParserSpec extends AnyFunSpec with Matchers {
 
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
+//      "foo[5m:1m]" -> "",
+      "rate(foo[5m])[5m:1m]" -> "",
+      "max_over_time(rate(foo[5m])[5m:1m])" -> "",
+      "max_over_time(sum(rate(foo[5m]))[5m:1m])" -> "",
+      "max_over_time((sum(rate(foo[5m])) + sum(rate(foo[5m])) [5m:1m])" -> "",
+      "sum(rate(foo[5m])[5m:1m])" -> "", // fail
+      "sum(rate(foo[5m])[5m:1m])" -> "", // fail
       "http_requests_total + time()" -> "ScalarVectorBinaryOperation(ADD,ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),false)",
       "time()" -> "ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988))",
       "hour()" -> "ScalarTimeBasedPlan(Hour,RangeParams(1524855988,1000,1524855988))",
