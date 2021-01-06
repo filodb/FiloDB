@@ -58,7 +58,7 @@ final case class SelectChunkInfosExec(queryContext: QueryContext,
             source.stats.incrReadPartitions(1)
             val subgroup = TimeSeriesShard.partKeyGroup(dataSchema.partKeySchema, partition.partKeyBase,
                                                         partition.partKeyOffset, numGroups)
-            val key = new PartitionRangeVectorKey(partition.partKeyBase, partition.partKeyOffset,
+            val key = PartitionRangeVectorKey(Left(partition),
                                                   dataSchema.partKeySchema, partCols, shard,
                                                   subgroup, partition.partID, dataSchema.name)
             ChunkInfoRangeVector(key, partition, chunkMethod, dataColumn)

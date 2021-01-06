@@ -36,7 +36,7 @@ class PartitionRangeVectorKeySerializer extends KryoSerializer[PartitionRangeVec
     val partBytes = BinaryRegionUtils.readLargeRegion(input)
     val schema = kryo.readObject(input, classOf[RecordSchema2])
     val keyCols = kryo.readClassAndObject(input)
-    PartitionRangeVectorKey(partBytes, UnsafeUtils.arayOffset,
+    PartitionRangeVectorKey(Right((partBytes, UnsafeUtils.arayOffset)),
       schema, keyCols.asInstanceOf[Seq[ColumnInfo]], input.readInt, input.readInt, input.readInt, input.readString)
   }
 
