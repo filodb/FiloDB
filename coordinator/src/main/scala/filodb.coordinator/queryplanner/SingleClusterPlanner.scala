@@ -1,7 +1,5 @@
 package filodb.coordinator.queryplanner
 
-import scala.concurrent.duration._
-
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
@@ -11,10 +9,10 @@ import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{DatasetRef, SpreadProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
+import filodb.core.query._
 import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
-import filodb.prometheus.ast. WindowConstants
+import filodb.prometheus.ast.WindowConstants
 import filodb.query.{exec, _}
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
 
@@ -38,10 +36,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                            shardMapperFunc: => ShardMapper,
                            earliestRetainedTimestampFn: => Long,
                            queryConfig: QueryConfig,
-                           spreadProvider: SpreadProvider = StaticSpreadProvider(),
-                           timeSplitEnabled: Boolean = false,
-                           minTimeRangeForSplitMs: => Long = 1.day.toMillis,
-                           splitSizeMs: => Long = 1.day.toMillis)
+                           spreadProvider: SpreadProvider = StaticSpreadProvider())
                            extends QueryPlanner with StrictLogging with PlannerMaterializer {
 
   override val schemas = schema
@@ -59,10 +54,11 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   }
 
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
-
+    val plannerParams = qContext.plannerParams
     if (shardMapperFunc.numShards <= 0) throw new IllegalStateException("No shards available")
     val logicalPlans = if (logicalPlan.isInstanceOf[PeriodicSeriesPlan])
-      LogicalPlanUtils.splitPlans(logicalPlan, qContext, timeSplitEnabled, minTimeRangeForSplitMs, splitSizeMs)
+      LogicalPlanUtils.splitPlans(logicalPlan, qContext, plannerParams.timeSplitEnabled,
+        plannerParams.minTimeRangeForSplitMs, plannerParams.splitSizeMs)
     else
       Seq(logicalPlan)
     val materialized = logicalPlans match {
