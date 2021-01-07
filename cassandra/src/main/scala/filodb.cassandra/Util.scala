@@ -94,27 +94,38 @@ object Util {
  */
 class RetryWithExpBackOffIterator(inner: Iterator[Row]) extends Iterator[Row] with StrictLogging{
   val callStack = new RuntimeException()
-  override def hasNext: Boolean = inner.hasNext
+  override def hasNext: Boolean = {
+    retryWithExpBackOff {
+      inner.hasNext
+    }
+  }
+
+  override def next(): Row = {
+    retryWithExpBackOff {
+      inner.next()
+    }
+  }
 
   //scalastyle:off null
-  override def next(): Row = {
+  def retryWithExpBackOff[T](fn: => T): T = {
     var retries = 0
     val maxRetries = 5 // Hardcode maxRetries for now. If needed make it a config later.
-    var nxt: Row = null
-    while (retries < maxRetries && nxt == null) {
+    while (retries < maxRetries) {
       try {
-        nxt = inner.next()
+        val res = fn // apply function
+        return res
       } catch {
         case e: ReadTimeoutException =>
           retries += 1
           if (retries == 5) throw e
           val jitter = Random.nextInt(3000)
           val sleepTime = Math.pow(2, retries + 1).toLong * 1000 + jitter
-          logger.error("Got ReadTimeoutException when invoking next on " +
+          logger.error("Got ReadTimeoutException when invoking next/hasNext on " +
             s"cassandra's paged iterator. RetriesFinished=$retries sleepingForMs=$sleepTime", callStack)
           Thread.sleep(sleepTime)
       }
     }
-    nxt
+    ??? // unreachable line
   }
+
 }
