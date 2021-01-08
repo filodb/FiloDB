@@ -1,5 +1,7 @@
 package filodb.coordinator.queryplanner
 
+import scala.concurrent.duration._
+
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
@@ -36,7 +38,10 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                            shardMapperFunc: => ShardMapper,
                            earliestRetainedTimestampFn: => Long,
                            queryConfig: QueryConfig,
-                           spreadProvider: SpreadProvider = StaticSpreadProvider())
+                           spreadProvider: SpreadProvider = StaticSpreadProvider(),
+                           timeSplitEnabled: Boolean = false,
+                           minTimeRangeForSplitMs: => Long = 1.day.toMillis,
+                           splitSizeMs: => Long = 1.day.toMillis)
                            extends QueryPlanner with StrictLogging with PlannerMaterializer {
 
   override val schemas = schema
@@ -55,10 +60,14 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     val plannerParams = qContext.plannerParams
+    val timeSplitConfig = if (plannerParams.timeSplitEnabled)
+      (plannerParams.timeSplitEnabled, plannerParams.minTimeRangeForSplitMs, plannerParams.splitSizeMs)
+    else (timeSplitEnabled, minTimeRangeForSplitMs, splitSizeMs)
+
     if (shardMapperFunc.numShards <= 0) throw new IllegalStateException("No shards available")
     val logicalPlans = if (logicalPlan.isInstanceOf[PeriodicSeriesPlan])
-      LogicalPlanUtils.splitPlans(logicalPlan, qContext, plannerParams.timeSplitEnabled,
-        plannerParams.minTimeRangeForSplitMs, plannerParams.splitSizeMs)
+      LogicalPlanUtils.splitPlans(logicalPlan, qContext, timeSplitConfig._1,
+        timeSplitConfig._2, timeSplitConfig._3)
     else
       Seq(logicalPlan)
     val materialized = logicalPlans match {
