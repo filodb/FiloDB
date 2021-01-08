@@ -44,6 +44,8 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
   var gauge2PartKeyBytes: Array[Byte] = _
   var gauge3PartKeyBytes: Array[Byte] = _
   var gauge4PartKeyBytes: Array[Byte] = _
+  var gauge5PartKeyBytes: Array[Byte] = _
+  var gauge6PartKeyBytes: Array[Byte] = _
   val rawDataStoreConfig = StoreConfig(ConfigFactory.parseString(
     """
       |flush-interval = 1h
@@ -69,8 +71,8 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
     conf.set("spark.filodb.partitionkeys.copier.target.configFile", configPath)
     conf.set("spark.filodb.partitionkeys.copier.target.dataset", targetDatasetName)
 
-    conf.set("spark.filodb.partitionkeys.copier.ingestionTimeStart", "2020-10-13T00:00:00Z")
-    conf.set("spark.filodb.partitionkeys.copier.ingestionTimeEnd", "2020-10-13T05:00:00Z")
+    conf.set("spark.filodb.partitionkeys.copier.repairStartTime", "2020-10-13T00:00:00Z")
+    conf.set("spark.filodb.partitionkeys.copier.repairEndTime", "2020-10-13T05:00:00Z")
     conf.set("spark.filodb.partitionkeys.copier.diskTimeToLive", "7d")
     conf
   }
@@ -87,7 +89,6 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
   override def beforeAll(): Unit = {
     colStore.initialize(sourceDataset.ref, numOfShards).futureValue
     colStore.truncate(sourceDataset.ref, numOfShards).futureValue
-
     colStore.initialize(targetDataset.ref, numOfShards).futureValue
     colStore.truncate(targetDataset.ref, numOfShards).futureValue
   }
@@ -116,17 +117,36 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
       val ws: String = "my_ws_name_" + shard
       val ns: String = "my_ns_id"
 
+      /*
+      Repair window: 2020-10-13T00:00:00Z and 2020-10-13T05:00:00Z
+
+      1. timeSeries born/died before repair window.             1507923801000 (October 13, 2017 7:43:21 PM) - 1510611624000 (November 13, 2017 10:20:24 PM) x
+      2. timeSeries born before and died within repair window   1510611624000 (November 13, 2017 10:20:24 PM) - 1602561600000 (October 13, 2020 4:00:00 AM) √
+      3. timeSeries born and died within repair window          1602554400000 (October 13, 2020 2:00:00 AM) - 1602561600000 (October 13, 2020 4:00:00 AM)   √
+      4. timeSeries born within and died after repair window    1602561600000 (October 13, 2020 4:00:00 AM) - 1609855200000 (January 5, 2021 2:00:00 PM)    √
+      5. timeSeries born and died after repair window           1609855200000 (January 5, 2021 2:00:00 PM) - 1610028000000 (January 7, 2021 2:00:00 PM)     x
+      6. timeSeries born before and died after repair window    1507923801000 (October 13, 2017 7:43:21 PM) - 1610028000000 (January 7, 2021 2:00:00 PM)    x
+
+      Result: 2, 3 and 4 should be repaired/migrated as per the requirement.
+       */
+
       gauge1PartKeyBytes = tsPartition(Schemas.gauge, "my_gauge1", getSeriesTags(ws + "1", ns + "1")).partKeyBytes
-      writePartKeys(PartKeyRecord(gauge1PartKeyBytes, 1507923801000L, Long.MaxValue, Some(150)), shard) // 2017
+      writePartKeys(PartKeyRecord(gauge1PartKeyBytes, 1507923801000L, 1510611624000L, Some(150)), shard)
 
       gauge2PartKeyBytes = tsPartition(Schemas.gauge, "my_gauge2", getSeriesTags(ws + "2", ns + "2")).partKeyBytes
-      writePartKeys(PartKeyRecord(gauge2PartKeyBytes, 1539459801000L, Long.MaxValue, Some(150)), shard) // 2018
+      writePartKeys(PartKeyRecord(gauge2PartKeyBytes, 1510611624000L, 1602561600000L, Some(150)), shard)
 
       gauge3PartKeyBytes = tsPartition(Schemas.gauge, "my_gauge3", getSeriesTags(ws + "3", ns + "3")).partKeyBytes
-      writePartKeys(PartKeyRecord(gauge3PartKeyBytes, 1602554400000L, 1602561600000L, Some(150)), shard) // 2020-10-13 02:00-04:00 GMT
+      writePartKeys(PartKeyRecord(gauge3PartKeyBytes, 1602554400000L, 1602561600000L, Some(150)), shard)
 
       gauge4PartKeyBytes = tsPartition(Schemas.gauge, "my_gauge4", getSeriesTags(ws + "4", ns + "4")).partKeyBytes
-      writePartKeys(PartKeyRecord(gauge4PartKeyBytes, 1602549000000L, 1602561600000L, Some(150)), shard) // 2020-10-13 00:30-04:00 GMT
+      writePartKeys(PartKeyRecord(gauge4PartKeyBytes, 1602561600000L, 1609855200000L, Some(150)), shard)
+
+      gauge5PartKeyBytes = tsPartition(Schemas.gauge, "my_gauge5", getSeriesTags(ws + "5", ns + "5")).partKeyBytes
+      writePartKeys(PartKeyRecord(gauge5PartKeyBytes, 1609855200000L, 1610028000000L, Some(150)), shard)
+
+      gauge6PartKeyBytes = tsPartition(Schemas.gauge, "my_gauge6", getSeriesTags(ws + "6", ns + "6")).partKeyBytes
+      writePartKeys(PartKeyRecord(gauge6PartKeyBytes, 1507923801000L, 1610028000000L, Some(150)), shard)
     }
   }
 
@@ -152,19 +172,23 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
       map
     }
 
-    val startTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.copier.ingestionTimeStart")).toEpochMilli()
-    val endTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.copier.ingestionTimeEnd")).toEpochMilli()
-
+    val startTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.copier.repairStartTime")).toEpochMilli()
+    val endTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.copier.repairEndTime")).toEpochMilli()
     for (shard <- 0 until numOfShards) {
       val partKeyRecords = Await.result(colStore.scanPartKeys(targetDataset.ref, shard).toListL.runAsync, Duration(1, "minutes"))
-
-      // because there will be 2 records that meets the copier time period.
-      partKeyRecords.size shouldEqual 2
-
+      // because there will be 3 records that meets the copier time period.
+      partKeyRecords.size shouldEqual 3
       for (pkr <- partKeyRecords) {
         // verify all the records fall in the copier time period.
-        pkr.startTime should be >= startTime
-        pkr.endTime should be <= endTime
+        // either pkr.startTime or pkr.endTime should fall in the startTime:endTime window
+        var metric = getPartKeyMap(pkr).get("_metric_").get
+        val startTimeFallsInWindow = pkr.startTime >= startTime && pkr.startTime <= endTime
+        val endTimeFallsInWindow = pkr.endTime >= startTime && pkr.endTime <= endTime
+        if (startTimeFallsInWindow || endTimeFallsInWindow) {
+          assert(true)
+        } else {
+          assert(false, "Either startTime or endTime doesn't fall in the migration window.")
+        }
       }
     }
 
@@ -172,16 +196,14 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
     val shard0 = 0
     val partKeyRecordsShard0 = Await.result(colStore.scanPartKeys(targetDataset.ref, shard0).toListL.runAsync,
       Duration(1, "minutes"))
-    partKeyRecordsShard0.size shouldEqual 2
+    partKeyRecordsShard0.size shouldEqual 3
     for (pkr <- partKeyRecordsShard0) {
       val map = getPartKeyMap(pkr)
-
       // verify workspace/namespace value for "my_gauge3" metric
       if ("my_gauge3".equals(map.get("_metric_").get)) {
         getWorkspace(map) shouldEqual "my_ws_name_03"
         getNamespace(map) shouldEqual "my_ns_id3"
       }
-
       // verify workspace/namespace value for "my_gauge4" metric
       if ("my_gauge4".equals(map.get("_metric_").get)) {
         getWorkspace(map) shouldEqual "my_ws_name_04"
@@ -193,41 +215,19 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
     val shard2 = 2
     val partKeyRecordsShard2 = Await.result(colStore.scanPartKeys(targetDataset.ref, shard2).toListL.runAsync,
       Duration(1, "minutes"))
-    partKeyRecordsShard2.size shouldEqual 2
+    partKeyRecordsShard2.size shouldEqual 3
     for (pkr <- partKeyRecordsShard2) {
       val map = getPartKeyMap(pkr)
-
       // verify workspace/namespace value for "my_gauge3" metric
       if ("my_gauge3".equals(map.get("_metric_").get)) {
         getWorkspace(map) shouldEqual "my_ws_name_23"
         getNamespace(map) shouldEqual "my_ns_id3"
       }
-
       // verify workspace/namespace value for "my_gauge4" metric
       if ("my_gauge4".equals(map.get("_metric_").get)) {
         getWorkspace(map) shouldEqual "my_ws_name_24"
         getNamespace(map) shouldEqual "my_ns_id4"
       }
-    }
-  }
-
-  it("verify data deletes on cassandra target table") {
-    val shard0 = 0
-    val partKeyRecordsShard0 = Await.result(colStore.scanPartKeys(targetDataset.ref, shard0).toListL.runAsync,
-      Duration(1, "minutes"))
-    // making sure there is some data in at least one shard before starting the delete job.
-    partKeyRecordsShard0.size shouldEqual 2
-
-    // flag enabled to deleteFirst from target
-    sparkConf.set("spark.filodb.partitionkeys.copier.deleteFirst", "true")
-    sparkConf.set("spark.filodb.partitionkeys.copier.noCopy", "true")
-
-    PartitionKeysCopierMain.run(sparkConf).close()
-
-    for (shard <- 0 until numOfShards) {
-      val partKeyRec = Await.result(colStore.scanPartKeys(targetDataset.ref, shard).toListL.runAsync,
-        Duration(1, "minutes"))
-      partKeyRec.size shouldEqual 0
     }
   }
 }

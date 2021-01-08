@@ -60,8 +60,8 @@ class PartitionKeysCopier(conf: SparkConf) {
   private val targetSession = FiloSessionProvider.openSession(targetCassConfig)
 
   private val numOfShards: Int = getShardNum
-  private val ingestionTimeStart = parseDateTime(conf.get("spark.filodb.partitionkeys.copier.ingestionTimeStart"))
-  private val ingestionTimeEnd = parseDateTime(conf.get("spark.filodb.partitionkeys.copier.ingestionTimeEnd"))
+  private val repairStartTime = parseDateTime(conf.get("spark.filodb.partitionkeys.copier.repairStartTime"))
+  private val repairEndTime = parseDateTime(conf.get("spark.filodb.partitionkeys.copier.repairEndTime"))
   private val diskTimeToLiveSeconds = conf.getTimeAsSeconds("spark.filodb.partitionkeys.copier.diskTimeToLive")
   private val readSched = Scheduler.io("cass-read-sched")
   private val writeSched = Scheduler.io("cass-write-sched")
@@ -69,8 +69,6 @@ class PartitionKeysCopier(conf: SparkConf) {
   val sourceCassandraColStore = new CassandraColumnStore(sourceConfig, readSched, sourceSession)(writeSched)
   val targetCassandraColStore = new CassandraColumnStore(targetConfig, readSched, targetSession)(writeSched)
 
-  // Destructively deletes everything in the target before updating anthing. Is used when chunks aren't aligned.
-  private[repair] val deleteFirst = conf.getBoolean("spark.filodb.partitionkeys.copier.deleteFirst", false)
   // Disable the copy phase either for fully deleting with no replacement, or for no-op testing.
   private[repair] val noCopy = conf.getBoolean("spark.filodb.partitionkeys.copier.noCopy", false)
   private[repair] val splitsPerNode = conf.getInt("spark.filodb.partitionkeys.copier.splitsPerNode", 1)
@@ -79,27 +77,15 @@ class PartitionKeysCopier(conf: SparkConf) {
   private[repair] def getTargetScanSplits = targetCassandraColStore.getScanSplits(targetDatasetRef, splitsPerNode)
 
   def copySourceToTarget(splitIter: Iterator[ScanSplit]): Unit = {
-    sourceCassandraColStore.copyOrDeletePartitionKeysByTimeRange(
+    sourceCassandraColStore.copyPartitionKeysByTimeRange(
       sourceDatasetRef,
       numOfShards,
       splitIter,
-      ingestionTimeStart.toEpochMilli(),
-      ingestionTimeEnd.toEpochMilli(),
+      repairStartTime.toEpochMilli(),
+      repairEndTime.toEpochMilli(),
       targetCassandraColStore,
       targetDatasetRef,
       diskTimeToLiveSeconds.toInt)
-  }
-
-  def deleteFromTarget(splitIter: Iterator[ScanSplit]): Unit = {
-    targetCassandraColStore.copyOrDeletePartitionKeysByTimeRange(
-      targetDatasetRef,
-      numOfShards,
-      splitIter,
-      ingestionTimeStart.toEpochMilli(),
-      ingestionTimeEnd.toEpochMilli(),
-      targetCassandraColStore,
-      targetDatasetRef,
-      0) // ttl 0 is interpreted as delete
   }
 
   def shutdown(): Unit = {
@@ -150,26 +136,12 @@ object PartitionKeysCopierMain extends App with StrictLogging {
       .config(conf)
       .getOrCreate()
 
-    if (copier.deleteFirst) {
-      logger.info("PartitionKeysCopier deleting from target first")
-
-      val splits = copier.getTargetScanSplits
-      logger.info(s"Delete phase cassandra split size: ${splits.size}. We will have this many spark partitions. " +
-        s"Tune splitsPerNode which was ${copier.splitsPerNode} if parallelism is low")
-
-      spark.sparkContext
-        .makeRDD(splits)
-        .foreachPartition(splitIter => PartitionKeysCopier.lookup(conf).deleteFromTarget(splitIter))
-    }
-
     if (copier.noCopy) {
       logger.info("PartitionKeysCopier copy phase disabled")
     } else {
       val splits = copier.getSourceScanSplits
-
       logger.info(s"Copy phase cassandra split size: ${splits.size}. We will have this many spark partitions. " +
         s"Tune splitsPerNode which was ${copier.splitsPerNode} if parallelism is low")
-
       spark
         .sparkContext
         .makeRDD(splits)

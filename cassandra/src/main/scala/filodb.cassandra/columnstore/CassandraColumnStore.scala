@@ -226,43 +226,36 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   /**
    * Copy a range of partitionKey records to a target ColumnStore, for performing disaster recovery or
-   * backfills. This method can also be used to delete records, by specifying a ttl of zero.
-   * If the target is the same as the source, then this effectively deletes from the source.
+   * backfills.
    *
-   * @param diskTimeToLiveSeconds pass zero to delete chunks
+   * @param diskTimeToLiveSeconds ttl
    */
-  def copyOrDeletePartitionKeysByTimeRange(datasetRef: DatasetRef,
-                                           numOfShards: Int,
-                                           splits: Iterator[ScanSplit],
-                                           startTime: Long,
-                                           endTime: Long,
-                                           target: CassandraColumnStore,
-                                           targetDatasetRef: DatasetRef,
-                                           diskTimeToLiveSeconds: Int): Unit = {
+  def copyPartitionKeysByTimeRange(datasetRef: DatasetRef,
+                                   numOfShards: Int,
+                                   splits: Iterator[ScanSplit],
+                                   repairStartTime: Long,
+                                   repairEndTime: Long,
+                                   target: CassandraColumnStore,
+                                   targetDatasetRef: DatasetRef,
+                                   diskTimeToLiveSeconds: Int): Unit = {
     def compareAndGet(sourceRec: PartKeyRecord, targetRec: PartKeyRecord): PartKeyRecord = {
       // compare and get the oldest start time
       val startTime =
-        if (sourceRec.startTime <= targetRec.startTime) sourceRec.startTime else targetRec.startTime
+        if (sourceRec.startTime < targetRec.startTime) sourceRec.startTime else targetRec.startTime
       // compare and get the latest end time
       val endTime =
-        if (sourceRec.endTime >= targetRec.endTime) sourceRec.endTime else targetRec.endTime
-
+        if (sourceRec.endTime > targetRec.endTime) sourceRec.endTime else targetRec.endTime
       PartKeyRecord(sourceRec.partKey, startTime, endTime, None)
     }
 
-    def copyRows(targetPartitionKeysTable: PartitionKeysTable, rows: Iterator[Row]) = {
+    def copyRows(targetPartitionKeysTable: PartitionKeysTable, rows: Set[Row]) = {
       for (row <- rows) {
         val partKeyRecord = PartitionKeysTable.rowToPartKeyRecord(row)
-
-        if (diskTimeToLiveSeconds == 0) {
-          targetPartitionKeysTable.deletePartKey(partKeyRecord.partKey)
-        } else {
-          targetPartitionKeysTable.readPartKey(partKeyRecord.partKey) match {
-            case Some(targetPkr) =>
-              targetPartitionKeysTable.writePartKey(compareAndGet(partKeyRecord, targetPkr), diskTimeToLiveSeconds)
-            case None =>
-              targetPartitionKeysTable.writePartKey(partKeyRecord, diskTimeToLiveSeconds)
-          }
+        targetPartitionKeysTable.readPartKey(partKeyRecord.partKey) match {
+          case Some(targetPkr) =>
+            targetPartitionKeysTable.writePartKey(compareAndGet(partKeyRecord, targetPkr), diskTimeToLiveSeconds)
+          case None =>
+            targetPartitionKeysTable.writePartKey(partKeyRecord, diskTimeToLiveSeconds)
         }
       }
     }
@@ -271,10 +264,15 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     for (split <- splits) {
       for (shard <- 0 until numOfShards) {
         val tokens = split.asInstanceOf[CassandraTokenRangeSplit].tokens
-        val sourcePartitionKeysTable = getOrCreatePartitionKeysTable(datasetRef, shard)
-        val targetPartitionKeysTable = target.getOrCreatePartitionKeysTable(targetDatasetRef, shard)
-        val rows = sourcePartitionKeysTable.scanRowsByTimeNoAsync(tokens, startTime, endTime)
-        copyRows(targetPartitionKeysTable, rows)
+        val srcPartKeysTable = getOrCreatePartitionKeysTable(datasetRef, shard)
+        val targetPartKeysTable = target.getOrCreatePartitionKeysTable(targetDatasetRef, shard)
+        // CQL does not support OR operator. So we need to query separately to get the timeSeries partitionKeys
+        // which were born or died during the data loss period (aka repair window).
+        val rowsByStartTime = srcPartKeysTable.scanRowsByStartTimeRangeNoAsync(tokens, repairStartTime, repairEndTime)
+        val rowsByEndTime = srcPartKeysTable.scanRowsByEndTimeRangeNoAsync(tokens, repairStartTime, repairEndTime)
+        // add to a Set to eliminate duplicate entries.
+        val rowSet = rowsByStartTime.++(rowsByEndTime)
+        copyRows(targetPartKeysTable, rowSet)
       }
     }
   }

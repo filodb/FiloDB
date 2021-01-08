@@ -46,9 +46,15 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
     s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ?")
     .setConsistencyLevel(ConsistencyLevel.ONE)
 
-  private lazy val scanCqlWithStartEndTime = session.prepare(
+  private lazy val scanCqlForStartTime = session.prepare(
     s"SELECT partKey, startTime, endTime FROM $tableString " +
-      s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ? AND startTime >= ? AND endTime <= ? " +
+      s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ? AND startTime >= ? AND startTime <= ? " +
+      s"ALLOW FILTERING")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
+  private lazy val scanCqlForEndTime = session.prepare(
+    s"SELECT partKey, startTime, endTime FROM $tableString " +
+      s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ? AND endTime >= ? AND endTime <= ? " +
       s"ALLOW FILTERING")
     .setConsistencyLevel(ConsistencyLevel.ONE)
 
@@ -87,25 +93,50 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
   }
 
   /**
-   * Method used by repair job.
-   * Return rows consisting of partKey, start and end time.
+   * Method used by data repair jobs.
+   * Return PartitionKey rows where timeSeries startTime falls within the specified repair start/end window.
+   * (In other words - return timesSeries that were born during the data loss period)
+   * Rows consist of partKey, start and end time. Refer the CQL used below.
    */
-  def scanRowsByTimeNoAsync(tokens: Seq[(String, String)],
-                                startTime: Long,
-                                endTime: Long): Iterator[Row] = {
+  def scanRowsByStartTimeRangeNoAsync(tokens: Seq[(String, String)],
+                                      repairStartTime: Long,
+                                      repairEndTime: Long): Set[Row] = {
     tokens.iterator.flatMap { case (start, end) =>
       /*
        * FIXME conversion of tokens to Long works only for Murmur3Partitioner because it generates
        * Long based tokens. If other partitioners are used, this can potentially break.
        * Correct way is to pass Token objects around and bind tokens with stmt.bind().setPartitionKeyToken(token)
        */
-      val stmt = scanCqlWithStartEndTime.bind(start.toLong: java.lang.Long,
+      val startTimeStmt = scanCqlForStartTime.bind(start.toLong: java.lang.Long,
+        end.toLong: java.lang.Long,
+        repairStartTime: java.lang.Long,
+        repairEndTime: java.lang.Long)
+      session.execute(startTimeStmt).iterator.asScala
+    }
+  }.toSet
+
+  /**
+   * Method used by data repair jobs.
+   * Return PartitionKey rows where timeSeries endTime falls within the specified repair start/end window.
+   * (In other words - return timesSeries that died during the data loss period)
+   * Rows consist of partKey, start and end time. Refer the CQL used below.
+   */
+  def scanRowsByEndTimeRangeNoAsync(tokens: Seq[(String, String)],
+                                      startTime: Long,
+                                      endTime: Long): Set[Row] = {
+    tokens.iterator.flatMap { case (start, end) =>
+      /*
+       * FIXME conversion of tokens to Long works only for Murmur3Partitioner because it generates
+       * Long based tokens. If other partitioners are used, this can potentially break.
+       * Correct way is to pass Token objects around and bind tokens with stmt.bind().setPartitionKeyToken(token)
+       */
+      val endTimeStmt = scanCqlForEndTime.bind(start.toLong: java.lang.Long,
         end.toLong: java.lang.Long,
         startTime: java.lang.Long,
         endTime: java.lang.Long)
-      session.execute(stmt).iterator.asScala
+      session.execute(endTimeStmt).iterator.asScala
     }
-  }
+  }.toSet
 
   /**
    * Returns PartKeyRecord for a given partKey bytes.
