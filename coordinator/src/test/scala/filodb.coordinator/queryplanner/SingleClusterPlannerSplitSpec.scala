@@ -42,8 +42,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
   private val splitSizeMs = 10000
 
   // Splitting timewindow is enabled with threshold at 20secs with splitsize as 10sec
-  private val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
-    timeSplitEnabled = true, minTimeRangeForSplitMs = splitThresholdMs, splitSizeMs = splitSizeMs)
+  private val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig)
 
   /*
   This is the PromQL
@@ -72,6 +71,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
   val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
   val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
   val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000)
+  val plannerParams = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = splitThresholdMs, splitSizeMs = splitSizeMs)
 
   it ("should generate SplitLocalPartitionDistConcatExec plan with LocalPartitionDistConcatExec child plans" +
         " for LogicalPlan") {
@@ -79,7 +79,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
 
     // materialized exec plan
-    val parentExecPlan = engine.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
+    val parentExecPlan = engine.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams, plannerParams = plannerParams))
 
     /*
     Since threshold
@@ -156,7 +156,8 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     // materialized exec plan
     val parentExecPlan = engine.materialize(logicalPlan,
       QueryContext(promQlQueryParams, plannerParams = PlannerParams(spreadOverride =
-        Some(StaticSpreadProvider(SpreadChange(0, 4))), queryTimeoutMillis = 1000000)))
+        Some(StaticSpreadProvider(SpreadChange(0, 4))), queryTimeoutMillis = 1000000, timeSplitEnabled = true,
+        minTimeRangeForSplitMs = splitThresholdMs, splitSizeMs = splitSizeMs)))
 
     parentExecPlan.isInstanceOf[SplitLocalPartitionDistConcatExec] shouldEqual true
     parentExecPlan.children.foreach { execPlan =>
@@ -191,7 +192,8 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
 
     val parentExecPlan = engine.materialize(lp,
       QueryContext(promQlQueryParams, plannerParams = PlannerParams(spreadOverride =
-        Some(StaticSpreadProvider(SpreadChange(0, 4))), queryTimeoutMillis = 1000000)))
+        Some(StaticSpreadProvider(SpreadChange(0, 4))), queryTimeoutMillis = 1000000, timeSplitEnabled = true,
+        minTimeRangeForSplitMs = splitThresholdMs, splitSizeMs = splitSizeMs)))
 
     info(s"First inner child plan: ${parentExecPlan.children.head.children.head.printTree()}")
     parentExecPlan.isInstanceOf[SplitLocalPartitionDistConcatExec] shouldEqual true
@@ -223,7 +225,8 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
 
     // materialized exec plan
     val parentExecPlan = engine.materialize(logicalPlan,  QueryContext(promQlQueryParams, plannerParams =
-      PlannerParams(spreadOverride = Some(FunctionalSpreadProvider(spreadFunc)), queryTimeoutMillis = 1000000)))
+      PlannerParams(spreadOverride = Some(FunctionalSpreadProvider(spreadFunc)), queryTimeoutMillis = 1000000, timeSplitEnabled = true,
+        minTimeRangeForSplitMs = splitThresholdMs, splitSizeMs = splitSizeMs)))
 
     parentExecPlan.printTree()
 
@@ -258,7 +261,8 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       Seq(SpreadChange(0, 1), SpreadChange(350000, 2)) // spread change time is in ms
     }
     val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams(spreadOverride =
-      Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000)))
+      Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000, timeSplitEnabled = true,
+      minTimeRangeForSplitMs = splitThresholdMs, splitSizeMs = splitSizeMs)))
     execPlan.isInstanceOf[SplitLocalPartitionDistConcatExec] shouldEqual true
     execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true // Stitch split plans
     execPlan.children should have length (5)
@@ -277,7 +281,8 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       Seq(SpreadChange(0, 1), SpreadChange(450000, 2)) // spread change time is in ms
     }
     val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams(spreadOverride =
-      Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000)))
+      Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000, timeSplitEnabled = true,
+      minTimeRangeForSplitMs = splitThresholdMs, splitSizeMs = splitSizeMs)))
     execPlan.isInstanceOf[SplitLocalPartitionDistConcatExec] shouldEqual true
     execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true // Stitch split plans
     execPlan.children should have length (5)
@@ -298,7 +303,8 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       Seq(SpreadChange(0, 1), SpreadChange(350000, 2))
     }
     val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams(spreadOverride =
-      Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000)))
+      Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000, timeSplitEnabled = true,
+      minTimeRangeForSplitMs = splitThresholdMs, splitSizeMs = splitSizeMs)))
 
     execPlan.isInstanceOf[SplitLocalPartitionDistConcatExec] shouldEqual true
     execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true // Stitch split plans
@@ -334,7 +340,8 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       Seq(SpreadChange(0, 1), SpreadChange(450000, 2))
     }
     val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams(spreadOverride =
-      Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000)))
+      Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000, timeSplitEnabled = true,
+      minTimeRangeForSplitMs = splitThresholdMs, splitSizeMs = splitSizeMs)))
 
     execPlan.isInstanceOf[SplitLocalPartitionDistConcatExec] shouldEqual true
     execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true // Stitch split plans
@@ -354,7 +361,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.LAND, Cardinality.ManyToMany, summed2)
 
     // materialized exec plan
-    val parentExecPlan = engine.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
+    val parentExecPlan = engine.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams, plannerParams = plannerParams))
 
     parentExecPlan.isInstanceOf[SplitLocalPartitionDistConcatExec] shouldEqual true
       parentExecPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
@@ -379,15 +386,16 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       " and generate child EmptyResultExec if range is outside retention period " +
       " should bound queries until retention period and drop instants outside retention period") {
     val nowSeconds = System.currentTimeMillis() / 1000
-     val planner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
-       earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis, queryConfig,
-       timeSplitEnabled = true, minTimeRangeForSplitMs = 1.day.toMillis, splitSizeMs = 1.day.toMillis)
+    val plannerParams2 = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = 1.day.toMillis, splitSizeMs = 1.day.toMillis)
+    val planner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
+       earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis, queryConfig)
 
     // Case 1: no offset or window
     val logicalPlan1 = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""",
       TimeStepParams(nowSeconds - 4.days.toSeconds, 1.minute.toSeconds, nowSeconds))
 
-    val splitEp1 = planner.materialize(logicalPlan1, QueryContext()).asInstanceOf[SplitLocalPartitionDistConcatExec]
+    val splitEp1 = planner.materialize(logicalPlan1, QueryContext(plannerParams = plannerParams2))
+                          .asInstanceOf[SplitLocalPartitionDistConcatExec]
     splitEp1.children should have length(4)
 
     splitEp1.children.head.isInstanceOf[EmptyResultExec] shouldEqual true // outside retention period
@@ -416,7 +424,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     // Case 2: no offset, some window
     val logicalPlan2 = Parser.queryRangeToLogicalPlan("""rate(foo{job="bar"}[20m])""",
       TimeStepParams(nowSeconds - 4.days.toSeconds, 1.minute.toSeconds, nowSeconds))
-    val splitEp2 = planner.materialize(logicalPlan2, QueryContext()).asInstanceOf[SplitLocalPartitionDistConcatExec]
+    val splitEp2 = planner.materialize(logicalPlan2, QueryContext(plannerParams = plannerParams2)).asInstanceOf[SplitLocalPartitionDistConcatExec]
     splitEp2.children should have length(4)
 
     splitEp2.children.head.isInstanceOf[EmptyResultExec] shouldEqual true
@@ -433,7 +441,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     val logicalPlan3 = Parser.queryRangeToLogicalPlan("""rate(foo{job="bar"}[20m] offset 15m)""",
       TimeStepParams(nowSeconds - 4.days.toSeconds, 1.minute.toSeconds, nowSeconds))
 
-    val splitEp3 = planner.materialize(logicalPlan3, QueryContext()).asInstanceOf[SplitLocalPartitionDistConcatExec]
+    val splitEp3 = planner.materialize(logicalPlan3, QueryContext(plannerParams = plannerParams2)).asInstanceOf[SplitLocalPartitionDistConcatExec]
     splitEp3.children should have length(4)
 
     splitEp3.children.head.isInstanceOf[EmptyResultExec] shouldEqual true
@@ -450,7 +458,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     // Case 4: outside retention
     val logicalPlan4 = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""",
       TimeStepParams(nowSeconds - 10.days.toSeconds, 1.minute.toSeconds, nowSeconds - 5.days.toSeconds))
-    val ep4 = planner.materialize(logicalPlan4, QueryContext())
+    val ep4 = planner.materialize(logicalPlan4, QueryContext(plannerParams = plannerParams2))
     ep4.children should have length (5)
     ep4.children.foreach { childPlan =>
       childPlan.isInstanceOf[EmptyResultExec] shouldEqual true
@@ -464,15 +472,15 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       " and should not split underlying queries with step > splitSize and materialize instant queries " +
       "with lookback == retention correctly") {
     val nowSeconds = System.currentTimeMillis() / 1000
+    val plannerParams2 = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = 1.day.toMillis, splitSizeMs = 1.day.toMillis)
     val planner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
-      earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis, queryConfig,
-      timeSplitEnabled = true, minTimeRangeForSplitMs = 1.day.toMillis, splitSizeMs = 1.day.toMillis)
+      earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis, queryConfig)
 
     val logicalPlan = Parser.queryRangeToLogicalPlan("""sum(rate(foo{job="bar"}[3d]))""",
       TimeStepParams(nowSeconds, 1.minute.toSeconds, nowSeconds))
 
     val ep = planner.materialize(logicalPlan, QueryContext(origQueryParams = PromQlQueryParams
-    ("""sum(rate(foo{job="bar"}[3d]))""",1000, 100, 1000))).asInstanceOf[LocalPartitionReduceAggregateExec]
+    ("""sum(rate(foo{job="bar"}[3d]))""",1000, 100, 1000), plannerParams = plannerParams2)).asInstanceOf[LocalPartitionReduceAggregateExec]
     val psm = ep.children.head.asInstanceOf[MultiSchemaPartitionsExec]
       .rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
     psm.start shouldEqual (nowSeconds * 1000)
@@ -487,10 +495,10 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     periodicSeries.endMs shouldEqual 10000000
     periodicSeries.stepMs shouldEqual 1000000
 
-    val engine2 = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
-      timeSplitEnabled = true, minTimeRangeForSplitMs = 5000000, splitSizeMs = 2000000)
+    val engine2 = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig)
+    val plannerParams2 = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = 5000000, splitSizeMs = 2000000)
 
-    val parentExecPlan = engine2.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val parentExecPlan = engine2.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams = plannerParams2))
 
     parentExecPlan.children should have length(4)
     parentExecPlan.children.zipWithIndex.foreach { case(execPlan, i) =>
@@ -527,10 +535,10 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     periodicSeries.endMs shouldEqual 10000000
     periodicSeries.stepMs shouldEqual 1000000
 
-    val engine2 = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
-      timeSplitEnabled = true, minTimeRangeForSplitMs = 5000000, splitSizeMs = 2000000)
+    val plannerParams2 = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = 5000000, splitSizeMs = 2000000)
+    val engine2 = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig)
 
-    val parentExecPlan = engine2.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val parentExecPlan = engine2.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams = plannerParams2))
 
     parentExecPlan.children should have length(4)
     parentExecPlan.children.zipWithIndex.foreach { case(execPlan, i) =>
@@ -562,14 +570,14 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     val dataset = MetricsTestData.timeseriesDatasetWithMetric
     val dsRef = dataset.ref
     val schemas = Schemas(dataset.schema)
+    val plannerParams2 = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = 200000, splitSizeMs = 100000)
 
-    val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
-      timeSplitEnabled = true, minTimeRangeForSplitMs = 200000, splitSizeMs = 100000)
+    val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig)
 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan("""sum(foo{_ns_="bar", _ws_="test"}) by (__name__)""",
       TimeStepParams(1000, 20, 2000))
 
-    val execPlan1 = engine.materialize(logicalPlan1, QueryContext(origQueryParams = promQlQueryParams))
+    val execPlan1 = engine.materialize(logicalPlan1, QueryContext(origQueryParams = promQlQueryParams, plannerParams = plannerParams2))
     execPlan1.isInstanceOf[SplitLocalPartitionDistConcatExec] shouldEqual true
 
     execPlan1.children.foreach { childPlan =>
@@ -587,7 +595,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       TimeStepParams(1000, 20, 2000))
 
     // materialized exec plan
-    val execPlan2 = engine.materialize(logicalPlan2, QueryContext(origQueryParams = promQlQueryParams))
+    val execPlan2 = engine.materialize(logicalPlan2, QueryContext(origQueryParams = promQlQueryParams, plannerParams = plannerParams2))
     execPlan2.isInstanceOf[SplitLocalPartitionDistConcatExec] shouldEqual true
 
     execPlan2.children.foreach { childPlan =>
@@ -605,15 +613,15 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     val dataset = MetricsTestData.timeseriesDatasetWithMetric
     val dsRef = dataset.ref
     val schemas = Schemas(dataset.schema)
+    val plannerParams2 = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = 200000, splitSizeMs = 100000)
 
-    val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
-                                        timeSplitEnabled = true, minTimeRangeForSplitMs = 200000, splitSizeMs = 100000)
+    val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig)
 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan(
       """sum(foo{_ns_="bar1", _ws_="test"}) + ignoring(__name__)
         | sum(foo{_ns_="bar2", _ws_="test"})""".stripMargin,
       TimeStepParams(1000, 20, 2000))
-    val execPlan1 = engine.materialize(logicalPlan1, QueryContext(origQueryParams = promQlQueryParams))
+    val execPlan1 = engine.materialize(logicalPlan1, QueryContext(origQueryParams = promQlQueryParams, plannerParams = plannerParams2))
     execPlan1.isInstanceOf[SplitLocalPartitionDistConcatExec] shouldEqual true
     execPlan1.children should have length(9)
 
@@ -626,7 +634,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       """sum(foo{_ns_="bar1", _ws_="test"}) + group_left(__name__)
         | sum(foo{_ns_="bar2", _ws_="test"})""".stripMargin,
       TimeStepParams(1000, 20, 2000))
-    val execPlan2 = engine.materialize(logicalPlan2, QueryContext(origQueryParams = promQlQueryParams))
+    val execPlan2 = engine.materialize(logicalPlan2, QueryContext(origQueryParams = promQlQueryParams, plannerParams = plannerParams2))
 
     execPlan2.isInstanceOf[SplitLocalPartitionDistConcatExec] shouldEqual true
     execPlan2.children should have length(9)
@@ -642,16 +650,16 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     val t = TimeStepParams(700, 1000, 10000)
     val lp = Parser.queryRangeToLogicalPlan("rate(http_requests_total{job = \"app\"}[5m] offset 5m) / " +
       "rate(http_requests_total{job = \"app\"}[5m])", t)
+    val plannerParams2 = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = 5000000, splitSizeMs = 2000000)
 
-    val engine2 = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
-      timeSplitEnabled = true, minTimeRangeForSplitMs = 5000000, splitSizeMs = 2000000)
+    val engine2 = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig)
 
     val periodicSeriesPlan = lp.asInstanceOf[BinaryJoin]
     periodicSeriesPlan.startMs shouldEqual 700000
     periodicSeriesPlan.endMs shouldEqual 10000000
     periodicSeriesPlan.stepMs shouldEqual 1000000
 
-    val parentExecPlan = engine2.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val parentExecPlan = engine2.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams = plannerParams2))
     parentExecPlan.isInstanceOf[SplitLocalPartitionDistConcatExec] shouldEqual true
     parentExecPlan.children should have length(4)
 
