@@ -1,6 +1,7 @@
 package filodb.query
 
 import enumeratum.{Enum, EnumEntry}
+
 import filodb.core.{DatasetRef, NodeCommand, NodeResponse}
 import filodb.core.query.{RangeVector, ResultSchema}
 
