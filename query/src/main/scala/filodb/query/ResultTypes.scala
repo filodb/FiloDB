@@ -19,16 +19,25 @@ final case class QueryError(id: String, t: Throwable) extends QueryResponse with
     t.getStackTrace.map(_.toString).mkString("\n")
 }
 
-final case class RemoteQueryError(id: String,
-                                  errorResponse: RemoteErrorResponse,
-                                  statusCode: Int) extends QueryResponse {
-  override def toString: String = s"RemoteQueryError id=$id RemoteErrorResponse=$errorResponse StatusCode=$statusCode"
-}
 /**
   * Use this exception to raise user errors when inside the context of an observable.
   * Currently no other way to raise user errors when returning an observable
   */
 class BadQueryException(message: String) extends RuntimeException(message)
+
+case class RemoteQueryFailureException(statusCode: Int, requestStatus: String, errorType: String, errorMessage: String )
+  extends RuntimeException {
+  override def getMessage: String = {
+    val sb = new StringBuilder(64)
+    sb.append("[").append(this.requestStatus).append("] ").append(this.statusCode)
+    if (this.errorType != null) sb.append(" (").append(this.errorType).append(")")
+    if (this.errorMessage != null) sb.append(" - \"").append(this.errorMessage).append("\"")
+    val cause = getCause
+    if (cause == null) return sb.toString
+    sb.append("; ").append("nested exception is ").append(cause)
+    sb.toString
+  }
+}
 
 sealed trait QueryResultType extends EnumEntry
 object QueryResultType extends Enum[QueryResultType] {

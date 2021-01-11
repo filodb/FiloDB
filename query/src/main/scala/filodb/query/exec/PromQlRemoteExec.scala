@@ -55,7 +55,9 @@ case class PromQlRemoteExec(queryEndpoint: String,
         // as response status code is not 2xx
         if (response.body.isLeft) {
           parser.decode[RemoteErrorResponse](response.body.left.get) match {
-              case Right(errorResponse) => RemoteQueryError(queryContext.queryId, errorResponse, response.code.toInt)
+              case Right(errorResponse) => QueryError(queryContext.queryId,
+                RemoteQueryFailureException(response.code.toInt, errorResponse.status, errorResponse.errorType,
+                  errorResponse.error))
               case Left(ex)             => QueryError(queryContext.queryId, ex)
             }
         }
