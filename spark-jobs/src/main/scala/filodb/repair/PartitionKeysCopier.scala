@@ -71,10 +71,10 @@ class PartitionKeysCopier(conf: SparkConf) {
 
   // Disable the copy phase either for fully deleting with no replacement, or for no-op testing.
   private[repair] val noCopy = conf.getBoolean("spark.filodb.partitionkeys.copier.noCopy", false)
-  private[repair] val splitsPerNode = conf.getInt("spark.filodb.partitionkeys.copier.splitsPerNode", 1)
+  private[repair] val numSplitsForScans = sourceCassConfig.getInt("num-token-range-splits-for-scans")
 
-  private[repair] def getSourceScanSplits = sourceCassandraColStore.getScanSplits(sourceDatasetRef, splitsPerNode)
-  private[repair] def getTargetScanSplits = targetCassandraColStore.getScanSplits(targetDatasetRef, splitsPerNode)
+  private[repair] def getSourceScanSplits = sourceCassandraColStore.getScanSplits(sourceDatasetRef, numSplitsForScans)
+  private[repair] def getTargetScanSplits = targetCassandraColStore.getScanSplits(targetDatasetRef, numSplitsForScans)
 
   def copySourceToTarget(splitIter: Iterator[ScanSplit]): Unit = {
     sourceCassandraColStore.copyPartitionKeysByTimeRange(
@@ -141,7 +141,7 @@ object PartitionKeysCopierMain extends App with StrictLogging {
     } else {
       val splits = copier.getSourceScanSplits
       logger.info(s"Copy phase cassandra split size: ${splits.size}. We will have this many spark partitions. " +
-        s"Tune splitsPerNode which was ${copier.splitsPerNode} if parallelism is low")
+        s"Tune num-token-range-splits-for-scans which was ${copier.numSplitsForScans}, if parallelism is low")
       spark
         .sparkContext
         .makeRDD(splits)
