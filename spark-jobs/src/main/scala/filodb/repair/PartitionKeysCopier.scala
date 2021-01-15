@@ -1,21 +1,21 @@
 package filodb.repair
 
 import java.io.File
-import java.lang
 import java.time.Instant
 import java.time.format.DateTimeFormatter
-import java.util
+import java.{lang, util}
 
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
+import filodb.cassandra.FiloSessionProvider
+import filodb.cassandra.columnstore.CassandraColumnStore
+import filodb.core.metadata.Schemas
+import filodb.core.store.{PartKeyRecord, ScanSplit}
+import filodb.core.{DatasetRef, GlobalConfig}
+import filodb.memory.format.UnsafeUtils
 import monix.execution.Scheduler
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
-
-import filodb.cassandra.FiloSessionProvider
-import filodb.cassandra.columnstore.CassandraColumnStore
-import filodb.core.{DatasetRef, GlobalConfig}
-import filodb.core.store.ScanSplit
 
 class PartitionKeysCopier(conf: SparkConf) {
 
@@ -59,6 +59,10 @@ class PartitionKeysCopier(conf: SparkConf) {
   private val sourceSession = FiloSessionProvider.openSession(sourceCassConfig)
   private val targetSession = FiloSessionProvider.openSession(targetCassConfig)
 
+  val schemas = Schemas.fromConfig(sourceConfig).get
+  private[repair] def partKeyHashFn = (partKey: PartKeyRecord) =>
+    Option(schemas.part.binSchema.partitionHash(partKey, UnsafeUtils.arayOffset))
+
   private val numOfShards: Int = getShardNum
   private val repairStartTime = parseDateTime(conf.get("spark.filodb.partitionkeys.copier.repairStartTime"))
   private val repairEndTime = parseDateTime(conf.get("spark.filodb.partitionkeys.copier.repairEndTime"))
@@ -85,6 +89,7 @@ class PartitionKeysCopier(conf: SparkConf) {
       repairEndTime.toEpochMilli(),
       targetCassandraColStore,
       targetDatasetRef,
+      partKeyHashFn,
       diskTimeToLiveSeconds.toInt)
   }
 

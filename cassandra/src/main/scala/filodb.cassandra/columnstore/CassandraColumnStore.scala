@@ -237,7 +237,12 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                                    repairEndTime: Long,
                                    target: CassandraColumnStore,
                                    targetDatasetRef: DatasetRef,
+                                   partKeyHashFn: PartKeyRecord => Option[Int],
                                    diskTimeToLiveSeconds: Int): Unit = {
+    def pkRecordWithHash(pkRecord: PartKeyRecord) = {
+      PartKeyRecord(pkRecord.partKey, pkRecord.startTime, pkRecord.endTime, partKeyHashFn(pkRecord))
+    }
+
     def compareAndGet(sourceRec: PartKeyRecord, targetRec: PartKeyRecord): PartKeyRecord = {
       // compare and get the oldest start time
       val startTime =
@@ -248,16 +253,19 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       PartKeyRecord(sourceRec.partKey, startTime, endTime, None)
     }
 
-    def copyRows(targetPartitionKeysTable: PartitionKeysTable, rows: Set[Row]) = {
-      for (row <- rows) {
-        val partKeyRecord = PartitionKeysTable.rowToPartKeyRecord(row)
+    def copyRows(targetPartitionKeysTable: PartitionKeysTable, rows: Set[Row], shard: Int) = {
+      val partKeys = rows.map(PartitionKeysTable.rowToPartKeyRecord).map(partKeyRecord =>
         targetPartitionKeysTable.readPartKey(partKeyRecord.partKey) match {
-          case Some(targetPkr) =>
-            targetPartitionKeysTable.writePartKey(compareAndGet(partKeyRecord, targetPkr), diskTimeToLiveSeconds)
-          case None =>
-            targetPartitionKeysTable.writePartKey(partKeyRecord, diskTimeToLiveSeconds)
+          case Some(targetPkr) => pkRecordWithHash(compareAndGet(partKeyRecord, targetPkr))
+          case None => pkRecordWithHash(partKeyRecord)
         }
-      }
+      )
+
+      val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
+      Await.result(
+        writePartKeys(targetDatasetRef, shard, Observable.fromIterable(partKeys), diskTimeToLiveSeconds, updateHour),
+        Duration.Inf // TODO - Use cassandra write timeout.
+      )
     }
 
     // for every split, scan PartitionKeysTable for all the shards.
@@ -272,7 +280,9 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
         val rowsByEndTime = srcPartKeysTable.scanRowsByEndTimeRangeNoAsync(tokens, repairStartTime, repairEndTime)
         // add to a Set to eliminate duplicate entries.
         val rowSet = rowsByStartTime.++(rowsByEndTime)
-        copyRows(targetPartKeysTable, rowSet)
+        if (rowSet.nonEmpty) {
+          copyRows(targetPartKeysTable, rowSet, shard)
+        }
       }
     }
   }
