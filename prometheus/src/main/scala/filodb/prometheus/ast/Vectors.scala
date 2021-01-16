@@ -178,8 +178,13 @@ trait Vectors extends Scalars with TimeUnits with Base {
       // we start from 5 minutes earlier that provided start time in order to include last sample for the
       // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
       val ps = PeriodicSeries(
-        RawSeries(timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
-          offset.map(_.millis(timeParams.step * 1000))),
+        RawSeries(
+          timeParamToSelector(timeParams),
+          columnFilters,
+          column.toSeq,
+          Some(staleDataLookbackMillis),
+          offset.map(_.millis(timeParams.step * 1000))
+        ),
         timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
         offset.map(_.millis(timeParams.step * 1000))
       )
@@ -209,7 +214,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
     */
   case class RangeExpression(metricName: Option[String],
                              labelSelection: Seq[LabelMatch],
-                             window: Duration,
+                             timeInterval: TimeInterval,
                              offset: Option[Duration]) extends Vector with SimpleSeries {
 
     private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
@@ -218,17 +223,20 @@ trait Vectors extends Scalars with TimeUnits with Base {
       if (isRoot && timeParams.start != timeParams.end) {
         throw new UnsupportedOperationException("Range expression is not allowed in query_range")
       }
-      // multiply by 1000 to convert unix timestamp in seconds to millis
-      val rs = RawSeries(timeParamToSelector(timeParams), columnFilters, column.toSeq,
-        Some(window.millis(timeParams.step * 1000)),
-        offset.map(_.millis(timeParams.step * 1000)))
-      bucketOpt.map { bOpt =>
-        // It's a fixed value, the range params don't matter at all
-        val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
-        ApplyInstantFunctionRaw(rs, InstantFunctionId.HistogramBucket, Seq(param))
-      }.getOrElse(rs)
+        // multiply by 1000 to convert unix timestamp in seconds to millis
+        val rs = RawSeries(
+          timeParamToSelector(timeParams),
+          columnFilters,
+          column.toSeq,
+          Some(timeInterval.duration.millis(timeParams.step * 1000)),
+          offset.map(_.millis(timeParams.step * 1000))
+        )
+        bucketOpt.map { bOpt =>
+          // It's a fixed value, the range params don't matter at all
+          val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
+          ApplyInstantFunctionRaw(rs, InstantFunctionId.HistogramBucket, Seq(param))
+        }.getOrElse(rs)
     }
-
   }
 
 }

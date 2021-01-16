@@ -137,7 +137,59 @@ trait Expressions extends Aggregates with Functions {
         }
       }
    }
-    }
+  }
     // scalastyle:on method.length
     // scalastyle:on cyclomatic.complexity
+
+  case class SubqueryExpression(subquery: Expression, sqcl: SubqueryClause) extends Expression with PeriodicSeries {
+
+    override def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
+      // If we have subquery defined and end different from the start,
+      // this is certainly a situation when we should throw an exception.
+      // Top level expression of a range query should be returning an
+      // instant vector but subqueries by definition return range vectors.
+      // Suppose we have
+      //    sum_over_time(metric{}[10:1m])[1d:1h]
+      // the meaning of the above is we produce a range vector with 25 values which would be sum_over_time of 10 samples
+      // of last 10 minutes of last 25 hours. This means that metric{}[10:1m] needs to be executed with
+      // 25 different start timestamps and no step and end defined.
+      if (timeParams.start != timeParams.end) {
+        throw new UnsupportedOperationException("Subquery is not allowed as a top level expression for query_range")
+      }
+
+      //How do I know what's the default step? TODO
+      //for now, let's put step 10 seconds
+      var stepToUse = 10L
+      if (sqcl.step.isDefined) {
+        stepToUse = sqcl.step.get.millis(1L) / 1000
+      }
+      var timeParamsToUse = TimeStepParams(
+        timeParams.start - (sqcl.interval.millis(1L) / 1000),
+        stepToUse,
+        timeParams.start //don't understand why I need to pass 1
+      )
+
+      subquery match {
+        case ie : InstantExpression => instantQueryLogicalPlan(ie, sqcl, timeParamsToUse);
+        case f : Function => functionLogicalPlan(f, sqcl, timeParamsToUse);
+        case _ => ???
+      }
+    }
+
+    def functionLogicalPlan(
+      f : Function, sqcl: SubqueryClause, timeParams: TimeRangeParams
+    ) : PeriodicSeriesPlan = {
+//      if (RangeFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).exists()) {
+//        rangeFunctionLogicalPlan(f, sqcl, timeParams)
+//      }
+      f.toSeriesPlan(timeParams)
+    }
+
+    def instantQueryLogicalPlan(
+      ie : InstantExpression, sqcl: SubqueryClause, timeParams: TimeRangeParams
+    ): PeriodicSeriesPlan = {
+
+      ie.toSeriesPlan(timeParams)
+    }
+  }
 }
