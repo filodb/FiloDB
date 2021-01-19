@@ -73,11 +73,10 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
     conf.set("spark.filodb.partitionkeys.copier.repairStartTime", "2020-10-13T00:00:00Z")
     conf.set("spark.filodb.partitionkeys.copier.repairEndTime", "2020-10-13T05:00:00Z")
-    conf.set("spark.filodb.partitionkeys.copier.diskTimeToLive", "7d")
     conf
   }
 
-  val numOfShards = PartitionKeysCopier.lookup(sparkConf).getShardNum
+  val numOfShards = PartitionKeysCopier.lookup(sparkConf).numOfShards
 
   // Examples: 2019-10-20T12:34:56Z  or  2019-10-20T12:34:56-08:00
   private def parseDateTime(str: String) = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str))
