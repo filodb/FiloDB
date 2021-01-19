@@ -8,7 +8,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 
-import com.datastax.driver.core.{ConsistencyLevel, Metadata, Row, Session, TokenRange}
+import com.datastax.driver.core.{ConsistencyLevel, Metadata, Session, TokenRange}
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
@@ -253,8 +253,8 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       PartKeyRecord(sourceRec.partKey, startTime, endTime, None)
     }
 
-    def copyRows(targetPartitionKeysTable: PartitionKeysTable, rows: Set[Row], shard: Int) = {
-      val partKeys = rows.map(PartitionKeysTable.rowToPartKeyRecord).map(partKeyRecord =>
+    def copyRows(targetPartitionKeysTable: PartitionKeysTable, records: Set[PartKeyRecord], shard: Int) = {
+      val partKeys = records.map(partKeyRecord =>
         targetPartitionKeysTable.readPartKey(partKeyRecord.partKey) match {
           case Some(targetPkr) => pkRecordWithHash(compareAndGet(partKeyRecord, targetPkr))
           case None => pkRecordWithHash(partKeyRecord)
@@ -279,9 +279,9 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
         val rowsByStartTime = srcPartKeysTable.scanRowsByStartTimeRangeNoAsync(tokens, repairStartTime, repairEndTime)
         val rowsByEndTime = srcPartKeysTable.scanRowsByEndTimeRangeNoAsync(tokens, repairStartTime, repairEndTime)
         // add to a Set to eliminate duplicate entries.
-        val rowSet = rowsByStartTime.++(rowsByEndTime)
-        if (rowSet.nonEmpty) {
-          copyRows(targetPartKeysTable, rowSet, shard)
+        val records = rowsByStartTime.++(rowsByEndTime).map(PartitionKeysTable.rowToPartKeyRecord)
+        if (records.nonEmpty) {
+          copyRows(targetPartKeysTable, records, shard)
         }
       }
     }
