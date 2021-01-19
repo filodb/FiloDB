@@ -154,7 +154,7 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
     PartitionKeysCopierMain.run(sparkConf).close()
   }
 
-  it("verify data written onto cassandra target table") {
+  it("should have copied data to cassandra target tables") {
     def getWorkspace(map: Map[String, String]): String = {
       val ws: String = map.get("_ws_").get
       ws
@@ -174,8 +174,30 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
     val startTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.copier.repairStartTime")).toEpochMilli()
     val endTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.copier.repairEndTime")).toEpochMilli()
+
+    // verify data in index table.
     for (shard <- 0 until numOfShards) {
       val partKeyRecords = Await.result(colStore.scanPartKeys(targetDataset.ref, shard).toListL.runAsync, Duration(1, "minutes"))
+      // because there will be 3 records that meets the copier time period.
+      partKeyRecords.size shouldEqual 3
+      for (pkr <- partKeyRecords) {
+        // verify all the records fall in the copier time period.
+        // either pkr.startTime or pkr.endTime should fall in the startTime:endTime window
+        var metric = getPartKeyMap(pkr).get("_metric_").get
+        val startTimeFallsInWindow = pkr.startTime >= startTime && pkr.startTime <= endTime
+        val endTimeFallsInWindow = pkr.endTime >= startTime && pkr.endTime <= endTime
+        if (startTimeFallsInWindow || endTimeFallsInWindow) {
+          assert(true)
+        } else {
+          assert(false, "Either startTime or endTime doesn't fall in the migration window.")
+        }
+      }
+    }
+
+    // verify data in pk_by_update_time table
+    val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
+    for (shard <- 0 until numOfShards) {
+      val partKeyRecords = Await.result(colStore.getPartKeysByUpdateHour(targetDataset.ref, shard, updateHour).toListL.runAsync, Duration(1, "minutes"))
       // because there will be 3 records that meets the copier time period.
       partKeyRecords.size shouldEqual 3
       for (pkr <- partKeyRecords) {
