@@ -22,6 +22,8 @@ case class PartKeyRecord(partKey: Array[Byte], startTime: Long, endTime: Long, h
       startTime == otherPartKey.startTime &&
       endTime == otherPartKey.endTime
   }
+
+  override def hashCode(): Int = super.hashCode()
 }
 
 /**

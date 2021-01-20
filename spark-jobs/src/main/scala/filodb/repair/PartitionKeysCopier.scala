@@ -1,24 +1,24 @@
 package filodb.repair
 
+import java.{lang, util}
 import java.io.File
 import java.time.Instant
 import java.time.format.DateTimeFormatter
-import java.{lang, util}
 
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
-import filodb.cassandra.FiloSessionProvider
-import filodb.cassandra.columnstore.CassandraColumnStore
-import filodb.core.metadata.Schemas
-import filodb.core.store.{PartKeyRecord, ScanSplit}
-import filodb.core.{DatasetRef, GlobalConfig}
-import filodb.memory.format.UnsafeUtils
 import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
-
 import scala.concurrent.duration.FiniteDuration
+
+import filodb.cassandra.FiloSessionProvider
+import filodb.cassandra.columnstore.CassandraColumnStore
+import filodb.core.{DatasetRef, GlobalConfig}
+import filodb.core.metadata.Schemas
+import filodb.core.store.{PartKeyRecord, ScanSplit}
+import filodb.memory.format.UnsafeUtils
 
 class PartitionKeysCopier(conf: SparkConf) {
 

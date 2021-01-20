@@ -244,11 +244,9 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     }
 
     def compareAndGet(sourceRec: PartKeyRecord, targetRec: PartKeyRecord): PartKeyRecord = {
-      // compare and get the oldest start time
-      val startTime =
+      val startTime = // compare and get the oldest start time
         if (sourceRec.startTime < targetRec.startTime) sourceRec.startTime else targetRec.startTime
-      // compare and get the latest end time
-      val endTime =
+      val endTime = // compare and get the latest end time
         if (sourceRec.endTime > targetRec.endTime) sourceRec.endTime else targetRec.endTime
       PartKeyRecord(sourceRec.partKey, startTime, endTime, None)
     }
@@ -260,7 +258,6 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
           case None => pkRecordWithHash(partKeyRecord)
         }
       )
-
       val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
       Await.result(
         writePartKeys(targetDatasetRef, shard, Observable.fromIterable(partKeys), diskTimeToLiveSeconds, updateHour),
@@ -269,21 +266,18 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     }
 
     // for every split, scan PartitionKeysTable for all the shards.
-    for (split <- splits) {
-      for (shard <- 0 until numOfShards) {
-        val tokens = split.asInstanceOf[CassandraTokenRangeSplit].tokens
-        val srcPartKeysTable = getOrCreatePartitionKeysTable(datasetRef, shard)
-        val targetPartKeysTable = target.getOrCreatePartitionKeysTable(targetDatasetRef, shard)
-        // CQL does not support OR operator. So we need to query separately to get the timeSeries partitionKeys
-        // which were born or died during the data loss period (aka repair window).
-        val rowsByStartTime = srcPartKeysTable.scanRowsByStartTimeRangeNoAsync(tokens, repairStartTime, repairEndTime)
-        val rowsByEndTime = srcPartKeysTable.scanRowsByEndTimeRangeNoAsync(tokens, repairStartTime, repairEndTime)
-        // add to a Set to eliminate duplicate entries.
-        val records = rowsByStartTime.++(rowsByEndTime).map(PartitionKeysTable.rowToPartKeyRecord)
-        if (records.nonEmpty) {
-          copyRows(targetPartKeysTable, records, shard)
-        }
-      }
+    for (split <- splits; shard <- 0 until numOfShards) {
+      val tokens = split.asInstanceOf[CassandraTokenRangeSplit].tokens
+      val srcPartKeysTable = getOrCreatePartitionKeysTable(datasetRef, shard)
+      val targetPartKeysTable = target.getOrCreatePartitionKeysTable(targetDatasetRef, shard)
+      // CQL does not support OR operator. So we need to query separately to get the timeSeries partitionKeys
+      // which were born or died during the data loss period (aka repair window).
+      val rowsByStartTime = srcPartKeysTable.scanRowsByStartTimeRangeNoAsync(tokens, repairStartTime, repairEndTime)
+      val rowsByEndTime = srcPartKeysTable.scanRowsByEndTimeRangeNoAsync(tokens, repairStartTime, repairEndTime)
+      // add to a Set to eliminate duplicate entries.
+      val records = rowsByStartTime.++(rowsByEndTime).map(PartitionKeysTable.rowToPartKeyRecord)
+      if (records.nonEmpty)
+        copyRows(targetPartKeysTable, records, shard)
     }
   }
 
