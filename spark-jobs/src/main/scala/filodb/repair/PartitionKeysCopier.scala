@@ -63,7 +63,7 @@ class PartitionKeysCopier(conf: SparkConf) {
 
   val schemas = Schemas.fromConfig(sourceConfig).get
   private[repair] def partKeyHashFn = (partKey: PartKeyRecord) =>
-    Option(schemas.part.binSchema.partitionHash(partKey, UnsafeUtils.arayOffset))
+    Option(schemas.part.binSchema.partitionHash(partKey.partKey, UnsafeUtils.arayOffset))
 
   val numOfShards: Int = sourceDatasetConfig.getInt("num-shards")
   private val repairStartTime = parseDateTime(conf.get("spark.filodb.partitionkeys.copier.repairStartTime"))
