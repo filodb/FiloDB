@@ -81,7 +81,7 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
             }
           })
           if (willDelete) {
-            BusterContext.log.info(s"Deleting part key $pkPairs with startTime=${pkr.startTime} and " +
+            BusterContext.log.debug(s"Deleting part key $pkPairs with startTime=${pkr.startTime} and " +
               s"endTime=${pkr.endTime} from shard=$shard")
             numPartKeysDeleting.increment()
           }
