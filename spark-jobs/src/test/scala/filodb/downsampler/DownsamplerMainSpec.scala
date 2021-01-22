@@ -756,6 +756,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
          |filodb.cardbuster.delete-pk-filters.0._ns_ = bulk_ns
          |filodb.cardbuster.delete-pk-filters.0._ws_ = "b.*_ws"
          |filodb.cardbuster.delete-startTimeGTE = "${Instant.ofEpochMilli(0).toString}"
+         |filodb.cardbuster.delete-startTimeLTE = "${Instant.ofEpochMilli(600).toString}"
+         |filodb.cardbuster.delete-endTimeGTE = "${Instant.ofEpochMilli(500).toString}"
          |filodb.cardbuster.delete-endTimeLTE = "${Instant.ofEpochMilli(600).toString}"
          |""".stripMargin)
 
@@ -796,14 +798,18 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   it ("should be able to bust cardinality in both raw and downsample tables with spark job") {
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
-    val deleteFilterConfig = ConfigFactory.parseString( """
+    val deleteFilterConfig = ConfigFactory.parseString( s"""
                                                           |filodb.cardbuster.delete-pk-filters = [
                                                           | {
                                                           |    _ns_ = "bulk_ns"
                                                           |    _ws_ = "bulk_ws"
                                                           | }
                                                           |]
-                                                        """.stripMargin)
+                                                          |filodb.cardbuster.delete-startTimeGTE = "${Instant.ofEpochMilli(0).toString}"
+                                                          |filodb.cardbuster.delete-startTimeLTE = "${Instant.ofEpochMilli(10000).toString}"
+                                                          |filodb.cardbuster.delete-endTimeGTE = "${Instant.ofEpochMilli(500).toString}"
+                                                          |filodb.cardbuster.delete-endTimeLTE = "${Instant.ofEpochMilli(10600).toString}"
+                                                          |                                                        """.stripMargin)
     val settings2 = new DownsamplerSettings(deleteFilterConfig.withFallback(conf))
     val dsIndexJobSettings2 = new DSIndexJobSettings(settings2)
     val cardBuster = new CardinalityBuster(settings2, dsIndexJobSettings2)

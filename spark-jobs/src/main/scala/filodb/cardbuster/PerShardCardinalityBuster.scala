@@ -40,24 +40,21 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
 
   @transient lazy val deleteFilter = dsSettings.filodbConfig
     .as[Seq[Map[String, String]]]("cardbuster.delete-pk-filters").map(_.mapValues(_.r).toSeq)
-  @transient lazy val startTimeGTE = dsSettings.filodbConfig
-    .as[Option[String]]("cardbuster.delete-startTimeGTE").map { str =>
-    Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str)).toEpochMilli
-  }
-  @transient lazy val startTimeLTE = dsSettings.filodbConfig
-    .as[Option[String]]("cardbuster.delete-startTimeLTE").map { str =>
-    Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str)).toEpochMilli
-  }
-  @transient lazy val endTimeGTE = dsSettings.filodbConfig
-    .as[Option[String]]("cardbuster.delete-endTimeGTE").map { str =>
-    Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str)).toEpochMilli
-  }
-  @transient lazy val endTimeLTE = dsSettings.filodbConfig
-    .as[Option[String]]("cardbuster.delete-endTimeLTE").map { str =>
-    Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str)).toEpochMilli
-  }
+
+  @transient lazy val startTimeGTE = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(dsSettings.filodbConfig
+    .as[String]("cardbuster.delete-startTimeGTE"))).toEpochMilli
+
+  @transient lazy val startTimeLTE = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(dsSettings.filodbConfig
+    .as[String]("cardbuster.delete-startTimeLTE"))).toEpochMilli
+
+  @transient lazy val endTimeGTE = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(dsSettings.filodbConfig
+    .as[String]("cardbuster.delete-endTimeGTE"))).toEpochMilli
+
+  @transient lazy val endTimeLTE = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(dsSettings.filodbConfig
+    .as[String]("cardbuster.delete-endTimeLTE"))).toEpochMilli
 
   def bustIndexRecords(shard: Int): Unit = {
+    require(deleteFilter.nonEmpty, "cardbuster.delete-pk-filters should be non-empty")
     BusterContext.log.info(s"Busting cardinality in shard=$shard with " +
       s"filter=$deleteFilter " +
       s"inDownsampleTables=$inDownsampleTables " +
@@ -68,10 +65,10 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
     )
     val toDelete = colStore.scanPartKeys(dataset, shard)
       .filter { pkr =>
-        val timeOk = startTimeGTE.forall(pkr.startTime >= _) &&
-                          startTimeLTE.forall(pkr.startTime <= _) &&
-                          endTimeGTE.forall(pkr.endTime >= _) &&
-                          endTimeLTE.forall(pkr.endTime <= _)
+        val timeOk = pkr.startTime >= startTimeGTE &&
+                     pkr.startTime <= startTimeLTE &&
+                     pkr.endTime >= endTimeGTE &&
+                     pkr.endTime <= endTimeLTE
 
         if (timeOk) {
           val pk = pkr.partKey
