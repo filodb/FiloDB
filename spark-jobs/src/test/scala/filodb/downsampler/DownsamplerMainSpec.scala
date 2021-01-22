@@ -753,12 +753,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     sparkConf.setMaster("local[2]")
     val deleteFilterConfig = ConfigFactory.parseString(
       s"""
-         |filodb.cardbuster.delete-pk-filters = [
-         | {
-         |    _ns_ = "bulk_ns"
-         |    _ws_ = "bulk_ws"
-         | }
-         |]
+         |filodb.cardbuster.delete-pk-filters.0._ns_ = bulk_ns
+         |filodb.cardbuster.delete-pk-filters.0._ws_ = "b.*_ws"
          |filodb.cardbuster.delete-startTimeGTE = "${Instant.ofEpochMilli(0).toString}"
          |filodb.cardbuster.delete-endTimeLTE = "${Instant.ofEpochMilli(600).toString}"
          |""".stripMargin)

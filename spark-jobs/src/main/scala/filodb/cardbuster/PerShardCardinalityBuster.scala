@@ -39,7 +39,7 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
   @transient lazy private val dataset = if (inDownsampleTables) dsDatasetRef else rawDatasetRef
 
   @transient lazy val deleteFilter = dsSettings.filodbConfig
-    .as[Seq[Map[String, String]]]("cardbuster.delete-pk-filters").map(_.toSeq)
+    .as[Seq[Map[String, String]]]("cardbuster.delete-pk-filters").map(_.mapValues(_.r).toSeq)
   @transient lazy val startTimeGTE = dsSettings.filodbConfig
     .as[Option[String]]("cardbuster.delete-startTimeGTE").map { str =>
     Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str)).toEpochMilli
@@ -78,7 +78,11 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
           val rawSchemaId = RecordSchema.schemaID(pk, UnsafeUtils.arayOffset)
           val schema = schemas(rawSchemaId)
           val pkPairs = schema.partKeySchema.toStringPairs(pk, UnsafeUtils.arayOffset)
-          val willDelete = deleteFilter.exists(filter => filter.forall(pkPairs.contains))
+          val willDelete = deleteFilter.exists(filter => filter.forall { case (filterKey, filterValRegex) =>
+            pkPairs.exists { case (pkKey, pkVal) =>
+              pkKey == filterKey && filterValRegex.findAllMatchIn(pkVal).nonEmpty
+            }
+          })
           if (willDelete) {
             BusterContext.log.debug(s"Deleting part key ${schema.partKeySchema.stringify(pk)}")
             numPartKeysDeleting.increment()
