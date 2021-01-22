@@ -29,7 +29,7 @@ object BusterContext extends StrictLogging {
  * filodb.cardbuster.delete-pk-filters = [
  *  {
  *     _ns_ = "bulk_ns"
- *     _ws_ = "bulk_ws"
+ *     _ws_ = "tag_value_as_regex"
  *  }
  * ]
  * filodb.cardbuster.delete-startTimeGTE = "ISO_TIME"
