@@ -23,6 +23,21 @@ object BusterContext extends StrictLogging {
   lazy protected[cardbuster] val log: Logger = logger
 }
 
+/**
+ * Requires following typesafe config properties:
+ *
+ * filodb.cardbuster.delete-pk-filters = [
+ *  {
+ *     _ns_ = "bulk_ns"
+ *     _ws_ = "tag_value_as_regex"
+ *  }
+ * ]
+ * filodb.cardbuster.delete-startTimeGTE = "ISO_TIME"
+ * filodb.cardbuster.delete-startTimeLTE = "ISO_TIME"
+ * filodb.cardbuster.delete-endTimeGTE = "ISO_TIME"
+ * filodb.cardbuster.delete-endTimeLTE = "ISO_TIME"
+ *
+ */
 class CardinalityBuster(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSIndexJobSettings) extends Serializable {
 
   def run(conf: SparkConf): SparkSession = {
