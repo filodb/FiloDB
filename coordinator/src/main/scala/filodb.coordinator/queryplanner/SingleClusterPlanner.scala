@@ -11,10 +11,10 @@ import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{DatasetRef, SpreadProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
+import filodb.core.query._
 import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
-import filodb.prometheus.ast. WindowConstants
+import filodb.prometheus.ast.WindowConstants
 import filodb.query.{exec, _}
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
 
@@ -59,10 +59,15 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   }
 
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+    val plannerParams = qContext.plannerParams
+    val timeSplitConfig = if (plannerParams.timeSplitEnabled)
+      (plannerParams.timeSplitEnabled, plannerParams.minTimeRangeForSplitMs, plannerParams.splitSizeMs)
+    else (timeSplitEnabled, minTimeRangeForSplitMs, splitSizeMs)
 
     if (shardMapperFunc.numShards <= 0) throw new IllegalStateException("No shards available")
     val logicalPlans = if (logicalPlan.isInstanceOf[PeriodicSeriesPlan])
-      LogicalPlanUtils.splitPlans(logicalPlan, qContext, timeSplitEnabled, minTimeRangeForSplitMs, splitSizeMs)
+      LogicalPlanUtils.splitPlans(logicalPlan, qContext, timeSplitConfig._1,
+        timeSplitConfig._2, timeSplitConfig._3)
     else
       Seq(logicalPlan)
     val materialized = logicalPlans match {

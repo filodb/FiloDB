@@ -5,9 +5,8 @@ import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
 
 import com.datastax.driver.core.{ConsistencyLevel, ResultSet, Row}
-import com.datastax.driver.core.exceptions.ReadTimeoutException
 
-import filodb.cassandra.FiloCassandraConnector
+import filodb.cassandra.{FiloCassandraConnector, RetryWithExpBackOffIterator}
 import filodb.core._
 import filodb.core.store.ChunkSinkStats
 
@@ -97,7 +96,7 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
                                end.toLong: java.lang.Long,
                                ingestionTimeStart: java.lang.Long,
                                ingestionTimeEnd: java.lang.Long)
-      session.execute(stmt).iterator.asScala
+      new RetryWithExpBackOffIterator(session.execute(stmt).iterator.asScala)
     }
   }
 
@@ -116,15 +115,9 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
                                ingestionTimeStart: java.lang.Long,
                                ingestionTimeEnd: java.lang.Long)
                          .setFetchSize(fetchSize)
-      try {
-        session.execute(stmt).iterator.asScala
-          .map { row => row.getBytes("partition") }
-          .toStream.distinct // removes duplicate consecutive partKeys
-      } catch { case e: ReadTimeoutException =>
-        logger.error(s"Got read timeout when scanning Ingestion Index Table for tokenRange=($start,$end) " +
-                     s"ingestionTimeStart=$ingestionTimeStart ingestionTimeEnd=$ingestionTimeEnd")
-        throw e
-      }
+      new RetryWithExpBackOffIterator(session.execute(stmt).iterator.asScala)
+        .map { row => row.getBytes("partition") }
+        .toStream.distinct // removes duplicate consecutive partKeys
     }
   }
 
