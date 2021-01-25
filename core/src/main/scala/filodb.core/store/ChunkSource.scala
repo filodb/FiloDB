@@ -162,7 +162,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
       stats.incrReadPartitions(1)
       val subgroup = TimeSeriesShard.partKeyGroup(schema.partKeySchema, partition.partKeyBase,
                                                   partition.partKeyOffset, numGroups)
-      val key = new PartitionRangeVectorKey(partition.partKeyBase, partition.partKeyOffset,
+      val key = new PartitionRangeVectorKey(Left(partition),
                                             schema.partKeySchema, partCols, partition.shard,
                                             subgroup, partition.partID, schema.name)
       RawDataRangeVector(key, partition, lookupRes.chunkMethod, ids)

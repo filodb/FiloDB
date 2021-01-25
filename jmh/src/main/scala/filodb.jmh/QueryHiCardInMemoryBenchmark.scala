@@ -14,11 +14,10 @@ import monix.reactive.Observable
 import org.openjdk.jmh.annotations._
 
 import filodb.coordinator.queryplanner.SingleClusterPlanner
-import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{QueryConfig, QueryContext, QuerySession}
+import filodb.core.query.{PlannerParams, PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -36,7 +35,6 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
 
   import filodb.coordinator._
   import client.Client.actorAsk
-  import client.QueryCommands._
   import NodeClusterActor._
 
   val numShards = 1
@@ -107,14 +105,15 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
 
   val numQueries = 100       // Please make sure this number matches the OperationsPerInvocation below
   val queryIntervalSec = samplesDuration.toSeconds  // # minutes between start and stop
-  val queryStep = 150        // # of seconds between each query sample "step"
+  val queryStep = 15        // # of seconds between each query sample "step"
 
-
+  val dummyPromQlQueryParams = PromQlQueryParams("dummy", 0, 1000, 100) // not real
+  val qContext = QueryContext(dummyPromQlQueryParams,
+    plannerParams = PlannerParams(queryTimeoutMillis = Int.MaxValue, shardOverrides = Some(Seq(0))))
   private def toExecPlan(query: String): ExecPlan = {
     val queryStartTime = ingestionStartTime + 7.minutes.toMillis  // 7 minutes from start until 60 minutes from start
     val qParams = TimeStepParams(queryStartTime/1000, queryStep, queryStartTime/1000 + queryIntervalSec)
-    val execPlan = engine.materialize(Parser.queryRangeToLogicalPlan(query, qParams),
-      QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, 0))), 20000))
+    val execPlan = engine.materialize(Parser.queryRangeToLogicalPlan(query, qParams), qContext)
     var child = execPlan
     while (child.children.size > 0) child = child.children(0)
     child
@@ -132,7 +131,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(100)
   def scanSumOfRateBenchmark(): Unit = {
     (0 until numQueries).foreach { _ =>
-      val querySession = QuerySession(QueryContext(), queryConfig)
+      val querySession = QuerySession(qContext, queryConfig)
       Await.result(scanSumOfRate.execute(store, querySession).runAsync, 60.seconds)
     }
   }
@@ -144,7 +143,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(100)
   def scanSumOfSumOverTimeBenchmark(): Unit = {
     (0 until numQueries).foreach { _ =>
-      val querySession = QuerySession(QueryContext(), queryConfig)
+      val querySession = QuerySession(qContext, queryConfig)
       Await.result(scanSumSumOverTime.execute(store, querySession).runAsync, 60.seconds)
     }
   }

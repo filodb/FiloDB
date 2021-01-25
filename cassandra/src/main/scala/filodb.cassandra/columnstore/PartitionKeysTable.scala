@@ -3,6 +3,7 @@ package filodb.cassandra.columnstore
 import java.lang.{Integer => JInt, Long => JLong}
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.jdk.CollectionConverters.asScalaIteratorConverter
 
 import com.datastax.driver.core.{ConsistencyLevel, Row}
 import monix.eval.Task
@@ -45,6 +46,23 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
     s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ?")
     .setConsistencyLevel(ConsistencyLevel.ONE)
 
+  private lazy val scanCqlForStartTime = session.prepare(
+    s"SELECT partKey, startTime, endTime FROM $tableString " +
+      s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ? AND startTime >= ? AND startTime <= ? " +
+      s"ALLOW FILTERING")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
+  private lazy val scanCqlForEndTime = session.prepare(
+    s"SELECT partKey, startTime, endTime FROM $tableString " +
+      s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ? AND endTime >= ? AND endTime <= ? " +
+      s"ALLOW FILTERING")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
+  private lazy val readCql = session.prepare(
+    s"SELECT partKey, startTime, endTime FROM $tableString " +
+      s"WHERE partKey = ? ")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
   private lazy val deleteCql = session.prepare(
     s"DELETE FROM $tableString " +
     s"WHERE partKey = ?"
@@ -74,7 +92,74 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
     } yield pk
   }
 
-  def deletePartKey(pk: Array[Byte], shard: Int): Future[Response] = {
+  /**
+   * Method used by data repair jobs.
+   * Return PartitionKey rows where timeSeries startTime falls within the specified repair start/end window.
+   * (In other words - return timesSeries that were born during the data loss period)
+   * Rows consist of partKey, start and end time. Refer the CQL used below.
+   */
+  def scanRowsByStartTimeRangeNoAsync(tokens: Seq[(String, String)],
+                                      repairStartTime: Long,
+                                      repairEndTime: Long): Set[Row] = {
+    tokens.iterator.flatMap { case (start, end) =>
+      /*
+       * FIXME conversion of tokens to Long works only for Murmur3Partitioner because it generates
+       * Long based tokens. If other partitioners are used, this can potentially break.
+       * Correct way is to pass Token objects around and bind tokens with stmt.bind().setPartitionKeyToken(token)
+       */
+      val startTimeStmt = scanCqlForStartTime.bind(start.toLong: java.lang.Long,
+        end.toLong: java.lang.Long,
+        repairStartTime: java.lang.Long,
+        repairEndTime: java.lang.Long)
+      session.execute(startTimeStmt).iterator.asScala
+    }
+  }.toSet
+
+  /**
+   * Method used by data repair jobs.
+   * Return PartitionKey rows where timeSeries endTime falls within the specified repair start/end window.
+   * (In other words - return timesSeries that died during the data loss period)
+   * Rows consist of partKey, start and end time. Refer the CQL used below.
+   */
+  def scanRowsByEndTimeRangeNoAsync(tokens: Seq[(String, String)],
+                                      startTime: Long,
+                                      endTime: Long): Set[Row] = {
+    tokens.iterator.flatMap { case (start, end) =>
+      /*
+       * FIXME conversion of tokens to Long works only for Murmur3Partitioner because it generates
+       * Long based tokens. If other partitioners are used, this can potentially break.
+       * Correct way is to pass Token objects around and bind tokens with stmt.bind().setPartitionKeyToken(token)
+       */
+      val endTimeStmt = scanCqlForEndTime.bind(start.toLong: java.lang.Long,
+        end.toLong: java.lang.Long,
+        startTime: java.lang.Long,
+        endTime: java.lang.Long)
+      session.execute(endTimeStmt).iterator.asScala
+    }
+  }.toSet
+
+  /**
+   * Returns PartKeyRecord for a given partKey bytes.
+   *
+   * @param pk partKey bytes
+   * @return Option[PartKeyRecord]
+   */
+  def readPartKey(pk: Array[Byte]) : Option[PartKeyRecord] = {
+    val iterator = session.execute(readCql.bind().setBytes(0, toBuffer(pk))).iterator()
+    if (iterator.hasNext) {
+      Some(PartitionKeysTable.rowToPartKeyRecord(iterator.next()))
+    } else {
+      None
+    }
+  }
+
+  /**
+   * Deletes PartKeyRecord for a given partKey bytes.
+   *
+   * @param pk partKey bytes
+   * @return Future[Response]
+   */
+  def deletePartKey(pk: Array[Byte]): Future[Response] = {
     val  stmt = deleteCql.bind().setBytes(0, toBuffer(pk)).setConsistencyLevel(writeConsistencyLevel)
     connector.execStmtWithRetries(stmt)
   }

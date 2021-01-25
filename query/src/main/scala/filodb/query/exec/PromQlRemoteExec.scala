@@ -45,12 +45,27 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                               (implicit sched: Scheduler): Future[QueryResponse] = {
+
+    import PromCirceSupport._
+    import io.circe.parser
     remoteExecHttpClient.httpGet(queryContext.plannerParams.applicationId, queryEndpoint,
       requestTimeoutMs, queryContext.submitTime, getUrlParams())
       .map { response =>
-        response.unsafeBody match {
-          case Left(error) => QueryError(queryContext.queryId, error.error)
-          case Right(successResponse) => toQueryResponse(successResponse.data, queryContext.queryId, execPlan2Span)
+        // Error response from remote partition is a nested json present in response.body
+        // as response status code is not 2xx
+        if (response.body.isLeft) {
+          parser.decode[RemoteErrorResponse](response.body.left.get) match {
+              case Right(errorResponse) => QueryError(queryContext.queryId,
+                RemoteQueryFailureException(response.code.toInt, errorResponse.status, errorResponse.errorType,
+                  errorResponse.error))
+              case Left(ex)             => QueryError(queryContext.queryId, ex)
+            }
+        }
+        else {
+          response.unsafeBody match {
+            case Left(error)            => QueryError(queryContext.queryId, error.error)
+            case Right(successResponse) => toQueryResponse(successResponse.data, queryContext.queryId, execPlan2Span)
+          }
         }
       }
   }

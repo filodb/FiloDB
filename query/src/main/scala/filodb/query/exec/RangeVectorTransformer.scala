@@ -1,6 +1,7 @@
 package filodb.query.exec
 
 import monix.reactive.Observable
+import scala.collection.Iterator
 import scala.collection.mutable.ListBuffer
 import spire.syntax.cfor._
 
@@ -368,10 +369,16 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
 
     val resultRv = nonNanTimestamps.map { t =>
       val rowList = new ListBuffer[TransientRow]()
-      for (i <- rangeParams.startSecs to rangeParams.endSecs by rangeParams.stepSecs) {
-        if (!t.contains(i * 1000))
-          rowList += new TransientRow(i * 1000, 1)
-      }
+
+      val it = Iterator.from(0, rangeParams.stepSecs.toInt)
+        .takeWhile(_ <= rangeParams.endSecs - rangeParams.startSecs).map { i =>
+        val timestamp = i + rangeParams.startSecs
+        if (!t.contains(timestamp * 1000))
+          rowList += new TransientRow(timestamp * 1000, 1)
+       }
+
+      // address step == 0 case
+      if (rangeParams.startSecs == rangeParams.endSecs || rangeParams.stepSecs == 0) it.take(1).toList else it.toList
       new RangeVector {
         override def key: RangeVectorKey = if (rowList.isEmpty) CustomRangeVectorKey.empty else keysFromFilter
         override def rows(): RangeVectorCursor = {

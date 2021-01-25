@@ -42,9 +42,9 @@ final case class LabelReplaceFunction(funcParams: Seq[String]) extends Miscellan
   }
 
   private def labelReplaceImpl(rangeVectorKey: RangeVectorKey, funcParams: Seq[Any]): RangeVectorKey = {
-
-    val value: ZeroCopyUTF8String = if (rangeVectorKey.labelValues.contains(ZeroCopyUTF8String(srcLabel))) {
-      rangeVectorKey.labelValues.get(ZeroCopyUTF8String(srcLabel)).get
+    val labelValues = rangeVectorKey.labelValues
+    val value: ZeroCopyUTF8String = if (labelValues.contains(ZeroCopyUTF8String(srcLabel))) {
+      labelValues.get(ZeroCopyUTF8String(srcLabel)).get
     }
     else {
       // Assign dummy value as label_replace should overwrite destination label if the source label is empty but matched
@@ -103,18 +103,19 @@ final case class LabelJoinFunction(funcParams: Seq[String]) extends Miscellaneou
 
   private def labelJoinImpl(rangeVectorKey: RangeVectorKey): RangeVectorKey = {
 
-    val srcLabelValues = srcLabel.map(x=> rangeVectorKey.labelValues.get(ZeroCopyUTF8String(x)).
+    val labelValues = rangeVectorKey.labelValues
+    val srcLabelValues = srcLabel.map(x=> labelValues.get(ZeroCopyUTF8String(x)).
       map(_.toString).getOrElse(""))
 
     val labelJoinValue = srcLabelValues.mkString(separator)
 
     if (labelJoinValue.length > 0) {
-      return CustomRangeVectorKey(rangeVectorKey.labelValues.
-        updated(ZeroCopyUTF8String(dstLabel), ZeroCopyUTF8String(labelJoinValue)), rangeVectorKey.sourceShards)
+      CustomRangeVectorKey(labelValues.updated(ZeroCopyUTF8String(dstLabel),
+        ZeroCopyUTF8String(labelJoinValue)), rangeVectorKey.sourceShards)
     }
     else {
       // Drop label if new value is empty
-      return CustomRangeVectorKey(rangeVectorKey.labelValues -
+      CustomRangeVectorKey(rangeVectorKey.labelValues -
         ZeroCopyUTF8String(dstLabel), rangeVectorKey.sourceShards)
     }
   }

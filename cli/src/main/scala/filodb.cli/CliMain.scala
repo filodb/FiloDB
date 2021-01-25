@@ -8,6 +8,7 @@ import scala.concurrent.duration._
 import scala.util.Try
 
 import com.opencsv.CSVWriter
+import java.util
 import monix.reactive.Observable
 import org.rogach.scallop.ScallopConf
 import org.rogach.scallop.exceptions.ScallopException
@@ -197,11 +198,11 @@ object CliMain extends FilodbClusterNode {
 
         case Some("partKeyBrAsString") =>
           require(args.hexpk.isDefined, "--hexPk must be defined")
-          partKeyBrAsString(args.hexpk())
+          printPartKeyBrAsString(args.hexpk())
 
         case Some("decodeChunkInfo") =>
           require(args.hexchunkinfo.isDefined, "--hexChunkInfo must be defined")
-          decodeChunkInfo(args.hexchunkinfo())
+          printDecodedChunkInfo(args.hexchunkinfo())
 
         case Some("decodeVector") =>
           require(args.hexvector.isDefined && args.vectortype.isDefined, "--hexVector and --vectorType must be defined")
@@ -331,23 +332,30 @@ object CliMain extends FilodbClusterNode {
     }
   }
 
-  def partKeyBrAsString(brHex: String): Unit = {
-    val brHex2 = if (brHex.startsWith("0x")) brHex.substring(2) else brHex
-    val array = new BigInteger(brHex2, 16).toByteArray
-    val schema = Schemas.fromConfig(config).get.schemas.head._2
-    println(schema.partKeySchema.stringify(array))
+  def printPartKeyBrAsString(brHex: String): Unit = {
+    val pkBytes = hexStringToByteArray(brHex)
+    val partSchema = Schemas.fromConfig(config).get.part
+    println(partKeyBrAsString(brHex))
   }
 
-  def decodeChunkInfo(hexChunkInfo: String): Unit = {
-    val ciHex = if (hexChunkInfo.startsWith("0x")) hexChunkInfo.substring(2) else hexChunkInfo
-    val array = new BigInteger(ciHex, 16).toByteArray
-    val ci = ChunkSetInfoOnHeap(array, Array.empty)
+  def partKeyBrAsString(brHex: String): String = {
+    val pkBytes = hexStringToByteArray(brHex)
+    val partSchema = Schemas.fromConfig(config).get.part
+    partSchema.binSchema.stringify(pkBytes)
+  }
+
+  def printDecodedChunkInfo(hexChunkInfo: String): Unit = {
+    val ci = decodeChunkInfo(hexChunkInfo)
     println(s"ChunkSetInfo id=${ci.id} numRows=${ci.numRows} startTime=${ci.startTime} endTime=${ci.endTime}")
   }
 
+  def decodeChunkInfo(hexChunkInfo: String): ChunkSetInfoOnHeap = {
+    val array = hexStringToByteArray(hexChunkInfo)
+    ChunkSetInfoOnHeap(array, Array.empty)
+  }
+
   def decodeVector(hexVector: String, vectorType: String): Unit = {
-    val vec = if (hexVector.startsWith("0x")) hexVector.substring(2) else hexVector
-    val array = new BigInteger(vec, 16).toByteArray
+    val array = hexStringToByteArray(hexVector)
     val memReader = MemoryReader.fromArray(array)
 
     val clazz = vectorType match {
@@ -451,6 +459,12 @@ object CliMain extends FilodbClusterNode {
       writer.close()
       outStream.close()
     }
+  }
+
+  private def hexStringToByteArray(brHex: String): Array[Byte] = {
+    val brHex2 = if (brHex.startsWith("0x")) brHex.substring(2) else brHex
+    val biArray = new BigInteger("10" + brHex2, 16).toByteArray
+    util.Arrays.copyOfRange(biArray, 1, biArray.length)
   }
 
 }
