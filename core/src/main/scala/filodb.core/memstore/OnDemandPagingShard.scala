@@ -49,8 +49,6 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
     .tag("shard", shardNum)
     .start()
 
-  val assumedResolution = 20000 // for now hard-code and assume 30ms as reporting interval
-
   private def capDataScannedPerShardCheck(lookup: PartLookupResult): Unit = {
     lookup.firstSchemaId.foreach { schId =>
       lookup.chunkMethod match {
@@ -58,7 +56,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
           val numMatches = lookup.partsInMemory.length + lookup.partIdsNotInMemory.length
           schemas.ensureQueriedDataSizeWithinLimitApprox(schId, numMatches,
             storeConfig.flushInterval.toMillis,
-            assumedResolution, end - st, storeConfig.maxDataPerShardQuery)
+            storeConfig.estimatedIngestResolutionMillis, end - st, storeConfig.maxDataPerShardQuery)
         case _ =>
       }
     }
