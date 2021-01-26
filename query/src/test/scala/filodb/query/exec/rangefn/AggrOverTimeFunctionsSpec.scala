@@ -721,4 +721,19 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
     aggregated.foreach(x => x._2 shouldEqual(0))
   }
+
+  it("test") {
+    var data = Seq(1.5, 2.5, 3.5, 4.5, 5.5)
+    val rv = timeValueRV(data)
+    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+
+    val windowSize = 100
+    val step = 20
+
+    val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 20000, 150000, 30000,
+      new SumOverTimeChunkedFunctionD(), querySession)
+    val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
+    aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
+  }
+
 }

@@ -455,6 +455,10 @@ object Parser extends Expression {
 
   def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
     val expression = parseQuery(query)
+    println("expression" + expression)
+    val prec = assignPrecedence(expression)
+
+    println("prec:" + prec)
     assignPrecedence(expression) match {
       case p: PeriodicSeries => p.toSeriesPlan(timeParams)
       case r: SimpleSeries   => r.toSeriesPlan(timeParams, isRoot = true)

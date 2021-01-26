@@ -119,7 +119,7 @@ trait Functions extends Base with Operators with Vectors {
                      case function: Function if (function.name.equalsIgnoreCase("scalar")) =>
                        function.toSeriesPlan(timeParams).asInstanceOf[ScalarVaryingDoublePlan]
                      case _ =>
-                       throw new IllegalArgumentException("Parameters can be a string, number or scalar function")
+                       throw new IllegalArgumentException("Parameters can be a string, number or scalar function:")
                    }
         if (instantFunctionIdOpt.isDefined) {
           val instantFunctionId = instantFunctionIdOpt.get
