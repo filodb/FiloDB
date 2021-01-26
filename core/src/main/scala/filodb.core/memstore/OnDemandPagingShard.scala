@@ -56,7 +56,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
           val numMatches = lookup.partsInMemory.length + lookup.partIdsNotInMemory.length
           schemas.ensureQueriedDataSizeWithinLimitApprox(schId, numMatches,
             storeConfig.flushInterval.toMillis,
-            storeConfig.estimatedIngestResolution, end - st, storeConfig.maxDataPerShardQuery)
+            storeConfig.estimatedIngestResolutionMillis, end - st, storeConfig.maxDataPerShardQuery)
         case _ =>
       }
     }
