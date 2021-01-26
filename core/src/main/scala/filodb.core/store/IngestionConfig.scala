@@ -41,8 +41,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              maxDataPerShardQuery: Long,
                              meteringEnabled: Boolean,
                              // approx data resolution, used for estimating the size of data to be scanned for
-                             // answering queries
-                             resolution: Int) {
+                             // answering queries, specified in milliseconds
+                             estimatedIngestResolution: Int) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
@@ -69,7 +69,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity,
                                "ensure-headroom-percent" -> ensureHeadroomPercent,
                                "metering-enabled" -> meteringEnabled,
-                               "resolution" -> resolution).asJava)
+                               "ingest-resolution" -> estimatedIngestResolution).asJava)
 }
 
 final case class AssignShardConfig(address: String, shardList: Seq[Int])
@@ -107,7 +107,7 @@ object StoreConfig {
                                            |trace-filters = {}
                                            |metering-enabled = false
                                            |time-aligned-chunks-enabled = false
-                                           |resolution = 60000
+                                           |ingest-resolution = 60000
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
   def apply(storeConfig: Config): StoreConfig = {
@@ -150,7 +150,7 @@ object StoreConfig {
                 config.as[Map[String, String]]("trace-filters"),
                 config.getMemorySize("max-data-per-shard-query").toBytes,
                 config.getBoolean("metering-enabled"),
-                config.getInt("resolution"))
+                config.getInt("ingest-resolution"))
   }
 }
 
