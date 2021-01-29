@@ -13,18 +13,7 @@ import monix.reactive.Observable
 
 import filodb.core._
 
-case class PartKeyRecord(partKey: Array[Byte], startTime: Long, endTime: Long, hash: Option[Int]) {
-  override def equals(obj: Any): Boolean = {
-    if (obj == null) return false
-    if (!obj.isInstanceOf[PartKeyRecord]) return false
-    val otherPartKey = obj.asInstanceOf[PartKeyRecord]
-    partKey.deep == otherPartKey.partKey.deep &&
-      startTime == otherPartKey.startTime &&
-      endTime == otherPartKey.endTime
-  }
-
-  override def hashCode(): Int = super.hashCode()
-}
+case class PartKeyRecord(partKey: Array[Byte], startTime: Long, endTime: Long, hash: Option[Int])
 
 /**
  * ChunkSink is the base trait for a sink, or writer to a persistent store, of chunks
