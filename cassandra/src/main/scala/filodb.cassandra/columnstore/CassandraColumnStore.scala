@@ -261,7 +261,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
       Await.result(
         writePartKeys(targetDatasetRef, shard, Observable.fromIterable(partKeys), diskTimeToLiveSeconds, updateHour),
-        Duration.Inf // TODO - Use cassandra write timeout.
+        5.minutes
       )
     }
 
