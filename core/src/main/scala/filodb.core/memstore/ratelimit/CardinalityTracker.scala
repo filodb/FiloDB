@@ -44,7 +44,7 @@ class CardinalityTracker(ref: DatasetRef,
                          quotaExceededProtocol: QuotaExceededProtocol = NoActionQuotaProtocol) extends StrictLogging {
 
   require(defaultChildrenQuota.length == shardKeyLen + 1)
-  require(defaultChildrenQuota.forall(q => q > 0 && q < 2000000))
+  require(defaultChildrenQuota.forall(q => q > 0))
   logger.info(s"Initializing Cardinality Tracker for shard $shard with $defaultChildrenQuota")
 
   /**
