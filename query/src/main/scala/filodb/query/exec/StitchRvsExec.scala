@@ -22,14 +22,14 @@ object StitchRvsExec {
       .groupBy(_.key.labelValues)
       .values
       .map { toMerge =>
-      if (toMerge.size > 1) {
-        val rows = StitchRvsExec.merge(toMerge.map(_.rows))
-        val key = toMerge.head.key
-        IteratorBackedRangeVector(key, rows)
-      } else {
-        toMerge.head
+        if (toMerge.size > 1) {
+          val rows = StitchRvsExec.merge(toMerge.map(_.rows))
+          val key = toMerge.head.key
+          IteratorBackedRangeVector(key, rows)
+        } else {
+          toMerge.head
+        }
       }
-    }
   }
 
   def merge(vectors: Iterable[RangeVectorCursor]): RangeVectorCursor = {
