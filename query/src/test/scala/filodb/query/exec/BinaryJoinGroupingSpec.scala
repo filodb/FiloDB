@@ -211,14 +211,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
       .toListL.runAsync.futureValue
 
-    val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
-      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
-      ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("idle")
-    ),
-      Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
-        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
-        ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("user")
-    ),
+    val expectedLabels = List(
       Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("def"),
         ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
         ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("idle")
@@ -226,15 +219,23 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("def"),
         ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
         ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("user")
+      ),
+      Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
+        ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("idle")
+      ),
+      Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
+        ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("user")
       )
     )
     result.size shouldEqual 4
     result.map(_.key.labelValues) sameElements(expectedLabels) shouldEqual true
 
-    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(0.75)
-    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(0.25)
-    result(2).rows.map(_.getDouble(1)).toList shouldEqual List(0.8)
-    result(3).rows.map(_.getDouble(1)).toList shouldEqual List(0.2)
+    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(0.8)
+    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(0.2)
+    result(2).rows.map(_.getDouble(1)).toList shouldEqual List(0.75)
+    result(3).rows.map(_.getDouble(1)).toList shouldEqual List(0.25)
   }
 
   it("copy sample role to node using group right ") {
@@ -308,12 +309,12 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       )
     )
     result.size shouldEqual 4
-    result.map(_.key.labelValues) sameElements(expectedLabels) shouldEqual true
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
 
-    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(0.75)
-    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(0.25)
-    result(2).rows.map(_.getDouble(1)).toList shouldEqual List(0.8)
-    result(3).rows.map(_.getDouble(1)).toList shouldEqual List(0.2)
+    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(0.8)
+    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(0.2)
+    result(2).rows.map(_.getDouble(1)).toList shouldEqual List(0.75)
+    result(3).rows.map(_.getDouble(1)).toList shouldEqual List(0.25)
   }
 
   it("should have metric name when operator is not MathOperator") {
