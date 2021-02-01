@@ -188,8 +188,8 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       .toListL.runAsync.futureValue
 
     result.size shouldEqual 2
-    result(0).key.labelValues.contains("_pi_".utf8) shouldEqual true
-    result(1).key.labelValues.contains("_step_".utf8) shouldEqual true
+    result(0).key.labelValues.contains("_step_".utf8) shouldEqual true
+    result(1).key.labelValues.contains("_pi_".utf8) shouldEqual true
 
   }
 
@@ -257,8 +257,8 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     result.size shouldEqual 4
     Seq("_pi_".utf8, "tag1".utf8).forall(result(0).key.labelValues.contains) shouldEqual true
-    Seq("_step_".utf8, "tag1".utf8).forall(result(1).key.labelValues.contains) shouldEqual true
-    Seq("_pi_".utf8, "tag1".utf8).forall(result(2).key.labelValues.contains) shouldEqual true
+    Seq("_pi_".utf8, "tag1".utf8).forall(result(1).key.labelValues.contains) shouldEqual true
+    Seq("_step_".utf8, "tag1".utf8).forall(result(2).key.labelValues.contains) shouldEqual true
     Seq("_step_".utf8, "tag1".utf8).forall(result(3).key.labelValues.contains) shouldEqual true
   }
 
@@ -527,5 +527,46 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     thrown.getCause.getClass shouldEqual classOf[BadQueryException]
     thrown.getCause.getMessage shouldEqual "This query results in more than 1 join cardinality." +
       " Try applying more filters."
+  }
+
+  it ("should remove dupes and stitch before joining") {
+
+    def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
+
+    val queryContext = QueryContext(plannerParams = PlannerParams(joinQueryCardLimit = 10)) // set join card limit to 1
+    val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.ADD,
+      Cardinality.OneToOne,
+      Nil, Nil, Nil, "__name__")
+
+    val lhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = dataRows.take(20).iterator
+    }
+
+    val lhsRvDupe = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = dataRows.take(30).drop(20).iterator
+    }
+
+    val rhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = dataRows.take(30).iterator
+    }
+
+    val lhs = QueryResult("someId", null, Seq(lhsRv, lhsRvDupe).map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, Seq(rhsRv).map(rv => SerializedRangeVector(rv, schema)))
+
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
+      .toListL.runAsync.futureValue
+
+    result.size shouldEqual 1
+    result.head.key.labelValues shouldEqual Map("tag".utf8 -> s"value1".utf8)
+    result.head.rows().map(_.getLong(0)).toList shouldEqual (0L until 30).toList
   }
 }

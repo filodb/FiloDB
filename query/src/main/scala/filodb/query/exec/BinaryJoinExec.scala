@@ -83,8 +83,9 @@ final case class BinaryJoinExec(queryContext: QueryContext,
       // NOTE: We can't require this any more, as multischema queries may result in not a QueryResult if the
       //       filter returns empty results.  The reason is that the schema will be undefined.
       // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
-      val lhsRvs = resp.filter(_._2 < lhs.size).flatMap(_._1)
-      val rhsRvs = resp.filter(_._2 >= lhs.size).flatMap(_._1)
+      // Stitch results and uniquify LHS and RHS vectors - there could be dupes because of spread increase
+      val lhsRvs = StitchRvsExec.stitchAndUnique(resp.filter(_._2 < lhs.size).flatMap(_._1))
+      val rhsRvs = StitchRvsExec.stitchAndUnique(resp.filter(_._2 >= lhs.size).flatMap(_._1))
       // figure out which side is the "one" side
       val (oneSide, otherSide, lhsIsOneSide) =
         if (cardinality == Cardinality.OneToMany) (lhsRvs, rhsRvs, true)
