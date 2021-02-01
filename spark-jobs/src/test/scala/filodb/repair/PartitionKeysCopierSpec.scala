@@ -15,7 +15,6 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
-
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.GlobalConfig
@@ -38,7 +37,6 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
   private val config = ConfigFactory.parseFile(new File(configPath)).getConfig("filodb").withFallback(sysConfig)
 
   lazy val session = new DefaultFiloSessionProvider(config.getConfig("cassandra")).session
-  lazy val colStore = new CassandraColumnStore(config, s, session)
 
   var gauge1PartKeyBytes: Array[Byte] = _
   var gauge2PartKeyBytes: Array[Byte] = _
@@ -85,7 +83,32 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
     Map("_ws_".utf8 -> workspace.utf8, "_ns_".utf8 -> namespace.utf8)
   }
 
-  override def beforeAll(): Unit = {
+  describe("raw data repair") {
+    it("should copy data for repair window") {
+      val colStore = new CassandraColumnStore(config, s, session)
+      truncateColStore(colStore)
+      prepareTestData(colStore)
+
+      PartitionKeysCopierMain.run(sparkConf).close()
+
+      validateRepairData(colStore)
+    }
+  }
+
+  describe("downsample data repair") {
+    it("should copy data for repair window") {
+      sparkConf.set("spark.filodb.partitionkeys.copier.copyDownsample", "true")
+      val colStore = new CassandraColumnStore(config, s, session, true)
+      truncateColStore(colStore)
+      prepareTestData(colStore)
+
+      PartitionKeysCopierMain.run(sparkConf).close()
+
+      validateRepairData(colStore)
+    }
+  }
+
+  def truncateColStore(colStore: CassandraColumnStore): Unit = {
     colStore.initialize(sourceDataset.ref, numOfShards).futureValue
     colStore.truncate(sourceDataset.ref, numOfShards).futureValue
     colStore.initialize(targetDataset.ref, numOfShards).futureValue
@@ -96,7 +119,7 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
     offheapMem.free()
   }
 
-  it("should write test data to cassandra source table") {
+  def prepareTestData(colStore: CassandraColumnStore): Unit = {
     def writePartKeys(pk: PartKeyRecord, shard: Int): Unit = {
       colStore.writePartKeys(sourceDataset.ref, shard, Observable.now(pk), 259200, 0L, false).futureValue
     }
@@ -149,11 +172,7 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
     }
   }
 
-  it("should run a simple Spark job") {
-    PartitionKeysCopierMain.run(sparkConf).close()
-  }
-
-  it("should have copied data to cassandra target tables") {
+  def validateRepairData(colStore: CassandraColumnStore): Unit = {
     def getWorkspace(map: Map[String, String]): String = {
       val ws: String = map.get("_ws_").get
       ws
