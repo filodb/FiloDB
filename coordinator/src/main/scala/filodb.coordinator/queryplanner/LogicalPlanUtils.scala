@@ -173,7 +173,7 @@ object LogicalPlanUtils extends StrictLogging {
       leaf.map { l =>
         l match {
           case lp: RawSeries => lp.offsetMs.getOrElse(0L)
-          case _ => 0L
+          case _             => 0L
         }
       }
     }
@@ -186,7 +186,7 @@ object LogicalPlanUtils extends StrictLogging {
       leaf.map { l =>
         l match {
           case lp: RawSeries => lp.lookbackMs.getOrElse(staleDataLookbackMillis)
-          case _ => 0
+          case _             => 0
         }
       }
     }

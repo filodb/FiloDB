@@ -198,13 +198,12 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
     downsampleLp.asInstanceOf[PeriodicSeriesWithWindowing].offsetMs.get shouldEqual(120000)
   }
 
-
   it("should direct overlapping binary join offset queries to both raw & downsample planner and stitch") {
 
     val start = now/1000 - 30.minutes.toSeconds
     val step = 1.minute.toSeconds
     val end = now/1000 - 2.minutes.toSeconds
-    val logicalPlan = Parser.queryRangeToLogicalPlan("sum(foo offset 2m) - sum(foo)",
+    val logicalPlan = Parser.queryRangeToLogicalPlan("sum(foo) - sum(foo offset 2m)",
       TimeStepParams(start, step, end))
       .asInstanceOf[PeriodicSeriesPlan]
 
