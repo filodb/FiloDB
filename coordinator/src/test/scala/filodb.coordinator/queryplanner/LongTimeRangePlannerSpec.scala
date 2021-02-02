@@ -1,7 +1,9 @@
 package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration._
+
 import monix.execution.Scheduler
+
 import filodb.core.DatasetRef
 import filodb.core.query.{QueryContext, QuerySession}
 import filodb.core.store.ChunkSource
