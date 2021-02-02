@@ -229,12 +229,12 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       )
     )
     result.size shouldEqual 4
-    result.map(_.key.labelValues) sameElements(expectedLabels) shouldEqual true
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
 
     result(0).rows.map(_.getDouble(1)).toList shouldEqual List(0.75)
     result(1).rows.map(_.getDouble(1)).toList shouldEqual List(0.25)
-    result(2).rows.map(_.getDouble(1)).toList shouldEqual List(0.8)
-    result(3).rows.map(_.getDouble(1)).toList shouldEqual List(0.2)
+    result(2).rows.map(_.getDouble(1)).toList shouldEqual List(0.2)
+    result(3).rows.map(_.getDouble(1)).toList shouldEqual List(0.8)
   }
 
   it("copy sample role to node using group right ") {
@@ -308,12 +308,12 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       )
     )
     result.size shouldEqual 4
-    result.map(_.key.labelValues) sameElements(expectedLabels) shouldEqual true
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
 
     result(0).rows.map(_.getDouble(1)).toList shouldEqual List(0.75)
     result(1).rows.map(_.getDouble(1)).toList shouldEqual List(0.25)
-    result(2).rows.map(_.getDouble(1)).toList shouldEqual List(0.8)
-    result(3).rows.map(_.getDouble(1)).toList shouldEqual List(0.2)
+    result(2).rows.map(_.getDouble(1)).toList shouldEqual List(0.2)
+    result(3).rows.map(_.getDouble(1)).toList shouldEqual List(0.8)
   }
 
   it("should have metric name when operator is not MathOperator") {
@@ -387,7 +387,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     )
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements(expectedLabels) shouldEqual true
+    result.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
   }
 
   it("should throw BadQueryException - many-to-one with on - cardinality limit 1") {
