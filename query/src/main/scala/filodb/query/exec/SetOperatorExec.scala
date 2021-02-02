@@ -67,12 +67,12 @@ final case class SetOperatorExec(queryContext: QueryContext,
       //       filter returns empty results.  The reason is that the schema will be undefined.
       // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
       // Resp is segregated based on index of child plans
-      val lhsRvs = StitchRvsExec.stitchAndUnique(resp.filter(_._3 < lhs.size).flatMap(_._2))
+      val lhsRvs = resp.filter(_._3 < lhs.size).flatMap(_._2)
       val rhsResp = resp.filter(_._3 >= lhs.size)
-      val rhsRvs = StitchRvsExec.stitchAndUnique(rhsResp.flatMap(_._2))
+      val rhsRvs = rhsResp.flatMap(_._2)
 
       val results: List[RangeVector] = binaryOp match {
-        case LAND    => val rhsSchema = rhsResp.headOption.map(_._1).getOrElse(ResultSchema.empty)
+        case LAND    => val rhsSchema = if (rhsResp.map(_._1).nonEmpty) rhsResp.map(_._1).head else ResultSchema.empty
                         setOpAnd(lhsRvs, rhsRvs, rhsSchema)
         case LOR     => setOpOr(lhsRvs, rhsRvs)
         case LUnless => setOpUnless(lhsRvs, rhsRvs)
@@ -97,7 +97,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
     else rv.rows.filter(!_.getDouble(1).isNaN).isEmpty
   }
 
-  private def setOpAnd(lhsRvs: Iterable[RangeVector], rhsRvs: Iterable[RangeVector],
+  private def setOpAnd(lhsRvs: List[RangeVector], rhsRvs: List[RangeVector],
                        rhsSchema: ResultSchema): List[RangeVector] = {
     // isEmpty method consumes rhs range vector
     require(rhsRvs.forall(_.isInstanceOf[SerializedRangeVector]), "RHS should be SerializedRangeVector")
@@ -142,8 +142,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
     result.toList
   }
 
-  private def setOpOr(lhsRvs: Iterable[RangeVector]
-                      , rhsRvs: Iterable[RangeVector]): List[RangeVector] = {
+  private def setOpOr(lhsRvs: List[RangeVector]
+                      , rhsRvs: List[RangeVector]): List[RangeVector] = {
     val lhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
     var result = new ListBuffer[RangeVector]()
     // Add everything from left hand side range vector
@@ -162,8 +162,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
     result.toList
   }
 
-  private def setOpUnless(lhsRvs: Iterable[RangeVector]
-                          , rhsRvs: Iterable[RangeVector]): List[RangeVector] = {
+  private def setOpUnless(lhsRvs: List[RangeVector]
+                          , rhsRvs: List[RangeVector]): List[RangeVector] = {
     val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
     var result = new ListBuffer[RangeVector]()
     rhsRvs.foreach { rv =>

@@ -489,8 +489,9 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       .toListL.runAsync.futureValue
 
     result.size shouldEqual 8
-    result.map(rv => (rv.key.labelValues, rv.rows.map(_.getDouble(1)).toList)).toSet shouldEqual
-      sampleHttpRequests.map( rv => (rv.key.labelValues, rv.rows.map(_.getDouble(1)).toList)).toSet
+    result.map(_.key.labelValues) sameElements (sampleHttpRequests.map(_.key.labelValues).toList) shouldEqual true
+    sampleHttpRequests.flatMap(_.rows.map(_.getDouble(1)).toList).
+      sameElements(result.flatMap(_.rows.map(_.getDouble(1)).toList)) shouldEqual true
   }
 
   it("should return Lhs when LAND is done with vector having no labels and ignoring is used om Lhs labels") {
@@ -510,8 +511,9 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       .toListL.runAsync.futureValue
 
     result.size shouldEqual 8
-    result.map(rv => (rv.key.labelValues, rv.rows.map(_.getDouble(1)).toList)).toSet shouldEqual
-      sampleHttpRequests.map( rv => (rv.key.labelValues, rv.rows.map(_.getDouble(1)).toList)).toSet
+    result.map(_.key.labelValues) sameElements (sampleHttpRequests.map(_.key.labelValues)) shouldEqual true
+    sampleHttpRequests.flatMap(_.rows.map(_.getDouble(1)).toList).
+      sameElements(result.flatMap(_.rows.map(_.getDouble(1)).toList)) shouldEqual true
   }
 
   it("should join many-to-many with or") {
@@ -662,14 +664,14 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     )
 
     result2.size shouldEqual 6
-    result2.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
+    result2.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
 
-    result2(0).rows.map(_.getDouble(1)).toList shouldEqual List(401)
-    result2(1).rows.map(_.getDouble(1)).toList shouldEqual List(301)
-    result2(2).rows.map(_.getDouble(1)).toList shouldEqual List(801)
-    result2(3).rows.map(_.getDouble(1)).toList shouldEqual List(701)
-    result2(4).rows.map(_.getDouble(1)).toList shouldEqual List(200)
-    result2(5).rows.map(_.getDouble(1)).toList shouldEqual List(100)
+    result2(0).rows.map(_.getDouble(1)).toList shouldEqual List(301)
+    result2(1).rows.map(_.getDouble(1)).toList shouldEqual List(401)
+    result2(2).rows.map(_.getDouble(1)).toList shouldEqual List(701)
+    result2(3).rows.map(_.getDouble(1)).toList shouldEqual List(801)
+    result2(4).rows.map(_.getDouble(1)).toList shouldEqual List(100)
+    result2(5).rows.map(_.getDouble(1)).toList shouldEqual List(200)
   }
 
   it("should excludes everything that has instance=0/1 but includes entries without " +
@@ -733,14 +735,14 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     )
 
     result2.size shouldEqual 6
-    result2.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
+    result2.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
 
-    result2(0).rows.map(_.getDouble(1)).toList shouldEqual List(401)
-    result2(1).rows.map(_.getDouble(1)).toList shouldEqual List(301)
-    result2(2).rows.map(_.getDouble(1)).toList shouldEqual List(801)
-    result2(3).rows.map(_.getDouble(1)).toList shouldEqual List(701)
-    result2(4).rows.map(_.getDouble(1)).toList shouldEqual List(200)
-    result2(5).rows.map(_.getDouble(1)).toList shouldEqual List(100)
+    result2(0).rows.map(_.getDouble(1)).toList shouldEqual List(301)
+    result2(1).rows.map(_.getDouble(1)).toList shouldEqual List(401)
+    result2(2).rows.map(_.getDouble(1)).toList shouldEqual List(701)
+    result2(3).rows.map(_.getDouble(1)).toList shouldEqual List(801)
+    result2(4).rows.map(_.getDouble(1)).toList shouldEqual List(100)
+    result2(5).rows.map(_.getDouble(1)).toList shouldEqual List(200)
   }
 
   it("should join many-to-many with unless") {
