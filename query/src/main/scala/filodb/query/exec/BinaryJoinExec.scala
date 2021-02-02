@@ -94,34 +94,48 @@ final case class BinaryJoinExec(queryContext: QueryContext,
       oneSide.foreach { rv =>
         val jk = joinKeys(rv.key)
         if (oneSideMap.contains(jk)) {
-          qLogger.info(s"BinaryJoinError: RV ${rv.key} (IDs ${rv.key.partIds}) produced $jk, but already in map: " +
-                      s"RV ${oneSideMap(jk).key} (IDs ${oneSideMap(jk).key.partIds})")
-          throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk")
+          val rvDupe = oneSideMap(jk)
+          if (rv.key.labelValues == rvDupe.key.labelValues) {
+            oneSideMap.put(jk, StitchRvsExec.stitch(rv, rvDupe))
+          } else {
+            qLogger.info(s"BinaryJoinError: RV ${rv.key} (IDs ${rv.key.partIds}) produced $jk, but already in map: " +
+              s"RV ${oneSideMap(jk).key} (IDs ${oneSideMap(jk).key.partIds})")
+            throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk")
+          }
+        } else {
+          oneSideMap.put(jk, rv)
         }
-        oneSideMap.put(jk, rv)
       }
       // keep a hashset of result range vector keys to help ensure uniqueness of result range vectors
-      val resultKeySet = new mutable.HashSet[RangeVectorKey]()
+      val results = new mutable.HashMap[RangeVectorKey, ResultVal]()
+      case class ResultVal(resultRv: RangeVector, stitchedOtherSide: RangeVector)
       // iterate across the the "other" side which could be one or many and perform the binary operation
-      val results = otherSide.flatMap { rvOther =>
+      otherSide.foreach { rvOther =>
         val jk = joinKeys(rvOther.key)
-        oneSideMap.get(jk).map { rvOne =>
+        oneSideMap.get(jk).foreach { rvOne =>
           val resKey = resultKeys(rvOne.key, rvOther.key)
-          if (resultKeySet.contains(resKey))
-            throw new BadQueryException(s"Non-unique result vectors found for $resKey. " +
-              s"Use grouping to create unique matching")
-          resultKeySet.add(resKey)
+          val rvOtherCorrect = if (results.contains(resKey)) {
+            val resVal = results(resKey)
+            if (resVal.stitchedOtherSide.key.labelValues == rvOther.key.labelValues) {
+              StitchRvsExec.stitch(rvOther, resVal.stitchedOtherSide)
+            } else {
+              throw new BadQueryException(s"Non-unique result vectors found for $resKey. " +
+                s"Use grouping to create unique matching")
+            }
+          } else {
+            rvOther
+          }
 
           // OneToOne cardinality case is already handled. this condition handles OneToMany case
-          if (resultKeySet.size > queryContext.plannerParams.joinQueryCardLimit)
+          if (results.size >= queryContext.plannerParams.joinQueryCardLimit)
             throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
               joinQueryCardLimit} " + s"join cardinality. Try applying more filters.")
 
-          val res = if (lhsIsOneSide) binOp(rvOne.rows, rvOther.rows) else binOp(rvOther.rows, rvOne.rows)
-          IteratorBackedRangeVector(resKey, res)
+          val res = if (lhsIsOneSide) binOp(rvOne.rows, rvOtherCorrect.rows) else binOp(rvOtherCorrect.rows, rvOne.rows)
+          results.put(resKey, ResultVal(IteratorBackedRangeVector(resKey, res), rvOtherCorrect))
         }
       }
-      Observable.fromIterable(results)
+      Observable.fromIterable(results.values.map(_.resultRv))
     }
     Observable.fromTask(taskOfResults).flatten
   }

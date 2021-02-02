@@ -12,7 +12,12 @@ import filodb.query.Query.qLogger
 
 object StitchRvsExec {
 
-  def merge(vectors: Seq[RangeVectorCursor]): RangeVectorCursor = {
+  def stitch(v1: RangeVector, v2: RangeVector): RangeVector = {
+    val rows = StitchRvsExec.merge(Seq(v1.rows(), v2.rows()))
+    IteratorBackedRangeVector(v1.key, rows)
+  }
+
+  def merge(vectors: Iterable[RangeVectorCursor]): RangeVectorCursor = {
     // This is an n-way merge without using a heap.
     // Heap is not used since n is expected to be very small (almost always just 1 or 2)
     new RangeVectorCursor {
