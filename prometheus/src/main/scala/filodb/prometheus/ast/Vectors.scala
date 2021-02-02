@@ -209,7 +209,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
     */
   case class RangeExpression(metricName: Option[String],
                              labelSelection: Seq[LabelMatch],
-                             window: Duration,
+                             timeInterval: TimeInterval,
                              offset: Option[Duration]) extends Vector with SimpleSeries {
 
     private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
@@ -218,17 +218,20 @@ trait Vectors extends Scalars with TimeUnits with Base {
       if (isRoot && timeParams.start != timeParams.end) {
         throw new UnsupportedOperationException("Range expression is not allowed in query_range")
       }
-      // multiply by 1000 to convert unix timestamp in seconds to millis
-      val rs = RawSeries(timeParamToSelector(timeParams), columnFilters, column.toSeq,
-        Some(window.millis(timeParams.step * 1000)),
-        offset.map(_.millis(timeParams.step * 1000)))
-      bucketOpt.map { bOpt =>
-        // It's a fixed value, the range params don't matter at all
-        val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
-        ApplyInstantFunctionRaw(rs, InstantFunctionId.HistogramBucket, Seq(param))
-      }.getOrElse(rs)
+        // multiply by 1000 to convert unix timestamp in seconds to millis
+        val rs = RawSeries(
+          timeParamToSelector(timeParams),
+          columnFilters,
+          column.toSeq,
+          Some(timeInterval.duration.millis(timeParams.step * 1000)),
+          offset.map(_.millis(timeParams.step * 1000))
+        )
+        bucketOpt.map { bOpt =>
+          // It's a fixed value, the range params don't matter at all
+          val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
+          ApplyInstantFunctionRaw(rs, InstantFunctionId.HistogramBucket, Seq(param))
+        }.getOrElse(rs)
     }
-
   }
 
 }
