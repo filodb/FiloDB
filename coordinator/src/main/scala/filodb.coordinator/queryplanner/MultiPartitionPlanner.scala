@@ -72,9 +72,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val routingKeys = getRoutingKeys(logicalPlan)
 
     val offsetMs = LogicalPlanUtils.getOffsetMillis(logicalPlan)
-    val periodicSeriesTimeWithOffset = TimeRange((queryParams.startSecs * 1000) - offsetMs,
-      (queryParams.endSecs * 1000) - offsetMs)
-    val lookBackMs = getLookBackMillis(logicalPlan)
+    // To cover entire time range for queries like sum(foo offset 2d) - sum(foo)
+    val periodicSeriesTimeWithOffset = TimeRange((queryParams.startSecs * 1000) - offsetMs.max,
+      (queryParams.endSecs * 1000) - offsetMs.min)
+    val lookBackMs = getLookBackMillis(logicalPlan).max
 
     // Time at which raw data would be retrieved which is used to get partition assignments.
     // It should have time with offset and lookback as we need raw data at time including offset and lookback.
@@ -142,7 +143,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                         if (start > (queryParams.endSecs * 1000)) queryParams.endSecs * 1000 else start
                       }
         prevPartitionStart = startMs
-        val endMs = if (isInstantQuery) queryParams.endSecs * 1000 else p.timeRange.endMs + offsetMs
+        val endMs = if (isInstantQuery) queryParams.endSecs * 1000 else p.timeRange.endMs + offsetMs.max
         logger.debug(s"partitionInfo=$p; updated startMs=$startMs, endMs=$endMs")
         if (p.partitionName.equals(localPartitionName))
           localPartitionPlanner.materialize(

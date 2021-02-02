@@ -34,8 +34,8 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
     logicalPlan match {
       case p: PeriodicSeriesPlan =>
         val earliestRawTime = earliestRawTimestampFn
-        lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)
-        lazy val lookbackMs = LogicalPlanUtils.getLookBackMillis(logicalPlan)
+        lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan).max
+        lazy val lookbackMs = LogicalPlanUtils.getLookBackMillis(logicalPlan).max
         lazy val startWithOffsetMs = p.startMs - offsetMillis
         lazy val endWithOffsetMs = p.endMs - offsetMillis
         if (!logicalPlan.isRoutable)

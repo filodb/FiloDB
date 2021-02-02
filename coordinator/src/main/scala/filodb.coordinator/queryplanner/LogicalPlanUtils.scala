@@ -167,23 +167,27 @@ object LogicalPlanUtils extends StrictLogging {
     }
   }
 
-  def getOffsetMillis(logicalPlan: LogicalPlan): Long = {
+  def getOffsetMillis(logicalPlan: LogicalPlan): Seq[Long] = {
     val leaf = LogicalPlan.findLeafLogicalPlans(logicalPlan)
-    if (leaf.isEmpty) 0 else {
-      leaf.head match {
-        case lp: RawSeries => lp.offsetMs.getOrElse(0)
-        case _ => 0
+    if (leaf.isEmpty) Seq(0L) else {
+      leaf.map { l =>
+        l match {
+          case lp: RawSeries => lp.offsetMs.getOrElse(0L)
+          case _ => 0L
+        }
       }
     }
   }
 
-  def getLookBackMillis(logicalPlan: LogicalPlan): Long = {
+  def getLookBackMillis(logicalPlan: LogicalPlan): Seq[Long] = {
     val staleDataLookbackMillis = WindowConstants.staleDataLookbackMillis
     val leaf = LogicalPlan.findLeafLogicalPlans(logicalPlan)
-    if (leaf.isEmpty) 0 else {
-      leaf.head match {
-        case lp: RawSeries => lp.lookbackMs.getOrElse(staleDataLookbackMillis)
-        case _ => 0
+    if (leaf.isEmpty) Seq(0L) else {
+      leaf.map { l =>
+        l match {
+          case lp: RawSeries => lp.lookbackMs.getOrElse(staleDataLookbackMillis)
+          case _ => 0
+        }
       }
     }
   }
@@ -277,7 +281,7 @@ object ExtraOnByKeysUtil {
   private def shouldAddExtraKeys(lp: LogicalPlan, addStepKeyTimeRanges: Seq[Seq[Long]]): Boolean = {
     // need to check if raw time range in query overlaps with configured addStepKeyTimeRanges
     val range = getTimeFromLogicalPlan(lp)
-    val lookback = getLookBackMillis(lp)
+    val lookback = getLookBackMillis(lp).max
     queryTimeRangeRequiresExtraKeys(range.startMs - lookback, range.endMs, addStepKeyTimeRanges)
   }
 

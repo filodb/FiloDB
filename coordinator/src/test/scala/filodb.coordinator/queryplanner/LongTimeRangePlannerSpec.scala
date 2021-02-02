@@ -1,15 +1,13 @@
 package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration._
-
 import monix.execution.Scheduler
-
 import filodb.core.DatasetRef
 import filodb.core.query.{QueryContext, QuerySession}
 import filodb.core.store.ChunkSource
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{LogicalPlan, PeriodicSeriesPlan, PeriodicSeriesWithWindowing}
+import filodb.query.{BinaryJoin, LogicalPlan, PeriodicSeriesPlan, PeriodicSeriesWithWindowing}
 import filodb.query.exec._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -198,5 +196,29 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
     downsampleLp.startMs shouldEqual logicalPlan.startMs
     downsampleLp.endMs shouldEqual rawStart - (step * 1000)
     downsampleLp.asInstanceOf[PeriodicSeriesWithWindowing].offsetMs.get shouldEqual(120000)
+  }
+
+
+  it("should direct overlapping binary join offset queries to both raw & downsample planner and stitch") {
+
+    val start = now/1000 - 30.minutes.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now/1000 - 2.minutes.toSeconds
+    val logicalPlan = Parser.queryRangeToLogicalPlan("sum(foo offset 2m) - sum(foo)",
+      TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan]
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
+    val stitchExec = ep.asInstanceOf[StitchRvsExec]
+    stitchExec.children.size shouldEqual 2
+
+    val rawEp = stitchExec.children.head.asInstanceOf[MockExecPlan]
+    val downsampleEp = stitchExec.children.last.asInstanceOf[MockExecPlan]
+
+    rawEp.name shouldEqual "raw"
+    downsampleEp.name shouldEqual "downsample"
+
+    rawEp.lp.isInstanceOf[BinaryJoin] shouldEqual(true)
+    downsampleEp.lp.isInstanceOf[BinaryJoin] shouldEqual(true)
   }
 }

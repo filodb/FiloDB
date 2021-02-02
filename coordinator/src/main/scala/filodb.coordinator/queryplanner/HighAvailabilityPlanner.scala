@@ -55,7 +55,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   private def routeExecPlanMapper(routes: Seq[Route], rootLogicalPlan: LogicalPlan,
                                   qContext: QueryContext, lookBackTime: Long): ExecPlan = {
 
-    val offsetMs = LogicalPlanUtils.getOffsetMillis(rootLogicalPlan)
+    val offsetMs = LogicalPlanUtils.getOffsetMillis(rootLogicalPlan).max
     val execPlans: Seq[ExecPlan] = routes.map { route =>
       route match {
         case route: LocalRoute => if (route.timeRange.isEmpty)
@@ -100,11 +100,11 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
     // lazy because we want to fetch failures only if needed
-    lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)
+    lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan).max
     lazy val periodicSeriesTime = getTimeFromLogicalPlan(logicalPlan)
     lazy val periodicSeriesTimeWithOffset = TimeRange(periodicSeriesTime.startMs - offsetMillis,
       periodicSeriesTime.endMs - offsetMillis)
-    lazy val lookBackTime = getLookBackMillis(logicalPlan)
+    lazy val lookBackTime = getLookBackMillis(logicalPlan).max
     // Time at which raw data would be retrieved which is used to get failures.
     // It should have time with offset and lookback as we need raw data at time including offset and lookback.
     lazy val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackTime,
