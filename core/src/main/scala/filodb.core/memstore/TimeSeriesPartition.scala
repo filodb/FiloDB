@@ -508,7 +508,19 @@ TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats,
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
     _log.info(s"SwitchBuffers dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition - " +
                s"encode=$encode for currentChunk ${currentInfo.debugString}")
-    super.switchBuffers(blockHolder, encode)
+    val ret = super.switchBuffers(blockHolder, encode)
+    _log.info(s"After SwitchBuffers dataset=$ref schema=${schema.name} shard=$shard partId=$partID " +
+      s"$stringPartition - encode=$encode for currentChunk ${currentInfo.debugString} " +
+      s"chunkIds_in_chunkmap=${infos(AllChunkScan).map(_.debugString).mkString(",")}")
+    ret
+  }
+
+  override def infosToBeFlushed: ChunkInfoIterator = {
+    super.infosToBeFlushed.filter { info =>
+      _log.info(s"infosToBeFlushed returned ${info.debugString} dataset=$ref schema=${schema.name} shard=$shard " +
+        s"partId=$partID $stringPartition")
+      true
+    }
   }
 
   override protected def initNewChunk(startTime: Long, ingestionTime: Long): Unit = {
