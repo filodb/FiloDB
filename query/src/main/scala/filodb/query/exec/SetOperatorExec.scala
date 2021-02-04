@@ -97,6 +97,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
     else rv.rows.filter(!_.getDouble(1).isNaN).isEmpty
   }
 
+  // scalastyle:off method.length
   private def setOpAnd(lhsRvs: List[RangeVector], rhsRvs: List[RangeVector],
                        rhsSchema: ResultSchema): List[RangeVector] = {
     // isEmpty method consumes rhs range vector
@@ -155,7 +156,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
         }
         val arrayBuffer = result.getOrElse(jk, ArrayBuffer())
         val resRv = IteratorBackedRangeVector(lhs.key, rows)
-        if (index >=0) arrayBuffer.update(index,resRv) else arrayBuffer.append(resRv)
+        if (index >= 0) arrayBuffer.update(index, resRv) else arrayBuffer.append(resRv)
         result.put(jk, arrayBuffer)
       } else if (jk.isEmpty) {
         // "up AND ON (dummy) vector(1)" should be equivalent to up as there's no dummy label
@@ -166,6 +167,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
     }
     result.values.flatten.toList
   }
+  // scalastyle:on method.length
 
   private def setOpOr(lhsRvs: List[RangeVector]
                       , rhsRvs: List[RangeVector]): List[RangeVector] = {
