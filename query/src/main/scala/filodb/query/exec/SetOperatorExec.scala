@@ -1,13 +1,11 @@
 package filodb.query.exec
 
 import scala.collection.mutable
-import scala.collection.mutable.ListBuffer
-
+import scala.collection.mutable.ArrayBuffer
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.reactive.Observable
-
 import filodb.core.memstore.SchemaMismatch
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
@@ -15,6 +13,7 @@ import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.BinaryOperator.{LAND, LOR, LUnless}
 
+case class ResultVal(resultRv: RangeVector, stitchedOtherSide: RangeVector)
 /**
   * Set operator between results of lhs and rhs plan.
   *
@@ -101,20 +100,40 @@ final case class SetOperatorExec(queryContext: QueryContext,
                        rhsSchema: ResultSchema): List[RangeVector] = {
     // isEmpty method consumes rhs range vector
     require(rhsRvs.forall(_.isInstanceOf[SerializedRangeVector]), "RHS should be SerializedRangeVector")
+
+    val result = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
     val rhsMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
-    var result = new ListBuffer[RangeVector]()
+
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
       // Don't add range vector if it is empty
-      if (jk.nonEmpty && !isEmpty(rv, rhsSchema))
-        rhsMap.put(jk, rv)
+      if (jk.nonEmpty && !isEmpty(rv, rhsSchema)) {
+        if (rhsMap.contains(jk)) {
+          val resVal = rhsMap(jk)
+          if (resVal.key.labelValues == rv.key.labelValues) {
+            rhsMap.put(jk, StitchRvsExec.stitch(rv, resVal) )
+          } else {
+            rhsMap.put(jk, rv)
+          }
+        } else rhsMap.put(jk, rv)
+      }
     }
 
     lhsRvs.foreach { lhs =>
       val jk = joinKeys(lhs.key)
       // Add range vectors from lhs which are present in lhs and rhs both or when jk is empty
       if (rhsMap.contains(jk)) {
-        val lhsRows = lhs.rows
+        var index = -1
+        val lhsStitched = if (result.contains(jk)) {
+          val resVal = result(jk)
+          index = resVal.indexWhere(r => r.key.labelValues == lhs.key.labelValues)
+          if (index >= 0) {
+             StitchRvsExec.stitch(lhs, resVal(index))
+          } else {
+            lhs
+          }
+        } else lhs
+        val lhsRows = lhsStitched.rows
         val rhsRows = rhsMap.get(jk).get.rows
 
         val rows = new RangeVectorCursor {
@@ -133,51 +152,113 @@ final case class SetOperatorExec(queryContext: QueryContext,
             rhsRows.close()
           }
         }
-        result += IteratorBackedRangeVector(lhs.key, rows)
+        val arrayBuffer = result.getOrElse(jk, ArrayBuffer())
+        val resRv = IteratorBackedRangeVector(lhs.key, rows)
+        if (index >=0) arrayBuffer.update(index,resRv) else arrayBuffer.append(resRv)
+        result.put(jk, arrayBuffer)
       } else if (jk.isEmpty) {
         // "up AND ON (dummy) vector(1)" should be equivalent to up as there's no dummy label
-        result += lhs
+        val arrayBuffer = result.getOrElse(jk, ArrayBuffer())
+        arrayBuffer.append(lhs)
+        result.put(jk, arrayBuffer)
       }
     }
-    result.toList
+    result.values.flatten.toList
   }
 
   private def setOpOr(lhsRvs: List[RangeVector]
                       , rhsRvs: List[RangeVector]): List[RangeVector] = {
-    val lhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
-    var result = new ListBuffer[RangeVector]()
+
+    val lhsResult = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
+    val rhsResult = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
+
     // Add everything from left hand side range vector
     lhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
-      lhsKeysSet += jk
-      result += rv
+       if (lhsResult.contains(jk)) {
+        val resVal = lhsResult(jk)
+
+         val index = resVal.indexWhere(r => r.key.labelValues == rv.key.labelValues)
+        if (index >= 0) {
+          val stitched = StitchRvsExec.stitch(rv, resVal(index))
+          resVal.update(index, stitched)
+        } else {
+          lhsResult(jk).append(rv)
+        }
+      } else {
+         val lhsList = ArrayBuffer[RangeVector]()
+         lhsList.append(rv)
+         lhsResult.put(jk, lhsList)
+      }
     }
     // Add range vectors from right hand side which are not present on lhs
     rhsRvs.foreach { rhs =>
       val jk = joinKeys(rhs.key)
-      if (!lhsKeysSet.contains(jk)) {
-        result += rhs
+      if (!lhsResult.contains(jk)) {
+        if (rhsResult.contains(jk)) {
+          val resVal = rhsResult(jk)
+          val index = resVal.indexWhere(r => r.key.labelValues == rhs.key.labelValues)
+          if (index >= 0) {
+            val stitched = StitchRvsExec.stitch(rhs, resVal(index))
+            resVal.update(index, stitched)
+          } else {
+            resVal.append(rhs)
+          }
+        } else {
+         val rhsList = rhsResult.getOrElse(jk, ArrayBuffer())
+          rhsList.append(rhs)
+          rhsResult.put(jk, rhsList)
+        }
       }
     }
-    result.toList
+    lhsResult.values.flatten.toList ++ rhsResult.values.flatten.toList
   }
 
   private def setOpUnless(lhsRvs: List[RangeVector]
                           , rhsRvs: List[RangeVector]): List[RangeVector] = {
-    val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
-    var result = new ListBuffer[RangeVector]()
+    val lhsResult = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
+    val rhsResult = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
+
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
-      rhsKeysSet += jk
+
+      if (rhsResult.contains(jk)) {
+        val resVal = rhsResult(jk)
+        val index = resVal.indexWhere(r => r.key.labelValues == rv.key.labelValues)
+        if (index >= 0) {
+          val stitched = StitchRvsExec.stitch(rv, resVal(index))
+          resVal.update(index, stitched)
+        } else {
+          rhsResult(jk).append(rv)
+        }
+      } else {
+        val rhsList = ArrayBuffer[RangeVector]()
+        rhsList.append(rv)
+        rhsResult.put(jk, rhsList)
+      }
     }
     // Add range vectors which are not present in rhs
     lhsRvs.foreach { lhs =>
       val jk = joinKeys(lhs.key)
-      if (!rhsKeysSet.contains(jk)) {
-        result += lhs
+      if (!rhsResult.contains(jk)) {
+        if (lhsResult.contains(jk)) {
+          val resVal = lhsResult(jk)
+
+          val index = resVal.indexWhere(r => r.key.labelValues == lhs.key.labelValues)
+          if (index >= 0) {
+            val stitched = StitchRvsExec.stitch(lhs, resVal(index))
+            resVal.update(index, stitched)
+          } else {
+            resVal.append(lhs)
+          }
+        } else {
+          val lhsList = lhsResult.getOrElse(jk, ArrayBuffer())
+          lhsList.append(lhs)
+          lhsResult.put(jk, lhsList)
+        }
       }
     }
-    result.toList
+    lhsResult.values.flatten.toList
   }
 
   /**
