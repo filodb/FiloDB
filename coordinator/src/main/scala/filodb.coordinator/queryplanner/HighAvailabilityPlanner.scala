@@ -100,10 +100,10 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
     // lazy because we want to fetch failures only if needed
-    lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan).max
+    lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)
     lazy val periodicSeriesTime = getTimeFromLogicalPlan(logicalPlan)
-    lazy val periodicSeriesTimeWithOffset = TimeRange(periodicSeriesTime.startMs - offsetMillis,
-      periodicSeriesTime.endMs - offsetMillis)
+    lazy val periodicSeriesTimeWithOffset = TimeRange(periodicSeriesTime.startMs - offsetMillis.max,
+      periodicSeriesTime.endMs - offsetMillis.min)
     lazy val lookBackTime = getLookBackMillis(logicalPlan).max
     // Time at which raw data would be retrieved which is used to get failures.
     // It should have time with offset and lookback as we need raw data at time including offset and lookback.

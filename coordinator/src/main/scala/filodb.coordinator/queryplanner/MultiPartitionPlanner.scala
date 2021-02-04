@@ -143,7 +143,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                         if (start > (queryParams.endSecs * 1000)) queryParams.endSecs * 1000 else start
                       }
         prevPartitionStart = startMs
-        val endMs = if (isInstantQuery) queryParams.endSecs * 1000 else p.timeRange.endMs + offsetMs.max
+        val endMs = if (isInstantQuery) queryParams.endSecs * 1000 else p.timeRange.endMs + offsetMs.min
         logger.debug(s"partitionInfo=$p; updated startMs=$startMs, endMs=$endMs")
         if (p.partitionName.equals(localPartitionName))
           localPartitionPlanner.materialize(

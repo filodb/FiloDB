@@ -34,10 +34,10 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
     logicalPlan match {
       case p: PeriodicSeriesPlan =>
         val earliestRawTime = earliestRawTimestampFn
-        lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan).max
+        lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)
         lazy val lookbackMs = LogicalPlanUtils.getLookBackMillis(logicalPlan).max
-        lazy val startWithOffsetMs = p.startMs - offsetMillis
-        lazy val endWithOffsetMs = p.endMs - offsetMillis
+        lazy val startWithOffsetMs = p.startMs - offsetMillis.max
+        lazy val endWithOffsetMs = p.endMs - offsetMillis.min
         if (!logicalPlan.isRoutable)
           rawClusterPlanner.materialize(logicalPlan, qContext)
         else if (endWithOffsetMs < earliestRawTime) // full time range in downsampled cluster
@@ -50,7 +50,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
             logicalPlan
           } else {
             copyLogicalPlanWithUpdatedTimeRange(logicalPlan,
-              TimeRange(p.startMs, latestDownsampleTimestampFn + offsetMillis))
+              TimeRange(p.startMs, latestDownsampleTimestampFn + offsetMillis.min))
           }
           downsampleClusterPlanner.materialize(downsampleLp, qContext)
         } else { // raw/downsample overlapping query without long lookback
