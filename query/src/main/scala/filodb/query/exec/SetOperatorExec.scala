@@ -2,10 +2,12 @@ package filodb.query.exec
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.reactive.Observable
+
 import filodb.core.memstore.SchemaMismatch
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
@@ -13,7 +15,6 @@ import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.BinaryOperator.{LAND, LOR, LUnless}
 
-case class ResultVal(resultRv: RangeVector, stitchedOtherSide: RangeVector)
 /**
   * Set operator between results of lhs and rhs plan.
   *
@@ -177,8 +178,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
       val jk = joinKeys(rv.key)
        if (lhsResult.contains(jk)) {
         val resVal = lhsResult(jk)
-
-         val index = resVal.indexWhere(r => r.key.labelValues == rv.key.labelValues)
+        val index = resVal.indexWhere(r => r.key.labelValues == rv.key.labelValues)
         if (index >= 0) {
           val stitched = StitchRvsExec.stitch(rv, resVal(index))
           resVal.update(index, stitched)
@@ -205,7 +205,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
             resVal.append(rhs)
           }
         } else {
-         val rhsList = rhsResult.getOrElse(jk, ArrayBuffer())
+          val rhsList = rhsResult.getOrElse(jk, ArrayBuffer())
           rhsList.append(rhs)
           rhsResult.put(jk, rhsList)
         }
@@ -216,33 +216,18 @@ final case class SetOperatorExec(queryContext: QueryContext,
 
   private def setOpUnless(lhsRvs: List[RangeVector]
                           , rhsRvs: List[RangeVector]): List[RangeVector] = {
-    val lhsResult = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
-    val rhsResult = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
-
+    val result = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
+    val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
-
-      if (rhsResult.contains(jk)) {
-        val resVal = rhsResult(jk)
-        val index = resVal.indexWhere(r => r.key.labelValues == rv.key.labelValues)
-        if (index >= 0) {
-          val stitched = StitchRvsExec.stitch(rv, resVal(index))
-          resVal.update(index, stitched)
-        } else {
-          rhsResult(jk).append(rv)
-        }
-      } else {
-        val rhsList = ArrayBuffer[RangeVector]()
-        rhsList.append(rv)
-        rhsResult.put(jk, rhsList)
-      }
+      rhsKeysSet += jk
     }
     // Add range vectors which are not present in rhs
     lhsRvs.foreach { lhs =>
       val jk = joinKeys(lhs.key)
-      if (!rhsResult.contains(jk)) {
-        if (lhsResult.contains(jk)) {
-          val resVal = lhsResult(jk)
+      if (!rhsKeysSet.contains(jk)) {
+        if (result.contains(jk)) {
+          val resVal = result(jk)
 
           val index = resVal.indexWhere(r => r.key.labelValues == lhs.key.labelValues)
           if (index >= 0) {
@@ -252,13 +237,13 @@ final case class SetOperatorExec(queryContext: QueryContext,
             resVal.append(lhs)
           }
         } else {
-          val lhsList = lhsResult.getOrElse(jk, ArrayBuffer())
+          val lhsList = result.getOrElse(jk, ArrayBuffer())
           lhsList.append(lhs)
-          lhsResult.put(jk, lhsList)
+          result.put(jk, lhsList)
         }
       }
     }
-    lhsResult.values.flatten.toList
+    result.values.flatten.toList
   }
 
   /**

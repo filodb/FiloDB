@@ -600,8 +600,6 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
 
     result.size shouldEqual 6
     result.flatMap(_.key.labelValues.values.toSet).sorted sameElements expectedLabels.flatMap(_.toSet).sorted
-
-    println("result.flatMap(_.rows.map(_.getDouble(1)).toSet).toSet:" + result.flatMap(_.rows.map(_.getDouble(1)).toSet).toSet)
     expectedValues.toSet.diff(result.flatMap(_.rows.map(_.getDouble(1)).toSet).toSet).isEmpty shouldEqual true
   }
 
@@ -997,43 +995,6 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     rowValues(1).isNaN shouldEqual true
   }
 
-  it("should join many-to-many with or2") {
-    println("lhs size sampleCanary: sampleCanary" + sampleCanary.size)
-    println("rhs size: sampleVectorMatching" + sampleVectorMatching.size)
-    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
-      Array(dummyPlan),
-      new Array[ExecPlan](1),
-      BinaryOperator.LOR,
-      Nil, Nil, "__name__")
-
-    // scalastyle:off
-    val lhs = QueryResult("someId", tvSchema, sampleCanary.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", tvSchema, sampleVectorMatching.map(rv => SerializedRangeVector(rv, schema)))
-    // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
-      .toListL.runAsync.futureValue
-
-
-//    val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
-//      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
-//      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
-//      ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-//    ),
-//      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
-//        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
-//        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
-//        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-//      ))
-
-
-    println(" result.size:" +  result.size)
-    result.size shouldEqual (sampleCanary.size + sampleVectorMatching.size)
-//    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
-//    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(300)
-//    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(700)
-  }
-
-
   it ("should remove dupes in LHS and stitch before joining for LOR") {
 
     def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
@@ -1166,7 +1127,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     result.head.rows().map(_.getLong(0)).toList shouldEqual (0L until 40).toList
   }
 
-  it ("should remove dupes in RHS and stitch before joining for LAND") {
+  it ("should join with LAND when RHS has dupes") {
 
     def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
 
@@ -1174,7 +1135,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     val execPlan = SetOperatorExec(queryContext, dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
-      BinaryOperator.LOR,
+      BinaryOperator.LAND,
       Nil, Nil, "__name__")
 
     import NoCloseCursor._
@@ -1193,7 +1154,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     }
 
     val lhsRv = new RangeVector {
-      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value".utf8))
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
       val rows: RangeVectorCursor = dataRows.take(40).iterator
     }
 
@@ -1203,14 +1164,12 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
       .toListL.runAsync.futureValue
 
-    result.size shouldEqual 2
-    result.head.key.labelValues shouldEqual Map("tag".utf8 -> s"value".utf8)
-    result.last.key.labelValues shouldEqual Map("tag".utf8 -> s"value1".utf8)
+    result.size shouldEqual 1
+    result.head.key.labelValues shouldEqual Map("tag".utf8 -> s"value1".utf8)
     result.head.rows().map(_.getLong(0)).toList shouldEqual (0L until 40).toList
-    result.last.rows().map(_.getLong(0)).toList shouldEqual (0L until 40).toList
   }
 
-  it ("should remove dupes in RHS and stitch before joining for LUNLESS") {
+  it ("should join with LUNLESS when RHS has dupes") {
 
     def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
 
@@ -1292,10 +1251,6 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
 
     result.size shouldEqual 1
     result.head.key.labelValues shouldEqual Map("tag".utf8 -> s"value1".utf8)
-    //result.last.key.labelValues shouldEqual Map("tag".utf8 -> s"value2".utf8)
     result.head.rows().map(_.getLong(0)).toList shouldEqual (0L until 40).toList
-    //result.last.rows().map(_.getLong(0)).toList shouldEqual (0L until 40).toList
   }
-
-
 }
