@@ -131,14 +131,14 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
 
-    sparkConf.set("spark.filodb.chunkcopier.source.configFile", configPath)
-    sparkConf.set("spark.filodb.chunkcopier.source.dataset", "prometheus")
+    sparkConf.set("spark.filodb.chunks.copier.source.configFile", configPath)
+    sparkConf.set("spark.filodb.chunks.copier.source.dataset", "prometheus")
 
-    sparkConf.set("spark.filodb.chunkcopier.target.configFile", configPath)
-    sparkConf.set("spark.filodb.chunkcopier.target.dataset", "buddy_prometheus")
+    sparkConf.set("spark.filodb.chunks.copier.target.configFile", configPath)
+    sparkConf.set("spark.filodb.chunks.copier.target.dataset", "buddy_prometheus")
 
-    sparkConf.set("spark.filodb.chunkcopier.ingestionTimeStart", "2020-10-13T00:00:00Z")
-    sparkConf.set("spark.filodb.chunkcopier.ingestionTimeEnd",   "2020-10-13T05:00:00Z")
+    sparkConf.set("spark.filodb.chunks.copier.repairStartTime", "2020-10-13T00:00:00Z")
+    sparkConf.set("spark.filodb.chunks.copier.repairEndTime",   "2020-10-13T05:00:00Z")
 
     ChunkCopierMain.run(sparkConf).close()
 

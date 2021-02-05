@@ -46,15 +46,15 @@ class ChunkCopier(conf: SparkConf) {
       .orElseThrow()
   }
 
-  val rawSourceConfig = openConfig("spark.filodb.chunkcopier.source.configFile")
-  val rawTargetConfig = openConfig("spark.filodb.chunkcopier.target.configFile")
+  val rawSourceConfig = openConfig("spark.filodb.chunks.copier.source.configFile")
+  val rawTargetConfig = openConfig("spark.filodb.chunks.copier.target.configFile")
   val sourceConfig = rawSourceConfig.getConfig("filodb")
   val targetConfig = rawTargetConfig.getConfig("filodb")
   val sourceCassConfig = sourceConfig.getConfig("cassandra")
   val targetCassConfig = targetConfig.getConfig("cassandra")
 
-  val sourceDataset = conf.get("spark.filodb.chunkcopier.source.dataset")
-  val targetDataset = conf.get("spark.filodb.chunkcopier.target.dataset")
+  val sourceDataset = conf.get("spark.filodb.chunks.copier.source.dataset")
+  val targetDataset = conf.get("spark.filodb.chunks.copier.target.dataset")
   val targetDatasetConfig = datasetConfig(targetConfig, sourceDataset)
   val sourceDatasetRef = DatasetRef.fromDotString(sourceDataset)
   val targetDatasetRef = DatasetRef.fromDotString(targetDataset)
@@ -62,16 +62,16 @@ class ChunkCopier(conf: SparkConf) {
   // Examples: 2019-10-20T12:34:56Z  or  2019-10-20T12:34:56-08:00
   private def parseDateTime(str: String) = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str))
 
-  val ingestionTimeStart = parseDateTime(conf.get("spark.filodb.chunkcopier.ingestionTimeStart"))
-  val ingestionTimeEnd = parseDateTime(conf.get("spark.filodb.chunkcopier.ingestionTimeEnd"))
+  val ingestionTimeStart = parseDateTime(conf.get("spark.filodb.chunks.copier.repairStartTime"))
+  val ingestionTimeEnd = parseDateTime(conf.get("spark.filodb.chunks.copier.repairEndTime"))
 
   // Destructively deletes everything in the target before updating anthing. Is used when chunks aren't aligned.
-  val deleteFirst = conf.getBoolean("spark.filodb.chunkcopier.deleteFirst", false)
+  val deleteFirst = conf.getBoolean("spark.filodb.chunks.copier.deleteFirst", false)
 
   // Disable the copy phase either for fully deleting with no replacement, or for no-op testing.
-  val noCopy = conf.getBoolean("spark.filodb.chunkcopier.noCopy", false)
+  val noCopy = conf.getBoolean("spark.filodb.chunks.copier.noCopy", false)
 
-  val isDownsampleRepair = conf.getBoolean("spark.filodb.chunkcopier.isDownsampleCopy", false)
+  val isDownsampleRepair = conf.getBoolean("spark.filodb.chunks.copier.isDownsampleCopy", false)
   val diskTimeToLiveSeconds = if (isDownsampleRepair) {
     val dsSettings = new DownsamplerSettings(rawSourceConfig)
     val highestDSResolution = dsSettings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
@@ -82,7 +82,7 @@ class ChunkCopier(conf: SparkConf) {
   }
 
   val numSplitsForScans = sourceCassConfig.getInt("num-token-range-splits-for-scans")
-  val batchSize = conf.getInt("spark.filodb.chunkcopier.batchSize", 10000)
+  val batchSize = conf.getInt("spark.filodb.chunks.copier.batchSize", 10000)
 
   val readSched = Scheduler.io("cass-read-sched")
   val writeSched = Scheduler.io("cass-write-sched")
