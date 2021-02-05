@@ -71,8 +71,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
       val rhsResp = resp.filter(_._3 >= lhs.size)
       val rhsRvs = rhsResp.flatMap(_._2)
 
-      val results: List[RangeVector] = binaryOp match {
-        case LAND    => val rhsSchema = if (rhsResp.map(_._1).nonEmpty) rhsResp.map(_._1).head else ResultSchema.empty
+      val results: Iterable[RangeVector] = binaryOp match {
+        case LAND    => val rhsSchema = if (rhsResp.nonEmpty) rhsResp.head._1 else ResultSchema.empty
                         setOpAnd(lhsRvs, rhsRvs, rhsSchema)
         case LOR     => setOpOr(lhsRvs, rhsRvs)
         case LUnless => setOpUnless(lhsRvs, rhsRvs)
@@ -99,7 +99,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
 
   // scalastyle:off method.length
   private def setOpAnd(lhsRvs: List[RangeVector], rhsRvs: List[RangeVector],
-                       rhsSchema: ResultSchema): List[RangeVector] = {
+                       rhsSchema: ResultSchema): Iterable[RangeVector] = {
     // isEmpty method consumes rhs range vector
     require(rhsRvs.forall(_.isInstanceOf[SerializedRangeVector]), "RHS should be SerializedRangeVector")
 
@@ -128,6 +128,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
         var index = -1
         val lhsStitched = if (result.contains(jk)) {
           val resVal = result(jk)
+          // If LHS keys exist in result, stitch if it is a duplicate
           index = resVal.indexWhere(r => r.key.labelValues == lhs.key.labelValues)
           if (index >= 0) {
              StitchRvsExec.stitch(lhs, resVal(index))
@@ -136,7 +137,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
           }
         } else lhs
         val lhsRows = lhsStitched.rows
-        val rhsRows = rhsMap.get(jk).get.rows
+        val rhsRows = rhsMap(jk).rows
 
         val rows = new RangeVectorCursor {
           val cur = new TransientRow()
@@ -165,12 +166,12 @@ final case class SetOperatorExec(queryContext: QueryContext,
         result.put(jk, arrayBuffer)
       }
     }
-    result.values.flatten.toList
+    result.values.flatten
   }
   // scalastyle:on method.length
 
   private def setOpOr(lhsRvs: List[RangeVector]
-                      , rhsRvs: List[RangeVector]): List[RangeVector] = {
+                      , rhsRvs: List[RangeVector]): Iterable[RangeVector] = {
 
     val lhsResult = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
     val rhsResult = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
@@ -213,11 +214,11 @@ final case class SetOperatorExec(queryContext: QueryContext,
         }
       }
     }
-    lhsResult.values.flatten.toList ++ rhsResult.values.flatten.toList
+    lhsResult.values.flatten ++ rhsResult.values.flatten
   }
 
-  private def setOpUnless(lhsRvs: List[RangeVector]
-                          , rhsRvs: List[RangeVector]): List[RangeVector] = {
+  private def setOpUnless(lhsRvs: List[RangeVector],
+                          rhsRvs: List[RangeVector]): Iterable[RangeVector] = {
     val result = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
     val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
     rhsRvs.foreach { rv =>
@@ -245,7 +246,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
         }
       }
     }
-    result.values.flatten.toList
+    result.values.flatten
   }
 
   /**

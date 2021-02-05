@@ -1,14 +1,12 @@
 package filodb.query.exec
 
 import scala.util.Random
-
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
-
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
@@ -17,6 +15,8 @@ import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
+import scala.List
 
 
 class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
@@ -1252,5 +1252,74 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     result.size shouldEqual 1
     result.head.key.labelValues shouldEqual Map("tag".utf8 -> s"value1".utf8)
     result.head.rows().map(_.getLong(0)).toList shouldEqual (0L until 40).toList
+  }
+
+  it("AND should stitch dup LHS and not pick value when corresponding RHS value is NaN"){
+    val sampleNaN: Array[RangeVector] = Array(
+      new RangeVector {
+        val key: RangeVectorKey = CustomRangeVectorKey(
+          Map("__name__".utf8 -> s"http_requests".utf8,
+            "job".utf8 -> s"api-server".utf8,
+            "instance".utf8 -> "0".utf8,
+            "group".utf8 -> s"production".utf8)
+        )
+
+        import NoCloseCursor._
+        override def rows(): RangeVectorCursor = Seq(
+          new TransientRow(1L, 100),
+          new TransientRow(2L, 200),
+          new TransientRow(3L, Double.NaN)).iterator
+      })
+
+    val lhs1: Array[RangeVector] = Array(
+      new RangeVector {
+        val key: RangeVectorKey = CustomRangeVectorKey(
+          Map("__name__".utf8 -> s"http_requests".utf8,
+            "job".utf8 -> s"api-server".utf8,
+            "instance".utf8 -> "0".utf8,
+            "group".utf8 -> s"production".utf8)
+        )
+
+        import NoCloseCursor._
+        override def rows(): RangeVectorCursor = Seq(
+          new TransientRow(3L, 300)).iterator
+      })
+
+    val lhs2: Array[RangeVector] = Array(
+      new RangeVector {
+        val key: RangeVectorKey = CustomRangeVectorKey(
+          Map("__name__".utf8 -> s"http_requests".utf8,
+            "job".utf8 -> s"api-server".utf8,
+            "instance".utf8 -> "0".utf8,
+            "group".utf8 -> s"production".utf8)
+        )
+
+        import NoCloseCursor._
+        override def rows(): RangeVectorCursor = Seq(
+          new TransientRow(1L, 100),
+          new TransientRow(2L, 200)).iterator
+      })
+
+    val queryContext = QueryContext(plannerParams = PlannerParams(joinQueryCardLimit = 10)) // set join card limit to 1
+    val execPlan = SetOperatorExec(queryContext, dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.LAND,
+      Nil, Nil, "__name__")
+
+
+    val lhs = QueryResult("someId", tvSchema, (lhs2 ++ lhs1).map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleNaN.map(rv => SerializedRangeVector(rv, schema)))
+
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
+      .toListL.runAsync.futureValue
+
+    result.size shouldEqual 1
+    result.head.key.labelValues shouldEqual lhs1.head.key.labelValues
+    val rows = result.head.rows().map(x => (x.getLong(0), x.getDouble(1))).toList
+    rows.map(_._1) shouldEqual List(1, 2, 3)
+    val rowValues = rows.map(_._2)
+    rowValues.dropRight(1) shouldEqual List(100, 200)
+    rowValues.last.isNaN shouldEqual(true) // As Rhs does not have any value at 3L
   }
 }
