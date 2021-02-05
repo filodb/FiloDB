@@ -97,7 +97,7 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
   describe("downsample data repair") {
     it("should copy data for repair window") {
-      sparkConf.set("spark.filodb.partitionkeys.copier.copyDownsample", "true")
+      sparkConf.set("spark.filodb.partitionkeys.copier.isDownsampleCopy", "true")
       val colStore = new CassandraColumnStore(config, s, session, true)
       truncateColStore(colStore)
       prepareTestData(colStore)

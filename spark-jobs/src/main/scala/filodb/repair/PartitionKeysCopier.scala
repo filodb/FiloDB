@@ -69,7 +69,7 @@ class PartitionKeysCopier(conf: SparkConf) {
     Option(schemas.part.binSchema.partitionHash(partKey.partKey, UnsafeUtils.arayOffset))
 
   val numOfShards: Int = sourceDatasetConfig.getInt("num-shards")
-  private val isDownsampleRepair = conf.getBoolean("spark.filodb.partitionkeys.copier.copyDownsample", false)
+  private val isDownsampleRepair = conf.getBoolean("spark.filodb.partitionkeys.copier.isDownsampleCopy", false)
   private val repairStartTime = parseDateTime(conf.get("spark.filodb.partitionkeys.copier.repairStartTime"))
   private val repairEndTime = parseDateTime(conf.get("spark.filodb.partitionkeys.copier.repairEndTime"))
   private val diskTimeToLiveSeconds = if (isDownsampleRepair) {
