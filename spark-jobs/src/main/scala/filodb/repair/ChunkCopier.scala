@@ -1,19 +1,24 @@
 package filodb.repair
 
+import java.{lang, util}
 import java.io.File
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.Scheduler
+import net.ceedubs.ficus.Ficus._
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
+import scala.concurrent.duration.FiniteDuration
 
 import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, GlobalConfig}
 import filodb.core.store.ScanSplit
+import filodb.downsampler.chunk.DownsamplerSettings
+
 
 /**
   * Contains all the objects necessary for performing worker tasks. Is constructed from SparkConf
@@ -21,20 +26,38 @@ import filodb.core.store.ScanSplit
   */
 class ChunkCopier(conf: SparkConf) {
   private def openConfig(str: String) = {
-    val sysConfig = GlobalConfig.systemConfig.getConfig("filodb")
-    ConfigFactory.parseFile(new File(conf.get(str))).getConfig("filodb").withFallback(sysConfig)
+    ConfigFactory.parseFile(new File(conf.get(str))).withFallback(GlobalConfig.systemConfig)
   }
 
-  // Both "source" and "target" refer to file paths which define config files that have a
-  // top-level "filodb" section and a "cassandra" subsection.
-  val sourceConfig = openConfig("spark.filodb.chunkcopier.source.configFile")
-  val targetConfig = openConfig("spark.filodb.chunkcopier.target.configFile")
+  def datasetConfig(mainConfig: Config, datasetName: String): Config = {
+    def getConfig(path: lang.String): Config = {
+      ConfigFactory.parseFile(new File(path))
+    }
 
+    val sourceConfigPaths: util.List[lang.String] = mainConfig.getStringList("dataset-configs")
+    sourceConfigPaths.stream()
+      .map[Config](new util.function.Function[lang.String, Config]() {
+        override def apply(path: lang.String): Config = getConfig(path)
+      })
+      .filter(new util.function.Predicate[Config] {
+        override def test(conf: Config): Boolean = conf.getString("dataset").equals(datasetName)
+      })
+      .findFirst()
+      .orElseThrow()
+  }
+
+  val rawSourceConfig = openConfig("spark.filodb.chunkcopier.source.configFile")
+  val rawTargetConfig = openConfig("spark.filodb.chunkcopier.target.configFile")
+  val sourceConfig = rawSourceConfig.getConfig("filodb")
+  val targetConfig = rawTargetConfig.getConfig("filodb")
   val sourceCassConfig = sourceConfig.getConfig("cassandra")
   val targetCassConfig = targetConfig.getConfig("cassandra")
 
-  val sourceDatasetRef = DatasetRef.fromDotString(conf.get("spark.filodb.chunkcopier.source.dataset"))
-  val targetDatasetRef = DatasetRef.fromDotString(conf.get("spark.filodb.chunkcopier.target.dataset"))
+  val sourceDataset = conf.get("spark.filodb.chunkcopier.source.dataset")
+  val targetDataset = conf.get("spark.filodb.chunkcopier.target.dataset")
+  val targetDatasetConfig = datasetConfig(targetConfig, sourceDataset)
+  val sourceDatasetRef = DatasetRef.fromDotString(sourceDataset)
+  val targetDatasetRef = DatasetRef.fromDotString(targetDataset)
 
   // Examples: 2019-10-20T12:34:56Z  or  2019-10-20T12:34:56-08:00
   private def parseDateTime(str: String) = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str))
@@ -48,8 +71,17 @@ class ChunkCopier(conf: SparkConf) {
   // Disable the copy phase either for fully deleting with no replacement, or for no-op testing.
   val noCopy = conf.getBoolean("spark.filodb.chunkcopier.noCopy", false)
 
-  val diskTimeToLiveSeconds = conf.getTimeAsSeconds("spark.filodb.chunkcopier.diskTimeToLive")
-  val splitsPerNode = conf.getInt("spark.filodb.chunkcopier.splitsPerNode", 1)
+  val isDownsampleRepair = conf.getBoolean("spark.filodb.chunkcopier.isDownsampleCopy", false)
+  val diskTimeToLiveSeconds = if (isDownsampleRepair) {
+    val dsSettings = new DownsamplerSettings(rawSourceConfig)
+    val highestDSResolution = dsSettings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
+    dsSettings.ttlByResolution(highestDSResolution)
+  } else {
+    targetDatasetConfig.getConfig("sourceconfig.store")
+      .as[FiniteDuration]("disk-time-to-live").toSeconds.toInt
+  }
+
+  val numSplitsForScans = sourceCassConfig.getInt("num-token-range-splits-for-scans")
   val batchSize = conf.getInt("spark.filodb.chunkcopier.batchSize", 10000)
 
   val readSched = Scheduler.io("cass-read-sched")
@@ -61,9 +93,9 @@ class ChunkCopier(conf: SparkConf) {
   val sourceCassandraColStore = new CassandraColumnStore(sourceConfig, readSched, sourceSession)(writeSched)
   val targetCassandraColStore = new CassandraColumnStore(targetConfig, readSched, targetSession)(writeSched)
 
-  private[repair] def getSourceScanSplits = sourceCassandraColStore.getScanSplits(sourceDatasetRef, splitsPerNode)
+  private[repair] def getSourceScanSplits = sourceCassandraColStore.getScanSplits(sourceDatasetRef, numSplitsForScans)
 
-  private[repair] def getTargetScanSplits = targetCassandraColStore.getScanSplits(targetDatasetRef, splitsPerNode)
+  private[repair] def getTargetScanSplits = targetCassandraColStore.getScanSplits(targetDatasetRef, numSplitsForScans)
 
   def copySourceToTarget(splitIter: Iterator[ScanSplit]): Unit = {
     sourceCassandraColStore.copyOrDeleteChunksByIngestionTimeRange(
@@ -74,7 +106,7 @@ class ChunkCopier(conf: SparkConf) {
       batchSize,
       targetCassandraColStore,
       targetDatasetRef,
-      diskTimeToLiveSeconds.toInt)
+      diskTimeToLiveSeconds)
   }
 
   def deleteFromTarget(splitIter: Iterator[ScanSplit]): Unit = {
@@ -143,7 +175,7 @@ object ChunkCopierMain extends App with StrictLogging {
       val splits = copier.getTargetScanSplits
 
       logger.info(s"Delete phase cassandra split size: ${splits.size}. We will have this many spark partitions. " +
-        s"Tune splitsPerNode which was ${copier.splitsPerNode} if parallelism is low")
+        s"Tune splitsPerNode which was ${copier.numSplitsForScans} if parallelism is low")
 
       spark.sparkContext
         .makeRDD(splits)
@@ -156,7 +188,7 @@ object ChunkCopierMain extends App with StrictLogging {
       val splits = copier.getSourceScanSplits
 
       logger.info(s"Copy phase cassandra split size: ${splits.size}. We will have this many spark partitions. " +
-        s"Tune splitsPerNode which was ${copier.splitsPerNode} if parallelism is low")
+        s"Tune splitsPerNode which was ${copier.numSplitsForScans} if parallelism is low")
 
       spark.sparkContext
         .makeRDD(splits)
