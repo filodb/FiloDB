@@ -93,6 +93,8 @@ final case class BinaryJoinExec(queryContext: QueryContext,
       val oneSideMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
       oneSide.foreach { rv =>
         val jk = joinKeys(rv.key)
+        // When spread changes, we need to account for multiple Range Vectors with same key coming from different shards
+        // Each of these range vectors would contain data for different time ranges
         if (oneSideMap.contains(jk)) {
           val rvDupe = oneSideMap(jk)
           if (rv.key.labelValues == rvDupe.key.labelValues) {

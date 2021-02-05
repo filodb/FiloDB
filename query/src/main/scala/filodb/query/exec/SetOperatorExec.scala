@@ -71,7 +71,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
       val rhsResp = resp.filter(_._3 >= lhs.size)
       val rhsRvs = rhsResp.flatMap(_._2)
 
-      val results: Iterable[RangeVector] = binaryOp match {
+      val results: Iterator[RangeVector] = binaryOp match {
         case LAND    => val rhsSchema = if (rhsResp.nonEmpty) rhsResp.head._1 else ResultSchema.empty
                         setOpAnd(lhsRvs, rhsRvs, rhsSchema)
         case LOR     => setOpOr(lhsRvs, rhsRvs)
@@ -79,7 +79,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
         case _       => throw new IllegalArgumentException("requirement failed: Only and, or and unless are supported ")
       }
 
-      Observable.fromIterable(results)
+      Observable.fromIterator(results)
     }
     Observable.fromTask(taskOfResults).flatten
   }
@@ -97,9 +97,13 @@ final case class SetOperatorExec(queryContext: QueryContext,
     else rv.rows.filter(!_.getDouble(1).isNaN).isEmpty
   }
 
+  /***
+   * Add LHS range vector in result which have matching join keys in RHS.
+   * LHS row should only be added if corresponding row exists in RHS
+   */
   // scalastyle:off method.length
   private def setOpAnd(lhsRvs: List[RangeVector], rhsRvs: List[RangeVector],
-                       rhsSchema: ResultSchema): Iterable[RangeVector] = {
+                       rhsSchema: ResultSchema): Iterator[RangeVector] = {
     // isEmpty method consumes rhs range vector
     require(rhsRvs.forall(_.isInstanceOf[SerializedRangeVector]), "RHS should be SerializedRangeVector")
 
@@ -110,6 +114,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
       val jk = joinKeys(rv.key)
       // Don't add range vector if it is empty
       if (jk.nonEmpty && !isEmpty(rv, rhsSchema)) {
+        // When spread changes, we need to account for multiple Range Vectors with same key coming from different shards
+        // Each of these range vectors would contain data for different time ranges
         if (rhsMap.contains(jk)) {
           val resVal = rhsMap(jk)
           if (resVal.key.labelValues == rv.key.labelValues) {
@@ -166,12 +172,17 @@ final case class SetOperatorExec(queryContext: QueryContext,
         result.put(jk, arrayBuffer)
       }
     }
-    result.values.flatten
+    result.valuesIterator.map(_.toIterator).flatten
   }
   // scalastyle:on method.length
 
+
+  /***
+   * Add all LHS range vector in result. From RHS only only add the range vectors which have join key not
+   * present in result
+   */
   private def setOpOr(lhsRvs: List[RangeVector]
-                      , rhsRvs: List[RangeVector]): Iterable[RangeVector] = {
+                      , rhsRvs: List[RangeVector]): Iterator[RangeVector] = {
 
     val lhsResult = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
     val rhsResult = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
@@ -214,11 +225,14 @@ final case class SetOperatorExec(queryContext: QueryContext,
         }
       }
     }
-    lhsResult.values.flatten ++ rhsResult.values.flatten
+    lhsResult.valuesIterator.map(_.toIterator).flatten ++ rhsResult.valuesIterator.map(_.toIterator).flatten
   }
 
+  /***
+   * Return LHS range vector which have join keys not present in RHS
+   */
   private def setOpUnless(lhsRvs: List[RangeVector],
-                          rhsRvs: List[RangeVector]): Iterable[RangeVector] = {
+                          rhsRvs: List[RangeVector]): Iterator[RangeVector] = {
     val result = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
     val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
     rhsRvs.foreach { rv =>
@@ -246,7 +260,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
         }
       }
     }
-    result.values.flatten
+    result.valuesIterator.map(_.toIterator).flatten
   }
 
   /**
