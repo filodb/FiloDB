@@ -1,12 +1,14 @@
 package filodb.query.exec
 
 import scala.util.Random
+
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
+
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
@@ -15,9 +17,6 @@ import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-
-import scala.List
-
 
 class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
