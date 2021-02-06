@@ -636,7 +636,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     // Assuming that the last element in the shardKeyColumn is always a metric name, we are making sure the
     // shardKeyColumn.length is > 1 and dropping the last element in shardKeyColumn.
     if (schema.options.shardKeyColumns.length > 1 && shardKey.length == schema.options.shardKeyColumns.length) {
-      val tagSetMap = (schema.options.shardKeyColumns.map("sk_" + _) zip shardKey).dropRight(1).toMap
+      val tagSetMap = (schema.options.shardKeyColumns.map("metric" + _) zip shardKey).dropRight(1).toMap
       shardStats.activeTimeseries.withTags(TagSet.from(tagSetMap)).increment(times)
     }
   }
