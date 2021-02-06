@@ -38,6 +38,7 @@ import filodb.memory.format.ZeroCopyUTF8String._
 class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
 
+  val activeTimeseries = Kamon.gauge("memstore-active-timeseries")
   val rowsIngested = Kamon.counter("memstore-rows-ingested").withTags(TagSet.from(tags))
   val partitionsCreated = Kamon.counter("memstore-partitions-created").withTags(TagSet.from(tags))
   val dataDropped = Kamon.counter("memstore-data-dropped").withTags(TagSet.from(tags))
@@ -623,11 +624,21 @@ class TimeSeriesShard(val ref: DatasetRef,
       else activelyIngesting -= partId
     }
     shardStats.indexRecoveryNumRecordsProcessed.increment()
+    val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
+    captureTimeseriesCount(schema, shardKey, 1)
     if (storeConfig.meteringEnabled) {
-      val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
       cardTracker.incrementCount(shardKey)
     }
     partId
+  }
+
+  private def captureTimeseriesCount(schema: Schema, shardKey: Seq[String], times: Double) = {
+    // Assuming that the last element in the shardKeyColumn is always a metric name, we are making sure the
+    // shardKeyColumn.length is > 1 and dropping the last element in shardKeyColumn.
+    if (schema.options.shardKeyColumns.length > 1 && shardKey.length == schema.options.shardKeyColumns.length) {
+      val tagSetMap = (schema.options.shardKeyColumns.map("metric" + _) zip shardKey).dropRight(1).toMap
+      shardStats.activeTimeseries.withTags(TagSet.from(tagSetMap)).increment(times)
+    }
   }
 
   def indexNames(limit: Int): Seq[String] = partKeyIndex.indexNames(limit)
@@ -792,9 +803,10 @@ class TimeSeriesShard(val ref: DatasetRef,
       if (!p.ingesting) {
         logger.debug(s"Purging partition with partId=${p.partID}  ${p.stringPartition} from " +
           s"memory in dataset=$ref shard=$shardNum")
+        val schema = p.schema
+        val shardKey = schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset, schema.options.shardKeyColumns)
+        captureTimeseriesCount(schema, shardKey, -1)
         if (storeConfig.meteringEnabled) {
-          val schema = p.schema
-          val shardKey = schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset, schema.options.shardKeyColumns)
           cardTracker.decrementCount(shardKey)
         }
         removePartition(p)
@@ -1137,9 +1149,10 @@ class TimeSeriesShard(val ref: DatasetRef,
         // add new lucene entry if this partKey was never seen before
         // causes endTime to be set to Long.MaxValue
         partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
+        val shardKey = schema.partKeySchema.colValues(newPart.partKeyBase, newPart.partKeyOffset,
+          schema.options.shardKeyColumns)
+        captureTimeseriesCount(schema, shardKey, 1)
         if (storeConfig.meteringEnabled) {
-          val shardKey = schema.partKeySchema.colValues(newPart.partKeyBase, newPart.partKeyOffset,
-            schema.options.shardKeyColumns)
           cardTracker.incrementCount(shardKey)
         }
       } else {
