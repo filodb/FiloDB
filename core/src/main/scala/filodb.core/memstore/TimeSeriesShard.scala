@@ -11,10 +11,11 @@ import scala.util.{Random, Try}
 import bloomfilter.CanGenerateHashFrom
 import bloomfilter.mutable.BloomFilter
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
+import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import debox.{Buffer, Map => DMap}
 import kamon.Kamon
-import kamon.metric.MeasurementUnit
+import kamon.metric.{Counter, MeasurementUnit}
 import kamon.tag.TagSet
 import monix.eval.Task
 import monix.execution.{Scheduler, UncaughtExceptionReporter}
@@ -27,7 +28,7 @@ import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaSource, RocksDbCardinalityStore}
 import filodb.core.metadata.{Schema, Schemas}
-import filodb.core.query.{ColumnFilter, QuerySession}
+import filodb.core.query.{ColumnFilter, Filter, QuerySession}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.data.Shutdown
@@ -38,7 +39,9 @@ import filodb.memory.format.ZeroCopyUTF8String._
 class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
 
-  val activeTimeseries = Kamon.gauge("memstore-active-timeseries")
+  val timeseriesCount = Kamon.gauge("memstore-timeseries-count")
+  val chunksQueried = Kamon.counter("memstore-chunks-queried")
+  val tsCountBySchema = Kamon.gauge("memstore-timeseries-by-schema").withTags(TagSet.from(tags))
   val rowsIngested = Kamon.counter("memstore-rows-ingested").withTags(TagSet.from(tags))
   val partitionsCreated = Kamon.counter("memstore-partitions-created").withTags(TagSet.from(tags))
   val dataDropped = Kamon.counter("memstore-data-dropped").withTags(TagSet.from(tags))
@@ -195,7 +198,8 @@ case class PartLookupResult(shard: Int,
                             firstSchemaId: Option[Int] = None,
                             partIdsMemTimeGap: debox.Map[Int, Long] = debox.Map.empty,
                             partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty,
-                            pkRecords: Seq[PartKeyLuceneIndexRecord] = Seq.empty)
+                            pkRecords: Seq[PartKeyLuceneIndexRecord] = Seq.empty,
+                            queriedChunksCounter: Counter)
 
 final case class SchemaMismatch(expected: String, found: String) extends
 Exception(s"Multiple schemas found, please filter. Expected schema $expected, found schema $found")
@@ -230,7 +234,8 @@ class TimeSeriesShard(val ref: DatasetRef,
                       val bufferMemoryManager: NativeMemoryManager,
                       colStore: ColumnStore,
                       metastore: MetaStore,
-                      evictionPolicy: PartitionEvictionPolicy)
+                      evictionPolicy: PartitionEvictionPolicy,
+                      filodbConfig: Config)
                      (implicit val ioPool: ExecutionContext) extends StrictLogging {
   import collection.JavaConverters._
 
@@ -238,6 +243,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   import TimeSeriesShard._
 
   val shardStats = new TimeSeriesShardStats(ref, shardNum)
+  val shardKeyLevelIngestionMetricsEnabled = filodbConfig.getBoolean("shard-key-level-igestion-metrics-enabled")
+  val shardKeyLevelQueryMetricsEnabled = filodbConfig.getBoolean("shard-key-level-igestion-metrics-enabled")
 
   /**
     * Map of all partitions in the shard stored in memory, indexed by partition ID
@@ -635,10 +642,13 @@ class TimeSeriesShard(val ref: DatasetRef,
   private def captureTimeseriesCount(schema: Schema, shardKey: Seq[String], times: Double) = {
     // Assuming that the last element in the shardKeyColumn is always a metric name, we are making sure the
     // shardKeyColumn.length is > 1 and dropping the last element in shardKeyColumn.
-    if (schema.options.shardKeyColumns.length > 1 && shardKey.length == schema.options.shardKeyColumns.length) {
+    if (shardKeyLevelIngestionMetricsEnabled &&
+        schema.options.shardKeyColumns.length > 1 &&
+        shardKey.length == schema.options.shardKeyColumns.length) {
       val tagSetMap = (schema.options.shardKeyColumns.map("metric" + _) zip shardKey).dropRight(1).toMap
-      shardStats.activeTimeseries.withTags(TagSet.from(tagSetMap)).increment(times)
+      shardStats.timeseriesCount.withTags(TagSet.from(tagSetMap)).increment(times)
     }
+    shardStats.tsCountBySchema.withTag("schema", schema.name).increment(times)
   }
 
   def indexNames(limit: Int): Seq[String] = partKeyIndex.indexNames(limit)
@@ -1455,18 +1465,31 @@ class TimeSeriesShard(val ref: DatasetRef,
                        querySession: QuerySession): PartLookupResult = {
     querySession.lock = Some(reclaimLock)
     reclaimLock.lock()
+    val metricShardKeys = schemas.part.options.shardKeyColumns.dropRight(1)
     // any exceptions thrown here should be caught by a wrapped Task.
     // At the end, MultiSchemaPartitionsExec.execute releases the lock when the task is complete
     partMethod match {
       case SinglePartitionScan(partition, _) =>
         val partIds = debox.Buffer.empty[Int]
         getPartition(partition).foreach(p => partIds += p.partID)
-        PartLookupResult(shardNum, chunkMethod, partIds, Some(RecordSchema.schemaID(partition)))
+        val chunksQueriedMetric = shardStats.chunksQueried.withTags(TagSet.from(shardStats.tags))
+        PartLookupResult(shardNum, chunkMethod, partIds, Some(RecordSchema.schemaID(partition)),
+          queriedChunksCounter = chunksQueriedMetric)
       case MultiPartitionScan(partKeys, _)   =>
         val partIds = debox.Buffer.empty[Int]
         partKeys.flatMap(getPartition).foreach(p => partIds += p.partID)
-        PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID))
+        val chunksQueriedMetric = shardStats.chunksQueried.withTags(TagSet.from(shardStats.tags))
+        PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID),
+          queriedChunksCounter = chunksQueriedMetric)
       case FilteredPartitionScan(_, filters) =>
+        val chunksQueriedMetric = if (shardKeyLevelQueryMetricsEnabled) {
+          val metricTags = metricShardKeys.map { col =>
+            filters.collectFirst {
+              case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => "metric" + col -> filtVal
+            }.getOrElse(col -> "unknown")
+          }.toMap
+          shardStats.chunksQueried.withTags(TagSet.from(metricTags))
+        } else shardStats.chunksQueried.withTags(TagSet.from(shardStats.tags))
         // No matter if there are filters or not, need to run things through Lucene so we can discover potential
         // TSPartitions to read back from disk
         val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
@@ -1495,7 +1518,8 @@ class TimeSeriesShard(val ref: DatasetRef,
         }
         // now provide an iterator that additionally supplies the startTimes for
         // those partitions that may need to be paged
-        PartLookupResult(shardNum, chunkMethod, matches, _schema, startTimes, partIdsNotInMem)
+        PartLookupResult(shardNum, chunkMethod, matches, _schema, startTimes, partIdsNotInMem,
+          Nil, chunksQueriedMetric)
     }
   }
 
