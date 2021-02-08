@@ -38,7 +38,7 @@ class PartitionKeysCopier(conf: SparkConf) {
         override def apply(path: lang.String): Config = getConfig(path)
       })
       .filter(new util.function.Predicate[Config] {
-        override def test(conf: Config): Boolean = conf.getString("dataset").equals(sourceDataset)
+        override def test(config: Config): Boolean = config.getString("dataset").equals(datasetName)
       })
       .findFirst()
       .orElseThrow()
@@ -55,12 +55,10 @@ class PartitionKeysCopier(conf: SparkConf) {
   private val targetConfig = rawTargetConfig.getConfig("filodb")
   private val sourceCassConfig = sourceConfig.getConfig("cassandra")
   private val targetCassConfig = targetConfig.getConfig("cassandra")
-  private val sourceDataset = conf.get("spark.filodb.partitionkeys.copier.source.dataset")
-  private val targetDataset = conf.get("spark.filodb.partitionkeys.copier.target.dataset")
+  private val datasetName = conf.get("spark.filodb.partitionkeys.copier.dataset")
+  private val datasetRef = DatasetRef.fromDotString(datasetName)
   private val sourceDatasetConfig = datasetConfig(sourceConfig)
   private val targetDatasetConfig = datasetConfig(targetConfig)
-  private val sourceDatasetRef = DatasetRef.fromDotString(sourceDataset)
-  private val targetDatasetRef = DatasetRef.fromDotString(targetDataset)
   private val sourceSession = FiloSessionProvider.openSession(sourceCassConfig)
   private val targetSession = FiloSessionProvider.openSession(targetCassConfig)
 
@@ -94,18 +92,17 @@ class PartitionKeysCopier(conf: SparkConf) {
   private[repair] val noCopy = conf.getBoolean("spark.filodb.partitionkeys.copier.noCopy", false)
   private[repair] val numSplitsForScans = sourceCassConfig.getInt("num-token-range-splits-for-scans")
 
-  private[repair] def getSourceScanSplits = sourceCassandraColStore.getScanSplits(sourceDatasetRef, numSplitsForScans)
-  private[repair] def getTargetScanSplits = targetCassandraColStore.getScanSplits(targetDatasetRef, numSplitsForScans)
+  private[repair] def getSourceScanSplits = sourceCassandraColStore.getScanSplits(datasetRef, numSplitsForScans)
+  private[repair] def getTargetScanSplits = targetCassandraColStore.getScanSplits(datasetRef, numSplitsForScans)
 
   def copySourceToTarget(splitIter: Iterator[ScanSplit]): Unit = {
     sourceCassandraColStore.copyPartitionKeysByTimeRange(
-      sourceDatasetRef,
+      datasetRef,
       numOfShards,
       splitIter,
       repairStartTime.toEpochMilli(),
       repairEndTime.toEpochMilli(),
       targetCassandraColStore,
-      targetDatasetRef,
       partKeyHashFn,
       diskTimeToLiveSeconds.toInt)
   }
