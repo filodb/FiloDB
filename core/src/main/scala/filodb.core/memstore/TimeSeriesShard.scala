@@ -40,7 +40,8 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
 
   val timeseriesCount = Kamon.gauge("memstore-timeseries-count")
-  val chunksQueried = Kamon.counter("memstore-chunks-queried")
+  val chunksQueried = Kamon.counter("memstore-chunks-queried").withTags(TagSet.from(tags))
+  val chunksQueriedByShardKey = Kamon.counter("memstore-chunks-queried-by-shardkey")
   val tsCountBySchema = Kamon.gauge("memstore-timeseries-by-schema").withTags(TagSet.from(tags))
   val rowsIngested = Kamon.counter("memstore-rows-ingested").withTags(TagSet.from(tags))
   val partitionsCreated = Kamon.counter("memstore-partitions-created").withTags(TagSet.from(tags))
@@ -645,7 +646,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     if (shardKeyLevelIngestionMetricsEnabled &&
         schema.options.shardKeyColumns.length > 1 &&
         shardKey.length == schema.options.shardKeyColumns.length) {
-      val tagSetMap = (schema.options.shardKeyColumns.map("metric" + _) zip shardKey).dropRight(1).toMap
+      val tagSetMap = (schema.options.shardKeyColumns.map(c => s"metric${c}tag") zip shardKey).dropRight(1).toMap
       shardStats.timeseriesCount.withTags(TagSet.from(tagSetMap)).increment(times)
     }
     shardStats.tsCountBySchema.withTag("schema", schema.name).increment(times)
@@ -1472,24 +1473,22 @@ class TimeSeriesShard(val ref: DatasetRef,
       case SinglePartitionScan(partition, _) =>
         val partIds = debox.Buffer.empty[Int]
         getPartition(partition).foreach(p => partIds += p.partID)
-        val chunksQueriedMetric = shardStats.chunksQueried.withTags(TagSet.from(shardStats.tags))
         PartLookupResult(shardNum, chunkMethod, partIds, Some(RecordSchema.schemaID(partition)),
-          queriedChunksCounter = chunksQueriedMetric)
+          queriedChunksCounter = shardStats.chunksQueried)
       case MultiPartitionScan(partKeys, _)   =>
         val partIds = debox.Buffer.empty[Int]
         partKeys.flatMap(getPartition).foreach(p => partIds += p.partID)
-        val chunksQueriedMetric = shardStats.chunksQueried.withTags(TagSet.from(shardStats.tags))
         PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID),
-          queriedChunksCounter = chunksQueriedMetric)
+          queriedChunksCounter = shardStats.chunksQueried)
       case FilteredPartitionScan(_, filters) =>
         val chunksQueriedMetric = if (shardKeyLevelQueryMetricsEnabled) {
           val metricTags = metricShardKeys.map { col =>
             filters.collectFirst {
-              case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => "metric" + col -> filtVal
+              case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => s"metric${col}tag" -> filtVal
             }.getOrElse(col -> "unknown")
           }.toMap
-          shardStats.chunksQueried.withTags(TagSet.from(metricTags))
-        } else shardStats.chunksQueried.withTags(TagSet.from(shardStats.tags))
+          shardStats.chunksQueriedByShardKey.withTags(TagSet.from(metricTags))
+        } else shardStats.chunksQueried
         // No matter if there are filters or not, need to run things through Lucene so we can discover potential
         // TSPartitions to read back from disk
         val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
