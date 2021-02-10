@@ -289,6 +289,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   require (storeConfig.maxChunkTime > storeConfig.flushInterval, "MaxChunkTime should be greater than FlushInterval")
   val maxChunkTime = storeConfig.maxChunkTime.toMillis
 
+  val acceptDuplicateSamples = storeConfig.acceptDuplicateSamples
+
   // Called to remove chunks from ChunkMap of a given partition, when an offheap block is reclaimed
   private val reclaimListener = new ReclaimListener {
     def onReclaim(metaAddr: Long, numBytes: Int): Unit = {
@@ -1184,7 +1186,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         brRowReader.schema = schema.ingestionSchema
         brRowReader.recordOffset = recordOff
         tsp.ingest(ingestionTime, brRowReader, overflowBlockFactory,
-          storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, maxChunkTime)
+          storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, acceptDuplicateSamples, maxChunkTime)
         // Below is coded to work concurrently with logic in updateIndexWithEndTime
         // where we try to de-activate an active time series
         if (!tsp.ingesting) {

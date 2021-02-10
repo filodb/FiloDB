@@ -40,6 +40,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              traceFilters: Map[String, String],
                              maxDataPerShardQuery: Long,
                              meteringEnabled: Boolean,
+                             acceptDuplicateSamples: Boolean,
                              // approx data resolution, used for estimating the size of data to be scanned for
                              // answering queries, specified in milliseconds
                              estimatedIngestResolutionMillis: Int) {
@@ -69,6 +70,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity,
                                "ensure-headroom-percent" -> ensureHeadroomPercent,
                                "metering-enabled" -> meteringEnabled,
+                               "accept-duplicate-samples" -> acceptDuplicateSamples,
                                "ingest-resolution-millis" -> estimatedIngestResolutionMillis).asJava)
 }
 
@@ -106,6 +108,7 @@ object StoreConfig {
                                            |ensure-headroom-percent = 5.0
                                            |trace-filters = {}
                                            |metering-enabled = false
+                                           |accept-duplicate-samples = false
                                            |time-aligned-chunks-enabled = false
                                            |ingest-resolution-millis = 60000
                                            |""".stripMargin)
@@ -150,6 +153,7 @@ object StoreConfig {
                 config.as[Map[String, String]]("trace-filters"),
                 config.getMemorySize("max-data-per-shard-query").toBytes,
                 config.getBoolean("metering-enabled"),
+                config.getBoolean("accept-duplicate-samples"),
                 config.getInt("ingest-resolution-millis"))
   }
 }
