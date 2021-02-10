@@ -34,6 +34,17 @@ class ShardKeyRegexPlanner(dataset: Dataset,
   override val schemas = Schemas(dataset.schema)
 
   /**
+   * Returns true when regex has single matching value
+   * Example: sum(test1{_ws_ = "demo", _ns_ =~ "App-1"}) + sum(test2{_ws_ = "demo", _ns_ =~ "App-1"})
+   */
+  def hasSingleShardKeyMatch(nonMetricShardKeyFilters: Seq[Seq[ColumnFilter]]) = {
+    val shardKeyMatchers = nonMetricShardKeyFilters.map(shardKeyMatcher(_))
+    shardKeyMatchers.forall(_.size == 1) &&
+      shardKeyMatchers.forall(_.head.toSet.sameElements(shardKeyMatchers.head.head.toSet))
+    // ^^ For Binary join LHS and RHS should have same value
+  }
+
+  /**
     * Converts a logical plan to execution plan.
     *
     * @param logicalPlan Logical plan after converting PromQL -> AST -> LogicalPlan
@@ -45,7 +56,7 @@ class ShardKeyRegexPlanner(dataset: Dataset,
       LogicalPlan.getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
     if (LogicalPlan.hasShardKeyEqualsOnly(logicalPlan, dataset.options.nonMetricShardColumns)) {
       queryPlanner.materialize(logicalPlan, qContext)
-    } else if (shardKeyMatcher(nonMetricShardKeyFilters.head).size == 1) {
+    } else if (hasSingleShardKeyMatch(nonMetricShardKeyFilters)) {
       // For queries like topk(2, test{_ws_ = "demo", _ns_ =~ "App-1"}) which have just one matching value
       generateExecWithoutRegex(logicalPlan, nonMetricShardKeyFilters.head, qContext).head
     } else walkLogicalPlanTree(logicalPlan, qContext).plans.head
