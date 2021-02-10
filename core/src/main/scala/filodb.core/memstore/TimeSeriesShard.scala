@@ -788,7 +788,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     // Rapidly switch all of the input buffers for a particular group
     logger.debug(s"Switching write buffers for group $groupNum in dataset=$ref shard=$shardNum")
     InMemPartitionIterator(partitionGroups(groupNum).intIterator)
-      .foreach(_.switchBuffers(blockFactoryPool.fetchForOverflow(groupNum)))
+      .foreach(_.switchBuffers(blockFactoryPool.checkoutForOverflow(groupNum)))
 
     val dirtyPartKeys = if (groupNum == dirtyPartKeysFlushGroup) {
       logger.debug(s"Switching dirty part keys in dataset=$ref shard=$shardNum out for flush. ")
@@ -1206,7 +1206,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         val tsp = part.asInstanceOf[TimeSeriesPartition]
         brRowReader.schema = schema.ingestionSchema
         brRowReader.recordOffset = recordOff
-        tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.fetchForOverflow(group),
+        tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.checkoutForOverflow(group),
           storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, acceptDuplicateSamples, maxChunkTime)
         // Below is coded to work concurrently with logic in updateIndexWithEndTime
         // where we try to de-activate an active time series

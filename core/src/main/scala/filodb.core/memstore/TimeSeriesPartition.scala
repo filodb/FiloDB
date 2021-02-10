@@ -128,12 +128,12 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
    * Note: Enabling this might result into creation of smaller suboptimal chunks.
    *
    * @param ingestionTime time (as milliseconds from 1970) at the data source
-   * @param blockHolder the BlockMemFactory to use for encoding chunks in case of WriteBuffer overflow
+   * @param overflowBlockHolder the BlockMemFactory to use for encoding chunks in case of WriteBuffer overflow
    * @param createChunkAtFlushBoundary create time bucketed (flush-interval) chunks
    * @param flushIntervalMillis flush-interval in milliseconds
    * @param acceptDuplicateSamples accept duplicate samples
    */
-  def ingest(ingestionTime: Long, row: RowReader, blockHolder: BlockMemFactory,
+  def ingest(ingestionTime: Long, row: RowReader, overflowBlockHolder: BlockMemFactory,
              createChunkAtFlushBoundary: Boolean, flushIntervalMillis: Option[Long],
              acceptDuplicateSamples: Boolean,
              maxChunkTime: Long = Long.MaxValue): Unit = {
@@ -148,22 +148,22 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       if(!newChunk && createChunkAtFlushBoundary
         && ts/flushIntervalMillis.get != timestampOfLatestSample/flushIntervalMillis.get) {
         // we have reached maximum userTime in chunk. switch buffers, start a new chunk and ingest
-        switchBuffersAndIngest(ingestionTime, ts, row, blockHolder,
+        switchBuffersAndIngest(ingestionTime, ts, row, overflowBlockHolder,
           createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
       } else if (ts - currentInfo.startTime > maxChunkTime) {
         // we have reached maximum userTime in chunk. switch buffers, start a new chunk and ingest
-        switchBuffersAndIngest(ingestionTime, ts, row, blockHolder,
+        switchBuffersAndIngest(ingestionTime, ts, row, overflowBlockHolder,
           createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
       } else {
         cforRange { 0 until schema.numDataColumns } { col =>
           currentChunks(col).addFromReaderNoNA(row, col) match {
             case r: VectorTooSmall =>
-              switchBuffersAndIngest(ingestionTime, ts, row, blockHolder,
+              switchBuffersAndIngest(ingestionTime, ts, row, overflowBlockHolder,
                 createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
               return
             // Different histogram bucket schema: need a new vector here
             case BucketSchemaMismatch =>
-              switchBuffersAndIngest(ingestionTime, ts, row, blockHolder,
+              switchBuffersAndIngest(ingestionTime, ts, row, overflowBlockHolder,
                 createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
               return
             case other: AddResponse =>
@@ -187,7 +187,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   private def switchBuffersAndIngest(ingestionTime: Long,
                                      userTime: Long,
                                      row: RowReader,
-                                     blockHolder: BlockMemFactory,
+                                     overflowBlockHolder: BlockMemFactory,
                                      createChunkAtFlushBoundary: Boolean,
                                      flushIntervalMillis: Option[Long],
                                      acceptDuplicateSamples: Boolean,
@@ -196,10 +196,13 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     // vectors fills up.  This is possible if one vector fills up but the other one does not for some reason.
     // So we do not call ingest again unless switcing buffers succeeds.
     // re-ingest every element, allocating new WriteBuffers
-    if (switchBuffers(blockHolder, encode = true)) { ingest(ingestionTime, row, blockHolder,
-      createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime) }
-    else { _log.warn("EMPTY WRITEBUFFERS when switchBuffers called!  Likely a severe bug!!! " +
-      s"Part=$stringPartition userTime=$userTime numRows=${currentInfo.numRows}") }
+    if (switchBuffers(overflowBlockHolder, encode = true)) {
+      ingest(ingestionTime, row, overflowBlockHolder, createChunkAtFlushBoundary, flushIntervalMillis,
+        acceptDuplicateSamples, maxChunkTime)
+    } else {
+      _log.warn("EMPTY WRITEBUFFERS when switchBuffers called!  Likely a severe bug!!! " +
+        s"Part=$stringPartition userTime=$userTime numRows=${currentInfo.numRows}")
+    }
   }
 
   protected def initNewChunk(startTime: Long, ingestionTime: Long): Unit = {
@@ -499,7 +502,7 @@ TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats,
 
   _log.info(s"Creating TracingTimeSeriesPartition dataset=$ref schema=${schema.name} partId=$partID $stringPartition")
 
-  override def ingest(ingestionTime: Long, row: RowReader, blockHolder: BlockMemFactory,
+  override def ingest(ingestionTime: Long, row: RowReader, overflowBlockHolder: BlockMemFactory,
                       createChunkAtFlushBoundary: Boolean, flushIntervalMillis: Option[Long],
                       acceptDuplicateSamples: Boolean,
                       maxChunkTime: Long = Long.MaxValue): Unit = {
@@ -507,7 +510,7 @@ TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats,
     _log.info(s"Ingesting dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition " +
                s"ingestionTime=$ingestionTime ts=$ts " +
                (1 until schema.numDataColumns).map(row.getAny).mkString("[", ",", "]"))
-    super.ingest(ingestionTime, row, blockHolder, createChunkAtFlushBoundary, flushIntervalMillis,
+    super.ingest(ingestionTime, row, overflowBlockHolder, createChunkAtFlushBoundary, flushIntervalMillis,
       acceptDuplicateSamples, maxChunkTime)
   }
 

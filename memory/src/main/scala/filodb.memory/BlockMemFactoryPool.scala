@@ -19,36 +19,45 @@ class BlockMemFactoryPool(blockStore: BlockManager,
   private val factoryPool = new collection.mutable.Queue[BlockMemFactory]()
   private val checkedOut = new mutable.HashMap[Int, BlockMemFactory]()
 
-  def poolSize: Int = factoryPool.length
+  def poolSize: Int = synchronized {
+    factoryPool.length
+  }
 
   /**
    * Allocates (if needed) and returns new block mem factory from the pool for the given
-   * flush group. Subsequent calls to fetch will return the same block mem factory
-   * until the flush group is checked out for flush
+   * flush group. Subsequent checkoutForOverflow calls will return the same block mem factory
+   * until the flush group is checked out for flush using checkoutForFlush method
    */
-  def fetchForOverflow(flushGroup: Int): BlockMemFactory = synchronized {
+  def checkoutForOverflow(flushGroup: Int): BlockMemFactory = synchronized {
     if (checkedOut.contains(flushGroup)) {
       checkedOut(flushGroup)
     } else {
-      val fact = if (factoryPool.nonEmpty) {
-        logger.debug(s"Checking out BlockMemFactory from pool for flushGroup=$flushGroup poolSize=$poolSize")
-        factoryPool.dequeue
-      } else {
-        logger.debug(s"Nothing in BlockMemFactory pool.  Creating a new one for flushGroup=$flushGroup")
-        new BlockMemFactory(blockStore, metadataAllocSize, baseTags)
-      }
-      fact.tags = baseTags + ("flushGroup" -> flushGroup.toString)
+      val fact: _root_.filodb.memory.BlockMemFactory = getFactoryFromPool(flushGroup)
       checkedOut(flushGroup) = fact
       fact
     }
   }
 
-  /**
-   * Checks out a BlockMemFactory for flush. Subsequent call for fetch for this
-   * flush group will return new BlockMemFactory
+  private def getFactoryFromPool(flushGroup: Int) = {
+    val fact = if (factoryPool.nonEmpty) {
+      logger.debug(s"Checking out BlockMemFactory from pool for flushGroup=$flushGroup poolSize=$poolSize")
+      factoryPool.dequeue
+    } else {
+      logger.debug(s"Nothing in BlockMemFactory pool.  Creating a new one for flushGroup=$flushGroup")
+      new BlockMemFactory(blockStore, metadataAllocSize, baseTags)
+    }
+    fact.tags = baseTags + ("flushGroup" -> flushGroup.toString)
+    fact
+    }
+/**
+   * Checks out a new BlockMemFactory for flush. If there was a BMF checked out for
+   * overflow, the same BMF will be returned.
+   *
+   * This call will remove association of BMF with flush group, causing
+   * subsequent checkoutForOverflow calls to return new BlockMemFactory
    */
   def checkoutForFlush(flushGroup: Int): BlockMemFactory = synchronized {
-    checkedOut.remove(flushGroup).getOrElse(fetchForOverflow(flushGroup))
+    checkedOut.remove(flushGroup).getOrElse(getFactoryFromPool(flushGroup))
   }
 
   /**

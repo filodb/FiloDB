@@ -423,7 +423,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   // used for testing only
   def markPartitionsForEviction(partIDs: Seq[Int]): Long = {
     val shard = memStore.getShardE(dataset1.ref, 0)
-    val blockFactory = shard.blockFactoryPool.fetchForOverflow(0)
+    val blockFactory = shard.blockFactoryPool.checkoutForOverflow(0)
     var endTime = 0L
     for { n <- partIDs } {
       val part = shard.partitions.get(n)
@@ -613,7 +613,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       val afterIngestFree = shard.bufferMemoryManager.numFreeBytes
 
       // Switch buffers, encode and release/return buffers for all partitions
-      val blockFactory = shard.blockFactoryPool.fetchForOverflow(0)
+      val blockFactory = shard.blockFactoryPool.checkoutForOverflow(0)
       for { n <- 0 until numSeries } {
         val part = shard.partitions.get(n)
         part.switchBuffers(blockFactory, encode = true)
