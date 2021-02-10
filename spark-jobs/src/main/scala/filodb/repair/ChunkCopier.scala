@@ -88,8 +88,10 @@ class ChunkCopier(conf: SparkConf) {
   val sourceSession = FiloSessionProvider.openSession(sourceCassConfig)
   val targetSession = FiloSessionProvider.openSession(targetCassConfig)
 
-  val sourceCassandraColStore = new CassandraColumnStore(sourceConfig, readSched, sourceSession)(writeSched)
-  val targetCassandraColStore = new CassandraColumnStore(targetConfig, readSched, targetSession)(writeSched)
+  val sourceCassandraColStore = new CassandraColumnStore(
+    sourceConfig, readSched, sourceSession, isDownsampleRepair)(writeSched)
+  val targetCassandraColStore = new CassandraColumnStore(
+    targetConfig, readSched, targetSession, isDownsampleRepair)(writeSched)
 
   private[repair] def getSourceScanSplits = sourceCassandraColStore.getScanSplits(datasetRef, numSplitsForScans)
 
