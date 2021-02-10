@@ -163,7 +163,6 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
       timeMillis,      // ingestionTimeEnd
       7,         // batchSize
       colStore,  // target
-      targetDataset.ref, // targetDatasetRef
       3600 * 24 * 10) // diskTimeToLiveSeconds
 
     // Verify the copy.
@@ -208,7 +207,6 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
       timeMillis,      // ingestionTimeEnd
       7,         // batchSize
       colStore,  // target
-      dataset.ref, // targetDatasetRef is the the source, to delete from it
       0) // diskTimeToLiveSeconds is 0, which means delete
 
     chunks1 = colStore.getOrCreateChunkTable(dataset.ref).readAllChunksNoAsync(part1Bytes).all()

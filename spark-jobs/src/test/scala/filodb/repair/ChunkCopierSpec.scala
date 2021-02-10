@@ -31,27 +31,31 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
 
   implicit val s = monix.execution.Scheduler.Implicits.global
 
-  val configPath = "conf/timeseries-filodb-server.conf"
+  val sourceConfigPath = "conf/timeseries-filodb-server.conf"
+  val targetConfigPath = "spark-jobs/src/test/resources/timeseries-filodb-buddy-server.conf"
+  val datasetName = "prometheus"
 
   val sysConfig = GlobalConfig.systemConfig.getConfig("filodb")
-  val config = ConfigFactory.parseFile(new java.io.File(configPath))
+  val sourceConfig = ConfigFactory.parseFile(new java.io.File(sourceConfigPath))
+    .getConfig("filodb").withFallback(sysConfig)
+  val targetConfig = ConfigFactory.parseFile(new java.io.File(targetConfigPath))
     .getConfig("filodb").withFallback(sysConfig)
 
-  lazy val session = new DefaultFiloSessionProvider(config.getConfig("cassandra")).session
+  lazy val sourceSession = new DefaultFiloSessionProvider(sourceConfig.getConfig("cassandra")).session
+  lazy val targetSession = new DefaultFiloSessionProvider(targetConfig.getConfig("cassandra")).session
 
   it ("should run a simple Spark job") {
     // This test verifies that the configuration can be read and that Spark runs. A full test
     // that verifies chunks are copied correctly is found in CassandraColumnStoreSpec.
-    val colStore = new CassandraColumnStore(config, s, session)
+    val sourceColStore = new CassandraColumnStore(sourceConfig, s, sourceSession)
+    val targetColStore = new CassandraColumnStore(targetConfig, s, targetSession)
 
-    val sourceDataset = Dataset("prometheus", Schemas.gauge)
-    val targetDataset = Dataset("buddy_prometheus", Schemas.gauge)
+    val datasetRef = Dataset(datasetName, Schemas.gauge).ref
 
-    colStore.initialize(sourceDataset.ref, 1).futureValue
-    colStore.truncate(sourceDataset.ref, 1).futureValue
-
-    colStore.initialize(targetDataset.ref, 1).futureValue
-    colStore.truncate(targetDataset.ref, 1).futureValue
+    sourceColStore.initialize(datasetRef, 1).futureValue
+    sourceColStore.truncate(datasetRef, 1).futureValue
+    targetColStore.initialize(datasetRef, 1).futureValue
+    targetColStore.truncate(datasetRef, 1).futureValue
 
     val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8)
     var partBuilder = new RecordBuilder(TestData.nativeMem)
@@ -91,10 +95,8 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
 
       val set = ChunkSet(info, partKey, Nil, chunks)
 
-      colStore.write(sourceDataset.ref, Observable.fromIterable(Iterable(set))).futureValue
+      sourceColStore.write(datasetRef, Observable.fromIterable(Iterable(set))).futureValue
     }
-
-    val repairTimestamps = Array(1602561600000L, 1602554400000L, 1602561600001L)
 
     writeChunk(partKey1, 1507923801000L)
     writeChunk(partKey1, 1602554400000L) // repair
@@ -114,28 +116,27 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
     val part1Bytes = ByteBuffer.wrap(BinaryRegionLarge.asNewByteArray(partKey1))
     val part2Bytes = ByteBuffer.wrap(BinaryRegionLarge.asNewByteArray(partKey2))
 
-    val sourceChunks1 = colStore.getOrCreateChunkTable(sourceDataset.ref).readAllChunksNoAsync(part1Bytes).all()
+    val sourceChunks1 = sourceColStore.getOrCreateChunkTable(datasetRef).readAllChunksNoAsync(part1Bytes).all()
     sourceChunks1 should have size (6)
-    val repairChunks1 = util.Arrays.asList(sourceChunks1.get(1), sourceChunks1.get(2),sourceChunks1.get(3))
+    val repairChunks1 = util.Arrays.asList(sourceChunks1.get(1), sourceChunks1.get(2), sourceChunks1.get(3))
 
-    val sourceChunks2 = colStore.getOrCreateChunkTable(sourceDataset.ref).readAllChunksNoAsync(part2Bytes).all()
+    val sourceChunks2 = sourceColStore.getOrCreateChunkTable(datasetRef).readAllChunksNoAsync(part2Bytes).all()
     sourceChunks2 should have size (4)
     val repairChunks2 = util.Arrays.asList(sourceChunks1.get(1), sourceChunks1.get(2))
 
     // Expect 0 chunk records in the target at this point.
-    var chunks1 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunksNoAsync(part1Bytes).all()
+    var chunks1 = targetColStore.getOrCreateChunkTable(datasetRef).readAllChunksNoAsync(part1Bytes).all()
     chunks1 should have size (0)
-    var chunks2 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunksNoAsync(part2Bytes).all()
+    var chunks2 = targetColStore.getOrCreateChunkTable(datasetRef).readAllChunksNoAsync(part2Bytes).all()
     chunks2 should have size (0)
 
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
 
-    sparkConf.set("spark.filodb.chunks.copier.source.configFile", configPath)
-    sparkConf.set("spark.filodb.chunks.copier.source.dataset", "prometheus")
+    sparkConf.set("spark.filodb.chunks.copier.source.configFile", sourceConfigPath)
+    sparkConf.set("spark.filodb.chunks.copier.target.configFile", targetConfigPath)
 
-    sparkConf.set("spark.filodb.chunks.copier.target.configFile", configPath)
-    sparkConf.set("spark.filodb.chunks.copier.target.dataset", "buddy_prometheus")
+    sparkConf.set("spark.filodb.chunks.copier.dataset", "prometheus")
 
     sparkConf.set("spark.filodb.chunks.copier.repairStartTime", "2020-10-13T00:00:00Z")
     sparkConf.set("spark.filodb.chunks.copier.repairEndTime",   "2020-10-13T05:00:00Z")
@@ -158,21 +159,21 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
       }
     }
 
-    chunks1 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunksNoAsync(part1Bytes).all()
+    chunks1 = targetColStore.getOrCreateChunkTable(datasetRef).readAllChunksNoAsync(part1Bytes).all()
     checkRows(repairChunks1, chunks1)
-    chunks2 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunksNoAsync(part2Bytes).all()
+    chunks2 = targetColStore.getOrCreateChunkTable(datasetRef).readAllChunksNoAsync(part2Bytes).all()
     checkRows(repairChunks2, chunks2)
 
-    val sourceIndex1 = colStore.getOrCreateIngestionTimeIndexTable(sourceDataset.ref).readAllRowsNoAsync(part1Bytes).all()
+    val sourceIndex1 = sourceColStore.getOrCreateIngestionTimeIndexTable(datasetRef).readAllRowsNoAsync(part1Bytes).all()
     sourceIndex1 should have size (6)
     val expectedIndex1 = util.Arrays.asList(sourceIndex1.get(1), sourceIndex1.get(2), sourceIndex1.get(3))
-    val sourceIndex2 = colStore.getOrCreateIngestionTimeIndexTable(sourceDataset.ref).readAllRowsNoAsync(part2Bytes).all()
+    val sourceIndex2 = sourceColStore.getOrCreateIngestionTimeIndexTable(datasetRef).readAllRowsNoAsync(part2Bytes).all()
     sourceIndex2 should have size (4)
     val expectedIndex2 = util.Arrays.asList(sourceIndex2.get(1), sourceIndex2.get(2))
 
-    val index1 = colStore.getOrCreateIngestionTimeIndexTable(targetDataset.ref).readAllRowsNoAsync(part1Bytes).all()
+    val index1 = targetColStore.getOrCreateIngestionTimeIndexTable(datasetRef).readAllRowsNoAsync(part1Bytes).all()
     checkRows(expectedIndex1, index1)
-    val index2 = colStore.getOrCreateIngestionTimeIndexTable(targetDataset.ref).readAllRowsNoAsync(part2Bytes).all()
+    val index2 = targetColStore.getOrCreateIngestionTimeIndexTable(datasetRef).readAllRowsNoAsync(part2Bytes).all()
     checkRows(expectedIndex2, index2)
   }
 }

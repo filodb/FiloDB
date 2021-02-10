@@ -53,11 +53,9 @@ class ChunkCopier(conf: SparkConf) {
   val sourceCassConfig = sourceConfig.getConfig("cassandra")
   val targetCassConfig = targetConfig.getConfig("cassandra")
 
-  val sourceDataset = conf.get("spark.filodb.chunks.copier.source.dataset")
-  val targetDataset = conf.get("spark.filodb.chunks.copier.target.dataset")
-  val targetDatasetConfig = datasetConfig(targetConfig, sourceDataset)
-  val sourceDatasetRef = DatasetRef.fromDotString(sourceDataset)
-  val targetDatasetRef = DatasetRef.fromDotString(targetDataset)
+  val datasetName = conf.get("spark.filodb.chunks.copier.dataset")
+  val datasetRef = DatasetRef.fromDotString(datasetName)
+  val targetDatasetConfig = datasetConfig(targetConfig, datasetName)
 
   // Examples: 2019-10-20T12:34:56Z  or  2019-10-20T12:34:56-08:00
   private def parseDateTime(str: String) = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str))
@@ -93,31 +91,29 @@ class ChunkCopier(conf: SparkConf) {
   val sourceCassandraColStore = new CassandraColumnStore(sourceConfig, readSched, sourceSession)(writeSched)
   val targetCassandraColStore = new CassandraColumnStore(targetConfig, readSched, targetSession)(writeSched)
 
-  private[repair] def getSourceScanSplits = sourceCassandraColStore.getScanSplits(sourceDatasetRef, numSplitsForScans)
+  private[repair] def getSourceScanSplits = sourceCassandraColStore.getScanSplits(datasetRef, numSplitsForScans)
 
-  private[repair] def getTargetScanSplits = targetCassandraColStore.getScanSplits(targetDatasetRef, numSplitsForScans)
+  private[repair] def getTargetScanSplits = targetCassandraColStore.getScanSplits(datasetRef, numSplitsForScans)
 
   def copySourceToTarget(splitIter: Iterator[ScanSplit]): Unit = {
     sourceCassandraColStore.copyOrDeleteChunksByIngestionTimeRange(
-      sourceDatasetRef,
+      datasetRef,
       splitIter,
       ingestionTimeStart.toEpochMilli(),
       ingestionTimeEnd.toEpochMilli(),
       batchSize,
       targetCassandraColStore,
-      targetDatasetRef,
       diskTimeToLiveSeconds)
   }
 
   def deleteFromTarget(splitIter: Iterator[ScanSplit]): Unit = {
     targetCassandraColStore.copyOrDeleteChunksByIngestionTimeRange(
-      targetDatasetRef,
+      datasetRef,
       splitIter,
       ingestionTimeStart.toEpochMilli(),
       ingestionTimeEnd.toEpochMilli(),
       batchSize,
       targetCassandraColStore,
-      targetDatasetRef,
       0) // ttl 0 is interpreted as delete
   }
 
