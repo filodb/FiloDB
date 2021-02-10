@@ -3,6 +3,7 @@ package filodb.core.memstore
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext
 
+import com.typesafe.config.Config
 import debox.Buffer
 import java.util
 import kamon.Kamon
@@ -31,10 +32,11 @@ class OnDemandPagingShard(ref: DatasetRef,
                           bufferMemoryManager: NativeMemoryManager,
                           rawStore: ColumnStore,
                           metastore: MetaStore,
-                          evictionPolicy: PartitionEvictionPolicy)
+                          evictionPolicy: PartitionEvictionPolicy,
+                          filodbConfig: Config)
                          (implicit ec: ExecutionContext) extends
 TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryManager, rawStore,
-                metastore, evictionPolicy)(ec) {
+                metastore, evictionPolicy, filodbConfig)(ec) {
   import TimeSeriesShard._
   import FiloSchedulers._
 
@@ -49,8 +51,6 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
     .tag("shard", shardNum)
     .start()
 
-  val assumedResolution = 20000 // for now hard-code and assume 30ms as reporting interval
-
   private def capDataScannedPerShardCheck(lookup: PartLookupResult): Unit = {
     lookup.firstSchemaId.foreach { schId =>
       lookup.chunkMethod match {
@@ -58,7 +58,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
           val numMatches = lookup.partsInMemory.length + lookup.partIdsNotInMemory.length
           schemas.ensureQueriedDataSizeWithinLimitApprox(schId, numMatches,
             storeConfig.flushInterval.toMillis,
-            assumedResolution, end - st, storeConfig.maxDataPerShardQuery)
+            storeConfig.estimatedIngestResolutionMillis, end - st, storeConfig.maxDataPerShardQuery)
         case _ =>
       }
     }

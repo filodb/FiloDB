@@ -515,6 +515,7 @@ class ChunkMap(val memFactory: NativeMemoryManager, var capacity: Int) {
       }
 
       if (key == lastKey) {
+        _logger.error(s"overwriting an existing chunk chunkId=$key")
         // Replacing the last element.
         arraySet(rlast, element)
         return

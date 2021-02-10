@@ -9,7 +9,7 @@ import filodb.core.query.{QueryContext, QuerySession}
 import filodb.core.store.ChunkSource
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{LogicalPlan, PeriodicSeriesPlan}
+import filodb.query.{BinaryJoin, LogicalPlan, PeriodicSeriesPlan, PeriodicSeriesWithWindowing}
 import filodb.query.exec._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -202,4 +202,51 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
   }
 
 
+<<<<<<< HEAD
+=======
+    val rawEp = stitchExec.children.head.asInstanceOf[MockExecPlan]
+    val downsampleEp = stitchExec.children.last.asInstanceOf[MockExecPlan]
+
+    rawEp.name shouldEqual "raw"
+    downsampleEp.name shouldEqual "downsample"
+    val rawLp = rawEp.lp.asInstanceOf[PeriodicSeriesPlan]
+    val downsampleLp = downsampleEp.lp.asInstanceOf[PeriodicSeriesPlan]
+
+    // find first instant with range available within raw data
+    val rawStart = ((start*1000) to (end*1000) by (step*1000)).find { instant =>
+      instant - (5 + 2).minutes.toMillis > earliestRawTime // subtract lookback & offset
+    }.get
+
+    rawLp.startMs shouldEqual rawStart
+    rawLp.endMs shouldEqual logicalPlan.endMs
+    rawLp.asInstanceOf[PeriodicSeriesWithWindowing].offsetMs.get shouldEqual(120000)
+
+    downsampleLp.startMs shouldEqual logicalPlan.startMs
+    downsampleLp.endMs shouldEqual rawStart - (step * 1000)
+    downsampleLp.asInstanceOf[PeriodicSeriesWithWindowing].offsetMs.get shouldEqual(120000)
+  }
+
+  it("should direct overlapping binary join offset queries to both raw & downsample planner and stitch") {
+
+    val start = now/1000 - 30.minutes.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now/1000 - 2.minutes.toSeconds
+    val logicalPlan = Parser.queryRangeToLogicalPlan("sum(foo) - sum(foo offset 2m)",
+      TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan]
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
+    val stitchExec = ep.asInstanceOf[StitchRvsExec]
+    stitchExec.children.size shouldEqual 2
+
+    val rawEp = stitchExec.children.head.asInstanceOf[MockExecPlan]
+    val downsampleEp = stitchExec.children.last.asInstanceOf[MockExecPlan]
+
+    rawEp.name shouldEqual "raw"
+    downsampleEp.name shouldEqual "downsample"
+
+    rawEp.lp.isInstanceOf[BinaryJoin] shouldEqual(true)
+    downsampleEp.lp.isInstanceOf[BinaryJoin] shouldEqual(true)
+  }
+>>>>>>> ff3e685ee8d895a02e97e293032aa03e45207764
 }

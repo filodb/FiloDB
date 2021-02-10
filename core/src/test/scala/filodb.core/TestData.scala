@@ -4,6 +4,7 @@ import scala.concurrent.duration._
 import scala.io.Source
 
 import com.typesafe.config.ConfigFactory
+import kamon.Kamon
 import monix.eval.Task
 import monix.reactive.Observable
 import org.joda.time.DateTime
@@ -416,7 +417,7 @@ object MachineMetricsData {
       false, Option.empty, 1.hour.toMillis) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histIngestBH, encode = true)
-    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3)))  // select timestamp and histogram columns only
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3), Kamon.counter("dummy").withoutTags()))  // select timestamp and histogram columns only
   }
 
   private val histMaxBP = new WriteBufferPool(TestData.nativeMem, histMaxDS.schema.data, TestData.storeConf)
@@ -432,7 +433,7 @@ object MachineMetricsData {
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histMaxBH, encode = true)
     // Select timestamp, hist, max
-    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 4, 3)))
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 4, 3), Kamon.counter("dummy").withoutTags()))
   }
 }
 

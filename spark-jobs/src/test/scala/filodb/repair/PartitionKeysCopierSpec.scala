@@ -15,7 +15,6 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
-
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.GlobalConfig
@@ -32,13 +31,15 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
   implicit val s = monix.execution.Scheduler.Implicits.global
 
-  val configPath = "conf/timeseries-filodb-server.conf"
+  val sourceConfigPath = "conf/timeseries-filodb-server.conf"
+  val targetConfigPath = "spark-jobs/src/test/resources/timeseries-filodb-buddy-server.conf"
 
   private val sysConfig = GlobalConfig.systemConfig.getConfig("filodb")
-  private val config = ConfigFactory.parseFile(new File(configPath)).getConfig("filodb").withFallback(sysConfig)
+  private val sourceConfig = ConfigFactory.parseFile(new File(sourceConfigPath)).getConfig("filodb").withFallback(sysConfig)
+  private val targetConfig = ConfigFactory.parseFile(new File(targetConfigPath)).getConfig("filodb").withFallback(sysConfig)
 
-  lazy val session = new DefaultFiloSessionProvider(config.getConfig("cassandra")).session
-  lazy val colStore = new CassandraColumnStore(config, s, session)
+  lazy val sourceSession = new DefaultFiloSessionProvider(sourceConfig.getConfig("cassandra")).session
+  val targetSession = new DefaultFiloSessionProvider(targetConfig.getConfig("cassandra")).session
 
   var gauge1PartKeyBytes: Array[Byte] = _
   var gauge2PartKeyBytes: Array[Byte] = _
@@ -56,28 +57,24 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
     Map.empty, 100, rawDataStoreConfig)
 
   val datasetName = "prometheus"
-  val targetDatasetName = "buddy_prometheus"
-  val sourceDataset = Dataset(datasetName, Schemas.gauge)
-  val targetDataset = Dataset(targetDatasetName, Schemas.gauge)
-  val shardStats = new TimeSeriesShardStats(sourceDataset.ref, -1)
+  val dataset = Dataset(datasetName, Schemas.gauge)
+  val shardStats = new TimeSeriesShardStats(dataset.ref, -1)
 
   val sparkConf = {
     val conf = new SparkConf(loadDefaults = true)
     conf.setMaster("local[2]")
 
-    conf.set("spark.filodb.partitionkeys.copier.source.configFile", configPath)
-    conf.set("spark.filodb.partitionkeys.copier.source.dataset", datasetName)
+    conf.set("spark.filodb.partitionkeys.copier.source.configFile", sourceConfigPath)
+    conf.set("spark.filodb.partitionkeys.copier.target.configFile", targetConfigPath)
 
-    conf.set("spark.filodb.partitionkeys.copier.target.configFile", configPath)
-    conf.set("spark.filodb.partitionkeys.copier.target.dataset", targetDatasetName)
+    conf.set("spark.filodb.partitionkeys.copier.dataset", datasetName)
 
     conf.set("spark.filodb.partitionkeys.copier.repairStartTime", "2020-10-13T00:00:00Z")
     conf.set("spark.filodb.partitionkeys.copier.repairEndTime", "2020-10-13T05:00:00Z")
-    conf.set("spark.filodb.partitionkeys.copier.diskTimeToLive", "7d")
     conf
   }
 
-  val numOfShards = PartitionKeysCopier.lookup(sparkConf).getShardNum
+  val numOfShards = PartitionKeysCopier.lookup(sparkConf).numOfShards
 
   // Examples: 2019-10-20T12:34:56Z  or  2019-10-20T12:34:56-08:00
   private def parseDateTime(str: String) = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str))
@@ -86,20 +83,47 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
     Map("_ws_".utf8 -> workspace.utf8, "_ns_".utf8 -> namespace.utf8)
   }
 
-  override def beforeAll(): Unit = {
-    colStore.initialize(sourceDataset.ref, numOfShards).futureValue
-    colStore.truncate(sourceDataset.ref, numOfShards).futureValue
-    colStore.initialize(targetDataset.ref, numOfShards).futureValue
-    colStore.truncate(targetDataset.ref, numOfShards).futureValue
+  describe("raw data repair") {
+    it("should copy data for repair window") {
+      val sourceColStore = new CassandraColumnStore(sourceConfig, s, sourceSession)
+      val targetColStore = new CassandraColumnStore(targetConfig, s, targetSession)
+      truncateColStore(sourceColStore)
+      truncateColStore(targetColStore)
+      prepareTestData(sourceColStore)
+
+      PartitionKeysCopierMain.run(sparkConf).close()
+
+      validateRepairData(targetColStore)
+    }
+  }
+
+  describe("downsample data repair") {
+    it("should copy data for repair window") {
+      sparkConf.set("spark.filodb.partitionkeys.copier.isDownsampleCopy", "true")
+      val sourceColStore = new CassandraColumnStore(sourceConfig, s, sourceSession, true)
+      val targetColStore = new CassandraColumnStore(targetConfig, s, targetSession, true)
+      truncateColStore(sourceColStore)
+      truncateColStore(targetColStore)
+      prepareTestData(sourceColStore)
+
+      PartitionKeysCopierMain.run(sparkConf).close()
+
+      validateRepairData(targetColStore)
+    }
+  }
+
+  def truncateColStore(colStore: CassandraColumnStore): Unit = {
+    colStore.initialize(dataset.ref, numOfShards).futureValue
+    colStore.truncate(dataset.ref, numOfShards).futureValue
   }
 
   override def afterAll(): Unit = {
     offheapMem.free()
   }
 
-  it("should write test data to cassandra source table") {
+  def prepareTestData(colStore: CassandraColumnStore): Unit = {
     def writePartKeys(pk: PartKeyRecord, shard: Int): Unit = {
-      colStore.writePartKeys(sourceDataset.ref, shard, Observable.now(pk), 259200, 0L, false).futureValue
+      colStore.writePartKeys(dataset.ref, shard, Observable.now(pk), 259200, 0L, false).futureValue
     }
 
     def tsPartition(schema: Schema,
@@ -150,11 +174,7 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
     }
   }
 
-  it("should run a simple Spark job") {
-    PartitionKeysCopierMain.run(sparkConf).close()
-  }
-
-  it("verify data written onto cassandra target table") {
+  def validateRepairData(colStore: CassandraColumnStore): Unit = {
     def getWorkspace(map: Map[String, String]): String = {
       val ws: String = map.get("_ws_").get
       ws
@@ -174,8 +194,30 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
     val startTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.copier.repairStartTime")).toEpochMilli()
     val endTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.copier.repairEndTime")).toEpochMilli()
+
+    // verify data in index table.
     for (shard <- 0 until numOfShards) {
-      val partKeyRecords = Await.result(colStore.scanPartKeys(targetDataset.ref, shard).toListL.runAsync, Duration(1, "minutes"))
+      val partKeyRecords = Await.result(colStore.scanPartKeys(dataset.ref, shard).toListL.runAsync, Duration(1, "minutes"))
+      // because there will be 3 records that meets the copier time period.
+      partKeyRecords.size shouldEqual 3
+      for (pkr <- partKeyRecords) {
+        // verify all the records fall in the copier time period.
+        // either pkr.startTime or pkr.endTime should fall in the startTime:endTime window
+        var metric = getPartKeyMap(pkr).get("_metric_").get
+        val startTimeFallsInWindow = pkr.startTime >= startTime && pkr.startTime <= endTime
+        val endTimeFallsInWindow = pkr.endTime >= startTime && pkr.endTime <= endTime
+        if (startTimeFallsInWindow || endTimeFallsInWindow) {
+          assert(true)
+        } else {
+          assert(false, "Either startTime or endTime doesn't fall in the migration window.")
+        }
+      }
+    }
+
+    // verify data in pk_by_update_time table
+    val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
+    for (shard <- 0 until numOfShards) {
+      val partKeyRecords = Await.result(colStore.getPartKeysByUpdateHour(dataset.ref, shard, updateHour).toListL.runAsync, Duration(1, "minutes"))
       // because there will be 3 records that meets the copier time period.
       partKeyRecords.size shouldEqual 3
       for (pkr <- partKeyRecords) {
@@ -194,7 +236,7 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
     // verify workspace/namespace names in shard=0.
     val shard0 = 0
-    val partKeyRecordsShard0 = Await.result(colStore.scanPartKeys(targetDataset.ref, shard0).toListL.runAsync,
+    val partKeyRecordsShard0 = Await.result(colStore.scanPartKeys(dataset.ref, shard0).toListL.runAsync,
       Duration(1, "minutes"))
     partKeyRecordsShard0.size shouldEqual 3
     for (pkr <- partKeyRecordsShard0) {
@@ -213,7 +255,7 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
     // verify workspace/namespace names in shard=2.
     val shard2 = 2
-    val partKeyRecordsShard2 = Await.result(colStore.scanPartKeys(targetDataset.ref, shard2).toListL.runAsync,
+    val partKeyRecordsShard2 = Await.result(colStore.scanPartKeys(dataset.ref, shard2).toListL.runAsync,
       Duration(1, "minutes"))
     partKeyRecordsShard2.size shouldEqual 3
     for (pkr <- partKeyRecordsShard2) {
