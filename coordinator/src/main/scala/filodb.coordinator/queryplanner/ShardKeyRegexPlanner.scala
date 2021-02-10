@@ -41,39 +41,34 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     * @return materialized Execution Plan which can be dispatched
     */
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+    val nonMetricShardKeyFilters =
+      LogicalPlan.getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
     if (LogicalPlan.hasShardKeyEqualsOnly(logicalPlan, dataset.options.nonMetricShardColumns)) {
       queryPlanner.materialize(logicalPlan, qContext)
-    } else if (hasSingleShardKeyMatch(logicalPlan)) {
-      val nonMetricShardKeyFilters =
-        LogicalPlan.getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns).head
-      generateExecWithoutRegex(logicalPlan, nonMetricShardKeyFilters, qContext).head
+    } else if (shardKeyMatcher(nonMetricShardKeyFilters.head).size == 1) {
+      // For queries like topk(2, test{_ws_ = "demo", _ns_ =~ "App-1"}) which have just one matching value
+      generateExecWithoutRegex(logicalPlan, nonMetricShardKeyFilters.head, qContext).head
     } else walkLogicalPlanTree(logicalPlan, qContext).plans.head
-  }
-
-  def hasSingleShardKeyMatch(logicalPlan: LogicalPlan) = {
-    val nonMetricShardKeyFilters =
-      LogicalPlan.getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns).head
-    (shardKeyMatcher(nonMetricShardKeyFilters).size <= 1)
   }
 
    def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                            qContext: QueryContext): PlanResult = {
-     logicalPlan match {
-       case lp: ApplyMiscellaneousFunction => materializeApplyMiscellaneousFunction(qContext, lp)
-       case lp: ApplyInstantFunction => materializeApplyInstantFunction(qContext, lp)
-       case lp: ApplyInstantFunctionRaw => materializeApplyInstantFunctionRaw(qContext, lp)
-       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp)
-       case lp: ApplySortFunction => materializeApplySortFunction(qContext, lp)
-       case lp: ScalarVaryingDoublePlan => materializeScalarPlan(qContext, lp)
-       case lp: ApplyAbsentFunction => materializeAbsentFunction(qContext, lp)
-       case lp: VectorPlan => materializeVectorPlan(qContext, lp)
-       case lp: Aggregate => materializeAggregate(lp, qContext)
-       case lp: BinaryJoin => materializeBinaryJoin(lp, qContext)
-       case lp: LabelValues => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
-       case lp: SeriesKeysByFilters => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
-       case _ => materializeOthers(logicalPlan, qContext)
-     }
-   }
+    logicalPlan match {
+      case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
+      case lp: ApplyInstantFunction        => materializeApplyInstantFunction(qContext, lp)
+      case lp: ApplyInstantFunctionRaw     => materializeApplyInstantFunctionRaw(qContext, lp)
+      case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp)
+      case lp: ApplySortFunction           => materializeApplySortFunction(qContext, lp)
+      case lp: ScalarVaryingDoublePlan     => materializeScalarPlan(qContext, lp)
+      case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
+      case lp: VectorPlan                  => materializeVectorPlan(qContext, lp)
+      case lp: Aggregate                   => materializeAggregate(lp, qContext)
+      case lp: BinaryJoin                  => materializeBinaryJoin(lp, qContext)
+      case lp: LabelValues                 => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
+      case lp: SeriesKeysByFilters         => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
+      case _                               => materializeOthers(logicalPlan, qContext)
+    }
+  }
 
   private def generateExecWithoutRegex(logicalPlan: LogicalPlan, nonMetricShardKeyFilters: Seq[ColumnFilter],
                                        qContext: QueryContext): Seq[ExecPlan] = {
