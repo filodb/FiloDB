@@ -346,7 +346,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val shardTags = Map("dataset" -> ref.dataset, "shard" -> shardNum.toString)
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
     storeConfig.numPagesPerBlock)
-  private val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
+  private[core] val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
 
   /**
     * Lock that protects chunks from being reclaimed from Memstore.
@@ -357,10 +357,6 @@ class TimeSeriesShard(val ref: DatasetRef,
   // Requires blockStore.
   private val headroomTask = startHeadroomTask(ingestSched)
 
-  // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
-  // strictly during ingest() and switchBuffers().
-  private[core] val overflowBlockFactory = new BlockMemFactory(blockStore, maxMetaSize,
-                                             shardTags ++ Map("overflow" -> "true"), true)
   val partitionMaker = new DemandPagedChunkStore(this, blockStore)
 
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, reuseOneContainer = true)
@@ -791,7 +787,8 @@ class TimeSeriesShard(val ref: DatasetRef,
 
     // Rapidly switch all of the input buffers for a particular group
     logger.debug(s"Switching write buffers for group $groupNum in dataset=$ref shard=$shardNum")
-    InMemPartitionIterator(partitionGroups(groupNum).intIterator).foreach(_.switchBuffers(overflowBlockFactory))
+    InMemPartitionIterator(partitionGroups(groupNum).intIterator)
+      .foreach(_.switchBuffers(blockFactoryPool.fetchForOverflow(groupNum)))
 
     val dirtyPartKeys = if (groupNum == dirtyPartKeysFlushGroup) {
       logger.debug(s"Switching dirty part keys in dataset=$ref shard=$shardNum out for flush. ")
@@ -926,7 +923,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     val flushStart = System.currentTimeMillis()
 
     // Only allocate the blockHolder when we actually have chunks/partitions to flush
-    val blockHolder = blockFactoryPool.checkout(Map("flushGroup" -> flushGroup.groupNum.toString))
+    val blockHolder = blockFactoryPool.checkoutForFlush(flushGroup.groupNum)
 
     val chunkSetIter = partitionIt.flatMap { p =>
       // TODO re-enable following assertion. Am noticing that monix uses TrampolineExecutionContext
@@ -1209,7 +1206,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         val tsp = part.asInstanceOf[TimeSeriesPartition]
         brRowReader.schema = schema.ingestionSchema
         brRowReader.recordOffset = recordOff
-        tsp.ingest(ingestionTime, brRowReader, overflowBlockFactory,
+        tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.fetchForOverflow(group),
           storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, acceptDuplicateSamples, maxChunkTime)
         // Below is coded to work concurrently with logic in updateIndexWithEndTime
         // where we try to de-activate an active time series
