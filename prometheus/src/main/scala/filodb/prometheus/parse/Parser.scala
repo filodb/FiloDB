@@ -457,12 +457,39 @@ object Parser extends Expression {
   def queryToLogicalPlan(query: String, queryTimestamp: Long, step: Long): LogicalPlan = {
     // Remember step matters here in instant query, when lookback is provided in step factor notation as in [5i]
     val defaultQueryParams = TimeStepParams(queryTimestamp, step, queryTimestamp)
-    queryRangeToLogicalPlan(query, defaultQueryParams)
+    val res = queryRangeToLogicalPlan(query, defaultQueryParams)
+    println("res:" + res)
+    res
+  }
+
+  def getExpression(e: Expression): Expression = {
+
+   val res = e match {
+      case e: PrecedenceExpression  => getExpression(e.expression)
+      case b: BinaryExpression      =>
+        val lhsExpression = getExpression(b.lhs)
+        val rhsExpression = getExpression(b.rhs)
+        b.copy(lhs = lhsExpression, rhs= rhsExpression)
+      case f: Function              => val allParamsNew  = f.allParams.map(getExpression(_))
+        f.copy(allParams = allParamsNew)
+      case a: AggregateExpression =>  val paramsNew  = a.params.map(getExpression(_))
+        val altParams  = a.altFunctionParams.map(getExpression(_))
+        a.copy(params = paramsNew, altFunctionParams = altParams)
+
+      case s: Scalar => s
+      //a.copy(all = allParamsNew)
+      //a.copy(a.allParams = )
+      case _                        => e
+
+    }
+    println(s"returning $res for\n $e")
+    res
   }
 
   def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
+   println("query:"+ query)
     val expression = parseQuery(query)
-    assignPrecedence(expression) match {
+    getExpression(assignPrecedence(expression)) match {
       case p: PeriodicSeries => p.toSeriesPlan(timeParams)
       case r: SimpleSeries   => r.toSeriesPlan(timeParams, isRoot = true)
       case _ => throw new UnsupportedOperationException()

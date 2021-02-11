@@ -57,7 +57,7 @@ trait Aggregates extends Vectors with TimeUnits with Base {
     }
 
     val last: Expression = if (allParams.size == 1) allParams.head else allParams(1)
-    val series: PeriodicSeries = last match {
+    lazy val series: PeriodicSeries = last match {
       case s: PeriodicSeries => s
       case _ =>
         throw new IllegalArgumentException(
