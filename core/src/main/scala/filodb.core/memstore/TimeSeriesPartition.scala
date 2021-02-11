@@ -139,49 +139,48 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
              maxChunkTime: Long = Long.MaxValue): Unit = {
     // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
     val ts = schema.timestamp(row)
-    // accept duplicate sample when acceptDuplicateSamples = true, drop otherwise.
-    if (ts < timestampOfLatestSample
-          ||  ts <= timestampOfLatestSample && acceptDuplicateSamples) {
-      shardStats.outOfOrderDropped.increment()
-      return
-    }
+    // accept duplicate sample when acceptDuplicateSamples = true, drop otherwise
+    if (ts > timestampOfLatestSample
+      ||  ts == timestampOfLatestSample && acceptDuplicateSamples) {
+      val newChunk = currentChunks == nullChunks
+      if (newChunk) initNewChunk(ts, ingestionTime)
 
-    val newChunk = currentChunks == nullChunks
-    if (newChunk) initNewChunk(ts, ingestionTime)
+      if(!newChunk && createChunkAtFlushBoundary
+        && ts/flushIntervalMillis.get != timestampOfLatestSample/flushIntervalMillis.get) {
+        // we have reached maximum userTime in chunk. switch buffers, start a new chunk and ingest
+        switchBuffersAndIngest(ingestionTime, ts, row, blockHolder,
+          createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
+      } else if (ts - currentInfo.startTime > maxChunkTime) {
+        // we have reached maximum userTime in chunk. switch buffers, start a new chunk and ingest
+        switchBuffersAndIngest(ingestionTime, ts, row, blockHolder,
+          createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
+      } else {
+        cforRange { 0 until schema.numDataColumns } { col =>
+          currentChunks(col).addFromReaderNoNA(row, col) match {
+            case r: VectorTooSmall =>
+              switchBuffersAndIngest(ingestionTime, ts, row, blockHolder,
+                createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
+              return
+            // Different histogram bucket schema: need a new vector here
+            case BucketSchemaMismatch =>
+              switchBuffersAndIngest(ingestionTime, ts, row, blockHolder,
+                createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
+              return
+            case other: AddResponse =>
+          }
+        }
+        ChunkSetInfo.incrNumRows(currentInfo.infoAddr)
 
-    if(!newChunk && createChunkAtFlushBoundary
-      && ts/flushIntervalMillis.get != timestampOfLatestSample/flushIntervalMillis.get) {
-      // we have reached maximum userTime in chunk. switch buffers, start a new chunk and ingest
-      switchBuffersAndIngest(ingestionTime, ts, row, blockHolder,
-        createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
-    } else if (ts - currentInfo.startTime > maxChunkTime) {
-      // we have reached maximum userTime in chunk. switch buffers, start a new chunk and ingest
-      switchBuffersAndIngest(ingestionTime, ts, row, blockHolder,
-        createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
-    } else {
-      cforRange { 0 until schema.numDataColumns } { col =>
-        currentChunks(col).addFromReaderNoNA(row, col) match {
-          case r: VectorTooSmall =>
-            switchBuffersAndIngest(ingestionTime, ts, row, blockHolder,
-              createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
-            return
-          // Different histogram bucket schema: need a new vector here
-          case BucketSchemaMismatch =>
-            switchBuffersAndIngest(ingestionTime, ts, row, blockHolder,
-              createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
-            return
-          case other: AddResponse =>
+        // Update the end time as well.  For now assume everything arrives in increasing order
+        ChunkSetInfo.setEndTime(currentInfo.infoAddr, ts)
+
+        if (newChunk) {
+          // Publish it now that it has something.
+          infoPut(currentInfo)
         }
       }
-      ChunkSetInfo.incrNumRows(currentInfo.infoAddr)
-
-      // Update the end time as well.  For now assume everything arrives in increasing order
-      ChunkSetInfo.setEndTime(currentInfo.infoAddr, ts)
-
-      if (newChunk) {
-        // Publish it now that it has something.
-        infoPut(currentInfo)
-      }
+    } else {
+      shardStats.outOfOrderDropped.increment()
     }
   }
 
