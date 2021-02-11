@@ -37,7 +37,7 @@ class ShardKeyRegexPlanner(dataset: Dataset,
    * Returns true when regex has single matching value
    * Example: sum(test1{_ws_ = "demo", _ns_ =~ "App-1"}) + sum(test2{_ws_ = "demo", _ns_ =~ "App-1"})
    */
-  def hasSingleShardKeyMatch(nonMetricShardKeyFilters: Seq[Seq[ColumnFilter]]) = {
+  private def hasSingleShardKeyMatch(nonMetricShardKeyFilters: Seq[Seq[ColumnFilter]]) = {
     val shardKeyMatchers = nonMetricShardKeyFilters.map(shardKeyMatcher(_))
     shardKeyMatchers.forall(_.size == 1) &&
       shardKeyMatchers.forall(_.head.toSet.sameElements(shardKeyMatchers.head.head.toSet))
