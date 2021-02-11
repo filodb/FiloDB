@@ -133,7 +133,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
       val rr = new BinaryRecordRowReader(Schemas.untyped.ingestionSchema, base, offset)
       part.ingest(lastSampleTime, rr, offheapMem.blockMemFactory, createChunkAtFlushBoundary = false,
-        flushIntervalMillis = Option.empty)
+        flushIntervalMillis = Option.empty, acceptDuplicateSamples = false)
     }
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
@@ -176,7 +176,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
       val rr = new BinaryRecordRowReader(Schemas.gauge.ingestionSchema, base, offset)
       part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory, createChunkAtFlushBoundary = false,
-        flushIntervalMillis = Option.empty)
+        flushIntervalMillis = Option.empty, acceptDuplicateSamples = false)
     }
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
@@ -217,7 +217,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
       val rr = new BinaryRecordRowReader(Schemas.gauge.ingestionSchema, base, offset)
       part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory, createChunkAtFlushBoundary = false,
-        flushIntervalMillis = Option.empty)
+        flushIntervalMillis = Option.empty, acceptDuplicateSamples = false)
     }
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
@@ -264,7 +264,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
       val rr = new BinaryRecordRowReader(Schemas.promCounter.ingestionSchema, base, offset)
       part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory, createChunkAtFlushBoundary = false,
-        flushIntervalMillis = Option.empty)
+        flushIntervalMillis = Option.empty, acceptDuplicateSamples = false)
     }
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
@@ -312,7 +312,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
       val rr = new BinaryRecordRowReader(Schemas.promHistogram.ingestionSchema, base, offset)
       part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory, createChunkAtFlushBoundary = false,
-        flushIntervalMillis = Option.empty)
+        flushIntervalMillis = Option.empty, acceptDuplicateSamples = false)
     }
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)

@@ -336,7 +336,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
                    row <- c.iterate(part.schema.ingestionSchema)
               } {
                 part.ingest(userTimeEndExclusive, row, offHeapMem.blockMemFactory, createChunkAtFlushBoundary = false,
-                  flushIntervalMillis = Option.empty)
+                  flushIntervalMillis = Option.empty, acceptDuplicateSamples = false)
               }
             } catch {
               case e: Exception =>
