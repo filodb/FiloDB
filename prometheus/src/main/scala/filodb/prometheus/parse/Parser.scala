@@ -344,6 +344,13 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
 
   lazy val precedenceExpression: PackratParser[PrecedenceExpression] = {
 
+    "(" ~ binaryExpression ~ ")" ^^ {
+      case "(" ~ ep ~ ")" => PrecedenceExpression(ep)
+    }
+  }
+
+  lazy val precedenceExpression2: PackratParser[PrecedenceExpression] = {
+
     "(" ~ expression ~ ")" ^^ {
       case "(" ~ ep ~ ")" => PrecedenceExpression(ep)
     }
@@ -378,7 +385,7 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
 
   lazy val expression: PackratParser[Expression] =
     binaryExpression | aggregateExpression2 | aggregateExpression1 |
-      function | unaryExpression | vector | numericalExpression | simpleSeries | precedenceExpression
+      function | unaryExpression | vector | numericalExpression | simpleSeries | precedenceExpression | "(" ~> expression <~ ")"
 
 }
 
