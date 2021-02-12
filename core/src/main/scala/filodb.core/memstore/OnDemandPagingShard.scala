@@ -3,6 +3,7 @@ package filodb.core.memstore
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext
 
+import com.typesafe.config.Config
 import debox.Buffer
 import java.util
 import kamon.Kamon
@@ -31,10 +32,11 @@ class OnDemandPagingShard(ref: DatasetRef,
                           bufferMemoryManager: NativeMemoryManager,
                           rawStore: ColumnStore,
                           metastore: MetaStore,
-                          evictionPolicy: PartitionEvictionPolicy)
+                          evictionPolicy: PartitionEvictionPolicy,
+                          filodbConfig: Config)
                          (implicit ec: ExecutionContext) extends
 TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryManager, rawStore,
-                metastore, evictionPolicy)(ec) {
+                metastore, evictionPolicy, filodbConfig)(ec) {
   import TimeSeriesShard._
   import FiloSchedulers._
 

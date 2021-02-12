@@ -7,6 +7,7 @@ import scala.collection.Iterator
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import kamon.Kamon
+import kamon.metric.Counter
 import org.joda.time.DateTime
 
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
@@ -238,12 +239,15 @@ final case class DaysInMonthScalar(rangeParams: RangeParams) extends ScalarSingl
 final case class RawDataRangeVector(key: RangeVectorKey,
                                     partition: ReadablePartition,
                                     chunkMethod: ChunkScanMethod,
-                                    columnIDs: Array[Int]) extends RangeVector {
+                                    columnIDs: Array[Int],
+                                    chunksQueriedMetric: Counter) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
   def rows(): RangeVectorCursor = partition.timeRangeRows(chunkMethod, columnIDs)
 
   // Obtain ChunkSetInfos from specific window of time from partition
-  def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = partition.infos(windowStart, windowEnd)
+  def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = {
+    new CountingChunkInfoIterator(partition.infos(windowStart, windowEnd), chunksQueriedMetric)
+  }
 
   // the query engine is based around one main data column to query, so it will always be the second column passed in
   def valueColID: Int = columnIDs(1)

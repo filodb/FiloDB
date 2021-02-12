@@ -4,6 +4,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 
 import com.typesafe.config.ConfigFactory
+import kamon.Kamon
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 
 import filodb.core.{MetricsTestData, QueryTimeoutException, TestData, MachineMetricsData => MMD}
@@ -155,11 +156,11 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
     val part = TimeSeriesPartitionSpec.makePart(0, timeseriesDatasetWithMetric, partKey, bufferPool = tsBufferPool)
     val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
     readers.foreach { row => part.ingest(0, row, ingestBlockHolder, createChunkAtFlushBoundary = false,
-      flushIntervalMillis = Option.empty) }
+      flushIntervalMillis = Option.empty, acceptDuplicateSamples = false) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(ingestBlockHolder, encode = true)
     // part.encodeAndReleaseBuffers(ingestBlockHolder)
-    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1))
+    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), Kamon.counter("dummy").withoutTags())
   }
 
   def timeValueRvDownsample(tuples: Seq[(Long, Double, Double, Double, Double, Double)],
@@ -169,11 +170,11 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
       TupleRowReader((Some(ts), Some(d1), Some(d2), Some(d3), Some(d4), Some(d5)))
     }
     readers.foreach { row => part.ingest(0, row, ingestBlockHolder2, createChunkAtFlushBoundary = false,
-      flushIntervalMillis = Option.empty) }
+      flushIntervalMillis = Option.empty, acceptDuplicateSamples = false) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(ingestBlockHolder2, encode = true)
     // part.encodeAndReleaseBuffers(ingestBlockHolder)
-    RawDataRangeVector(null, part, AllChunkScan, colIds)
+    RawDataRangeVector(null, part, AllChunkScan, colIds, Kamon.counter("dummy").withoutTags())
   }
 
   def timeValueRV(data: Seq[Double], startTS: Long = defaultStartTS): RawDataRangeVector = {
@@ -187,7 +188,7 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
     val startingNumChunks = part.numChunks
     val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
     readers.foreach { row => part.ingest(0, row, ingestBlockHolder, createChunkAtFlushBoundary = false,
-      flushIntervalMillis = Option.empty) }
+      flushIntervalMillis = Option.empty, acceptDuplicateSamples = false) }
     part.switchBuffers(ingestBlockHolder, encode = true)
     part.numChunks shouldEqual (startingNumChunks + 1)
   }

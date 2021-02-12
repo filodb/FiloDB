@@ -236,7 +236,6 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                                    repairStartTime: Long,
                                    repairEndTime: Long,
                                    target: CassandraColumnStore,
-                                   targetDatasetRef: DatasetRef,
                                    partKeyHashFn: PartKeyRecord => Option[Int],
                                    diskTimeToLiveSeconds: Int): Unit = {
     def pkRecordWithHash(pkRecord: PartKeyRecord) = {
@@ -260,7 +259,8 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       )
       val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
       Await.result(
-        writePartKeys(targetDatasetRef, shard, Observable.fromIterable(partKeys), diskTimeToLiveSeconds, updateHour),
+        target.writePartKeys(datasetRef,
+          shard, Observable.fromIterable(partKeys), diskTimeToLiveSeconds, updateHour),
         5.minutes
       )
     }
@@ -269,7 +269,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     for (split <- splits; shard <- 0 until numOfShards) {
       val tokens = split.asInstanceOf[CassandraTokenRangeSplit].tokens
       val srcPartKeysTable = getOrCreatePartitionKeysTable(datasetRef, shard)
-      val targetPartKeysTable = target.getOrCreatePartitionKeysTable(targetDatasetRef, shard)
+      val targetPartKeysTable = target.getOrCreatePartitionKeysTable(datasetRef, shard)
       // CQL does not support OR operator. So we need to query separately to get the timeSeries partitionKeys
       // which were born or died during the data loss period (aka repair window).
       val rowsByStartTime = srcPartKeysTable.scanRowsByStartTimeRangeNoAsync(tokens, repairStartTime, repairEndTime)

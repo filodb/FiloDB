@@ -11,10 +11,11 @@ import scala.util.{Random, Try}
 import bloomfilter.CanGenerateHashFrom
 import bloomfilter.mutable.BloomFilter
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
+import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import debox.{Buffer, Map => DMap}
 import kamon.Kamon
-import kamon.metric.MeasurementUnit
+import kamon.metric.{Counter, MeasurementUnit}
 import kamon.tag.TagSet
 import monix.eval.Task
 import monix.execution.{Scheduler, UncaughtExceptionReporter}
@@ -27,7 +28,7 @@ import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaSource, RocksDbCardinalityStore}
 import filodb.core.metadata.{Schema, Schemas}
-import filodb.core.query.{ColumnFilter, QuerySession}
+import filodb.core.query.{ColumnFilter, Filter, QuerySession}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.data.Shutdown
@@ -38,6 +39,10 @@ import filodb.memory.format.ZeroCopyUTF8String._
 class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
 
+  val timeseriesCount = Kamon.gauge("memstore-timeseries-count")
+  val chunksQueried = Kamon.counter("memstore-chunks-queried").withTags(TagSet.from(tags))
+  val chunksQueriedByShardKey = Kamon.counter("memstore-chunks-queried-by-shardkey")
+  val tsCountBySchema = Kamon.gauge("memstore-timeseries-by-schema").withTags(TagSet.from(tags))
   val rowsIngested = Kamon.counter("memstore-rows-ingested").withTags(TagSet.from(tags))
   val partitionsCreated = Kamon.counter("memstore-partitions-created").withTags(TagSet.from(tags))
   val dataDropped = Kamon.counter("memstore-data-dropped").withTags(TagSet.from(tags))
@@ -194,7 +199,8 @@ case class PartLookupResult(shard: Int,
                             firstSchemaId: Option[Int] = None,
                             partIdsMemTimeGap: debox.Map[Int, Long] = debox.Map.empty,
                             partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty,
-                            pkRecords: Seq[PartKeyLuceneIndexRecord] = Seq.empty)
+                            pkRecords: Seq[PartKeyLuceneIndexRecord] = Seq.empty,
+                            queriedChunksCounter: Counter)
 
 final case class SchemaMismatch(expected: String, found: String) extends
 Exception(s"Multiple schemas found, please filter. Expected schema $expected, found schema $found")
@@ -229,7 +235,8 @@ class TimeSeriesShard(val ref: DatasetRef,
                       val bufferMemoryManager: NativeMemoryManager,
                       colStore: ColumnStore,
                       metastore: MetaStore,
-                      evictionPolicy: PartitionEvictionPolicy)
+                      evictionPolicy: PartitionEvictionPolicy,
+                      filodbConfig: Config)
                      (implicit val ioPool: ExecutionContext) extends StrictLogging {
   import collection.JavaConverters._
 
@@ -237,6 +244,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   import TimeSeriesShard._
 
   val shardStats = new TimeSeriesShardStats(ref, shardNum)
+  val shardKeyLevelIngestionMetricsEnabled = filodbConfig.getBoolean("shard-key-level-igestion-metrics-enabled")
+  val shardKeyLevelQueryMetricsEnabled = filodbConfig.getBoolean("shard-key-level-igestion-metrics-enabled")
 
   /**
     * Map of all partitions in the shard stored in memory, indexed by partition ID
@@ -289,6 +298,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   require (storeConfig.maxChunkTime > storeConfig.flushInterval, "MaxChunkTime should be greater than FlushInterval")
   val maxChunkTime = storeConfig.maxChunkTime.toMillis
 
+  val acceptDuplicateSamples = storeConfig.acceptDuplicateSamples
+
   // Called to remove chunks from ChunkMap of a given partition, when an offheap block is reclaimed
   private val reclaimListener = new ReclaimListener {
     def onReclaim(metaAddr: Long, numBytes: Int): Unit = {
@@ -335,7 +346,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val shardTags = Map("dataset" -> ref.dataset, "shard" -> shardNum.toString)
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
     storeConfig.numPagesPerBlock)
-  private val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
+  private[core] val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
 
   /**
     * Lock that protects chunks from being reclaimed from Memstore.
@@ -346,10 +357,6 @@ class TimeSeriesShard(val ref: DatasetRef,
   // Requires blockStore.
   private val headroomTask = startHeadroomTask(ingestSched)
 
-  // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
-  // strictly during ingest() and switchBuffers().
-  private[core] val overflowBlockFactory = new BlockMemFactory(blockStore, maxMetaSize,
-                                             shardTags ++ Map("overflow" -> "true"), true)
   val partitionMaker = new DemandPagedChunkStore(this, blockStore)
 
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, reuseOneContainer = true)
@@ -623,11 +630,24 @@ class TimeSeriesShard(val ref: DatasetRef,
       else activelyIngesting -= partId
     }
     shardStats.indexRecoveryNumRecordsProcessed.increment()
+    val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
+    captureTimeseriesCount(schema, shardKey, 1)
     if (storeConfig.meteringEnabled) {
-      val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
       cardTracker.incrementCount(shardKey)
     }
     partId
+  }
+
+  private def captureTimeseriesCount(schema: Schema, shardKey: Seq[String], times: Double) = {
+    // Assuming that the last element in the shardKeyColumn is always a metric name, we are making sure the
+    // shardKeyColumn.length is > 1 and dropping the last element in shardKeyColumn.
+    if (shardKeyLevelIngestionMetricsEnabled &&
+        schema.options.shardKeyColumns.length > 1 &&
+        shardKey.length == schema.options.shardKeyColumns.length) {
+      val tagSetMap = (schema.options.shardKeyColumns.map(c => s"metric${c}tag") zip shardKey).dropRight(1).toMap
+      shardStats.timeseriesCount.withTags(TagSet.from(tagSetMap)).increment(times)
+    }
+    shardStats.tsCountBySchema.withTag("schema", schema.name).increment(times)
   }
 
   def indexNames(limit: Int): Seq[String] = partKeyIndex.indexNames(limit)
@@ -767,7 +787,8 @@ class TimeSeriesShard(val ref: DatasetRef,
 
     // Rapidly switch all of the input buffers for a particular group
     logger.debug(s"Switching write buffers for group $groupNum in dataset=$ref shard=$shardNum")
-    InMemPartitionIterator(partitionGroups(groupNum).intIterator).foreach(_.switchBuffers(overflowBlockFactory))
+    InMemPartitionIterator(partitionGroups(groupNum).intIterator)
+      .foreach(_.switchBuffers(blockFactoryPool.checkoutForOverflow(groupNum)))
 
     val dirtyPartKeys = if (groupNum == dirtyPartKeysFlushGroup) {
       logger.debug(s"Switching dirty part keys in dataset=$ref shard=$shardNum out for flush. ")
@@ -792,9 +813,10 @@ class TimeSeriesShard(val ref: DatasetRef,
       if (!p.ingesting) {
         logger.debug(s"Purging partition with partId=${p.partID}  ${p.stringPartition} from " +
           s"memory in dataset=$ref shard=$shardNum")
+        val schema = p.schema
+        val shardKey = schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset, schema.options.shardKeyColumns)
+        captureTimeseriesCount(schema, shardKey, -1)
         if (storeConfig.meteringEnabled) {
-          val schema = p.schema
-          val shardKey = schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset, schema.options.shardKeyColumns)
           cardTracker.decrementCount(shardKey)
         }
         removePartition(p)
@@ -901,7 +923,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     val flushStart = System.currentTimeMillis()
 
     // Only allocate the blockHolder when we actually have chunks/partitions to flush
-    val blockHolder = blockFactoryPool.checkout(Map("flushGroup" -> flushGroup.groupNum.toString))
+    val blockHolder = blockFactoryPool.checkoutForFlush(flushGroup.groupNum)
 
     val chunkSetIter = partitionIt.flatMap { p =>
       // TODO re-enable following assertion. Am noticing that monix uses TrampolineExecutionContext
@@ -1137,9 +1159,10 @@ class TimeSeriesShard(val ref: DatasetRef,
         // add new lucene entry if this partKey was never seen before
         // causes endTime to be set to Long.MaxValue
         partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
+        val shardKey = schema.partKeySchema.colValues(newPart.partKeyBase, newPart.partKeyOffset,
+          schema.options.shardKeyColumns)
+        captureTimeseriesCount(schema, shardKey, 1)
         if (storeConfig.meteringEnabled) {
-          val shardKey = schema.partKeySchema.colValues(newPart.partKeyBase, newPart.partKeyOffset,
-            schema.options.shardKeyColumns)
           cardTracker.incrementCount(shardKey)
         }
       } else {
@@ -1183,8 +1206,8 @@ class TimeSeriesShard(val ref: DatasetRef,
         val tsp = part.asInstanceOf[TimeSeriesPartition]
         brRowReader.schema = schema.ingestionSchema
         brRowReader.recordOffset = recordOff
-        tsp.ingest(ingestionTime, brRowReader, overflowBlockFactory,
-          storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, maxChunkTime)
+        tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.checkoutForOverflow(group),
+          storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, acceptDuplicateSamples, maxChunkTime)
         // Below is coded to work concurrently with logic in updateIndexWithEndTime
         // where we try to de-activate an active time series
         if (!tsp.ingesting) {
@@ -1442,18 +1465,29 @@ class TimeSeriesShard(val ref: DatasetRef,
                        querySession: QuerySession): PartLookupResult = {
     querySession.lock = Some(reclaimLock)
     reclaimLock.lock()
+    val metricShardKeys = schemas.part.options.shardKeyColumns.dropRight(1)
     // any exceptions thrown here should be caught by a wrapped Task.
     // At the end, MultiSchemaPartitionsExec.execute releases the lock when the task is complete
     partMethod match {
       case SinglePartitionScan(partition, _) =>
         val partIds = debox.Buffer.empty[Int]
         getPartition(partition).foreach(p => partIds += p.partID)
-        PartLookupResult(shardNum, chunkMethod, partIds, Some(RecordSchema.schemaID(partition)))
+        PartLookupResult(shardNum, chunkMethod, partIds, Some(RecordSchema.schemaID(partition)),
+          queriedChunksCounter = shardStats.chunksQueried)
       case MultiPartitionScan(partKeys, _)   =>
         val partIds = debox.Buffer.empty[Int]
         partKeys.flatMap(getPartition).foreach(p => partIds += p.partID)
-        PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID))
+        PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID),
+          queriedChunksCounter = shardStats.chunksQueried)
       case FilteredPartitionScan(_, filters) =>
+        val chunksQueriedMetric = if (shardKeyLevelQueryMetricsEnabled) {
+          val metricTags = metricShardKeys.map { col =>
+            filters.collectFirst {
+              case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => s"metric${col}tag" -> filtVal
+            }.getOrElse(col -> "unknown")
+          }.toMap
+          shardStats.chunksQueriedByShardKey.withTags(TagSet.from(metricTags))
+        } else shardStats.chunksQueried
         // No matter if there are filters or not, need to run things through Lucene so we can discover potential
         // TSPartitions to read back from disk
         val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
@@ -1482,7 +1516,8 @@ class TimeSeriesShard(val ref: DatasetRef,
         }
         // now provide an iterator that additionally supplies the startTimes for
         // those partitions that may need to be paged
-        PartLookupResult(shardNum, chunkMethod, matches, _schema, startTimes, partIdsNotInMem)
+        PartLookupResult(shardNum, chunkMethod, matches, _schema, startTimes, partIdsNotInMem,
+          Nil, chunksQueriedMetric)
     }
   }
 

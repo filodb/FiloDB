@@ -18,7 +18,6 @@ import filodb.query._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
-
 class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
   import MultiSchemaPartitionsExecSpec._
@@ -489,8 +488,9 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       .toListL.runAsync.futureValue
 
     result.size shouldEqual 8
-    result.map(rv => (rv.key.labelValues, rv.rows.map(_.getDouble(1)).toList)).toSet shouldEqual
-      sampleHttpRequests.map( rv => (rv.key.labelValues, rv.rows.map(_.getDouble(1)).toList)).toSet
+    result.map(_.key.labelValues) sameElements (sampleHttpRequests.map(_.key.labelValues).toList) shouldEqual true
+    sampleHttpRequests.flatMap(_.rows.map(_.getDouble(1)).toList).
+      sameElements(result.flatMap(_.rows.map(_.getDouble(1)).toList)) shouldEqual true
   }
 
   it("should return Lhs when LAND is done with vector having no labels and ignoring is used om Lhs labels") {
@@ -510,8 +510,9 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       .toListL.runAsync.futureValue
 
     result.size shouldEqual 8
-    result.map(rv => (rv.key.labelValues, rv.rows.map(_.getDouble(1)).toList)).toSet shouldEqual
-      sampleHttpRequests.map( rv => (rv.key.labelValues, rv.rows.map(_.getDouble(1)).toList)).toSet
+    result.map(_.key.labelValues) sameElements (sampleHttpRequests.map(_.key.labelValues)) shouldEqual true
+    sampleHttpRequests.flatMap(_.rows.map(_.getDouble(1)).toList).
+      sameElements(result.flatMap(_.rows.map(_.getDouble(1)).toList)) shouldEqual true
   }
 
   it("should join many-to-many with or") {
@@ -662,12 +663,12 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     )
 
     result2.size shouldEqual 6
-    result2.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
+    result2.map(_.key.labelValues).toSet.equals(expectedLabels.toSet) shouldEqual true
 
-    result2(0).rows.map(_.getDouble(1)).toList shouldEqual List(401)
-    result2(1).rows.map(_.getDouble(1)).toList shouldEqual List(301)
-    result2(2).rows.map(_.getDouble(1)).toList shouldEqual List(801)
-    result2(3).rows.map(_.getDouble(1)).toList shouldEqual List(701)
+    result2(0).rows.map(_.getDouble(1)).toList shouldEqual List(301)
+    result2(1).rows.map(_.getDouble(1)).toList shouldEqual List(701)
+    result2(2).rows.map(_.getDouble(1)).toList shouldEqual List(401)
+    result2(3).rows.map(_.getDouble(1)).toList shouldEqual List(801)
     result2(4).rows.map(_.getDouble(1)).toList shouldEqual List(200)
     result2(5).rows.map(_.getDouble(1)).toList shouldEqual List(100)
   }
@@ -733,12 +734,12 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     )
 
     result2.size shouldEqual 6
-    result2.map(_.key.labelValues).toSet shouldEqual expectedLabels.toSet
+    result2.map(_.key.labelValues).toSet.equals(expectedLabels.toSet)
 
-    result2(0).rows.map(_.getDouble(1)).toList shouldEqual List(401)
-    result2(1).rows.map(_.getDouble(1)).toList shouldEqual List(301)
-    result2(2).rows.map(_.getDouble(1)).toList shouldEqual List(801)
-    result2(3).rows.map(_.getDouble(1)).toList shouldEqual List(701)
+    result2(0).rows.map(_.getDouble(1)).toList shouldEqual List(301)
+    result2(1).rows.map(_.getDouble(1)).toList shouldEqual List(701)
+    result2(2).rows.map(_.getDouble(1)).toList shouldEqual List(401)
+    result2(3).rows.map(_.getDouble(1)).toList shouldEqual List(801)
     result2(4).rows.map(_.getDouble(1)).toList shouldEqual List(200)
     result2(5).rows.map(_.getDouble(1)).toList shouldEqual List(100)
   }
@@ -771,10 +772,9 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       ))
 
     result.size shouldEqual 2
-
-    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
-    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(400)
-    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(800)
+    result.map(_.key.labelValues).toSet.equals(expectedLabels.toSet) shouldEqual true
+    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(800)
+    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(400)
   }
 
   it("should not return any results when rhs has same vector on joining with on labels with LUnless") {
@@ -992,5 +992,333 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     rowValues.head shouldEqual 100
     // LHS second RV has value 300 for 2L, however RHS has Double.NaN for 2L so RHS value is picked
     rowValues(1).isNaN shouldEqual true
+  }
+
+  it ("should remove dupes in LHS and stitch before joining for LOR") {
+
+    def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
+
+    val queryContext = QueryContext(plannerParams = PlannerParams(joinQueryCardLimit = 10)) // set join card limit to 1
+    val execPlan = SetOperatorExec(queryContext, dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+     BinaryOperator.LOR,
+      Nil, Nil, "__name__")
+
+    import NoCloseCursor._
+    val lhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(20).iterator
+    }
+
+    val lhsRvDupe = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(30).drop(20).iterator
+    }
+
+    val lhsRvDupe2 = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(40).drop(30).iterator
+    }
+
+    val rhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value2".utf8))
+      val rows: RangeVectorCursor = dataRows.take(40).iterator
+    }
+
+    val lhs = QueryResult("someId", tvSchema, Seq(lhsRv, lhsRvDupe, lhsRvDupe2).map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, Seq(rhsRv).map(rv => SerializedRangeVector(rv, schema)))
+
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
+      .toListL.runAsync.futureValue
+
+    result.size shouldEqual 2
+    result.head.key.labelValues shouldEqual Map("tag".utf8 -> s"value1".utf8)
+    result.last.key.labelValues shouldEqual Map("tag".utf8 -> s"value2".utf8)
+    result.head.rows().map(_.getLong(0)).toList shouldEqual (0L until 40).toList
+    result.last.rows().map(_.getLong(0)).toList shouldEqual (0L until 40).toList
+  }
+
+  it ("should remove dupes in RHS and stitch before joining for LOR") {
+
+    def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
+
+    val queryContext = QueryContext(plannerParams = PlannerParams(joinQueryCardLimit = 10)) // set join card limit to 1
+    val execPlan = SetOperatorExec(queryContext, dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.LOR,
+      Nil, Nil, "__name__")
+
+    import NoCloseCursor._
+    val rhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(20).iterator
+    }
+
+    val rhsRvDupe = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(30).drop(20).iterator
+    }
+    val rhsRvDupe2 = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(40).drop(30).iterator
+    }
+
+    val lhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value".utf8))
+      val rows: RangeVectorCursor = dataRows.take(40).iterator
+    }
+
+    val lhs = QueryResult("someId", tvSchema, Seq(lhsRv).map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, Seq(rhsRv, rhsRvDupe, rhsRvDupe2).map(rv => SerializedRangeVector(rv, schema)))
+
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
+      .toListL.runAsync.futureValue
+
+    result.size shouldEqual 2
+    result.head.key.labelValues shouldEqual Map("tag".utf8 -> s"value".utf8)
+    result.last.key.labelValues shouldEqual Map("tag".utf8 -> s"value1".utf8)
+    result.head.rows().map(_.getLong(0)).toList shouldEqual (0L until 40).toList
+    result.last.rows().map(_.getLong(0)).toList shouldEqual (0L until 40).toList
+  }
+
+  it ("should remove dupes in LHS and stitch before joining for LAND") {
+
+    def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
+
+    val queryContext = QueryContext(plannerParams = PlannerParams(joinQueryCardLimit = 10)) // set join card limit to 1
+    val execPlan = SetOperatorExec(queryContext, dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.LAND,
+      Nil, Nil, "__name__")
+
+    import NoCloseCursor._
+    val lhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(20).iterator
+    }
+
+    val lhsRvDupe = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(30).drop(20).iterator
+    }
+
+    val lhsRvDupe2 = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(40).drop(30).iterator
+    }
+
+    val rhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(40).iterator
+    }
+
+    val lhs = QueryResult("someId", tvSchema, Seq(lhsRv, lhsRvDupe, lhsRvDupe2).map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, Seq(rhsRv).map(rv => SerializedRangeVector(rv, schema)))
+
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
+      .toListL.runAsync.futureValue
+
+    result.size shouldEqual 1
+    result.head.key.labelValues shouldEqual Map("tag".utf8 -> s"value1".utf8)
+    result.head.rows().map(_.getLong(0)).toList shouldEqual (0L until 40).toList
+  }
+
+  it ("should join with LAND when RHS has dupes") {
+
+    def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
+
+    val queryContext = QueryContext(plannerParams = PlannerParams(joinQueryCardLimit = 10)) // set join card limit to 1
+    val execPlan = SetOperatorExec(queryContext, dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.LAND,
+      Nil, Nil, "__name__")
+
+    import NoCloseCursor._
+    val rhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(20).iterator
+    }
+
+    val rhsRvDupe = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(30).drop(20).iterator
+    }
+    val rhsRvDupe2 = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(40).drop(30).iterator
+    }
+
+    val lhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(40).iterator
+    }
+
+    val lhs = QueryResult("someId", tvSchema, Seq(lhsRv).map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, Seq(rhsRv, rhsRvDupe, rhsRvDupe2).map(rv => SerializedRangeVector(rv, schema)))
+
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
+      .toListL.runAsync.futureValue
+
+    result.size shouldEqual 1
+    result.head.key.labelValues shouldEqual Map("tag".utf8 -> s"value1".utf8)
+    result.head.rows().map(_.getLong(0)).toList shouldEqual (0L until 40).toList
+  }
+
+  it ("should join with LUNLESS when RHS has dupes") {
+
+    def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
+
+    val queryContext = QueryContext(plannerParams = PlannerParams(joinQueryCardLimit = 10)) // set join card limit to 1
+    val execPlan = SetOperatorExec(queryContext, dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.LUnless,
+      Nil, Nil, "__name__")
+
+    import NoCloseCursor._
+    val rhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(20).iterator
+    }
+
+    val rhsRvDupe = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(30).drop(20).iterator
+    }
+    val rhsRvDupe2 = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(40).drop(30).iterator
+    }
+
+    val lhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value".utf8))
+      val rows: RangeVectorCursor = dataRows.take(40).iterator
+    }
+
+    val lhs = QueryResult("someId", tvSchema, Seq(lhsRv).map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, Seq(rhsRv, rhsRvDupe, rhsRvDupe2).map(rv => SerializedRangeVector(rv, schema)))
+
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
+      .toListL.runAsync.futureValue
+
+    result.size shouldEqual 1
+    result.head.key.labelValues shouldEqual Map("tag".utf8 -> s"value".utf8)
+    result.head.rows().map(_.getLong(0)).toList shouldEqual (0L until 40).toList
+  }
+
+  it ("should remove dupes in LHS and stitch before joining for LUNLESS") {
+
+    def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
+
+    val queryContext = QueryContext(plannerParams = PlannerParams(joinQueryCardLimit = 10)) // set join card limit to 1
+    val execPlan = SetOperatorExec(queryContext, dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.LUnless,
+      Nil, Nil, "__name__")
+
+    import NoCloseCursor._
+    val lhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(20).iterator
+    }
+
+    val lhsRvDupe = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(30).drop(20).iterator
+    }
+
+    val lhsRvDupe2 = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
+      val rows: RangeVectorCursor = dataRows.take(40).drop(30).iterator
+    }
+
+    val rhsRv = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value2".utf8))
+      val rows: RangeVectorCursor = dataRows.take(40).iterator
+    }
+
+    val lhs = QueryResult("someId", tvSchema, Seq(lhsRv, lhsRvDupe, lhsRvDupe2).map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, Seq(rhsRv).map(rv => SerializedRangeVector(rv, schema)))
+
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
+      .toListL.runAsync.futureValue
+
+    result.size shouldEqual 1
+    result.head.key.labelValues shouldEqual Map("tag".utf8 -> s"value1".utf8)
+    result.head.rows().map(_.getLong(0)).toList shouldEqual (0L until 40).toList
+  }
+
+  it("AND should stitch dup LHS and not pick value when corresponding RHS value is NaN"){
+    val sampleNaN: Array[RangeVector] = Array(
+      new RangeVector {
+        val key: RangeVectorKey = CustomRangeVectorKey(
+          Map("__name__".utf8 -> s"http_requests".utf8,
+            "job".utf8 -> s"api-server".utf8,
+            "instance".utf8 -> "0".utf8,
+            "group".utf8 -> s"production".utf8)
+        )
+
+        import NoCloseCursor._
+        override def rows(): RangeVectorCursor = Seq(
+          new TransientRow(1L, 100),
+          new TransientRow(2L, 200),
+          new TransientRow(3L, Double.NaN)).iterator
+      })
+
+    val lhs1: Array[RangeVector] = Array(
+      new RangeVector {
+        val key: RangeVectorKey = CustomRangeVectorKey(
+          Map("__name__".utf8 -> s"http_requests".utf8,
+            "job".utf8 -> s"api-server".utf8,
+            "instance".utf8 -> "0".utf8,
+            "group".utf8 -> s"production".utf8)
+        )
+
+        import NoCloseCursor._
+        override def rows(): RangeVectorCursor = Seq(
+          new TransientRow(3L, 300)).iterator
+      })
+
+    val lhs2: Array[RangeVector] = Array(
+      new RangeVector {
+        val key: RangeVectorKey = CustomRangeVectorKey(
+          Map("__name__".utf8 -> s"http_requests".utf8,
+            "job".utf8 -> s"api-server".utf8,
+            "instance".utf8 -> "0".utf8,
+            "group".utf8 -> s"production".utf8)
+        )
+
+        import NoCloseCursor._
+        override def rows(): RangeVectorCursor = Seq(
+          new TransientRow(1L, 100),
+          new TransientRow(2L, 200)).iterator
+      })
+
+    val queryContext = QueryContext(plannerParams = PlannerParams(joinQueryCardLimit = 10)) // set join card limit to 1
+    val execPlan = SetOperatorExec(queryContext, dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.LAND,
+      Nil, Nil, "__name__")
+
+
+    val lhs = QueryResult("someId", tvSchema, (lhs2 ++ lhs1).map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", tvSchema, sampleNaN.map(rv => SerializedRangeVector(rv, schema)))
+
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, querySession)
+      .toListL.runAsync.futureValue
+
+    result.size shouldEqual 1
+    result.head.key.labelValues shouldEqual lhs1.head.key.labelValues
+    val rows = result.head.rows().map(x => (x.getLong(0), x.getDouble(1))).toList
+    rows.map(_._1) shouldEqual List(1, 2, 3)
+    val rowValues = rows.map(_._2)
+    rowValues.dropRight(1) shouldEqual List(100, 200)
+    rowValues.last.isNaN shouldEqual(true) // As Rhs does not have any value at 3L
   }
 }

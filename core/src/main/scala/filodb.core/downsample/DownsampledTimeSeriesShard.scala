@@ -230,7 +230,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           }
           stats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
           PartLookupResult(shardNum, chunkMethod, debox.Buffer.empty,
-            _schema, debox.Map.empty, debox.Buffer.empty, recs)
+            _schema, debox.Map.empty, debox.Buffer.empty, recs, stats.chunksQueried)
         } else {
           throw new UnsupportedOperationException("Cannot have empty filters")
         }
@@ -262,7 +262,6 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           .map { pd =>
             val part = makePagedPartition(pd, lookup.firstSchemaId.get, Some(resolution), colIds)
             stats.partitionsQueried.increment()
-            stats.chunksQueried.increment(part.numChunks)
             stats.singlePartCassFetchLatency.record(Math.max(0, System.currentTimeMillis - startExecute))
             part
           }

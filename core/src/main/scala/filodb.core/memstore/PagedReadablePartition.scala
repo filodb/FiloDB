@@ -72,7 +72,7 @@ class PagedReadablePartition(override val schema: Schema,
       private val iter = partData.chunkSetsTimeOrdered.iterator
       override def close(): Unit = {}
       override def hasNext: Boolean = iter.hasNext
-      override def nextInfo = ??? // intentionally not implemented since users dont bother with off-heap
+      override def nextInfo = ??? // intentionally not implemented since callers dont use off-heap chunkInfo
       override def nextInfoReader: ChunkSetInfoReader = {
         val nxt = iter.next()
         ChunkSetInfoOnHeap(nxt.infoBytes, nxt.vectors)

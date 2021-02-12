@@ -20,7 +20,7 @@ import filodb.core.store._
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
-class TimeSeriesMemStore(config: Config,
+class TimeSeriesMemStore(filodbConfig: Config,
                          val store: ColumnStore,
                          val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
@@ -35,10 +35,10 @@ extends MemStore with StrictLogging {
 
   val stats = new ChunkSourceStats
 
-  private val numParallelFlushes = config.getInt("memstore.flush-task-parallelism")
+  private val numParallelFlushes = filodbConfig.getInt("memstore.flush-task-parallelism")
 
   private val partEvictionPolicy = evictionPolicy.getOrElse {
-    new WriteBufferFreeEvictionPolicy(config.getMemorySize("memstore.min-write-buffers-free").toBytes)
+    new WriteBufferFreeEvictionPolicy(filodbConfig.getMemorySize("memstore.min-write-buffers-free").toBytes)
   }
 
   def isDownsampleStore: Boolean = false
@@ -48,7 +48,7 @@ extends MemStore with StrictLogging {
             downsample: DownsampleConfig = DownsampleConfig.disabled): Unit = synchronized {
     val shards = datasets.getOrElseUpdate(ref, new NonBlockingHashMapLong[TimeSeriesShard](32, false))
     val quotaSource = quotaSources.getOrElseUpdate(ref,
-      new ConfigQuotaSource(config, schemas.part.options.shardKeyColumns.length))
+      new ConfigQuotaSource(filodbConfig, schemas.part.options.shardKeyColumns.length))
     if (shards.containsKey(shard)) {
       throw ShardAlreadySetup(ref, shard)
     } else {
@@ -60,7 +60,7 @@ extends MemStore with StrictLogging {
       })
 
       val tsdb = new OnDemandPagingShard(ref, schemas, storeConf, quotaSource, shard, memFactory, store, metastore,
-                              partEvictionPolicy)
+                              partEvictionPolicy, filodbConfig)
       shards.put(shard, tsdb)
     }
   }

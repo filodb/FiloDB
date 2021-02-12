@@ -12,24 +12,9 @@ import filodb.query.Query.qLogger
 
 object StitchRvsExec {
 
-  /**
-   * Use this method to make RVs unique if there is a possibility of
-   * dupes from different shards. Cost: iteration is not lazy and will
-   * bring vectors to memory like in Binary Joins
-   */
-  def stitchAndUnique(vectors: Iterable[RangeVector]): Iterable[RangeVector] = {
-    vectors
-      .groupBy(_.key.labelValues)
-      .values
-      .map { toMerge =>
-        if (toMerge.size > 1) {
-          val rows = StitchRvsExec.merge(toMerge.map(_.rows))
-          val key = toMerge.head.key
-          IteratorBackedRangeVector(key, rows)
-        } else {
-          toMerge.head
-        }
-      }
+  def stitch(v1: RangeVector, v2: RangeVector): RangeVector = {
+    val rows = StitchRvsExec.merge(Seq(v1.rows(), v2.rows()))
+    IteratorBackedRangeVector(v1.key, rows)
   }
 
   def merge(vectors: Iterable[RangeVectorCursor]): RangeVectorCursor = {
@@ -93,7 +78,12 @@ final case class StitchRvsExec(queryContext: QueryContext,
       case (QueryResult(_, _, result), _) => result
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map(_.flatten).map { srvs =>
-      StitchRvsExec.stitchAndUnique(srvs)
+      val groups = srvs.groupBy(_.key.labelValues)
+      groups.mapValues { toMerge =>
+        val rows = StitchRvsExec.merge(toMerge.map(_.rows))
+        val key = toMerge.head.key
+        IteratorBackedRangeVector(key, rows)
+      }.values
     }.map(Observable.fromIterable)
     Observable.fromTask(stitched).flatten
   }
@@ -114,7 +104,12 @@ final case class StitchRvsMapper() extends RangeVectorTransformer {
             sourceSchema: ResultSchema, paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     qLogger.debug(s"StitchRvsMapper: Stitching results:")
     val stitched = source.toListL.map { rvs =>
-      StitchRvsExec.stitchAndUnique(rvs)
+      val groups = rvs.groupBy(_.key)
+      groups.mapValues { toMerge =>
+        val rows = StitchRvsExec.merge(toMerge.map(_.rows))
+        val key = toMerge.head.key
+        IteratorBackedRangeVector(key, rows)
+      }.values
     }.map(Observable.fromIterable)
     Observable.fromTask(stitched).flatten
   }

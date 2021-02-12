@@ -5,6 +5,8 @@ import java.util.concurrent.TimeUnit
 import scala.collection.{mutable, Iterator}
 import scala.collection.mutable.ListBuffer
 
+import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.FiloSchedulers
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
@@ -21,7 +23,7 @@ import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
   * Present: The top/bottom-k samples for each timestamp are placed into distinct RangeVectors for each RangeVectorKey
   *         Materialization is needed here, because it cannot be done lazily.
   */
-class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
+class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator with StrictLogging {
 
   private val numRowReaderColumns = 1 + k*2 // one for timestamp, two columns for each top-k
   private val rvkStringCache = mutable.HashMap[RangeVectorKey, ZeroCopyUTF8String]()
@@ -61,7 +63,9 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
   def zero: TopKHolder = new TopKHolder()
   def newRowToMapInto: MutableRowReader = new TopBottomKAggTransientRow(k)
   def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = {
+    logger.debug(s"TopKAggregatorMap before encoding key=${rvk.labelValues.mkString(",")}")
     val rvkString = rvkStringCache.getOrElseUpdate(rvk, CustomRangeVectorKey.toZcUtf8(rvk))
+    logger.debug(s"TopKAggregatorMap after encoding key=$rvkString")
     mapInto.setLong(0, item.getLong(0))
     // TODO: Use setBlob instead of setString once RowReader has the support for blob
     mapInto.setString(1, rvkString)
@@ -125,7 +129,10 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
         var i = 1
         while (row.notNull(i)) {
           if (row.filoUTF8String(i) != CustomRangeVectorKey.emptyAsZcUtf8) {
-            val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
+            val key = row.filoUTF8String(i)
+            logger.debug(s"TopkPresent before decoding key=$key")
+            val rvk = CustomRangeVectorKey.fromZcUtf8(key)
+            logger.debug(s"TopkPresent after decoding key=${rvk.labelValues.mkString(",")}")
             rvkSeen += rvk
             val builder = resRvs.getOrElseUpdate(rvk, createBuilder(rangeParams, timestamp))
             addRecordToBuilder(builder, TimeUnit.SECONDS.toMillis(timestamp), row.getDouble(i + 1))
@@ -145,6 +152,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
 
     resRvs.map { case (key, builder) =>
       val numRows = builder.allContainers.map(_.countRecords).sum
+      logger.debug(s"TopkPresent before creating SRV key = ${key.labelValues.mkString(",")}")
       new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0)
     }.toSeq
   }

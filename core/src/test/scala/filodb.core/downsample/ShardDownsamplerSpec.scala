@@ -1,6 +1,7 @@
 package filodb.core.downsample
 
 import com.typesafe.config.ConfigFactory
+import kamon.Kamon
 import org.scalatest.BeforeAndAfterAll
 
 import filodb.core.{MachineMetricsData => MMD}
@@ -74,11 +75,11 @@ class ShardDownsamplerSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
   def timeValueRV(tuples: Seq[(Long, Double)]): RawDataRangeVector = {
     val part = TimeSeriesPartitionSpec.makePart(0, promDataset, partKeyOffset, bufferPool = tsBufferPool)
     val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
-    readers.foreach { row => part.ingest(0, row, ingestBlockHolder, false, Option.empty) }
+    readers.foreach { row => part.ingest(0, row, ingestBlockHolder, false, Option.empty, false) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(ingestBlockHolder, encode = true)
 //    part.encodeAndReleaseBuffers(ingestBlockHolder)
-    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1))
+    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), Kamon.counter("dummy").withoutTags())
   }
 
   val downsampleOps = new ShardDownsampler(promDataset.name, 0, promSchema, downsampleSchema,
