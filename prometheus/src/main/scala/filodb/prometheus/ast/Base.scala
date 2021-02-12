@@ -27,7 +27,7 @@ trait Base {
 
   trait Series
 
-  trait PeriodicSeries extends Series with Expression {
+  trait PeriodicSeries extends Series {
     def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan
   }
 

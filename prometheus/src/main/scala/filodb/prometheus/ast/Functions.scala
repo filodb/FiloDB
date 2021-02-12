@@ -97,14 +97,13 @@ trait Functions extends Base with Operators with Vectors {
       val scalarFunctionIdOpt = ScalarFunctionId.withNameInsensitiveOption(name)
       if (vectorFn.isDefined) {
         allParams.head match {
-
+          case num: ScalarExpression => val params = RangeParams(timeParams.start, timeParams.step, timeParams.end)
+                                        VectorPlan(ScalarFixedDoublePlan(num.toScalar, params))
           case function: Function    => val nestedPlan = function.toSeriesPlan(timeParams)
                                         nestedPlan match {
                                           case scalarPlan: ScalarPlan => VectorPlan(scalarPlan)
                                           case _                      => throw new UnsupportedOperationException()
                                         }
-          case num: ScalarExpression => val params = RangeParams(timeParams.start, timeParams.step, timeParams.end)
-            VectorPlan(ScalarFixedDoublePlan(num.toScalar, params))
         }
       } else if (allParams.isEmpty) {
         ScalarTimeBasedPlan(scalarFunctionIdOpt.get, RangeParams(timeParams.start, timeParams.step, timeParams.end) )
@@ -113,16 +112,14 @@ trait Functions extends Base with Operators with Vectors {
         val otherParams: Seq[FunctionArgsPlan] =
           allParams.filter(!_.equals(seriesParam))
                    .filter(!_.isInstanceOf[InstantExpression])
-                   .map { x => x match {
+                   .map {
                      case num: ScalarExpression =>
                        val params = RangeParams(timeParams.start, timeParams.step, timeParams.end)
                        ScalarFixedDoublePlan(num.toScalar, params)
                      case function: Function if (function.name.equalsIgnoreCase("scalar")) =>
                        function.toSeriesPlan(timeParams).asInstanceOf[ScalarVaryingDoublePlan]
-                    // case b: PrecedenceExpression => b.expression
                      case _ =>
-                       throw new IllegalArgumentException("Parameters can be a string, number or scalar function:" + x)
-                   }
+                       throw new IllegalArgumentException("Parameters can be a string, number or scalar function")
                    }
         if (instantFunctionIdOpt.isDefined) {
           val instantFunctionId = instantFunctionIdOpt.get

@@ -411,17 +411,6 @@ class ParserSpec extends AnyFunSpec with Matchers {
 
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
-     // "(metric1 + (metric2 * metric3)) + metric4" -> ""
-    //  "sum((foo + foo))" -> "Aggregate(Sum,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),List(),List(),List())",
-//      """sum by (label_rms_namespace) (
-//        |max_over_time(container_memory_max_usage_bytes{container!="POD",container!="",_ws_="aci-kubernetes",_ns_="us-west-1a",namespace="aciredis-redis-qa"}[1h])
-//        |+
-//        |on(pod, namespace) group_left(priority_class, label_rms_namespace, label_rms_customer)
-//        | (max(label_replace(
-//        |(label_replace(
-//        |(kube_pod_info{exported_namespace="aciredis-redis-qa",_ws_="aci-kubernetes",_ns_="us-west-1a"} * on (exported_namespace, exported_pod) group_left(label_rms_namespace, label_rms_customer) (kube_pod_labels{exported_namespace="aciredis-redis-qa",_ws_="aci-kubernetes",_ns_="us-west-1a",label_rms_namespace="zhiyun-test"})),
-//        | "pod", "$1", "exported_pod", "(.*)")),
-//        | "namespace", "$1", "exported_namespace", "(.*)")) by (pod,priority_class,namespace, label_rms_namespace, label_rms_customer) * 0))""".stripMargin -> "",
       "http_requests_total + time()" -> "ScalarVectorBinaryOperation(ADD,ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),false)",
       "time()" -> "ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988))",
       "hour()" -> "ScalarTimeBasedPlan(Hour,RangeParams(1524855988,1000,1524855988))",
@@ -574,7 +563,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
       "metric1 + metric2 * metric3 + metric4" -> "BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric1))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),ADD,OneToOne,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric2))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),MUL,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric3))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),List(),List(),List()),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric4))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List())",
 
       "(metric1 + metric2) * (metric3 + metric4)" -> "BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric1))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric2))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),MUL,OneToOne,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric3))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric4))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),List(),List(),List())",
-      " sum((some_metric))" -> "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(some_metric))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List())"
+      "sum((some_metric))" -> "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(some_metric))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List())",
+      "sum((foo + foo))" -> "Aggregate(Sum,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),List(),List(),List())"
     )
 
     val qts: Long = 1524855988L

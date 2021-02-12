@@ -1,7 +1,6 @@
 package filodb.prometheus.ast
 
 import filodb.core.query.RangeParams
-//import filodb.prometheus.parse.{Expression, Operator}
 import filodb.query._
 
 trait Expressions extends Aggregates with Functions {
@@ -41,23 +40,21 @@ trait Expressions extends Aggregates with Functions {
       }
     }
 
-    def validate()= {
-       operator match {
-         case setOp: SetOp =>
-           if (lhs.isInstanceOf[ScalarExpression] || rhs.isInstanceOf[ScalarExpression])
-             throw new IllegalArgumentException("set operators not allowed in binary scalar expression")
-
-         case comparison: Comparision if !comparison.isBool =>
-           if (lhs.isInstanceOf[ScalarExpression] && rhs.isInstanceOf[ScalarExpression])
-             throw new IllegalArgumentException("comparisons between scalars must use BOOL modifier")
-         case _ =>
-       }
-     }
     // scalastyle:off method.length
     // scalastyle:off cyclomatic.complexity
     override def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
 
-      validate()
+      operator match {
+        case setOp: SetOp =>
+          if (lhs.isInstanceOf[ScalarExpression] || rhs.isInstanceOf[ScalarExpression])
+            throw new IllegalArgumentException("set operators not allowed in binary scalar expression")
+
+        case comparison: Comparision if !comparison.isBool =>
+          if (lhs.isInstanceOf[ScalarExpression] && rhs.isInstanceOf[ScalarExpression])
+            throw new IllegalArgumentException("comparisons between scalars must use BOOL modifier")
+        case _ =>
+      }
+
       val lhsWithPrecedence = lhs
 
       val rhsWithPrecedence = rhs

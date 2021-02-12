@@ -462,23 +462,22 @@ object Parser extends Expression {
     res
   }
 
-  def getExpression(e: Expression): Expression = {
+  def removePrecedenceExpression(e: Expression): Expression = {
 
    val res = e match {
-      case e: PrecedenceExpression  => getExpression(e.expression)
-      case b: BinaryExpression      =>
-        val lhsExpression = getExpression(b.lhs)
-        val rhsExpression = getExpression(b.rhs)
+      case e: PrecedenceExpression  => removePrecedenceExpression(e.expression)
+      case b: BinaryExpression      => val lhsExpression = removePrecedenceExpression(b.lhs)
+        val rhsExpression = removePrecedenceExpression(b.rhs)
         b.copy(lhs = lhsExpression, rhs= rhsExpression)
-      case f: Function              => val allParamsNew  = f.allParams.map(getExpression(_))
+      // Example: absent((a + b))
+      case f: Function              => val allParamsNew  = f.allParams.map(removePrecedenceExpression(_))
         f.copy(allParams = allParamsNew)
-      case a: AggregateExpression =>  val paramsNew  = a.params.map(getExpression(_))
-        val altParams  = a.altFunctionParams.map(getExpression(_))
+      // Example: sum(( a + b))
+      case a: AggregateExpression   =>  val paramsNew  = a.params.map(removePrecedenceExpression(_))
+        val altParams  = a.altFunctionParams.map(removePrecedenceExpression(_))
         a.copy(params = paramsNew, altFunctionParams = altParams)
-
       case s: Scalar => s
-      //a.copy(all = allParamsNew)
-      //a.copy(a.allParams = )
+      //TO DO remove default case and add all expressions
       case _                        => e
 
     }
@@ -489,7 +488,7 @@ object Parser extends Expression {
   def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
    println("query:"+ query)
     val expression = parseQuery(query)
-    getExpression(assignPrecedence(expression)) match {
+    removePrecedenceExpression(assignPrecedence(expression)) match {
       case p: PeriodicSeries => p.toSeriesPlan(timeParams)
       case r: SimpleSeries   => r.toSeriesPlan(timeParams, isRoot = true)
       case _ => throw new UnsupportedOperationException()
