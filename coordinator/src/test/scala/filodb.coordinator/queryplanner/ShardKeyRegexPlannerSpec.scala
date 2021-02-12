@@ -110,8 +110,11 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams =
+      PromQlQueryParams("""test1{_ws_="demo",_ns_="App"} + test2{_ws_="demo",_ns_="App"}""".stripMargin, 100,1, 1000)))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual(true)
+    execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
+      ("""test1{_ws_="demo",_ns_="App"} + test2{_ws_="demo",_ns_="App"}""")
   }
 
   it ("should generate Exec plan for Metadata query") {
@@ -323,5 +326,44 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     the[UnsupportedOperationException] thrownBy {
       val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     } should have message "Shard Key regex not supported for TopK"
+  }
+
+  it("should generate Exec plan for histogram quantile for Aggregate query having single matching regex value") {
+    val lp = Parser.queryToLogicalPlan("histogram_quantile(0.2, sum(test{_ws_ = \"demo\", _ns_ =~ \"App-1\"}))",
+      1000, 1000)
+    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
+      Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
+        ColumnFilter("_ns_", Equals("App-1"))))
+    }
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
+    execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].rangeVectorTransformers(0).
+      isInstanceOf[AggregatePresenter] shouldEqual true
+    execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].rangeVectorTransformers(1).
+      isInstanceOf[InstantVectorFunctionMapper] shouldEqual true
+
+    execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].rangeVectorTransformers(1).
+      asInstanceOf[InstantVectorFunctionMapper].function shouldEqual HistogramQuantile
+    execPlan.children.head.isInstanceOf[MultiSchemaPartitionsExec]
+
+    execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
+      """histogram_quantile(0.2,sum(test{_ws_="demo",_ns_="App-1"}))"""
+
+    execPlan.queryContext.plannerParams.skipAggregatePresent shouldEqual (false)
+  }
+
+  it("should generate Exec plan for Binary join with single regex match") {
+    val lp = Parser.queryToLogicalPlan("test1{_ws_ = \"demo\", _ns_ =~ \"App\"} + " +
+      "test2{_ws_ = \"demo\", _ns_ =~ \"App\"}", 1000, 1000)
+    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
+      Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
+        ColumnFilter("_ns_", Equals("App"))))
+    }
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
+    execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
+      ("""test1{_ws_="demo",_ns_="App"} + test2{_ws_="demo",_ns_="App"}""")
   }
 }
