@@ -32,7 +32,7 @@ import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
 import filodb.query.QueryResult
-import filodb.query.exec.{InProcessPlanDispatcher, MultiSchemaPartitionsExec}
+import filodb.query.exec.{InProcessPlanDispatcher, InternalRangeFunction, MultiSchemaPartitionsExec, PeriodicSamplesMapper}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -692,6 +692,37 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     }
 
   }
+
+  it("should bring up DownsampledTimeSeriesShard and be able to read data PeriodicSeriesMapper") {
+
+    val downsampleTSStore = new DownsampledTimeSeriesStore(downsampleColStore, rawColStore,
+      settings.filodbConfig)
+
+    downsampleTSStore.setup(batchDownsampler.rawDatasetRef, settings.filodbSettings.schemas,
+      0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
+
+    downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
+
+    val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
+
+    val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(counterName))
+    val qc = QueryContext(plannerParams = PlannerParams(sampleLimit = 1000))
+    val exec = MultiSchemaPartitionsExec(qc,
+      InProcessPlanDispatcher, batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
+    exec.addRangeVectorTransformer(PeriodicSamplesMapper(74373042000L, 10, 74373042000L,Some(150000),
+      Some(InternalRangeFunction.Rate), qc))
+
+    val querySession = QuerySession(QueryContext(), queryConfig)
+    val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
+    val res = exec.execute(downsampleTSStore, querySession)(queryScheduler)
+      .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
+    queryScheduler.shutdown()
+
+    res.result.size shouldEqual 1
+    res.result.foreach(_.rows.nonEmpty shouldEqual true)
+
+  }
+
 
   it("should bring up DownsampledTimeSeriesShard and NOT be able to read untyped data using SelectRawPartitionsExec") {
 

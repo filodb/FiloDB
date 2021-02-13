@@ -5,6 +5,7 @@ import java.nio.ByteBuffer
 import com.googlecode.javaewah.EWAHCompressedBitmap
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
+import kamon.metric.Counter
 
 import filodb.core.QueryTimeoutException
 import filodb.core.Types._
@@ -324,6 +325,22 @@ class ElementChunkInfoIterator(elIt: ElementIterator) extends ChunkInfoIterator 
   final def nextInfo: ChunkSetInfo = ChunkSetInfo(elIt.next)
   final def lock(): Unit = elIt.lock()
   final def unlock(): Unit = elIt.unlock()
+}
+
+class CountingChunkInfoIterator(base: ChunkInfoIterator,
+                                queriedChunksCounter: Counter) extends ChunkInfoIterator {
+  override def close(): Unit = base.close()
+  override def hasNext: Boolean = base.hasNext
+  override def nextInfoReader: ChunkSetInfoReader = {
+    queriedChunksCounter.increment()
+    base.nextInfoReader
+  }
+  override def nextInfo: ChunkSetInfo = {
+    queriedChunksCounter.increment()
+    base.nextInfo
+  }
+  override def lock(): Unit = base.lock()
+  override def unlock(): Unit = base.unlock()
 }
 
 class FilteredChunkInfoIterator(base: ChunkInfoIterator,

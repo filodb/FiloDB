@@ -630,10 +630,12 @@ class TimeSeriesShard(val ref: DatasetRef,
       else activelyIngesting -= partId
     }
     shardStats.indexRecoveryNumRecordsProcessed.increment()
-    val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
-    captureTimeseriesCount(schema, shardKey, 1)
-    if (storeConfig.meteringEnabled) {
-      cardTracker.incrementCount(shardKey)
+    if (schema != Schemas.UnknownSchema) {
+      val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
+      captureTimeseriesCount(schema, shardKey, 1)
+      if (storeConfig.meteringEnabled) {
+        cardTracker.incrementCount(shardKey)
+      }
     }
     partId
   }
