@@ -127,12 +127,12 @@ final case class InfluxPromSingleRecord(bytes: Array[Byte],
 }
 
 object InfluxHistogramRecord extends StrictLogging {
-  val sumLabel = "sum".getBytes
-  val countLabel = "count".getBytes
-  val infLabel = "+Inf".getBytes
-  val leKey = "le".getBytes
+  val sumLabel = "sum".getBytes(StandardCharsets.UTF_8)
+  val countLabel = "count".getBytes(StandardCharsets.UTF_8)
+  val infLabel = "+Inf".getBytes(StandardCharsets.UTF_8)
+  val leKey = "le".getBytes(StandardCharsets.UTF_8)
   val leHash = BinaryRegion.hash32(leKey)
-  val bucketSuffix = "bucket".getBytes
+  val bucketSuffix = "bucket".getBytes(StandardCharsets.UTF_8)
   val Underscore = '_'.toByte
 
   def copyMetricToBuffer(sourceBytes: Array[Byte], metricLen: Int): Unit = {

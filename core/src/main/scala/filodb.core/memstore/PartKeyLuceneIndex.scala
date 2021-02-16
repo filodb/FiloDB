@@ -1,6 +1,7 @@
 package filodb.core.memstore
 
 import java.io.File
+import java.nio.charset.StandardCharsets
 import java.util.PriorityQueue
 
 import scala.collection.JavaConverters._
@@ -201,7 +202,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   def removePartKeys(partIds: debox.Buffer[Int]): Unit = {
     val terms = new util.ArrayList[BytesRef]()
     cforRange { 0 until partIds.length } { i =>
-      terms.add(new BytesRef(partIds(i).toString.getBytes))
+      terms.add(new BytesRef(partIds(i).toString.getBytes(StandardCharsets.UTF_8)))
     }
     indexWriter.deleteDocuments(new TermInSetQuery(PART_ID, terms))
   }
@@ -382,7 +383,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     val collector = new PartIdStartTimeCollector()
     val terms = new util.ArrayList[BytesRef]()
     partIds.foreach { pId =>
-      terms.add(new BytesRef(pId.toString.getBytes))
+      terms.add(new BytesRef(pId.toString.getBytes(StandardCharsets.UTF_8)))
     }
     // dont use BooleanQuery which will hit the 1024 term limit. Instead use TermInSetQuery which is
     // more efficient within Lucene

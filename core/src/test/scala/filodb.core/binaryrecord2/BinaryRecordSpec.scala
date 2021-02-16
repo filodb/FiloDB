@@ -2,7 +2,6 @@ package filodb.core.binaryrecord2
 
 import debox.Buffer
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
-
 import filodb.core.{MachineMetricsData, Types}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.{Dataset, DatasetOptions}
@@ -11,6 +10,8 @@ import filodb.memory._
 import filodb.memory.format.{SeqRowReader, UnsafeUtils, ZeroCopyUTF8String => ZCUTF8}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
+import java.nio.charset.StandardCharsets
 
 class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
   import MachineMetricsData._
@@ -316,7 +317,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       stringSchema.fixedStart shouldEqual 6
 
       val str = "Serie zero"
-      val strBytes = str.getBytes()
+      val strBytes = str.getBytes(StandardCharsets.UTF_8)
       val utf8MedStr = str.utf8(nativeMem)
 
       builder.startNewRecord(stringSchema, 123)
@@ -598,8 +599,8 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
     }
 
     it("should compute shard key correctly") {
-      val jobHash = BinaryRegion.hash32(labels("job").getBytes)
-      val metricHash = BinaryRegion.hash32(labels("__name__").getBytes)
+      val jobHash = BinaryRegion.hash32(labels("job").getBytes) // default charset for hash
+      val metricHash = BinaryRegion.hash32(labels("__name__").getBytes) // default charset for hash
 
       RecordBuilder.shardKeyHash(Nil, labels("__name__")) shouldEqual (7*31 + metricHash)
       RecordBuilder.shardKeyHash(Seq(labels("job")), labels("__name__")) shouldEqual ((7*31 + jobHash)*31 + metricHash)

@@ -65,7 +65,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     colStore.initialize(dataset, 1).futureValue
     colStore.truncate(dataset, 1).futureValue
 
-    val pks = (10000 to 30000).map(_.toString.getBytes)
+    val pks = (10000 to 30000).map(_.toString.getBytes(StandardCharsets.UTF_8))
                               .zipWithIndex.map { case (pk, i) => PartKeyRecord(pk, 5, 10, Some(i))}.toSet
 
     val updateHour = 10
