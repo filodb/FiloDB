@@ -1,6 +1,7 @@
 package filodb.core.memstore.ratelimit
 
 import java.io.File
+import java.nio.charset.StandardCharsets
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
@@ -228,7 +229,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
 
     breakable {
       while (it.isValid()) {
-        val key = new String(it.key())
+        val key = new String(it.key(), StandardCharsets.UTF_8)
         if (key.startsWith(searchPrefix)) {
           buf += bytesToCardinality(it.value())
         } else break // dont continue beyond valid results

@@ -2,14 +2,11 @@ package filodb.cassandra.columnstore
 
 import java.lang.ref.Reference
 import java.nio.ByteBuffer
-
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
-
 import com.datastax.driver.core.Row
 import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
-
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.core._
@@ -19,6 +16,8 @@ import filodb.core.store.{ChunkSet, ChunkSetInfo, ColumnStoreSpec, PartKeyRecord
 import filodb.memory.{BinaryRegionLarge, NativeMemoryManager}
 import filodb.memory.format.{TupleRowReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
+
+import java.nio.charset.StandardCharsets
 
 class CassandraColumnStoreSpec extends ColumnStoreSpec {
   import NamesTestData._
@@ -73,13 +72,13 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     colStore.writePartKeys(dataset, 0, Observable.fromIterable(pks), 1.hour.toSeconds.toInt, 10, true )
       .futureValue shouldEqual Success
 
-    val expectedKeys = pks.map(pk => new String(pk.partKey).toInt)
+    val expectedKeys = pks.map(pk => new String(pk.partKey, StandardCharsets.UTF_8).toInt)
 
     val readData = colStore.getPartKeysByUpdateHour(dataset, 0, updateHour).toListL.runAsync.futureValue.toSet
-    readData.map(pk => new String(pk.partKey).toInt) shouldEqual expectedKeys
+    readData.map(pk => new String(pk.partKey, StandardCharsets.UTF_8).toInt) shouldEqual expectedKeys
 
     val readData2 = colStore.scanPartKeys(dataset, 0).toListL.runAsync.futureValue.toSet
-    readData2.map(pk => new String(pk.partKey).toInt) shouldEqual expectedKeys
+    readData2.map(pk => new String(pk.partKey, StandardCharsets.UTF_8).toInt) shouldEqual expectedKeys
 
     val numDeleted = colStore.deletePartKeys(dataset, 0,
       Observable.fromIterable(readData2.map(_.partKey))).futureValue
