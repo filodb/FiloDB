@@ -621,9 +621,9 @@ object RecordBuilder {
       val (k, v) = pairs.get(i)
       // This is not very efficient, we have to convert String to bytes first to get the hash
       // TODO: work on different API which is far more efficient and saves memory allocation
-      val valBytes = v.getBytes // using default character encoding for backward compatibility
+      val valBytes = v.getBytes(StandardCharsets.UTF_8)
       val keyHash = keyHashCache.getOrElseUpdate(k, { key =>
-        val keyBytes = key.getBytes // using default character encoding for backward compatibility
+        val keyBytes = key.getBytes(StandardCharsets.UTF_8)
         BinaryRegion.hasher32.hash(keyBytes, 0, keyBytes.size, BinaryRegion.Seed)
       })
       hashes(i) = combineHash(keyHash, BinaryRegion.hasher32.hash(valBytes, 0, valBytes.size, BinaryRegion.Seed))
@@ -666,7 +666,7 @@ object RecordBuilder {
   }
 
   final def shardKeyHash(shardKeyValues: Seq[String], metric: String): Int =
-    shardKeyHash(shardKeyValues.map(_.getBytes), metric.getBytes) // default charset for backward compatibility
+    shardKeyHash(shardKeyValues.map(_.getBytes(StandardCharsets.UTF_8)), metric.getBytes(StandardCharsets.UTF_8))
 
   /**
     * Removes the ignoreShardKeyColumnSuffixes from LabelPair as configured in DataSet.

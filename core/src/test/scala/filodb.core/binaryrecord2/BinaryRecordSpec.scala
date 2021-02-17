@@ -599,8 +599,8 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
     }
 
     it("should compute shard key correctly") {
-      val jobHash = BinaryRegion.hash32(labels("job").getBytes) // default charset for hash
-      val metricHash = BinaryRegion.hash32(labels("__name__").getBytes) // default charset for hash
+      val jobHash = BinaryRegion.hash32(labels("job").getBytes(StandardCharsets.UTF_8))
+      val metricHash = BinaryRegion.hash32(labels("__name__").getBytes(StandardCharsets.UTF_8))
 
       RecordBuilder.shardKeyHash(Nil, labels("__name__")) shouldEqual (7*31 + metricHash)
       RecordBuilder.shardKeyHash(Seq(labels("job")), labels("__name__")) shouldEqual ((7*31 + jobHash)*31 + metricHash)
