@@ -284,7 +284,10 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs,
         lp.endMs, window, Some(execRangeFn), qContext, lp.stepMultipleNotationUsed,
         paramsExec, lp.offsetMs, rawSource)))
-      series
+      if (execRangeFn == InternalRangeFunction.AbsentOverTime)
+        addAbsentFunctionMapper(series, lp.columnFilters,
+        RangeParams(lp.startMs / 1000, lp.stepMs / 1000, lp.endMs / 1000), qContext)
+      else series
     } else { // query is outside retention period, simply return empty result
       PlanResult(Seq(EmptyResultExec(qContext, dsRef)))
     }

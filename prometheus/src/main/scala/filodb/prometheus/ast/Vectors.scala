@@ -212,7 +212,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
                              window: Duration,
                              offset: Option[Duration]) extends Vector with SimpleSeries {
 
-    private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
+    val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
     def toSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): RawSeriesLikePlan = {
       if (isRoot && timeParams.start != timeParams.end) {

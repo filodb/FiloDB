@@ -483,4 +483,29 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     rvt2.end shouldEqual 10000000
     rvt2.step shouldEqual 1000000
   }
+
+  it("should generate execPlan for abset over time") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan("absent_over_time(http_requests_total{job = \"app\"}[10m])", t)
+
+    val periodicSeriesPlan = lp.asInstanceOf[PeriodicSeriesWithWindowing]
+    periodicSeriesPlan.startMs shouldEqual 700000
+    periodicSeriesPlan.endMs shouldEqual 10000000
+    periodicSeriesPlan.stepMs shouldEqual 1000000
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
+    val multiSchemaExec = execPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
+    multiSchemaExec.chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual(100000)
+    multiSchemaExec.chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual(9700000)
+
+    multiSchemaExec.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual(true)
+    val rvt = multiSchemaExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
+    rvt.offsetMs.get shouldEqual(300000)
+    rvt.startWithOffset shouldEqual(400000) // (700 - 300) * 1000
+    rvt.endWithOffset shouldEqual (9700000) // (10000 - 300) * 1000
+    rvt.start shouldEqual 700000
+    rvt.end shouldEqual 10000000
+    rvt.step shouldEqual 1000000
+  }
 }

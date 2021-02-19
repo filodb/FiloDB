@@ -3,10 +3,8 @@ package filodb.coordinator.queryplanner
 import java.util.concurrent.ThreadLocalRandom
 
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.core.metadata.{DatasetOptions, Schemas}
-import filodb.core.query.{PromQlQueryParams, QueryContext, RangeParams}
-import filodb.prometheus.ast.Vectors.PromMetricLabel
+import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryContext, RangeParams}
 import filodb.query._
 import filodb.query.exec._
 
@@ -126,20 +124,27 @@ trait  PlannerMaterializer {
       }
     }
 
-    def materializeAbsentFunction(qContext: QueryContext,
+   def addAbsentFunctionMapper(vectors: PlanResult,
+                               columnFilters: Seq[ColumnFilter],
+                               rangeParams: RangeParams,
+                               queryContext: QueryContext): PlanResult = {
+    if (vectors.plans.length > 1) {
+      val targetActor = pickDispatcher(vectors.plans)
+      val topPlan = LocalPartitionDistConcatExec(queryContext, targetActor, vectors.plans)
+      topPlan.addRangeVectorTransformer(AbsentFunctionMapper(columnFilters, rangeParams,
+        dsOptions.metricColumn))
+      PlanResult(Seq(topPlan), vectors.needsStitch)
+    } else {
+      vectors.plans.foreach(_.addRangeVectorTransformer(AbsentFunctionMapper(columnFilters, rangeParams,
+        dsOptions.metricColumn )))
+      vectors
+    }
+  }
+
+  def materializeAbsentFunction(qContext: QueryContext,
                                   lp: ApplyAbsentFunction): PlanResult = {
       val vectors = walkLogicalPlanTree(lp.vectors, qContext)
-      if (vectors.plans.length > 1) {
-        val targetActor = pickDispatcher(vectors.plans)
-        val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, vectors.plans)
-        topPlan.addRangeVectorTransformer(AbsentFunctionMapper(lp.columnFilters, lp.rangeParams,
-          PromMetricLabel))
-        PlanResult(Seq(topPlan), vectors.needsStitch)
-      } else {
-        vectors.plans.foreach(_.addRangeVectorTransformer(AbsentFunctionMapper(lp.columnFilters, lp.rangeParams,
-          dsOptions.metricColumn )))
-        vectors
-      }
+      addAbsentFunctionMapper(vectors, lp.columnFilters, lp.rangeParams, qContext)
     }
 }
 

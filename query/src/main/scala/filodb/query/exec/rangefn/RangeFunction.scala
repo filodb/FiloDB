@@ -357,6 +357,7 @@ object RangeFunction {
       case Some(Timestamp)        => () => new TimestampChunkedFunction()
       case Some(ZScore)           => () => new ZScoreChunkedFunctionD()
       case Some(PredictLinear)    => () => new PredictLinearChunkedFunctionD(funcParams)
+      case Some(AbsentOverTime)   => () => new LastSampleChunkedFunctionD
       case _                      => iteratingFunction(func, funcParams)
     }
   }
@@ -407,6 +408,7 @@ object RangeFunction {
     case Some(AvgOverTime)      => () => new AvgOverTimeFunction()
     case Some(StdDevOverTime)   => () => new StdDevOverTimeFunction()
     case Some(StdVarOverTime)   => () => new StdVarOverTimeFunction()
+    case Some(AbsentOverTime)   => () => LastSampleFunction
     case _                      => ???
   }
 }
@@ -464,6 +466,7 @@ abstract class LastSampleChunkedFuncDblVal(var value: Double = Double.NaN)
 extends LastSampleChunkedFunction[TransientRow] {
   override final def reset(): Unit = { timestamp = -1L; value = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    println("sampleToEmit.setValues timestamp:" + timestamp + "value:" + value)
     sampleToEmit.setValues(endTimestamp, value)
   }
 }
