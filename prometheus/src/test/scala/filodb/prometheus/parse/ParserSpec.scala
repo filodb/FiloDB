@@ -564,12 +564,12 @@ class ParserSpec extends AnyFunSpec with Matchers {
 
       "(metric1 + metric2) * (metric3 + metric4)" -> "BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric1))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric2))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),MUL,OneToOne,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric3))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric4))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),List(),List(),List())",
       "foo[5m:1m]" -> "PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855688000,60000,1524855988000,None)",
-      "rate(foo[3m])[5m:1m]" -> "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(180000),None),1524855688000,60000,1524855988000,180000,Rate,false,List(),None)"
-      //"max_over_time(rate(foo[5m])[5m:1m])" -> "" //will fail to parse
-      //"max_over_time(sum(rate(foo[5m]))[5m:1m])" -> "", //will fail to parse
-      //"sum(rate(foo[5m])[5m:1m])" -> "" // fail
-      //"max_over_time((sum(rate(foo[5m])) + sum(rate(foo[5m])) [5m:1m])" -> "", //fail
-      //"sum(rate(foo[5m])[5m:1m])" -> "", // fail
+      "rate(foo[3m])[5m:1m]" -> "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(180000),None),1524855688000,60000,1524855988000,180000,Rate,false,List(),None)",
+      "max_over_time(rate(foo[5m])[5m:1m])" -> "RangeFunctionPlan(MaxOverTime,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855688000,60000,1524855988000,300000,Rate,false,List(),None),1524855988,1000,1524855988)",
+      "deriv(rate(distance_covered_meters_total[1m])[5m:1m])[6m:3m]" -> "Subquery(ArrayBuffer(RangeFunctionPlan(Deriv,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855328000,1524855628000),List(ColumnFilter(__name__,Equals(distance_covered_meters_total))),List(),Some(60000),None),1524855328000,60000,1524855628000,60000,Rate,false,List(),None),1524855628,0,1524855628), RangeFunctionPlan(Deriv,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855508000,1524855808000),List(ColumnFilter(__name__,Equals(distance_covered_meters_total))),List(),Some(60000),None),1524855508000,60000,1524855808000,60000,Rate,false,List(),None),1524855808,0,1524855808), RangeFunctionPlan(Deriv,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(distance_covered_meters_total))),List(),Some(60000),None),1524855688000,60000,1524855988000,60000,Rate,false,List(),None),1524855988,0,1524855988)),1524855628,180,1524855988)"
+      // "sum(rate(foo[5m]))[5m:1m]" -> fails currently since sum is NOT defined as a function but an aggregate operator
+      // "sum(rate(foo[5m])[5m:1m])" -> "" // this should fail because it's invalid!!!, however, it parses now
+      // "max_over_time(    (  sum(rate(foo[5m])) + sum(rate(foo[5m]))  )[5m:1m]   )" -> "" //fail
     )
 
     val qts: Long = 1524855988L

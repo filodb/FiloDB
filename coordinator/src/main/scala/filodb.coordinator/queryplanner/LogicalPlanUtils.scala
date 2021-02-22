@@ -1,7 +1,5 @@
 package filodb.coordinator.queryplanner
 
-import scala.collection.mutable.ArrayBuffer
-
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils.{getLookBackMillis, getTimeFromLogicalPlan}
@@ -29,6 +27,7 @@ object LogicalPlanUtils extends StrictLogging {
     * Retrieve start and end time from LogicalPlan
     */
   // scalastyle:off cyclomatic.complexity
+  // scalastyle:off method.length
   def getTimeFromLogicalPlan(logicalPlan: LogicalPlan): TimeRange = {
     logicalPlan match {
       case lp: PeriodicSeries              => TimeRange(lp.startMs, lp.endMs)
@@ -59,6 +58,8 @@ object LogicalPlanUtils extends StrictLogging {
                                               lp.timeStepParams.endSecs * 1000)
       case lp: RawChunkMeta                => throw new UnsupportedOperationException(s"RawChunkMeta does not have " +
                                               s"time")
+      case sq: Subquery                    => TimeRange(sq.startMs, sq.endMs)
+      case rf: RangeFunctionPlan           => TimeRange(rf.startMs, rf.endMs)
     }
   }
   // scalastyle:on cyclomatic.complexity
@@ -130,6 +131,8 @@ object LogicalPlanUtils extends StrictLogging {
                                               lp.copy(lhs = updatedLhs, rhs = updatedRhs, rangeParams =
                                                 RangeParams(timeRange.startMs * 1000, lp.rangeParams.stepSecs,
                                                   timeRange.endMs * 1000))
+      case sq: Subquery                    => sq.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case rf: RangeFunctionPlan           => rf.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
     }
   }
 
@@ -231,6 +234,7 @@ object LogicalPlanUtils extends StrictLogging {
       val numStepsPerSplit = splitSizeMs/lp.stepMs
       var startTime = lp.startMs
       var endTime = Math.min(lp.startMs + numStepsPerSplit * lp.stepMs, lp.endMs)
+      import scala.collection.mutable.ArrayBuffer
       val splitPlans: ArrayBuffer[LogicalPlan] = ArrayBuffer.empty
       while (endTime < lp.endMs ) {
         splitPlans += copyWithUpdatedTimeRange(lp, TimeRange(startTime, endTime))

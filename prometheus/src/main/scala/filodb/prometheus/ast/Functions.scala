@@ -47,9 +47,11 @@ trait Functions extends Base with Operators with Vectors {
         paramSpec.zipWithIndex.foreach {
           case (specType, index) => specType match {
             case RangeVectorParam(errorMsg) =>
-              if (!allParams(index).isInstanceOf[RangeExpression])
-                throw new IllegalArgumentException(s"$errorMsg $funcName, " +
-                  s"got ${allParams(index).getClass.getSimpleName}")
+              if (
+                !allParams(index).isInstanceOf[RangeExpression] &&
+                  (!allParams(index).isInstanceOf[SubqueryExpression])
+              ) throw new IllegalArgumentException(s"$errorMsg $funcName, " +
+                s"got ${allParams(index).getClass.getSimpleName}")
 
             case InstantVectorParam(errorMsg) =>
               if (!allParams(index).isInstanceOf[InstantExpression])
@@ -171,23 +173,167 @@ trait Functions extends Base with Operators with Vectors {
         ApplyAbsentFunction(periodicSeriesPlan, columnFilter, RangeParams(timeParams.start, timeParams.step,
           timeParams.end))
       } else {
-        val rangeFunctionId = RangeFunctionId.withNameInsensitiveOption(name).get
-        if (rangeFunctionId == Timestamp) {
+        val funcId = RangeFunctionId.withNameInsensitiveOption(name).get
+        if (funcId == Timestamp) {
           val instantExpression = seriesParam.asInstanceOf[InstantExpression]
 
           PeriodicSeriesWithWindowing(instantExpression.toRawSeriesPlan(timeParams),
             timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000, 0,
-            rangeFunctionId, false, otherParams, instantExpression.offset.map(_.millis(timeParams.step * 1000)))
+            funcId, false, otherParams, instantExpression.offset.map(_.millis(timeParams.step * 1000)))
         } else {
-          val rangeExpression = seriesParam.asInstanceOf[RangeExpression]
-          PeriodicSeriesWithWindowing(
-            rangeExpression.toSeriesPlan(timeParams, isRoot = false),
-            timeParams.start * 1000 , timeParams.step * 1000, timeParams.end * 1000,
-            rangeExpression.timeInterval.duration.millis(timeParams.step * 1000),
-            rangeFunctionId, rangeExpression.timeInterval.duration.timeUnit == IntervalMultiple,
-            otherParams, rangeExpression.offset.map(_.millis(timeParams.step * 1000)))
+          seriesParam match {
+            case re: RangeExpression => rangeExpressionArgumentLogicalPlan(re, timeParams, funcId, otherParams);
+            case sq: SubqueryExpression => subqueryArgumentLogicalPlan(sq, timeParams, funcId, otherParams);
+            case _ => ???
+          }
+
         }
       }
     }
+
+    def rangeExpressionArgumentLogicalPlan(
+      rangeExpression : RangeExpression,
+      timeParams: TimeRangeParams,
+      rangeFunctionId: RangeFunctionId,
+      otherParams: Seq[FunctionArgsPlan]
+    ) : PeriodicSeriesPlan = {
+      PeriodicSeriesWithWindowing(
+        rangeExpression.toSeriesPlan(timeParams, isRoot = false),
+        timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
+        rangeExpression.window.duration.millis(timeParams.step * 1000),
+        rangeFunctionId,
+        rangeExpression.window.duration.timeUnit == IntervalMultiple,
+        otherParams,
+        rangeExpression.offset.map(_.millis(timeParams.step * 1000))
+      )
+    }
+
+    def subqueryArgumentLogicalPlan(
+      sq : SubqueryExpression,
+      timeParams: TimeRangeParams,
+      rangeFunctionId: RangeFunctionId,
+      otherParams: Seq[FunctionArgsPlan]
+    ) : PeriodicSeriesPlan = {
+      val subqueriesPlan = sq.toSeriesPlan(timeParams)
+      RangeFunctionPlan(rangeFunctionId, subqueriesPlan, timeParams.start, timeParams.step, timeParams.end)
+    }
+
   }
+
+  case class SubqueryExpression(subquery: PeriodicSeries, sqcl: SubqueryClause) extends Expression with PeriodicSeries {
+
+    override def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
+      // If subquery is defined and the end is different from the start in TimeRangeParams, this means
+      // that a subquery expression has been called by the query_range API.
+      // Top level expression of a range query, however, should return an
+      // instant vector but subqueries by definition return range vectors, hence, we check that and throw
+      // exception. Star should be the same as end, and step should be 0.
+      // Suppose we have
+      //    sum_over_time(foo{}[60m])[1d:10m]
+      // the above means we are to produce a range vector with 24*6 points which would be sum_over_time of 1h worth of
+      // samples for each point.
+      // TODO fix it for nested subqueries
+      if (timeParams.start != timeParams.end) {
+        throw new UnsupportedOperationException("Subquery is not allowed as a top level expression for query_range")
+      }
+
+      // Mosaic does not have a default step like prometheus does, will default o 60 seconds
+      var stepToUse = 60L
+      if (sqcl.step.isDefined) {
+        stepToUse = sqcl.step.get.millis(1L) / 1000
+      }
+
+      // here we borrow TimeStepParams concept of a range query for subquery,
+      // subquery in essence is a generalized range_query that can be executed
+      // on each level of a query while range query can operate only on the top
+      // level prometheus expression. With full implementation of subquery, query_range
+      // API is obsolete because its capabilities are a subset of subquery capabilities
+      var timeParamsToUse = TimeStepParams(
+        timeParams.start - (sqcl.interval.millis(1L) / 1000),
+        stepToUse,
+        timeParams.start
+      )
+
+      // currently we want to support only subqueries over instant selector like:
+      // foo[5m:1m]
+      // and over time range functions like:
+      // rate(foo[3m])[5m:1m]
+      // eventually, we will start supporting subqueries in more cases
+      subquery match {
+        case ie: InstantExpression => ie.toSeriesPlan(timeParamsToUse);
+        case f: Function => functionLogicalPlan(f, sqcl, timeParamsToUse);
+        case _ => throw new IllegalArgumentException("Subqueries are supported only over functions and selectors")
+      }
+    }
+
+
+    // In Phase II of subquery support in Mosaic we want to:
+    //   (a) fully support range function subquery which argument is:
+    //       an instant selector subquery, for example:
+    //         rate(foo[5m:1m])[10m:1m]
+    //       or range selector, for example:
+    //         rate(foo[5m])[10m:1m]
+    //       both of the cases are OPTIMIZED as they would produce
+    //       a PeriodicSeriesWithWindow logical plan that will be executing
+    //       only one actual physical C*/memory buffer query
+    //   (b) support generation of proper logical plans for nested
+    //       subqueries on another range function, for example:
+    //         deriv( rate(distance_covered_meters_total[1m])[5m:1m] )[10m:]
+    //       The above case is rather unusual and the motivation to support
+    //       is to verify subquery logical plan design. Though we do generate
+    //       logical plan, the actual implementation of the execution plans
+    //       of nested subqueries might be finished in Phase III only
+    //       Currently, the idea it to simply "materialize" each of the subqueries
+    //       by generating appropriate logical plan for each of them.
+    //       The problem with this approach is that the number of child logical plans can
+    //       be in 100s or even 1000s. However, at this point we do not have a way to
+    //       represent them without materializing them.
+    //       One way of doing so would be a very complicated "subquery" logical plan
+    //       that might look like:
+    //         subquery( raw series, function1st level, function2nd level, function3rd level)
+    def functionLogicalPlan(
+      f: Function, sqcl: SubqueryClause, timeParams: TimeRangeParams
+    ): PeriodicSeriesPlan = {
+
+      f.allParams.head match {
+        // for case (a) we need to verify that the argument of the function
+        // is a range selector
+        case re: RangeExpression => f.toSeriesPlan(timeParams)
+        case sq: SubqueryExpression =>
+          sq.subquery match {
+            // case (a) for instant select subquery
+            case InstantExpression(_, _, _) => f.toSeriesPlan(timeParams)
+            // for case (b) we need to verify that the argument of the function
+            // is a subquery over a range function
+            case Function(_, _) => {
+              val rf = RangeFunctionId.withNameInsensitiveOption(f.name)
+              if (rf.isEmpty ) {
+                throw new UnsupportedOperationException(
+                  "Support only range functions as a parameter to a function subquery"
+                )
+              }
+              // this is case (b)
+              // Now we generate explicit Subquery that may or may not be further
+              // optimized by the query planner
+              val timeRangeParams = Seq[LogicalPlan]()
+              import scala.collection.mutable.ArrayBuffer
+              val starts = ArrayBuffer[Long]()
+              var start = timeParams.start
+              while (start <= timeParams.end) {
+                starts.append(start)
+                start += timeParams.step
+              }
+              val childPlans = starts.map( s => f.toSeriesPlan(TimeStepParams(s, 0, s)))
+              Subquery(childPlans, timeParams.start, timeParams.step, timeParams.end)
+
+            }
+            case _ => throw new UnsupportedOperationException(
+              "Support only range function and instant selector subqueries " +
+                "as well as range selector for function subqueries"
+            )
+          }
+      }
+    }
+  }
+
 }
