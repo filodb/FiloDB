@@ -124,7 +124,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val (partitions, lookBackMs, offsetMs, routingKeys) = partitionUtilNonBinaryJoin(logicalPlan, queryParams)
-    if (routingKeys.forall(_._2.isEmpty) || partitions.isEmpty) localPartitionPlanner.materialize(logicalPlan, qContext)
+    if (partitions.isEmpty || routingKeys.forall(_._2.isEmpty)) localPartitionPlanner.materialize(logicalPlan, qContext)
     else {
       val stepMs = queryParams.stepSecs * 1000
       val isInstantQuery: Boolean = if (queryParams.startSecs == queryParams.endSecs) true else false
