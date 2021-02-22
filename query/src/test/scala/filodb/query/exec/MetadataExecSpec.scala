@@ -34,8 +34,8 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
 
   val partKeyLabelValues = Seq(
-    ("http_req_total", Map("instance"->"someHost:8787", "job"->"myCoolService")),
-    ("http_resp_time", Map("instance"->"someHost:8787", "job"->"myCoolService"))
+    ("http_req_total", Map("instance"->"someHost:8787", "job"->"myCoolService", "unicode_tag" -> "uni\u03C0tag")),
+    ("http_resp_time", Map("instance"->"someHost:8787", "job"->"myCoolService", "unicode_tag" -> "uni\u03BCtag"))
   )
 
   val addlLabels = Map("_type_" -> "prom-counter")
@@ -43,7 +43,8 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     tags + ("_metric_" -> metric) ++ addlLabels
   }
 
-  val jobQueryResult1 = ArrayBuffer(("job", "myCoolService"))
+  val jobQueryResult1 = ArrayBuffer(("job", "myCoolService"), ("unicode_tag", "uni\u03C0tag"))
+  val jobQueryResult2 = ArrayBuffer(("job", "myCoolService"), ("unicode_tag", "uni\u03BCtag"))
 
   val partTagsUTF8s = partKeyLabelValues.map { case (m, t) => (m,  t.map { case (k, v) => (k.utf8, v.utf8) }) }
   val now = System.currentTimeMillis()
@@ -86,7 +87,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
                        ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     val execPlan = LabelValuesExec(QueryContext(), dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, Seq("job"), now-5000, now)
+      timeseriesDataset.ref, 0, filters, Seq("job", "unicode_tag"), now-5000, now)
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp match {
@@ -155,6 +156,23 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
       }
     }
     result shouldEqual List(expectedLabelValues(0))
+  }
+
+  it ("should be able to query with unicode filter") {
+    val filters = Seq (ColumnFilter("unicode_tag", Filter.Equals("uni\u03BCtag".utf8)))
+    val execPlan = LabelValuesExec(QueryContext(), dummyDispatcher,
+      timeseriesDataset.ref, 0, filters, Seq("job", "unicode_tag"), now-5000, now)
+
+    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val result = resp match {
+      case QueryResult(id, _, response) => {
+        val rv = response(0)
+        rv.rows.size shouldEqual 1
+        val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
+        rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
+      }
+    }
+    result shouldEqual jobQueryResult2
   }
 
 }
