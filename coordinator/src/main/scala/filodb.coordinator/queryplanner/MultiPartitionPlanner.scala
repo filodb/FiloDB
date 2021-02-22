@@ -89,7 +89,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         sortBy(_.timeRange.startMs)
     }
     if (partitions.isEmpty && !routingKeys.isEmpty)
-      new UnsupportedOperationException("No partitions found for routing keys: " + routingKeys)
+      logger.warn(s"No partitions found for routing keys: $routingKeys")
 
     (partitions, lookBackMs, offsetMs, routingKeys)
   }
@@ -124,7 +124,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val (partitions, lookBackMs, offsetMs, routingKeys) = partitionUtilNonBinaryJoin(logicalPlan, queryParams)
-    if (routingKeys.forall(_._2.isEmpty)) localPartitionPlanner.materialize(logicalPlan, qContext)
+    if (partitions.isEmpty || routingKeys.forall(_._2.isEmpty)) localPartitionPlanner.materialize(logicalPlan, qContext)
     else {
       val stepMs = queryParams.stepSecs * 1000
       val isInstantQuery: Boolean = if (queryParams.startSecs == queryParams.endSecs) true else false
@@ -196,7 +196,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val (partitions, routingKeys) = partitionUtil(queryParams, logicalPlan)
-    if (routingKeys.forall(_._2.isEmpty)) localPartitionPlanner.materialize(logicalPlan, qContext)
+    if (partitions.isEmpty) {
+      logger.warn(s"No partitions found for routingKeys: $routingKeys")
+      localPartitionPlanner.materialize(logicalPlan, qContext)
+    } else if (routingKeys.forall(_._2.isEmpty)) localPartitionPlanner.materialize(logicalPlan, qContext)
     else {
       val partitionName = partitions.head.partitionName
       // Binary Join for single partition
@@ -213,37 +216,47 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     }
   }
 
-
   def materializeSeriesKeysFilters(lp: SeriesKeysByFilters, qContext: QueryContext): ExecPlan = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val partitions = partitionLocationProvider.getAuthorizedPartitions(
       TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
-    val execPlans = partitions.map { p =>
-      logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
-      if (p.partitionName.equals(localPartitionName))
-        localPartitionPlanner.materialize(lp.copy(startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
-      else
-        createMetadataRemoteExec(qContext, queryParams, p, Map("match[]" -> queryParams.promQl))
+    if (partitions.isEmpty) {
+      logger.warn(s"No partitions found for ${queryParams.startSecs}, ${queryParams.endSecs}")
+      localPartitionPlanner.materialize(lp, qContext)
     }
-    if (execPlans.size == 1) execPlans.head
-    else PartKeysDistConcatExec(qContext, InProcessPlanDispatcher,
-      execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
+    else {
+      val execPlans = partitions.map { p =>
+        logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
+        if (p.partitionName.equals(localPartitionName))
+          localPartitionPlanner.materialize(lp.copy(startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
+        else
+          createMetadataRemoteExec(qContext, queryParams, p, Map("match[]" -> queryParams.promQl))
+      }
+      if (execPlans.size == 1) execPlans.head
+      else PartKeysDistConcatExec(qContext, InProcessPlanDispatcher,
+        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
+    }
   }
 
   def materializeLabelValues(lp: LabelValues, qContext: QueryContext): ExecPlan = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val partitions = partitionLocationProvider.getAuthorizedPartitions(
       TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
-    val execPlans = partitions.map { p =>
-      logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
-      if (p.partitionName.equals(localPartitionName))
-        localPartitionPlanner.materialize(lp.copy(startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
-      else
-        createMetadataRemoteExec(qContext, queryParams, p, PlannerUtil.getLabelValuesUrlParams(lp, queryParams))
+    if (partitions.isEmpty) {
+      logger.warn(s"No partitions found for ${queryParams.startSecs}, ${queryParams.endSecs} ")
+      localPartitionPlanner.materialize(lp, qContext)
+    } else {
+      val execPlans = partitions.map { p =>
+        logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
+        if (p.partitionName.equals(localPartitionName))
+          localPartitionPlanner.materialize(lp.copy(startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
+        else
+          createMetadataRemoteExec(qContext, queryParams, p, PlannerUtil.getLabelValuesUrlParams(lp, queryParams))
+      }
+      if (execPlans.size == 1) execPlans.head
+      else LabelValuesDistConcatExec(qContext, InProcessPlanDispatcher,
+        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
     }
-    if (execPlans.size == 1) execPlans.head
-    else LabelValuesDistConcatExec(qContext, InProcessPlanDispatcher,
-      execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
   }
 
   private def createMetadataRemoteExec(qContext: QueryContext, queryParams: PromQlQueryParams,
