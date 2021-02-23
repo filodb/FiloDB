@@ -154,4 +154,27 @@ class AbsentFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures with
     rows shouldEqual expectedRows
   }
 
+  it("should work for instant queries") {
+    val columnFilter = Seq(ColumnFilter("host", Equals("host1")), ColumnFilter("instance", Equals("instance1")))
+    val expectedKeys = Map(ZeroCopyUTF8String("host") -> ZeroCopyUTF8String("host1"),
+      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("instance1"))
+    val expectedRows = List(1.0)
+    val absentFunctionMapper = exec.AbsentFunctionMapper(columnFilter, RangeParams(1607985105, 0, 1607985105), "metric")
+    val resultObs = absentFunctionMapper(Observable.fromIterable(emptySample), querySession, 1000, resultSchema, Nil)
+    val result = resultObs.toListL.runAsync.futureValue
+    result.size shouldEqual (1)
+    val keys = result.map(_.key.labelValues)
+    val rows = result.flatMap(_.rows.map(_.getDouble(1)).toList)
+    keys.head shouldEqual expectedKeys
+    rows shouldEqual expectedRows
+  }
+
+  it("should not generate range vector when sample is present for instant query") {
+    val columnFilter = Seq(ColumnFilter("host", Equals("host1")), ColumnFilter("instance", Equals("instance1")))
+    val absentFunctionMapper = exec.AbsentFunctionMapper(columnFilter, RangeParams(1, 0, 1), "metric")
+    val resultObs = absentFunctionMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
+    val result = resultObs.toListL.runAsync.futureValue
+    val rows = result.flatMap(_.rows.map(_.getDouble(1)).toList)
+    rows.isEmpty shouldEqual true
+  }
 }

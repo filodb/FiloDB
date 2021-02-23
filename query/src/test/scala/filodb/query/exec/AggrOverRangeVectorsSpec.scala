@@ -607,6 +607,26 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
   }
 
+  it("topK should work for instant queries ") {
+
+    val samples: Array[RangeVector] = Array(
+      toRv(Seq((1556744000, 42d)))
+    )
+
+    val agg6 = RowAggregator(AggregationOperator.TopK, Seq(1.0), tvSchema)
+    val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv
+      .key)
+    val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000, RangeParams(1556744, 0, 1556744))
+    val result6 = resultObs6.toListL.runAsync.futureValue
+    result6(0).key shouldEqual noKey
+    val result6b = resultObs6b.toListL.runAsync.futureValue
+    result6b.size shouldEqual 1
+    result6b(0).key shouldEqual ignoreKey
+    compareIter(result6b(0).rows.map(_.getDouble(1)), Seq(42d).iterator)
+  }
+
+
   @tailrec
   final private def compareIter(it1: Iterator[Double], it2: Iterator[Double]) : Unit = {
     (it1.hasNext, it2.hasNext) match{

@@ -316,7 +316,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     }
 
     resetsFunction.apply(startTs, endTs, gaugeWindowForReset, toEmit, queryConfig)
-    Math.abs(toEmit.value - expected) should be < errorOk
+    toEmit.value shouldEqual expected
 
     // Window sliding case
     val expected2 = 1
@@ -327,8 +327,18 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
       toEmit2 = q3.remove
       resetsFunction.removedFromWindow(toEmit2, gaugeWindowForReset)// old items being evicted for new window items
     }
-    resetsFunction.apply(startTs, endTs, gaugeWindow, toEmit2, queryConfig)
-    Math.abs(toEmit2.value - expected2) should be < errorOk
+    resetsFunction.apply(startTs, endTs, gaugeWindowForReset, toEmit2, queryConfig)
+    toEmit2.value shouldEqual expected2
+
+    // Remove all the elements from the window - window is outside of data range
+    // Expectation is to not emit outside window
+    while(q3.size > 0) {
+      val toEmit2 = q3.remove()
+      resetsFunction.removedFromWindow(toEmit2, gaugeWindowForReset)
+    }
+    resetsFunction.apply(startTs, endTs, gaugeWindowForReset, toEmit2, queryConfig)
+
+    toEmit2.value.isNaN shouldBe true //window is empty, so resets is not defined
   }
 
   it ("deriv should work when start and end are outside window") {

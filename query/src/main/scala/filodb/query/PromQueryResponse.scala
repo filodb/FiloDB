@@ -4,6 +4,8 @@ sealed trait PromQueryResponse {
   def status: String
 }
 
+final case class RemoteErrorResponse(status: String, errorType: String, error: String) extends PromQueryResponse
+
 final case class ErrorResponse(errorType: String, error: String, status: String = "error") extends PromQueryResponse
 
 final case class SuccessResponse(data: Data, status: String = "success") extends PromQueryResponse

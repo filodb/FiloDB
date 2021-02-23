@@ -105,7 +105,7 @@ trait ExecPlan extends QueryCommand {
     // we don't want these to happen in a single thread.
 
     // Step 1: initiate doExecute: make result schema and set up the async monix pipeline to create RVs
-    lazy val step1 = Task {
+    lazy val step1: Task[ExecResult] = Task {
       span.mark(s"execute-step1-start-${getClass.getSimpleName}")
       FiloSchedulers.assertThreadName(QuerySchedName)
       // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
@@ -124,7 +124,7 @@ trait ExecPlan extends QueryCommand {
     }
 
     // Step 2: Run connect monix pipeline to transformers, materialize the result
-    def step2(res: ExecResult) = res.schema.map { resSchema =>
+    def step2(res: ExecResult): Task[QueryResponse] = res.schema.map { resSchema =>
       Kamon.histogram("query-execute-time-elapsed-step2-start", MeasurementUnit.time.milliseconds)
         .withTag("plan", getClass.getSimpleName)
         .record(Math.max(0, System.currentTimeMillis - startExecute))
@@ -198,13 +198,13 @@ trait ExecPlan extends QueryCommand {
         QueryError(queryContext.queryId, ex)
       }
     }.flatten
-    .onErrorRecover { case NonFatal(ex) =>
+
+    val qresp = for { res <- step1
+                    qResult <- step2(res) }
+              yield { qResult }
+    qresp.onErrorRecover { case NonFatal(ex) =>
       QueryError(queryContext.queryId, ex)
     }
-
-    for { res <- step1
-          qResult <- step2(res) }
-    yield { qResult }
   }
 
 

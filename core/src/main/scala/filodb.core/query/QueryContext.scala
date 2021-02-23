@@ -3,6 +3,8 @@ package filodb.core.query
 import java.util.UUID
 import java.util.concurrent.locks.Lock
 
+import scala.concurrent.duration._
+
 import filodb.core.{SpreadChange, SpreadProvider}
 
 trait TsdbQueryParams
@@ -24,6 +26,9 @@ case class PlannerParams(applicationId: String = "filodb",
                         sampleLimit: Int = 1000000,
                         groupByCardLimit: Int = 100000,
                         joinQueryCardLimit: Int = 100000,
+                        timeSplitEnabled: Boolean = false,
+                        minTimeRangeForSplitMs: Long = 1.day.toMillis,
+                        splitSizeMs: Long = 1.day.toMillis,
                         skipAggregatePresent: Boolean = false,
                         processFailure: Boolean = true,
                         processMultiPartition: Boolean = false)

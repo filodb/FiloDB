@@ -73,4 +73,16 @@ object PromCirceSupport {
       } yield  AggregateResponse(functionName, sample)
     }
   }
+
+  implicit val decodeRemoteErrorResponse: Decoder[RemoteErrorResponse] = new Decoder[RemoteErrorResponse] {
+    final def apply(c: HCursor): Decoder.Result[RemoteErrorResponse] = {
+      for {
+        status    <- c.downField("status").as[String]
+        errorType <- c.downField("errorType").as[String]
+        error     <- c.downField("error").as[String]
+      } yield {
+        RemoteErrorResponse(status, errorType, error)
+      }
+    }
+  }
 }
