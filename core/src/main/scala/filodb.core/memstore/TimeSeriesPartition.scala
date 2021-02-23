@@ -540,7 +540,7 @@ TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats,
                s"newly created ChunkInfo ${currentInfo.debugString}")
   }
 
-  override def chunkmapAcquireShared(): Unit = {
+  /*override def chunkmapAcquireShared(): Unit = {
     super.chunkmapAcquireShared()
     _log.info(s"SHARED LOCK ACQUIRED for shard=$shard partId=$partID $stringPartition", new RuntimeException)
   }
@@ -558,7 +558,7 @@ TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats,
   override def chunkmapReleaseExclusive(): Unit = {
     super.chunkmapReleaseExclusive()
     _log.info(s"EXCLUSIVE LOCK RELEASED for shard=$shard partId=$partID $stringPartition", new RuntimeException)
-  }
+  }*/
 
 }
 
