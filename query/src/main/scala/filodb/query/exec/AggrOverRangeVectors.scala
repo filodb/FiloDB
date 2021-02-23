@@ -88,9 +88,10 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
     val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
 
     def grouping(rv: RangeVector): RangeVectorKey = {
+      val rvLabelValues = rv.key.labelValues
       val groupBy: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] =
-        if (by.nonEmpty) rv.key.labelValues.filter(lv => byLabels.contains(lv._1))
-        else if (without.nonEmpty) rv.key.labelValues.filterNot(lv =>withoutLabels.contains(lv._1))
+        if (by.nonEmpty) rvLabelValues.filter(lv => byLabels.contains(lv._1))
+        else if (without.nonEmpty) rvLabelValues.filterNot(lv =>withoutLabels.contains(lv._1))
         else Map.empty
       CustomRangeVectorKey(groupBy)
     }

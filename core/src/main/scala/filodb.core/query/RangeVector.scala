@@ -7,6 +7,7 @@ import scala.collection.Iterator
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import kamon.Kamon
+import kamon.metric.Counter
 import org.joda.time.DateTime
 
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
@@ -42,14 +43,22 @@ class SeqMapConsumer extends MapItemConsumer {
 /**
   * Range Vector Key backed by a BinaryRecord v2 partition key, which is basically a pointer to memory on or offheap.
   */
-final case class PartitionRangeVectorKey(partBase: Array[Byte],
-                                         partOffset: Long,
+final case class PartitionRangeVectorKey(partKeyData: Either[ReadablePartition, (Array[Byte], Long)],
                                          partSchema: RecordSchema,
                                          partKeyCols: Seq[ColumnInfo],
                                          sourceShard: Int,
                                          groupNum: Int,
                                          partId: Int,
                                          schemaName: String) extends RangeVectorKey {
+  def partBase: Array[Byte] = partKeyData match {
+    case Left(part) => part.partKeyBase
+    case Right((p, _)) => p
+  }
+  def partOffset: Long = partKeyData match {
+    case Left(part) => part.partKeyOffset
+    case Right((_, off)) => off
+  }
+
   override def sourceShards: Seq[Int] = Seq(sourceShard)
   override def partIds: Seq[Int] = Seq(partId)
   override def schemaNames: Seq[String] = Seq(schemaName)
@@ -230,12 +239,15 @@ final case class DaysInMonthScalar(rangeParams: RangeParams) extends ScalarSingl
 final case class RawDataRangeVector(key: RangeVectorKey,
                                     partition: ReadablePartition,
                                     chunkMethod: ChunkScanMethod,
-                                    columnIDs: Array[Int]) extends RangeVector {
+                                    columnIDs: Array[Int],
+                                    chunksQueriedMetric: Counter) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
   def rows(): RangeVectorCursor = partition.timeRangeRows(chunkMethod, columnIDs)
 
   // Obtain ChunkSetInfos from specific window of time from partition
-  def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = partition.infos(windowStart, windowEnd)
+  def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = {
+    new CountingChunkInfoIterator(partition.infos(windowStart, windowEnd), chunksQueriedMetric)
+  }
 
   // the query engine is based around one main data column to query, so it will always be the second column passed in
   def valueColID: Int = columnIDs(1)

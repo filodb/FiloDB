@@ -65,15 +65,15 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           // Routes are created according to offset but logical plan should have time without offset.
           // Offset logic is handled in ExecPlan
           localPlanner.materialize(
-            copyLogicalPlanWithUpdatedTimeRange(rootLogicalPlan, TimeRange(timeRange.startMs + offsetMs,
-              timeRange.endMs + offsetMs)), qContext)
+            copyLogicalPlanWithUpdatedTimeRange(rootLogicalPlan, TimeRange(timeRange.startMs + offsetMs.max,
+              timeRange.endMs + offsetMs.min)), qContext)
         }
         case route: RemoteRoute =>
           val timeRange = route.timeRange.get
           val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
           // Divide by 1000 to convert millis to seconds. PromQL params are in seconds.
           val promQlParams = PromQlQueryParams(queryParams.promQl,
-            (timeRange.startMs + offsetMs) / 1000, queryParams.stepSecs, (timeRange.endMs + offsetMs) / 1000)
+            (timeRange.startMs + offsetMs.max) / 1000, queryParams.stepSecs, (timeRange.endMs + offsetMs.min) / 1000)
           val newQueryContext = qContext.copy(origQueryParams = promQlParams, plannerParams = qContext.plannerParams.
             copy(processFailure = false) )
           logger.debug("PromQlExec params:" + promQlParams)
@@ -102,9 +102,9 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     // lazy because we want to fetch failures only if needed
     lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)
     lazy val periodicSeriesTime = getTimeFromLogicalPlan(logicalPlan)
-    lazy val periodicSeriesTimeWithOffset = TimeRange(periodicSeriesTime.startMs - offsetMillis,
-      periodicSeriesTime.endMs - offsetMillis)
-    lazy val lookBackTime = getLookBackMillis(logicalPlan)
+    lazy val periodicSeriesTimeWithOffset = TimeRange(periodicSeriesTime.startMs - offsetMillis.max,
+      periodicSeriesTime.endMs - offsetMillis.min)
+    lazy val lookBackTime = getLookBackMillis(logicalPlan).max
     // Time at which raw data would be retrieved which is used to get failures.
     // It should have time with offset and lookback as we need raw data at time including offset and lookback.
     lazy val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackTime,

@@ -127,8 +127,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val tuples = (numRawSamples until 0).by(-1).map(n => (now - n * reportingInterval, n.toDouble))
 
     // scalastyle:off null
-    val rvKey = new PartitionRangeVectorKey(null, defaultPartKey, dataset1.partKeySchema,
-                                            Seq(ColumnInfo("string", ColumnType.StringColumn)), 1, 5, 100, dataset1.name)
+    val rvKey = PartitionRangeVectorKey(Right((null, defaultPartKey)), dataset1.partKeySchema,
+                                        Seq(ColumnInfo("string", ColumnType.StringColumn)), 1, 5, 100, dataset1.name)
 
     val rowbuf = tuples.map { t =>
       new SeqRowReader(Seq[Any](t._1, t._2))

@@ -3,9 +3,11 @@ package filodb.cassandra
 import java.nio.ByteBuffer
 
 import scala.concurrent.{Future, Promise}
+import scala.util.Random
 
 import com.datastax.driver.core._
-import com.datastax.driver.core.exceptions.DriverException
+import com.datastax.driver.core.exceptions.{DriverException, ReadTimeoutException}
+import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 
 import filodb.core._
@@ -84,4 +86,46 @@ object Util {
   def toBuffer(key: Array[Byte]): ByteBuffer = ByteBuffer.wrap(key)
 
   def toHex(bb: ByteBuffer): String = com.datastax.driver.core.utils.Bytes.toHexString(bb)
+}
+
+/**
+ * Quick & Dirty synchronous exponential backoff that sleeps.
+ * Use only for synchronous API calls
+ */
+class RetryWithExpBackOffIterator(inner: Iterator[Row]) extends Iterator[Row] with StrictLogging{
+  val callStack = new RuntimeException()
+  override def hasNext: Boolean = {
+    retryWithExpBackOff {
+      inner.hasNext
+    }
+  }
+
+  override def next(): Row = {
+    retryWithExpBackOff {
+      inner.next()
+    }
+  }
+
+  //scalastyle:off null
+  def retryWithExpBackOff[T](fn: => T): T = {
+    var retries = 0
+    val maxRetries = 5 // Hardcode maxRetries for now. If needed make it a config later.
+    while (retries < maxRetries) {
+      try {
+        val res = fn // apply function
+        return res
+      } catch {
+        case e: ReadTimeoutException =>
+          retries += 1
+          if (retries == 5) throw e
+          val jitter = Random.nextInt(3000)
+          val sleepTime = Math.pow(2, retries + 1).toLong * 1000 + jitter
+          logger.error("Got ReadTimeoutException when invoking next/hasNext on " +
+            s"cassandra's paged iterator. RetriesFinished=$retries sleepingForMs=$sleepTime", callStack)
+          Thread.sleep(sleepTime)
+      }
+    }
+    ??? // unreachable line
+  }
+
 }

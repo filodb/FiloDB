@@ -8,7 +8,6 @@ import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.exceptions.TestFailedException
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core.{DatasetRef, QueryTimeoutException, TestData, Types}
@@ -463,12 +462,10 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val execPlan = MultiSchemaPartitionsExec(QueryContext(submitTime = System.currentTimeMillis() - 180000),
       dummyDispatcher, dsRef, 0, filters, AllChunkScan)
 
-    val thrown = intercept[TestFailedException] {
-      val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
-      val result = resp.asInstanceOf[QueryResult]
-    }
-    thrown.getCause.getClass shouldEqual classOf[QueryTimeoutException]
-    thrown.getCause.getMessage shouldEqual "Query timeout in filodb.query.exec.MultiSchemaPartitionsExec after 180 seconds"
+    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryError]
+    result.t.getClass shouldEqual classOf[QueryTimeoutException]
+    result.t.getMessage shouldEqual "Query timeout in filodb.query.exec.MultiSchemaPartitionsExec after 180 seconds"
   }
 
   it ("""should not return range vectors with !="" where column is not present""") {
