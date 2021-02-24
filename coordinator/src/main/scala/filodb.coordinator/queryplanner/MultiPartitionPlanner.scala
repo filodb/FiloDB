@@ -71,7 +71,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
     val routingKeys = getRoutingKeys(logicalPlan)
 
-    val offsetMs = LogicalPlanUtils.getOffsetMillis(logicalPlan)
+    val offsetMs = LogicalPlan.getOffsetMillis(logicalPlan)
     // To cover entire time range for queries like sum(foo offset 2d) - sum(foo)
     val periodicSeriesTimeWithOffset = TimeRange((queryParams.startSecs * 1000) - offsetMs.max,
       (queryParams.endSecs * 1000) - offsetMs.min)

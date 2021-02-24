@@ -167,18 +167,6 @@ object LogicalPlanUtils extends StrictLogging {
     }
   }
 
-  def getOffsetMillis(logicalPlan: LogicalPlan): Seq[Long] = {
-    val leaf = LogicalPlan.findLeafLogicalPlans(logicalPlan)
-    if (leaf.isEmpty) Seq(0L) else {
-      leaf.map { l =>
-        l match {
-          case lp: RawSeries => lp.offsetMs.getOrElse(0L)
-          case _             => 0L
-        }
-      }
-    }
-  }
-
   def getLookBackMillis(logicalPlan: LogicalPlan): Seq[Long] = {
     val staleDataLookbackMillis = WindowConstants.staleDataLookbackMillis
     val leaf = LogicalPlan.findLeafLogicalPlans(logicalPlan)
