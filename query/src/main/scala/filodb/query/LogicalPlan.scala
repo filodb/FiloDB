@@ -409,6 +409,7 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
 }
 
 object LogicalPlan {
+
   /**
     * Get leaf Logical Plans
     */
@@ -494,6 +495,23 @@ object LogicalPlan {
   def hasShardKeyEqualsOnly(logicalPlan: LogicalPlan, nonMetricShardColumns: Seq[String]): Boolean =
     getNonMetricShardKeyFilters(logicalPlan: LogicalPlan, nonMetricShardColumns: Seq[String]).
       forall(_.forall(f => f.filter.isInstanceOf[filodb.core.query.Filter.Equals]))
+
+  /**
+   * Get offset in millis from logicalPlan
+   * @param logicalPlan - input plan
+   * @return - seq of offset values in millis
+   */
+  def getOffsetMillis(logicalPlan: LogicalPlan): Seq[Long] = {
+    val leaf = findLeafLogicalPlans(logicalPlan)
+    if (leaf.isEmpty) Seq(0L) else {
+      leaf.map { l =>
+        l match {
+          case lp: RawSeries => lp.offsetMs.getOrElse(0L)
+          case _             => 0L
+        }
+      }
+    }
+  }
 
 }
 //scalastyle:on number.of.types
