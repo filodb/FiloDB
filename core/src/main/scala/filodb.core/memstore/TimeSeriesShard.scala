@@ -811,8 +811,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private def purgeExpiredPartitions(): Unit = ingestSched.executeTrampolined { () =>
     assertThreadName(IngestSchedName)
     val start = System.currentTimeMillis()
-    val partsToPurge = partKeyIndex.partIdsEndedBefore(
-      System.currentTimeMillis() - storeConfig.demandPagedRetentionPeriod.toMillis)
+    val partsToPurge = partKeyIndex.partIdsEndedBefore(start - storeConfig.demandPagedRetentionPeriod.toMillis)
     var numDeleted = 0
     val removedParts = debox.Buffer.empty[Int]
     val partIter = InMemPartitionIterator2(partsToPurge)

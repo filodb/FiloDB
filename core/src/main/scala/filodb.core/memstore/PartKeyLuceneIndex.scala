@@ -202,9 +202,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   def removePartKeys(partIds: debox.Buffer[Int]): Unit = {
     if (!partIds.isEmpty) {
       val terms = new util.ArrayList[BytesRef]()
-      cforRange {
-        0 until partIds.length
-      } { i =>
+      cforRange { 0 until partIds.length } { i =>
         terms.add(new BytesRef(partIds(i).toString.getBytes(StandardCharsets.UTF_8)))
       }
       indexWriter.deleteDocuments(new TermInSetQuery(PART_ID, terms))
