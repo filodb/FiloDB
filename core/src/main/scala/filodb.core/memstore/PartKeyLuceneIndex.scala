@@ -200,11 +200,15 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     * Delete partitions with given partIds
     */
   def removePartKeys(partIds: debox.Buffer[Int]): Unit = {
-    val terms = new util.ArrayList[BytesRef]()
-    cforRange { 0 until partIds.length } { i =>
-      terms.add(new BytesRef(partIds(i).toString.getBytes(StandardCharsets.UTF_8)))
+    if (!partIds.isEmpty) {
+      val terms = new util.ArrayList[BytesRef]()
+      cforRange {
+        0 until partIds.length
+      } { i =>
+        terms.add(new BytesRef(partIds(i).toString.getBytes(StandardCharsets.UTF_8)))
+      }
+      indexWriter.deleteDocuments(new TermInSetQuery(PART_ID, terms))
     }
-    indexWriter.deleteDocuments(new TermInSetQuery(PART_ID, terms))
   }
 
   def indexRamBytes: Long = indexWriter.ramBytesUsed()
