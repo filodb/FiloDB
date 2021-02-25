@@ -88,6 +88,9 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val partitionsPagedFromColStore = Kamon.counter("memstore-partitions-paged-in").withTags(TagSet.from(tags))
   val partitionsQueried = Kamon.counter("memstore-partitions-queried").withTags(TagSet.from(tags))
   val purgedPartitions = Kamon.counter("memstore-partitions-purged").withTags(TagSet.from(tags))
+  val purgedPartitionsFromIndex = Kamon.counter("memstore-partitions-purged-index").withTags(TagSet.from(tags))
+  val purgePartitionTimeMs = Kamon.counter("memstore-partitions-purge-time-ms", MeasurementUnit.time.milliseconds)
+                                              .withTags(TagSet.from(tags))
   val partitionsRestored = Kamon.counter("memstore-partitions-paged-restored").withTags(TagSet.from(tags))
   val chunkIdsEvicted = Kamon.counter("memstore-chunkids-evicted").withTags(TagSet.from(tags))
   val partitionsEvicted = Kamon.counter("memstore-partitions-evicted").withTags(TagSet.from(tags))
@@ -807,11 +810,12 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private def purgeExpiredPartitions(): Unit = ingestSched.executeTrampolined { () =>
     assertThreadName(IngestSchedName)
-    val partsToPurge = partKeyIndex.partIdsEndedBefore(
-      System.currentTimeMillis() - storeConfig.demandPagedRetentionPeriod.toMillis)
+    val start = System.currentTimeMillis()
+    val partsToPurge = partKeyIndex.partIdsEndedBefore(start - storeConfig.demandPagedRetentionPeriod.toMillis)
     var numDeleted = 0
     val removedParts = debox.Buffer.empty[Int]
-    InMemPartitionIterator2(partsToPurge).foreach { p =>
+    val partIter = InMemPartitionIterator2(partsToPurge)
+    partIter.foreach { p =>
       if (!p.ingesting) {
         logger.debug(s"Purging partition with partId=${p.partID}  ${p.stringPartition} from " +
           s"memory in dataset=$ref shard=$shardNum")
@@ -826,10 +830,13 @@ class TimeSeriesShard(val ref: DatasetRef,
         numDeleted += 1
       }
     }
-    if (!removedParts.isEmpty) partKeyIndex.removePartKeys(removedParts)
-    if (numDeleted > 0) logger.info(s"Purged $numDeleted partitions from memory and " +
-                        s"index from dataset=$ref shard=$shardNum")
+    partKeyIndex.removePartKeys(partIter.skippedPartIDs)
+    partKeyIndex.removePartKeys(removedParts)
+    if (numDeleted > 0) logger.info(s"Purged $numDeleted partitions from memory/index " +
+      s"and ${partIter.skippedPartIDs.len} from index only from dataset=$ref shard=$shardNum")
     shardStats.purgedPartitions.increment(numDeleted)
+    shardStats.purgedPartitionsFromIndex.increment(removedParts.len + partIter.skippedPartIDs.len)
+    shardStats.purgePartitionTimeMs.increment(System.currentTimeMillis() - start)
   }
 
   /**
