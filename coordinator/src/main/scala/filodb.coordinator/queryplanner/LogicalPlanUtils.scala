@@ -276,7 +276,8 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: SeriesKeysByFilters         => None
       case lp: ApplyInstantFunctionRaw     => getPeriodicSeriesPlan(lp.vectors)
       case lp: ScalarBinaryOperation       =>  if (lp.lhs.isRight) getPeriodicSeriesPlan(lp.lhs.right.get)
-      else if (lp.rhs.isRight) getPeriodicSeriesPlan(lp.rhs.right.get) else None
+                                               else if (lp.rhs.isRight) getPeriodicSeriesPlan(lp.rhs.right.get)
+                                               else None
       case lp: ScalarFixedDoublePlan       => None
       case lp: RawChunkMeta                => None
     }
