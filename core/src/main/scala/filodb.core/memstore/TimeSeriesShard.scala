@@ -810,6 +810,8 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private def purgeExpiredPartitions(): Unit = ingestSched.executeTrampolined { () =>
     assertThreadName(IngestSchedName)
+    // TODO Much of the purging work other of removing TSP from shard data structures can be done
+    // asynchronously on another thread. No need to block ingestion thread for this.
     val start = System.currentTimeMillis()
     val partsToPurge = partKeyIndex.partIdsEndedBefore(start - storeConfig.demandPagedRetentionPeriod.toMillis)
     var numDeleted = 0
@@ -828,6 +830,18 @@ class TimeSeriesShard(val ref: DatasetRef,
         removePartition(p)
         removedParts += p.partID
         numDeleted += 1
+      }
+    }
+    partIter.skippedPartIDs.foreach { pId =>
+      partKeyIndex.partKeyFromPartId(pId).foreach { pk =>
+        val unsafePkOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(pk.offset)
+        val schema = schemas(RecordSchema.schemaID(pk.bytes, unsafePkOffset))
+        val shardKey = schema.partKeySchema.colValues(pk.bytes, unsafePkOffset,
+          schemas.part.options.shardKeyColumns)
+        if (storeConfig.meteringEnabled) {
+          cardTracker.decrementCount(shardKey)
+        }
+        captureTimeseriesCount(schema, shardKey, -1)
       }
     }
     partKeyIndex.removePartKeys(partIter.skippedPartIDs)
