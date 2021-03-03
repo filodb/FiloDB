@@ -259,7 +259,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
       TimeStepParams(start, step, end))
       .asInstanceOf[PeriodicSeriesPlan]
 
-    val rawPlanner gs= new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = earliestRawTime, queryConfig)
+    val rawPlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = earliestRawTime, queryConfig)
     val downsamplePlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig)
     val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
       earliestRawTime, latestDownsampleTime, disp)
