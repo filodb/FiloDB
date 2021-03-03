@@ -1,5 +1,7 @@
 package filodb.gateway.conversion
 
+import java.nio.charset.StandardCharsets
+
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import org.jboss.netty.buffer.ChannelBuffer
@@ -15,7 +17,8 @@ trait KVVisitor {
 class StringKVVisitor extends KVVisitor {
   val keyValues = new collection.mutable.ArrayBuffer[(String, String)]
   def apply(bytes: Array[Byte], keyIndex: Int, keyLen: Int, valueIndex: Int, valueLen: Int): Unit =
-    keyValues += new String(bytes, keyIndex, keyLen) -> new String(bytes, valueIndex, valueLen)
+    keyValues += new String(bytes, keyIndex, keyLen, StandardCharsets.UTF_8) ->
+      new String(bytes, valueIndex, valueLen, StandardCharsets.UTF_8)
 }
 
 /**
@@ -40,7 +43,8 @@ trait InfluxFieldVisitor extends KVVisitor with StrictLogging {
         doubleValue(bytes, keyIndex, keyLen, InfluxProtocolParser.parseDouble(bytes, valueIndex, numBytesToParse))
       } catch {
         case e: Exception =>
-          logger.error(s"Could not parse [${new String(bytes, valueIndex, numBytesToParse)}] as number!", e)
+          logger.error(s"Could not parse [${new String(bytes, valueIndex, numBytesToParse,
+            StandardCharsets.UTF_8)}] as number!", e)
           stringValue(bytes, keyIndex, keyLen, valueIndex, valueLen)
       }
     }
@@ -69,7 +73,7 @@ object InfluxProtocolParser extends StrictLogging {
   val Equals = '='.toByte
   val Quote = '"'.toByte
 
-  val CounterKey = "counter".getBytes
+  val CounterKey = "counter".getBytes(StandardCharsets.UTF_8)
 
   /**
    * Read from a Netty ChannelBuffer and write an escape-corrected array of bytes,
@@ -135,7 +139,7 @@ object InfluxProtocolParser extends StrictLogging {
     val fieldOffsets = Buffer(fieldSetIndex)   // should be at least one field
     val timeIndex = parseInner(buffer, bytes, fieldSetIndex, fieldOffsets)
     if (timeIndex < (fieldSetIndex + 3)) {
-      logger.info(s"No fields in Influx record!  Line=${new String(bytes)}")
+      logger.info(s"No fields in Influx record!  Line=${new String(bytes, StandardCharsets.UTF_8)}")
       return None
     }
 
@@ -145,7 +149,7 @@ object InfluxProtocolParser extends StrictLogging {
       buffer.readBytes(bytes, timeIndex, tsLen)
       val ts = parseUnixTime(bytes, timeIndex, tsLen)
       if (ts < 0) {
-        logger.info(s"Could not parse timestamp!  Line=${new String(bytes)}")
+        logger.info(s"Could not parse timestamp!  Line=${new String(bytes, StandardCharsets.UTF_8)}")
         return None
       }
       ts
@@ -225,7 +229,7 @@ object InfluxProtocolParser extends StrictLogging {
           dblNum = dblNum * 10 + (b - 0x30)
         case '.'   => fractionMultiplier = 0.1
         case other =>   // not a digit. Convert whole thing to string and let Double parser handle it.
-          return java.lang.Double.parseDouble(new String(bytes, index, len))
+          return java.lang.Double.parseDouble(new String(bytes, index, len, StandardCharsets.UTF_8))
       }
       curIndex += 1
     }

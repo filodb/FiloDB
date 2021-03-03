@@ -23,7 +23,7 @@ object StitchRvsExec {
     new RangeVectorCursor {
       val bVectors = vectors.map(_.buffered)
       val mins = new mutable.ArrayBuffer[BufferedIterator[RowReader]](2)
-      val noResult = new TransientRow(0, 0)
+      val nanResult = new TransientRow(0, Double.NaN)
       override def hasNext: Boolean = bVectors.exists(_.hasNext)
 
       override def next(): RowReader = {
@@ -48,10 +48,11 @@ object StitchRvsExec {
         if (mins.size == 1) mins.head.next()
         else if (mins.isEmpty) throw new IllegalStateException("next was called when no element")
         else {
-          mins.foreach(it => if (it.hasNext) it.next()) // move iterator forward
-          noResult.timestamp = minTime
-          noResult.value = Double.NaN // until we have a different indicator for "unable-to-calculate" use NaN
-          noResult
+          nanResult.timestamp = minTime
+          // until we have a different indicator for "unable-to-calculate", use NaN when multiple values seen
+          val minRows = mins.map(it => if (it.hasNext) it.next() else nanResult) // move iterators forward
+          val minsWithoutNan = minRows.filter(!_.getDouble(1).isNaN)
+          if (minsWithoutNan.size == 1) minsWithoutNan.head else nanResult
         }
       }
 

@@ -117,10 +117,10 @@ object LogicalPlanUtils extends StrictLogging {
                                             }
       case lp: VectorPlan                  => lp.copy(scalars = copyWithUpdatedTimeRange(lp.scalars, timeRange).
                                             asInstanceOf[ScalarPlan])
-      case lp: ScalarTimeBasedPlan         => lp.copy(rangeParams = RangeParams(timeRange.startMs * 1000,
-                                              lp.rangeParams.stepSecs, timeRange.endMs * 1000))
-      case lp: ScalarFixedDoublePlan       => lp.copy(timeStepParams = RangeParams(timeRange.startMs * 1000,
-                                              lp.timeStepParams.stepSecs, timeRange.endMs * 1000))
+      case lp: ScalarTimeBasedPlan         => lp.copy(rangeParams = RangeParams(timeRange.startMs / 1000,
+                                              lp.rangeParams.stepSecs, timeRange.endMs / 1000))
+      case lp: ScalarFixedDoublePlan       => lp.copy(timeStepParams = RangeParams(timeRange.startMs / 1000,
+                                              lp.timeStepParams.stepSecs, timeRange.endMs / 1000))
       case lp: ScalarBinaryOperation       =>  val updatedLhs = if (lp.lhs.isRight) Right(copyWithUpdatedTimeRange
                                               (lp.lhs.right.get, timeRange).asInstanceOf[ScalarBinaryOperation]) else
                                               Left(lp.lhs.left.get)
@@ -128,8 +128,8 @@ object LogicalPlanUtils extends StrictLogging {
                                                 lp.rhs.right.get, timeRange).asInstanceOf[ScalarBinaryOperation])
                                               else Left(lp.rhs.left.get)
                                               lp.copy(lhs = updatedLhs, rhs = updatedRhs, rangeParams =
-                                                RangeParams(timeRange.startMs * 1000, lp.rangeParams.stepSecs,
-                                                  timeRange.endMs * 1000))
+                                                RangeParams(timeRange.startMs / 1000, lp.rangeParams.stepSecs,
+                                                  timeRange.endMs / 1000))
     }
   }
 
