@@ -814,7 +814,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     // asynchronously on another thread. No need to block ingestion thread for this.
     val start = System.currentTimeMillis()
     val partsToPurge = partKeyIndex.partIdsEndedBefore(start - storeConfig.demandPagedRetentionPeriod.toMillis)
-    var numDeleted = 0
     val removedParts = debox.Buffer.empty[Int]
     val partIter = InMemPartitionIterator2(partsToPurge)
     partIter.foreach { p =>
@@ -829,7 +828,6 @@ class TimeSeriesShard(val ref: DatasetRef,
         }
         removePartition(p)
         removedParts += p.partID
-        numDeleted += 1
       }
     }
     partIter.skippedPartIDs.foreach { pId =>
@@ -846,9 +844,10 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
     partKeyIndex.removePartKeys(partIter.skippedPartIDs)
     partKeyIndex.removePartKeys(removedParts)
-    if (numDeleted > 0) logger.info(s"Purged $numDeleted partitions from memory/index " +
-      s"and ${partIter.skippedPartIDs.length} from index only from dataset=$ref shard=$shardNum")
-    shardStats.purgedPartitions.increment(numDeleted)
+    if (removedParts.length + partIter.skippedPartIDs.length > 0)
+      logger.info(s"Purged ${removedParts.length} partitions from memory/index " +
+        s"and ${partIter.skippedPartIDs.length} from index only from dataset=$ref shard=$shardNum")
+    shardStats.purgedPartitions.increment(removedParts.length)
     shardStats.purgedPartitionsFromIndex.increment(removedParts.length + partIter.skippedPartIDs.length)
     shardStats.purgePartitionTimeMs.increment(System.currentTimeMillis() - start)
   }
