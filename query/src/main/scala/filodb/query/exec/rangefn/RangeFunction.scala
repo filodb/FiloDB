@@ -466,7 +466,6 @@ abstract class LastSampleChunkedFuncDblVal(var value: Double = Double.NaN)
 extends LastSampleChunkedFunction[TransientRow] {
   override final def reset(): Unit = { timestamp = -1L; value = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
-    println("sampleToEmit.setValues timestamp:" + timestamp + "value:" + value)
     sampleToEmit.setValues(endTimestamp, value)
   }
 }

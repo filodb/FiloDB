@@ -3,6 +3,7 @@ package filodb.coordinator.queryplanner
 import java.util.concurrent.ThreadLocalRandom
 
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.metadata.{DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryContext, RangeParams}
 import filodb.query._

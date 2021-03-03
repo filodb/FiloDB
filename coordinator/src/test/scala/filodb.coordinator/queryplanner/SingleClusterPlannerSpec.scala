@@ -13,6 +13,7 @@ import filodb.core.query.{ColumnFilter, Filter, PlannerParams, PromQlQueryParams
 import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
+import filodb.query.RangeFunctionId.AbsentOverTime
 import filodb.query._
 import filodb.query.exec._
 import org.scalatest.funspec.AnyFunSpec
@@ -484,28 +485,36 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     rvt2.step shouldEqual 1000000
   }
 
-  it("should generate execPlan for abset over time") {
+  it("should generate execPlan for absent over time") {
     val t = TimeStepParams(700, 1000, 10000)
-    val lp = Parser.queryRangeToLogicalPlan("absent_over_time(http_requests_total{job = \"app\"}[10m])", t)
-
-    val periodicSeriesPlan = lp.asInstanceOf[PeriodicSeriesWithWindowing]
-    periodicSeriesPlan.startMs shouldEqual 700000
-    periodicSeriesPlan.endMs shouldEqual 10000000
-    periodicSeriesPlan.stepMs shouldEqual 1000000
+    val lp = Parser.queryRangeToLogicalPlan("""absent_over_time(http_requests_total{job = "app"}[10m])""", t)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
+    execPlan.rangeVectorTransformers.head.isInstanceOf[AbsentFunctionMapper] shouldEqual true
     execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
     val multiSchemaExec = execPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
-    multiSchemaExec.chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual(100000)
-    multiSchemaExec.chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual(9700000)
 
     multiSchemaExec.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual(true)
     val rvt = multiSchemaExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
-    rvt.offsetMs.get shouldEqual(300000)
-    rvt.startWithOffset shouldEqual(400000) // (700 - 300) * 1000
-    rvt.endWithOffset shouldEqual (9700000) // (10000 - 300) * 1000
-    rvt.start shouldEqual 700000
-    rvt.end shouldEqual 10000000
-    rvt.step shouldEqual 1000000
+    rvt.window.get shouldEqual(10*60*1000)
+    rvt.functionId.get.toString shouldEqual(AbsentOverTime.toString)
+  }
+
+  it("should generate execPlan for sum on absent over time") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan("""sum(absent_over_time(http_requests_total{job = "app"}[10m]))""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
+    execPlan.rangeVectorTransformers.head.isInstanceOf[AggregatePresenter] shouldEqual true
+    execPlan.children(0).isInstanceOf[LocalPartitionDistConcatExec] shouldEqual(true)
+    execPlan.children(0).rangeVectorTransformers.head.isInstanceOf[AbsentFunctionMapper] shouldEqual(true)
+
+    val multiSchemaExec = execPlan.children(0).children.head
+    multiSchemaExec.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual(true)
+    val rvt = multiSchemaExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
+    rvt.window.get shouldEqual(10*60*1000)
+    rvt.functionId.get.toString shouldEqual(AbsentOverTime.toString)
   }
 }

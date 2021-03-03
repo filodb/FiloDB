@@ -363,7 +363,6 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
 
     def addNonNanTimestamps(res: List[Long], cur: RangeVector): List[Long]  = {
-      //println("rows:" + cur.rows().map(x =>(x.getLong(0), x.getDouble(1))))
       res ++ cur.rows.filter(!_.getDouble(1).isNaN).map(_.getLong(0)).toList
     }
     val nonNanTimestamps = source.foldLeftL(List[Long]())(addNonNanTimestamps)
