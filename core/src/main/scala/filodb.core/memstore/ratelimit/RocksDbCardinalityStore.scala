@@ -1,6 +1,7 @@
 package filodb.core.memstore.ratelimit
 
 import java.io.File
+import java.nio.charset.StandardCharsets
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
@@ -204,31 +205,31 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   }
 
   override def store(shardKeyPrefix: Seq[String], card: Cardinality): Unit = {
-    val key = toStringKey(shardKeyPrefix, false).getBytes()
+    val key = toStringKey(shardKeyPrefix, false).getBytes(StandardCharsets.UTF_8)
     logger.debug(s"Storing shard=$shard dataset=$ref ${new String(key)} with $card")
     db.put(key, cardinalityToBytes(card))
   }
 
   def getOrZero(shardKeyPrefix: Seq[String], zero: Cardinality): Cardinality = {
-    val value = db.get(toStringKey(shardKeyPrefix, false).getBytes())
+    val value = db.get(toStringKey(shardKeyPrefix, false).getBytes(StandardCharsets.UTF_8))
     if (value == NotFound) zero else bytesToCardinality(value)
   }
 
   override def remove(shardKeyPrefix: Seq[String]): Unit = {
-    db.delete(toStringKey(shardKeyPrefix, false).getBytes())
+    db.delete(toStringKey(shardKeyPrefix, false).getBytes(StandardCharsets.UTF_8))
   }
 
   override def scanChildren(shardKeyPrefix: Seq[String]): Seq[Cardinality] = {
     val it = db.newIterator()
     val searchPrefix = toStringKey(shardKeyPrefix, true)
     logger.debug(s"Scanning shard=$shard dataset=$ref ${new String(searchPrefix)}")
-    it.seek(searchPrefix.getBytes())
+    it.seek(searchPrefix.getBytes(StandardCharsets.UTF_8))
     val buf = ArrayBuffer[Cardinality]()
     import scala.util.control.Breaks._
 
     breakable {
       while (it.isValid()) {
-        val key = new String(it.key())
+        val key = new String(it.key(), StandardCharsets.UTF_8)
         if (key.startsWith(searchPrefix)) {
           buf += bytesToCardinality(it.value())
         } else break // dont continue beyond valid results

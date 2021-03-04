@@ -1,5 +1,7 @@
 package filodb.core.binaryrecord2
 
+import java.nio.charset.StandardCharsets
+
 import scala.collection.mutable.ArrayBuffer
 
 import org.agrona.DirectBuffer
@@ -390,7 +392,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
     val keyToNum = DMap.empty[Long, Int]
     var index = 0
     val offsets = predefinedKeys.scanLeft(UnsafeUtils.arayOffset.toLong) { case (offset, str) =>
-                    val bytes = str.getBytes
+                    val bytes = str.getBytes(StandardCharsets.UTF_8)
                     require(bytes.size < 192, s"Predefined key $str too long")
                     UTF8StringShort.copyByteArrayTo(bytes, stringBytes, offset)
                     keyToNum(makeKeyKey(bytes)) = index

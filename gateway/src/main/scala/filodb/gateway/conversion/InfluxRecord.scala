@@ -1,5 +1,7 @@
 package filodb.gateway.conversion
 
+import java.nio.charset.StandardCharsets
+
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 
@@ -36,7 +38,7 @@ trait InfluxRecord extends InputRecord {
           val keyToCompare = schema.options.nonMetricShardKeyBytes(nonMetricIndex)
           if (BinaryRegion.equalBytes(bytes, keyIndex, keyLen, keyToCompare)) {
             // key match.  Add value to nonMetricShardValues
-            nonMetricShardValues += new String(bytes, valueIndex, valueLen)
+            nonMetricShardValues += new String(bytes, valueIndex, valueLen, StandardCharsets.UTF_8)
 
             // calculate hash too
             nonMetricIndex += 1
@@ -51,7 +53,7 @@ trait InfluxRecord extends InputRecord {
   // WARNING: lots of allocation happening here
   override def toString: String = {
     s"""{
-        |  measurement: ${new String(bytes, 0, kpiLen)}
+        |  measurement: ${new String(bytes, 0, kpiLen, StandardCharsets.UTF_8)}
         |  ${tagDelims.length} tags:
         |${debugKeyValues(bytes, tagDelims, endOfTags)}
         |  fields:
@@ -60,7 +62,7 @@ trait InfluxRecord extends InputRecord {
         |}""".stripMargin
   }
 
-  final def getMetric: String = new String(bytes, 0, kpiLen)
+  final def getMetric: String = new String(bytes, 0, kpiLen, StandardCharsets.UTF_8)
 
   final def shardKeyHash: Int = {
     val kpiHash = BinaryRegion.hasher32.hash(bytes, 0, kpiLen, BinaryRegion.Seed)
@@ -125,12 +127,12 @@ final case class InfluxPromSingleRecord(bytes: Array[Byte],
 }
 
 object InfluxHistogramRecord extends StrictLogging {
-  val sumLabel = "sum".getBytes
-  val countLabel = "count".getBytes
-  val infLabel = "+Inf".getBytes
-  val leKey = "le".getBytes
+  val sumLabel = "sum".getBytes(StandardCharsets.UTF_8)
+  val countLabel = "count".getBytes(StandardCharsets.UTF_8)
+  val infLabel = "+Inf".getBytes(StandardCharsets.UTF_8)
+  val leKey = "le".getBytes(StandardCharsets.UTF_8)
   val leHash = BinaryRegion.hash32(leKey)
-  val bucketSuffix = "bucket".getBytes
+  val bucketSuffix = "bucket".getBytes(StandardCharsets.UTF_8)
   val Underscore = '_'.toByte
 
   def copyMetricToBuffer(sourceBytes: Array[Byte], metricLen: Int): Unit = {
@@ -211,8 +213,10 @@ class HistogramFieldVisitor(numFields: Int) extends InfluxFieldVisitor {
   }
 
   def stringValue(bytes: Array[Byte], keyIndex: Int, keyLen: Int, valueOffset: Int, valueLen: Int): Unit = {
-    _log.warn(s"Got non numeric field in histogram record: key=${new String(bytes, keyIndex, keyLen)} " +
-      s"value=[${new String(bytes, valueOffset, valueLen)}]\nline=[${new String(bytes, 0, valueOffset + valueLen)}]")
+    _log.warn(s"Got non numeric field in histogram record: " +
+      s"key=${new String(bytes, keyIndex, keyLen, StandardCharsets.UTF_8)} " +
+      s"value=[${new String(bytes, valueOffset, valueLen, StandardCharsets.UTF_8)}]" +
+      s"\nline=[${new String(bytes, 0, valueOffset + valueLen, StandardCharsets.UTF_8)}]")
   }
 }
 
