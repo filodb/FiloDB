@@ -1,5 +1,6 @@
 package filodb.jmh
 
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 
 import ch.qos.logback.classic.{Level, Logger}
@@ -45,7 +46,7 @@ class GatewayBenchmark extends StrictLogging {
   val singleInfluxRec = s"${tagMap("__name__")},${influxTags.map{case (k, v) => s"$k=$v"}.mkString(",")} " +
                         s"counter=$value ${initTimestamp}000000"
   val singleInfluxBuf = ChannelBuffers.buffer(1024)
-  singleInfluxBuf.writeBytes(singleInfluxRec.getBytes)
+  singleInfluxBuf.writeBytes(singleInfluxRec.getBytes(StandardCharsets.UTF_8))
 
 
   // Histogram containing 8 buckets + sum and count
@@ -64,7 +65,7 @@ class GatewayBenchmark extends StrictLogging {
                       s"${histBuckets.map { case (k, v) => s"$k=$v"}.mkString(",") },sum=$histSum,count=8 " +
                       s"${initTimestamp}000000"
   val histInfluxBuf = ChannelBuffers.buffer(1024)
-  histInfluxBuf.writeBytes(histInfluxRec.getBytes)
+  histInfluxBuf.writeBytes(histInfluxRec.getBytes(StandardCharsets.UTF_8))
 
   val builder = new RecordBuilder(MemFactory.onHeapFactory, reuseOneContainer = true)
 

@@ -73,7 +73,7 @@ object InfluxProtocolParser extends StrictLogging {
   val Equals = '='.toByte
   val Quote = '"'.toByte
 
-  val CounterKey = "counter".getBytes
+  val CounterKey = "counter".getBytes(StandardCharsets.UTF_8)
 
   /**
    * Read from a Netty ChannelBuffer and write an escape-corrected array of bytes,
