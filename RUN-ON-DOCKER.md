@@ -24,7 +24,7 @@ docker exec -it cassandra cqlsh -f /tmp/ddl.cql
 docker exec -it cassandra cqlsh -e "DESC TABLES"
 ```
 
-The next 3 cassandra keyspaces with their table will be presend in the output
+The next 3 cassandra keyspaces with their tables will be presend in the output
 ```
 Keyspace filodb
 ---------------
