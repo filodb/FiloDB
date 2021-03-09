@@ -47,6 +47,45 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers {
     mergeAndValidate(rvs, expected)
   }
 
+  it ("should merge with two overlapping RVs with NaNs correctly") {
+    val rvs = Seq (
+      Seq(  (10L, 3d),
+        (20L, 3d),
+        (30L, 3d),
+        (40L, 3d),
+        (50L, 3d),
+        (60L, Double.NaN),
+        (70L, Double.NaN),
+        (80L, Double.NaN),
+        (90L, Double.NaN),
+        (100L, Double.NaN)
+      ),
+      Seq(  (10L, Double.NaN),
+        (20L, Double.NaN),
+        (30L, 4d),
+        (50L, 4d),
+        (60L, 3d),
+        (70L, 3d),
+        (80L, 3d),
+        (90L, 3d),
+        (100L, 3d)
+      )
+    )
+    val expected =
+      Seq(  (10L, 3d),
+        (20L, 3d),
+        (30L, Double.NaN),
+        (40L, 3d),
+        (50L, Double.NaN),
+        (60L, 3d),
+        (70L, 3d),
+        (80L, 3d),
+        (90L, 3d),
+        (100L, 3d)
+      )
+    mergeAndValidate(rvs, expected)
+  }
+
   it ("should merge one RV correctly") {
     val input =       Seq(  (10L, 3d),
       (20L, 3d),

@@ -529,91 +529,123 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       " Try applying more filters."
   }
 
-  it ("should remove dupes in LHS and stitch before joining") {
+  it ("should stitch same RVs from multiple shards on LHS and RHS before joining by ignoring NaN") {
 
-    def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
+    val lhs1 = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("pod".utf8 -> "filodb-raw-tsdb1-7bd4b486c8-rkd7z".utf8,
+          "namespace".utf8 -> "aci-telemetry-prod1".utf8))
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = Seq(
+        new TransientRow(4800,2.0 ),
+        new TransientRow(4900,2.0 ),
+        new TransientRow(5000,2.0 ),
+        new TransientRow(5100,2.0 ),
+        new TransientRow(5200,2.0 ),
+        new TransientRow(5300,2.0 ),
+        new TransientRow(5400,2.0 ),
+        new TransientRow(5500,2.0 ),
+        new TransientRow(5600,2.0 ),
+        new TransientRow(5700, Double.NaN ),
+        new TransientRow(5800, Double.NaN ),
+        new TransientRow(5900, Double.NaN ),
+        new TransientRow(6000, Double.NaN )
+      ).iterator
+    }
 
-    val queryContext = QueryContext(plannerParams = PlannerParams(joinQueryCardLimit = 10)) // set join card limit to 1
-    val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
-      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+    val lhs2 = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("pod".utf8 -> "filodb-raw-tsdb1-7bd4b486c8-rkd7z".utf8,
+          "namespace".utf8 -> "aci-telemetry-prod1".utf8))
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = Seq(
+        new TransientRow(4800, Double.NaN),
+        new TransientRow(4900, Double.NaN),
+        new TransientRow(5000, Double.NaN),
+        new TransientRow(5100, Double.NaN),
+        new TransientRow(5200,2.0 ),
+        new TransientRow(5300,2.0 ),
+        new TransientRow(5400,2.0 ),
+        new TransientRow(5500,2.0 ),
+        new TransientRow(5600,2.0 ),
+        new TransientRow(5700,2.0 ),
+        new TransientRow(5800,2.0 ),
+        new TransientRow(5900,2.0 ),
+        new TransientRow(6000,2.0 )
+      ).iterator
+    }
+
+    val rhs1 = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"kube_pod_info".utf8,
+          "pod".utf8 -> "filodb-raw-tsdb1-7bd4b486c8-rkd7z".utf8,
+          "namespace".utf8 -> "aci-telemetry-prod1".utf8,
+          "res".utf8 -> "res-val".utf8))
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = Seq(
+        new TransientRow(4800,2.0 ),
+        new TransientRow(4900,2.0 ),
+        new TransientRow(5000,2.0 ),
+        new TransientRow(5100,2.0 ),
+        new TransientRow(5200,2.0 ),
+        new TransientRow(5300,2.0 ),
+        new TransientRow(5400,2.0 ),
+        new TransientRow(5500,2.0 ),
+        new TransientRow(5600,2.0 ),
+        new TransientRow(5700, Double.NaN ),
+        new TransientRow(5800, Double.NaN ),
+        new TransientRow(5900, Double.NaN ),
+        new TransientRow(6000, Double.NaN )
+      ).iterator
+    }
+
+    val rhs2 = new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"kube_pod_info".utf8,
+          "pod".utf8 -> "filodb-raw-tsdb1-7bd4b486c8-rkd7z".utf8,
+          "namespace".utf8 -> "aci-telemetry-prod1".utf8,
+          "res".utf8 -> "res-val".utf8))
+      import NoCloseCursor._
+      val rows: RangeVectorCursor = Seq(
+        new TransientRow(4800, Double.NaN),
+        new TransientRow(4900, Double.NaN),
+        new TransientRow(5000, Double.NaN),
+        new TransientRow(5100, Double.NaN),
+        new TransientRow(5200,2.0 ),
+        new TransientRow(5300,2.0 ),
+        new TransientRow(5400,2.0 ),
+        new TransientRow(5500,2.0 ),
+        new TransientRow(5600,2.0 ),
+        new TransientRow(5700,2.0 ),
+        new TransientRow(5800,2.0 ),
+        new TransientRow(5900,2.0 ),
+        new TransientRow(6000,2.0 )
+      ).iterator
+    }
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, Seq(lhs1, lhs2).map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, Seq(rhs1, rhs2).map(rv => SerializedRangeVector(rv, schema)))
+    // scalastyle:on
+
+    val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
-      Cardinality.OneToOne,
-      Nil, Nil, Nil, "__name__")
+      Cardinality.OneToMany,
+      Seq("exported_namespace", "exported_pod"),
+      Nil,
+      Nil, "__name__")
 
-    import NoCloseCursor._
-    val lhsRv = new RangeVector {
-      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
-      val rows: RangeVectorCursor = dataRows.take(20).iterator
-    }
-
-    val lhsRvDupe = new RangeVector {
-      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
-      val rows: RangeVectorCursor = dataRows.take(30).drop(20).iterator
-    }
-
-    val lhsRvDupe2 = new RangeVector {
-      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
-      val rows: RangeVectorCursor = dataRows.take(40).drop(30).iterator
-    }
-
-    val rhsRv = new RangeVector {
-      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
-      val rows: RangeVectorCursor = dataRows.take(40).iterator
-    }
-
-    val lhs = QueryResult("someId", null, Seq(lhsRv, lhsRvDupe, lhsRvDupe2).map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, Seq(rhsRv).map(rv => SerializedRangeVector(rv, schema)))
-
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
+    val result = execPlan.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), tvSchemaTask, querySession)
       .toListL.runAsync.futureValue
 
-    result.size shouldEqual 1
-    result.head.key.labelValues shouldEqual Map("tag".utf8 -> s"value1".utf8)
-    result.head.rows().map(_.getLong(0)).toList shouldEqual (0L until 40).toList
+    result.head.key.labelValues.shouldEqual(Map(
+      "pod".utf8 -> "filodb-raw-tsdb1-7bd4b486c8-rkd7z".utf8,
+      "namespace".utf8 -> "aci-telemetry-prod1".utf8,
+      "res".utf8 -> "res-val".utf8))
+    result.head.rows().map(r => (r.getLong(0), r.getDouble(1).toString)).toList shouldEqual
+      List((4800,"4.0"), (4900,"4.0"), (5000,"4.0"), (5100,"4.0"), (5200,"NaN"), (5300,"NaN"), (5400,"NaN"),
+        (5500,"NaN"), (5600,"NaN"), (5700,"4.0"), (5800,"4.0"), (5900,"4.0"), (6000,"4.0"))
   }
-
-  it ("should remove dupes in RHS and stitch before joining") {
-
-    def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
-
-    val queryContext = QueryContext(plannerParams = PlannerParams(joinQueryCardLimit = 10)) // set join card limit to 1
-    val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
-      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
-      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
-      BinaryOperator.ADD,
-      Cardinality.OneToOne,
-      Nil, Nil, Nil, "__name__")
-
-    import NoCloseCursor._
-    val rhsRv = new RangeVector {
-      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
-      val rows: RangeVectorCursor = dataRows.take(20).iterator
-    }
-
-    val rhsRvDupe = new RangeVector {
-      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
-      val rows: RangeVectorCursor = dataRows.take(30).drop(20).iterator
-    }
-    val rhsRvDupe2 = new RangeVector {
-      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
-      val rows: RangeVectorCursor = dataRows.take(40).drop(30).iterator
-    }
-
-    val lhsRv = new RangeVector {
-      val key: RangeVectorKey = CustomRangeVectorKey(Map("tag".utf8 -> s"value1".utf8))
-      val rows: RangeVectorCursor = dataRows.take(40).iterator
-    }
-
-    val lhs = QueryResult("someId", null, Seq(lhsRv).map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, Seq(rhsRv, rhsRvDupe, rhsRvDupe2).map(rv => SerializedRangeVector(rv, schema)))
-
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
-      .toListL.runAsync.futureValue
-
-    result.size shouldEqual 1
-    result.head.key.labelValues shouldEqual Map("tag".utf8 -> s"value1".utf8)
-    result.head.rows().map(_.getLong(0)).toList shouldEqual (0L until 40).toList
-  }
-
 }

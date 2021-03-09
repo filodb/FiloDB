@@ -36,10 +36,11 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
 
   override def allTransformers: Seq[RangeVectorTransformer] = finalPlan.rangeVectorTransformers
 
-  var finalPlan: ExecPlan = _
+  @transient // dont serialize the SelectRawPartitionsExec plan created for plan execution
+  var finalPlan: SelectRawPartitionsExec = _
 
   private def finalizePlan(source: ChunkSource,
-                           querySession: QuerySession): ExecPlan = {
+                           querySession: QuerySession): SelectRawPartitionsExec = {
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     Kamon.currentSpan().mark("filtered-partition-scan")
     val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)

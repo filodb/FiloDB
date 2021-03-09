@@ -67,6 +67,7 @@ object Submodules {
     .settings(
       commonSettings,
       name := "filodb-cassandra",
+      baseDirectory in Test := file("."),   // since we have a config using FiloDB project root as relative path
       libraryDependencies ++= cassDeps
     )
 

@@ -1,6 +1,7 @@
 package filodb.core.memstore
 
 import java.nio.ByteBuffer
+import java.nio.charset.StandardCharsets
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -97,7 +98,8 @@ extends RawToPartitionMaker with StrictLogging {
       tsPart
     }.getOrElse {
       // This should never happen.  The code in OnDemandPagingShard pre-creates partitions before we ODP them.
-      throw new RuntimeException(s"Partition [${new String(rawPartition.partitionKey)}] not found, this is bad")
+      throw new RuntimeException(s"Partition [${new String(rawPartition.partitionKey, StandardCharsets.UTF_8)}] " +
+        s"not found, this is bad")
     }
   }
   //scalastyle:on

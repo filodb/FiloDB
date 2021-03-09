@@ -1,12 +1,13 @@
 package filodb.gateway.conversion
 
 import org.jboss.netty.buffer.ChannelBuffers
-
 import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema, StringifyMapItemConsumer}
 import filodb.core.metadata.Schemas
 import filodb.memory.MemFactory
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
+import java.nio.charset.StandardCharsets
 
 class InfluxRecordSpec extends AnyFunSpec with Matchers {
   // First one has app tag
@@ -26,7 +27,7 @@ class InfluxRecordSpec extends AnyFunSpec with Matchers {
 
   def convertToRecords(rawText: Seq[String]): Seq[Option[InfluxRecord]] = {
     rawText.map { line =>
-      buffer.writeBytes(line.getBytes())
+      buffer.writeBytes(line.getBytes(StandardCharsets.UTF_8))
       InfluxProtocolParser.parse(buffer)
     }
   }

@@ -1,5 +1,7 @@
 package filodb.core.metadata
 
+import java.nio.charset.StandardCharsets
+
 import scala.collection.JavaConverters._
 
 import com.typesafe.config.{Config, ConfigFactory, ConfigRenderOptions}
@@ -95,12 +97,12 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
   }
 
   val nonMetricShardColumns = shardKeyColumns.filterNot(_ == metricColumn).sorted
-  val nonMetricShardKeyBytes = nonMetricShardColumns.map(_.getBytes).toArray
+  val nonMetricShardKeyBytes = nonMetricShardColumns.map(_.getBytes(StandardCharsets.UTF_8)).toArray
   val nonMetricShardKeyUTF8 = nonMetricShardColumns.map(ZCUTF8.apply).toArray
   val nonMetricShardKeyHash = nonMetricShardKeyBytes.map(BinaryRegion.hash32)
   val ignorePartKeyHashTags = ignoreTagsOnPartitionKeyHash.toSet
 
-  val metricBytes = metricColumn.getBytes
+  val metricBytes = metricColumn.getBytes(StandardCharsets.UTF_8)
   val metricUTF8 = ZCUTF8(metricBytes)
   val metricHash = BinaryRegion.hash32(metricBytes)
 }

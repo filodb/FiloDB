@@ -1,11 +1,15 @@
 package filodb.coordinator.queryplanner
 
+import akka.actor.ActorSystem
+import akka.testkit.TestProbe
+import com.typesafe.config.ConfigFactory
+import filodb.coordinator.ShardMapper
+
 import scala.concurrent.duration._
-
 import monix.execution.Scheduler
-
-import filodb.core.DatasetRef
-import filodb.core.query.{QueryContext, QuerySession}
+import filodb.core.{DatasetRef, MetricsTestData}
+import filodb.core.metadata.Schemas
+import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.ChunkSource
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -47,6 +51,20 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
   private def disp = InProcessPlanDispatcher
   val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
                                                  earliestRawTime, latestDownsampleTime, disp)
+  implicit val system = ActorSystem()
+  val node = TestProbe().ref
+
+  val mapper = new ShardMapper(32)
+  val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000)
+  for { i <- 0 until 32 } mapper.registerNode(Seq(i), node)
+  def mapperRef = mapper
+
+  val dataset = MetricsTestData.timeseriesDataset
+  val dsRef = dataset.ref
+  val schemas = Schemas(dataset.schema)
+
+  val config = ConfigFactory.load("application_test.conf")
+  val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
 
   it("should direct raw-cluster-only queries to raw planner") {
     val logicalPlan = Parser.queryRangeToLogicalPlan("rate(foo[2m])",
@@ -221,5 +239,35 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
 
     rawEp.lp.isInstanceOf[BinaryJoin] shouldEqual(true)
     downsampleEp.lp.isInstanceOf[BinaryJoin] shouldEqual(true)
+  }
+
+  it("should direct overlapping binary join offset queries with vector(0) to both raw & downsample planner and stitch") {
+
+    val start = now/1000 - 5.minutes.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now/1000 - 2.minutes.toSeconds
+
+    val rawRetention = 10090.minutes
+    val downsampleRetention= 183.days
+
+    val earliestRawTime = now - rawRetention.toMillis
+    val earliestDownSampleTime = now - downsampleRetention.toMillis
+    val latestDownsampleTime = now - 12.hours.toMillis
+
+    val query ="""sum(rate(foo{job = "app"}[5m]) or vector(0)) - sum(rate(foo{job = "app"}[5m] offset 8d)) * 0.5"""
+    val logicalPlan = Parser.queryRangeToLogicalPlan(query,
+      TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan]
+
+    val rawPlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = earliestRawTime, queryConfig)
+    val downsamplePlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig)
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+      earliestRawTime, latestDownsampleTime, disp)
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
+    val stitchExec = ep.asInstanceOf[StitchRvsExec]
+    stitchExec.children.size shouldEqual 2
+    stitchExec.children(0).isInstanceOf[BinaryJoinExec] shouldEqual(true)
+    stitchExec.children(1).isInstanceOf[BinaryJoinExec] shouldEqual(true)
   }
 }

@@ -2,14 +2,11 @@ package filodb.cassandra.columnstore
 
 import java.lang.ref.Reference
 import java.nio.ByteBuffer
-
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
-
 import com.datastax.driver.core.Row
 import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
-
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.core._
@@ -19,6 +16,8 @@ import filodb.core.store.{ChunkSet, ChunkSetInfo, ColumnStoreSpec, PartKeyRecord
 import filodb.memory.{BinaryRegionLarge, NativeMemoryManager}
 import filodb.memory.format.{TupleRowReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
+
+import java.nio.charset.StandardCharsets
 
 class CassandraColumnStoreSpec extends ColumnStoreSpec {
   import NamesTestData._
@@ -66,20 +65,20 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     colStore.initialize(dataset, 1).futureValue
     colStore.truncate(dataset, 1).futureValue
 
-    val pks = (10000 to 30000).map(_.toString.getBytes)
+    val pks = (10000 to 30000).map(_.toString.getBytes(StandardCharsets.UTF_8))
                               .zipWithIndex.map { case (pk, i) => PartKeyRecord(pk, 5, 10, Some(i))}.toSet
 
     val updateHour = 10
     colStore.writePartKeys(dataset, 0, Observable.fromIterable(pks), 1.hour.toSeconds.toInt, 10, true )
       .futureValue shouldEqual Success
 
-    val expectedKeys = pks.map(pk => new String(pk.partKey).toInt)
+    val expectedKeys = pks.map(pk => new String(pk.partKey, StandardCharsets.UTF_8).toInt)
 
     val readData = colStore.getPartKeysByUpdateHour(dataset, 0, updateHour).toListL.runAsync.futureValue.toSet
-    readData.map(pk => new String(pk.partKey).toInt) shouldEqual expectedKeys
+    readData.map(pk => new String(pk.partKey, StandardCharsets.UTF_8).toInt) shouldEqual expectedKeys
 
     val readData2 = colStore.scanPartKeys(dataset, 0).toListL.runAsync.futureValue.toSet
-    readData2.map(pk => new String(pk.partKey).toInt) shouldEqual expectedKeys
+    readData2.map(pk => new String(pk.partKey, StandardCharsets.UTF_8).toInt) shouldEqual expectedKeys
 
     val numDeleted = colStore.deletePartKeys(dataset, 0,
       Observable.fromIterable(readData2.map(_.partKey))).futureValue
@@ -91,13 +90,18 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
 
   "copyOrDeleteChunksByIngestionTimeRange" should "actually work" in {
     val dataset = Dataset("source", Schemas.gauge)
-    val targetDataset = Dataset("target", Schemas.gauge)
 
     colStore.initialize(dataset.ref, 1).futureValue
     colStore.truncate(dataset.ref, 1).futureValue
 
-    colStore.initialize(targetDataset.ref, 1).futureValue
-    colStore.truncate(targetDataset.ref, 1).futureValue
+    val targetConfigPath = "spark-jobs/src/test/resources/timeseries-filodb-buddy-server.conf"
+    val targetConfig = ConfigFactory.parseFile(new java.io.File(targetConfigPath))
+      .getConfig("filodb").withFallback(GlobalConfig.systemConfig.getConfig("filodb"))
+    val targetSession = new DefaultFiloSessionProvider(targetConfig.getConfig("cassandra")).session
+    val targetColStore = new CassandraColumnStore(targetConfig, s, targetSession)
+
+    targetColStore.initialize(dataset.ref, 1).futureValue
+    targetColStore.truncate(dataset.ref, 1).futureValue
 
     val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8)
 
@@ -151,9 +155,9 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     expectChunks2 should have size (11)
 
     // Expect 0 chunk records in the target at this point.
-    var chunks1 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunksNoAsync(part1Bytes).all()
+    var chunks1 = targetColStore.getOrCreateChunkTable(dataset.ref).readAllChunksNoAsync(part1Bytes).all()
     chunks1 should have size (0)
-    var chunks2 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunksNoAsync(part2Bytes).all()
+    var chunks2 = targetColStore.getOrCreateChunkTable(dataset.ref).readAllChunksNoAsync(part2Bytes).all()
     chunks2 should have size (0)
 
     colStore.copyOrDeleteChunksByIngestionTimeRange(
@@ -162,8 +166,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
       startTimeMillis, // ingestionTimeStart
       timeMillis,      // ingestionTimeEnd
       7,         // batchSize
-      colStore,  // target
-      targetDataset.ref, // targetDatasetRef
+      targetColStore,  // target
       3600 * 24 * 10) // diskTimeToLiveSeconds
 
     // Verify the copy.
@@ -184,9 +187,9 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
       }
     }
 
-    chunks1 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunksNoAsync(part1Bytes).all()
+    chunks1 = targetColStore.getOrCreateChunkTable(dataset.ref).readAllChunksNoAsync(part1Bytes).all()
     checkRows(expectChunks1, chunks1)
-    chunks2 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunksNoAsync(part2Bytes).all()
+    chunks2 = targetColStore.getOrCreateChunkTable(dataset.ref).readAllChunksNoAsync(part2Bytes).all()
     checkRows(expectChunks2, chunks2)
 
     val expectIndex1 = colStore.getOrCreateIngestionTimeIndexTable(dataset.ref).readAllRowsNoAsync(part1Bytes).all()
@@ -194,9 +197,9 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     val expectIndex2 = colStore.getOrCreateIngestionTimeIndexTable(dataset.ref).readAllRowsNoAsync(part2Bytes).all()
     expectIndex2 should have size (11)
 
-    var index1 = colStore.getOrCreateIngestionTimeIndexTable(targetDataset.ref).readAllRowsNoAsync(part1Bytes).all()
+    var index1 = targetColStore.getOrCreateIngestionTimeIndexTable(dataset.ref).readAllRowsNoAsync(part1Bytes).all()
     checkRows(expectIndex1, index1)
-    var index2 = colStore.getOrCreateIngestionTimeIndexTable(targetDataset.ref).readAllRowsNoAsync(part2Bytes).all()
+    var index2 = targetColStore.getOrCreateIngestionTimeIndexTable(dataset.ref).readAllRowsNoAsync(part2Bytes).all()
     checkRows(expectIndex2, index2)
 
     // Now delete from the source.
@@ -207,18 +210,17 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
       startTimeMillis, // ingestionTimeStart
       timeMillis,      // ingestionTimeEnd
       7,         // batchSize
-      colStore,  // target
-      dataset.ref, // targetDatasetRef is the the source, to delete from it
+      targetColStore,  // target
       0) // diskTimeToLiveSeconds is 0, which means delete
 
-    chunks1 = colStore.getOrCreateChunkTable(dataset.ref).readAllChunksNoAsync(part1Bytes).all()
+    chunks1 = targetColStore.getOrCreateChunkTable(dataset.ref).readAllChunksNoAsync(part1Bytes).all()
     chunks1 should have size (0)
-    chunks2 = colStore.getOrCreateChunkTable(dataset.ref).readAllChunksNoAsync(part2Bytes).all()
+    chunks2 = targetColStore.getOrCreateChunkTable(dataset.ref).readAllChunksNoAsync(part2Bytes).all()
     chunks2 should have size (0)
 
-    index1 = colStore.getOrCreateIngestionTimeIndexTable(dataset.ref).readAllRowsNoAsync(part1Bytes).all()
+    index1 = targetColStore.getOrCreateIngestionTimeIndexTable(dataset.ref).readAllRowsNoAsync(part1Bytes).all()
     index1 should have size (0)
-    index2 = colStore.getOrCreateIngestionTimeIndexTable(dataset.ref).readAllRowsNoAsync(part2Bytes).all()
+    index2 = targetColStore.getOrCreateIngestionTimeIndexTable(dataset.ref).readAllRowsNoAsync(part2Bytes).all()
     index2 should have size (0)
   }
 
