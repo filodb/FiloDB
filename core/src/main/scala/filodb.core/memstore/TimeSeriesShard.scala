@@ -247,8 +247,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   import TimeSeriesShard._
 
   val shardStats = new TimeSeriesShardStats(ref, shardNum)
-  val shardKeyLevelIngestionMetricsEnabled = filodbConfig.getBoolean("shard-key-level-igestion-metrics-enabled")
-  val shardKeyLevelQueryMetricsEnabled = filodbConfig.getBoolean("shard-key-level-igestion-metrics-enabled")
+  val shardKeyLevelIngestionMetricsEnabled = filodbConfig.getBoolean("shard-key-level-ingestion-metrics-enabled")
+  val shardKeyLevelQueryMetricsEnabled = filodbConfig.getBoolean("shard-key-level-query-metrics-enabled")
 
   /**
     * Map of all partitions in the shard stored in memory, indexed by partition ID
