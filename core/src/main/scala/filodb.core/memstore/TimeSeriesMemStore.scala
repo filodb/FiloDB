@@ -43,6 +43,12 @@ extends MemStore with StrictLogging {
 
   def isDownsampleStore: Boolean = false
 
+  override def checkReadyForQuery(ref: DatasetRef, shard: Int): Unit = {
+    if (!getShardE(ref: DatasetRef, shard: Int).isReadyForQuery) {
+      throw new IllegalStateException(s"TSDB is not ready for query yet since shard=$shard is still bootstrapping.")
+    }
+  }
+
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
   def setup(ref: DatasetRef, schemas: Schemas, shard: Int, storeConf: StoreConfig,
             downsample: DownsampleConfig = DownsampleConfig.disabled): Unit = synchronized {
@@ -80,6 +86,7 @@ extends MemStore with StrictLogging {
   def refreshIndexForTesting(dataset: DatasetRef): Unit =
     datasets.get(dataset).foreach(_.values().asScala.foreach { s =>
       s.refreshPartKeyIndexBlocking()
+      s.isReadyForQuery = true
     })
 
   /**
@@ -110,6 +117,8 @@ extends MemStore with StrictLogging {
                    flushSched: Scheduler,
                    cancelTask: Task[Unit]): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
+    shard.isReadyForQuery = true
+    logger.info(s"Shard now ready for query dataset=$dataset shard=$shardNum")
     stream.flatMap {
       case d: SomeData =>
         // The write buffers for all partitions in a group are switched here, in line with ingestion

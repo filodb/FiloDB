@@ -86,9 +86,10 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
+    source.checkReadyForQuery(dataset, shard)
     finalPlan = finalizePlan(source, querySession)
     finalPlan.doExecute(source, querySession)(sched)
-   }
+  }
 
   protected def args: String = s"dataset=$dataset, shard=$shard, " +
                                s"chunkMethod=$chunkMethod, filters=$filters, colName=$colName, schema=$schema"

@@ -246,6 +246,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   import FiloSchedulers._
   import TimeSeriesShard._
 
+  @volatile var isReadyForQuery = false
+
   val shardStats = new TimeSeriesShardStats(ref, shardNum)
   val shardKeyLevelIngestionMetricsEnabled = filodbConfig.getBoolean("shard-key-level-ingestion-metrics-enabled")
   val shardKeyLevelQueryMetricsEnabled = filodbConfig.getBoolean("shard-key-level-query-metrics-enabled")

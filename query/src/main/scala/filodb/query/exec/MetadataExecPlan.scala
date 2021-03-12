@@ -112,6 +112,7 @@ final case class LabelValuesExec(queryContext: QueryContext,
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
+    source.checkReadyForQuery(dataset, shard)
     val parentSpan = Kamon.currentSpan()
     val rvs = if (source.isInstanceOf[MemStore]) {
       val memStore = source.asInstanceOf[MemStore]
