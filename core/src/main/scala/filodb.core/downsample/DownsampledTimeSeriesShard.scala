@@ -52,6 +52,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                  downsampleConfig: DownsampleConfig)
                                 (implicit val ioPool: ExecutionContext) extends StrictLogging {
 
+  @volatile var isReadyForQuery = false
   private val downsampleTtls = downsampleConfig.ttls
   private val downsampledDatasetRefs = downsampleConfig.downsampleDatasetRefs(rawDatasetRef.dataset)
 
@@ -120,6 +121,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         indexUpdatedHour.set(hour() - indexJobIntervalInHours - 1)
         startHousekeepingTask()
         startStatsUpdateTask()
+        logger.info(s"Shard now ready for query dataset=$indexDataset shard=$shardNum")
+        isReadyForQuery = true
       }.runAsync(housekeepingSched)
   }
 
