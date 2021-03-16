@@ -92,7 +92,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
         throw new ServiceUnavailableException(s"Unable to answer query since shard $shard is still bootstrapping")
       }
       querySession.resultCouldBePartial = true
-      querySession.partialResultsReason = Some("Partial results since some shards are still bootstrapping")
+      querySession.partialResultsReason = Some("Result may be partial since some shards are still bootstrapping")
     }
     finalPlan = finalizePlan(source, querySession)
     finalPlan.doExecute(source, querySession)(sched)

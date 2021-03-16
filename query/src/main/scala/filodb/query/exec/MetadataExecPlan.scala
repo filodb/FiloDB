@@ -116,7 +116,7 @@ final case class LabelValuesExec(queryContext: QueryContext,
         throw new ServiceUnavailableException(s"Unable to answer query since shard $shard is still bootstrapping")
       }
       querySession.resultCouldBePartial = true
-      querySession.partialResultsReason = Some("Partial results since some shards are still bootstrapping")
+      querySession.partialResultsReason = Some("Result may be partial since some shards are still bootstrapping")
     }
     val rvs = if (source.isInstanceOf[MemStore]) {
       val memStore = source.asInstanceOf[MemStore]
