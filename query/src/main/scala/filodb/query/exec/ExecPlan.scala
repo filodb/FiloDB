@@ -140,7 +140,7 @@ trait ExecPlan extends QueryCommand {
           querySession.partialResultsReason))
       } else {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
-          val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
+          val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult(querySession))
           (transf.apply(acc._1, querySession, queryContext.plannerParams.sampleLimit, acc._2,
             paramRangeVector), transf.schema(acc._2))
         }
@@ -302,7 +302,7 @@ abstract class LeafExecPlan extends ExecPlan {
   * getResult will get the ScalarRangeVector for the FuncArg
   */
 sealed trait FuncArgs {
-  def getResult (implicit sched: Scheduler) : Observable[ScalarRangeVector]
+  def getResult(querySession: QuerySession)(implicit sched: Scheduler) : Observable[ScalarRangeVector]
 }
 
 /**
@@ -310,20 +310,26 @@ sealed trait FuncArgs {
   */
 final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParams) extends FuncArgs {
 
-  override def getResult(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
+  override def getResult(querySession: QuerySession)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.fromTask(
       execPlan.dispatcher.dispatch(execPlan).onErrorHandle { case ex: Throwable =>
         QueryError(execPlan.queryContext.queryId, ex)
       }.map {
-        case QueryResult(_, _, result, _, _)  => // Result is empty because of NaN so create ScalarFixedDouble with NaN
-                                              if (result.isEmpty) {
-                                                ScalarFixedDouble(timeStepParams, Double.NaN)
-                                              } else {
-                                                result.head match {
-                                                  case f: ScalarFixedDouble   => f
-                                                  case s: ScalarVaryingDouble => s
-                                                }
-                                              }
+        case QueryResult(_, _, result, isPartialResult, partialResultReason)  =>
+                        // Result is empty because of NaN so create ScalarFixedDouble with NaN
+                      if (isPartialResult) {
+                        querySession.resultCouldBePartial = true
+                        querySession.partialResultsReason = partialResultReason
+                      }
+
+                      if (result.isEmpty) {
+                          ScalarFixedDouble(timeStepParams, Double.NaN)
+                        } else {
+                          result.head match {
+                            case f: ScalarFixedDouble   => f
+                            case s: ScalarVaryingDouble => s
+                          }
+                        }
         case QueryError(_, ex)          =>  throw ex
       })
   }
@@ -335,7 +341,7 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
   * FuncArgs for scalar parameter
   */
 final case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) extends FuncArgs {
-  override def getResult(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
+  override def getResult(querySession: QuerySession)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.now(ScalarFixedDouble(timeStepParams, scalar))
   }
 }
@@ -344,7 +350,7 @@ final case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) ext
   * FuncArgs for date and time functions
   */
 final case class TimeFuncArgs(timeStepParams: RangeParams) extends FuncArgs {
-  override def getResult(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
+  override def getResult(querySession: QuerySession)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.now(TimeScalar(timeStepParams))
   }
 }
@@ -411,7 +417,11 @@ abstract class NonLeafExecPlan extends ExecPlan {
       .doOnStart(_ => span.mark("first-child-result-received"))
       .doOnTerminate(_ => span.mark("last-child-result-received"))
       .collect {
-      case (res @ QueryResult(_, schema, _, _, _), i) if schema != ResultSchema.empty =>
+      case (res @ QueryResult(_, schema, _, isPartialResult, partialResultReason), i) if schema != ResultSchema.empty =>
+        if (isPartialResult) {
+          querySession.resultCouldBePartial = true
+          querySession.partialResultsReason = partialResultReason
+        }
         sch = reduceSchemas(sch, res)
         (res, i.toInt)
       case (e: QueryError, _) =>
