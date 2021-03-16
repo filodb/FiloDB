@@ -5,13 +5,14 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 
 import akka.actor.ActorRef
-import akka.pattern.ask
+import akka.pattern.{ask, AskTimeoutException}
 import akka.util.Timeout
 import monix.eval.Task
 import monix.execution.Scheduler
 
 import filodb.core.QueryTimeoutException
-import filodb.query.QueryResponse
+import filodb.core.query.ResultSchema
+import filodb.query.{Query, QueryResponse, QueryResult}
 
 /**
   * This trait externalizes distributed query execution strategy
@@ -39,6 +40,10 @@ case class ActorPlanDispatcher(target: ActorRef) extends PlanDispatcher {
       val fut = (target ? plan)(t).map {
         case resp: QueryResponse => resp
         case e =>  throw new IllegalStateException(s"Received bad response $e")
+      }.recover { // if partial results allowed, then return empty result
+        case e: AskTimeoutException if (plan.queryContext.plannerParams.partialResultsOk) =>
+            Query.qLogger.warn(s"Swallowed AskTimeoutException since partial result was enabled: ${e.getMessage}")
+            QueryResult(plan.queryContext.queryId, ResultSchema.empty, Nil, true, Some("Timeout on shards"))
       }
       Task.fromFuture(fut)
     }

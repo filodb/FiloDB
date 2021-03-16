@@ -52,7 +52,7 @@ object QueryResultType extends Enum[QueryResultType] {
 final case class QueryResult(id: String,
                              resultSchema: ResultSchema,
                              result: Seq[RangeVector],
-                             isPartialResult: Boolean = false,
+                             mayBePartial: Boolean = false,
                              partialResultReason: Option[String] = None) extends QueryResponse {
   def resultType: QueryResultType = {
     result match {
