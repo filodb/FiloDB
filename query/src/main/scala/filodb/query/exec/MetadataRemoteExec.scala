@@ -47,6 +47,6 @@ case class MetadataRemoteExec(queryEndpoint: String,
     val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, recordSchema,
                         queryWithPlanName(queryContext)))
 
-    QueryResult(id, resultSchema, srvSeq)
+    QueryResult(id, resultSchema, srvSeq, false, None) // TODO need to actually get isPartialResponse from http response
   }
 }

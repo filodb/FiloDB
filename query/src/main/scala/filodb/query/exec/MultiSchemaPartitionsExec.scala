@@ -8,6 +8,7 @@ import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QueryContext, QuerySession}
 import filodb.core.store._
 import filodb.query.Query.qLogger
+import filodb.query.ServiceUnavailableException
 
 final case class UnknownSchemaQueryErr(id: Int) extends
   Exception(s"Unknown schema ID $id during query.  This likely means a schema config change happened and " +
@@ -86,7 +87,13 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
-    source.checkReadyForQuery(dataset, shard)
+    if (!source.isReadyForQuery(dataset, shard)) {
+      if (!queryContext.plannerParams.partialResultsOk) {
+        throw new ServiceUnavailableException(s"Unable to answer query since shard $shard is still bootstrapping")
+      }
+      querySession.resultCouldBePartial = true
+      querySession.partialResultsReason = Some(s"Shard $shard still bootstrapping")
+    }
     finalPlan = finalizePlan(source, querySession)
     finalPlan.doExecute(source, querySession)(sched)
   }

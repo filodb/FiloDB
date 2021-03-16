@@ -68,11 +68,11 @@ final case class BinaryJoinExec(queryContext: QueryContext,
                               querySession: QuerySession): Observable[RangeVector] = {
     val span = Kamon.currentSpan()
     val taskOfResults = childResponses.map {
-      case (QueryResult(_, _, result), _)
+      case (QueryResult(_, _, result, _, _), _)
         if (result.size  > queryContext.plannerParams.joinQueryCardLimit && cardinality == Cardinality.OneToOne) =>
         throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.joinQueryCardLimit}"
           + s" join cardinality. Try applying more filters.")
-      case (QueryResult(_, _, result), i) => (result, i)
+      case (QueryResult(_, _, result, _, _), i) => (result, i)
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
       span.mark("binary-join-child-results-available")
@@ -199,9 +199,9 @@ final case class BinaryJoinExec(queryContext: QueryContext,
     */
   override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema = {
     resp match {
-      case QueryResult(_, schema, _) if rs == ResultSchema.empty =>
+      case QueryResult(_, schema, _, _, _) if rs == ResultSchema.empty =>
         schema     /// First schema, take as is
-      case QueryResult(_, schema, _) =>
+      case QueryResult(_, schema, _, _, _) =>
         if (!rs.hasSameColumnsAs(schema)) throw SchemaMismatch(rs.toString, schema.toString)
         else rs
     }

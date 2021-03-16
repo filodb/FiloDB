@@ -43,10 +43,8 @@ extends MemStore with StrictLogging {
 
   def isDownsampleStore: Boolean = false
 
-  override def checkReadyForQuery(ref: DatasetRef, shard: Int): Unit = {
-    if (!getShardE(ref: DatasetRef, shard: Int).isReadyForQuery) {
-      throw new IllegalStateException(s"TSDB is not ready for query yet since shard=$shard is still bootstrapping.")
-    }
+  override def isReadyForQuery(ref: DatasetRef, shard: Int): Boolean = {
+    getShardE(ref: DatasetRef, shard: Int).isReadyForQuery
   }
 
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.

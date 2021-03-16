@@ -1,6 +1,5 @@
 package filodb.query.exec
 
-import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -36,7 +35,7 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
-      case (QueryResult(_, _, result), _) => result
+      case (QueryResult(_, _, result, _, _), _) => result
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
       var metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
@@ -112,8 +111,13 @@ final case class LabelValuesExec(queryContext: QueryContext,
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
-    source.checkReadyForQuery(dataset, shard)
-    val parentSpan = Kamon.currentSpan()
+    if (!source.isReadyForQuery(dataset, shard)) {
+      if (!queryContext.plannerParams.partialResultsOk) {
+        throw new ServiceUnavailableException(s"Unable to answer query since shard $shard is still bootstrapping")
+      }
+      querySession.resultCouldBePartial = true
+      querySession.partialResultsReason = Some(s"Shard $shard still bootstrapping")
+    }
     val rvs = if (source.isInstanceOf[MemStore]) {
       val memStore = source.asInstanceOf[MemStore]
       val response = filters.isEmpty match {
