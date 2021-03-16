@@ -25,6 +25,8 @@ final case class QueryError(id: String, t: Throwable) extends QueryResponse with
   */
 class BadQueryException(message: String) extends RuntimeException(message)
 
+class ServiceUnavailableException(message: String) extends RuntimeException(message)
+
 case class RemoteQueryFailureException(statusCode: Int, requestStatus: String, errorType: String, errorMessage: String )
   extends RuntimeException {
   override def getMessage: String = {
@@ -49,7 +51,9 @@ object QueryResultType extends Enum[QueryResultType] {
 
 final case class QueryResult(id: String,
                              resultSchema: ResultSchema,
-                             result: Seq[RangeVector]) extends QueryResponse {
+                             result: Seq[RangeVector],
+                             isPartialResult: Boolean = false,
+                             partialResultReason: Option[String] = None) extends QueryResponse {
   def resultType: QueryResultType = {
     result match {
       case Nil => QueryResultType.RangeVectors

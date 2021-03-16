@@ -32,7 +32,8 @@ case class PlannerParams(applicationId: String = "filodb",
                         splitSizeMs: Long = 1.day.toMillis,
                         skipAggregatePresent: Boolean = false,
                         processFailure: Boolean = true,
-                        processMultiPartition: Boolean = false)
+                        processMultiPartition: Boolean = false,
+                        partialResultsOk: Boolean = false)
 object PlannerParams {
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): PlannerParams =
     PlannerParams(spreadOverride = constSpread, sampleLimit = sampleLimit)
@@ -84,7 +85,9 @@ object QueryContext {
   */
 case class QuerySession(qContext: QueryContext,
                         queryConfig: QueryConfig,
-                        var lock: Option[Lock] = None) {
+                        var lock: Option[Lock] = None,
+                        var resultCouldBePartial: Boolean = false,
+                        var partialResultsReason: Option[String] = None) {
   def close(): Unit = {
     lock.foreach(_.unlock())
     lock = None

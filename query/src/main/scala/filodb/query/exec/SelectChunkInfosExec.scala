@@ -8,6 +8,7 @@ import filodb.core.memstore.TimeSeriesShard
 import filodb.core.metadata.Column
 import filodb.core.query._
 import filodb.core.store._
+import filodb.query.ServiceUnavailableException
 
 object SelectChunkInfosExec {
   import Column.ColumnType._
@@ -42,7 +43,13 @@ final case class SelectChunkInfosExec(queryContext: QueryContext,
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
-    source.checkReadyForQuery(dataset, shard)
+    if (!source.isReadyForQuery(dataset, shard)) {
+      if (!queryContext.plannerParams.partialResultsOk) {
+        throw new ServiceUnavailableException(s"Unable to answer query since shard $shard is still bootstrapping")
+      }
+      querySession.resultCouldBePartial = true
+      querySession.partialResultsReason = Some(s"Shard $shard still bootstrapping")
+    }
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
 
