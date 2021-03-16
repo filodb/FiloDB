@@ -429,8 +429,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // cache caches results so that multiple subscribers can process
     }.cache
 
-    val outputSchema = processedTasks.collect { // collect schema of first result that is not partial
-      case (QueryResult(_, schema, _, false, _), _) => schema
+    val outputSchema = processedTasks.collect { // collect schema of first result that is nonEmpty
+      case (QueryResult(_, schema, _, _, _), _) if schema.colIDs.nonEmpty => schema
     }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
       // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {
