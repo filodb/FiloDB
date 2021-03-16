@@ -43,7 +43,8 @@ case class ActorPlanDispatcher(target: ActorRef) extends PlanDispatcher {
       }.recover { // if partial results allowed, then return empty result
         case e: AskTimeoutException if (plan.queryContext.plannerParams.allowPartialResults) =>
             Query.qLogger.warn(s"Swallowed AskTimeoutException since partial result was enabled: ${e.getMessage}")
-            QueryResult(plan.queryContext.queryId, ResultSchema.empty, Nil, true, Some("Timeout on shards"))
+            QueryResult(plan.queryContext.queryId, ResultSchema.empty, Nil, true,
+              Some("Partial result since query on some shards timed out"))
       }
       Task.fromFuture(fut)
     }

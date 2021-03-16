@@ -48,7 +48,7 @@ final case class SelectChunkInfosExec(queryContext: QueryContext,
         throw new ServiceUnavailableException(s"Unable to answer query since shard $shard is still bootstrapping")
       }
       querySession.resultCouldBePartial = true
-      querySession.partialResultsReason = Some(s"Shard $shard still bootstrapping")
+      querySession.partialResultsReason = Some("Partial results since some shards are still bootstrapping")
     }
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
