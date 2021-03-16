@@ -112,7 +112,7 @@ final case class LabelValuesExec(queryContext: QueryContext,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
     if (!source.isReadyForQuery(dataset, shard)) {
-      if (!queryContext.plannerParams.partialResultsOk) {
+      if (!queryContext.plannerParams.allowPartialResults) {
         throw new ServiceUnavailableException(s"Unable to answer query since shard $shard is still bootstrapping")
       }
       querySession.resultCouldBePartial = true
