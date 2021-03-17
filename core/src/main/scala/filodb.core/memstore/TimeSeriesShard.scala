@@ -247,8 +247,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   import TimeSeriesShard._
 
   val shardStats = new TimeSeriesShardStats(ref, shardNum)
-  val shardKeyLevelIngestionMetricsEnabled = filodbConfig.getBoolean("shard-key-level-igestion-metrics-enabled")
-  val shardKeyLevelQueryMetricsEnabled = filodbConfig.getBoolean("shard-key-level-igestion-metrics-enabled")
+  val shardKeyLevelIngestionMetricsEnabled = filodbConfig.getBoolean("shard-key-level-ingestion-metrics-enabled")
+  val shardKeyLevelQueryMetricsEnabled = filodbConfig.getBoolean("shard-key-level-query-metrics-enabled")
 
   /**
     * Map of all partitions in the shard stored in memory, indexed by partition ID
@@ -810,9 +810,10 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private def purgeExpiredPartitions(): Unit = ingestSched.executeTrampolined { () =>
     assertThreadName(IngestSchedName)
+    // TODO Much of the purging work other of removing TSP from shard data structures can be done
+    // asynchronously on another thread. No need to block ingestion thread for this.
     val start = System.currentTimeMillis()
     val partsToPurge = partKeyIndex.partIdsEndedBefore(start - storeConfig.demandPagedRetentionPeriod.toMillis)
-    var numDeleted = 0
     val removedParts = debox.Buffer.empty[Int]
     val partIter = InMemPartitionIterator2(partsToPurge)
     partIter.foreach { p =>
@@ -827,15 +828,27 @@ class TimeSeriesShard(val ref: DatasetRef,
         }
         removePartition(p)
         removedParts += p.partID
-        numDeleted += 1
+      }
+    }
+    partIter.skippedPartIDs.foreach { pId =>
+      partKeyIndex.partKeyFromPartId(pId).foreach { pk =>
+        val unsafePkOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(pk.offset)
+        val schema = schemas(RecordSchema.schemaID(pk.bytes, unsafePkOffset))
+        val shardKey = schema.partKeySchema.colValues(pk.bytes, unsafePkOffset,
+          schemas.part.options.shardKeyColumns)
+        if (storeConfig.meteringEnabled) {
+          cardTracker.decrementCount(shardKey)
+        }
+        captureTimeseriesCount(schema, shardKey, -1)
       }
     }
     partKeyIndex.removePartKeys(partIter.skippedPartIDs)
     partKeyIndex.removePartKeys(removedParts)
-    if (numDeleted > 0) logger.info(s"Purged $numDeleted partitions from memory/index " +
-      s"and ${partIter.skippedPartIDs.len} from index only from dataset=$ref shard=$shardNum")
-    shardStats.purgedPartitions.increment(numDeleted)
-    shardStats.purgedPartitionsFromIndex.increment(removedParts.len + partIter.skippedPartIDs.len)
+    if (removedParts.length + partIter.skippedPartIDs.length > 0)
+      logger.info(s"Purged ${removedParts.length} partitions from memory/index " +
+        s"and ${partIter.skippedPartIDs.length} from index only from dataset=$ref shard=$shardNum")
+    shardStats.purgedPartitions.increment(removedParts.length)
+    shardStats.purgedPartitionsFromIndex.increment(removedParts.length + partIter.skippedPartIDs.length)
     shardStats.purgePartitionTimeMs.increment(System.currentTimeMillis() - start)
   }
 

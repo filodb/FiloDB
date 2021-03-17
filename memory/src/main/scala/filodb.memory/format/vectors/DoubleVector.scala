@@ -322,7 +322,8 @@ extends DoubleVectorDataReader {
     val it = iterate(acc, vect, 0)
     var last = Double.MinValue
     cforRange { 0 until len } { pos =>
-      val nextVal = it.next
+      var nextVal = it.next
+      if (nextVal.isNaN) nextVal = 0  // explicit counter reset due to end of time series marker
       if (nextVal < last) {   // reset!
         _correction += last
         _drops += pos
@@ -442,8 +443,10 @@ class DoubleCounterAppender(addr: BinaryRegion.NativePointer, maxBytes: Int, dis
 extends DoubleAppendingVector(addr, maxBytes, dispose) {
   private var last = Double.MinValue
   override final def addData(data: Double): AddResponse = {
-    if (data < last) PrimitiveVectorReader.markDrop(MemoryAccessor.nativePtrAccessor, addr)
-    last = data
+    if (!data.isNaN && data < last)
+      PrimitiveVectorReader.markDrop(MemoryAccessor.nativePtrAccessor, addr)
+    if (!data.isNaN)
+      last = data
     super.addData(data)
   }
 

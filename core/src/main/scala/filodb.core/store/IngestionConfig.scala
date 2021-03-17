@@ -107,7 +107,7 @@ object StoreConfig {
                                            |evicted-pk-bloom-filter-capacity = 5000000
                                            |ensure-headroom-percent = 5.0
                                            |trace-filters = {}
-                                           |metering-enabled = false
+                                           |metering-enabled = true
                                            |accept-duplicate-samples = false
                                            |time-aligned-chunks-enabled = false
                                            |ingest-resolution-millis = 60000

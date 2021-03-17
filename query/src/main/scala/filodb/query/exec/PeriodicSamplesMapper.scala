@@ -444,7 +444,8 @@ class BufferableCounterCorrectionIterator(iter: Iterator[RowReader]) extends Ite
   override def hasNext: Boolean = iter.hasNext
   override def next(): TransientRow = {
     val next = iter.next()
-    val nextVal = next.getDouble(1)
+    var nextVal = next.getDouble(1)
+    if (nextVal.isNaN) nextVal = 0 // explicit counter reset due to end of time series marker
     if (nextVal < prevVal) {
       correction += prevVal
     }
