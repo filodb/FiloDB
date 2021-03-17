@@ -267,7 +267,8 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
     val stitchExec = ep.asInstanceOf[StitchRvsExec]
     stitchExec.children.size shouldEqual 2
-    stitchExec.children(0).isInstanceOf[BinaryJoinExec] shouldEqual(true)
+    // Raw cluster does not have data for offset 8 days
+    stitchExec.children(0).isInstanceOf[EmptyResultExec] shouldEqual(true)
     stitchExec.children(1).isInstanceOf[BinaryJoinExec] shouldEqual(true)
   }
 }
