@@ -215,7 +215,7 @@ trait Functions extends Base with Operators with Vectors {
       otherParams: Seq[FunctionArgsPlan]
     ) : PeriodicSeriesPlan = {
       val subqueriesPlan = sq.toSeriesPlan(timeParams)
-      RangeFunctionPlan(rangeFunctionId, subqueriesPlan, timeParams.start, timeParams.step, timeParams.end)
+      RangeFunctionPlan(rangeFunctionId, otherParams, subqueriesPlan, timeParams.start, timeParams.step, timeParams.end)
     }
 
   }

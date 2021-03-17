@@ -214,6 +214,7 @@ case class Subquery(
 
 case class RangeFunctionPlan(
   rangeFunctionId: RangeFunctionId,
+  functionArgs: Seq[FunctionArgsPlan],
   nestedPlan: LogicalPlan,
   startMs: Long,
   stepMs: Long,

@@ -193,6 +193,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       case lp: ScalarFixedDoublePlan       => materializeFixedScalar(qContext, lp)
       case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
       case lp: ScalarBinaryOperation       => materializeScalarBinaryOperation(qContext, lp)
+      case lp: RangeFunctionPlan           => materializeRangeFunctionPlan(qContext, lp)
       case _                               => throw new BadQueryException("Invalid logical plan")
     }
   }
@@ -288,6 +289,20 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     } else { // query is outside retention period, simply return empty result
       PlanResult(Seq(EmptyResultExec(qContext, dsRef)))
     }
+  }
+
+  private def materializeRangeFunctionPlan(
+    qContext: QueryContext,
+    lp: RangeFunctionPlan
+  ): PlanResult = {
+    val series = walkLogicalPlanTree(lp.nestedPlan, qContext)
+    // why do I care. if isRaw - then we useChunked, otherwise iterator
+    val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.rangeFunctionId)
+    val paramsExec = materializeFunctionArgs(lp.functionArgs, qContext)
+    series.plans.foreach(_.addRangeVectorTransformer(RangeFunctionMapper(
+      execRangeFn, qContext, paramsExec
+    )))
+    series
   }
 
   private def materializePeriodicSeries(qContext: QueryContext,
