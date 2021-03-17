@@ -96,20 +96,20 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       else (timeSplitEnabled, minTimeRangeForSplitMs, splitSizeMs)
 
       if (shardMapperFunc.numShards <= 0) throw new IllegalStateException("No shards available")
-      val logicalPlans = if (logicalPlan.isInstanceOf[PeriodicSeriesPlan])
-        LogicalPlanUtils.splitPlans(logicalPlan, qContext, timeSplitConfig._1,
+      val logicalPlans = if (updatedPlan.get.isInstanceOf[PeriodicSeriesPlan])
+        LogicalPlanUtils.splitPlans(updatedPlan.get, qContext, timeSplitConfig._1,
           timeSplitConfig._2, timeSplitConfig._3)
       else
         Seq(logicalPlan)
       val materialized = logicalPlans match {
         case Seq(one) => materializeTimeSplitPlan(one, qContext)
         case many =>
-          val meterializedPlans = many.map(materializeTimeSplitPlan(_, qContext))
-          val targetActor = pickDispatcher(meterializedPlans)
+          val materializedPlans = many.map(materializeTimeSplitPlan(_, qContext))
+          val targetActor = pickDispatcher(materializedPlans)
 
           // create SplitLocalPartitionDistConcatExec that will execute child execplanss sequentially and stitches
           // results back with StitchRvsMapper transformer.
-          val stitchPlan = SplitLocalPartitionDistConcatExec(qContext, targetActor, meterializedPlans)
+          val stitchPlan = SplitLocalPartitionDistConcatExec(qContext, targetActor, materializedPlans)
           stitchPlan
       }
       logger.debug(s"Materialized logical plan for dataset=$dsRef :" +
