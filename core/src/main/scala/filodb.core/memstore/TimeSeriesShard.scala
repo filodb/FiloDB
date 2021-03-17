@@ -573,6 +573,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   def recoverIndex(): Future[Unit] = {
     val indexBootstrapper = new IndexBootstrapper(colStore)
     indexBootstrapper.bootstrapIndex(partKeyIndex, shardNum, ref)(bootstrapPartKey)
+                     .executeOn(ingestSched) // to make sure bootstrapIndex task is run on ingestion thread
                      .map { count =>
                         startFlushingIndex()
                        logger.info(s"Bootstrapped index for dataset=$ref shard=$shardNum with $count records")
