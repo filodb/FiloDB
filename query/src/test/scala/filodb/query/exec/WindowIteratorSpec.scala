@@ -252,7 +252,35 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     chunkedIt.foreach { v =>
       windowResults.find(a => a._1 == v.getLong(0)).foreach(b => v.getDouble(1) shouldEqual b._2 +- 0.0000000001)
     }
+  }
 
+  it("should deal with NaN end of time series marker during counter correction") {
+    val samples = Seq(
+      1614821996000L -> Double.NaN,
+      1614821996100L -> 489.0,
+      1614821997000L -> Double.NaN,
+      1614822566000L -> 19.0,
+      1614822596000L -> 26.0,
+      1614822626000L -> 26.0,
+      1614822656000L -> 26.0,
+      1614822686000L -> 26.0,
+      1614822716000L -> 26.0,
+      1614822717000L -> Double.NaN,
+      1614822866000L -> 5.0
+    )
+    val rawRows = samples.map(s => new TransientRow(s._1, s._2))
+    import filodb.core.query.NoCloseCursor._
+    val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 1614822880000L, 15000, 1614822880000L, 900000L,
+      RangeFunction(tsResSchema,
+        Some(InternalRangeFunction.Rate), ColumnType.DoubleColumn, queryConfig,
+        useChunked = false).asSliding, queryConfig)
+      slidingWinIterator.next().getDouble(1) shouldEqual 0.5870753512132821
+
+    val rv = timeValueRVPk(samples)
+    val chunkedIt = new ChunkedWindowIteratorD(rv, 1614822880000L, 15000, 1614822880000L, 900000L,
+      RangeFunction(tsResSchema,
+        Some(Rate), ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, querySession)
+    chunkedIt.next().getDouble(1) shouldEqual 0.5870753512132821
   }
 
   it("should calculate the rate for instant queries where step is 0") {
