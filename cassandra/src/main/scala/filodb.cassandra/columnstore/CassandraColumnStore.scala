@@ -61,6 +61,8 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   logger.info(s"Starting CassandraColumnStore with config ${cassandraConfig.withoutPath("password")}")
 
   private val writeParallelism = cassandraConfig.getInt("write-parallelism")
+  private val indexScanParallelismPerShard =
+    Math.min(cassandraConfig.getInt("index-scan-parallelism-per-shard"), Runtime.getRuntime.availableProcessors())
   private val pkByUTNumSplits = cassandraConfig.getInt("pk-by-updated-time-table-num-splits")
   private val pkByUTTtlSeconds = cassandraConfig.getDuration("pk-by-updated-time-table-ttl", TimeUnit.SECONDS).toInt
   private val createTablesEnabled = cassandraConfig.getBoolean("create-tables-enabled")
@@ -424,7 +426,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord] = {
     val table = getOrCreatePartitionKeysTable(ref, shard)
     Observable.fromIterable(getScanSplits(ref)).flatMap { tokenRange =>
-      table.scanPartKeys(tokenRange.asInstanceOf[CassandraTokenRangeSplit].tokens, shard)
+      table.scanPartKeys(tokenRange.asInstanceOf[CassandraTokenRangeSplit].tokens, indexScanParallelismPerShard)
     }
   }
 
