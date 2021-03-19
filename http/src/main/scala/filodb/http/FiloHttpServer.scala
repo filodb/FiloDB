@@ -54,10 +54,14 @@ class FiloHttpServer(actorSystem: ActorSystem, filoSettings: FilodbSettings) ext
                                            new ClusterApiRoute(clusterProxy),
                                            new HealthRoute(coordinatorRef),
                                            new PrometheusApiRoute(coordinatorRef, settings))
+
+    // Load runtime api routes from class names.
+    // The class should implement filodb.http.FiloRoute
+    // and contain an empty constructor.
     val runtimeRoutes = settings.httpRuntimeApiRoutes.asScala.map {
       Class.forName(_)
-        .getConstructor(classOf[FilodbSettings])
-        .newInstance(filoSettings)
+        .getConstructor()
+        .newInstance()
         .asInstanceOf[FiloRoute]
     }
     val filoRoutes = defaultRoutes ++ runtimeRoutes
