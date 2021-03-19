@@ -27,6 +27,8 @@ import filodb.memory.format.ZeroCopyUTF8String._
 class DownsampledTimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
 
+  val shardTotalRecoveryTime = Kamon.gauge("downsample-total-shard-recovery-time",
+    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
   val partitionsQueried = Kamon.counter("downsample-partitions-queried").withTags(TagSet.from(tags))
   val chunksQueried = Kamon.counter("downsample-chunks-queried").withTags(TagSet.from(tags))
   val queryTimeRangeMins = Kamon.histogram("query-time-range-minutes").withTags(TagSet.from(tags))
@@ -52,7 +54,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                  downsampleConfig: DownsampleConfig)
                                 (implicit val ioPool: ExecutionContext) extends StrictLogging {
 
+  val creationTime = System.currentTimeMillis()
   @volatile var isReadyForQuery = false
+
   private val downsampleTtls = downsampleConfig.ttls
   private val downsampledDatasetRefs = downsampleConfig.downsampleDatasetRefs(rawDatasetRef.dataset)
 
@@ -119,6 +123,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         // Hence indexUpdatedHour should be: currentHour - 6
         val indexJobIntervalInHours = (downsampleStoreConfig.maxChunkTime.toMinutes + 59) / 60 // for ceil division
         indexUpdatedHour.set(hour() - indexJobIntervalInHours - 1)
+        stats.shardTotalRecoveryTime.update(System.currentTimeMillis() - creationTime)
         startHousekeepingTask()
         startStatsUpdateTask()
         logger.info(s"Shard now ready for query dataset=$indexDataset shard=$shardNum")

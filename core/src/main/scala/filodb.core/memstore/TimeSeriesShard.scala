@@ -40,6 +40,8 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
 
   val timeseriesCount = Kamon.gauge("memstore-timeseries-count")
+  val shardTotalRecoveryTime = Kamon.gauge("memstore-total-shard-recovery-time",
+    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
   val chunksQueried = Kamon.counter("memstore-chunks-queried").withTags(TagSet.from(tags))
   val chunksQueriedByShardKey = Kamon.counter("memstore-chunks-queried-by-shardkey")
   val tsCountBySchema = Kamon.gauge("memstore-timeseries-by-schema").withTags(TagSet.from(tags))
@@ -251,6 +253,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   val shardStats = new TimeSeriesShardStats(ref, shardNum)
   val shardKeyLevelIngestionMetricsEnabled = filodbConfig.getBoolean("shard-key-level-ingestion-metrics-enabled")
   val shardKeyLevelQueryMetricsEnabled = filodbConfig.getBoolean("shard-key-level-query-metrics-enabled")
+
+  val creationTime = System.currentTimeMillis()
 
   /**
     * Map of all partitions in the shard stored in memory, indexed by partition ID

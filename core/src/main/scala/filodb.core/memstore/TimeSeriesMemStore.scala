@@ -117,6 +117,7 @@ extends MemStore with StrictLogging {
     val shard = getShardE(dataset, shardNum)
     shard.isReadyForQuery = true
     logger.info(s"Shard now ready for query dataset=$dataset shard=$shardNum")
+    shard.shardStats.shardTotalRecoveryTime.update(System.currentTimeMillis() - shard.creationTime)
     stream.flatMap {
       case d: SomeData =>
         // The write buffers for all partitions in a group are switched here, in line with ingestion
