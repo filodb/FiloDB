@@ -133,6 +133,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
    * @param flushIntervalMillis flush-interval in milliseconds
    * @param acceptDuplicateSamples accept duplicate samples
    */
+  // scalastyle:off method.length
   def ingest(ingestionTime: Long, row: RowReader, overflowBlockHolder: BlockMemFactory,
              createChunkAtFlushBoundary: Boolean, flushIntervalMillis: Option[Long],
              acceptDuplicateSamples: Boolean,
@@ -156,7 +157,9 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
           createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
       } else {
         cforRange { 0 until schema.numDataColumns } { col =>
-          currentChunks(col).addFromReaderNoNA(row, col) match {
+          chunkmapWithExclusive { // acquire write lock to ensure readers don't read partial data
+            currentChunks(col).addFromReaderNoNA(row, col)
+          } match {
             case r: VectorTooSmall =>
               switchBuffersAndIngest(ingestionTime, ts, row, overflowBlockHolder,
                 createChunkAtFlushBoundary, flushIntervalMillis, acceptDuplicateSamples, maxChunkTime)
