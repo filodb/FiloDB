@@ -49,7 +49,7 @@ object ChunkMap extends StrictLogging {
     classOf[ChunkMap].getDeclaredField("lockState"))
 
   private val InitialExclusiveRetryTimeoutNanos = 1.millisecond.toNanos
-  private val MaxExclusiveRetryTimeoutNanos = 1.minute.toNanos
+  private val MaxExclusiveRetryTimeoutNanos = 10.minute.toNanos
 
   private val exclusiveLockWait = Kamon.counter("memory-exclusive-lock-waits").withoutTags
   private val sharedLockLingering = Kamon.counter("memory-shared-lock-lingering").withoutTags
