@@ -57,4 +57,8 @@ trait TimeUnits {
 
   case class Offset(duration: Duration)
 
+  case class SimpleLookback(duration: Duration)
+
+  case class SubqueryClause(window: Duration, step: Option[Duration])
+
 }

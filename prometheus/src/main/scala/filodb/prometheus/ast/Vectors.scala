@@ -91,6 +91,10 @@ trait Vectors extends Scalars with TimeUnits with Base {
     }
   }
 
+  case class SubqueryExpression(subquery: PeriodicSeries, sqcl: SubqueryClause) extends Expression with PeriodicSeries {
+    def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = ???
+  }
+
   sealed trait Vector extends Expression {
     def metricName: Option[String]
     def labelSelection: Seq[LabelMatch]
