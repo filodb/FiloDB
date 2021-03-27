@@ -56,7 +56,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   private val downsampledDatasetRefs = downsampleConfig.downsampleDatasetRefs(rawDatasetRef.dataset)
 
   private val indexDataset = downsampledDatasetRefs.last
-  private val indexTtl = downsampleTtls.last
+  private val indexTtlMs = downsampleTtls.last.toMillis
 
   private val downsampleStoreConfig = StoreConfig(filodbConfig.getConfig("downsampler.downsample-store-config"))
 
@@ -64,7 +64,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   private val stats = new DownsampledTimeSeriesShardStats(rawDatasetRef, shardNum)
 
-  private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, shardNum, indexTtl)
+  private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, shardNum, indexTtlMs)
 
   private val indexUpdatedHour = new AtomicLong(0)
 
