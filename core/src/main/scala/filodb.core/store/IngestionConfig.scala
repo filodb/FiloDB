@@ -86,7 +86,6 @@ object StoreConfig {
 
   val defaults = ConfigFactory.parseString("""
                                            |disk-time-to-live = 3 days
-                                           |ingestion-time-index-retention = 7 days
                                            |max-chunks-size = 400
                                            |max-data-per-shard-query = 300 MB
                                            |max-blob-buffer-size = 15000
