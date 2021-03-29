@@ -51,6 +51,8 @@ trait Aggregates extends Vectors with TimeUnits with Base {
           parameter = Seq(num.toScalar)
         case s: InstantExpression =>
           parameter = Seq(s.metricName.get)
+        case literal: StringLiteral =>
+          parameter = Seq(literal.str)
         case _ =>
           throw new IllegalArgumentException("First parameter to aggregate operator can be a string or number")
       }

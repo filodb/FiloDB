@@ -55,4 +55,8 @@ trait Base {
     */
   case class Identifier(str: String) extends Expression
 
+  /**
+    * A literal is quoted string originally, but the quotes are removed by the parser.
+    */
+  case class StringLiteral(str: String) extends Expression
 }

@@ -134,6 +134,7 @@ object RowAggregator {
       case Quantile => new QuantileRowAggregator(params(0).asInstanceOf[Double])
       case Stdvar   => StdvarRowAggregator
       case Stddev   => StddevRowAggregator
+        // FIXME: Shouldn't be stripping off quotes when using the Antlr-based parser.
       case CountValues => new CountValuesRowAggregator(params(0).asInstanceOf[String].replaceAll("^\"|\"$", ""))
       case _     => ???
     }

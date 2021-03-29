@@ -171,7 +171,7 @@ TIME_RANGE
     ;
 
 // The special 'i' form is for "Step Multiple Notation for PromQL Lookback (#821)"
-DURATION: [1-9] [0-9]* ('s' | 'm' | 'h' | 'd' | 'w' | 'y' | 'i');
+DURATION: NUMBER ('s' | 'm' | 'h' | 'd' | 'w' | 'y' | 'i');
 
 // Used for functions, labels, and metric names.
 IDENTIFIER:      [a-zA-Z_]+;

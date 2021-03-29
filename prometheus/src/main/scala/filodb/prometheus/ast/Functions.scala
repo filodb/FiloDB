@@ -112,6 +112,7 @@ trait Functions extends Base with Operators with Vectors {
         val otherParams: Seq[FunctionArgsPlan] =
           allParams.filter(!_.equals(seriesParam))
                    .filter(!_.isInstanceOf[InstantExpression])
+                   .filter(!_.isInstanceOf[StringLiteral])
                    .map {
                      case num: ScalarExpression =>
                        val params = RangeParams(timeParams.start, timeParams.step, timeParams.end)
@@ -151,6 +152,7 @@ trait Functions extends Base with Operators with Vectors {
       // Get parameters other than  series like label names. Parameters can be quoted so remove special characters
       val stringParam = allParams.filter(!_.equals(seriesParam)).collect {
         case e: InstantExpression => e.realMetricName.replaceAll("^\"|\"$", "")
+        case s: StringLiteral     => s.str
       }
 
       if (miscellaneousFunctionIdOpt.isDefined) {

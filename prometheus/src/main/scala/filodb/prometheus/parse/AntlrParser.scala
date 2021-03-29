@@ -9,7 +9,9 @@ import org.antlr.v4.runtime.tree.{ParseTree, TerminalNode}
 
 import filodb.prometheus.antlr.{PromQLLexer, PromQLParser, PromQLBaseVisitor}
 
-import filodb.prometheus.ast.{Base, Expressions, Vectors}
+import filodb.prometheus.ast.{Base, Expressions, TimeStepParams, TimeRangeParams, Vectors}
+
+import filodb.query.LogicalPlan
 
 /**
   * Bridges the gap between the auto-generated Antlr classes the FiloDB AST classes.
@@ -63,6 +65,24 @@ object AntlrParser extends Base {
     throw new IllegalArgumentException(msg)
   }
 
+  // Copied from Parser.
+  def queryToLogicalPlan(query: String, queryTimestamp: Long, step: Long): LogicalPlan = {
+    // Remember step matters here in instant query, when lookback is provided in step factor
+    // notation as in [5i]
+    val defaultQueryParams = TimeStepParams(queryTimestamp, step, queryTimestamp)
+    queryRangeToLogicalPlan(query, defaultQueryParams)
+  }
+
+  // Copied from Parser.
+  def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
+    val expression = parseQuery(query)
+    expression match {
+      case p: PeriodicSeries => p.toSeriesPlan(timeParams)
+      case r: SimpleSeries   => r.toSeriesPlan(timeParams, isRoot = true)
+      case _ => throw new UnsupportedOperationException()
+    }
+  }
+
   // FIXME: Need a better way of capturing cast failures and converting to IllegalArgumentexception
   def cast[T](obj: Object): T = {
     return obj.asInstanceOf[T]
@@ -99,6 +119,10 @@ class AntlrParser extends PromQLBaseVisitor[Object] with Expressions with Vector
       case PromQLParser.ADD => Add
       case PromQLParser.SUB => Sub
     }
+  }
+
+  override def visitPowOp(ctx: PromQLParser.PowOpContext): ArithmeticOp = {
+    Pow
   }
 
   override def visitMultOp(ctx: PromQLParser.MultOpContext): ArithmeticOp = {
@@ -222,7 +246,6 @@ class AntlrParser extends PromQLBaseVisitor[Object] with Expressions with Vector
       None
     }
 
-    // FIXME: altFunctionParams: Seq[Expression]
     AggregateExpression(name, params, grouping, Seq.empty)
   }
 
@@ -287,8 +310,7 @@ class AntlrParser extends PromQLBaseVisitor[Object] with Expressions with Vector
     if (num != null) {
       Scalar(java.lang.Double.parseDouble(num.getSymbol().getText()))
     } else {
-      // FIXME InstantExpression? There's no good string literal class!
-      Identifier(dequote(ctx.STRING()))
+      StringLiteral(dequote(ctx.STRING()))
     }
   }
 
