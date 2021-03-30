@@ -12,7 +12,6 @@ import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
-import filodb.query.Query.qLogger
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 
 /**
