@@ -266,7 +266,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Maintained using a high-performance bitmap index.
     */
   private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, shardNum,
-    storeConfig.demandPagedRetentionPeriod)
+    storeConfig.diskTTLSeconds * 1000)
 
   private val cardTracker: CardinalityTracker = if (storeConfig.meteringEnabled) {
     // FIXME switch this to some local-disk based store when we graduate out of POC mode
@@ -334,7 +334,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private val blockMemorySize = storeConfig.shardMemSize
   protected val numGroups = storeConfig.groupsPerShard
-  private val chunkRetentionHours = (storeConfig.demandPagedRetentionPeriod.toSeconds / 3600).toInt
+  private val chunkRetentionHours = (storeConfig.diskTTLSeconds / 3600).toInt
   val pagingEnabled = storeConfig.demandPagingEnabled
 
   /**
@@ -814,7 +814,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     // TODO Much of the purging work other of removing TSP from shard data structures can be done
     // asynchronously on another thread. No need to block ingestion thread for this.
     val start = System.currentTimeMillis()
-    val partsToPurge = partKeyIndex.partIdsEndedBefore(start - storeConfig.demandPagedRetentionPeriod.toMillis)
+    val partsToPurge = partKeyIndex.partIdsEndedBefore(start - storeConfig.diskTTLSeconds * 1000)
     val removedParts = debox.Buffer.empty[Int]
     val partIter = InMemPartitionIterator2(partsToPurge)
     partIter.foreach { p =>

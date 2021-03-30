@@ -12,7 +12,6 @@ import filodb.core.downsample.DownsampleConfig
 final case class StoreConfig(flushInterval: FiniteDuration,
                              timeAlignedChunksEnabled: Boolean,
                              diskTTLSeconds: Int,
-                             demandPagedRetentionPeriod: FiniteDuration,
                              maxChunksSize: Int,
                              // Max write buffer size for Histograms, UTF8Strings, other blobs
                              maxBlobBufferSize: Int,
@@ -49,7 +48,6 @@ final case class StoreConfig(flushInterval: FiniteDuration,
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
                                "time-aligned-chunks-enabled" -> timeAlignedChunksEnabled,
                                "disk-time-to-live" -> (diskTTLSeconds + "s"),
-                               "demand-paged-chunk-retention-period" -> (demandPagedRetentionPeriod.toSeconds + "s"),
                                "max-chunks-size" -> maxChunksSize,
                                "max-blob-buffer-size" -> maxBlobBufferSize,
                                "shard-mem-size" -> shardMemSize,
@@ -88,7 +86,6 @@ object StoreConfig {
 
   val defaults = ConfigFactory.parseString("""
                                            |disk-time-to-live = 3 days
-                                           |demand-paged-chunk-retention-period = 72 hours
                                            |max-chunks-size = 400
                                            |max-data-per-shard-query = 300 MB
                                            |max-blob-buffer-size = 15000
@@ -131,7 +128,6 @@ object StoreConfig {
     StoreConfig(flushInterval,
                 timeAlignedChunksEnabled,
                 config.as[FiniteDuration]("disk-time-to-live").toSeconds.toInt,
-                config.as[FiniteDuration]("demand-paged-chunk-retention-period"),
                 config.getInt("max-chunks-size"),
                 config.getInt("max-blob-buffer-size"),
                 config.getMemorySize("shard-mem-size").toBytes,

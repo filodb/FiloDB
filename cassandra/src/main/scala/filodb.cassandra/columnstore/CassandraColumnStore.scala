@@ -64,7 +64,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   private val indexScanParallelismPerShard =
     Math.min(cassandraConfig.getInt("index-scan-parallelism-per-shard"), Runtime.getRuntime.availableProcessors())
   private val pkByUTNumSplits = cassandraConfig.getInt("pk-by-updated-time-table-num-splits")
-  private val pkByUTTtlSeconds = cassandraConfig.getDuration("pk-by-updated-time-table-ttl", TimeUnit.SECONDS).toInt
+  private val writeTimeIndexTtlSeconds = cassandraConfig.getDuration("write-time-index-ttl", TimeUnit.SECONDS).toInt
   private val createTablesEnabled = cassandraConfig.getBoolean("create-tables-enabled")
   private val numTokenRangeSplitsForScans = cassandraConfig.getInt("num-token-range-splits-for-scans")
 
@@ -147,7 +147,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
            val future =
              for { writeChunksResp   <- writeChunks(ref, partBytes, chunkset, diskTimeToLiveSeconds)
                    if writeChunksResp == Success
-                   writeIndicesResp  <- writeIndices(ref, partBytes, chunkset, diskTimeToLiveSeconds)
+                   writeIndicesResp  <- writeIndices(ref, partBytes, chunkset, writeTimeIndexTtlSeconds)
                    if writeIndicesResp == Success
              } yield {
                writeChunksetLatency.record(System.currentTimeMillis() - start)
@@ -445,7 +445,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       val split = (pk.hash.get & Int.MaxValue) % pkByUTNumSplits
       val writePkFut = pkTable.writePartKey(pk, ttl).flatMap {
         case resp if resp == Success && writeToPkUTTable =>
-          pkByUTTable.writePartKey(shard, updateHour, split, pk, pkByUTTtlSeconds)
+          pkByUTTable.writePartKey(shard, updateHour, split, pk, writeTimeIndexTtlSeconds)
         case resp =>
           Future.successful(resp)
       }
