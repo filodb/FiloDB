@@ -12,7 +12,6 @@ import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
-import filodb.query.Query.qLogger
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 
 /**
@@ -100,9 +99,8 @@ final case class BinaryJoinExec(queryContext: QueryContext,
           if (rv.key.labelValues == rvDupe.key.labelValues) {
             oneSideMap.put(jk, StitchRvsExec.stitch(rv, rvDupe))
           } else {
-            qLogger.info(s"BinaryJoinError: RV ${rv.key} (IDs ${rv.key.partIds}) produced $jk, but already in map: " +
-              s"RV ${oneSideMap(jk).key} (IDs ${oneSideMap(jk).key.partIds})")
-            throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk")
+            throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk. " +
+              s"${rvDupe.key.labelValues} and ${rv.key.labelValues} were the violating keys on many side")
           }
         } else {
           oneSideMap.put(jk, rv)
@@ -121,8 +119,8 @@ final case class BinaryJoinExec(queryContext: QueryContext,
             if (resVal.stitchedOtherSide.key.labelValues == rvOther.key.labelValues) {
               StitchRvsExec.stitch(rvOther, resVal.stitchedOtherSide)
             } else {
-              throw new BadQueryException(s"Non-unique result vectors found for $resKey. " +
-                s"Use grouping to create unique matching")
+              throw new BadQueryException(s"Non-unique result vectors ${resVal.stitchedOtherSide.key.labelValues} " +
+                s"and ${rvOther.key.labelValues} found for $resKey . Use grouping to create unique matching")
             }
           } else {
             rvOther
