@@ -43,21 +43,17 @@ trait Expressions extends Aggregates with Functions {
     // scalastyle:off method.length
     // scalastyle:off cyclomatic.complexity
     override def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
+      val lhsWithPrecedence = lhs match {
+       case p: PrecedenceExpression  => p.expression
+       case _                        => lhs
 
-      operator match {
-        case setOp: SetOp =>
-          if (lhs.isInstanceOf[ScalarExpression] || rhs.isInstanceOf[ScalarExpression])
-            throw new IllegalArgumentException("set operators not allowed in binary scalar expression")
+     }
 
-        case comparison: Comparision if !comparison.isBool =>
-          if (lhs.isInstanceOf[ScalarExpression] && rhs.isInstanceOf[ScalarExpression])
-            throw new IllegalArgumentException("comparisons between scalars must use BOOL modifier")
-        case _ =>
+      val rhsWithPrecedence = rhs match {
+        case p: PrecedenceExpression  => p.expression
+        case _                        => rhs
+
       }
-
-      val lhsWithPrecedence = lhs
-
-      val rhsWithPrecedence = rhs
 
       if (hasScalarResult(lhsWithPrecedence) && hasScalarResult(rhsWithPrecedence)) {
         val rangeParams = RangeParams(timeParams.start, timeParams.step, timeParams.end)

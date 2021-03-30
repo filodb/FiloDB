@@ -358,13 +358,6 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
     }
   }
 
-  lazy val precedenceExpression2: PackratParser[PrecedenceExpression] = {
-
-    "(" ~ expression ~ ")" ^^ {
-      case "(" ~ ep ~ ")" => PrecedenceExpression(ep)
-    }
-  }
-
   lazy val functionParams: PackratParser[Seq[Expression]] =
     "(" ~> repsep(expression, ",") <~ ")" ^^ {
       Seq() ++ _
@@ -394,7 +387,8 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
 
   lazy val expression: PackratParser[Expression] =
     binaryExpression | aggregateExpression2 | aggregateExpression1 |
-      function | unaryExpression | vector | numericalExpression | simpleSeries | precedenceExpression | "(" ~> expression <~ ")"
+      function | unaryExpression | vector | numericalExpression | simpleSeries | precedenceExpression |
+      "(" ~> expression <~ ")"
 
   // Generally most expressions can be subqueries except for those that return range vectors,
   // for example, subquery itself or range vector selectors cannot be "subqueryable"
@@ -475,14 +469,11 @@ object Parser extends Expression {
   def queryToLogicalPlan(query: String, queryTimestamp: Long, step: Long): LogicalPlan = {
     // Remember step matters here in instant query, when lookback is provided in step factor notation as in [5i]
     val defaultQueryParams = TimeStepParams(queryTimestamp, step, queryTimestamp)
-    val res = queryRangeToLogicalPlan(query, defaultQueryParams)
-    println("res:" + res)
-    res
+    queryRangeToLogicalPlan(query, defaultQueryParams)
   }
 
   def removePrecedenceExpression(e: Expression): Expression = {
-
-   val res = e match {
+    e match {
       case e: PrecedenceExpression  => removePrecedenceExpression(e.expression)
       case b: BinaryExpression      => val lhsExpression = removePrecedenceExpression(b.lhs)
         val rhsExpression = removePrecedenceExpression(b.rhs)
@@ -494,17 +485,13 @@ object Parser extends Expression {
       case a: AggregateExpression   =>  val paramsNew  = a.params.map(removePrecedenceExpression(_))
         val altParams  = a.altFunctionParams.map(removePrecedenceExpression(_))
         a.copy(params = paramsNew, altFunctionParams = altParams)
-      case s: Scalar => s
-      //TO DO remove default case and add all expressions
-      case _                        => e
-
+      case s: Scalar                => s
+      case i: InstantExpression     => i
+      case r: RangeExpression       => r
     }
-    println(s"returning $res for\n $e")
-    res
   }
 
   def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
-   println("query:"+ query)
     val expression = parseQuery(query)
     removePrecedenceExpression(assignPrecedence(expression)) match {
       case p: PeriodicSeries => p.toSeriesPlan(timeParams)
