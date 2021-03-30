@@ -122,7 +122,7 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
                                     rangeParams: RangeParams,
                                     funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
 
-  protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
+  protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams, rangeParams=$rangeParams"
 
   def apply(source: Observable[RangeVector],
             querySession: QuerySession,

@@ -49,7 +49,7 @@ object ChunkMap extends StrictLogging {
     classOf[ChunkMap].getDeclaredField("lockState"))
 
   private val InitialExclusiveRetryTimeoutNanos = 1.millisecond.toNanos
-  private val MaxExclusiveRetryTimeoutNanos = 1.minute.toNanos
+  private val MaxExclusiveRetryTimeoutNanos = 10.minute.toNanos
 
   private val exclusiveLockWait = Kamon.counter("memory-exclusive-lock-waits").withoutTags
   private val sharedLockLingering = Kamon.counter("memory-shared-lock-lingering").withoutTags
@@ -515,7 +515,6 @@ class ChunkMap(val memFactory: NativeMemoryManager, var capacity: Int) {
       }
 
       if (key == lastKey) {
-        _logger.error(s"overwriting an existing chunk chunkId=$key")
         // Replacing the last element.
         arraySet(rlast, element)
         return

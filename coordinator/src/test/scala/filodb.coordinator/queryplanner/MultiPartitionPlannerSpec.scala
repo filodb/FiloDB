@@ -509,4 +509,72 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
       asInstanceOf[MultiSchemaPartitionsExec].filters.contains(ColumnFilter("job", Equals("app2"))) shouldEqual(true)
 
   }
+
+  it ("should generate local Exec plan when partitions list is empty") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        List.empty
+
+      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+        List.empty
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(1000, 100, 2000))
+
+    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", 1000, 100, 2000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
+    execPlan.children.length shouldEqual 2
+    execPlan.children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
+    execPlan.children.head.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+  }
+
+  it ("should generate local Exec plan for Metadata Label values query when partitions list is empty") {
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        List.empty
+
+      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+        List.empty
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+
+    val lp = Parser.labelValuesQueryToLogicalPlan(Seq("""__metric__"""), Some("""_ws_="demo""""), TimeStepParams(startSeconds, step, endSeconds) )
+
+    val promQlQueryParams = PromQlQueryParams("", startSeconds, step, endSeconds, Some("/api/v2/label/values"))
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[LabelValuesDistConcatExec] shouldEqual (true)
+  }
+
+  it ("should generate local Exec plan for Metadata query when partitions list is empty") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        List.empty
+
+      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = List.empty
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.metadataQueryToLogicalPlan("http_requests_total{job=\"prometheus\", method=\"GET\"}",
+      TimeStepParams(startSeconds, step, endSeconds))
+
+    val promQlQueryParams = PromQlQueryParams(
+      "http_requests_total{job=\"prometheus\", method=\"GET\"}", startSeconds, step, endSeconds)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[PartKeysDistConcatExec] shouldEqual (true)
+    execPlan.children(0).isInstanceOf[PartKeysExec] shouldEqual(true)
+    execPlan.children(1).isInstanceOf[PartKeysExec] shouldEqual(true)
+  }
 }

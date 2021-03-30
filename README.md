@@ -90,7 +90,7 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 
 ## Pre-requisites
 
-1. [Java 8](http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html)
+1. [Java 11](https://www.oracle.com/java/technologies/javase-downloads.html#JDK11)
 2. [SBT](http://www.scala-sbt.org/) to build
 3. [Apache Cassandra](http://cassandra.apache.org/) 2.x or 3.x (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing)
     - For testing, install a single node C* cluster, like this:  `ccm create v39_single -v 3.9 -n 1 -s`

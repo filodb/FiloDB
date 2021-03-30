@@ -1,5 +1,7 @@
 package filodb.memory.format
 
+import java.nio.charset.StandardCharsets
+
 import net.jpountz.xxhash.XXHashFactory
 import spire.syntax.cfor._
 
@@ -117,7 +119,7 @@ final class ZeroCopyUTF8String(val base: Any, val offset: Long, val numBytes: In
   import ZeroCopyUTF8String._
   import filodb.memory.UTF8String._
 
-  final def asNewString: String = new String(asNewByteArray)
+  final def asNewString: String = new String(asNewByteArray, StandardCharsets.UTF_8)
   override def toString: String = asNewString
 
   final def numChars: Int = {

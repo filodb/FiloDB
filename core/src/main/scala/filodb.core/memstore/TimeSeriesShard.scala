@@ -88,6 +88,9 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val partitionsPagedFromColStore = Kamon.counter("memstore-partitions-paged-in").withTags(TagSet.from(tags))
   val partitionsQueried = Kamon.counter("memstore-partitions-queried").withTags(TagSet.from(tags))
   val purgedPartitions = Kamon.counter("memstore-partitions-purged").withTags(TagSet.from(tags))
+  val purgedPartitionsFromIndex = Kamon.counter("memstore-partitions-purged-index").withTags(TagSet.from(tags))
+  val purgePartitionTimeMs = Kamon.counter("memstore-partitions-purge-time-ms", MeasurementUnit.time.milliseconds)
+                                              .withTags(TagSet.from(tags))
   val partitionsRestored = Kamon.counter("memstore-partitions-paged-restored").withTags(TagSet.from(tags))
   val chunkIdsEvicted = Kamon.counter("memstore-chunkids-evicted").withTags(TagSet.from(tags))
   val partitionsEvicted = Kamon.counter("memstore-partitions-evicted").withTags(TagSet.from(tags))
@@ -244,8 +247,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   import TimeSeriesShard._
 
   val shardStats = new TimeSeriesShardStats(ref, shardNum)
-  val shardKeyLevelIngestionMetricsEnabled = filodbConfig.getBoolean("shard-key-level-igestion-metrics-enabled")
-  val shardKeyLevelQueryMetricsEnabled = filodbConfig.getBoolean("shard-key-level-igestion-metrics-enabled")
+  val shardKeyLevelIngestionMetricsEnabled = filodbConfig.getBoolean("shard-key-level-ingestion-metrics-enabled")
+  val shardKeyLevelQueryMetricsEnabled = filodbConfig.getBoolean("shard-key-level-query-metrics-enabled")
 
   /**
     * Map of all partitions in the shard stored in memory, indexed by partition ID
@@ -298,6 +301,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   require (storeConfig.maxChunkTime > storeConfig.flushInterval, "MaxChunkTime should be greater than FlushInterval")
   val maxChunkTime = storeConfig.maxChunkTime.toMillis
 
+  val acceptDuplicateSamples = storeConfig.acceptDuplicateSamples
+
   // Called to remove chunks from ChunkMap of a given partition, when an offheap block is reclaimed
   private val reclaimListener = new ReclaimListener {
     def onReclaim(metaAddr: Long, numBytes: Int): Unit = {
@@ -344,7 +349,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val shardTags = Map("dataset" -> ref.dataset, "shard" -> shardNum.toString)
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
     storeConfig.numPagesPerBlock)
-  private val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
+  private[core] val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
 
   /**
     * Lock that protects chunks from being reclaimed from Memstore.
@@ -355,10 +360,6 @@ class TimeSeriesShard(val ref: DatasetRef,
   // Requires blockStore.
   private val headroomTask = startHeadroomTask(ingestSched)
 
-  // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
-  // strictly during ingest() and switchBuffers().
-  private[core] val overflowBlockFactory = new BlockMemFactory(blockStore, maxMetaSize,
-                                             shardTags ++ Map("overflow" -> "true"), true)
   val partitionMaker = new DemandPagedChunkStore(this, blockStore)
 
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, reuseOneContainer = true)
@@ -572,6 +573,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   def recoverIndex(): Future[Unit] = {
     val indexBootstrapper = new IndexBootstrapper(colStore)
     indexBootstrapper.bootstrapIndex(partKeyIndex, shardNum, ref)(bootstrapPartKey)
+                     .executeOn(ingestSched) // to make sure bootstrapIndex task is run on ingestion thread
                      .map { count =>
                         startFlushingIndex()
                        logger.info(s"Bootstrapped index for dataset=$ref shard=$shardNum with $count records")
@@ -632,10 +634,12 @@ class TimeSeriesShard(val ref: DatasetRef,
       else activelyIngesting -= partId
     }
     shardStats.indexRecoveryNumRecordsProcessed.increment()
-    val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
-    captureTimeseriesCount(schema, shardKey, 1)
-    if (storeConfig.meteringEnabled) {
-      cardTracker.incrementCount(shardKey)
+    if (schema != Schemas.UnknownSchema) {
+      val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
+      captureTimeseriesCount(schema, shardKey, 1)
+      if (storeConfig.meteringEnabled) {
+        cardTracker.incrementCount(shardKey)
+      }
     }
     partId
   }
@@ -789,7 +793,8 @@ class TimeSeriesShard(val ref: DatasetRef,
 
     // Rapidly switch all of the input buffers for a particular group
     logger.debug(s"Switching write buffers for group $groupNum in dataset=$ref shard=$shardNum")
-    InMemPartitionIterator(partitionGroups(groupNum).intIterator).foreach(_.switchBuffers(overflowBlockFactory))
+    InMemPartitionIterator(partitionGroups(groupNum).intIterator)
+      .foreach(_.switchBuffers(blockFactoryPool.checkoutForOverflow(groupNum)))
 
     val dirtyPartKeys = if (groupNum == dirtyPartKeysFlushGroup) {
       logger.debug(s"Switching dirty part keys in dataset=$ref shard=$shardNum out for flush. ")
@@ -806,11 +811,13 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private def purgeExpiredPartitions(): Unit = ingestSched.executeTrampolined { () =>
     assertThreadName(IngestSchedName)
-    val partsToPurge = partKeyIndex.partIdsEndedBefore(
-      System.currentTimeMillis() - storeConfig.demandPagedRetentionPeriod.toMillis)
-    var numDeleted = 0
+    // TODO Much of the purging work other of removing TSP from shard data structures can be done
+    // asynchronously on another thread. No need to block ingestion thread for this.
+    val start = System.currentTimeMillis()
+    val partsToPurge = partKeyIndex.partIdsEndedBefore(start - storeConfig.demandPagedRetentionPeriod.toMillis)
     val removedParts = debox.Buffer.empty[Int]
-    InMemPartitionIterator2(partsToPurge).foreach { p =>
+    val partIter = InMemPartitionIterator2(partsToPurge)
+    partIter.foreach { p =>
       if (!p.ingesting) {
         logger.debug(s"Purging partition with partId=${p.partID}  ${p.stringPartition} from " +
           s"memory in dataset=$ref shard=$shardNum")
@@ -822,13 +829,28 @@ class TimeSeriesShard(val ref: DatasetRef,
         }
         removePartition(p)
         removedParts += p.partID
-        numDeleted += 1
       }
     }
-    if (!removedParts.isEmpty) partKeyIndex.removePartKeys(removedParts)
-    if (numDeleted > 0) logger.info(s"Purged $numDeleted partitions from memory and " +
-                        s"index from dataset=$ref shard=$shardNum")
-    shardStats.purgedPartitions.increment(numDeleted)
+    partIter.skippedPartIDs.foreach { pId =>
+      partKeyIndex.partKeyFromPartId(pId).foreach { pk =>
+        val unsafePkOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(pk.offset)
+        val schema = schemas(RecordSchema.schemaID(pk.bytes, unsafePkOffset))
+        val shardKey = schema.partKeySchema.colValues(pk.bytes, unsafePkOffset,
+          schemas.part.options.shardKeyColumns)
+        if (storeConfig.meteringEnabled) {
+          cardTracker.decrementCount(shardKey)
+        }
+        captureTimeseriesCount(schema, shardKey, -1)
+      }
+    }
+    partKeyIndex.removePartKeys(partIter.skippedPartIDs)
+    partKeyIndex.removePartKeys(removedParts)
+    if (removedParts.length + partIter.skippedPartIDs.length > 0)
+      logger.info(s"Purged ${removedParts.length} partitions from memory/index " +
+        s"and ${partIter.skippedPartIDs.length} from index only from dataset=$ref shard=$shardNum")
+    shardStats.purgedPartitions.increment(removedParts.length)
+    shardStats.purgedPartitionsFromIndex.increment(removedParts.length + partIter.skippedPartIDs.length)
+    shardStats.purgePartitionTimeMs.increment(System.currentTimeMillis() - start)
   }
 
   /**
@@ -924,7 +946,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     val flushStart = System.currentTimeMillis()
 
     // Only allocate the blockHolder when we actually have chunks/partitions to flush
-    val blockHolder = blockFactoryPool.checkout(Map("flushGroup" -> flushGroup.groupNum.toString))
+    val blockHolder = blockFactoryPool.checkoutForFlush(flushGroup.groupNum)
 
     val chunkSetIter = partitionIt.flatMap { p =>
       // TODO re-enable following assertion. Am noticing that monix uses TrampolineExecutionContext
@@ -1207,8 +1229,8 @@ class TimeSeriesShard(val ref: DatasetRef,
         val tsp = part.asInstanceOf[TimeSeriesPartition]
         brRowReader.schema = schema.ingestionSchema
         brRowReader.recordOffset = recordOff
-        tsp.ingest(ingestionTime, brRowReader, overflowBlockFactory,
-          storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, maxChunkTime)
+        tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.checkoutForOverflow(group),
+          storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, acceptDuplicateSamples, maxChunkTime)
         // Below is coded to work concurrently with logic in updateIndexWithEndTime
         // where we try to de-activate an active time series
         if (!tsp.ingesting) {
