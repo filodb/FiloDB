@@ -83,7 +83,7 @@ object AntlrParser extends Base {
     }
   }
 
-  // FIXME: Need a better way of capturing cast failures and converting to IllegalArgumentexception
+  // TODO: Need a better way of capturing cast failures and converting to IllegalArgumentexception.
   def cast[T](obj: Object): T = {
     return obj.asInstanceOf[T]
   }

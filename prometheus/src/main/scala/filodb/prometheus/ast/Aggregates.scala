@@ -50,7 +50,7 @@ trait Aggregates extends Vectors with TimeUnits with Base {
         case num: ScalarExpression =>
           parameter = Seq(num.toScalar)
         case s: InstantExpression =>
-          parameter = Seq(s.metricName.get)
+          parameter = Seq(s.metricName.get.replaceAll("^\"|\"$", ""))
         case literal: StringLiteral =>
           parameter = Seq(literal.str)
         case _ =>

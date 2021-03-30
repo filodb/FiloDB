@@ -100,8 +100,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("1 unless 1")
     parseError("1 !~ 1")
     parseError("1 =~ 1")
-    parseError("-\"string\"") // FIXME
-    parseError("-test[5m]") // FIXME
+    parseError("-\"string\"")
+    parseError("-test[5m]")
     parseError("*test")
     parseError("1 offset 1d")
     parseError("a - on(b) ignoring(c) d")
@@ -541,7 +541,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
         "ApplySortFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),SortDesc)",
       "absent(http_requests_total{host=\"api-server\"})" -> "ApplyAbsentFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(host,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(ColumnFilter(host,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),RangeParams(1524855988,1000,1524855988),List())",
       "count_values(\"freq\", http_requests_total)" ->
-        "Aggregate(CountValues,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(\"freq\"),List(),List())",
+        "Aggregate(CountValues,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(freq),List(),List())",
       "timestamp(http_requests_total)" -> "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,0,Timestamp,false,List(),None)",
       "sum:some_metric:dataset:1m{_ws_=\"demo\", _ns_=\"test\"}" -> "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(test)), ColumnFilter(__name__,Equals(sum:some_metric:dataset:1m))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None)",
       "1 + 2 * 3" -> "ScalarBinaryOperation(ADD,Left(1.0),Right(ScalarBinaryOperation(MUL,Left(2.0),Left(3.0),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))",
@@ -570,20 +570,14 @@ class ParserSpec extends AnyFunSpec with Matchers {
     val qts: Long = 1524855988L
     val step = 1000
     queryToLpString.foreach { case (q, e) =>
-      //info(s"Parsing $q")
+      info(s"Parsing $q")
       val lp = Parser.queryToLogicalPlan(q, qts, step)
       if (lp.isInstanceOf[BinaryJoin])
         printBinaryJoin(lp)
-      val str = lp.toString
-      str shouldEqual (e)
+      lp.toString shouldEqual (e)
 
       val lp2 = AntlrParser.queryToLogicalPlan(q, qts, step)
-      val str2 = lp2.toString
-      if (!str.equals(str2)) {
-        info("" + q)
-        info(str)
-        info(str2)
-      }
+      lp2.toString shouldEqual (e)
     }
   }
 
@@ -591,7 +585,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
     val q = "sum(rate(foo{job=\"SNRT-App-0\"}[5i]))"
     val qts: Long = 1524855988L
     val step = 0
-    //info(s"Parsing $q")
+    info(s"Parsing $q")
     intercept[IllegalArgumentException] {
       Parser.queryToLogicalPlan(q, qts, step)
     }
@@ -604,13 +598,12 @@ class ParserSpec extends AnyFunSpec with Matchers {
     val q = "sum(rate(foo{job=\"SNRT-App-0\"}[5m]))"
     val qts: Long = 1524855988L
     val step = 0
-    //info(s"Parsing $q")
+    info(s"Parsing $q")
     Parser.queryToLogicalPlan(q, qts, step)
     AntlrParser.queryToLogicalPlan(q, qts, step)
   }
 
   private def printBinaryJoin( lp: LogicalPlan, level: Int = 0) : scala.Unit =  {
-    /*
     if (!lp.isInstanceOf[BinaryJoin]) {
       info(s"${"  "*level}" + lp.toString)
     }
@@ -626,24 +619,17 @@ class ParserSpec extends AnyFunSpec with Matchers {
       info(s"${"  "*level}" + "rhs: ")
       printBinaryJoin(binaryJoin.rhs, level + 1)
     }
-     */
   }
 
   private def parseSuccessfully(query: String) = {
     val result = Parser.parseQuery(query)
-    //info(String.valueOf(result))
+    info(String.valueOf(result))
     antlrParseSuccessfully(query)
   }
 
   private def antlrParseSuccessfully(query: String) = {
-    try {
-      val result = AntlrParser.parseQuery(query)
-      //info(String.valueOf(result))
-    } catch {
-      case e: IllegalArgumentException => {
-        info(e.toString())
-      }
-    }
+    val result = AntlrParser.parseQuery(query)
+    //info(String.valueOf(result))
   }
 
   private def parseError(query: String) = {
@@ -654,12 +640,15 @@ class ParserSpec extends AnyFunSpec with Matchers {
   }
 
   private def antlrParseError(query: String) = {
-    try {
+    intercept[IllegalArgumentException] {
       AntlrParser.parseQuery(query)
-      info("*** " + query);
-    } catch {
-      case e: IllegalArgumentException => {
-        //info("good error " + e)
+      try {
+        AntlrParser.queryToLogicalPlan(query, 1524855988L, 0)
+      } catch {
+        case e: UnsupportedOperationException => {
+          // This case is reached only for certain unsupported unary operations.
+          throw new IllegalArgumentException()
+        }
       }
     }
   }
