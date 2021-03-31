@@ -30,7 +30,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
                      ref: DatasetRef)
                      (assignPartId: PartKeyRecord => Int): Task[Long] = {
 
-    val recoverIndexLatency = Kamon.histogram("shard-recover-index-latency",
+    val recoverIndexLatency = Kamon.gauge("shard-recover-index-latency",
       MeasurementUnit.time.milliseconds)
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum)
@@ -43,7 +43,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
       .countL
       .map { count =>
         index.refreshReadersBlocking()
-        recoverIndexLatency.record(System.currentTimeMillis() - start)
+        recoverIndexLatency.update(System.currentTimeMillis() - start)
         count
       }
   }
@@ -66,7 +66,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
                    schemas: Schemas,
                    parallelism: Int = Runtime.getRuntime.availableProcessors())
                    (lookUpOrAssignPartId: Array[Byte] => Int): Task[Long] = {
-    val recoverIndexLatency = Kamon.histogram("downsample-store-refresh-index-latency",
+    val recoverIndexLatency = Kamon.gauge("downsample-store-refresh-index-latency",
       MeasurementUnit.time.milliseconds)
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum)
@@ -85,7 +85,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
      .countL
      .map { count =>
        index.refreshReadersBlocking()
-       recoverIndexLatency.record(System.currentTimeMillis() - start)
+       recoverIndexLatency.update(System.currentTimeMillis() - start)
        count
      }
   }

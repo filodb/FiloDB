@@ -194,6 +194,15 @@ trait UnitParser extends BaseParser {
   lazy val duration: PackratParser[Duration] = decimalNumber ~ timeUnit ^^ {
     case d ~ tu => Duration(d.toDouble, tu)
   }
+
+  lazy val subqueryClause: PackratParser[SubqueryClause] = "[" ~ duration ~ ":" ~ duration.? ~ "]" ^^ {
+    case leftBracket ~ timeRange ~ colon ~ step ~ rightBracket => SubqueryClause(timeRange, step)
+  }
+
+  lazy val simpleLookback: PackratParser[SimpleLookback] = "[" ~ duration ~ "]" ^^ {
+    case leftBracket ~ timeRange ~ rightBracket => SimpleLookback(timeRange)
+  }
+
   lazy val offset: PackratParser[Offset] = OFFSET ~ duration ^^ {
     case ignore ~ t => Offset(t)
   }
@@ -265,15 +274,15 @@ trait SelectorParser extends OperatorParser with UnitParser with BaseParser {
   }
 
   lazy val rangeVectorSelector: PackratParser[RangeExpression] =
-    metricNameIdentifier ~ labelSelection.? ~ "[" ~ duration ~ "]" ~ offset.? ^^ {
-      case metricName ~ ls ~ leftBracket ~ td ~ rightBracket ~ opt =>
-        RangeExpression(Some(metricName.str), ls.getOrElse(Seq.empty), td, opt.map(_.duration))
+    metricNameIdentifier ~ labelSelection.? ~ simpleLookback ~ offset.? ^^ {
+      case metricName ~ ls ~ simpleLookback ~ opt =>
+        RangeExpression(Some(metricName.str), ls.getOrElse(Seq.empty), simpleLookback.duration, opt.map(_.duration))
     }
 
   lazy val rangeVectorSelector2: PackratParser[RangeExpression] =
-    labelSelection ~ "[" ~ duration ~ "]" ~ offset.? ^^ {
-      case ls ~ leftBracket ~ td ~ rightBracket ~ opt =>
-        RangeExpression(None, ls, td, opt.map(_.duration))
+    labelSelection ~ simpleLookback ~ offset.? ^^ {
+      case ls ~ simpleLookback ~ opt =>
+        RangeExpression(None, ls, simpleLookback.duration, opt.map(_.duration))
     }
 
   lazy val vector: PackratParser[Vector] =
@@ -377,9 +386,18 @@ trait ExpressionParser extends AggregatesParser with SelectorParser with Numeric
     }
 
   lazy val expression: PackratParser[Expression] =
-    binaryExpression | aggregateExpression2 | aggregateExpression1 |
+    binaryExpression | subqueryExpression | aggregateExpression2 | aggregateExpression1 |
       function | unaryExpression | vector | numericalExpression | simpleSeries | precedenceExpression
 
+  // Generally most expressions can be subqueries except for those that return range vectors,
+  // for example, subquery itself or range vector selectors cannot be "subqueryable"
+  lazy val subqueryableExpression: PackratParser[PeriodicSeries] =
+    binaryExpression | aggregateExpression2 | aggregateExpression1 | function | instantVectorSelector
+
+  lazy val subqueryExpression: PackratParser[SubqueryExpression] =
+    subqueryableExpression ~ subqueryClause ^^ {
+      case sqe ~ sqc => SubqueryExpression( sqe, sqc)
+    }
 }
 
 ////////////////////// END EXPRESSIONS ///////////////////////////////////////////

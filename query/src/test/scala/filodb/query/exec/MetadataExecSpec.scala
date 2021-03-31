@@ -91,7 +91,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp match {
-      case QueryResult(id, _, response) => {
+      case QueryResult(id, _, response, _, _) => {
         val rv = response(0)
         rv.rows.size shouldEqual 1
         val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
@@ -111,7 +111,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     resp match {
-      case QueryResult(_, _, results) => results.size shouldEqual 1
+      case QueryResult(_, _, results, _, _) => results.size shouldEqual 1
         results(0).rows.size shouldEqual 0
     }
   }
@@ -125,7 +125,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp match {
-      case QueryResult(id, _, response) =>
+      case QueryResult(id, _, response, _, _) =>
         response.size shouldEqual 1
         response(0).rows.map { row =>
           val r = row.asInstanceOf[BinaryRecordRowReader]
@@ -146,7 +146,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp match {
-      case QueryResult(id, _, response) => {
+      case QueryResult(id, _, response, _, _) => {
         response.size shouldEqual 1
         response(0).rows.map { row =>
           val r = row.asInstanceOf[BinaryRecordRowReader]
@@ -165,7 +165,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp match {
-      case QueryResult(id, _, response) => {
+      case QueryResult(id, _, response, _, _) => {
         val rv = response(0)
         rv.rows.size shouldEqual 1
         val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]

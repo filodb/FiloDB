@@ -7,7 +7,6 @@ import java.util.PriorityQueue
 import scala.collection.JavaConverters._
 import scala.collection.immutable.HashSet
 import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.duration.FiniteDuration
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
@@ -72,7 +71,7 @@ final case class PartKeyLuceneIndexRecord(partKey: Array[Byte], startTime: Long,
 class PartKeyLuceneIndex(ref: DatasetRef,
                          schema: PartitionSchema,
                          shardNum: Int,
-                         retention: FiniteDuration, // only used to calculate fallback startTime
+                         retentionMillis: Long, // only used to calculate fallback startTime
                          diskLocation: Option[File] = None
                          ) extends StrictLogging {
 
@@ -433,7 +432,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                                (partKeyNumBytes: Int = partKeyOnHeapBytes.length): Unit = {
     var startTime = startTimeFromPartId(partId) // look up index for old start time
     if (startTime == NOT_FOUND) {
-      startTime = System.currentTimeMillis() - retention.toMillis
+      startTime = System.currentTimeMillis() - retentionMillis
       logger.warn(s"Could not find in Lucene startTime for partId=$partId in dataset=$ref. Using " +
         s"$startTime instead.", new IllegalStateException()) // assume this time series started retention period ago
     }
