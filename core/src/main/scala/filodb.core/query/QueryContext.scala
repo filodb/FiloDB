@@ -12,6 +12,7 @@ trait TsdbQueryParams
 /**
   * This class provides PromQl query parameters
   * Config has routing parameters
+ *  startSecs, stepSecs, endSecs should not be used for query execution as it can be changed by query planner
   */
 case class PromQlQueryParams(promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long , remoteQueryPath:
                             Option[String] = None, verbose: Boolean = false) extends TsdbQueryParams
