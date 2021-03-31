@@ -402,7 +402,10 @@ trait ExpressionParser extends AggregatesParser with SelectorParser with Numeric
 
 ////////////////////// END EXPRESSIONS ///////////////////////////////////////////
 
-object Parser extends ExpressionParser {
+/**
+  * Expected to be replaced by AntlrParser.
+  */
+object LegacyParser extends ExpressionParser {
   /**
     * Parser is not whitespace sensitive
     */
