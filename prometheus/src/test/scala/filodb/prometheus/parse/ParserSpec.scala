@@ -571,7 +571,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
     val step = 1000
     queryToLpString.foreach { case (q, e) =>
       info(s"Parsing $q")
-      val lp = Parser.queryToLogicalPlan(q, qts, step)
+      val lp = LegacyParser.queryToLogicalPlan(q, qts, step)
       if (lp.isInstanceOf[BinaryJoin])
         printBinaryJoin(lp)
       lp.toString shouldEqual (e)
@@ -587,7 +587,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
     val step = 0
     info(s"Parsing $q")
     intercept[IllegalArgumentException] {
-      Parser.queryToLogicalPlan(q, qts, step)
+      LegacyParser.queryToLogicalPlan(q, qts, step)
     }
     intercept[IllegalArgumentException] {
       AntlrParser.queryToLogicalPlan(q, qts, step)
@@ -599,7 +599,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
     val qts: Long = 1524855988L
     val step = 0
     info(s"Parsing $q")
-    Parser.queryToLogicalPlan(q, qts, step)
+    LegacyParser.queryToLogicalPlan(q, qts, step)
     AntlrParser.queryToLogicalPlan(q, qts, step)
   }
 
@@ -622,7 +622,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
   }
 
   private def parseSuccessfully(query: String) = {
-    val result = Parser.parseQuery(query)
+    val result = LegacyParser.parseQuery(query)
     info(String.valueOf(result))
     antlrParseSuccessfully(query)
   }
@@ -634,7 +634,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
 
   private def parseError(query: String) = {
     intercept[IllegalArgumentException] {
-      Parser.parseQuery(query)
+      LegacyParser.parseQuery(query)
     }
     antlrParseError(query)
   }

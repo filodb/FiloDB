@@ -6,7 +6,7 @@ import filodb.query.LogicalPlan
 /**
   * Parser routes requests to LegacyParser or AntlrParser.
   */
-object PromParser {
+object Parser {
   def parseQuery(query: String): Expression = {
     LegacyParser.parseQuery(query)
   }
