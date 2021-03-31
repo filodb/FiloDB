@@ -5,6 +5,7 @@ import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
+
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, StaticSpreadProvider}
 import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange}
@@ -13,8 +14,8 @@ import filodb.core.query.{ColumnFilter, Filter, PlannerParams, PromQlQueryParams
 import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
-import filodb.query.RangeFunctionId.AbsentOverTime
 import filodb.query._
+import filodb.query.exec.InternalRangeFunction.Last
 import filodb.query.exec._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -498,7 +499,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     multiSchemaExec.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual(true)
     val rvt = multiSchemaExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
     rvt.window.get shouldEqual(10*60*1000)
-    rvt.functionId.get.toString shouldEqual(AbsentOverTime.toString)
+    rvt.functionId.get.toString shouldEqual(Last.toString)
   }
 
   it("should generate execPlan for sum on absent over time") {
@@ -515,6 +516,6 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     multiSchemaExec.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual(true)
     val rvt = multiSchemaExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
     rvt.window.get shouldEqual(10*60*1000)
-    rvt.functionId.get.toString shouldEqual(AbsentOverTime.toString)
+    rvt.functionId.get.toString shouldEqual(Last.toString)
   }
 }

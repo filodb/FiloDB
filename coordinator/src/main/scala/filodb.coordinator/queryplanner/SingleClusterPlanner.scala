@@ -1,11 +1,9 @@
 package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration._
-
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{DatasetRef, SpreadProvider}
@@ -15,6 +13,7 @@ import filodb.core.query._
 import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
+import filodb.query.exec.InternalRangeFunction.Last
 import filodb.query.{exec, _}
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
 
@@ -275,7 +274,13 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                                                      lp: PeriodicSeriesWithWindowing): PlanResult = {
     val series = walkLogicalPlanTree(lp.series, qContext)
     val rawSource = lp.series.isRaw
-    val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
+
+    /* Last function is used to get the latest value in the window for absent_over_time
+    If no data is present AbsentFunctionMapper will return range vector with value 1 */
+
+    val execRangeFn = if (lp.function == RangeFunctionId.AbsentOverTime) Last
+                      else InternalRangeFunction.lpToInternalFunc(lp.function)
+
     val paramsExec = materializeFunctionArgs(lp.functionArgs, qContext)
 
     val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs, lp.window, lp.offsetMs.getOrElse(0))
@@ -284,7 +289,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs,
         lp.endMs, window, Some(execRangeFn), qContext, lp.stepMultipleNotationUsed,
         paramsExec, lp.offsetMs, rawSource)))
-      if (execRangeFn == InternalRangeFunction.AbsentOverTime)
+      if (lp.function == RangeFunctionId.AbsentOverTime)
         addAbsentFunctionMapper(series, lp.columnFilters,
         RangeParams(lp.startMs / 1000, lp.stepMs / 1000, lp.endMs / 1000), qContext)
       else series

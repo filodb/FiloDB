@@ -181,6 +181,7 @@ trait Functions extends Base with Operators with Vectors {
         } else {
           val rangeExpression = seriesParam.asInstanceOf[RangeExpression]
 
+         // absent_over_time creates range vector with column filters in original query
           PeriodicSeriesWithWindowing(
             rangeExpression.toSeriesPlan(timeParams, isRoot = false),
             timeParams.start * 1000 , timeParams.step * 1000, timeParams.end * 1000,

@@ -357,7 +357,6 @@ object RangeFunction {
       case Some(Timestamp)        => () => new TimestampChunkedFunction()
       case Some(ZScore)           => () => new ZScoreChunkedFunctionD()
       case Some(PredictLinear)    => () => new PredictLinearChunkedFunctionD(funcParams)
-      case Some(AbsentOverTime)   => () => new LastSampleChunkedFunctionD
       case _                      => iteratingFunction(func, funcParams)
     }
   }
@@ -408,7 +407,6 @@ object RangeFunction {
     case Some(AvgOverTime)      => () => new AvgOverTimeFunction()
     case Some(StdDevOverTime)   => () => new StdDevOverTimeFunction()
     case Some(StdVarOverTime)   => () => new StdVarOverTimeFunction()
-    case Some(AbsentOverTime)   => () => LastSampleFunction
     case _                      => ???
   }
 }
