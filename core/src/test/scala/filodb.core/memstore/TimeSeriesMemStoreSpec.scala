@@ -237,7 +237,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
   it("should flush dirty part keys during start-ingestion, end-ingestion and re-ingestion") {
     memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf.copy(groupsPerShard = 2,
-                                                        demandPagedRetentionPeriod = 1.hour,
+                                                        diskTTLSeconds = 1.hour.toSeconds.toInt,
                                                         flushInterval = 10.minutes))
     Thread sleep 1000
     val numPartKeysWritten = partKeysWritten
@@ -315,7 +315,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     val memStore = new TimeSeriesMemStore(config, colStore, new InMemoryMetaStore(), Some(policy))
     memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf.copy(groupsPerShard = 2,
-      demandPagedRetentionPeriod = 1.hour,
+      diskTTLSeconds = 1.hour.toSeconds.toInt,
       flushInterval = 10.minutes))
     Thread sleep 1000
 

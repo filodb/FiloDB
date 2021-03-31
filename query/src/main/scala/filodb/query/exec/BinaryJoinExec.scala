@@ -12,7 +12,6 @@ import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
-import filodb.query.Query.qLogger
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 
 /**
@@ -68,11 +67,11 @@ final case class BinaryJoinExec(queryContext: QueryContext,
                               querySession: QuerySession): Observable[RangeVector] = {
     val span = Kamon.currentSpan()
     val taskOfResults = childResponses.map {
-      case (QueryResult(_, _, result), _)
+      case (QueryResult(_, _, result, _, _), _)
         if (result.size  > queryContext.plannerParams.joinQueryCardLimit && cardinality == Cardinality.OneToOne) =>
         throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.joinQueryCardLimit}"
           + s" join cardinality. Try applying more filters.")
-      case (QueryResult(_, _, result), i) => (result, i)
+      case (QueryResult(_, _, result, _, _), i) => (result, i)
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
       span.mark("binary-join-child-results-available")
@@ -100,9 +99,8 @@ final case class BinaryJoinExec(queryContext: QueryContext,
           if (rv.key.labelValues == rvDupe.key.labelValues) {
             oneSideMap.put(jk, StitchRvsExec.stitch(rv, rvDupe))
           } else {
-            qLogger.info(s"BinaryJoinError: RV ${rv.key} (IDs ${rv.key.partIds}) produced $jk, but already in map: " +
-              s"RV ${oneSideMap(jk).key} (IDs ${oneSideMap(jk).key.partIds})")
-            throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk")
+            throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk. " +
+              s"${rvDupe.key.labelValues} and ${rv.key.labelValues} were the violating keys on many side")
           }
         } else {
           oneSideMap.put(jk, rv)
@@ -121,8 +119,8 @@ final case class BinaryJoinExec(queryContext: QueryContext,
             if (resVal.stitchedOtherSide.key.labelValues == rvOther.key.labelValues) {
               StitchRvsExec.stitch(rvOther, resVal.stitchedOtherSide)
             } else {
-              throw new BadQueryException(s"Non-unique result vectors found for $resKey. " +
-                s"Use grouping to create unique matching")
+              throw new BadQueryException(s"Non-unique result vectors ${resVal.stitchedOtherSide.key.labelValues} " +
+                s"and ${rvOther.key.labelValues} found for $resKey . Use grouping to create unique matching")
             }
           } else {
             rvOther
@@ -199,9 +197,9 @@ final case class BinaryJoinExec(queryContext: QueryContext,
     */
   override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema = {
     resp match {
-      case QueryResult(_, schema, _) if rs == ResultSchema.empty =>
+      case QueryResult(_, schema, _, _, _) if rs == ResultSchema.empty =>
         schema     /// First schema, take as is
-      case QueryResult(_, schema, _) =>
+      case QueryResult(_, schema, _, _, _) =>
         if (!rs.hasSameColumnsAs(schema)) throw SchemaMismatch(rs.toString, schema.toString)
         else rs
     }

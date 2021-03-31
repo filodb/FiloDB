@@ -55,11 +55,12 @@ case class ScalarFixedDoubleExec(queryContext: QueryContext,
     Kamon.runWithSpan(Kamon.currentSpan(), false) {
       Task {
         rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
-          val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
+          val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult(querySession))
           (transf.apply(acc._1, querySession, queryContext.plannerParams.sampleLimit, acc._2,
             paramRangeVector), transf.schema(acc._2))
         }._1.toListL.map({
-          QueryResult(queryContext.queryId, resultSchema, _)
+          QueryResult(queryContext.queryId, resultSchema, _, querySession.resultCouldBePartial,
+            querySession.partialResultsReason)
         })
       }.flatten
     }
