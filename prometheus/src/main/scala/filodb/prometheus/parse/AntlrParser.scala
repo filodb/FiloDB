@@ -9,7 +9,7 @@ import org.antlr.v4.runtime.tree.{ParseTree, TerminalNode}
 
 import filodb.prometheus.antlr.{PromQLLexer, PromQLParser, PromQLBaseVisitor}
 
-import filodb.prometheus.ast.{Base, Expressions, TimeStepParams, TimeRangeParams, Vectors}
+import filodb.prometheus.ast._
 
 import filodb.query.LogicalPlan
 
@@ -18,7 +18,7 @@ import filodb.query.LogicalPlan
   * Auto-generated classes shouldn't leak past here. When the grammar changes, the
   * auto-generated classes need to be rebuilt, and then additional changes are required here.
   */
-object AntlrParser extends Base {
+object AntlrParser {
   /**
     * Main entry point.
     */
@@ -92,7 +92,7 @@ object AntlrParser extends Base {
 /**
   * The real work happens here, by extending the auto-generated visitor.
   */
-class AntlrParser extends PromQLBaseVisitor[Object] with Expressions with Vectors {
+class AntlrParser extends PromQLBaseVisitor[Object] {
   override def visitBinaryOperation(ctx: PromQLParser.BinaryOperationContext): BinaryExpression = {
     val lhs = build[Expression](ctx.getChild(0))
     val op = build[Operator](ctx.getChild(1))

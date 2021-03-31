@@ -3,14 +3,14 @@ package filodb.prometheus.parse
 import scala.util.parsing.combinator.{JavaTokenParsers, PackratParsers, RegexParsers}
 
 import filodb.core.query.{ColumnFilter, Filter}
-import filodb.prometheus.ast.{Expressions, TimeRangeParams, TimeStepParams}
-import filodb.query._
+import filodb.prometheus.ast._
+import filodb.query.{LabelValues, LogicalPlan}
 
 object BaseParser {
   val whiteSpace = "[ \t\r\f\n]+".r
 }
 
-trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers with PackratParsers {
+trait BaseParser extends JavaTokenParsers with RegexParsers with PackratParsers {
 
   lazy val labelNameIdentifier: PackratParser[Identifier] = {
     "[a-zA-Z_][a-zA-Z0-9_]*".r ^^ { str => Identifier(str) }
@@ -97,7 +97,7 @@ trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers wit
 }
 
 //  }////////////////////    OPERATORS ///////////////////////////////////////////
-trait Operator extends BaseParser {
+trait OperatorParser extends BaseParser {
 
 
   lazy val equalMatch = "=" ^^ (_ => EqualMatch)
@@ -173,7 +173,7 @@ trait Operator extends BaseParser {
 
 ////////////////////// UNITS ///////////////////////////////////////////
 
-trait Unit extends BaseParser {
+trait UnitParser extends BaseParser {
 
   lazy val second = "s" ^^ (_ => Second)
 
@@ -201,7 +201,7 @@ trait Unit extends BaseParser {
 
 ////////////////////// END UNITS ///////////////////////////////////////////
 ////////////////////// NUMERICALS ///////////////////////////////////////////
-trait Numeric extends Unit with Operator {
+trait NumericParser extends UnitParser with OperatorParser {
 
 
   lazy val scalar: PackratParser[Scalar] = floatingPointNumber ^^ {
@@ -214,7 +214,7 @@ trait Numeric extends Unit with Operator {
 
 ////////////////////// END NUMERICALS///////////////////////////////////////////
 ////////////////////// JOINS ///////////////////////////////////////////
-trait Join extends Numeric {
+trait JoinParser extends NumericParser {
 
 
   lazy val ignoring: PackratParser[Ignoring] = IGNORING ~ labels ^^ {
@@ -247,7 +247,7 @@ trait Join extends Numeric {
 
 ////////////////////// END JOINS ///////////////////////////////////////////
 ////////////////////// SELECTORS ///////////////////////////////////////////
-trait Selector extends Operator with Unit with BaseParser {
+trait SelectorParser extends OperatorParser with UnitParser with BaseParser {
   protected lazy val simpleSeries: PackratParser[InstantExpression] =
     "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str => InstantExpression(Some(str), Seq.empty, None) }
 
@@ -283,7 +283,7 @@ trait Selector extends Operator with Unit with BaseParser {
 
 ////////////////////// END SELECTORS ///////////////////////////////////////////
 ////////////////////// AGGREGATES ///////////////////////////////////////////
-trait Aggregates extends Operator with BaseParser {
+trait AggregatesParser extends OperatorParser with BaseParser {
 
   protected val SUM = Keyword("SUM")
   protected val AVG = Keyword("AVG")
@@ -329,7 +329,7 @@ trait Aggregates extends Operator with BaseParser {
 
 ////////////////////// END AGGREGATES ///////////////////////////////////////////
 ////////////////////// EXPRESSIONS ///////////////////////////////////////////
-trait Expression extends Aggregates with Selector with Numeric with Join {
+trait ExpressionParser extends AggregatesParser with SelectorParser with NumericParser with JoinParser {
 
   lazy val unaryExpression: PackratParser[UnaryExpression] =
     (add | sub) ~ (numericalExpression | instantVectorSelector | rangeVectorSelector) ^^ {
@@ -384,7 +384,7 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
 
 ////////////////////// END EXPRESSIONS ///////////////////////////////////////////
 
-object Parser extends Expression {
+object Parser extends ExpressionParser {
   /**
     * Parser is not whitespace sensitive
     */
