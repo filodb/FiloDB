@@ -88,10 +88,6 @@ case class VectorMatch(matching: Option[JoinMatching],
   }
 }
 
-case class SubqueryExpression(subquery: PeriodicSeries, sqcl: SubqueryClause) extends Expression with PeriodicSeries {
-  def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = ???
-}
-
 sealed trait Vector extends Expression {
   import Vectors._
 
