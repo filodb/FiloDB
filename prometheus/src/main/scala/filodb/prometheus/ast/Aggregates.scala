@@ -61,7 +61,7 @@ trait Aggregates extends Vectors with TimeUnits with Base {
       case s: PeriodicSeries => s
       case _ =>
         throw new IllegalArgumentException(
-          s"Second parameter to aggregate operator $name should be a vector, is instead $last"
+          s"Second parameter to aggregate operator $name should be an instant vector, is instead $last"
         )
     }
 
