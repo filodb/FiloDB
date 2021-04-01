@@ -89,7 +89,35 @@ case class VectorMatch(matching: Option[JoinMatching],
 }
 
 case class SubqueryExpression(subquery: PeriodicSeries, sqcl: SubqueryClause) extends Expression with PeriodicSeries {
-  def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = ???
+
+  def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
+    // There are only two places for the subquery to be defined in the abstract syntax tree:
+    // a) top level expression (equivalent of query_range API)
+    // b) argument of a range function
+    // In case b), the toSeriesPlan is called on the inner subquery expression, not
+    // on this class itself, hence this method is only for case a).
+    // Top level expression of a range query, should return an
+    // instant vector but subqueries by definition return range vectors.
+    // It's illegal to have a top level subquery expression to be called from query_range API
+    // when start and end parameters are not the same.
+    if (timeParams.start != timeParams.end) {
+      throw new UnsupportedOperationException("Subquery is not allowed as a top level expression for query_range")
+    }
+    // According to PromQL docs, the subquery step is an optional parameter and
+    // defaults to Prometheus node collection interval.
+    // Mosaic does not have a default step, defaulting to hard coded 60 seconds here.
+    var stepToUse = 60L
+    if (sqcl.step.isDefined) {
+      stepToUse = sqcl.step.get.millis(1L) / 1000
+    }
+    val timeParamsToUse = TimeStepParams(
+      timeParams.start - (sqcl.window.millis(1L) / 1000),
+      stepToUse,
+      timeParams.start
+    )
+    subquery.toSeriesPlan(timeParamsToUse)
+  }
+
 }
 
 sealed trait Vector extends Expression {

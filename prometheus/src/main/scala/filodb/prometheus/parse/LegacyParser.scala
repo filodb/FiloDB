@@ -500,6 +500,7 @@ object LegacyParser extends ExpressionParser with StrictLogging {
       case s: Scalar                => s
       case i: InstantExpression     => i
       case r: RangeExpression       => r
+      case s: SubqueryExpression    => s
     }
   }
 
