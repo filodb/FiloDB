@@ -1,27 +1,83 @@
 package filodb.prometheus.parse
 
-import filodb.core.query.{ColumnFilter, Filter}
+import com.typesafe.scalalogging.StrictLogging
+
+import filodb.core.GlobalConfig
+import filodb.core.query.{ColumnFilter, Filter, QueryConfig}
 import filodb.prometheus.ast._
 import filodb.query.{LabelValues, LogicalPlan}
 
 /**
   * Parser routes requests to LegacyParser or AntlrParser.
   */
-object Parser {
+object Parser extends StrictLogging {
+  sealed trait Mode
+  case object Legacy extends Mode
+  case object Antlr extends Mode
+  case object Shadow extends Mode
+
+  val mode: Mode = {
+    val conf = GlobalConfig.systemConfig
+    val queryConfig = new QueryConfig(conf.getConfig("filodb.query"))
+    queryConfig.parser match {
+      case "legacy" => Legacy
+      case "antlr" => Antlr
+      case "shadow" => Shadow
+    }
+  }
+
+  // Only called directly by tests.
   def parseQuery(query: String): Expression = {
-    AntlrParser.parseQuery(query)
-    //LegacyParser.parseQuery(query)
+    mode match {
+      case Antlr => AntlrParser.parseQuery(query)
+      case Legacy => LegacyParser.parseQuery(query)
+      case Shadow => {
+        try {
+          AntlrParser.parseQuery(query)
+        } catch {
+          case e: Throwable => {
+            logger.error(s"Antlr parse error: $query", e)
+          }
+        }
+        LegacyParser.parseQuery(query)
+      }
+    }
   }
 
   // TODO: Once fully switched to AntlrParser, get rid of the special precedence methods.
-  def parseQueryWithPrecedence(query: String): Expression = {
-    AntlrParser.parseQueryWithPrecedence(query)
-    //LegacyParser.parseQueryWithPrecedence(query)
+  private def parseQueryWithPrecedence(query: String): Expression = {
+    mode match {
+      case Antlr => AntlrParser.parseQueryWithPrecedence(query)
+      case Legacy => LegacyParser.parseQueryWithPrecedence(query)
+      case Shadow => {
+        try {
+          AntlrParser.parseQueryWithPrecedence(query)
+        } catch {
+          case e: Throwable => {
+            logger.error(s"Antlr parse error: $query", e)
+          }
+        }
+        LegacyParser.parseQueryWithPrecedence(query)
+      }
+    }
   }
 
+  // Only called by tests.
   def parseLabelValueFilter(query: String): Seq[LabelMatch] = {
-    AntlrParser.parseLabelValueFilter(query)
-    //LegacyParser.parseLabelValueFilter(query)
+    mode match {
+      case Antlr => AntlrParser.parseLabelValueFilter(query)
+      case Legacy => LegacyParser.parseLabelValueFilter(query)
+      case Shadow => {
+        try {
+          AntlrParser.parseLabelValueFilter(query)
+        } catch {
+          case e: Throwable => {
+            logger.error(s"Antlr parse error: $query", e)
+          }
+        }
+        LegacyParser.parseLabelValueFilter(query)
+      }
+    }
   }
 
   def parseFilter(query: String): InstantExpression = {
@@ -42,6 +98,7 @@ object Parser {
     }
   }
 
+  // Only called by tests.
   def labelValuesQueryToLogicalPlan(labelNames: Seq[String], filterQuery: Option[String],
                                     timeParams: TimeRangeParams): LogicalPlan = {
     filterQuery match {
