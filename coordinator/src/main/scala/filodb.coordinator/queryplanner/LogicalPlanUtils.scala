@@ -57,6 +57,7 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: ScalarBinaryOperation       => TimeRange(lp.rangeParams.startSecs * 1000, lp.rangeParams.endSecs * 1000)
       case lp: ScalarFixedDoublePlan       => TimeRange(lp.timeStepParams.startSecs * 1000,
                                               lp.timeStepParams.endSecs * 1000)
+      case sq: SubqueryWithWindowing       => TimeRange(sq.startMs, sq.endMs)
       case lp: RawChunkMeta                => throw new UnsupportedOperationException(s"RawChunkMeta does not have " +
                                               s"time")
     }
@@ -130,6 +131,7 @@ object LogicalPlanUtils extends StrictLogging {
                                               lp.copy(lhs = updatedLhs, rhs = updatedRhs, rangeParams =
                                                 RangeParams(timeRange.startMs / 1000, lp.rangeParams.stepSecs,
                                                   timeRange.endMs / 1000))
+      case sq: SubqueryWithWindowing       => ???
     }
   }
 
@@ -280,6 +282,7 @@ object LogicalPlanUtils extends StrictLogging {
                                                else None
       case lp: ScalarFixedDoublePlan       => None
       case lp: RawChunkMeta                => None
+      case sq: SubqueryWithWindowing       => ???
     }
   }
 }
