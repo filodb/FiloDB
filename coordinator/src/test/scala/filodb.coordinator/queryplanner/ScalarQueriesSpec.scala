@@ -406,7 +406,7 @@ class ScalarQueriesSpec extends AnyFunSpec with Matchers {
   }
 
   it("should generate BinaryJoinExec for query node_info > bool http_requests_total") {
-    val lp = Parser.queryToLogicalPlan("node_info{job = \"app\"} > bool" +
+    val lp = Parser.queryToLogicalPlan("node_info{job = \"app\"} > bool " +
       "http_requests_total{job = \"app\"}", 1000, 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
