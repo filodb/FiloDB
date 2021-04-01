@@ -11,8 +11,6 @@ import filodb.prometheus.antlr.{PromQLLexer, PromQLParser, PromQLBaseVisitor}
 
 import filodb.prometheus.ast._
 
-import filodb.query.LogicalPlan
-
 /**
   * Bridges the gap between the auto-generated Antlr classes the FiloDB AST classes.
   * Auto-generated classes shouldn't leak past here. When the grammar changes, the
@@ -23,6 +21,22 @@ object AntlrParser {
     * Main entry point.
     */
   def parseQuery(query: String): Expression = {
+    parseQuery(query, p => p.expression())
+  }
+
+  def parseLabelValueFilter(query: String): Seq[LabelMatch] = {
+    parseQuery(query, p => p.labelMatcherList())
+  }
+
+  def parseQueryWithPrecedence(query: String): Expression = {
+    // Antlr parser handles precedence automatically.
+    parseQuery(query)
+  }
+
+  /**
+    * @param entry callback which invokes the parser entry point
+    */
+  def parseQuery[T](query: String, entry: PromQLParser => ParseTree): T = {
     val errors = new StringBuilder()
 
     val listener = new BaseErrorListener() {
@@ -50,7 +64,7 @@ object AntlrParser {
     parser.addErrorListener(listener)
 
     try {
-      val expr = cast[Expression](new AntlrParser().visit(parser.expression()))
+      val expr = cast[T](new AntlrParser().visit(entry(parser)))
       if (expr != null && errors.length() == 0) {
         return expr
       }
@@ -65,25 +79,7 @@ object AntlrParser {
     throw new IllegalArgumentException(msg)
   }
 
-  // Copied from Parser.
-  def queryToLogicalPlan(query: String, queryTimestamp: Long, step: Long): LogicalPlan = {
-    // Remember step matters here in instant query, when lookback is provided in step factor
-    // notation as in [5i]
-    val defaultQueryParams = TimeStepParams(queryTimestamp, step, queryTimestamp)
-    queryRangeToLogicalPlan(query, defaultQueryParams)
-  }
-
-  // Copied from Parser.
-  def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
-    val expression = parseQuery(query)
-    expression match {
-      case p: PeriodicSeries => p.toSeriesPlan(timeParams)
-      case r: SimpleSeries   => r.toSeriesPlan(timeParams, isRoot = true)
-      case _ => throw new UnsupportedOperationException()
-    }
-  }
-
-  // TODO: Need a better way of capturing cast failures and converting to IllegalArgumentexception.
+  // TODO: Need a better way of capturing cast failures and converting to IllegalArgumentException.
   def cast[T](obj: Object): T = {
     return obj.asInstanceOf[T]
   }

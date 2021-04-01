@@ -2,9 +2,7 @@ package filodb.prometheus.parse
 
 import scala.util.parsing.combinator.{JavaTokenParsers, PackratParsers, RegexParsers}
 
-import filodb.core.query.{ColumnFilter, Filter}
 import filodb.prometheus.ast._
-import filodb.query.{LabelValues, LogicalPlan}
 
 object BaseParser {
   val whiteSpace = "[ \t\r\f\n]+".r
@@ -421,17 +419,6 @@ object LegacyParser extends ExpressionParser {
     }
   }
 
-  def parseFilter(query: String): InstantExpression = {
-    parseAll(expression, query) match {
-      case s: Success[_] => s.get match {
-        case ie: InstantExpression => ie
-        case _ => throw new IllegalArgumentException(s"Expression $query is not a simple filter")
-      }
-      case e: Error => handleError(e, query)
-      case f: Failure => handleFailure(f, query)
-    }
-  }
-
   def parseLabelValueFilter(query: String): Seq[LabelMatch] = {
     parseAll(labelValues, query) match {
       case s: Success[_] => s.get.asInstanceOf[Seq[LabelMatch]]
@@ -440,47 +427,8 @@ object LegacyParser extends ExpressionParser {
     }
   }
 
-  def metadataQueryToLogicalPlan(query: String, timeParams: TimeRangeParams,
-                                 fetchFirstLastSampleTimes: Boolean = false): LogicalPlan = {
-    val expression = parseQuery(query)
-    expression match {
-      case p: InstantExpression => p.toMetadataPlan(timeParams, fetchFirstLastSampleTimes)
-      case _ => throw new UnsupportedOperationException()
-    }
-  }
-
-  def labelValuesQueryToLogicalPlan(labelNames: Seq[String], filterQuery: Option[String],
-                                    timeParams: TimeRangeParams): LogicalPlan = {
-    filterQuery match {
-      case Some(filter) =>
-        val columnFilters = parseLabelValueFilter(filter).map { l =>
-          l.labelMatchOp match {
-            case EqualMatch => ColumnFilter(l.label, Filter.Equals(l.value))
-            case NotRegexMatch => ColumnFilter(l.label, Filter.NotEqualsRegex(l.value))
-            case RegexMatch => ColumnFilter(l.label, Filter.EqualsRegex(l.value))
-            case NotEqual(false) => ColumnFilter(l.label, Filter.NotEquals(l.value))
-            case other: Any => throw new IllegalArgumentException(s"Unknown match operator $other")
-          }
-        }
-        LabelValues(labelNames, columnFilters, timeParams.start * 1000, timeParams.end * 1000)
-      case _ =>
-        LabelValues(labelNames, Seq.empty, timeParams.start * 1000, timeParams.end * 1000)
-    }
-  }
-
-  def queryToLogicalPlan(query: String, queryTimestamp: Long, step: Long): LogicalPlan = {
-    // Remember step matters here in instant query, when lookback is provided in step factor notation as in [5i]
-    val defaultQueryParams = TimeStepParams(queryTimestamp, step, queryTimestamp)
-    queryRangeToLogicalPlan(query, defaultQueryParams)
-  }
-
-  def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
-    val expression = parseQuery(query)
-    assignPrecedence(expression) match {
-      case p: PeriodicSeries => p.toSeriesPlan(timeParams)
-      case r: SimpleSeries   => r.toSeriesPlan(timeParams, isRoot = true)
-      case _ => throw new UnsupportedOperationException()
-    }
+  def parseQueryWithPrecedence(query: String): Expression = {
+    assignPrecedence(parseQuery(query))
   }
 
   def assignPrecedence(expression: Expression): Expression = {
