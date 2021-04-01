@@ -485,7 +485,7 @@ object Parser extends Expression {
       case f: Function             => f.copy(allParams = f.allParams.map(assignPrecedence(_)))
       case a: AggregateExpression  => a.copy(params = a.params.map(assignPrecedence(_)), altFunctionParams = a.
                                      altFunctionParams.map(assignPrecedence(_)))
-      case b: BinaryExpression     => assignPrecedence(b.lhs, b.operator, b.vectorMatch, b.rhs)
+      case b: BinaryExpression     => assignPrecedence(assignPrecedence(b.lhs), b.operator, b.vectorMatch, b.rhs)
 
       case p: PrecedenceExpression => assignPrecedence(p.expression)
       case _                       => expression
