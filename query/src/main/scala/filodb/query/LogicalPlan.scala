@@ -156,6 +156,56 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
 }
 
 /**
+ *  Subquery represents a series of N points conceptually generated
+ *  by running N homogeneous queries where
+ *  SW = subquery window
+ *  SS = subquery step
+ *  N = SW / SS + 1
+ *  For example, foo[5m:1m], would generate a series of 6 points 1 minute apart.
+ *
+ *  query_range API is an equivalent of subquery though the concept of subquery
+ *  is wider. query_range can be called with start/end/step parameters only on the
+ *  top most expression in the query while subqueries can be:
+ *  (1) top level expression (complete equivalent to query_range)
+ *  (2) arguments to time range functions, potentially nested several levels deep
+ *
+ *  So, there are two major cases for a subquery expression:
+ *  A) any_instant_expression[W:S] as a top level expression. In this case, subquery
+ *     would issue "any_instant_expression" with its own start, end, and step
+ *     parameters. If such an expression is called with query_range API, where start != end
+ *     and step is not zero, an exception is thrown. No special subquery
+ *     node in logical plan is generated as all of the PeriodicSeries logical plans can
+ *     handle range_query API's start, step, and end parameters.
+ *  B) RangeFunction(any_instant_expression[W:S]) at any node/level of abstract syntax tree.
+ *     In this case, we ALWAYS have a range function involved and SubqueryWithWindowing
+ *     logical plan node is generated. The plan is almost identical in the functionality to
+ *     PeriodicSeriesWithWindowing. The difference between the two is that currently
+ *     PeriodicSeriesWithWindowing expects a RawSeriesLikePlan while subquery is NOT
+ *     necessarily an instant selector. PeriodicSeriesWithWindowing needs to be refactored,
+ *     so, it could handle any PeriodicSeries; however, at this point we are going to
+ *     replicate the functionality in the specialized SubqueryWithWindowing logical plan.
+ *     We do so, that we can integrage subquery code without affecting existing existing
+ *     code paths, stabilize the codebase, and later merge the two.
+ *  Below is an example of B) case:
+ *  sum_over_time(<someExpression>[5m:1m]) called with query_range API parameters:
+ *  start=S, end=E, step=ST
+ *  The above is equivalent to query API call:
+ *  sum_over_time(<someExpression[5m:1m])[(now-S):ST] offset (now-E)
+ */
+case class SubqueryWithWindowing(
+  innerPeriodicSeries: PeriodicSeriesPlan, // someExpression
+  startMs: Long, // S
+  stepMs: Long, // ST
+  endMs: Long, // E
+  functionId: RangeFunctionId, // sum_over_time
+  subQueryWindowMs: Long, // 5m
+  subQueryStepMs: Long //1m
+) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = ???
+}
+
+/**
   * Concrete logical plan to query for data in a given range
   * with results in a regular time interval.
   *
