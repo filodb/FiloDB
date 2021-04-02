@@ -36,7 +36,6 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
   val rawDataStoreConfig = StoreConfig(ConfigFactory.parseString( """
                                                                     |flush-interval = 1h
                                                                     |shard-mem-size = 1MB
-                                                                    |ingestion-buffer-mem-size = 30MB
                                                                   """.stripMargin))
 
   val offheapMem = new OffHeapMemory(Seq(Schemas.gauge),

@@ -41,6 +41,14 @@ extends MemStore with StrictLogging {
     new WriteBufferFreeEvictionPolicy(filodbConfig.getMemorySize("memstore.min-write-buffers-free").toBytes)
   }
 
+  private lazy val ingestionMemory = filodbConfig.getMemorySize("memstore.ingestion-buffer-mem-size").toBytes
+
+  private[this] lazy val ingestionMemFactory: NativeMemoryManager = {
+    logger.info(s"Allocating $datasetMemFactories bytes for WriteBufferPool/PartitionKeys")
+    val tags = Map.empty[String, String]
+    new NativeMemoryManager(ingestionMemory, tags)
+  }
+
   def isDownsampleStore: Boolean = false
 
   override def isReadyForQuery(ref: DatasetRef, shard: Int): Boolean = {
@@ -56,15 +64,8 @@ extends MemStore with StrictLogging {
     if (shards.containsKey(shard)) {
       throw ShardAlreadySetup(ref, shard)
     } else {
-      val memFactory = datasetMemFactories.getOrElseUpdate(ref, {
-        val bufferMemorySize = storeConf.ingestionBufferMemSize
-        logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool/PartitionKeys for dataset=${ref}")
-        val tags = Map("dataset" -> ref.toString)
-        new NativeMemoryManager(bufferMemorySize, tags)
-      })
-
-      val tsdb = new OnDemandPagingShard(ref, schemas, storeConf, quotaSource, shard, memFactory, store, metastore,
-                              partEvictionPolicy, filodbConfig)
+      val tsdb = new OnDemandPagingShard(ref, schemas, storeConf, quotaSource, shard, ingestionMemFactory, store,
+        metastore, partEvictionPolicy, filodbConfig)
       shards.put(shard, tsdb)
     }
   }
