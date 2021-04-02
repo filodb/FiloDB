@@ -110,6 +110,7 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
       val otherParams: Seq[FunctionArgsPlan] =
         allParams.filter(!_.equals(seriesParam))
                  .filter(!_.isInstanceOf[InstantExpression])
+                 .filter(!_.isInstanceOf[StringLiteral])
                  .map {
                    case num: ScalarExpression =>
                      val params = RangeParams(timeParams.start, timeParams.step, timeParams.end)
@@ -149,6 +150,7 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
     // Get parameters other than  series like label names. Parameters can be quoted so remove special characters
     val stringParam = allParams.filter(!_.equals(seriesParam)).collect {
       case e: InstantExpression => e.realMetricName.replaceAll("^\"|\"$", "")
+      case s: StringLiteral     => s.str
     }
 
     if (miscellaneousFunctionIdOpt.isDefined) {

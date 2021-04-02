@@ -54,7 +54,7 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     parseAndAssertResult("""http_requests_total::sum{job="app"}""")
     parseAndAssertResult("""topk(2.0,http_requests_total{job="app"})""")
     parseAndAssertResult("""quantile(0.2,http_requests_total{job="app"})""")
-    parseAndAssertResult("""count_values("freq",http_requests_total{job="app"})""")
+    parseAndAssertResult("""count_values(freq,http_requests_total{job="app"})""")
     parseAndAssertResult("""timestamp(http_requests_total{job="app"})""")
     parseAndAssertResult("""absent(http_requests_total{job="app"})""")
     parseAndAssertResult("""absent(sum(http_requests_total{job="app"}))""")
