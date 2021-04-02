@@ -32,6 +32,7 @@ object Parser extends StrictLogging {
       case Antlr => AntlrParser.parseQuery(query)
       case Legacy => LegacyParser.parseQuery(query)
       case Shadow => {
+        val expr = LegacyParser.parseQuery(query)
         try {
           AntlrParser.parseQuery(query)
         } catch {
@@ -39,7 +40,7 @@ object Parser extends StrictLogging {
             logger.error(s"Antlr parse error: $query", e)
           }
         }
-        LegacyParser.parseQuery(query)
+        expr
       }
     }
   }
@@ -50,6 +51,7 @@ object Parser extends StrictLogging {
       case Antlr => AntlrParser.parseQueryWithPrecedence(query)
       case Legacy => LegacyParser.parseQueryWithPrecedence(query)
       case Shadow => {
+        val expr = LegacyParser.parseQueryWithPrecedence(query)
         try {
           AntlrParser.parseQueryWithPrecedence(query)
         } catch {
@@ -57,7 +59,7 @@ object Parser extends StrictLogging {
             logger.error(s"Antlr parse error: $query", e)
           }
         }
-        LegacyParser.parseQueryWithPrecedence(query)
+        expr
       }
     }
   }
@@ -68,6 +70,7 @@ object Parser extends StrictLogging {
       case Antlr => AntlrParser.parseLabelValueFilter(query)
       case Legacy => LegacyParser.parseLabelValueFilter(query)
       case Shadow => {
+        val labels = LegacyParser.parseLabelValueFilter(query)
         try {
           AntlrParser.parseLabelValueFilter(query)
         } catch {
@@ -75,7 +78,7 @@ object Parser extends StrictLogging {
             logger.error(s"Antlr parse error: $query", e)
           }
         }
-        LegacyParser.parseLabelValueFilter(query)
+        labels
       }
     }
   }
