@@ -20,6 +20,7 @@ class QueryConfig(queryConfig: Config) {
     require(v.forall(r => r.size == 2 && r(0) < r(1)))
     v
   }
+  lazy val parser = queryConfig.as[String]("parser")
 
   /**
    * Feature flag test: returns true if the config has an entry with "true", "t" etc

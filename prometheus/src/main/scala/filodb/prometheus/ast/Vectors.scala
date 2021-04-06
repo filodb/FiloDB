@@ -231,5 +231,4 @@ case class RangeExpression(metricName: Option[String],
       ApplyInstantFunctionRaw(rs, InstantFunctionId.HistogramBucket, Seq(param))
     }.getOrElse(rs)
   }
-
 }

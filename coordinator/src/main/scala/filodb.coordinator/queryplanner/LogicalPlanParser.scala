@@ -57,7 +57,9 @@ object LogicalPlanParser {
       ClosingRoundBracket
     val withoutString = if (lp.without.isEmpty) "" else s"${Space}without$Space$OpeningRoundBracket" +
       s"${lp.without.mkString(Comma)}$ClosingRoundBracket"
-    val params = if (lp.params.isEmpty) "" else s"${lp.params.mkString(",")},"
+    val params = if (lp.params.isEmpty) "" else {
+      lp.params.map(p => if (p.isInstanceOf[String]) {Quotes + p + Quotes} else p).mkString(Comma) + Comma
+    }
 
     val function = if (lp.operator.equals(CountValues)) "count_values" else lp.operator.toString.toLowerCase
     s"$function$OpeningRoundBracket$params$periodicSeriesQuery$ClosingRoundBracket$byString$withoutString"
