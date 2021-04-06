@@ -48,7 +48,9 @@ case class AggregateExpression(name: String, params: Seq[Expression],
       case num: ScalarExpression =>
         parameter = Seq(num.toScalar)
       case s: InstantExpression =>
-        parameter = Seq(s.metricName.get)
+        parameter = Seq(s.metricName.get.replaceAll("^\"|\"$", ""))
+      case literal: StringLiteral =>
+        parameter = Seq(literal.str)
       case _ =>
         throw new IllegalArgumentException("First parameter to aggregate operator can be a string or number")
     }

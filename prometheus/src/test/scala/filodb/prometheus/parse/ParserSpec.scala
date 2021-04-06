@@ -67,6 +67,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("+1 + -2 * 1")
     parseSuccessfully("1 < bool 2 - 1 * 2")
     parseSuccessfully("1 + 2/(3*1)")
+    //parseSuccessfully("10 + -(20 + 30)")
     parseSuccessfully("-some_metric")
     parseSuccessfully("+some_metric")
     parseSuccessfully("(1 + heap_size{a=\"b\"})")
@@ -540,7 +541,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
         "ApplySortFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),SortDesc)",
       "absent(http_requests_total{host=\"api-server\"})" -> "ApplyAbsentFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(host,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(ColumnFilter(host,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),RangeParams(1524855988,1000,1524855988),List())",
       "count_values(\"freq\", http_requests_total)" ->
-        "Aggregate(CountValues,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(\"freq\"),List(),List())",
+        "Aggregate(CountValues,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(freq),List(),List())",
       "timestamp(http_requests_total)" -> "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,0,Timestamp,false,List(),None)",
       "sum:some_metric:dataset:1m{_ws_=\"demo\", _ns_=\"test\"}" -> "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(test)), ColumnFilter(__name__,Equals(sum:some_metric:dataset:1m))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None)",
       "1 + 2 * 3" -> "ScalarBinaryOperation(ADD,Left(1.0),Right(ScalarBinaryOperation(MUL,Left(2.0),Left(3.0),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))",
@@ -615,12 +616,34 @@ class ParserSpec extends AnyFunSpec with Matchers {
   }
 
   private def parseSuccessfully(query: String) = {
-    Parser.parseQuery(query)
+    val result = LegacyParser.parseQuery(query)
+    info(String.valueOf(result))
+    antlrParseSuccessfully(query)
+  }
+
+  private def antlrParseSuccessfully(query: String) = {
+    val result = AntlrParser.parseQuery(query)
+    //info(String.valueOf(result))
   }
 
   private def parseError(query: String) = {
     intercept[IllegalArgumentException] {
-      Parser.parseQuery(query)
+      LegacyParser.parseQuery(query)
+    }
+    antlrParseError(query)
+  }
+
+  private def antlrParseError(query: String) = {
+    intercept[IllegalArgumentException] {
+      AntlrParser.parseQuery(query)
+      try {
+        Parser.queryToLogicalPlan(query, 1524855988L, 0)
+      } catch {
+        case e: UnsupportedOperationException => {
+          // This case is reached only for certain unsupported unary operations.
+          throw new IllegalArgumentException()
+        }
+      }
     }
   }
 
