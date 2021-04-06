@@ -28,11 +28,6 @@ object AntlrParser {
     parseQuery(query, p => p.labelMatcherList())
   }
 
-  def parseQueryWithPrecedence(query: String): Expression = {
-    // Antlr parser handles precedence automatically.
-    parseQuery(query)
-  }
-
   /**
     * @param entry callback which invokes the parser entry point
     */

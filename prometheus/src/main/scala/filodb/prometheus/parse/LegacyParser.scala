@@ -351,7 +351,7 @@ trait ExpressionParser extends AggregatesParser with SelectorParser with Numeric
 
   lazy val precedenceExpression: PackratParser[PrecedenceExpression] = {
 
-    "(" ~ expression ~ ")" ^^ {
+    "(" ~ binaryExpression ~ ")" ^^ {
       case "(" ~ ep ~ ")" => PrecedenceExpression(ep)
     }
   }
@@ -385,7 +385,8 @@ trait ExpressionParser extends AggregatesParser with SelectorParser with Numeric
 
   lazy val expression: PackratParser[Expression] =
     binaryExpression | subqueryExpression | aggregateExpression2 | aggregateExpression1 |
-      function | unaryExpression | vector | numericalExpression | simpleSeries | precedenceExpression
+    function | unaryExpression | vector | numericalExpression | simpleSeries | precedenceExpression |
+    "(" ~> expression <~ ")"
 
   // Generally most expressions can be subqueries except for those that return range vectors,
   // for example, subquery itself or range vector selectors cannot be "subqueryable"
@@ -428,7 +429,7 @@ object LegacyParser extends ExpressionParser {
   }
 
   def parseQueryWithPrecedence(query: String): Expression = {
-    assignPrecedence(parseQuery(query))
+    removePrecedenceExpression(assignPrecedence(parseQuery(query)))
   }
 
   def assignPrecedence(expression: Expression): Expression = {
@@ -476,6 +477,25 @@ object LegacyParser extends ExpressionParser {
             vectorMatch, rhsWithPrecedence)
         }
       case _ => BinaryExpression(lhs, operator, vectorMatch, rhs)
+    }
+  }
+
+  def removePrecedenceExpression(e: Expression): Expression = {
+    e match {
+      case e: PrecedenceExpression  => removePrecedenceExpression(e.expression)
+      case b: BinaryExpression      => val lhsExpression = removePrecedenceExpression(b.lhs)
+                                       val rhsExpression = removePrecedenceExpression(b.rhs)
+                                       b.copy(lhs = lhsExpression, rhs = rhsExpression)
+      // Example: absent((a + b))
+      case f: Function              => val allParamsNew  = f.allParams.map(removePrecedenceExpression(_))
+                                       f.copy(allParams = allParamsNew)
+      // Example: sum(( a + b))
+      case a: AggregateExpression   => val paramsNew  = a.params.map(removePrecedenceExpression(_))
+                                       val altParams  = a.altFunctionParams.map(removePrecedenceExpression(_))
+                                       a.copy(params = paramsNew, altFunctionParams = altParams)
+      case s: Scalar                => s
+      case i: InstantExpression     => i
+      case r: RangeExpression       => r
     }
   }
 

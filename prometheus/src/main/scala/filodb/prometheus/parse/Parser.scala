@@ -48,12 +48,12 @@ object Parser extends StrictLogging {
   // TODO: Once fully switched to AntlrParser, get rid of the special precedence methods.
   private def parseQueryWithPrecedence(query: String): Expression = {
     mode match {
-      case Antlr => AntlrParser.parseQueryWithPrecedence(query)
+      case Antlr => AntlrParser.parseQuery(query)
       case Legacy => LegacyParser.parseQueryWithPrecedence(query)
       case Shadow => {
         val expr = LegacyParser.parseQueryWithPrecedence(query)
         try {
-          AntlrParser.parseQueryWithPrecedence(query)
+          AntlrParser.parseQuery(query)
         } catch {
           case e: Throwable => {
             logger.error(s"Antlr parse error: $query", e)
