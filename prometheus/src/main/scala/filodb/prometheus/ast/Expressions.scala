@@ -131,7 +131,7 @@ case class BinaryExpression(lhs: Expression,
               onLabels.getOrElse(Nil), ignoringLabels.getOrElse(Nil),
               vectorMatch.flatMap(_.grouping).map(_.labels).getOrElse(Nil))
           }
-        case _ => throw new UnsupportedOperationException("Invalid operands")
+        case _ => throw new UnsupportedOperationException(s"Invalid operands: $lhsWithPrecedence, $rhsWithPrecedence")
       }
     }
   }
