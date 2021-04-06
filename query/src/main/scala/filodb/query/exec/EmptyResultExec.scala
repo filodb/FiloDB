@@ -19,7 +19,7 @@ case class EmptyResultExec(queryContext: QueryContext,
     Task(QueryResult(queryContext.queryId,
       new ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
                            ColumnInfo("value", ColumnType.DoubleColumn)), 1),
-      Seq.empty))
+      Seq.empty, false, None))
   }
 
   override def doExecute(source: ChunkSource,

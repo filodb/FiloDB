@@ -40,6 +40,13 @@ case class ActorPlanDispatcher(target: ActorRef) extends PlanDispatcher {
         case resp: QueryResponse => resp
         case e =>  throw new IllegalStateException(s"Received bad response $e")
       }
+      // TODO We can send partial results on timeout. Try later. Need to address QueryTimeoutException too.
+//        .recover { // if partial results allowed, then return empty result
+//        case e: AskTimeoutException if (plan.queryContext.plannerParams.allowPartialResults) =>
+//            Query.qLogger.warn(s"Swallowed AskTimeoutException since partial result was enabled: ${e.getMessage}")
+//            QueryResult(plan.queryContext.queryId, ResultSchema.empty, Nil, true,
+//              Some("Result may be partial since query on some shards timed out"))
+//      }
       Task.fromFuture(fut)
     }
   }

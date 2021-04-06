@@ -136,10 +136,11 @@ trait ExecPlan extends QueryCommand {
         qLogger.debug(s"queryId: ${queryContext.queryId} Empty plan $this, returning empty results")
         span.mark("empty-plan")
         span.mark(s"execute-step2-end-${getClass.getSimpleName}")
-        Task.eval(QueryResult(queryContext.queryId, resSchema, Nil))
+        Task.eval(QueryResult(queryContext.queryId, resSchema, Nil, querySession.resultCouldBePartial,
+          querySession.partialResultsReason))
       } else {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
-          val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
+          val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult(querySession))
           (transf.apply(acc._1, querySession, queryContext.plannerParams.sampleLimit, acc._2,
             paramRangeVector), transf.schema(acc._2))
         }
@@ -191,7 +192,8 @@ trait ExecPlan extends QueryCommand {
             span.mark(s"num-result-samples: $numResultSamples")
             span.mark(s"num-range-vectors: ${r.size}")
             span.mark(s"execute-step2-end-${getClass.getSimpleName}")
-            QueryResult(queryContext.queryId, finalRes._2, r)
+            QueryResult(queryContext.queryId, finalRes._2, r, querySession.resultCouldBePartial,
+              querySession.partialResultsReason)
           }
       }
       resultTask.onErrorHandle { case ex: Throwable =>
@@ -300,7 +302,7 @@ abstract class LeafExecPlan extends ExecPlan {
   * getResult will get the ScalarRangeVector for the FuncArg
   */
 sealed trait FuncArgs {
-  def getResult (implicit sched: Scheduler) : Observable[ScalarRangeVector]
+  def getResult(querySession: QuerySession)(implicit sched: Scheduler) : Observable[ScalarRangeVector]
 }
 
 /**
@@ -308,20 +310,26 @@ sealed trait FuncArgs {
   */
 final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParams) extends FuncArgs {
 
-  override def getResult(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
+  override def getResult(querySession: QuerySession)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.fromTask(
       execPlan.dispatcher.dispatch(execPlan).onErrorHandle { case ex: Throwable =>
         QueryError(execPlan.queryContext.queryId, ex)
       }.map {
-        case QueryResult(_, _, result)  =>  // Result is empty because of NaN so create ScalarFixedDouble with NaN
-                                              if (result.isEmpty) {
-                                                ScalarFixedDouble(timeStepParams, Double.NaN)
-                                              } else {
-                                                result.head match {
-                                                  case f: ScalarFixedDouble   => f
-                                                  case s: ScalarVaryingDouble => s
-                                                }
-                                              }
+        case QueryResult(_, _, result, isPartialResult, partialResultReason)  =>
+                        // Result is empty because of NaN so create ScalarFixedDouble with NaN
+                      if (isPartialResult) {
+                        querySession.resultCouldBePartial = true
+                        querySession.partialResultsReason = partialResultReason
+                      }
+
+                      if (result.isEmpty) {
+                          ScalarFixedDouble(timeStepParams, Double.NaN)
+                        } else {
+                          result.head match {
+                            case f: ScalarFixedDouble   => f
+                            case s: ScalarVaryingDouble => s
+                          }
+                        }
         case QueryError(_, ex)          =>  throw ex
       })
   }
@@ -333,7 +341,7 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
   * FuncArgs for scalar parameter
   */
 final case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) extends FuncArgs {
-  override def getResult(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
+  override def getResult(querySession: QuerySession)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.now(ScalarFixedDouble(timeStepParams, scalar))
   }
 }
@@ -342,7 +350,7 @@ final case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) ext
   * FuncArgs for date and time functions
   */
 final case class TimeFuncArgs(timeStepParams: RangeParams) extends FuncArgs {
-  override def getResult(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
+  override def getResult(querySession: QuerySession)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.now(TimeScalar(timeStepParams))
   }
 }
@@ -409,7 +417,11 @@ abstract class NonLeafExecPlan extends ExecPlan {
       .doOnStart(_ => span.mark("first-child-result-received"))
       .doOnTerminate(_ => span.mark("last-child-result-received"))
       .collect {
-      case (res @ QueryResult(_, schema, _), i) if schema != ResultSchema.empty =>
+      case (res @ QueryResult(_, schema, _, isPartialResult, partialResultReason), i) if schema != ResultSchema.empty =>
+        if (isPartialResult) {
+          querySession.resultCouldBePartial = true
+          querySession.partialResultsReason = partialResultReason
+        }
         sch = reduceSchemas(sch, res)
         (res, i.toInt)
       case (e: QueryError, _) =>
@@ -417,8 +429,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // cache caches results so that multiple subscribers can process
     }.cache
 
-    val outputSchema = processedTasks.collect {
-      case (QueryResult(_, schema, _), _) => schema
+    val outputSchema = processedTasks.collect { // collect schema of first result that is nonEmpty
+      case (QueryResult(_, schema, _, _, _), _) if schema.columns.nonEmpty => schema
     }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
       // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {
@@ -436,9 +448,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
    */
   def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema = {
     resp match {
-      case QueryResult(_, schema, _) if rs == ResultSchema.empty =>
+      case QueryResult(_, schema, _, _, _) if rs == ResultSchema.empty =>
         schema     /// First schema, take as is
-      case QueryResult(_, schema, _) =>
+      case QueryResult(_, schema, _, _, _) =>
         if (rs != schema) throw SchemaMismatch(rs.toString, schema.toString)
         else rs
     }
@@ -462,9 +474,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
 object IgnoreFixedVectorLenAndColumnNamesSchemaReducer {
   def reduceSchema(rs: ResultSchema, resp: QueryResult): ResultSchema = {
     resp match {
-      case QueryResult(_, schema, _) if rs == ResultSchema.empty =>
+      case QueryResult(_, schema, _, _, _) if rs == ResultSchema.empty =>
         schema /// First schema, take as is
-      case QueryResult(_, schema, _) =>
+      case QueryResult(_, schema, _, _, _) =>
         if (!rs.hasSameColumnsAs(schema) && !rs.hasSameColumnTypes(schema))  {
           throw SchemaMismatch(rs.toString, schema.toString)
         }

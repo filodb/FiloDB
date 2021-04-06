@@ -41,7 +41,7 @@ object TestData {
   val sourceConfStr = """
     store {
       max-chunks-size = 100
-      demand-paged-chunk-retention-period = 10 hours
+      disk-time-to-live = 10 hours
       shard-mem-size = 100MB
       groups-per-shard = 4
       ingestion-buffer-mem-size = 80MB

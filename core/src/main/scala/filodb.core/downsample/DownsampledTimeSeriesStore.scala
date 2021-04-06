@@ -32,6 +32,10 @@ extends MemStore with StrictLogging {
 
   override def isDownsampleStore: Boolean = true
 
+  def isReadyForQuery(ref: DatasetRef, shard: Int): Boolean = {
+    getShardE(ref: DatasetRef, shard: Int).isReadyForQuery
+  }
+
   override def metastore: MetaStore = ??? // Not needed
 
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
