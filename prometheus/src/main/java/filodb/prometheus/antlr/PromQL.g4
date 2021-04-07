@@ -174,7 +174,7 @@ TIME_RANGE
 DURATION: NUMBER ('s' | 'm' | 'h' | 'd' | 'w' | 'y' | 'i');
 
 // Used for functions, labels, and metric names.
-IDENTIFIER:      [a-zA-Z_]+;
+IDENTIFIER: [a-zA-Z_] [a-zA-Z0-9_]*;
 
 // Used for metric names.
 IDENTIFIER_EXTENDED: [a-zA-Z_:] [a-zA-Z0-9_:\-.]*;

@@ -236,6 +236,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("last(some_metric[5m])")
     parseSuccessfully("round(some_metric)")
     parseSuccessfully("round(some_metric, 5)")
+    parseSuccessfully("log2(some_metric, 5)")
 
     //        parseError(  "floor()")
     //        parseError(  "floor(some_metric, other_metric)")
