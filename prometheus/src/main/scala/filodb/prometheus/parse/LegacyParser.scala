@@ -2,6 +2,8 @@ package filodb.prometheus.parse
 
 import scala.util.parsing.combinator.{JavaTokenParsers, PackratParsers, RegexParsers}
 
+import com.typesafe.scalalogging.StrictLogging
+
 import filodb.prometheus.ast._
 
 object BaseParser {
@@ -404,7 +406,7 @@ trait ExpressionParser extends AggregatesParser with SelectorParser with Numeric
 /**
   * Expected to be replaced by AntlrParser.
   */
-object LegacyParser extends ExpressionParser {
+object LegacyParser extends ExpressionParser with StrictLogging {
   /**
     * Parser is not whitespace sensitive
     */
@@ -413,6 +415,7 @@ object LegacyParser extends ExpressionParser {
   override val whiteSpace = BaseParser.whiteSpace
 
   def parseQuery(query: String): Expression = {
+    logger.debug(s"LegacyParser query: $query")
     parseAll(expression, query) match {
       case s: Success[_] => s.get.asInstanceOf[Expression]
       case e: Error => handleError(e, query)
