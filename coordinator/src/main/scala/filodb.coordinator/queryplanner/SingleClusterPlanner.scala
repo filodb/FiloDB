@@ -286,8 +286,8 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       paramsExec, lp.offsetMs, rawSource)))
     if (lp.function == RangeFunctionId.AbsentOverTime) {
       val aggregate = Aggregate(AggregationOperator.Sum, lp, Nil, Seq("job"))
-
-      addAbsentFunctionMapper(PlanResult(Seq(addAggregator(aggregate, qContext, series, Seq.empty))), lp.columnFilters,
+      val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext, series, Seq.empty)))
+      addAbsentFunctionMapper(aggregatePlanResult, lp.columnFilters,
         RangeParams(lp.startMs / 1000, lp.stepMs / 1000, lp.endMs / 1000), qContext)
 
     } else series

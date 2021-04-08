@@ -142,7 +142,7 @@ trait  PlannerMaterializer {
     }
   }
 
-   def addAggregator(lp: Aggregate, qContext: QueryContext, toReduceLevel1: PlanResult,
+   def addAggregator(lp: Aggregate, qContext: QueryContext, toReduceLevel: PlanResult,
                      extraOnByKeysTimeRanges: Seq[Seq[Long]]):
    LocalPartitionReduceAggregateExec = {
 
@@ -154,26 +154,26 @@ trait  PlannerMaterializer {
      * 1. Step instants must be chosen so time windows dont span shards.
      * 2. We pump data into multiple shards for sometime so atleast one shard will fully contain any time window
      *
-     * Pulling all data into one node and stich before reducing (not feasible, doesnt scale). So we will
+     * Pulling all data into one node and stitch before reducing (not feasible, doesnt scale). So we will
      * not stitch
      *
      * Starting off with solution 1 first until (2) or some other approach is decided on.
      */
-    toReduceLevel1.plans.foreach {
+    toReduceLevel.plans.foreach {
       _.addRangeVectorTransformer(AggregateMapReduce(lp.operator, lp.params,
         LogicalPlanUtils.renameLabels(lp.without, dsOptions.metricColumn),
         LogicalPlanUtils.renameLabels(byKeysReal, dsOptions.metricColumn)))
     }
 
     val toReduceLevel2 =
-      if (toReduceLevel1.plans.size >= 16) {
+      if (toReduceLevel.plans.size >= 16) {
         // If number of children is above a threshold, parallelize aggregation
-        val groupSize = Math.sqrt(toReduceLevel1.plans.size).ceil.toInt
-        toReduceLevel1.plans.grouped(groupSize).map { nodePlans =>
+        val groupSize = Math.sqrt(toReduceLevel.plans.size).ceil.toInt
+        toReduceLevel.plans.grouped(groupSize).map { nodePlans =>
           val reduceDispatcher = nodePlans.head.dispatcher
           LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, nodePlans, lp.operator, lp.params)
         }.toList
-      } else toReduceLevel1.plans
+      } else toReduceLevel.plans
 
     val reduceDispatcher = pickDispatcher(toReduceLevel2)
     val reducer = LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
@@ -188,9 +188,9 @@ trait  PlannerMaterializer {
                                   lp: ApplyAbsentFunction): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, qContext)
     val aggregate = Aggregate(AggregationOperator.Sum, lp, Nil, Seq("job"))
-
-    addAbsentFunctionMapper(PlanResult(Seq(addAggregator(aggregate, qContext, vectors, Seq.empty))),
-      lp.columnFilters, RangeParams(lp.startMs / 1000, lp.stepMs / 1000, lp.endMs / 1000), qContext)
+    val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext, vectors, Seq.empty)))
+    addAbsentFunctionMapper(aggregatePlanResult, lp.columnFilters,
+      RangeParams(lp.startMs / 1000, lp.stepMs / 1000, lp.endMs / 1000), qContext)
     }
 }
 
