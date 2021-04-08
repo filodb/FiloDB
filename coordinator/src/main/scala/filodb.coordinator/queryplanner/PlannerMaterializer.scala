@@ -129,17 +129,9 @@ trait  PlannerMaterializer {
                                columnFilters: Seq[ColumnFilter],
                                rangeParams: RangeParams,
                                queryContext: QueryContext): PlanResult = {
-    if (vectors.plans.length > 1) {
-      val targetActor = pickDispatcher(vectors.plans)
-      val topPlan = LocalPartitionDistConcatExec(queryContext, targetActor, vectors.plans)
-      topPlan.addRangeVectorTransformer(AbsentFunctionMapper(columnFilters, rangeParams,
-        dsOptions.metricColumn))
-      PlanResult(Seq(topPlan), vectors.needsStitch)
-    } else {
       vectors.plans.foreach(_.addRangeVectorTransformer(AbsentFunctionMapper(columnFilters, rangeParams,
         dsOptions.metricColumn )))
       vectors
-    }
   }
 
    def addAggregator(lp: Aggregate, qContext: QueryContext, toReduceLevel: PlanResult,
