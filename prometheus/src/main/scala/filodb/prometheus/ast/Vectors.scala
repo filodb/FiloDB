@@ -175,7 +175,7 @@ case class InstantExpression(metricName: Option[String],
 
   import WindowConstants._
 
-  private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
+  val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     // we start from 5 minutes earlier that provided start time in order to include last sample for the

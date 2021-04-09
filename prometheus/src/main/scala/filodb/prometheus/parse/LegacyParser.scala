@@ -314,13 +314,14 @@ trait AggregatesParser extends OperatorParser with BaseParser {
   protected val STDVAR_OVER_TIME = Keyword("STDVAR_OVER_TIME")
   protected val COUNT_OVER_TIME = Keyword("COUNT_OVER_TIME")
   protected val QUANTILE_OVER_TIME = Keyword("QUANTILE_OVER_TIME")
+  protected val ABSENT_OVER_TIME= Keyword("ABSENT_OVER_TIME")
 
   lazy val aggregateOperator: PackratParser[String] =
     SUM | AVG | MIN | MAX | STD_DEV | STD_VAR | COUNT_VALUES | COUNT | BOTTOMK | TOPK | QUANTILE
 
   lazy val aggregateRangeOperator: PackratParser[String] =
     SUM_OVER_TIME | AVG_OVER_TIME | MIN_OVER_TIME | MAX_OVER_TIME | STDDEV_OVER_TIME |
-      STDVAR_OVER_TIME | COUNT_OVER_TIME | QUANTILE_OVER_TIME
+      STDVAR_OVER_TIME | COUNT_OVER_TIME | QUANTILE_OVER_TIME | ABSENT_OVER_TIME
 
 
   lazy val without: PackratParser[Without] = WITHOUT ~ labels ^^ {
