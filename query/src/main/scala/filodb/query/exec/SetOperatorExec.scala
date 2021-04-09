@@ -110,6 +110,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
     val result = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
     val rhsMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
 
+    val period = lhsRvs.headOption.flatMap(_.period)
+
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
       // Don't add range vector if it is empty
@@ -162,7 +164,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
           }
         }
         val arrayBuffer = result.getOrElse(jk, ArrayBuffer())
-        val resRv = IteratorBackedRangeVector(lhs.key, rows)
+        val resRv = IteratorBackedRangeVector(lhs.key, rows, period)
         if (index >= 0) arrayBuffer.update(index, resRv) else arrayBuffer.append(resRv)
         result.put(jk, arrayBuffer)
       } else if (jk.isEmpty) {

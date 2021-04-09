@@ -14,7 +14,7 @@ object StitchRvsExec {
 
   def stitch(v1: RangeVector, v2: RangeVector): RangeVector = {
     val rows = StitchRvsExec.merge(Seq(v1.rows(), v2.rows()))
-    IteratorBackedRangeVector(v1.key, rows)
+    IteratorBackedRangeVector(v1.key, rows, RvRange.union(v1.period, v2.period))
   }
 
   def merge(vectors: Iterable[RangeVectorCursor]): RangeVectorCursor = {
@@ -83,7 +83,7 @@ final case class StitchRvsExec(queryContext: QueryContext,
       groups.mapValues { toMerge =>
         val rows = StitchRvsExec.merge(toMerge.map(_.rows))
         val key = toMerge.head.key
-        IteratorBackedRangeVector(key, rows)
+        IteratorBackedRangeVector(key, rows, toMerge.headOption.flatMap(_.period))
       }.values
     }.map(Observable.fromIterable)
     Observable.fromTask(stitched).flatten
@@ -109,7 +109,7 @@ final case class StitchRvsMapper() extends RangeVectorTransformer {
       groups.mapValues { toMerge =>
         val rows = StitchRvsExec.merge(toMerge.map(_.rows))
         val key = toMerge.head.key
-        IteratorBackedRangeVector(key, rows)
+        IteratorBackedRangeVector(key, rows, toMerge.headOption.flatMap(_.period))
       }.values
     }.map(Observable.fromIterable)
     Observable.fromTask(stitched).flatten

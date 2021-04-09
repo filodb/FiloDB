@@ -54,14 +54,6 @@ trait RangeVectorTransformer extends java.io.Serializable {
   def canHandleEmptySchemas: Boolean = false
 }
 
-object RangeVectorTransformer {
-  def valueColumnType(schema: ResultSchema): ColumnType = {
-    require(schema.isTimeSeries, s"Schema $schema is not time series based, cannot continue query")
-    require(schema.columns.size >= 2, s"Schema $schema has less than 2 columns, cannot continue query")
-    schema.columns(1).colType
-  }
-}
-
 /**
   * Applies an instant vector function to every instant/row of the
   * range vectors
@@ -72,18 +64,18 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
 
   def evaluate(source: Observable[RangeVector], scalarRangeVector: Seq[ScalarRangeVector], querySession: QuerySession,
                limit: Int, sourceSchema: ResultSchema) : Observable[RangeVector] = {
-    RangeVectorTransformer.valueColumnType(sourceSchema) match {
+    ResultSchema.valueColumnType(sourceSchema) match {
       case ColumnType.HistogramColumn =>
         val instantFunction = InstantFunction.histogram(function)
         if (instantFunction.isHToDoubleFunc) {
           source.map { rv =>
             IteratorBackedRangeVector(rv.key, new H2DoubleInstantFuncIterator(rv.rows, instantFunction.asHToDouble,
-              scalarRangeVector))
+              scalarRangeVector), rv.period)
           }
         } else if (instantFunction.isHistDoubleToDoubleFunc && sourceSchema.isHistDouble) {
           source.map { rv =>
             IteratorBackedRangeVector(rv.key, new HD2DoubleInstantFuncIterator(rv.rows, instantFunction.asHDToDouble,
-              scalarRangeVector))
+              scalarRangeVector), rv.period)
           }
         } else {
           throw new UnsupportedOperationException(s"Sorry, function $function is not supported right now")
@@ -97,7 +89,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
           val instantFunction = InstantFunction.double(function)
           source.map { rv =>
             IteratorBackedRangeVector(rv.key, new DoubleInstantFuncIterator(rv.rows, instantFunction,
-              scalarRangeVector))
+              scalarRangeVector), rv.period)
           }
         }
       case cType: ColumnType =>
@@ -130,7 +122,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
   override def schema(source: ResultSchema): ResultSchema = {
     // if source is histogram, determine what output column type is
     // otherwise pass along the source
-    RangeVectorTransformer.valueColumnType(source) match {
+    ResultSchema.valueColumnType(source) match {
       case ColumnType.HistogramColumn =>
         val instantFunction = InstantFunction.histogram(function)
         if (instantFunction.isHToDoubleFunc || instantFunction.isHistDoubleToDoubleFunc) {
@@ -232,7 +224,7 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
           result
         }
       }
-      IteratorBackedRangeVector(rv.key, resultIterator)
+      IteratorBackedRangeVector(rv.key, resultIterator, rv.period)
     }
   }
 }
@@ -304,7 +296,9 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
       if (rvs.size > 1) {
         Seq(ScalarFixedDouble(timeStepParams, Double.NaN))
       } else {
-        Seq(ScalarVaryingDouble(rvs.head.rows.map(r => (r.getLong(0), r.getDouble(1))).toMap))
+        Seq(ScalarVaryingDouble(rvs.head.rows.map(r => (r.getLong(0), r.getDouble(1))).toMap,
+          Some(RvRange(timeStepParams.startSecs * 1000, timeStepParams.stepSecs * 1000,
+                       timeStepParams.endSecs * 1000))))
       }
     }.map(Observable.fromIterable)
     Observable.fromTask(resultRv).flatten
@@ -336,6 +330,7 @@ final case class VectorFunctionMapper() extends RangeVectorTransformer {
       new RangeVector {
         override def key: RangeVectorKey = rv.key
         override def rows(): RangeVectorCursor = rv.rows
+        override def period: Option[RvRange] = rv.period
       }
     }
   }
@@ -385,6 +380,8 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
           import NoCloseCursor._
           rowList.iterator
         }
+        override def period: Option[RvRange] = Some(RvRange(rangeParams.startSecs * 1000, rangeParams.stepSecs * 1000,
+                                                            rangeParams.endSecs * 1000))
       }
     }
 
@@ -414,7 +411,6 @@ final case class BucketValues(schema: HistogramBuckets,
  * vectors may be pulled by the next reader at the same time this observable processes future vectors.
  */
 final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVectorTransformer {
-  import RangeVectorTransformer._
 
   protected[exec] def args: String = s"HistToPromSeriesMapper(options=${sch.options})"
 
@@ -458,12 +454,12 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
     // Now create new RangeVectors for each bucket
     // NOTE: debox.Map methods sometimes has issues giving consistent results instead of duplicates.
     buckets.mapToArray { case (le, bucketValues) =>
-      promBucketRV(rv.key, le, timestamps, bucketValues)
+      promBucketRV(rv.key, le, timestamps, bucketValues, rv.period)
     }.toSeq
   }
 
   override def schema(source: ResultSchema): ResultSchema =
-    if (valueColumnType(source) != ColumnType.HistogramColumn) source else
+    if (ResultSchema.valueColumnType(source) != ColumnType.HistogramColumn) source else
     ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
       ColumnInfo("value", ColumnType.DoubleColumn)), 1)
 
@@ -480,13 +476,14 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
 
   // Create a Prometheus-compatible single bucket range vector
   private def promBucketRV(origKey: RangeVectorKey, le: Double,
-                           ts: debox.Buffer[Long], values: debox.Buffer[Double]): RangeVector = {
+                           ts: debox.Buffer[Long], values: debox.Buffer[Double],
+                           period: Option[RvRange]): RangeVector = {
     // create new range vector key, appending _bucket to the metric name
     val labels2 = origKey.labelValues.map { case (k, v) =>
       if (k == sch.options.metricUTF8) (k, ZeroCopyUTF8String(v.toString + "_bucket")) else (k, v)
     }
     val lab3 = labels2.updated(LeUtf8, ZeroCopyUTF8String(if (le == Double.PositiveInfinity) "+Inf" else le.toString))
-    BufferRangeVector(CustomRangeVectorKey(lab3, origKey.sourceShards), ts, values)
+    BufferRangeVector(CustomRangeVectorKey(lab3, origKey.sourceShards), ts, values, period)
   }
 }
 

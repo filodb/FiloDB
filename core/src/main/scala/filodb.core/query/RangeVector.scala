@@ -17,6 +17,7 @@ import filodb.core.store._
 import filodb.memory.{MemFactory, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
+import filodb.memory.format.vectors.Histogram
 
 /**
   * Identifier for a single RangeVector.
@@ -103,12 +104,25 @@ object CustomRangeVectorKey {
   val emptyAsZcUtf8 = toZcUtf8(empty)
 }
 
+case class RvRange(startMs: Long, stepMs: Long, endMs: Long)
+
+object RvRange {
+  def union(v1: Option[RvRange], v2: Option[RvRange]): Option[RvRange] = {
+    if (v1.isDefined && v2.isDefined) {
+      require(v1.get.stepMs == v2.get.stepMs, s"Steps for Rvs being stitched were " +
+        s"not equal: ${v1.get.stepMs} and ${v2.get.stepMs}")
+      Some(RvRange(Math.min(v1.get.startMs, v2.get.startMs), v1.get.stepMs, Math.max(v1.get.endMs, v2.get.endMs)))
+    } else None
+  }
+}
+
 /**
   * Represents a single result of any FiloDB Query.
   */
 trait RangeVector {
   def key: RangeVectorKey
   def rows(): RangeVectorCursor
+  def period: Option[RvRange] = None
   def numRows: Option[Int] = None
   def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
 }
@@ -132,7 +146,8 @@ trait ScalarRangeVector extends SerializableRangeVector {
 /**
   * ScalarRangeVector which has time specific value
   */
-final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]) extends ScalarRangeVector {
+final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double],
+                                     override val period: Option[RvRange]) extends ScalarRangeVector {
   import NoCloseCursor._
   override def rows: RangeVectorCursor = timeValueMap.toList.sortWith(_._1 < _._1).
                                             map { x => new TransientRow(x._1, x._2) }.iterator
@@ -145,6 +160,8 @@ final case class RangeParams(startSecs: Long, stepSecs: Long, endSecs: Long)
 
 trait ScalarSingleValue extends ScalarRangeVector {
   def rangeParams: RangeParams
+  override def period: Option[RvRange] = Some(RvRange(rangeParams.stepSecs * 1000,
+                                             rangeParams.stepSecs * 1000, rangeParams.endSecs * 1000))
   var numRowsInt : Int = 0
 
   override def rows(): RangeVectorCursor = {
@@ -253,6 +270,8 @@ final case class RawDataRangeVector(key: RangeVectorKey,
   def valueColID: Int = columnIDs(1)
 
   def publishInterval: Option[Long] = partition.publishInterval
+
+  override def period: Option[RvRange] = None
 }
 
 /**
@@ -271,6 +290,7 @@ final case class ChunkInfoRangeVector(key: RangeVectorKey,
     reader.setInfo(info)
     reader
   }
+  override def period: Option[RvRange] = None
 }
 
 /**
@@ -284,14 +304,45 @@ final class SerializedRangeVector(val key: RangeVectorKey,
                                   val numRowsInt: Int,
                                   containers: Seq[RecordContainer],
                                   val schema: RecordSchema,
-                                  startRecordNo: Int) extends RangeVector with SerializableRangeVector with
-                                  java.io.Serializable {
+                                  startRecordNo: Int,
+                                  override val period: Option[RvRange]) extends RangeVector with
+                                          SerializableRangeVector with java.io.Serializable {
 
   override val numRows = Some(numRowsInt)
   import NoCloseCursor._
   // Possible for records to spill across containers, so we read from all containers
-  override def rows: RangeVectorCursor =
-    containers.toIterator.flatMap(_.iterate(schema)).slice(startRecordNo, startRecordNo + numRowsInt)
+  override def rows: RangeVectorCursor = {
+    // TODO if period.isDefined, then need to insert NaNs
+    val it = containers.toIterator.flatMap(_.iterate(schema)).slice(startRecordNo, startRecordNo + numRowsInt)
+    if (period.isDefined &&
+        schema.isTimeSeries &&
+        period.get.startMs != period.get.endMs &&
+        schema.columns.size == 2 &&
+        schema.columns(1).colType == DoubleColumn || schema.columns(1).colType == HistogramColumn) {
+
+      new Iterator[RowReader] {
+        var curTime = period.get.startMs
+        val bufIt = it.buffered
+        val emptyDouble = new TransientRow(0L, Double.NaN)
+        val emptyHist = new TransientHistRow(0L, Histogram.empty)
+        override def hasNext: Boolean = curTime <= period.get.endMs
+        override def next(): RowReader = {
+          if (bufIt.head.getLong(0) == curTime) bufIt.next()
+          else {
+            if (schema.columns(1).colType == DoubleColumn) {
+              emptyDouble.timestamp = curTime
+              curTime += period.get.stepMs
+              emptyDouble
+            } else {
+              emptyHist.timestamp = curTime
+              curTime += period.get.stepMs
+              emptyHist
+            }
+          }
+        }
+      }
+    } else it
+  }
 
   /**
     * Pretty prints all the elements into strings using record schema
@@ -337,8 +388,17 @@ object SerializedRangeVector extends StrictLogging {
       ChunkMap.validateNoSharedLocks(execPlan)
       val rows = rv.rows
       while (rows.hasNext) {
-        numRows += 1
-        builder.addFromReader(rows.next, schema, 0)
+        val nextRow = rows.next()
+        // Don't encode empty / NaN data over the wire
+        if (rv.period.isEmpty ||
+            rv.period.get.startMs == rv.period.get.endMs ||
+            !schema.isTimeSeries ||
+            schema.columns.size != 2 ||
+            schema.columns(1).colType == DoubleColumn && !nextRow.getDouble(1).isNaN ||
+            schema.columns(1).colType == HistogramColumn && !nextRow.getHistogram(1).isEmpty) {
+          numRows += 1
+          builder.addFromReader(nextRow, schema, 0)
+        }
       }
     } finally {
       rv.rows().close()
@@ -352,7 +412,7 @@ object SerializedRangeVector extends StrictLogging {
       case None                 => builder.allContainers
       case Some(firstContainer) => builder.allContainers.dropWhile(_ != firstContainer)
     }
-    new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo)
+    new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo, rv.period)
   }
   // scalastyle:on null
 
@@ -380,11 +440,13 @@ object SerializedRangeVector extends StrictLogging {
 }
 
 final case class IteratorBackedRangeVector(key: RangeVectorKey,
-                                           rows: RangeVectorCursor) extends RangeVector
+                                           rows: RangeVectorCursor,
+                                           override val period: Option[RvRange]) extends RangeVector
 
 final case class BufferRangeVector(key: RangeVectorKey,
                                    timestamps: Buffer[Long],
-                                   values: Buffer[Double]) extends RangeVector {
+                                   values: Buffer[Double],
+                                   override val period: Option[RvRange]) extends RangeVector {
   require(timestamps.length == values.length, s"${timestamps.length} ts != ${values.length} values")
 
   def rows(): RangeVectorCursor = new RangeVectorCursor {

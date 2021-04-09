@@ -24,6 +24,8 @@ class RangeVectorSpec  extends AnyFunSpec with Matchers {
       def partIds: Seq[Int] = Nil
       def schemaNames: Seq[String] = Nil
     }
+
+    override def period: Option[RvRange] = None
   }
 
   val cols = Array(new ColumnInfo("timestamp", ColumnType.TimestampColumn),

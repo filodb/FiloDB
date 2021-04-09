@@ -88,6 +88,7 @@ final case class BinaryJoinExec(queryContext: QueryContext,
       val (oneSide, otherSide, lhsIsOneSide) =
         if (cardinality == Cardinality.OneToMany) (lhsRvs, rhsRvs, true)
         else (rhsRvs, lhsRvs, false)
+      val period = oneSide.headOption.flatMap(_.period)
       // load "one" side keys in a hashmap
       val oneSideMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
       oneSide.foreach { rv =>
@@ -132,7 +133,7 @@ final case class BinaryJoinExec(queryContext: QueryContext,
               joinQueryCardLimit} " + s"join cardinality. Try applying more filters.")
 
           val res = if (lhsIsOneSide) binOp(rvOne.rows, rvOtherCorrect.rows) else binOp(rvOtherCorrect.rows, rvOne.rows)
-          results.put(resKey, ResultVal(IteratorBackedRangeVector(resKey, res), rvOtherCorrect))
+          results.put(resKey, ResultVal(IteratorBackedRangeVector(resKey, res, period), rvOtherCorrect))
         }
       }
       Observable.fromIterable(results.values.map(_.resultRv))

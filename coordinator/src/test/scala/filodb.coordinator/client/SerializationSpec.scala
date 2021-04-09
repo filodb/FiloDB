@@ -294,7 +294,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val key = CustomRangeVectorKey(keysMap)
     val cols = Seq(ColumnInfo("value", ColumnType.DoubleColumn))
     import filodb.core.query.NoCloseCursor._
-    val ser = SerializedRangeVector(IteratorBackedRangeVector(key, Iterator.empty), cols)
+    val ser = SerializedRangeVector(IteratorBackedRangeVector(key, Iterator.empty, None), cols)
 
     val schema = ResultSchema(MachineMetricsData.dataset1.schema.infosFromIDs(0 to 0), 1)
 
@@ -312,7 +312,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val cols = Seq(ColumnInfo("value", ColumnType.MapColumn))
     import filodb.core.query.NoCloseCursor._
     val ser = Seq(SerializedRangeVector(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-      new UTF8MapIteratorRowReader(input.toIterator)), cols))
+      new UTF8MapIteratorRowReader(input.toIterator), None), cols))
 
     val result = QueryResult2("someId", schema, ser)
     val roundTripResult = roundTrip(result).asInstanceOf[QueryResult2]
