@@ -139,6 +139,7 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
     }
   }
 
+  // scalastyle:off method.length
   def toSeriesPlanMisc(seriesParam: Series,
                        otherParams: Seq[FunctionArgsPlan],
                        timeParams: TimeRangeParams): PeriodicSeriesPlan = {
@@ -191,4 +192,5 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
       }
     }
   }
+  // scalastyle:on method.length
 }

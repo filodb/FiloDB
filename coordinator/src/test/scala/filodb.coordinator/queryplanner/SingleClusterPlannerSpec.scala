@@ -547,4 +547,15 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     rvt.window.get shouldEqual(10*60*1000)
     rvt.functionId.get.toString shouldEqual(Last.toString)
   }
+
+  it("should generate execPlan for absent function") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan("""absent(http_requests_total{job = "app"})""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
+    execPlan.rangeVectorTransformers.head.isInstanceOf[AggregatePresenter] shouldEqual true
+    execPlan.rangeVectorTransformers.tail.head.isInstanceOf[AbsentFunctionMapper] shouldEqual true
+    execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
+  }
 }

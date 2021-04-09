@@ -176,10 +176,13 @@ trait  PlannerMaterializer {
 
     reducer
   }
+
   def materializeAbsentFunction(qContext: QueryContext,
                                   lp: ApplyAbsentFunction): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, qContext)
     val aggregate = Aggregate(AggregationOperator.Sum, lp, Nil, Seq("job"))
+    // Add sum to aggregate all child responses
+    // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
     val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext, vectors, Seq.empty)))
     addAbsentFunctionMapper(aggregatePlanResult, lp.columnFilters,
       RangeParams(lp.startMs / 1000, lp.stepMs / 1000, lp.endMs / 1000), qContext)
