@@ -139,6 +139,7 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
     }
   }
 
+  // scalastyle:off method.length
   def toSeriesPlanMisc(seriesParam: Series,
                        otherParams: Seq[FunctionArgsPlan],
                        timeParams: TimeRangeParams): PeriodicSeriesPlan = {
@@ -180,13 +181,16 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
           rangeFunctionId, false, otherParams, instantExpression.offset.map(_.millis(timeParams.step * 1000)))
       } else {
         val rangeExpression = seriesParam.asInstanceOf[RangeExpression]
+
+        // absent_over_time creates range vector with column filters in original query
         PeriodicSeriesWithWindowing(
           rangeExpression.toSeriesPlan(timeParams, isRoot = false),
           timeParams.start * 1000 , timeParams.step * 1000, timeParams.end * 1000,
           rangeExpression.window.millis(timeParams.step * 1000),
           rangeFunctionId, rangeExpression.window.timeUnit == IntervalMultiple,
-          otherParams, rangeExpression.offset.map(_.millis(timeParams.step * 1000)))
+          otherParams, rangeExpression.offset.map(_.millis(timeParams.step * 1000)), rangeExpression.columnFilters)
       }
     }
   }
+  // scalastyle:on method.length
 }

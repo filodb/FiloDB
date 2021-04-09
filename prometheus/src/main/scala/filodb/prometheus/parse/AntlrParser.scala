@@ -7,6 +7,8 @@ import org.antlr.v4.runtime.{BailErrorStrategy, BaseErrorListener, CharStreams, 
 import org.antlr.v4.runtime.misc.ParseCancellationException
 import org.antlr.v4.runtime.tree.{ParseTree, TerminalNode}
 
+import com.typesafe.scalalogging.StrictLogging
+
 import filodb.prometheus.antlr.{PromQLLexer, PromQLParser, PromQLBaseVisitor}
 
 import filodb.prometheus.ast._
@@ -16,11 +18,12 @@ import filodb.prometheus.ast._
   * Auto-generated classes shouldn't leak past here. When the grammar changes, the
   * auto-generated classes need to be rebuilt, and then additional changes are required here.
   */
-object AntlrParser {
+object AntlrParser extends StrictLogging {
   /**
     * Main entry point.
     */
   def parseQuery(query: String): Expression = {
+    logger.debug(s"AntlrParser query: $query")
     parseQuery(query, p => p.expression())
   }
 
