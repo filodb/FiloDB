@@ -23,8 +23,15 @@ import filodb.memory.format.UnsafeUtils
 
 class PartitionKeysCopier(conf: SparkConf) {
 
-  private def openConfig(str: String) = {
-    ConfigFactory.parseFile(new File(conf.get(str))).withFallback(GlobalConfig.systemConfig)
+  // Get filo config from spark conf or file.
+  private def getFiloConfig(valueConf: String, filePathConf: String) = {
+    val configString = conf.get(valueConf, "")
+    val config = if (!configString.isBlank) {
+      ConfigFactory.parseString(configString)
+    } else {
+      ConfigFactory.parseFile(new File(conf.get(filePathConf))).withFallback(GlobalConfig.systemConfig)
+    }
+    config
   }
 
   def datasetConfig(mainConfig: Config): Config = {
@@ -49,8 +56,14 @@ class PartitionKeysCopier(conf: SparkConf) {
 
   // Both "source" and "target" refer to file paths which define config files that have a
   // top-level "filodb" section and a "cassandra" subsection.
-  private val rawSourceConfig = openConfig("spark.filodb.partitionkeys.copier.source.configFile")
-  private val rawTargetConfig = openConfig("spark.filodb.partitionkeys.copier.target.configFile")
+  private val rawSourceConfig = getFiloConfig(
+    "spark.filodb.partitionkeys.copier.source.config.value",
+    "spark.filodb.partitionkeys.copier.source.config.file"
+  )
+  private val rawTargetConfig = getFiloConfig(
+    "spark.filodb.partitionkeys.copier.target.config.value",
+    "spark.filodb.partitionkeys.copier.target.config.file"
+  )
   private val sourceConfig = rawSourceConfig.getConfig("filodb")
   private val targetConfig = rawTargetConfig.getConfig("filodb")
   private val sourceCassConfig = sourceConfig.getConfig("cassandra")
