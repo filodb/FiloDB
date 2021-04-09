@@ -434,7 +434,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       execPlan2.asInstanceOf[BinaryJoinExec].ignoring shouldEqual Seq("_metric_")
 
       val logicalPlan2 = Parser.queryRangeToLogicalPlan(
-        """sum(foo{_ns_="bar1", _ws_="test"}) + group_left(__name__)
+        """sum(foo{_ns_="bar1", _ws_="test"}) + ignoring(__name__) group_left(__name__)
           | sum(foo{_ns_="bar2", _ws_="test"})""".stripMargin,
         TimeStepParams(1000, 20, 2000))
       val execPlan3 = engine.materialize(logicalPlan2, QueryContext(origQueryParams = promQlQueryParams))

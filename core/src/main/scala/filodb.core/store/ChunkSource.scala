@@ -71,6 +71,8 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
     */
   def isDownsampleStore: Boolean
 
+  def isReadyForQuery(datasetRef: DatasetRef, shard: Int): Boolean
+
   /**
    * Scans and returns data in partitions according to the method.  The partitions are ready to be queried.
    * FiloPartitions contains chunks in offheap memory.

@@ -67,9 +67,6 @@ sourceconfig {
     # TTL for on-disk / C* data.  Data older than this may be purged.
     disk-time-to-live = 3 days
 
-    # amount of time paged chunks should be retained in memory
-    demand-paged-chunk-retention-period = 72 hours
-
     max-chunks-size = 500
 
     # Number of bytes of offheap mem to allocate to chunk storage in each shard.  Ex. 1000MB, 1G, 2GB

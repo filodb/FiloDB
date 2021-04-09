@@ -7,6 +7,7 @@ import spire.syntax.cfor._
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.memory.format.vectors.Histogram
+import filodb.query.BadQueryException
 
 object HistogramQuantileMapper {
   import ZeroCopyUTF8String._
@@ -63,7 +64,7 @@ final case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends Rang
         val sortedBucketRvs = histBuckets._2.toArray.map { bucket =>
           val labelValues = bucket.key.labelValues
           if (!labelValues.contains(le))
-            throw new IllegalArgumentException("Cannot calculate histogram quantile" +
+            throw new BadQueryException("Cannot calculate histogram quantile" +
               s"because 'le' tag is absent in the time series ${bucket.key.labelValues}")
           val leStr = labelValues(le).toString
           val leDouble = if (leStr == "+Inf") Double.PositiveInfinity else leStr.toDouble
