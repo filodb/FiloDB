@@ -172,7 +172,8 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
                                        function: RangeFunctionId,
                                        stepMultipleNotationUsed: Boolean = false,
                                        functionArgs: Seq[FunctionArgsPlan] = Nil,
-                                       offsetMs: Option[Long] = None) extends PeriodicSeriesPlan
+                                       offsetMs: Option[Long] = None,
+                                       columnFilters: Seq[ColumnFilter] = Nil) extends PeriodicSeriesPlan
   with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(series)
 
