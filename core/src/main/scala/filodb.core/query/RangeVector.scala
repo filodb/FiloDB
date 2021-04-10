@@ -318,7 +318,7 @@ final class SerializedRangeVector(val key: RangeVectorKey,
         schema.isTimeSeries &&
         period.get.startMs != period.get.endMs &&
         schema.columns.size == 2 &&
-        schema.columns(1).colType == DoubleColumn || schema.columns(1).colType == HistogramColumn) {
+        (schema.columns(1).colType == DoubleColumn || schema.columns(1).colType == HistogramColumn)) {
 
       new Iterator[RowReader] {
         var curTime = period.get.startMs
