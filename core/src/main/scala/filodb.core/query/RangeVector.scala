@@ -327,7 +327,10 @@ final class SerializedRangeVector(val key: RangeVectorKey,
         val emptyHist = new TransientHistRow(0L, Histogram.empty)
         override def hasNext: Boolean = curTime <= period.get.endMs
         override def next(): RowReader = {
-          if (bufIt.head.getLong(0) == curTime) bufIt.next()
+          if (bufIt.hasNext && bufIt.head.getLong(0) == curTime) {
+            curTime += period.get.stepMs
+            bufIt.next()
+          }
           else {
             if (schema.columns(1).colType == DoubleColumn) {
               emptyDouble.timestamp = curTime
