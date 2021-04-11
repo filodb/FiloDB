@@ -312,7 +312,6 @@ final class SerializedRangeVector(val key: RangeVectorKey,
   import NoCloseCursor._
   // Possible for records to spill across containers, so we read from all containers
   override def rows: RangeVectorCursor = {
-    // TODO if period.isDefined, then need to insert NaNs
     val it = containers.toIterator.flatMap(_.iterate(schema)).slice(startRecordNo, startRecordNo + numRowsInt)
     if (period.isDefined &&
         schema.isTimeSeries &&
