@@ -123,6 +123,7 @@ trait RangeVector {
   def key: RangeVectorKey
   def rows(): RangeVectorCursor
   def period: Option[RvRange] = None
+  // FIXME remove default in numRows since many impls simply default to None. Shouldn't scalars implement this
   def numRows: Option[Int] = None
   def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
 }
@@ -132,7 +133,10 @@ trait RangeVector {
   *  implement this marker trait, then query engine will convert it to one that does.
   */
 trait SerializableRangeVector extends RangeVector {
-  def numRowsInt: Int
+  /**
+   * Used to calculate number of samples sent over the wire for limiting resources used by query
+   */
+  def numRowsSerialized: Int
 }
 
 /**
@@ -153,7 +157,7 @@ final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]
                                             map { x => new TransientRow(x._1, x._2) }.iterator
   def getValue(time: Long): Double = timeValueMap(time)
 
-  override def numRowsInt: Int = timeValueMap.size
+  override def numRowsSerialized: Int = timeValueMap.size
 }
 
 final case class RangeParams(startSecs: Long, stepSecs: Long, endSecs: Long)
@@ -162,13 +166,12 @@ trait ScalarSingleValue extends ScalarRangeVector {
   def rangeParams: RangeParams
   override def period: Option[RvRange] = Some(RvRange(rangeParams.stepSecs * 1000,
                                              rangeParams.stepSecs * 1000, rangeParams.endSecs * 1000))
-  var numRowsInt : Int = 0
+  val numRowsSerialized : Int = 1
 
   override def rows(): RangeVectorCursor = {
     import NoCloseCursor._
     val it = Iterator.from(0, rangeParams.stepSecs.toInt)
                      .takeWhile(_ <= rangeParams.endSecs - rangeParams.startSecs).map { i =>
-      numRowsInt += 1
       val t = i + rangeParams.startSecs
       new TransientRow(t * 1000, getValue(t * 1000))
     }
@@ -301,18 +304,28 @@ final case class ChunkInfoRangeVector(key: RangeVectorKey,
   * only serialized once as a single instance.
   */
 final class SerializedRangeVector(val key: RangeVectorKey,
-                                  val numRowsInt: Int,
+                                  val numRowsSerialized: Int,
                                   containers: Seq[RecordContainer],
                                   val schema: RecordSchema,
                                   startRecordNo: Int,
                                   override val period: Option[RvRange]) extends RangeVector with
                                           SerializableRangeVector with java.io.Serializable {
 
-  override val numRows = Some(numRowsInt)
+  override val numRows = {
+    if (period.isDefined &&
+      schema.isTimeSeries &&
+      period.get.startMs != period.get.endMs &&
+      schema.columns.size == 2 &&
+      (schema.columns(1).colType == DoubleColumn || schema.columns(1).colType == HistogramColumn)) {
+      Some(((period.get.endMs - period.get.startMs) / period.get.stepMs).toInt + 1)
+    } else {
+      Some(numRowsSerialized)
+    }
+  }
   import NoCloseCursor._
   // Possible for records to spill across containers, so we read from all containers
   override def rows: RangeVectorCursor = {
-    val it = containers.toIterator.flatMap(_.iterate(schema)).slice(startRecordNo, startRecordNo + numRowsInt)
+    val it = containers.toIterator.flatMap(_.iterate(schema)).slice(startRecordNo, startRecordNo + numRowsSerialized)
     if (period.isDefined &&
         schema.isTimeSeries &&
         period.get.startMs != period.get.endMs &&
