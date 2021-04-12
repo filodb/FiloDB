@@ -14,16 +14,19 @@ case class BinaryExpression(lhs: Expression,
                             vectorMatch: Option[VectorMatch],
                             rhs: Expression) extends Expression with PeriodicSeries {
 
-  operator match {
-    case setOp: SetOp =>
-      if (lhs.isInstanceOf[ScalarExpression] || rhs.isInstanceOf[ScalarExpression])
-        throw new IllegalArgumentException("set operators not allowed in binary scalar expression")
+  def validate(): Unit = {
+    operator match {
+      case setOp: SetOp =>
+        if (lhs.isInstanceOf[ScalarExpression] || rhs.isInstanceOf[ScalarExpression])
+          throw new IllegalArgumentException("set operators not allowed in binary scalar expression")
 
-    case comparison: Comparision if !comparison.isBool =>
-      if (lhs.isInstanceOf[ScalarExpression] && rhs.isInstanceOf[ScalarExpression])
-        throw new IllegalArgumentException("comparisons between scalars must use BOOL modifier")
-    case _ =>
+      case comparison: Comparision if !comparison.isBool =>
+        if (lhs.isInstanceOf[ScalarExpression] && rhs.isInstanceOf[ScalarExpression])
+          throw new IllegalArgumentException("comparisons between scalars must use BOOL modifier")
+      case _ =>
+    }
   }
+
   if (vectorMatch.isDefined) {
     vectorMatch.get.validate(operator, lhs, rhs)
   }
@@ -41,6 +44,8 @@ case class BinaryExpression(lhs: Expression,
   // scalastyle:off method.length
   // scalastyle:off cyclomatic.complexity
   override def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
+    validate()
+
     val lhsWithPrecedence = lhs match {
       case p: PrecedenceExpression  => p.expression
       case _                        => lhs

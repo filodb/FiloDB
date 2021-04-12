@@ -94,10 +94,12 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("(1 + heap_size{a=\"b\"}) + 5 * (3 - cpu_load{c=\"d\"}")
 
     parseError("(")
-    parseError("1 and 1")
-    parseError("1 == 1")  // reason: comparisons between scalars must use BOOL modifier
-    parseError("1 or 1")
-    parseError("1 unless 1")
+    // NOTE: Uncomment when we move to antlr
+
+    // parseError("1 and 1")
+    // parseError("1 == 1")  // reason: comparisons between scalars must use BOOL modifier
+    // parseError("1 or 1")
+    // parseError("1 unless 1")
     parseError("1 !~ 1")
     parseError("1 =~ 1")
     parseError("-\"string\"")
@@ -130,13 +132,14 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("foo / ignoring(test,blub) group_left(bar) bar")
     parseSuccessfully("foo - on(test,blub) group_right(bar,foo) bar")
     parseSuccessfully("foo - ignoring(test,blub) group_right(bar,foo) bar")
+    // NOTE: Uncomment when we move to antlr
 
-    parseError("foo and 1")
-    parseError("1 and foo")
-    parseError("foo or 1")
-    parseError("1 or foo")
-    parseError("foo unless 1")
-    parseError("1 unless foo")
+    // parseError("foo and 1")
+    // parseError("1 and foo")
+    // parseError("foo or 1")
+    // parseError("1 or foo")
+    // parseError("foo unless 1")
+    // parseError("1 unless foo")
     parseError("1 or on(bar) foo")
     parseError("foo == on(bar) 10")
     parseError("foo and on(bar) group_left(baz) bar")
@@ -563,8 +566,11 @@ class ParserSpec extends AnyFunSpec with Matchers {
 
       "(metric1 + (metric2 * metric3)) + metric4" -> "BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric1))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),ADD,OneToOne,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric2))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),MUL,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric3))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),List(),List(),List()),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric4))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List())",
       "metric1 + metric2 * metric3 + metric4" -> "BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric1))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),ADD,OneToOne,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric2))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),MUL,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric3))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),List(),List(),List()),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric4))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List())",
+
       "(metric1 + metric2) * (metric3 + metric4)" -> "BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric1))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric2))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),MUL,OneToOne,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric3))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(metric4))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),List(),List(),List())",
-      "sum((some_metric))" -> "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(some_metric))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List())",
+      "count((some_metric / 300) >= 1 ) or vector(0)" -> "BinaryJoin(Aggregate(Count,ScalarVectorBinaryOperation(GTE,ScalarFixedDoublePlan(1.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(DIV,ScalarFixedDoublePlan(300.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(some_metric))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),false),false),List(),List(),List()),LOR,ManyToMany,VectorPlan(ScalarFixedDoublePlan(0.0,RangeParams(1524855988,1000,1524855988))),List(),List(),List())",
+      "count(some_metric / 300 >= 1 ) or vector(0)" -> "BinaryJoin(Aggregate(Count,ScalarVectorBinaryOperation(GTE,ScalarFixedDoublePlan(1.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(DIV,ScalarFixedDoublePlan(300.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(some_metric))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),false),false),List(),List(),List()),LOR,ManyToMany,VectorPlan(ScalarFixedDoublePlan(0.0,RangeParams(1524855988,1000,1524855988))),List(),List(),List())",
+      "sum((some_metric))" -> "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(some_metric))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()))",
       "sum((foo + foo))" -> "Aggregate(Sum,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),List(),List(),List())"
     )
 
