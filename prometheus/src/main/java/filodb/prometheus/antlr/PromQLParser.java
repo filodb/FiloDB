@@ -17,49 +17,51 @@ public class PromQLParser extends Parser {
 	protected static final PredictionContextCache _sharedContextCache =
 		new PredictionContextCache();
 	public static final int
-		T__0=1, T__1=2, T__2=3, T__3=4, T__4=5, NUMBER=6, STRING=7, ADD=8, SUB=9, 
-		MUL=10, DIV=11, MOD=12, POW=13, EQ=14, DEQ=15, NE=16, GT=17, LT=18, GE=19, 
-		LE=20, RE=21, NRE=22, AND=23, OR=24, UNLESS=25, BY=26, WITHOUT=27, ON=28, 
-		IGNORING=29, GROUP_LEFT=30, GROUP_RIGHT=31, OFFSET=32, BOOL=33, AGGREGATION_OP=34, 
-		TIME_RANGE=35, DURATION=36, IDENTIFIER=37, IDENTIFIER_EXTENDED=38, WS=39, 
-		COMMENT=40;
+		T__0=1, T__1=2, T__2=3, T__3=4, T__4=5, T__5=6, T__6=7, NUMBER=8, STRING=9, 
+		ADD=10, SUB=11, MUL=12, DIV=13, MOD=14, POW=15, EQ=16, DEQ=17, NE=18, 
+		GT=19, LT=20, GE=21, LE=22, RE=23, NRE=24, AND=25, OR=26, UNLESS=27, BY=28, 
+		WITHOUT=29, ON=30, IGNORING=31, GROUP_LEFT=32, GROUP_RIGHT=33, OFFSET=34, 
+		BOOL=35, AGGREGATION_OP=36, DURATION=37, IDENTIFIER=38, IDENTIFIER_EXTENDED=39, 
+		WS=40, COMMENT=41;
 	public static final int
 		RULE_expression = 0, RULE_vectorExpression = 1, RULE_unaryOp = 2, RULE_powOp = 3, 
 		RULE_multOp = 4, RULE_addOp = 5, RULE_compareOp = 6, RULE_andUnlessOp = 7, 
 		RULE_orOp = 8, RULE_vector = 9, RULE_parens = 10, RULE_instantOrRangeSelector = 11, 
-		RULE_instantSelector = 12, RULE_labelMatcher = 13, RULE_labelMatcherOp = 14, 
-		RULE_labelMatcherList = 15, RULE_function = 16, RULE_parameter = 17, RULE_parameterList = 18, 
-		RULE_aggregation = 19, RULE_by = 20, RULE_without = 21, RULE_grouping = 22, 
-		RULE_on = 23, RULE_ignoring = 24, RULE_groupLeft = 25, RULE_groupRight = 26, 
-		RULE_metricName = 27, RULE_metricKeyword = 28, RULE_labelName = 29, RULE_labelNameList = 30, 
-		RULE_labelKeyword = 31, RULE_literal = 32;
+		RULE_instantSelector = 12, RULE_window = 13, RULE_offset = 14, RULE_labelMatcher = 15, 
+		RULE_labelMatcherOp = 16, RULE_labelMatcherList = 17, RULE_function = 18, 
+		RULE_parameter = 19, RULE_parameterList = 20, RULE_aggregation = 21, RULE_by = 22, 
+		RULE_without = 23, RULE_grouping = 24, RULE_on = 25, RULE_ignoring = 26, 
+		RULE_groupLeft = 27, RULE_groupRight = 28, RULE_metricName = 29, RULE_metricKeyword = 30, 
+		RULE_labelName = 31, RULE_labelNameList = 32, RULE_labelKeyword = 33, 
+		RULE_literal = 34;
 	private static String[] makeRuleNames() {
 		return new String[] {
 			"expression", "vectorExpression", "unaryOp", "powOp", "multOp", "addOp", 
 			"compareOp", "andUnlessOp", "orOp", "vector", "parens", "instantOrRangeSelector", 
-			"instantSelector", "labelMatcher", "labelMatcherOp", "labelMatcherList", 
-			"function", "parameter", "parameterList", "aggregation", "by", "without", 
-			"grouping", "on", "ignoring", "groupLeft", "groupRight", "metricName", 
-			"metricKeyword", "labelName", "labelNameList", "labelKeyword", "literal"
+			"instantSelector", "window", "offset", "labelMatcher", "labelMatcherOp", 
+			"labelMatcherList", "function", "parameter", "parameterList", "aggregation", 
+			"by", "without", "grouping", "on", "ignoring", "groupLeft", "groupRight", 
+			"metricName", "metricKeyword", "labelName", "labelNameList", "labelKeyword", 
+			"literal"
 		};
 	}
 	public static final String[] ruleNames = makeRuleNames();
 
 	private static String[] makeLiteralNames() {
 		return new String[] {
-			null, "'('", "')'", "'{'", "'}'", "','", null, null, "'+'", "'-'", "'*'", 
-			"'/'", "'%'", "'^'", "'='", "'=='", "'!='", "'>'", "'<'", "'>='", "'<='", 
-			"'=~'", "'!~'"
+			null, "'('", "')'", "'{'", "'}'", "'['", "']'", "','", null, null, "'+'", 
+			"'-'", "'*'", "'/'", "'%'", "'^'", "'='", "'=='", "'!='", "'>'", "'<'", 
+			"'>='", "'<='", "'=~'", "'!~'"
 		};
 	}
 	private static final String[] _LITERAL_NAMES = makeLiteralNames();
 	private static String[] makeSymbolicNames() {
 		return new String[] {
-			null, null, null, null, null, null, "NUMBER", "STRING", "ADD", "SUB", 
-			"MUL", "DIV", "MOD", "POW", "EQ", "DEQ", "NE", "GT", "LT", "GE", "LE", 
-			"RE", "NRE", "AND", "OR", "UNLESS", "BY", "WITHOUT", "ON", "IGNORING", 
-			"GROUP_LEFT", "GROUP_RIGHT", "OFFSET", "BOOL", "AGGREGATION_OP", "TIME_RANGE", 
-			"DURATION", "IDENTIFIER", "IDENTIFIER_EXTENDED", "WS", "COMMENT"
+			null, null, null, null, null, null, null, null, "NUMBER", "STRING", "ADD", 
+			"SUB", "MUL", "DIV", "MOD", "POW", "EQ", "DEQ", "NE", "GT", "LT", "GE", 
+			"LE", "RE", "NRE", "AND", "OR", "UNLESS", "BY", "WITHOUT", "ON", "IGNORING", 
+			"GROUP_LEFT", "GROUP_RIGHT", "OFFSET", "BOOL", "AGGREGATION_OP", "DURATION", 
+			"IDENTIFIER", "IDENTIFIER_EXTENDED", "WS", "COMMENT"
 		};
 	}
 	private static final String[] _SYMBOLIC_NAMES = makeSymbolicNames();
@@ -135,9 +137,9 @@ public class PromQLParser extends Parser {
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(66);
+			setState(70);
 			vectorExpression(0);
-			setState(67);
+			setState(71);
 			match(EOF);
 			}
 		}
@@ -240,7 +242,7 @@ public class PromQLParser extends Parser {
 			int _alt;
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(74);
+			setState(78);
 			_errHandler.sync(this);
 			switch (_input.LA(1)) {
 			case ADD:
@@ -250,9 +252,9 @@ public class PromQLParser extends Parser {
 				_ctx = _localctx;
 				_prevctx = _localctx;
 
-				setState(70);
+				setState(74);
 				unaryOp();
-				setState(71);
+				setState(75);
 				vectorExpression(7);
 				}
 				break;
@@ -273,7 +275,7 @@ public class PromQLParser extends Parser {
 				_localctx = new VectorOperationContext(_localctx);
 				_ctx = _localctx;
 				_prevctx = _localctx;
-				setState(73);
+				setState(77);
 				vector();
 				}
 				break;
@@ -281,7 +283,7 @@ public class PromQLParser extends Parser {
 				throw new NoViableAltException(this);
 			}
 			_ctx.stop = _input.LT(-1);
-			setState(120);
+			setState(124);
 			_errHandler.sync(this);
 			_alt = getInterpreter().adaptivePredict(_input,8,_ctx);
 			while ( _alt!=2 && _alt!=org.antlr.v4.runtime.atn.ATN.INVALID_ALT_NUMBER ) {
@@ -289,28 +291,28 @@ public class PromQLParser extends Parser {
 					if ( _parseListeners!=null ) triggerExitRuleEvent();
 					_prevctx = _localctx;
 					{
-					setState(118);
+					setState(122);
 					_errHandler.sync(this);
 					switch ( getInterpreter().adaptivePredict(_input,7,_ctx) ) {
 					case 1:
 						{
 						_localctx = new BinaryOperationContext(new VectorExpressionContext(_parentctx, _parentState));
 						pushNewRecursionContext(_localctx, _startState, RULE_vectorExpression);
-						setState(76);
+						setState(80);
 						if (!(precpred(_ctx, 8))) throw new FailedPredicateException(this, "precpred(_ctx, 8)");
-						setState(77);
+						setState(81);
 						powOp();
-						setState(79);
+						setState(83);
 						_errHandler.sync(this);
 						_la = _input.LA(1);
 						if (_la==ON || _la==IGNORING) {
 							{
-							setState(78);
+							setState(82);
 							grouping();
 							}
 						}
 
-						setState(81);
+						setState(85);
 						vectorExpression(8);
 						}
 						break;
@@ -318,21 +320,21 @@ public class PromQLParser extends Parser {
 						{
 						_localctx = new BinaryOperationContext(new VectorExpressionContext(_parentctx, _parentState));
 						pushNewRecursionContext(_localctx, _startState, RULE_vectorExpression);
-						setState(83);
+						setState(87);
 						if (!(precpred(_ctx, 6))) throw new FailedPredicateException(this, "precpred(_ctx, 6)");
-						setState(84);
+						setState(88);
 						multOp();
-						setState(86);
+						setState(90);
 						_errHandler.sync(this);
 						_la = _input.LA(1);
 						if (_la==ON || _la==IGNORING) {
 							{
-							setState(85);
+							setState(89);
 							grouping();
 							}
 						}
 
-						setState(88);
+						setState(92);
 						vectorExpression(7);
 						}
 						break;
@@ -340,21 +342,21 @@ public class PromQLParser extends Parser {
 						{
 						_localctx = new BinaryOperationContext(new VectorExpressionContext(_parentctx, _parentState));
 						pushNewRecursionContext(_localctx, _startState, RULE_vectorExpression);
-						setState(90);
+						setState(94);
 						if (!(precpred(_ctx, 5))) throw new FailedPredicateException(this, "precpred(_ctx, 5)");
-						setState(91);
+						setState(95);
 						addOp();
-						setState(93);
+						setState(97);
 						_errHandler.sync(this);
 						_la = _input.LA(1);
 						if (_la==ON || _la==IGNORING) {
 							{
-							setState(92);
+							setState(96);
 							grouping();
 							}
 						}
 
-						setState(95);
+						setState(99);
 						vectorExpression(6);
 						}
 						break;
@@ -362,21 +364,21 @@ public class PromQLParser extends Parser {
 						{
 						_localctx = new BinaryOperationContext(new VectorExpressionContext(_parentctx, _parentState));
 						pushNewRecursionContext(_localctx, _startState, RULE_vectorExpression);
-						setState(97);
+						setState(101);
 						if (!(precpred(_ctx, 4))) throw new FailedPredicateException(this, "precpred(_ctx, 4)");
-						setState(98);
+						setState(102);
 						compareOp();
-						setState(100);
+						setState(104);
 						_errHandler.sync(this);
 						_la = _input.LA(1);
 						if (_la==ON || _la==IGNORING) {
 							{
-							setState(99);
+							setState(103);
 							grouping();
 							}
 						}
 
-						setState(102);
+						setState(106);
 						vectorExpression(5);
 						}
 						break;
@@ -384,21 +386,21 @@ public class PromQLParser extends Parser {
 						{
 						_localctx = new BinaryOperationContext(new VectorExpressionContext(_parentctx, _parentState));
 						pushNewRecursionContext(_localctx, _startState, RULE_vectorExpression);
-						setState(104);
+						setState(108);
 						if (!(precpred(_ctx, 3))) throw new FailedPredicateException(this, "precpred(_ctx, 3)");
-						setState(105);
+						setState(109);
 						andUnlessOp();
-						setState(107);
+						setState(111);
 						_errHandler.sync(this);
 						_la = _input.LA(1);
 						if (_la==ON || _la==IGNORING) {
 							{
-							setState(106);
+							setState(110);
 							grouping();
 							}
 						}
 
-						setState(109);
+						setState(113);
 						vectorExpression(4);
 						}
 						break;
@@ -406,28 +408,28 @@ public class PromQLParser extends Parser {
 						{
 						_localctx = new BinaryOperationContext(new VectorExpressionContext(_parentctx, _parentState));
 						pushNewRecursionContext(_localctx, _startState, RULE_vectorExpression);
-						setState(111);
+						setState(115);
 						if (!(precpred(_ctx, 2))) throw new FailedPredicateException(this, "precpred(_ctx, 2)");
-						setState(112);
+						setState(116);
 						orOp();
-						setState(114);
+						setState(118);
 						_errHandler.sync(this);
 						_la = _input.LA(1);
 						if (_la==ON || _la==IGNORING) {
 							{
-							setState(113);
+							setState(117);
 							grouping();
 							}
 						}
 
-						setState(116);
+						setState(120);
 						vectorExpression(3);
 						}
 						break;
 					}
 					} 
 				}
-				setState(122);
+				setState(126);
 				_errHandler.sync(this);
 				_alt = getInterpreter().adaptivePredict(_input,8,_ctx);
 			}
@@ -465,7 +467,7 @@ public class PromQLParser extends Parser {
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(123);
+			setState(127);
 			_la = _input.LA(1);
 			if ( !(_la==ADD || _la==SUB) ) {
 			_errHandler.recoverInline(this);
@@ -507,7 +509,7 @@ public class PromQLParser extends Parser {
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(125);
+			setState(129);
 			match(POW);
 			}
 		}
@@ -544,7 +546,7 @@ public class PromQLParser extends Parser {
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(127);
+			setState(131);
 			_la = _input.LA(1);
 			if ( !((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << MUL) | (1L << DIV) | (1L << MOD))) != 0)) ) {
 			_errHandler.recoverInline(this);
@@ -588,7 +590,7 @@ public class PromQLParser extends Parser {
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(129);
+			setState(133);
 			_la = _input.LA(1);
 			if ( !(_la==ADD || _la==SUB) ) {
 			_errHandler.recoverInline(this);
@@ -637,7 +639,7 @@ public class PromQLParser extends Parser {
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(131);
+			setState(135);
 			_la = _input.LA(1);
 			if ( !((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << DEQ) | (1L << NE) | (1L << GT) | (1L << LT) | (1L << GE) | (1L << LE))) != 0)) ) {
 			_errHandler.recoverInline(this);
@@ -647,12 +649,12 @@ public class PromQLParser extends Parser {
 				_errHandler.reportMatch(this);
 				consume();
 			}
-			setState(133);
+			setState(137);
 			_errHandler.sync(this);
 			_la = _input.LA(1);
 			if (_la==BOOL) {
 				{
-				setState(132);
+				setState(136);
 				match(BOOL);
 				}
 			}
@@ -691,7 +693,7 @@ public class PromQLParser extends Parser {
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(135);
+			setState(139);
 			_la = _input.LA(1);
 			if ( !(_la==AND || _la==UNLESS) ) {
 			_errHandler.recoverInline(this);
@@ -733,7 +735,7 @@ public class PromQLParser extends Parser {
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(137);
+			setState(141);
 			match(OR);
 			}
 		}
@@ -779,41 +781,41 @@ public class PromQLParser extends Parser {
 		VectorContext _localctx = new VectorContext(_ctx, getState());
 		enterRule(_localctx, 18, RULE_vector);
 		try {
-			setState(144);
+			setState(148);
 			_errHandler.sync(this);
 			switch ( getInterpreter().adaptivePredict(_input,10,_ctx) ) {
 			case 1:
 				enterOuterAlt(_localctx, 1);
 				{
-				setState(139);
+				setState(143);
 				function();
 				}
 				break;
 			case 2:
 				enterOuterAlt(_localctx, 2);
 				{
-				setState(140);
+				setState(144);
 				aggregation();
 				}
 				break;
 			case 3:
 				enterOuterAlt(_localctx, 3);
 				{
-				setState(141);
+				setState(145);
 				instantOrRangeSelector();
 				}
 				break;
 			case 4:
 				enterOuterAlt(_localctx, 4);
 				{
-				setState(142);
+				setState(146);
 				literal();
 				}
 				break;
 			case 5:
 				enterOuterAlt(_localctx, 5);
 				{
-				setState(143);
+				setState(147);
 				parens();
 				}
 				break;
@@ -851,11 +853,11 @@ public class PromQLParser extends Parser {
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(146);
+			setState(150);
 			match(T__0);
-			setState(147);
+			setState(151);
 			vectorExpression(0);
-			setState(148);
+			setState(152);
 			match(T__1);
 			}
 		}
@@ -874,9 +876,12 @@ public class PromQLParser extends Parser {
 		public InstantSelectorContext instantSelector() {
 			return getRuleContext(InstantSelectorContext.class,0);
 		}
-		public TerminalNode TIME_RANGE() { return getToken(PromQLParser.TIME_RANGE, 0); }
-		public TerminalNode OFFSET() { return getToken(PromQLParser.OFFSET, 0); }
-		public TerminalNode DURATION() { return getToken(PromQLParser.DURATION, 0); }
+		public WindowContext window() {
+			return getRuleContext(WindowContext.class,0);
+		}
+		public OffsetContext offset() {
+			return getRuleContext(OffsetContext.class,0);
+		}
 		public InstantOrRangeSelectorContext(ParserRuleContext parent, int invokingState) {
 			super(parent, invokingState);
 		}
@@ -894,27 +899,25 @@ public class PromQLParser extends Parser {
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(150);
+			setState(154);
 			instantSelector();
-			setState(152);
+			setState(156);
 			_errHandler.sync(this);
 			switch ( getInterpreter().adaptivePredict(_input,11,_ctx) ) {
 			case 1:
 				{
-				setState(151);
-				match(TIME_RANGE);
+				setState(155);
+				window();
 				}
 				break;
 			}
-			setState(156);
+			setState(159);
 			_errHandler.sync(this);
 			switch ( getInterpreter().adaptivePredict(_input,12,_ctx) ) {
 			case 1:
 				{
-				setState(154);
-				match(OFFSET);
-				setState(155);
-				match(DURATION);
+				setState(158);
+				offset();
 				}
 				break;
 			}
@@ -954,7 +957,7 @@ public class PromQLParser extends Parser {
 		enterRule(_localctx, 24, RULE_instantSelector);
 		int _la;
 		try {
-			setState(170);
+			setState(173);
 			_errHandler.sync(this);
 			switch (_input.LA(1)) {
 			case AND:
@@ -968,26 +971,26 @@ public class PromQLParser extends Parser {
 			case IDENTIFIER_EXTENDED:
 				enterOuterAlt(_localctx, 1);
 				{
-				setState(158);
+				setState(161);
 				metricName();
-				setState(164);
+				setState(167);
 				_errHandler.sync(this);
 				switch ( getInterpreter().adaptivePredict(_input,14,_ctx) ) {
 				case 1:
 					{
-					setState(159);
+					setState(162);
 					match(T__2);
-					setState(161);
+					setState(164);
 					_errHandler.sync(this);
 					_la = _input.LA(1);
 					if ((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << ON) | (1L << IGNORING) | (1L << GROUP_LEFT) | (1L << GROUP_RIGHT) | (1L << OFFSET) | (1L << BOOL) | (1L << AGGREGATION_OP) | (1L << IDENTIFIER))) != 0)) {
 						{
-						setState(160);
+						setState(163);
 						labelMatcherList();
 						}
 					}
 
-					setState(163);
+					setState(166);
 					match(T__3);
 					}
 					break;
@@ -997,16 +1000,91 @@ public class PromQLParser extends Parser {
 			case T__2:
 				enterOuterAlt(_localctx, 2);
 				{
-				setState(166);
+				setState(169);
 				match(T__2);
-				setState(167);
+				setState(170);
 				labelMatcherList();
-				setState(168);
+				setState(171);
 				match(T__3);
 				}
 				break;
 			default:
 				throw new NoViableAltException(this);
+			}
+		}
+		catch (RecognitionException re) {
+			_localctx.exception = re;
+			_errHandler.reportError(this, re);
+			_errHandler.recover(this, re);
+		}
+		finally {
+			exitRule();
+		}
+		return _localctx;
+	}
+
+	public static class WindowContext extends ParserRuleContext {
+		public TerminalNode DURATION() { return getToken(PromQLParser.DURATION, 0); }
+		public WindowContext(ParserRuleContext parent, int invokingState) {
+			super(parent, invokingState);
+		}
+		@Override public int getRuleIndex() { return RULE_window; }
+		@Override
+		public <T> T accept(ParseTreeVisitor<? extends T> visitor) {
+			if ( visitor instanceof PromQLVisitor ) return ((PromQLVisitor<? extends T>)visitor).visitWindow(this);
+			else return visitor.visitChildren(this);
+		}
+	}
+
+	public final WindowContext window() throws RecognitionException {
+		WindowContext _localctx = new WindowContext(_ctx, getState());
+		enterRule(_localctx, 26, RULE_window);
+		try {
+			enterOuterAlt(_localctx, 1);
+			{
+			setState(175);
+			match(T__4);
+			setState(176);
+			match(DURATION);
+			setState(177);
+			match(T__5);
+			}
+		}
+		catch (RecognitionException re) {
+			_localctx.exception = re;
+			_errHandler.reportError(this, re);
+			_errHandler.recover(this, re);
+		}
+		finally {
+			exitRule();
+		}
+		return _localctx;
+	}
+
+	public static class OffsetContext extends ParserRuleContext {
+		public TerminalNode OFFSET() { return getToken(PromQLParser.OFFSET, 0); }
+		public TerminalNode DURATION() { return getToken(PromQLParser.DURATION, 0); }
+		public OffsetContext(ParserRuleContext parent, int invokingState) {
+			super(parent, invokingState);
+		}
+		@Override public int getRuleIndex() { return RULE_offset; }
+		@Override
+		public <T> T accept(ParseTreeVisitor<? extends T> visitor) {
+			if ( visitor instanceof PromQLVisitor ) return ((PromQLVisitor<? extends T>)visitor).visitOffset(this);
+			else return visitor.visitChildren(this);
+		}
+	}
+
+	public final OffsetContext offset() throws RecognitionException {
+		OffsetContext _localctx = new OffsetContext(_ctx, getState());
+		enterRule(_localctx, 28, RULE_offset);
+		try {
+			enterOuterAlt(_localctx, 1);
+			{
+			setState(179);
+			match(OFFSET);
+			setState(180);
+			match(DURATION);
 			}
 		}
 		catch (RecognitionException re) {
@@ -1041,15 +1119,15 @@ public class PromQLParser extends Parser {
 
 	public final LabelMatcherContext labelMatcher() throws RecognitionException {
 		LabelMatcherContext _localctx = new LabelMatcherContext(_ctx, getState());
-		enterRule(_localctx, 26, RULE_labelMatcher);
+		enterRule(_localctx, 30, RULE_labelMatcher);
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(172);
+			setState(182);
 			labelName();
-			setState(173);
+			setState(183);
 			labelMatcherOp();
-			setState(174);
+			setState(184);
 			match(STRING);
 			}
 		}
@@ -1082,12 +1160,12 @@ public class PromQLParser extends Parser {
 
 	public final LabelMatcherOpContext labelMatcherOp() throws RecognitionException {
 		LabelMatcherOpContext _localctx = new LabelMatcherOpContext(_ctx, getState());
-		enterRule(_localctx, 28, RULE_labelMatcherOp);
+		enterRule(_localctx, 32, RULE_labelMatcherOp);
 		int _la;
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(176);
+			setState(186);
 			_la = _input.LA(1);
 			if ( !((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << EQ) | (1L << NE) | (1L << RE) | (1L << NRE))) != 0)) ) {
 			_errHandler.recoverInline(this);
@@ -1130,26 +1208,26 @@ public class PromQLParser extends Parser {
 
 	public final LabelMatcherListContext labelMatcherList() throws RecognitionException {
 		LabelMatcherListContext _localctx = new LabelMatcherListContext(_ctx, getState());
-		enterRule(_localctx, 30, RULE_labelMatcherList);
+		enterRule(_localctx, 34, RULE_labelMatcherList);
 		int _la;
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(178);
+			setState(188);
 			labelMatcher();
-			setState(183);
+			setState(193);
 			_errHandler.sync(this);
 			_la = _input.LA(1);
-			while (_la==T__4) {
+			while (_la==T__6) {
 				{
 				{
-				setState(179);
-				match(T__4);
-				setState(180);
+				setState(189);
+				match(T__6);
+				setState(190);
 				labelMatcher();
 				}
 				}
-				setState(185);
+				setState(195);
 				_errHandler.sync(this);
 				_la = _input.LA(1);
 			}
@@ -1184,13 +1262,13 @@ public class PromQLParser extends Parser {
 
 	public final FunctionContext function() throws RecognitionException {
 		FunctionContext _localctx = new FunctionContext(_ctx, getState());
-		enterRule(_localctx, 32, RULE_function);
+		enterRule(_localctx, 36, RULE_function);
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(186);
+			setState(196);
 			match(IDENTIFIER);
-			setState(187);
+			setState(197);
 			parameterList();
 			}
 		}
@@ -1225,22 +1303,22 @@ public class PromQLParser extends Parser {
 
 	public final ParameterContext parameter() throws RecognitionException {
 		ParameterContext _localctx = new ParameterContext(_ctx, getState());
-		enterRule(_localctx, 34, RULE_parameter);
+		enterRule(_localctx, 38, RULE_parameter);
 		try {
-			setState(191);
+			setState(201);
 			_errHandler.sync(this);
 			switch ( getInterpreter().adaptivePredict(_input,17,_ctx) ) {
 			case 1:
 				enterOuterAlt(_localctx, 1);
 				{
-				setState(189);
+				setState(199);
 				literal();
 				}
 				break;
 			case 2:
 				enterOuterAlt(_localctx, 2);
 				{
-				setState(190);
+				setState(200);
 				vectorExpression(0);
 				}
 				break;
@@ -1277,40 +1355,40 @@ public class PromQLParser extends Parser {
 
 	public final ParameterListContext parameterList() throws RecognitionException {
 		ParameterListContext _localctx = new ParameterListContext(_ctx, getState());
-		enterRule(_localctx, 36, RULE_parameterList);
+		enterRule(_localctx, 40, RULE_parameterList);
 		int _la;
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(193);
+			setState(203);
 			match(T__0);
-			setState(202);
+			setState(212);
 			_errHandler.sync(this);
 			_la = _input.LA(1);
 			if ((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << T__0) | (1L << T__2) | (1L << NUMBER) | (1L << STRING) | (1L << ADD) | (1L << SUB) | (1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << OFFSET) | (1L << AGGREGATION_OP) | (1L << IDENTIFIER) | (1L << IDENTIFIER_EXTENDED))) != 0)) {
 				{
-				setState(194);
+				setState(204);
 				parameter();
-				setState(199);
+				setState(209);
 				_errHandler.sync(this);
 				_la = _input.LA(1);
-				while (_la==T__4) {
+				while (_la==T__6) {
 					{
 					{
-					setState(195);
-					match(T__4);
-					setState(196);
+					setState(205);
+					match(T__6);
+					setState(206);
 					parameter();
 					}
 					}
-					setState(201);
+					setState(211);
 					_errHandler.sync(this);
 					_la = _input.LA(1);
 				}
 				}
 			}
 
-			setState(204);
+			setState(214);
 			match(T__1);
 			}
 		}
@@ -1349,66 +1427,66 @@ public class PromQLParser extends Parser {
 
 	public final AggregationContext aggregation() throws RecognitionException {
 		AggregationContext _localctx = new AggregationContext(_ctx, getState());
-		enterRule(_localctx, 38, RULE_aggregation);
+		enterRule(_localctx, 42, RULE_aggregation);
 		try {
-			setState(221);
+			setState(231);
 			_errHandler.sync(this);
 			switch ( getInterpreter().adaptivePredict(_input,22,_ctx) ) {
 			case 1:
 				enterOuterAlt(_localctx, 1);
 				{
-				setState(206);
+				setState(216);
 				match(AGGREGATION_OP);
-				setState(207);
+				setState(217);
 				parameterList();
 				}
 				break;
 			case 2:
 				enterOuterAlt(_localctx, 2);
 				{
-				setState(208);
+				setState(218);
 				match(AGGREGATION_OP);
-				setState(211);
+				setState(221);
 				_errHandler.sync(this);
 				switch (_input.LA(1)) {
 				case BY:
 					{
-					setState(209);
+					setState(219);
 					by();
 					}
 					break;
 				case WITHOUT:
 					{
-					setState(210);
+					setState(220);
 					without();
 					}
 					break;
 				default:
 					throw new NoViableAltException(this);
 				}
-				setState(213);
+				setState(223);
 				parameterList();
 				}
 				break;
 			case 3:
 				enterOuterAlt(_localctx, 3);
 				{
-				setState(215);
+				setState(225);
 				match(AGGREGATION_OP);
-				setState(216);
+				setState(226);
 				parameterList();
-				setState(219);
+				setState(229);
 				_errHandler.sync(this);
 				switch (_input.LA(1)) {
 				case BY:
 					{
-					setState(217);
+					setState(227);
 					by();
 					}
 					break;
 				case WITHOUT:
 					{
-					setState(218);
+					setState(228);
 					without();
 					}
 					break;
@@ -1448,13 +1526,13 @@ public class PromQLParser extends Parser {
 
 	public final ByContext by() throws RecognitionException {
 		ByContext _localctx = new ByContext(_ctx, getState());
-		enterRule(_localctx, 40, RULE_by);
+		enterRule(_localctx, 44, RULE_by);
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(223);
+			setState(233);
 			match(BY);
-			setState(224);
+			setState(234);
 			labelNameList();
 			}
 		}
@@ -1487,13 +1565,13 @@ public class PromQLParser extends Parser {
 
 	public final WithoutContext without() throws RecognitionException {
 		WithoutContext _localctx = new WithoutContext(_ctx, getState());
-		enterRule(_localctx, 42, RULE_without);
+		enterRule(_localctx, 46, RULE_without);
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(226);
+			setState(236);
 			match(WITHOUT);
-			setState(227);
+			setState(237);
 			labelNameList();
 			}
 		}
@@ -1534,40 +1612,40 @@ public class PromQLParser extends Parser {
 
 	public final GroupingContext grouping() throws RecognitionException {
 		GroupingContext _localctx = new GroupingContext(_ctx, getState());
-		enterRule(_localctx, 44, RULE_grouping);
+		enterRule(_localctx, 48, RULE_grouping);
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(231);
+			setState(241);
 			_errHandler.sync(this);
 			switch (_input.LA(1)) {
 			case ON:
 				{
-				setState(229);
+				setState(239);
 				on();
 				}
 				break;
 			case IGNORING:
 				{
-				setState(230);
+				setState(240);
 				ignoring();
 				}
 				break;
 			default:
 				throw new NoViableAltException(this);
 			}
-			setState(235);
+			setState(245);
 			_errHandler.sync(this);
 			switch (_input.LA(1)) {
 			case GROUP_LEFT:
 				{
-				setState(233);
+				setState(243);
 				groupLeft();
 				}
 				break;
 			case GROUP_RIGHT:
 				{
-				setState(234);
+				setState(244);
 				groupRight();
 				}
 				break;
@@ -1621,13 +1699,13 @@ public class PromQLParser extends Parser {
 
 	public final OnContext on() throws RecognitionException {
 		OnContext _localctx = new OnContext(_ctx, getState());
-		enterRule(_localctx, 46, RULE_on);
+		enterRule(_localctx, 50, RULE_on);
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(237);
+			setState(247);
 			match(ON);
-			setState(238);
+			setState(248);
 			labelNameList();
 			}
 		}
@@ -1660,13 +1738,13 @@ public class PromQLParser extends Parser {
 
 	public final IgnoringContext ignoring() throws RecognitionException {
 		IgnoringContext _localctx = new IgnoringContext(_ctx, getState());
-		enterRule(_localctx, 48, RULE_ignoring);
+		enterRule(_localctx, 52, RULE_ignoring);
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(240);
+			setState(250);
 			match(IGNORING);
-			setState(241);
+			setState(251);
 			labelNameList();
 			}
 		}
@@ -1699,18 +1777,18 @@ public class PromQLParser extends Parser {
 
 	public final GroupLeftContext groupLeft() throws RecognitionException {
 		GroupLeftContext _localctx = new GroupLeftContext(_ctx, getState());
-		enterRule(_localctx, 50, RULE_groupLeft);
+		enterRule(_localctx, 54, RULE_groupLeft);
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(243);
+			setState(253);
 			match(GROUP_LEFT);
-			setState(245);
+			setState(255);
 			_errHandler.sync(this);
 			switch ( getInterpreter().adaptivePredict(_input,25,_ctx) ) {
 			case 1:
 				{
-				setState(244);
+				setState(254);
 				labelNameList();
 				}
 				break;
@@ -1746,18 +1824,18 @@ public class PromQLParser extends Parser {
 
 	public final GroupRightContext groupRight() throws RecognitionException {
 		GroupRightContext _localctx = new GroupRightContext(_ctx, getState());
-		enterRule(_localctx, 52, RULE_groupRight);
+		enterRule(_localctx, 56, RULE_groupRight);
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(247);
+			setState(257);
 			match(GROUP_RIGHT);
-			setState(249);
+			setState(259);
 			_errHandler.sync(this);
 			switch ( getInterpreter().adaptivePredict(_input,26,_ctx) ) {
 			case 1:
 				{
-				setState(248);
+				setState(258);
 				labelNameList();
 				}
 				break;
@@ -1794,9 +1872,9 @@ public class PromQLParser extends Parser {
 
 	public final MetricNameContext metricName() throws RecognitionException {
 		MetricNameContext _localctx = new MetricNameContext(_ctx, getState());
-		enterRule(_localctx, 54, RULE_metricName);
+		enterRule(_localctx, 58, RULE_metricName);
 		try {
-			setState(254);
+			setState(264);
 			_errHandler.sync(this);
 			switch (_input.LA(1)) {
 			case AND:
@@ -1808,21 +1886,21 @@ public class PromQLParser extends Parser {
 			case AGGREGATION_OP:
 				enterOuterAlt(_localctx, 1);
 				{
-				setState(251);
+				setState(261);
 				metricKeyword();
 				}
 				break;
 			case IDENTIFIER:
 				enterOuterAlt(_localctx, 2);
 				{
-				setState(252);
+				setState(262);
 				match(IDENTIFIER);
 				}
 				break;
 			case IDENTIFIER_EXTENDED:
 				enterOuterAlt(_localctx, 3);
 				{
-				setState(253);
+				setState(263);
 				match(IDENTIFIER_EXTENDED);
 				}
 				break;
@@ -1862,12 +1940,12 @@ public class PromQLParser extends Parser {
 
 	public final MetricKeywordContext metricKeyword() throws RecognitionException {
 		MetricKeywordContext _localctx = new MetricKeywordContext(_ctx, getState());
-		enterRule(_localctx, 56, RULE_metricKeyword);
+		enterRule(_localctx, 60, RULE_metricKeyword);
 		int _la;
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(256);
+			setState(266);
 			_la = _input.LA(1);
 			if ( !((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << OFFSET) | (1L << AGGREGATION_OP))) != 0)) ) {
 			_errHandler.recoverInline(this);
@@ -1908,9 +1986,9 @@ public class PromQLParser extends Parser {
 
 	public final LabelNameContext labelName() throws RecognitionException {
 		LabelNameContext _localctx = new LabelNameContext(_ctx, getState());
-		enterRule(_localctx, 58, RULE_labelName);
+		enterRule(_localctx, 62, RULE_labelName);
 		try {
-			setState(260);
+			setState(270);
 			_errHandler.sync(this);
 			switch (_input.LA(1)) {
 			case AND:
@@ -1927,14 +2005,14 @@ public class PromQLParser extends Parser {
 			case AGGREGATION_OP:
 				enterOuterAlt(_localctx, 1);
 				{
-				setState(258);
+				setState(268);
 				labelKeyword();
 				}
 				break;
 			case IDENTIFIER:
 				enterOuterAlt(_localctx, 2);
 				{
-				setState(259);
+				setState(269);
 				match(IDENTIFIER);
 				}
 				break;
@@ -1973,40 +2051,40 @@ public class PromQLParser extends Parser {
 
 	public final LabelNameListContext labelNameList() throws RecognitionException {
 		LabelNameListContext _localctx = new LabelNameListContext(_ctx, getState());
-		enterRule(_localctx, 60, RULE_labelNameList);
+		enterRule(_localctx, 64, RULE_labelNameList);
 		int _la;
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(262);
+			setState(272);
 			match(T__0);
-			setState(271);
+			setState(281);
 			_errHandler.sync(this);
 			_la = _input.LA(1);
 			if ((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << ON) | (1L << IGNORING) | (1L << GROUP_LEFT) | (1L << GROUP_RIGHT) | (1L << OFFSET) | (1L << BOOL) | (1L << AGGREGATION_OP) | (1L << IDENTIFIER))) != 0)) {
 				{
-				setState(263);
+				setState(273);
 				labelName();
-				setState(268);
+				setState(278);
 				_errHandler.sync(this);
 				_la = _input.LA(1);
-				while (_la==T__4) {
+				while (_la==T__6) {
 					{
 					{
-					setState(264);
-					match(T__4);
-					setState(265);
+					setState(274);
+					match(T__6);
+					setState(275);
 					labelName();
 					}
 					}
-					setState(270);
+					setState(280);
 					_errHandler.sync(this);
 					_la = _input.LA(1);
 				}
 				}
 			}
 
-			setState(273);
+			setState(283);
 			match(T__1);
 			}
 		}
@@ -2047,12 +2125,12 @@ public class PromQLParser extends Parser {
 
 	public final LabelKeywordContext labelKeyword() throws RecognitionException {
 		LabelKeywordContext _localctx = new LabelKeywordContext(_ctx, getState());
-		enterRule(_localctx, 62, RULE_labelKeyword);
+		enterRule(_localctx, 66, RULE_labelKeyword);
 		int _la;
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(275);
+			setState(285);
 			_la = _input.LA(1);
 			if ( !((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << ON) | (1L << IGNORING) | (1L << GROUP_LEFT) | (1L << GROUP_RIGHT) | (1L << OFFSET) | (1L << BOOL) | (1L << AGGREGATION_OP))) != 0)) ) {
 			_errHandler.recoverInline(this);
@@ -2091,12 +2169,12 @@ public class PromQLParser extends Parser {
 
 	public final LiteralContext literal() throws RecognitionException {
 		LiteralContext _localctx = new LiteralContext(_ctx, getState());
-		enterRule(_localctx, 64, RULE_literal);
+		enterRule(_localctx, 68, RULE_literal);
 		int _la;
 		try {
 			enterOuterAlt(_localctx, 1);
 			{
-			setState(277);
+			setState(287);
 			_la = _input.LA(1);
 			if ( !(_la==NUMBER || _la==STRING) ) {
 			_errHandler.recoverInline(this);
@@ -2145,100 +2223,103 @@ public class PromQLParser extends Parser {
 	}
 
 	public static final String _serializedATN =
-		"\3\u608b\ua72a\u8133\ub9ed\u417c\u3be7\u7786\u5964\3*\u011a\4\2\t\2\4"+
+		"\3\u608b\ua72a\u8133\ub9ed\u417c\u3be7\u7786\u5964\3+\u0124\4\2\t\2\4"+
 		"\3\t\3\4\4\t\4\4\5\t\5\4\6\t\6\4\7\t\7\4\b\t\b\4\t\t\t\4\n\t\n\4\13\t"+
 		"\13\4\f\t\f\4\r\t\r\4\16\t\16\4\17\t\17\4\20\t\20\4\21\t\21\4\22\t\22"+
 		"\4\23\t\23\4\24\t\24\4\25\t\25\4\26\t\26\4\27\t\27\4\30\t\30\4\31\t\31"+
 		"\4\32\t\32\4\33\t\33\4\34\t\34\4\35\t\35\4\36\t\36\4\37\t\37\4 \t \4!"+
-		"\t!\4\"\t\"\3\2\3\2\3\2\3\3\3\3\3\3\3\3\3\3\5\3M\n\3\3\3\3\3\3\3\5\3R"+
-		"\n\3\3\3\3\3\3\3\3\3\3\3\5\3Y\n\3\3\3\3\3\3\3\3\3\3\3\5\3`\n\3\3\3\3\3"+
-		"\3\3\3\3\3\3\5\3g\n\3\3\3\3\3\3\3\3\3\3\3\5\3n\n\3\3\3\3\3\3\3\3\3\3\3"+
-		"\5\3u\n\3\3\3\3\3\7\3y\n\3\f\3\16\3|\13\3\3\4\3\4\3\5\3\5\3\6\3\6\3\7"+
-		"\3\7\3\b\3\b\5\b\u0088\n\b\3\t\3\t\3\n\3\n\3\13\3\13\3\13\3\13\3\13\5"+
-		"\13\u0093\n\13\3\f\3\f\3\f\3\f\3\r\3\r\5\r\u009b\n\r\3\r\3\r\5\r\u009f"+
-		"\n\r\3\16\3\16\3\16\5\16\u00a4\n\16\3\16\5\16\u00a7\n\16\3\16\3\16\3\16"+
-		"\3\16\5\16\u00ad\n\16\3\17\3\17\3\17\3\17\3\20\3\20\3\21\3\21\3\21\7\21"+
-		"\u00b8\n\21\f\21\16\21\u00bb\13\21\3\22\3\22\3\22\3\23\3\23\5\23\u00c2"+
-		"\n\23\3\24\3\24\3\24\3\24\7\24\u00c8\n\24\f\24\16\24\u00cb\13\24\5\24"+
-		"\u00cd\n\24\3\24\3\24\3\25\3\25\3\25\3\25\3\25\5\25\u00d6\n\25\3\25\3"+
-		"\25\3\25\3\25\3\25\3\25\5\25\u00de\n\25\5\25\u00e0\n\25\3\26\3\26\3\26"+
-		"\3\27\3\27\3\27\3\30\3\30\5\30\u00ea\n\30\3\30\3\30\5\30\u00ee\n\30\3"+
-		"\31\3\31\3\31\3\32\3\32\3\32\3\33\3\33\5\33\u00f8\n\33\3\34\3\34\5\34"+
-		"\u00fc\n\34\3\35\3\35\3\35\5\35\u0101\n\35\3\36\3\36\3\37\3\37\5\37\u0107"+
-		"\n\37\3 \3 \3 \3 \7 \u010d\n \f \16 \u0110\13 \5 \u0112\n \3 \3 \3!\3"+
-		"!\3\"\3\"\3\"\2\3\4#\2\4\6\b\n\f\16\20\22\24\26\30\32\34\36 \"$&(*,.\60"+
-		"\62\64\668:<>@B\2\n\3\2\n\13\3\2\f\16\3\2\21\26\4\2\31\31\33\33\5\2\20"+
-		"\20\22\22\27\30\5\2\31\35\"\"$$\3\2\31$\3\2\b\t\2\u0121\2D\3\2\2\2\4L"+
-		"\3\2\2\2\6}\3\2\2\2\b\177\3\2\2\2\n\u0081\3\2\2\2\f\u0083\3\2\2\2\16\u0085"+
-		"\3\2\2\2\20\u0089\3\2\2\2\22\u008b\3\2\2\2\24\u0092\3\2\2\2\26\u0094\3"+
-		"\2\2\2\30\u0098\3\2\2\2\32\u00ac\3\2\2\2\34\u00ae\3\2\2\2\36\u00b2\3\2"+
-		"\2\2 \u00b4\3\2\2\2\"\u00bc\3\2\2\2$\u00c1\3\2\2\2&\u00c3\3\2\2\2(\u00df"+
-		"\3\2\2\2*\u00e1\3\2\2\2,\u00e4\3\2\2\2.\u00e9\3\2\2\2\60\u00ef\3\2\2\2"+
-		"\62\u00f2\3\2\2\2\64\u00f5\3\2\2\2\66\u00f9\3\2\2\28\u0100\3\2\2\2:\u0102"+
-		"\3\2\2\2<\u0106\3\2\2\2>\u0108\3\2\2\2@\u0115\3\2\2\2B\u0117\3\2\2\2D"+
-		"E\5\4\3\2EF\7\2\2\3F\3\3\2\2\2GH\b\3\1\2HI\5\6\4\2IJ\5\4\3\tJM\3\2\2\2"+
-		"KM\5\24\13\2LG\3\2\2\2LK\3\2\2\2Mz\3\2\2\2NO\f\n\2\2OQ\5\b\5\2PR\5.\30"+
-		"\2QP\3\2\2\2QR\3\2\2\2RS\3\2\2\2ST\5\4\3\nTy\3\2\2\2UV\f\b\2\2VX\5\n\6"+
-		"\2WY\5.\30\2XW\3\2\2\2XY\3\2\2\2YZ\3\2\2\2Z[\5\4\3\t[y\3\2\2\2\\]\f\7"+
-		"\2\2]_\5\f\7\2^`\5.\30\2_^\3\2\2\2_`\3\2\2\2`a\3\2\2\2ab\5\4\3\bby\3\2"+
-		"\2\2cd\f\6\2\2df\5\16\b\2eg\5.\30\2fe\3\2\2\2fg\3\2\2\2gh\3\2\2\2hi\5"+
-		"\4\3\7iy\3\2\2\2jk\f\5\2\2km\5\20\t\2ln\5.\30\2ml\3\2\2\2mn\3\2\2\2no"+
-		"\3\2\2\2op\5\4\3\6py\3\2\2\2qr\f\4\2\2rt\5\22\n\2su\5.\30\2ts\3\2\2\2"+
-		"tu\3\2\2\2uv\3\2\2\2vw\5\4\3\5wy\3\2\2\2xN\3\2\2\2xU\3\2\2\2x\\\3\2\2"+
-		"\2xc\3\2\2\2xj\3\2\2\2xq\3\2\2\2y|\3\2\2\2zx\3\2\2\2z{\3\2\2\2{\5\3\2"+
-		"\2\2|z\3\2\2\2}~\t\2\2\2~\7\3\2\2\2\177\u0080\7\17\2\2\u0080\t\3\2\2\2"+
-		"\u0081\u0082\t\3\2\2\u0082\13\3\2\2\2\u0083\u0084\t\2\2\2\u0084\r\3\2"+
-		"\2\2\u0085\u0087\t\4\2\2\u0086\u0088\7#\2\2\u0087\u0086\3\2\2\2\u0087"+
-		"\u0088\3\2\2\2\u0088\17\3\2\2\2\u0089\u008a\t\5\2\2\u008a\21\3\2\2\2\u008b"+
-		"\u008c\7\32\2\2\u008c\23\3\2\2\2\u008d\u0093\5\"\22\2\u008e\u0093\5(\25"+
-		"\2\u008f\u0093\5\30\r\2\u0090\u0093\5B\"\2\u0091\u0093\5\26\f\2\u0092"+
-		"\u008d\3\2\2\2\u0092\u008e\3\2\2\2\u0092\u008f\3\2\2\2\u0092\u0090\3\2"+
-		"\2\2\u0092\u0091\3\2\2\2\u0093\25\3\2\2\2\u0094\u0095\7\3\2\2\u0095\u0096"+
-		"\5\4\3\2\u0096\u0097\7\4\2\2\u0097\27\3\2\2\2\u0098\u009a\5\32\16\2\u0099"+
-		"\u009b\7%\2\2\u009a\u0099\3\2\2\2\u009a\u009b\3\2\2\2\u009b\u009e\3\2"+
-		"\2\2\u009c\u009d\7\"\2\2\u009d\u009f\7&\2\2\u009e\u009c\3\2\2\2\u009e"+
-		"\u009f\3\2\2\2\u009f\31\3\2\2\2\u00a0\u00a6\58\35\2\u00a1\u00a3\7\5\2"+
-		"\2\u00a2\u00a4\5 \21\2\u00a3\u00a2\3\2\2\2\u00a3\u00a4\3\2\2\2\u00a4\u00a5"+
-		"\3\2\2\2\u00a5\u00a7\7\6\2\2\u00a6\u00a1\3\2\2\2\u00a6\u00a7\3\2\2\2\u00a7"+
-		"\u00ad\3\2\2\2\u00a8\u00a9\7\5\2\2\u00a9\u00aa\5 \21\2\u00aa\u00ab\7\6"+
-		"\2\2\u00ab\u00ad\3\2\2\2\u00ac\u00a0\3\2\2\2\u00ac\u00a8\3\2\2\2\u00ad"+
-		"\33\3\2\2\2\u00ae\u00af\5<\37\2\u00af\u00b0\5\36\20\2\u00b0\u00b1\7\t"+
-		"\2\2\u00b1\35\3\2\2\2\u00b2\u00b3\t\6\2\2\u00b3\37\3\2\2\2\u00b4\u00b9"+
-		"\5\34\17\2\u00b5\u00b6\7\7\2\2\u00b6\u00b8\5\34\17\2\u00b7\u00b5\3\2\2"+
-		"\2\u00b8\u00bb\3\2\2\2\u00b9\u00b7\3\2\2\2\u00b9\u00ba\3\2\2\2\u00ba!"+
-		"\3\2\2\2\u00bb\u00b9\3\2\2\2\u00bc\u00bd\7\'\2\2\u00bd\u00be\5&\24\2\u00be"+
-		"#\3\2\2\2\u00bf\u00c2\5B\"\2\u00c0\u00c2\5\4\3\2\u00c1\u00bf\3\2\2\2\u00c1"+
-		"\u00c0\3\2\2\2\u00c2%\3\2\2\2\u00c3\u00cc\7\3\2\2\u00c4\u00c9\5$\23\2"+
-		"\u00c5\u00c6\7\7\2\2\u00c6\u00c8\5$\23\2\u00c7\u00c5\3\2\2\2\u00c8\u00cb"+
-		"\3\2\2\2\u00c9\u00c7\3\2\2\2\u00c9\u00ca\3\2\2\2\u00ca\u00cd\3\2\2\2\u00cb"+
-		"\u00c9\3\2\2\2\u00cc\u00c4\3\2\2\2\u00cc\u00cd\3\2\2\2\u00cd\u00ce\3\2"+
-		"\2\2\u00ce\u00cf\7\4\2\2\u00cf\'\3\2\2\2\u00d0\u00d1\7$\2\2\u00d1\u00e0"+
-		"\5&\24\2\u00d2\u00d5\7$\2\2\u00d3\u00d6\5*\26\2\u00d4\u00d6\5,\27\2\u00d5"+
-		"\u00d3\3\2\2\2\u00d5\u00d4\3\2\2\2\u00d6\u00d7\3\2\2\2\u00d7\u00d8\5&"+
-		"\24\2\u00d8\u00e0\3\2\2\2\u00d9\u00da\7$\2\2\u00da\u00dd\5&\24\2\u00db"+
-		"\u00de\5*\26\2\u00dc\u00de\5,\27\2\u00dd\u00db\3\2\2\2\u00dd\u00dc\3\2"+
-		"\2\2\u00de\u00e0\3\2\2\2\u00df\u00d0\3\2\2\2\u00df\u00d2\3\2\2\2\u00df"+
-		"\u00d9\3\2\2\2\u00e0)\3\2\2\2\u00e1\u00e2\7\34\2\2\u00e2\u00e3\5> \2\u00e3"+
-		"+\3\2\2\2\u00e4\u00e5\7\35\2\2\u00e5\u00e6\5> \2\u00e6-\3\2\2\2\u00e7"+
-		"\u00ea\5\60\31\2\u00e8\u00ea\5\62\32\2\u00e9\u00e7\3\2\2\2\u00e9\u00e8"+
-		"\3\2\2\2\u00ea\u00ed\3\2\2\2\u00eb\u00ee\5\64\33\2\u00ec\u00ee\5\66\34"+
-		"\2\u00ed\u00eb\3\2\2\2\u00ed\u00ec\3\2\2\2\u00ed\u00ee\3\2\2\2\u00ee/"+
-		"\3\2\2\2\u00ef\u00f0\7\36\2\2\u00f0\u00f1\5> \2\u00f1\61\3\2\2\2\u00f2"+
-		"\u00f3\7\37\2\2\u00f3\u00f4\5> \2\u00f4\63\3\2\2\2\u00f5\u00f7\7 \2\2"+
-		"\u00f6\u00f8\5> \2\u00f7\u00f6\3\2\2\2\u00f7\u00f8\3\2\2\2\u00f8\65\3"+
-		"\2\2\2\u00f9\u00fb\7!\2\2\u00fa\u00fc\5> \2\u00fb\u00fa\3\2\2\2\u00fb"+
-		"\u00fc\3\2\2\2\u00fc\67\3\2\2\2\u00fd\u0101\5:\36\2\u00fe\u0101\7\'\2"+
-		"\2\u00ff\u0101\7(\2\2\u0100\u00fd\3\2\2\2\u0100\u00fe\3\2\2\2\u0100\u00ff"+
-		"\3\2\2\2\u01019\3\2\2\2\u0102\u0103\t\7\2\2\u0103;\3\2\2\2\u0104\u0107"+
-		"\5@!\2\u0105\u0107\7\'\2\2\u0106\u0104\3\2\2\2\u0106\u0105\3\2\2\2\u0107"+
-		"=\3\2\2\2\u0108\u0111\7\3\2\2\u0109\u010e\5<\37\2\u010a\u010b\7\7\2\2"+
-		"\u010b\u010d\5<\37\2\u010c\u010a\3\2\2\2\u010d\u0110\3\2\2\2\u010e\u010c"+
-		"\3\2\2\2\u010e\u010f\3\2\2\2\u010f\u0112\3\2\2\2\u0110\u010e\3\2\2\2\u0111"+
-		"\u0109\3\2\2\2\u0111\u0112\3\2\2\2\u0112\u0113\3\2\2\2\u0113\u0114\7\4"+
-		"\2\2\u0114?\3\2\2\2\u0115\u0116\t\b\2\2\u0116A\3\2\2\2\u0117\u0118\t\t"+
-		"\2\2\u0118C\3\2\2\2!LQX_fmtxz\u0087\u0092\u009a\u009e\u00a3\u00a6\u00ac"+
-		"\u00b9\u00c1\u00c9\u00cc\u00d5\u00dd\u00df\u00e9\u00ed\u00f7\u00fb\u0100"+
-		"\u0106\u010e\u0111";
+		"\t!\4\"\t\"\4#\t#\4$\t$\3\2\3\2\3\2\3\3\3\3\3\3\3\3\3\3\5\3Q\n\3\3\3\3"+
+		"\3\3\3\5\3V\n\3\3\3\3\3\3\3\3\3\3\3\5\3]\n\3\3\3\3\3\3\3\3\3\3\3\5\3d"+
+		"\n\3\3\3\3\3\3\3\3\3\3\3\5\3k\n\3\3\3\3\3\3\3\3\3\3\3\5\3r\n\3\3\3\3\3"+
+		"\3\3\3\3\3\3\5\3y\n\3\3\3\3\3\7\3}\n\3\f\3\16\3\u0080\13\3\3\4\3\4\3\5"+
+		"\3\5\3\6\3\6\3\7\3\7\3\b\3\b\5\b\u008c\n\b\3\t\3\t\3\n\3\n\3\13\3\13\3"+
+		"\13\3\13\3\13\5\13\u0097\n\13\3\f\3\f\3\f\3\f\3\r\3\r\5\r\u009f\n\r\3"+
+		"\r\5\r\u00a2\n\r\3\16\3\16\3\16\5\16\u00a7\n\16\3\16\5\16\u00aa\n\16\3"+
+		"\16\3\16\3\16\3\16\5\16\u00b0\n\16\3\17\3\17\3\17\3\17\3\20\3\20\3\20"+
+		"\3\21\3\21\3\21\3\21\3\22\3\22\3\23\3\23\3\23\7\23\u00c2\n\23\f\23\16"+
+		"\23\u00c5\13\23\3\24\3\24\3\24\3\25\3\25\5\25\u00cc\n\25\3\26\3\26\3\26"+
+		"\3\26\7\26\u00d2\n\26\f\26\16\26\u00d5\13\26\5\26\u00d7\n\26\3\26\3\26"+
+		"\3\27\3\27\3\27\3\27\3\27\5\27\u00e0\n\27\3\27\3\27\3\27\3\27\3\27\3\27"+
+		"\5\27\u00e8\n\27\5\27\u00ea\n\27\3\30\3\30\3\30\3\31\3\31\3\31\3\32\3"+
+		"\32\5\32\u00f4\n\32\3\32\3\32\5\32\u00f8\n\32\3\33\3\33\3\33\3\34\3\34"+
+		"\3\34\3\35\3\35\5\35\u0102\n\35\3\36\3\36\5\36\u0106\n\36\3\37\3\37\3"+
+		"\37\5\37\u010b\n\37\3 \3 \3!\3!\5!\u0111\n!\3\"\3\"\3\"\3\"\7\"\u0117"+
+		"\n\"\f\"\16\"\u011a\13\"\5\"\u011c\n\"\3\"\3\"\3#\3#\3$\3$\3$\2\3\4%\2"+
+		"\4\6\b\n\f\16\20\22\24\26\30\32\34\36 \"$&(*,.\60\62\64\668:<>@BDF\2\n"+
+		"\3\2\f\r\3\2\16\20\3\2\23\30\4\2\33\33\35\35\5\2\22\22\24\24\31\32\5\2"+
+		"\33\37$$&&\3\2\33&\3\2\n\13\2\u0129\2H\3\2\2\2\4P\3\2\2\2\6\u0081\3\2"+
+		"\2\2\b\u0083\3\2\2\2\n\u0085\3\2\2\2\f\u0087\3\2\2\2\16\u0089\3\2\2\2"+
+		"\20\u008d\3\2\2\2\22\u008f\3\2\2\2\24\u0096\3\2\2\2\26\u0098\3\2\2\2\30"+
+		"\u009c\3\2\2\2\32\u00af\3\2\2\2\34\u00b1\3\2\2\2\36\u00b5\3\2\2\2 \u00b8"+
+		"\3\2\2\2\"\u00bc\3\2\2\2$\u00be\3\2\2\2&\u00c6\3\2\2\2(\u00cb\3\2\2\2"+
+		"*\u00cd\3\2\2\2,\u00e9\3\2\2\2.\u00eb\3\2\2\2\60\u00ee\3\2\2\2\62\u00f3"+
+		"\3\2\2\2\64\u00f9\3\2\2\2\66\u00fc\3\2\2\28\u00ff\3\2\2\2:\u0103\3\2\2"+
+		"\2<\u010a\3\2\2\2>\u010c\3\2\2\2@\u0110\3\2\2\2B\u0112\3\2\2\2D\u011f"+
+		"\3\2\2\2F\u0121\3\2\2\2HI\5\4\3\2IJ\7\2\2\3J\3\3\2\2\2KL\b\3\1\2LM\5\6"+
+		"\4\2MN\5\4\3\tNQ\3\2\2\2OQ\5\24\13\2PK\3\2\2\2PO\3\2\2\2Q~\3\2\2\2RS\f"+
+		"\n\2\2SU\5\b\5\2TV\5\62\32\2UT\3\2\2\2UV\3\2\2\2VW\3\2\2\2WX\5\4\3\nX"+
+		"}\3\2\2\2YZ\f\b\2\2Z\\\5\n\6\2[]\5\62\32\2\\[\3\2\2\2\\]\3\2\2\2]^\3\2"+
+		"\2\2^_\5\4\3\t_}\3\2\2\2`a\f\7\2\2ac\5\f\7\2bd\5\62\32\2cb\3\2\2\2cd\3"+
+		"\2\2\2de\3\2\2\2ef\5\4\3\bf}\3\2\2\2gh\f\6\2\2hj\5\16\b\2ik\5\62\32\2"+
+		"ji\3\2\2\2jk\3\2\2\2kl\3\2\2\2lm\5\4\3\7m}\3\2\2\2no\f\5\2\2oq\5\20\t"+
+		"\2pr\5\62\32\2qp\3\2\2\2qr\3\2\2\2rs\3\2\2\2st\5\4\3\6t}\3\2\2\2uv\f\4"+
+		"\2\2vx\5\22\n\2wy\5\62\32\2xw\3\2\2\2xy\3\2\2\2yz\3\2\2\2z{\5\4\3\5{}"+
+		"\3\2\2\2|R\3\2\2\2|Y\3\2\2\2|`\3\2\2\2|g\3\2\2\2|n\3\2\2\2|u\3\2\2\2}"+
+		"\u0080\3\2\2\2~|\3\2\2\2~\177\3\2\2\2\177\5\3\2\2\2\u0080~\3\2\2\2\u0081"+
+		"\u0082\t\2\2\2\u0082\7\3\2\2\2\u0083\u0084\7\21\2\2\u0084\t\3\2\2\2\u0085"+
+		"\u0086\t\3\2\2\u0086\13\3\2\2\2\u0087\u0088\t\2\2\2\u0088\r\3\2\2\2\u0089"+
+		"\u008b\t\4\2\2\u008a\u008c\7%\2\2\u008b\u008a\3\2\2\2\u008b\u008c\3\2"+
+		"\2\2\u008c\17\3\2\2\2\u008d\u008e\t\5\2\2\u008e\21\3\2\2\2\u008f\u0090"+
+		"\7\34\2\2\u0090\23\3\2\2\2\u0091\u0097\5&\24\2\u0092\u0097\5,\27\2\u0093"+
+		"\u0097\5\30\r\2\u0094\u0097\5F$\2\u0095\u0097\5\26\f\2\u0096\u0091\3\2"+
+		"\2\2\u0096\u0092\3\2\2\2\u0096\u0093\3\2\2\2\u0096\u0094\3\2\2\2\u0096"+
+		"\u0095\3\2\2\2\u0097\25\3\2\2\2\u0098\u0099\7\3\2\2\u0099\u009a\5\4\3"+
+		"\2\u009a\u009b\7\4\2\2\u009b\27\3\2\2\2\u009c\u009e\5\32\16\2\u009d\u009f"+
+		"\5\34\17\2\u009e\u009d\3\2\2\2\u009e\u009f\3\2\2\2\u009f\u00a1\3\2\2\2"+
+		"\u00a0\u00a2\5\36\20\2\u00a1\u00a0\3\2\2\2\u00a1\u00a2\3\2\2\2\u00a2\31"+
+		"\3\2\2\2\u00a3\u00a9\5<\37\2\u00a4\u00a6\7\5\2\2\u00a5\u00a7\5$\23\2\u00a6"+
+		"\u00a5\3\2\2\2\u00a6\u00a7\3\2\2\2\u00a7\u00a8\3\2\2\2\u00a8\u00aa\7\6"+
+		"\2\2\u00a9\u00a4\3\2\2\2\u00a9\u00aa\3\2\2\2\u00aa\u00b0\3\2\2\2\u00ab"+
+		"\u00ac\7\5\2\2\u00ac\u00ad\5$\23\2\u00ad\u00ae\7\6\2\2\u00ae\u00b0\3\2"+
+		"\2\2\u00af\u00a3\3\2\2\2\u00af\u00ab\3\2\2\2\u00b0\33\3\2\2\2\u00b1\u00b2"+
+		"\7\7\2\2\u00b2\u00b3\7\'\2\2\u00b3\u00b4\7\b\2\2\u00b4\35\3\2\2\2\u00b5"+
+		"\u00b6\7$\2\2\u00b6\u00b7\7\'\2\2\u00b7\37\3\2\2\2\u00b8\u00b9\5@!\2\u00b9"+
+		"\u00ba\5\"\22\2\u00ba\u00bb\7\13\2\2\u00bb!\3\2\2\2\u00bc\u00bd\t\6\2"+
+		"\2\u00bd#\3\2\2\2\u00be\u00c3\5 \21\2\u00bf\u00c0\7\t\2\2\u00c0\u00c2"+
+		"\5 \21\2\u00c1\u00bf\3\2\2\2\u00c2\u00c5\3\2\2\2\u00c3\u00c1\3\2\2\2\u00c3"+
+		"\u00c4\3\2\2\2\u00c4%\3\2\2\2\u00c5\u00c3\3\2\2\2\u00c6\u00c7\7(\2\2\u00c7"+
+		"\u00c8\5*\26\2\u00c8\'\3\2\2\2\u00c9\u00cc\5F$\2\u00ca\u00cc\5\4\3\2\u00cb"+
+		"\u00c9\3\2\2\2\u00cb\u00ca\3\2\2\2\u00cc)\3\2\2\2\u00cd\u00d6\7\3\2\2"+
+		"\u00ce\u00d3\5(\25\2\u00cf\u00d0\7\t\2\2\u00d0\u00d2\5(\25\2\u00d1\u00cf"+
+		"\3\2\2\2\u00d2\u00d5\3\2\2\2\u00d3\u00d1\3\2\2\2\u00d3\u00d4\3\2\2\2\u00d4"+
+		"\u00d7\3\2\2\2\u00d5\u00d3\3\2\2\2\u00d6\u00ce\3\2\2\2\u00d6\u00d7\3\2"+
+		"\2\2\u00d7\u00d8\3\2\2\2\u00d8\u00d9\7\4\2\2\u00d9+\3\2\2\2\u00da\u00db"+
+		"\7&\2\2\u00db\u00ea\5*\26\2\u00dc\u00df\7&\2\2\u00dd\u00e0\5.\30\2\u00de"+
+		"\u00e0\5\60\31\2\u00df\u00dd\3\2\2\2\u00df\u00de\3\2\2\2\u00e0\u00e1\3"+
+		"\2\2\2\u00e1\u00e2\5*\26\2\u00e2\u00ea\3\2\2\2\u00e3\u00e4\7&\2\2\u00e4"+
+		"\u00e7\5*\26\2\u00e5\u00e8\5.\30\2\u00e6\u00e8\5\60\31\2\u00e7\u00e5\3"+
+		"\2\2\2\u00e7\u00e6\3\2\2\2\u00e8\u00ea\3\2\2\2\u00e9\u00da\3\2\2\2\u00e9"+
+		"\u00dc\3\2\2\2\u00e9\u00e3\3\2\2\2\u00ea-\3\2\2\2\u00eb\u00ec\7\36\2\2"+
+		"\u00ec\u00ed\5B\"\2\u00ed/\3\2\2\2\u00ee\u00ef\7\37\2\2\u00ef\u00f0\5"+
+		"B\"\2\u00f0\61\3\2\2\2\u00f1\u00f4\5\64\33\2\u00f2\u00f4\5\66\34\2\u00f3"+
+		"\u00f1\3\2\2\2\u00f3\u00f2\3\2\2\2\u00f4\u00f7\3\2\2\2\u00f5\u00f8\58"+
+		"\35\2\u00f6\u00f8\5:\36\2\u00f7\u00f5\3\2\2\2\u00f7\u00f6\3\2\2\2\u00f7"+
+		"\u00f8\3\2\2\2\u00f8\63\3\2\2\2\u00f9\u00fa\7 \2\2\u00fa\u00fb\5B\"\2"+
+		"\u00fb\65\3\2\2\2\u00fc\u00fd\7!\2\2\u00fd\u00fe\5B\"\2\u00fe\67\3\2\2"+
+		"\2\u00ff\u0101\7\"\2\2\u0100\u0102\5B\"\2\u0101\u0100\3\2\2\2\u0101\u0102"+
+		"\3\2\2\2\u01029\3\2\2\2\u0103\u0105\7#\2\2\u0104\u0106\5B\"\2\u0105\u0104"+
+		"\3\2\2\2\u0105\u0106\3\2\2\2\u0106;\3\2\2\2\u0107\u010b\5> \2\u0108\u010b"+
+		"\7(\2\2\u0109\u010b\7)\2\2\u010a\u0107\3\2\2\2\u010a\u0108\3\2\2\2\u010a"+
+		"\u0109\3\2\2\2\u010b=\3\2\2\2\u010c\u010d\t\7\2\2\u010d?\3\2\2\2\u010e"+
+		"\u0111\5D#\2\u010f\u0111\7(\2\2\u0110\u010e\3\2\2\2\u0110\u010f\3\2\2"+
+		"\2\u0111A\3\2\2\2\u0112\u011b\7\3\2\2\u0113\u0118\5@!\2\u0114\u0115\7"+
+		"\t\2\2\u0115\u0117\5@!\2\u0116\u0114\3\2\2\2\u0117\u011a\3\2\2\2\u0118"+
+		"\u0116\3\2\2\2\u0118\u0119\3\2\2\2\u0119\u011c\3\2\2\2\u011a\u0118\3\2"+
+		"\2\2\u011b\u0113\3\2\2\2\u011b\u011c\3\2\2\2\u011c\u011d\3\2\2\2\u011d"+
+		"\u011e\7\4\2\2\u011eC\3\2\2\2\u011f\u0120\t\b\2\2\u0120E\3\2\2\2\u0121"+
+		"\u0122\t\t\2\2\u0122G\3\2\2\2!PU\\cjqx|~\u008b\u0096\u009e\u00a1\u00a6"+
+		"\u00a9\u00af\u00c3\u00cb\u00d3\u00d6\u00df\u00e7\u00e9\u00f3\u00f7\u0101"+
+		"\u0105\u010a\u0110\u0118\u011b";
 	public static final ATN _ATN =
 		new ATNDeserializer().deserialize(_serializedATN.toCharArray());
 	static {

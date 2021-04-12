@@ -104,6 +104,18 @@ public interface PromQLVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitInstantSelector(PromQLParser.InstantSelectorContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link PromQLParser#window}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitWindow(PromQLParser.WindowContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link PromQLParser#offset}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitOffset(PromQLParser.OffsetContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link PromQLParser#labelMatcher}.
 	 * @param ctx the parse tree
 	 * @return the visitor result

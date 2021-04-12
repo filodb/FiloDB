@@ -171,18 +171,26 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
       build[Seq[LabelMatch]](matcherList)
     }
 
-    val offset: Option[Duration] = if (ctx.OFFSET == null) {
+    val offset: Option[Duration] = if (ctx.offset == null) {
       None
     } else {
-      Some(parseDuration(ctx.DURATION.getSymbol().getText()))
+      Some(build[Duration](ctx.offset))
     }
 
-    if (ctx.TIME_RANGE == null) {
+    if (ctx.window == null) {
       InstantExpression(metricName, labelSelection, offset)
     } else {
-      val window = parseWindow(ctx.TIME_RANGE.getSymbol().getText())
+      val window = build[Duration](ctx.window)
       RangeExpression(metricName, labelSelection, window, offset)
     }
+  }
+
+  override def visitWindow(ctx: PromQLParser.WindowContext): Duration = {
+    parseDuration(ctx.DURATION.getSymbol().getText())
+  }
+
+  override def visitOffset(ctx: PromQLParser.OffsetContext): Duration = {
+    parseDuration(ctx.DURATION.getSymbol().getText())
   }
 
   override def visitLabelMatcher(ctx: PromQLParser.LabelMatcherContext): LabelMatch = {
@@ -379,12 +387,5 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
     val scale = java.lang.Double.parseDouble(str.substring(0, str.length - 1))
 
     Duration(scale, timeUnit)
-  }
-
-  /**
-    * Strip off the brackets and parse as a duration.
-    */
-  private def parseWindow(str: String): Duration = {
-    parseDuration(str.substring(1, str.length - 1))
   }
 }

@@ -41,12 +41,16 @@ vector
 
 parens: '(' vectorExpression ')';
 
-instantOrRangeSelector: instantSelector TIME_RANGE? (OFFSET DURATION)?;
+instantOrRangeSelector: instantSelector window? offset?;
 
 instantSelector
     : metricName ('{' labelMatcherList? '}')?
     | '{' labelMatcherList '}'
     ;
+
+window: '[' DURATION ']';
+
+offset: OFFSET DURATION;
 
 labelMatcher:     labelName labelMatcherOp STRING;
 labelMatcherOp:   EQ | NE | RE | NRE;
@@ -163,11 +167,6 @@ AGGREGATION_OP
     | B O T T O M K
     | T O P K
     | Q U A N T I L E
-    ;
-
-TIME_RANGE
-    : '[' DURATION ']'
-//    | '[' DURATION ':' DURATION? ']'
     ;
 
 // The special 'i' form is for "Step Multiple Notation for PromQL Lookback (#821)"
