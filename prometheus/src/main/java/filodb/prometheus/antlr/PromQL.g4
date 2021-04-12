@@ -20,6 +20,7 @@ vectorExpression
     | vectorExpression compareOp grouping? vectorExpression            #binaryOperation
     | vectorExpression andUnlessOp grouping? vectorExpression          #binaryOperation
     | vectorExpression orOp grouping? vectorExpression                 #binaryOperation
+    | vectorExpression '[' DURATION ':' DURATION? ']' offset?          #subQuery
     | vector                                                           #vectorOperation
     ;
 
@@ -176,7 +177,7 @@ DURATION: NUMBER ('s' | 'm' | 'h' | 'd' | 'w' | 'y' | 'i');
 IDENTIFIER: [a-zA-Z_] [a-zA-Z0-9_]*;
 
 // Used for metric names.
-IDENTIFIER_EXTENDED: [a-zA-Z_:] [a-zA-Z0-9_:\-.]*;
+IDENTIFIER_EXTENDED: [_:]? [a-zA-Z] [a-zA-Z0-9_:\-.]*;
 
 // Magic for case-insensitive matching.
 fragment A : [aA]; // match either an 'a' or 'A'

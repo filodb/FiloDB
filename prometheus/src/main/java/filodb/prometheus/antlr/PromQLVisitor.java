@@ -38,6 +38,13 @@ public interface PromQLVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitVectorOperation(PromQLParser.VectorOperationContext ctx);
 	/**
+	 * Visit a parse tree produced by the {@code subQuery}
+	 * labeled alternative in {@link PromQLParser#vectorExpression}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitSubQuery(PromQLParser.SubQueryContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link PromQLParser#unaryOp}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
