@@ -171,7 +171,7 @@ final case class RangeParams(startSecs: Long, stepSecs: Long, endSecs: Long)
 
 trait ScalarSingleValue extends ScalarRangeVector {
   def rangeParams: RangeParams
-  override def outputRange: Option[RvRange] = Some(RvRange(rangeParams.stepSecs * 1000,
+  override def outputRange: Option[RvRange] = Some(RvRange(rangeParams.startSecs * 1000,
                                              rangeParams.stepSecs * 1000, rangeParams.endSecs * 1000))
   val numRowsSerialized : Int = 1
 

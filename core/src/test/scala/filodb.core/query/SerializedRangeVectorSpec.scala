@@ -73,6 +73,7 @@ class SerializedRangeVectorSpec  extends AnyFunSpec with Matchers {
       RvRange(1000, 100, 1000))
     val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan")
     srv.numRows shouldEqual Some(11)
+    srv.numRowsSerialized shouldEqual 11
     val res = srv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
     res.length shouldEqual 11
     res.map(_._1) shouldEqual (0 to 1000 by 100)
@@ -96,7 +97,8 @@ class SerializedRangeVectorSpec  extends AnyFunSpec with Matchers {
                       RvRange(0, 100, 1000))
 
     val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan")
-
+    srv.numRows shouldEqual Some(11)
+    srv.numRowsSerialized shouldEqual 4
     val res = srv.rows.map(r => (r.getLong(0), r.getHistogram(1))).toList
     res.length shouldEqual 11
     res.map(_._1) shouldEqual (0 to 1000 by 100)
