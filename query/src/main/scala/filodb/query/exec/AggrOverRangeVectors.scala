@@ -169,7 +169,7 @@ object RangeVectorAggregator extends StrictLogging {
                 cardinalityLimit: Int = Int.MaxValue): Observable[RangeVector] = {
     // reduce the range vectors using the foldLeft construct. This results in one aggregate per group.
     val task = source.toListL.map { rvs =>
-      val period = rvs.headOption.flatMap(_.period)
+      val period = rvs.headOption.flatMap(_.outputRange)
       // now reduce each group and create one result range vector per group
       val groupedResult = mapReduceInternal(rvs, rowAgg, skipMapPhase, grouping)
 
@@ -251,7 +251,7 @@ object RangeVectorAggregator extends StrictLogging {
       source.foldLeftF(accs) { case (_, rv) =>
         count += 1
         val rowIter = rv.rows
-        if (period.isEmpty) period = rv.period
+        if (period.isEmpty) period = rv.outputRange
         try {
           cforRange { 0 until outputLen } { i =>
             accs(i) = rowAgg.reduceAggregate(accs(i), rowIter.next)

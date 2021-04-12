@@ -70,7 +70,7 @@ class QuantileRowAggregator(q: Double) extends RowAggregator {
       mutRow.setValues(r.getLong(0), qVal)
       mutRow
     }
-    Seq(IteratorBackedRangeVector(aggRangeVector.key, result, aggRangeVector.period))
+    Seq(IteratorBackedRangeVector(aggRangeVector.key, result, aggRangeVector.outputRange))
   }
 
   def reductionSchema(source: ResultSchema): ResultSchema = {

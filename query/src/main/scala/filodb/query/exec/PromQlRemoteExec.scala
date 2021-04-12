@@ -131,7 +131,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
         }
         override def numRows: Option[Int] = Option(samples.size)
 
-        override def period: Option[RvRange] = Some(RvRange(promQlQueryParams.startSecs * 1000,
+        override def outputRange: Option[RvRange] = Some(RvRange(promQlQueryParams.startSecs * 1000,
                                                             promQlQueryParams.stepSecs * 1000,
                                                             promQlQueryParams.endSecs * 1000))
       }
@@ -170,7 +170,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
         override def numRows: Option[Int] = Option(samples.size)
 
-        override def period: Option[RvRange] = Some(RvRange(promQlQueryParams.startSecs * 1000,
+        override def outputRange: Option[RvRange] = Some(RvRange(promQlQueryParams.startSecs * 1000,
           promQlQueryParams.stepSecs * 1000,
           promQlQueryParams.endSecs * 1000))
 
@@ -200,7 +200,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
           }
           override def numRows: Option[Int] = Option(d.aggregateResponse.get.aggregateSampl.size)
 
-          override def period: Option[RvRange] = Some(RvRange(promQlQueryParams.startSecs * 1000,
+          override def outputRange: Option[RvRange] = Some(RvRange(promQlQueryParams.startSecs * 1000,
             promQlQueryParams.stepSecs * 1000,
             promQlQueryParams.endSecs * 1000))
       }
@@ -232,7 +232,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
         }
         override def numRows: Option[Int] = Option(d.aggregateResponse.get.aggregateSampl.size)
 
-        override def period: Option[RvRange] = Some(RvRange(promQlQueryParams.startSecs * 1000,
+        override def outputRange: Option[RvRange] = Some(RvRange(promQlQueryParams.startSecs * 1000,
           promQlQueryParams.stepSecs * 1000,
           promQlQueryParams.endSecs * 1000))
       }

@@ -70,12 +70,12 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
         if (instantFunction.isHToDoubleFunc) {
           source.map { rv =>
             IteratorBackedRangeVector(rv.key, new H2DoubleInstantFuncIterator(rv.rows, instantFunction.asHToDouble,
-              scalarRangeVector), rv.period)
+              scalarRangeVector), rv.outputRange)
           }
         } else if (instantFunction.isHistDoubleToDoubleFunc && sourceSchema.isHistDouble) {
           source.map { rv =>
             IteratorBackedRangeVector(rv.key, new HD2DoubleInstantFuncIterator(rv.rows, instantFunction.asHDToDouble,
-              scalarRangeVector), rv.period)
+              scalarRangeVector), rv.outputRange)
           }
         } else {
           throw new UnsupportedOperationException(s"Sorry, function $function is not supported right now")
@@ -89,7 +89,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
           val instantFunction = InstantFunction.double(function)
           source.map { rv =>
             IteratorBackedRangeVector(rv.key, new DoubleInstantFuncIterator(rv.rows, instantFunction,
-              scalarRangeVector), rv.period)
+              scalarRangeVector), rv.outputRange)
           }
         }
       case cType: ColumnType =>
@@ -224,7 +224,7 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
           result
         }
       }
-      IteratorBackedRangeVector(rv.key, resultIterator, rv.period)
+      IteratorBackedRangeVector(rv.key, resultIterator, rv.outputRange)
     }
   }
 }
@@ -330,7 +330,7 @@ final case class VectorFunctionMapper() extends RangeVectorTransformer {
       new RangeVector {
         override def key: RangeVectorKey = rv.key
         override def rows(): RangeVectorCursor = rv.rows
-        override def period: Option[RvRange] = rv.period
+        override def outputRange: Option[RvRange] = rv.outputRange
       }
     }
   }
@@ -380,8 +380,8 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
           import NoCloseCursor._
           rowList.iterator
         }
-        override def period: Option[RvRange] = Some(RvRange(rangeParams.startSecs * 1000, rangeParams.stepSecs * 1000,
-                                                            rangeParams.endSecs * 1000))
+        override def outputRange: Option[RvRange] = Some(RvRange(rangeParams.startSecs * 1000,
+                                                        rangeParams.stepSecs * 1000, rangeParams.endSecs * 1000))
       }
     }
 
@@ -454,7 +454,7 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
     // Now create new RangeVectors for each bucket
     // NOTE: debox.Map methods sometimes has issues giving consistent results instead of duplicates.
     buckets.mapToArray { case (le, bucketValues) =>
-      promBucketRV(rv.key, le, timestamps, bucketValues, rv.period)
+      promBucketRV(rv.key, le, timestamps, bucketValues, rv.outputRange)
     }.toSeq
   }
 

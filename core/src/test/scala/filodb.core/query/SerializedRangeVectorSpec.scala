@@ -18,7 +18,7 @@ class SerializedRangeVectorSpec  extends AnyFunSpec with Matchers {
       override def key: RangeVectorKey = rangeVectorKey
       override def rows(): RangeVectorCursor = samples.map(r => new TransientRow(r._1, r._2)).iterator
 
-      override def period: Option[RvRange] = Some(rvPeriod)
+      override def outputRange: Option[RvRange] = Some(rvPeriod)
     }
   }
 
@@ -30,7 +30,7 @@ class SerializedRangeVectorSpec  extends AnyFunSpec with Matchers {
       override def key: RangeVectorKey = rangeVectorKey
       override def rows(): RangeVectorCursor = samples.map(r => new TransientHistRow(r._1, r._2)).iterator
 
-      override def period: Option[RvRange] = Some(rvPeriod)
+      override def outputRange: Option[RvRange] = Some(rvPeriod)
     }
   }
 

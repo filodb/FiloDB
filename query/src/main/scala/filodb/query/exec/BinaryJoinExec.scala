@@ -88,7 +88,7 @@ final case class BinaryJoinExec(queryContext: QueryContext,
       val (oneSide, otherSide, lhsIsOneSide) =
         if (cardinality == Cardinality.OneToMany) (lhsRvs, rhsRvs, true)
         else (rhsRvs, lhsRvs, false)
-      val period = oneSide.headOption.flatMap(_.period)
+      val period = oneSide.headOption.flatMap(_.outputRange)
       // load "one" side keys in a hashmap
       val oneSideMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
       oneSide.foreach { rv =>

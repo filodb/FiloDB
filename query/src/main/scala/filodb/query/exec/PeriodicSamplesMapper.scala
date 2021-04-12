@@ -124,7 +124,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
           row.setDouble(1, r.getDouble(1))
           row
         }
-        override def period: Option[RvRange] = outputRvRange
+        override def outputRange: Option[RvRange] = outputRvRange
       }
     }).getOrElse(rvs)
   }

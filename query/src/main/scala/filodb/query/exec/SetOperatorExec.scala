@@ -110,7 +110,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
     val result = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
     val rhsMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
 
-    val period = lhsRvs.headOption.flatMap(_.period)
+    val period = lhsRvs.headOption.flatMap(_.outputRange)
 
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)

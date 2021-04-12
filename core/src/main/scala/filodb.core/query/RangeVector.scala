@@ -121,10 +121,18 @@ object RvRange {
   */
 trait RangeVector {
   def key: RangeVectorKey
+
   def rows(): RangeVectorCursor
-  def period: Option[RvRange] = None
+
+  /**
+   * If Some, then it describes start/step/end of output data.
+   * Present only for time series data that is periodic. If raw data is requested, then None.
+   */
+  def outputRange: Option[RvRange] = None
+
   // FIXME remove default in numRows since many impls simply default to None. Shouldn't scalars implement this
   def numRows: Option[Int] = None
+
   def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
 }
 
@@ -151,7 +159,7 @@ trait ScalarRangeVector extends SerializableRangeVector {
   * ScalarRangeVector which has time specific value
   */
 final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double],
-                                     override val period: Option[RvRange]) extends ScalarRangeVector {
+                                     override val outputRange: Option[RvRange]) extends ScalarRangeVector {
   import NoCloseCursor._
   override def rows: RangeVectorCursor = timeValueMap.toList.sortWith(_._1 < _._1).
                                             map { x => new TransientRow(x._1, x._2) }.iterator
@@ -164,7 +172,7 @@ final case class RangeParams(startSecs: Long, stepSecs: Long, endSecs: Long)
 
 trait ScalarSingleValue extends ScalarRangeVector {
   def rangeParams: RangeParams
-  override def period: Option[RvRange] = Some(RvRange(rangeParams.stepSecs * 1000,
+  override def outputRange: Option[RvRange] = Some(RvRange(rangeParams.stepSecs * 1000,
                                              rangeParams.stepSecs * 1000, rangeParams.endSecs * 1000))
   val numRowsSerialized : Int = 1
 
@@ -274,7 +282,7 @@ final case class RawDataRangeVector(key: RangeVectorKey,
 
   def publishInterval: Option[Long] = partition.publishInterval
 
-  override def period: Option[RvRange] = None
+  override def outputRange: Option[RvRange] = None
 }
 
 /**
@@ -293,7 +301,7 @@ final case class ChunkInfoRangeVector(key: RangeVectorKey,
     reader.setInfo(info)
     reader
   }
-  override def period: Option[RvRange] = None
+  override def outputRange: Option[RvRange] = None
 }
 
 /**
@@ -308,16 +316,16 @@ final class SerializedRangeVector(val key: RangeVectorKey,
                                   containers: Seq[RecordContainer],
                                   val schema: RecordSchema,
                                   startRecordNo: Int,
-                                  override val period: Option[RvRange]) extends RangeVector with
+                                  override val outputRange: Option[RvRange]) extends RangeVector with
                                           SerializableRangeVector with java.io.Serializable {
 
   override val numRows = {
-    if (period.isDefined &&
+    if (outputRange.isDefined &&
       schema.isTimeSeries &&
-      period.get.startMs != period.get.endMs &&
+      outputRange.get.startMs != outputRange.get.endMs &&
       schema.columns.size == 2 &&
       (schema.columns(1).colType == DoubleColumn || schema.columns(1).colType == HistogramColumn)) {
-      Some(((period.get.endMs - period.get.startMs) / period.get.stepMs).toInt + 1)
+      Some(((outputRange.get.endMs - outputRange.get.startMs) / outputRange.get.stepMs).toInt + 1)
     } else {
       Some(numRowsSerialized)
     }
@@ -326,31 +334,31 @@ final class SerializedRangeVector(val key: RangeVectorKey,
   // Possible for records to spill across containers, so we read from all containers
   override def rows: RangeVectorCursor = {
     val it = containers.toIterator.flatMap(_.iterate(schema)).slice(startRecordNo, startRecordNo + numRowsSerialized)
-    if (period.isDefined &&
+    if (outputRange.isDefined &&
         schema.isTimeSeries &&
-        period.get.startMs != period.get.endMs &&
+        outputRange.get.startMs != outputRange.get.endMs &&
         schema.columns.size == 2 &&
         (schema.columns(1).colType == DoubleColumn || schema.columns(1).colType == HistogramColumn)) {
 
       new Iterator[RowReader] {
-        var curTime = period.get.startMs
+        var curTime = outputRange.get.startMs
         val bufIt = it.buffered
         val emptyDouble = new TransientRow(0L, Double.NaN)
         val emptyHist = new TransientHistRow(0L, Histogram.empty)
-        override def hasNext: Boolean = curTime <= period.get.endMs
+        override def hasNext: Boolean = curTime <= outputRange.get.endMs
         override def next(): RowReader = {
           if (bufIt.hasNext && bufIt.head.getLong(0) == curTime) {
-            curTime += period.get.stepMs
+            curTime += outputRange.get.stepMs
             bufIt.next()
           }
           else {
             if (schema.columns(1).colType == DoubleColumn) {
               emptyDouble.timestamp = curTime
-              curTime += period.get.stepMs
+              curTime += outputRange.get.stepMs
               emptyDouble
             } else {
               emptyHist.timestamp = curTime
-              curTime += period.get.stepMs
+              curTime += outputRange.get.stepMs
               emptyHist
             }
           }
@@ -405,8 +413,8 @@ object SerializedRangeVector extends StrictLogging {
       while (rows.hasNext) {
         val nextRow = rows.next()
         // Don't encode empty / NaN data over the wire
-        if (rv.period.isEmpty ||
-            rv.period.get.startMs == rv.period.get.endMs ||
+        if (rv.outputRange.isEmpty ||
+            rv.outputRange.get.startMs == rv.outputRange.get.endMs ||
             !schema.isTimeSeries ||
             schema.columns.size != 2 ||
             schema.columns(1).colType == DoubleColumn && !nextRow.getDouble(1).isNaN ||
@@ -427,7 +435,7 @@ object SerializedRangeVector extends StrictLogging {
       case None                 => builder.allContainers
       case Some(firstContainer) => builder.allContainers.dropWhile(_ != firstContainer)
     }
-    new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo, rv.period)
+    new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo, rv.outputRange)
   }
   // scalastyle:on null
 
@@ -456,12 +464,12 @@ object SerializedRangeVector extends StrictLogging {
 
 final case class IteratorBackedRangeVector(key: RangeVectorKey,
                                            rows: RangeVectorCursor,
-                                           override val period: Option[RvRange]) extends RangeVector
+                                           override val outputRange: Option[RvRange]) extends RangeVector
 
 final case class BufferRangeVector(key: RangeVectorKey,
                                    timestamps: Buffer[Long],
                                    values: Buffer[Double],
-                                   override val period: Option[RvRange]) extends RangeVector {
+                                   override val outputRange: Option[RvRange]) extends RangeVector {
   require(timestamps.length == values.length, s"${timestamps.length} ts != ${values.length} values")
 
   def rows(): RangeVectorCursor = new RangeVectorCursor {
