@@ -319,12 +319,9 @@ final class SerializedRangeVector(val key: RangeVectorKey,
                                   override val outputRange: Option[RvRange]) extends RangeVector with
                                           SerializableRangeVector with java.io.Serializable {
 
+
   override val numRows = {
-    if (outputRange.isDefined &&
-      schema.isTimeSeries &&
-      outputRange.get.startMs != outputRange.get.endMs &&
-      schema.columns.size == 2 &&
-      (schema.columns(1).colType == DoubleColumn || schema.columns(1).colType == HistogramColumn)) {
+    if (SerializedRangeVector.canRemoveEmptyRows(outputRange, schema)) {
       Some(((outputRange.get.endMs - outputRange.get.startMs) / outputRange.get.stepMs).toInt + 1)
     } else {
       Some(numRowsSerialized)
@@ -334,12 +331,7 @@ final class SerializedRangeVector(val key: RangeVectorKey,
   // Possible for records to spill across containers, so we read from all containers
   override def rows: RangeVectorCursor = {
     val it = containers.toIterator.flatMap(_.iterate(schema)).slice(startRecordNo, startRecordNo + numRowsSerialized)
-    if (outputRange.isDefined &&
-        schema.isTimeSeries &&
-        outputRange.get.startMs != outputRange.get.endMs &&
-        schema.columns.size == 2 &&
-        (schema.columns(1).colType == DoubleColumn || schema.columns(1).colType == HistogramColumn)) {
-
+    if (SerializedRangeVector.canRemoveEmptyRows(outputRange, schema)) {
       new Iterator[RowReader] {
         var curTime = outputRange.get.startMs
         val bufIt = it.buffered
@@ -393,6 +385,14 @@ object SerializedRangeVector extends StrictLogging {
 
   val queryResultBytes = Kamon.histogram("query-engine-result-bytes").withoutTags
 
+  def canRemoveEmptyRows(outputRange: Option[RvRange], sch: RecordSchema) : Boolean = {
+    outputRange.isDefined && // metadata queries
+      sch.isTimeSeries && // metadata queries
+      outputRange.get.startMs != outputRange.get.endMs && // instant queries can have raw data
+      sch.columns.size == 2 &&
+      (sch.columns(1).colType == DoubleColumn || sch.columns(1).colType == HistogramColumn)
+  }
+
   /**
     * Creates a SerializedRangeVector out of another RangeVector by sharing a previously used RecordBuilder.
     * The most efficient option when you need to create multiple SRVs as the containers are automatically
@@ -413,10 +413,7 @@ object SerializedRangeVector extends StrictLogging {
       while (rows.hasNext) {
         val nextRow = rows.next()
         // Don't encode empty / NaN data over the wire
-        if (rv.outputRange.isEmpty ||
-            rv.outputRange.get.startMs == rv.outputRange.get.endMs ||
-            !schema.isTimeSeries ||
-            schema.columns.size != 2 ||
+        if (!canRemoveEmptyRows(rv.outputRange, schema) ||
             schema.columns(1).colType == DoubleColumn && !nextRow.getDouble(1).isNaN ||
             schema.columns(1).colType == HistogramColumn && !nextRow.getHistogram(1).isEmpty) {
           numRows += 1
