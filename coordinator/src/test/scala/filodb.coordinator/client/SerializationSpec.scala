@@ -144,6 +144,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
           rowbuf.iterator
         }
         override val key: RangeVectorKey = rvKey
+        override def outputRange: Option[RvRange] = None
       }
       val srv = SerializedRangeVector(rv, cols)
       val observedTs = srv.rows.toSeq.map(_.getLong(0))

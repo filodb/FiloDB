@@ -127,7 +127,7 @@ trait RangeVector {
    * If Some, then it describes start/step/end of output data.
    * Present only for time series data that is periodic. If raw data is requested, then None.
    */
-  def outputRange: Option[RvRange] = None
+  def outputRange: Option[RvRange]
 
   // FIXME remove default in numRows since many impls simply default to None. Shouldn't scalars implement this
   def numRows: Option[Int] = None

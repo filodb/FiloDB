@@ -39,6 +39,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       }.take(20)
       override def key: RangeVectorKey = ignoreKey
       override def rows(): RangeVectorCursor = data.iterator
+      override def outputRange: Option[RvRange] = None
     })
 
     val rangeParams = RangeParams(0, 1, 0)
@@ -307,6 +308,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       import NoCloseCursor._
       override def key: RangeVectorKey = rangeVectorKey
       override def rows(): RangeVectorCursor = samples.map(r => new TransientRow(r._1, r._2)).iterator
+      override def outputRange: Option[RvRange] = None
     }
   }
 

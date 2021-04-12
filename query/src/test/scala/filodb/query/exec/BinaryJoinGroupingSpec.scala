@@ -52,6 +52,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 3)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
@@ -64,6 +65,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 1)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
@@ -76,6 +78,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 8)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
@@ -88,6 +91,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 2)).iterator
+      override def outputRange: Option[RvRange] = None
     }
   )
   val sampleNodeRole: Array[RangeVector] = Array(
@@ -102,6 +106,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 1)).iterator
+      override def outputRange: Option[RvRange] = None
     }
   )
 
@@ -116,6 +121,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       import NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 2)).iterator
+      override def outputRange: Option[RvRange] = None
     }
   )
 
@@ -330,6 +336,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
         import NoCloseCursor._
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 3)).iterator
+        override def outputRange: Option[RvRange] = None
       },
       new RangeVector {
         val key: RangeVectorKey = CustomRangeVectorKey(
@@ -342,6 +349,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
         import NoCloseCursor._
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 1)).iterator
+        override def outputRange: Option[RvRange] = None
       })
 
    val sampleRhs: Array[RangeVector] = Array(
@@ -356,6 +364,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
         import NoCloseCursor._
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 1)).iterator
+        override def outputRange: Option[RvRange] = None
       }
     )
 
