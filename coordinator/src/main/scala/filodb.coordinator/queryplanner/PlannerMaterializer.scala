@@ -183,7 +183,8 @@ trait  PlannerMaterializer {
     val aggregate = Aggregate(AggregationOperator.Sum, lp, Nil, Seq("job"))
     // Add sum to aggregate all child responses
     // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
-    val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext, vectors, Seq.empty)))
+    val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
+      qContext.plannerParams.copy(skipAggregatePresent = true)), vectors, Seq.empty))) // No need for present for sum
     addAbsentFunctionMapper(aggregatePlanResult, lp.columnFilters,
       RangeParams(lp.startMs / 1000, lp.stepMs / 1000, lp.endMs / 1000), qContext)
     }
