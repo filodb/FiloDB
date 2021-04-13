@@ -416,8 +416,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
     val processedTasks = childTasks
       .doOnStart(_ => span.mark("first-child-result-received"))
       .doOnTerminate(_ => span.mark("last-child-result-received"))
-      .collect {
-      case (res @ QueryResult(_, schema, _, isPartialResult, partialResultReason), i) if schema != ResultSchema.empty =>
+      .map {
+      case (res @ QueryResult(_, _, _, isPartialResult, partialResultReason), i) =>
         if (isPartialResult) {
           querySession.resultCouldBePartial = true
           querySession.partialResultsReason = partialResultReason
@@ -426,8 +426,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
         (res, i.toInt)
       case (e: QueryError, _) =>
         throw e.t
-    // cache caches results so that multiple subscribers can process
-    }.cache
+    }.filter(_._1.resultSchema != ResultSchema.empty)
+     .cache // cache caches results so that multiple subscribers can process
 
     val outputSchema = processedTasks.collect { // collect schema of first result that is nonEmpty
       case (QueryResult(_, schema, _, _, _), _) if schema.columns.nonEmpty => schema
