@@ -422,7 +422,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
           querySession.resultCouldBePartial = true
           querySession.partialResultsReason = partialResultReason
         }
-        sch = reduceSchemas(sch, res)
+        if (res.resultSchema != ResultSchema.empty) sch = reduceSchemas(sch, res)
         (res, i.toInt)
       case (e: QueryError, _) =>
         throw e.t
