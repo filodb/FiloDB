@@ -134,7 +134,7 @@ object RowAggregator {
       case Quantile => new QuantileRowAggregator(params(0).asInstanceOf[Double])
       case Stdvar   => StdvarRowAggregator
       case Stddev   => StddevRowAggregator
-      case CountValues => new CountValuesRowAggregator(params(0).asInstanceOf[String].replaceAll("^\"|\"$", ""))
+      case CountValues => new CountValuesRowAggregator(params(0).asInstanceOf[String])
       case _     => ???
     }
   }
