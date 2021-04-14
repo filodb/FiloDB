@@ -432,11 +432,11 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSubquery("avg_over_time(max_over_time(rate(foo[5m])[5m:1m])[10m:2m])")
 
     parseSubqueryError("log2(foo)[5m][5m:1m]")
-    parseSubqueryError("log2(foo)[5m:1m][5m:1m]")
     parseSubqueryError("sum(foo)[5m]")
     // FIXME: these should be uncommented when subquery support is finished
     //parseSubqueryError("sum(rate(foo[5m])[5m:1m])")
     //parseSubqueryError("log2(rate(foo[5m])[5m:1m])")
+    //parseSubqueryError("log2(foo)[5m:1m][5m:1m]")
   }
 
   it("Should be able to make logical plans for Series Expressions") {
@@ -665,7 +665,9 @@ class ParserSpec extends AnyFunSpec with Matchers {
   }
 
   private def parseSubqueryError(query: String) = {
-    antlrParseError(query)
+    intercept[IllegalArgumentException] {
+      AntlrParser.parseQuery(query)
+    }
   }
 
   private def antlrParseSuccessfully(query: String) = {
