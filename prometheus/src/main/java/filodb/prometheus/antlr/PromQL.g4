@@ -20,7 +20,7 @@ vectorExpression
     | vectorExpression compareOp grouping? vectorExpression            #binaryOperation
     | vectorExpression andUnlessOp grouping? vectorExpression          #binaryOperation
     | vectorExpression orOp grouping? vectorExpression                 #binaryOperation
-    | vectorExpression '[' DURATION ':' DURATION? ']' offset?          #subQuery
+    | vectorExpression subquery offset?                                #subqueryOperation
     | vector                                                           #vectorOperation
     ;
 
@@ -42,6 +42,7 @@ vector
 
 parens: '(' vectorExpression ')';
 
+// TODO: Make offset applicable to any expression.
 instantOrRangeSelector: instantSelector window? offset?;
 
 instantSelector
@@ -52,6 +53,8 @@ instantSelector
 window: '[' DURATION ']';
 
 offset: OFFSET DURATION;
+
+subquery: '[' DURATION ':' DURATION? ']';
 
 labelMatcher:     labelName labelMatcherOp STRING;
 labelMatcherOp:   EQ | NE | RE | NRE;

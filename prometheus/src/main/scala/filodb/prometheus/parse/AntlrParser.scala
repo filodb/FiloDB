@@ -87,10 +87,13 @@ object AntlrParser extends StrictLogging {
   * The real work happens here, by extending the auto-generated visitor.
   */
 class AntlrParser extends PromQLBaseVisitor[Object] {
-  override def visitSubQuery(ctx: PromQLParser.SubQueryContext): SubqueryExpression = {
+  override def visitSubqueryOperation(ctx: PromQLParser.SubqueryOperationContext): SubqueryExpression = {
     // FIXME: implement subquery
     SubqueryExpression(null, null)
   }
+
+  // FIXME: implement subquery (this just parses the [range:resolution] part)
+  //override def visitSubquery(ctx: PromQLParser.SubqueryContext): ???
 
   override def visitBinaryOperation(ctx: PromQLParser.BinaryOperationContext): BinaryExpression = {
     val lhs = build[Expression](ctx.getChild(0))
