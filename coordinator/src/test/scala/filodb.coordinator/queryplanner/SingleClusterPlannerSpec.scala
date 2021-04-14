@@ -520,8 +520,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
-    execPlan.rangeVectorTransformers.head.isInstanceOf[AggregatePresenter] shouldEqual true
-    execPlan.rangeVectorTransformers.tail.head.isInstanceOf[AbsentFunctionMapper] shouldEqual true
+    execPlan.rangeVectorTransformers.head.isInstanceOf[AbsentFunctionMapper] shouldEqual true
     execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
     val multiSchemaExec = execPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
 
@@ -537,9 +536,9 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
-    execPlan.rangeVectorTransformers.head.isInstanceOf[AggregatePresenter] shouldEqual true
+
     execPlan.children.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
-    execPlan.children.head.rangeVectorTransformers.tail.head.isInstanceOf[AbsentFunctionMapper] shouldEqual(true)
+    execPlan.children.head.rangeVectorTransformers.head.isInstanceOf[AbsentFunctionMapper] shouldEqual true
 
     val multiSchemaExec = execPlan.children.head.children.head
     multiSchemaExec.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual(true)
@@ -554,8 +553,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
-    execPlan.rangeVectorTransformers.head.isInstanceOf[AggregatePresenter] shouldEqual true
-    execPlan.rangeVectorTransformers.tail.head.isInstanceOf[AbsentFunctionMapper] shouldEqual true
+    execPlan.rangeVectorTransformers.head.isInstanceOf[AbsentFunctionMapper] shouldEqual true
     execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
   }
 }
