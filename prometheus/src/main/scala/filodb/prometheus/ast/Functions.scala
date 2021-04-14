@@ -205,7 +205,8 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
       rangeFunctionId,
       rangeExpression.window.timeUnit == IntervalMultiple,
       otherParams,
-      rangeExpression.offset.map(_.millis(timeParams.step * 1000))
+      rangeExpression.offset.map(_.millis(timeParams.step * 1000)),
+      rangeExpression.columnFilters
     )
   }
 
