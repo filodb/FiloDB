@@ -282,7 +282,7 @@ object LogicalPlanUtils extends StrictLogging {
                                                else None
       case lp: ScalarFixedDoublePlan       => None
       case lp: RawChunkMeta                => None
-      case sq: SubqueryWithWindowing       => ???
+      case sq: SubqueryWithWindowing       => getPeriodicSeriesPlan(sq.innerPeriodicSeries)
     }
   }
 }

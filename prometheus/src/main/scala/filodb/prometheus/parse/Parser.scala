@@ -386,7 +386,7 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
     }
 
   lazy val expression: PackratParser[Expression] =
-    binaryExpression | subqueryExpression | aggregateExpression2 | aggregateExpression1 |
+    subqueryExpression | binaryExpression | aggregateExpression2 | aggregateExpression1 |
       function | unaryExpression | vector | numericalExpression | simpleSeries | precedenceExpression
 
   // Generally most expressions can be subqueries except for those that return range vectors,
