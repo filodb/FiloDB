@@ -3,6 +3,7 @@ package filodb.core.downsample
 import java.util
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
+import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 
@@ -313,18 +314,19 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   }
 
   /**
-    * Iterator for lazy traversal of partIdIterator, value for the given label will be extracted from the ParitionKey.
+    * Iterator for traversal of partIds, value for the given label will be extracted from the ParitionKey.
+    * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
     */
   case class LabelValueResultIterator(partIds: debox.Buffer[Int], labelNames: Seq[String], limit: Int)
     extends Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] {
-    var currVal: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = _
-    var numResultsReturned = 0
-    var partIndex = 0
+    var iterIndx = 0
+    private lazy val rows = labelValues
 
-    override def hasNext: Boolean = {
-      var foundValue = false
-      while(partIndex < partIds.length && numResultsReturned < limit && !foundValue) {
-        val partId = partIds(partIndex)
+    def labelValues: Seq[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
+      var partLoopIndx = 0
+      val rows = new mutable.HashSet[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]()
+      while(partLoopIndx < partIds.length && rows.size < limit) {
+        val partId = partIds(partLoopIndx)
 
         //retrieve PartKey either from In-memory map or from PartKeyIndex
         val nextPart = partKeyFromPartId(partId)
@@ -332,18 +334,21 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
         // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
         // have a centralized service/store for serving metadata
-        currVal = schemas.part.binSchema.toStringPairs(nextPart, UnsafeUtils.arayOffset)
+        val currVal = schemas.part.binSchema.toStringPairs(nextPart, UnsafeUtils.arayOffset)
           .filter(labelNames contains _._1).map(pair => {
           pair._1.utf8 -> pair._2.utf8
         }).toMap
-        foundValue = currVal.nonEmpty
-        partIndex += 1
+        if (currVal.nonEmpty) rows.add(currVal)
+        partLoopIndx += 1
       }
-      foundValue
+      rows.toSeq
     }
 
+    override def hasNext: Boolean = iterIndx < rows.size
+
     override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = {
-      numResultsReturned += 1
+      val currVal = rows(iterIndx)
+      iterIndx += 1
       currVal
     }
   }
