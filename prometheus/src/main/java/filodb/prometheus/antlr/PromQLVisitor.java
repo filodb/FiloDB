@@ -38,6 +38,13 @@ public interface PromQLVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitVectorOperation(PromQLParser.VectorOperationContext ctx);
 	/**
+	 * Visit a parse tree produced by the {@code subqueryOperation}
+	 * labeled alternative in {@link PromQLParser#vectorExpression}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitSubqueryOperation(PromQLParser.SubqueryOperationContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link PromQLParser#unaryOp}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
@@ -103,6 +110,24 @@ public interface PromQLVisitor<T> extends ParseTreeVisitor<T> {
 	 * @return the visitor result
 	 */
 	T visitInstantSelector(PromQLParser.InstantSelectorContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link PromQLParser#window}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitWindow(PromQLParser.WindowContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link PromQLParser#offset}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitOffset(PromQLParser.OffsetContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link PromQLParser#subquery}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitSubquery(PromQLParser.SubqueryContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link PromQLParser#labelMatcher}.
 	 * @param ctx the parse tree

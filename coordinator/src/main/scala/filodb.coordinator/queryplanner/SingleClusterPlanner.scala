@@ -288,7 +288,8 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       val aggregate = Aggregate(AggregationOperator.Sum, lp, Nil, Seq("job"))
       // Add sum to aggregate all child responses
       // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
-      val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext, series, Seq.empty)))
+      val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
+        qContext.plannerParams.copy(skipAggregatePresent = true)), series, Seq.empty)))
       addAbsentFunctionMapper(aggregatePlanResult, lp.columnFilters,
         RangeParams(lp.startMs / 1000, lp.stepMs / 1000, lp.endMs / 1000), qContext)
     } else series

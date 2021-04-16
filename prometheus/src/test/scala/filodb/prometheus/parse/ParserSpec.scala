@@ -414,6 +414,31 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully(bob.append("\"}").toString())
   }
 
+  it("parse subqueries") {
+    parseSubquery("min_over_time( rate(http_requests_total[5m])[30m:1m] )")
+    parseSubquery("max_over_time( deriv( rate(distance_covered_meters_total[1m])[5m:1m] )[10m:] )")
+    parseSubquery("max_over_time((time() - max(foo) < 1000)[5m:10s] offset 5m)")
+    parseSubquery("avg_over_time(rate(demo_cpu_usage_seconds_total[1m])[2m:10s])")
+
+    parseSubquery("foo[5m:1m]")
+    parseSubquery("foo[5m:]")
+    parseSubquery("max_over_time(rate(foo[5m])[5m:1m])")
+    parseSubquery("max_over_time(sum(foo)[5m:1m])")
+    parseSubquery("sum(foo)[5m:1m]")
+    parseSubquery("log2(foo)[5m:1m]")
+    parseSubquery("log2(foo)[5m:]")
+    parseSubquery("(foo + bar)[5m:1m]")
+    parseSubquery("sum_over_time((foo + bar)[5m:1m])")
+    parseSubquery("avg_over_time(max_over_time(rate(foo[5m])[5m:1m])[10m:2m])")
+
+    parseSubqueryError("log2(foo)[5m][5m:1m]")
+    parseSubqueryError("sum(foo)[5m]")
+    // FIXME: these should be uncommented when subquery support is finished
+    //parseSubqueryError("sum(rate(foo[5m])[5m:1m])")
+    //parseSubqueryError("log2(rate(foo[5m])[5m:1m])")
+    //parseSubqueryError("log2(foo)[5m:1m][5m:1m]")
+  }
+
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
       "http_requests_total + time()" -> "ScalarVectorBinaryOperation(ADD,ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),false)",
@@ -624,6 +649,25 @@ class ParserSpec extends AnyFunSpec with Matchers {
     val result = LegacyParser.parseQuery(query)
     info(String.valueOf(result))
     antlrParseSuccessfully(query)
+  }
+
+  private def parseSubquery(query: String) = {
+    try {
+      val result = AntlrParser.parseQuery(query)
+    } catch {
+      case e: Exception => {
+        // FIXME: don't catch any exception when subquery support is finished
+        if (!e.getMessage().startsWith("Expected")) {
+          throw e
+        }
+      }
+    }
+  }
+
+  private def parseSubqueryError(query: String) = {
+    intercept[IllegalArgumentException] {
+      AntlrParser.parseQuery(query)
+    }
   }
 
   private def antlrParseSuccessfully(query: String) = {

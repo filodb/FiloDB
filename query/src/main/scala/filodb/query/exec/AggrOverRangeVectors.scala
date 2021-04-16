@@ -30,11 +30,16 @@ trait ReduceAggregateExec extends NonLeafExecPlan {
         case (QueryResult(_, _, result, _, _), _) => Observable.fromIterable(result)
         case (QueryError(_, ex), _)         => throw ex
     }
-    val task = for { schema <- firstSchema }
+
+    val task = for { schema <- firstSchema}
                yield {
-                 val aggregator = RowAggregator(aggrOp, aggrParams, schema)
-                 RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key,
-                   querySession.qContext.plannerParams.groupByCardLimit)
+                 // For absent function schema can be empty
+                 if (schema == ResultSchema.empty) Observable.empty
+                 else {
+                   val aggregator = RowAggregator(aggrOp, aggrParams, schema)
+                   RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key,
+                     querySession.qContext.plannerParams.groupByCardLimit)
+                 }
                }
     Observable.fromTask(task).flatten
   }
