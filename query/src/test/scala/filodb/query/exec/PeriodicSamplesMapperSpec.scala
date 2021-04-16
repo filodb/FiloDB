@@ -3,14 +3,13 @@ package filodb.query.exec
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
-
 import filodb.core.{MetricsTestData, TestData}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
 import filodb.core.query._
 import filodb.memory.format.ZeroCopyUTF8String
 import filodb.query._
-import filodb.query.exec.InternalRangeFunction.Increase
+import filodb.query.exec.InternalRangeFunction.{Increase, Resets}
 import filodb.query.exec.rangefn.RawDataWindowingSpec
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -118,4 +117,26 @@ class PeriodicSamplesMapperSpec extends AnyFunSpec with Matchers with ScalaFutur
     resultRows.foreach(_.toList shouldEqual expectedResults)
   }
 
+  it("should increase resets for NaN") {
+
+    val samples = Seq(
+      100000L -> Double.NaN,
+      120000L -> 100d,
+      153000L -> 20d,
+      253000L -> Double.NaN,
+      600000L -> 100d
+    )
+
+    val rv = timeValueRVPk(samples)
+
+    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(600000L, 100000, 600000L, Some(600000), Some(Resets),
+      QueryContext())
+    val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rv)),
+      querySession, 1000, resultSchema, Nil)
+
+    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map
+    (r => (r.getLong(0), r.getDouble(1))).toList)
+
+    resultRows.head.head._2 shouldEqual(2)
+  }
 }
