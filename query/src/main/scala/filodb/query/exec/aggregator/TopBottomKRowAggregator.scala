@@ -153,7 +153,10 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator wi
     resRvs.map { case (key, builder) =>
       val numRows = builder.allContainers.map(_.countRecords()).sum
       logger.debug(s"TopkPresent before creating SRV key = ${key.labelValues.mkString(",")}")
-      new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0, None)
+      new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0,
+                                                    Some(RvRange(rangeParams.startSecs * 1000,
+                                                      rangeParams.stepSecs * 1000,
+                                                      rangeParams.endSecs * 1000)))
     }.toSeq
   }
 
