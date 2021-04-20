@@ -45,6 +45,7 @@ class AbsentFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures with
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1000L, 1d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
@@ -52,6 +53,7 @@ class AbsentFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures with
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1000L, 5d)).iterator
+      override def outputRange: Option[RvRange] = None
     })
 
   val testSampleNan: Array[RangeVector] = Array(
@@ -63,6 +65,7 @@ class AbsentFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures with
         new TransientRow(1000L, Double.NaN),
         new TransientRow(2000L, 1d),
         new TransientRow(3000L, Double.NaN)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
@@ -72,6 +75,7 @@ class AbsentFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures with
         new TransientRow(1000L, 5d),
         new TransientRow(2000L, Double.NaN),
         new TransientRow(3000L, Double.NaN)).iterator
+      override def outputRange: Option[RvRange] = None
     })
 
   it("should generate range vector for empty Sample") {

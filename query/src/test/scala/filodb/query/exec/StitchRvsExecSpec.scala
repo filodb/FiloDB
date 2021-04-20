@@ -2,9 +2,8 @@ package filodb.query.exec
 
 import scala.annotation.tailrec
 
-
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, TimestampColumn}
-import filodb.core.query.{ColumnInfo, QueryContext, ResultSchema, TransientRow}
+import filodb.core.query.{ColumnInfo, CustomRangeVectorKey, QueryContext, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange, TransientRow}
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.memory.format.UnsafeUtils
 import filodb.query.QueryResult
@@ -229,6 +228,62 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers {
       case (false, false) => Unit
       case _ => fail("Unequal lengths")
     }
+  }
+
+  it ("should have correct output range when stitched") {
+    val r1 = new RangeVector {
+      override def key: RangeVectorKey = CustomRangeVectorKey.empty
+      override def rows(): RangeVectorCursor = Iterator.empty
+      override def outputRange: Option[RvRange] = Some(RvRange(10, 10, 100))
+    }
+
+    val r2 = new RangeVector {
+      override def key: RangeVectorKey = CustomRangeVectorKey.empty
+      override def rows(): RangeVectorCursor = Iterator.empty
+      override def outputRange: Option[RvRange] = Some(RvRange(90, 10, 200))
+    }
+
+    val r = StitchRvsExec.stitch(r1, r2)
+    r.outputRange shouldEqual Some(RvRange(10, 10, 200))
+
+  }
+
+  it ("should error when RVs have different steps") {
+    val r1 = new RangeVector {
+      override def key: RangeVectorKey = CustomRangeVectorKey.empty
+      override def rows(): RangeVectorCursor = Iterator.empty
+      override def outputRange: Option[RvRange] = Some(RvRange(10, 10, 100))
+    }
+
+    val r2 = new RangeVector {
+      override def key: RangeVectorKey = CustomRangeVectorKey.empty
+      override def rows(): RangeVectorCursor = Iterator.empty
+      override def outputRange: Option[RvRange] = Some(RvRange(90, 20, 200))
+    }
+
+    intercept[IllegalArgumentException] {
+      StitchRvsExec.stitch(r1, r2)
+    }
+
+  }
+
+  it ("should error when one of the RVs doesn't have step") {
+    val r1 = new RangeVector {
+      override def key: RangeVectorKey = CustomRangeVectorKey.empty
+      override def rows(): RangeVectorCursor = Iterator.empty
+      override def outputRange: Option[RvRange] = Some(RvRange(10, 10, 100))
+    }
+
+    val r2 = new RangeVector {
+      override def key: RangeVectorKey = CustomRangeVectorKey.empty
+      override def rows(): RangeVectorCursor = Iterator.empty
+      override def outputRange: Option[RvRange] = None
+    }
+
+    intercept[IllegalArgumentException] {
+      StitchRvsExec.stitch(r1, r2)
+    }
+
   }
 
 }

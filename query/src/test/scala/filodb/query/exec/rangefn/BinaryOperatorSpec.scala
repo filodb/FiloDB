@@ -28,6 +28,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 3.3d),
         new TransientRow(2L, 5.1d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = ignoreKey
@@ -35,6 +36,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(3L, 3239.3423d),
         new TransientRow(4L, 94935.1523d)).iterator
+      override def outputRange: Option[RvRange] = None
     })
   val queryConfig = new QueryConfig(config.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)
@@ -56,6 +58,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = data.iterator
+      override def outputRange: Option[RvRange] = None
     })
     fireBinaryOperatorTests(samples, scalar)
     fireComparatorOperatorTests(samples, scalar)
@@ -73,6 +76,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, Double.NaN),
           new TransientRow(2L, 5.6d)).iterator
+        override def outputRange: Option[RvRange] = None
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
@@ -80,6 +84,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 4.6d),
           new TransientRow(2L, 4.4d)).iterator
+        override def outputRange: Option[RvRange] = None
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
@@ -87,6 +92,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 0d),
           new TransientRow(2L, 5.4d)).iterator
+        override def outputRange: Option[RvRange] = None
       }
     )
     fireBinaryOperatorTests(samples, Double.NaN)
@@ -111,6 +117,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
           new TransientRow(2L, 5.9d),
           new TransientRow(2L, Double.NaN),
           new TransientRow(2L, 3.3d)).iterator
+        override def outputRange: Option[RvRange] = None
       }
     )
     fireBinaryOperatorTests(samples, scalar)
@@ -266,6 +273,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 1),
           new TransientRow(2L, 2)).iterator
+        override def outputRange: Option[RvRange] = None
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
@@ -273,6 +281,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 1),
           new TransientRow(2L, 2)).iterator
+        override def outputRange: Option[RvRange] = None
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
@@ -280,6 +289,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 1),
           new TransientRow(2L, 2)).iterator
+        override def outputRange: Option[RvRange] = None
       }
     )
     val expectedVal = samples.map(_.rows.map(v => v.getDouble(1) * 2))
@@ -305,6 +315,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 15.004124836249305),
           new TransientRow(2L, 2)).iterator
+        override def outputRange: Option[RvRange] = None
       }
     )
     val expectedVal = samples.map(_.rows.map(v => scala.math.floor(v.getDouble(1))))

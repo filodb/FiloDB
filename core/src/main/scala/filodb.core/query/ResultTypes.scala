@@ -8,6 +8,7 @@ import org.joda.time.DateTime
 
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column
+import filodb.core.metadata.Column.ColumnType
 import filodb.core.store.ChunkScanMethod
 import filodb.memory.format.RowReader
 
@@ -68,6 +69,12 @@ final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
 
 object ResultSchema {
   val empty = ResultSchema(Nil, 1)
+
+  def valueColumnType(schema: ResultSchema): ColumnType = {
+    require(schema.isTimeSeries, s"Schema $schema is not time series based, cannot continue query")
+    require(schema.columns.size >= 2, s"Schema $schema has less than 2 columns, cannot continue query")
+    schema.columns(1).colType
+  }
 }
 
 /**
