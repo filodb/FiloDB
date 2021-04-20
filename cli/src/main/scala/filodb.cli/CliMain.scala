@@ -23,7 +23,7 @@ import filodb.core.metadata.{Column, Schemas}
 import filodb.core.query._
 import filodb.core.store.ChunkSetInfoOnHeap
 import filodb.memory.MemFactory
-import filodb.memory.format.{BinaryVector, Classes, MemoryReader, RowReader}
+import filodb.memory.format.{BinaryVector, Classes, MemoryReader, PrimitiveVectorReader, RowReader}
 import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
 import filodb.query._
@@ -181,7 +181,7 @@ object CliMain extends FilodbClusterNode {
             printf("%40s %12s %10s %10s\n", "Child", "TimeSeries", "Children", "Children")
             printf("%40s %12s %10s %10s\n", "Name", "Count", "Count", "Quota")
             println("===================================================================================")
-            crs._2.foreach { cr =>
+            crs._2.sortBy(_.timeSeriesCount)(Ordering.Int.reverse).foreach { cr =>
               printf("%40s %12d %10d %10d\n", cr.childName, cr.timeSeriesCount, cr.childrenCount, cr.childrenQuota)
             }
           }
@@ -369,7 +369,8 @@ object CliMain extends FilodbClusterNode {
 
     val vecReader = BinaryVector.reader(clazz, memReader, 0)
     val str = vecReader.debugString(memReader, 0)
-    println(vecReader.getClass.getSimpleName)
+    println(s"Dropped: ${PrimitiveVectorReader.dropped(memReader, 0)}")
+    println(s"VectorType: ${vecReader.getClass.getSimpleName}")
     println(str)
   }
 
