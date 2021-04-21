@@ -691,10 +691,9 @@ class TimeSeriesShard(val ref: DatasetRef,
    */
   case class LabelValueResultIterator(partIds: debox.Buffer[Int], labelNames: Seq[String], limit: Int)
     extends Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] {
-    var iterIndx = 0
     private lazy val rows = labelValues
 
-    def labelValues: Seq[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
+    def labelValues: Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
       var partLoopIndx = 0
       val rows = new mutable.HashSet[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]()
       while(partLoopIndx < partIds.length && rows.size < limit) {
@@ -713,16 +712,12 @@ class TimeSeriesShard(val ref: DatasetRef,
         if (currVal.nonEmpty) rows.add(currVal)
         partLoopIndx += 1
       }
-      rows.toSeq
+      rows.toIterator
     }
 
-    override def hasNext: Boolean = iterIndx < rows.size
+    override def hasNext: Boolean = rows.hasNext
 
-    override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = {
-      val currVal = rows(iterIndx)
-      iterIndx += 1
-      currVal
-    }
+    override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = rows.next
   }
 
   /**
