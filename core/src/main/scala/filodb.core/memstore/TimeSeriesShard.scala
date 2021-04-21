@@ -1456,7 +1456,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   private def partitionsToEvict(): EWAHCompressedBitmap = {
     // Iterate and add eligible partitions to delete to our list
     // Need to filter out partitions with no endTime. Any endTime calculated would not be set within one flush interval.
-    partKeyIndex.partIdsOrderedByEndTime(storeConfig.numToEvict, evictionWatermark, Long.MaxValue - 1)
+    val numPartsToEvict = partitions.size() * storeConfig.percentTSPsToEvict / 100
+    partKeyIndex.partIdsOrderedByEndTime(numPartsToEvict, evictionWatermark, Long.MaxValue - 1)
   }
 
   private[core] def getPartition(partKey: Array[Byte]): Option[TimeSeriesPartition] = {

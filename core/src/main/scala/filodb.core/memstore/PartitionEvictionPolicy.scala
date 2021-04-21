@@ -2,7 +2,7 @@ package filodb.core.memstore
 
 import com.typesafe.scalalogging.StrictLogging
 
-import filodb.memory.MemFactory
+import filodb.memory.{MemFactory, NativeMemoryManager}
 
 /**
  * This is a policy that determines when partitions should be evicted out of memory
@@ -13,7 +13,7 @@ trait PartitionEvictionPolicy {
    * @param numPartitions the current number of partitions in the shard
    * @param memManager the MemFactory used to allocate write buffers and partition keys
    */
-  def shouldEvict(numPartitions: Int, memManager: MemFactory): Boolean
+  def shouldEvict(numPartitions: Int, memManager: NativeMemoryManager): Boolean
 }
 
 /**
@@ -23,10 +23,12 @@ trait PartitionEvictionPolicy {
  *  that WriteBuffers are sized much more than the heap, which should be the normal case.
  * Also, determining heap free space is just really tricky.
  *
- * @param minBufferMem the minimum number of bytes that should be free in the bufferMemManager
+ * @param minBufferMemPercentage percent of capacity that should be free in the bufferMemManager
  */
-class WriteBufferFreeEvictionPolicy(minBufferMem: Long = 1024*1024) extends PartitionEvictionPolicy with StrictLogging {
-  def shouldEvict(numPartitions: Int, memManager: MemFactory): Boolean = {
+class WriteBufferFreeEvictionPolicy(minBufferMemPercentage: Double) extends PartitionEvictionPolicy
+                                                                              with StrictLogging {
+  def shouldEvict(numPartitions: Int, memManager: NativeMemoryManager): Boolean = {
+    val minBufferMem = memManager.upperBoundSizeInBytes * 10 / 100
     if (memManager.numFreeBytes < minBufferMem) {
       logger.info(s"Recommending partition eviction; buffer free memory = ${memManager.numFreeBytes}")
       true
@@ -40,5 +42,5 @@ class WriteBufferFreeEvictionPolicy(minBufferMem: Long = 1024*1024) extends Part
  * A policy, used for testing, which evicts any partitions if the # of partitions is above a max.
  */
 class FixedMaxPartitionsEvictionPolicy(maxPartitions: Int) extends PartitionEvictionPolicy with StrictLogging {
-  def shouldEvict(numPartitions: Int, memManager: MemFactory): Boolean = numPartitions > maxPartitions
+  def shouldEvict(numPartitions: Int, memManager: NativeMemoryManager): Boolean = numPartitions > maxPartitions
 }

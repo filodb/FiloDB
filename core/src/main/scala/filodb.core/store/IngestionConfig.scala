@@ -20,7 +20,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              // Number of bytes to allocate to ingestion write buffers per shard
                              ingestionBufferMemSize: Long,
                              maxBufferPoolSize: Int,
-                             numToEvict: Int,
+                             percentTSPsToEvict: Int,
                              groupsPerShard: Int,
                              numPagesPerBlock: Int,
                              failureRetries: Int,
@@ -53,7 +53,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "shard-mem-size" -> shardMemSize,
                                "ingestion-buffer-mem-size" -> ingestionBufferMemSize,
                                "max-buffer-pool-size" -> maxBufferPoolSize,
-                               "num-partitions-to-evict" -> numToEvict,
+                               "percent-partitions-to-evict" -> percentTSPsToEvict,
                                "groups-per-shard" -> groupsPerShard,
                                "max-chunk-time" -> (maxChunkTime.toSeconds + "s"),
                                "num-block-pages" -> numPagesPerBlock,
@@ -91,7 +91,7 @@ object StoreConfig {
                                            |max-blob-buffer-size = 15000
                                            |ingestion-buffer-mem-size = 10M
                                            |max-buffer-pool-size = 10000
-                                           |num-partitions-to-evict = 1000
+                                           |percent-partitions-to-evict = 10
                                            |groups-per-shard = 60
                                            |num-block-pages = 100
                                            |failure-retries = 3
