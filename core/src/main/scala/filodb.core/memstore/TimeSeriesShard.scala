@@ -705,10 +705,10 @@ class TimeSeriesShard(val ref: DatasetRef,
         // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
         // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
         // have a centralized service/store for serving metadata
-        val currVal = schemas.part.binSchema.toStringPairs(nextPart.base, nextPart.offset)
-          .filter(labelNames contains _._1).map(pair => {
-          pair._1.utf8 -> pair._2.utf8
-        }).toMap
+
+        val currVal = schemas.part.binSchema.colValues(nextPart.base, nextPart.offset, labelNames).
+          zipWithIndex.filter(_._1 != null).map{case(value, ind) => labelNames(ind).utf8 -> value.utf8}.toMap
+
         if (currVal.nonEmpty) rows.add(currVal)
         partLoopIndx += 1
       }

@@ -319,10 +319,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     */
   case class LabelValueResultIterator(partIds: debox.Buffer[Int], labelNames: Seq[String], limit: Int)
     extends Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] {
-    var iterIndx = 0
     private lazy val rows = labelValues
 
-    def labelValues: Seq[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
+    def labelValues: Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
       var partLoopIndx = 0
       val rows = new mutable.HashSet[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]()
       while(partLoopIndx < partIds.length && rows.size < limit) {
@@ -334,23 +333,19 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
         // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
         // have a centralized service/store for serving metadata
-        val currVal = schemas.part.binSchema.toStringPairs(nextPart, UnsafeUtils.arayOffset)
-          .filter(labelNames contains _._1).map(pair => {
-          pair._1.utf8 -> pair._2.utf8
-        }).toMap
+
+        val currVal = schemas.part.binSchema.colValues(nextPart, UnsafeUtils.arayOffset, labelNames).
+          zipWithIndex.filter(_._1 != null).map{case(value, ind) => labelNames(ind).utf8 -> value.utf8}.toMap
+
         if (currVal.nonEmpty) rows.add(currVal)
         partLoopIndx += 1
       }
-      rows.toSeq
+      rows.toIterator
     }
 
-    override def hasNext: Boolean = iterIndx < rows.size
+    override def hasNext: Boolean = rows.hasNext
 
-    override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = {
-      val currVal = rows(iterIndx)
-      iterIndx += 1
-      currVal
-    }
+    override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = rows.next
   }
 
   /**
