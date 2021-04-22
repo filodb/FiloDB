@@ -1379,16 +1379,12 @@ class TimeSeriesShard(val ref: DatasetRef,
         return false
       }
 
-      // Pruning group bitmaps
-      for { group <- 0 until numGroups } {
-        partitionGroups(group) = partitionGroups(group).andNot(partIdsToEvict)
-      }
-
       // Finally, prune partitions and keyMap data structures
       logger.info(s"Evicting partitions from dataset=$ref shard=$shardNum ...")
       val intIt = partIdsToEvict.intIterator
       var numPartsEvicted = 0
       var partsSkipped = 0
+      val successfullyEvictedParts = new EWAHCompressedBitmap()
       while (intIt.hasNext) {
         val partitionObj = partitions.get(intIt.next)
         if (partitionObj != UnsafeUtils.ZeroPointer) {
@@ -1404,6 +1400,7 @@ class TimeSeriesShard(val ref: DatasetRef,
             }
             // The previously created PartKey is just meant for bloom filter and will be GCed
             removePartition(partitionObj)
+            successfullyEvictedParts.set(partitionObj.partID)
             numPartsEvicted += 1
           } else {
             partsSkipped += 1
@@ -1411,6 +1408,10 @@ class TimeSeriesShard(val ref: DatasetRef,
         } else {
           partsSkipped += 1
         }
+      }
+      // Pruning group bitmaps.
+      for { group <- 0 until numGroups } {
+        partitionGroups(group) = partitionGroups(group).andNot(successfullyEvictedParts)
       }
       val elemCount = evictedPartKeys.synchronized {
         if (!evictedPartKeysDisposed) evictedPartKeys.approximateElementCount() else 0
