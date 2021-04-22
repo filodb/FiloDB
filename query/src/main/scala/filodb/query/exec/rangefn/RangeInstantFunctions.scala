@@ -134,8 +134,8 @@ class ResetsFunction extends RangeFunction {
     val currentValue = if (row.value.isNaN) 0 else row.value
     if (window.size > 0) {
       val prevValue = if (window.head.value.isNaN) 0 else window.head.value
-    if (currentValue > prevValue) resets -= 1
-    } else if (window.size == 0) resets = Double.NaN
+      if (currentValue > prevValue) resets -= 1
+    } else resets = Double.NaN
   }
 
   def apply(startTimestamp: Long,
