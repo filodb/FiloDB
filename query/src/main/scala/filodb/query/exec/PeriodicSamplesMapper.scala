@@ -40,6 +40,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
 
   val startWithOffset = startMs - offsetMs.getOrElse(0L)
   val endWithOffset = endMs - offsetMs.getOrElse(0L)
+  val outputRvRange = Some(RvRange(startMs, stepMs, endMs))
 
   val isLastFn = functionId.isEmpty || functionId.contains(InternalRangeFunction.LastSampleHistMax) ||
     functionId.contains(InternalRangeFunction.Timestamp)
@@ -60,7 +61,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
     // enforcement of minimum step is good since we have a high limit on number of samples
     if (startMs < endMs && stepMs < querySession.queryConfig.minStepMs) // range query with small step
       throw new BadQueryException(s"step should be at least ${querySession.queryConfig.minStepMs/1000}s")
-    val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
+    val valColType = ResultSchema.valueColumnType(sourceSchema)
     // If a max column is present, the ExecPlan's job is to put it into column 2
     val hasMaxCol = valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 2 &&
                       sourceSchema.columns(2).name == "max"
@@ -82,7 +83,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorH(rdrv, startWithOffset, adjustedStep, endWithOffset,
-                    windowPlusPubInt, rangeFuncGen().asChunkedH, querySession, histRow))
+                    windowPlusPubInt, rangeFuncGen().asChunkedH, querySession, histRow), outputRvRange)
         }
       case c: ChunkedRangeFunction[_] =>
         source.map { rv =>
@@ -92,7 +93,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorD(rdrv, startWithOffset, adjustedStep, endWithOffset,
-                    windowPlusPubInt, rangeFuncGen().asChunkedD, querySession))
+                    windowPlusPubInt, rangeFuncGen().asChunkedD, querySession), outputRvRange)
         }
       // Iterator-based: Wrap long columns to yield a double value
       case f: RangeFunction if valColType == ColumnType.LongColumn =>
@@ -100,7 +101,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), startWithOffset, adjustedStep, endWithOffset,
-              windowPlusPubInt, rangeFuncGen().asSliding, querySession.queryConfig))
+              windowPlusPubInt, rangeFuncGen().asSliding, querySession.queryConfig), outputRvRange)
         }
       // Otherwise just feed in the double column
       case f: RangeFunction =>
@@ -108,7 +109,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(rv.rows, startWithOffset, adjustedStep, endWithOffset, windowPlusPubInt,
-              rangeFuncGen().asSliding, querySession.queryConfig))
+              rangeFuncGen().asSliding, querySession.queryConfig), outputRvRange)
         }
     }
 
@@ -117,14 +118,13 @@ final case class PeriodicSamplesMapper(startMs: Long,
     offsetMs.map(o => rvs.map { rv =>
       new RangeVector {
         val row = new TransientRow()
-
         override def key: RangeVectorKey = rv.key
-
         override def rows(): RangeVectorCursor = rv.rows.mapRow { r =>
           row.setLong(0, r.getLong(0) + o)
           row.setDouble(1, r.getDouble(1))
           row
         }
+        override def outputRange: Option[RvRange] = outputRvRange
       }
     }).getOrElse(rvs)
   }

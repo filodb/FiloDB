@@ -29,6 +29,7 @@ class ResultTypesSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
       override def numRows: Option[Int] = Option(rows.size)
 
+      override def outputRange: Option[RvRange] = None
     }
     val queryResult = QueryResult("id:1", resultSchema, Seq(rv))
     queryResult.resultType.toString shouldEqual ("RangeVectors")
@@ -45,6 +46,8 @@ class ResultTypesSpec extends AnyFunSpec with Matchers with ScalaFutures {
         new TransientRow(1L, 3.3d)).toIterator
       override def numRows: Option[Int] = Option(rows.size)
 
+      override def outputRange: Option[RvRange] = None
+
     }
 
     val rv2 = new RangeVector {
@@ -56,6 +59,7 @@ class ResultTypesSpec extends AnyFunSpec with Matchers with ScalaFutures {
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 9.4d)).toIterator
       override def numRows: Option[Int] = Option(rows.size)
+      override def outputRange: Option[RvRange] = None
 
     }
     val queryResult = QueryResult("id:1", resultSchema, Seq(rv1, rv2))
@@ -73,6 +77,7 @@ class ResultTypesSpec extends AnyFunSpec with Matchers with ScalaFutures {
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 3.3d)).toIterator
       override def numRows: Option[Int] = Option(rows.size)
+      override def outputRange: Option[RvRange] = None
 
     }
 
