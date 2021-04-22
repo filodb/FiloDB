@@ -42,7 +42,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
 
     import NoCloseCursor._
     val rangeVector = IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-      UTF8MapIteratorRowReader(iteratorMap.toIterator))
+      UTF8MapIteratorRowReader(iteratorMap.toIterator), None)
 
     val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, recordSchema,
                         queryWithPlanName(queryContext)))

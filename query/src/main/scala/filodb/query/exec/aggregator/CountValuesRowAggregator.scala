@@ -110,7 +110,7 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
     }
     resRvs.map { case (key, builder) =>
       val numRows = builder.allContainers.map(_.countRecords()).sum
-      new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0)
+      new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0, None)
     }.toSeq
   }
 

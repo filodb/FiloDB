@@ -20,6 +20,7 @@ vectorExpression
     | vectorExpression compareOp grouping? vectorExpression            #binaryOperation
     | vectorExpression andUnlessOp grouping? vectorExpression          #binaryOperation
     | vectorExpression orOp grouping? vectorExpression                 #binaryOperation
+    | vectorExpression subquery offset?                                #subqueryOperation
     | vector                                                           #vectorOperation
     ;
 
@@ -41,12 +42,19 @@ vector
 
 parens: '(' vectorExpression ')';
 
-instantOrRangeSelector: instantSelector TIME_RANGE? (OFFSET DURATION)?;
+// TODO: Make offset applicable to any expression.
+instantOrRangeSelector: instantSelector window? offset?;
 
 instantSelector
     : metricName ('{' labelMatcherList? '}')?
     | '{' labelMatcherList '}'
     ;
+
+window: '[' DURATION ']';
+
+offset: OFFSET DURATION;
+
+subquery: '[' DURATION ':' DURATION? ']';
 
 labelMatcher:     labelName labelMatcherOp STRING;
 labelMatcherOp:   EQ | NE | RE | NRE;
@@ -165,11 +173,6 @@ AGGREGATION_OP
     | Q U A N T I L E
     ;
 
-TIME_RANGE
-    : '[' DURATION ']'
-//    | '[' DURATION ':' DURATION? ']'
-    ;
-
 // The special 'i' form is for "Step Multiple Notation for PromQL Lookback (#821)"
 DURATION: NUMBER ('s' | 'm' | 'h' | 'd' | 'w' | 'y' | 'i');
 
@@ -177,7 +180,7 @@ DURATION: NUMBER ('s' | 'm' | 'h' | 'd' | 'w' | 'y' | 'i');
 IDENTIFIER: [a-zA-Z_] [a-zA-Z0-9_]*;
 
 // Used for metric names.
-IDENTIFIER_EXTENDED: [a-zA-Z_:] [a-zA-Z0-9_:\-.]*;
+IDENTIFIER_EXTENDED: [_:]? [a-zA-Z] [a-zA-Z0-9_:\-.]*;
 
 // Magic for case-insensitive matching.
 fragment A : [aA]; // match either an 'a' or 'A'

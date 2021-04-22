@@ -131,6 +131,9 @@ case class PromQlRemoteExec(queryEndpoint: String,
         }
         override def numRows: Option[Int] = Option(samples.size)
 
+        override def outputRange: Option[RvRange] = Some(RvRange(promQlQueryParams.startSecs * 1000,
+                                                            promQlQueryParams.stepSecs * 1000,
+                                                            promQlQueryParams.endSecs * 1000))
       }
       SerializedRangeVector(rv, builder, recordSchema.get("default").get,
         queryWithPlanName(queryContext))
@@ -167,6 +170,10 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
         override def numRows: Option[Int] = Option(samples.size)
 
+        override def outputRange: Option[RvRange] = Some(RvRange(promQlQueryParams.startSecs * 1000,
+          promQlQueryParams.stepSecs * 1000,
+          promQlQueryParams.endSecs * 1000))
+
       }
       SerializedRangeVector(rv, builder, recordSchema.get("histogram").get, queryContext.origQueryParams.toString)
       // TODO: Handle stitching with verbose flag
@@ -192,7 +199,11 @@ case class PromQlRemoteExec(queryEndpoint: String,
             }
           }
           override def numRows: Option[Int] = Option(d.aggregateResponse.get.aggregateSampl.size)
-        }
+
+          override def outputRange: Option[RvRange] = Some(RvRange(promQlQueryParams.startSecs * 1000,
+            promQlQueryParams.stepSecs * 1000,
+            promQlQueryParams.endSecs * 1000))
+      }
       SerializedRangeVector(rv, builder, recordSchema.get(Avg.entryName).get,
         queryWithPlanName(queryContext))
     }
@@ -220,6 +231,10 @@ case class PromQlRemoteExec(queryEndpoint: String,
           }
         }
         override def numRows: Option[Int] = Option(d.aggregateResponse.get.aggregateSampl.size)
+
+        override def outputRange: Option[RvRange] = Some(RvRange(promQlQueryParams.startSecs * 1000,
+          promQlQueryParams.stepSecs * 1000,
+          promQlQueryParams.endSecs * 1000))
       }
       SerializedRangeVector(rv, builder, recordSchema.get(QueryFunctionConstants.stdVal).get,
         queryWithPlanName(queryContext))

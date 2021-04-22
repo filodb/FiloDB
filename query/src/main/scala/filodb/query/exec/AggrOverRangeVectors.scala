@@ -30,11 +30,16 @@ trait ReduceAggregateExec extends NonLeafExecPlan {
         case (QueryResult(_, _, result, _, _), _) => Observable.fromIterable(result)
         case (QueryError(_, ex), _)         => throw ex
     }
-    val task = for { schema <- firstSchema }
+
+    val task = for { schema <- firstSchema}
                yield {
-                 val aggregator = RowAggregator(aggrOp, aggrParams, schema)
-                 RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key,
-                   querySession.qContext.plannerParams.groupByCardLimit)
+                 // For absent function schema can be empty
+                 if (schema == ResultSchema.empty) Observable.empty
+                 else {
+                   val aggregator = RowAggregator(aggrOp, aggrParams, schema)
+                   RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key,
+                     querySession.qContext.plannerParams.groupByCardLimit)
+                 }
                }
     Observable.fromTask(task).flatten
   }
@@ -164,6 +169,7 @@ object RangeVectorAggregator extends StrictLogging {
                 cardinalityLimit: Int = Int.MaxValue): Observable[RangeVector] = {
     // reduce the range vectors using the foldLeft construct. This results in one aggregate per group.
     val task = source.toListL.map { rvs =>
+      val period = rvs.headOption.flatMap(_.outputRange)
       // now reduce each group and create one result range vector per group
       val groupedResult = mapReduceInternal(rvs, rowAgg, skipMapPhase, grouping)
 
@@ -173,7 +179,7 @@ object RangeVectorAggregator extends StrictLogging {
           s"Try applying more filters")
       groupedResult.map { case (rvk, aggHolder) =>
         val rowIterator = new CustomCloseCursor(aggHolder.map(_.toRowReader))(aggHolder.close())
-        IteratorBackedRangeVector(rvk, rowIterator)
+        IteratorBackedRangeVector(rvk, rowIterator, period)
       }
     }
     Observable.fromTask(task).flatMap(rvs => Observable.fromIterable(rvs))
@@ -229,6 +235,7 @@ object RangeVectorAggregator extends StrictLogging {
    * Time wise first iteration also uses less memory for high-cardinality use cases and reduces the
    * time window of holding chunk map locks to each time series, instead of the entire query.
    */
+  // scalastyle:off method.length
   def fastReduce(rowAgg: RowAggregator,
                  skipMapPhase: Boolean,
                  source: Observable[RangeVector],
@@ -236,6 +243,7 @@ object RangeVectorAggregator extends StrictLogging {
     // Can't use an Array here because rowAgg.AggHolderType does not have a ClassTag
     val accs = collection.mutable.ArrayBuffer.fill(outputLen)(rowAgg.zero)
     var count = 0
+    var period: Option[RvRange] = None
 
     // FoldLeft means we create the source PeriodicMapper etc and process immediately.  We can release locks right away
     // NOTE: ChunkedWindowIterator automatically releases locks after last window.  So it should all just work.  :)
@@ -243,6 +251,7 @@ object RangeVectorAggregator extends StrictLogging {
       source.foldLeftF(accs) { case (_, rv) =>
         count += 1
         val rowIter = rv.rows
+        if (period.isEmpty) period = rv.outputRange
         try {
           cforRange { 0 until outputLen } { i =>
             accs(i) = rowAgg.reduceAggregate(accs(i), rowIter.next)
@@ -274,7 +283,7 @@ object RangeVectorAggregator extends StrictLogging {
       if (count > 0) {
         import NoCloseCursor._ // The base range vectors are already closed, so no close propagation needed
         Observable.now(IteratorBackedRangeVector(CustomRangeVectorKey.empty,
-          NoCloseCursor(accs.toIterator.map(_.toRowReader))))
+          NoCloseCursor(accs.toIterator.map(_.toRowReader)), period))
       } else {
         Observable.empty
       }
