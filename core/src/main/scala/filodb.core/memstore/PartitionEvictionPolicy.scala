@@ -2,7 +2,7 @@ package filodb.core.memstore
 
 import com.typesafe.scalalogging.StrictLogging
 
-import filodb.memory.{MemFactory, NativeMemoryManager}
+import filodb.memory.NativeMemoryManager
 
 /**
  * This is a policy that determines when partitions should be evicted out of memory
@@ -41,6 +41,12 @@ class WriteBufferFreeEvictionPolicy(minBufferMemPercentage: Double) extends Part
 /**
  * A policy, used for testing, which evicts any partitions if the # of partitions is above a max.
  */
-class FixedMaxPartitionsEvictionPolicy(maxPartitions: Int) extends PartitionEvictionPolicy with StrictLogging {
+class FixedMaxPartitionsEvictionPolicy(maxPartitions: Int) extends PartitionEvictionPolicy {
   def shouldEvict(numPartitions: Int, memManager: NativeMemoryManager): Boolean = numPartitions > maxPartitions
+}
+
+class CompositeEvictionPolicy(p: Seq[PartitionEvictionPolicy]) extends PartitionEvictionPolicy {
+  def shouldEvict(numPartitions: Int, memManager: NativeMemoryManager): Boolean = {
+    p.exists(_.shouldEvict(numPartitions, memManager))
+  }
 }

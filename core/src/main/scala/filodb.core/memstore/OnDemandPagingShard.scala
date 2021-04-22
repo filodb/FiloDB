@@ -204,6 +204,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
             val stamp = partSetLock.writeLock()
             try {
               part.ingesting = false
+              evictablePartIds.add(part.partID)
               partSet.add(part)
             } finally {
               partSetLock.unlockWrite(stamp)

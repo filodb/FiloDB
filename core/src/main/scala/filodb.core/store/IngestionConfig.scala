@@ -20,6 +20,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              // Number of bytes to allocate to ingestion write buffers per shard
                              ingestionBufferMemSize: Long,
                              maxBufferPoolSize: Int,
+
                              percentTSPsToEvict: Int,
                              groupsPerShard: Int,
                              numPagesPerBlock: Int,

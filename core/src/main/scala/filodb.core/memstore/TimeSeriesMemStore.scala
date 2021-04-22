@@ -38,7 +38,12 @@ extends MemStore with StrictLogging {
   private val numParallelFlushes = filodbConfig.getInt("memstore.flush-task-parallelism")
 
   private val partEvictionPolicy = evictionPolicy.getOrElse {
-    new WriteBufferFreeEvictionPolicy(filodbConfig.getDouble("min-write-buffers-free-percentage"))
+    new CompositeEvictionPolicy(
+      Seq(
+        new WriteBufferFreeEvictionPolicy(filodbConfig.getDouble("min-write-buffers-free-percentage")),
+        new FixedMaxPartitionsEvictionPolicy(filodbConfig.getInt("max-partitions-on-heap-per-shard"))
+      )
+    )
   }
 
   def isDownsampleStore: Boolean = false

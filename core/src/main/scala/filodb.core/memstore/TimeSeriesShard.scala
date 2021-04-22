@@ -22,6 +22,7 @@ import monix.execution.{Scheduler, UncaughtExceptionReporter}
 import monix.execution.atomic.AtomicBoolean
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
+import org.jctools.queues.MpscChunkedArrayQueue
 import spire.syntax.cfor._
 
 import filodb.core.{ErrorResponse, _}
@@ -301,6 +302,14 @@ class TimeSeriesShard(val ref: DatasetRef,
   private final var ingested = 0L
 
   /**
+   * Queue of partIds that are eligible for eviction since they have stopped ingesting.
+   * Caller needs to double check ingesting status since they may have started to re-ingest
+   * since partId was added to this queue.
+   */
+  protected final val evictablePartIds = new MpscChunkedArrayQueue[Int](10000, 100000000)
+
+  private val targetMaxPartitions = filodbConfig.getInt("max-partitions-on-heap-per-shard")
+  /**
     * Keeps track of last offset ingested into memory (not necessarily flushed).
     * This value is used to keep track of the checkpoint to be written for next flush for any group.
     */
@@ -399,12 +408,6 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   // Use 1/4 of flush intervals within retention period for initial ChunkMap size
   private val initInfoMapSize = Math.max((numFlushIntervalsDuringRetention / 4) + 4, 20)
-
-  /**
-    * Timestamp to start searching for partitions to evict. Advances as more and more partitions are evicted.
-    * Used to ensure we keep searching for newer and newer partitions to evict.
-    */
-  private[core] var evictionWatermark: Long = 0L
 
   /**
     * Dirty partitions whose start/end times have not been updated to cassandra.
@@ -1104,6 +1107,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         dirtyParts += p.partID
         activelyIngesting -= p.partID
         p.ingesting = false
+        evictablePartIds.add(p.partID)
       }
     }
   }
@@ -1366,38 +1370,28 @@ class TimeSeriesShard(val ref: DatasetRef,
   // scalastyle:off method.length
   private[filodb] def ensureFreeSpace(): Boolean = {
     assertThreadName(IngestSchedName)
-    var lastPruned = EmptyBitmap
     while (evictionPolicy.shouldEvict(partSet.size, bufferMemoryManager)) {
-      // Eliminate partitions evicted from last cycle so we don't have an endless loop
-      val prunedPartitions = partitionsToEvict().andNot(lastPruned)
-      if (prunedPartitions.isEmpty) {
+      val partIdsToEvict = partitionsToEvict()
+      if (partIdsToEvict.isEmpty) {
         logger.warn(s"dataset=$ref shard=$shardNum: No partitions to evict but we are still low on space. " +
           s"DATA WILL BE DROPPED")
         return false
       }
-      lastPruned = prunedPartitions
 
       // Pruning group bitmaps
       for { group <- 0 until numGroups } {
-        partitionGroups(group) = partitionGroups(group).andNot(prunedPartitions)
+        partitionGroups(group) = partitionGroups(group).andNot(partIdsToEvict)
       }
 
       // Finally, prune partitions and keyMap data structures
-      logger.info(s"Evicting partitions from dataset=$ref shard=$shardNum, watermark=$evictionWatermark...")
-      val intIt = prunedPartitions.intIterator
-      var partsRemoved = 0
+      logger.info(s"Evicting partitions from dataset=$ref shard=$shardNum ...")
+      val intIt = partIdsToEvict.intIterator
+      var numPartsEvicted = 0
       var partsSkipped = 0
-      var maxEndTime = evictionWatermark
       while (intIt.hasNext) {
         val partitionObj = partitions.get(intIt.next)
         if (partitionObj != UnsafeUtils.ZeroPointer) {
-          // TODO we can optimize fetching of endTime by getting them along with top-k query
-          val endTime = partKeyIndex.endTimeFromPartId(partitionObj.partID)
-          if (partitionObj.ingesting)
-            logger.warn(s"Partition ${partitionObj.partID} is ingesting, but it was eligible for eviction. How?")
-          if (endTime == PartKeyLuceneIndex.NOT_FOUND || endTime == Long.MaxValue) {
-            logger.warn(s"endTime $endTime was not correct. how?", new IllegalStateException())
-          } else {
+          if (!partitionObj.ingesting) { // could have started re-ingesting after it got into evictablePartIds queue
             logger.debug(s"Evicting partId=${partitionObj.partID} ${partitionObj.stringPartition} " +
               s"from dataset=$ref shard=$shardNum")
             // add the evicted partKey to a bloom filter so that we are able to quickly
@@ -1409,30 +1403,20 @@ class TimeSeriesShard(val ref: DatasetRef,
             }
             // The previously created PartKey is just meant for bloom filter and will be GCed
             removePartition(partitionObj)
-            partsRemoved += 1
-            maxEndTime = Math.max(maxEndTime, endTime)
+            numPartsEvicted += 1
+          } else {
+            partsSkipped += 1
           }
         } else {
           partsSkipped += 1
         }
       }
       val elemCount = evictedPartKeys.synchronized {
-        if (!evictedPartKeysDisposed) {
-          evictedPartKeys.approximateElementCount()
-        } else {
-          0
-        }
+        if (!evictedPartKeysDisposed) evictedPartKeys.approximateElementCount() else 0
       }
       shardStats.evictedPkBloomFilterSize.update(elemCount)
-      evictionWatermark = maxEndTime + 1
-      // Plus one needed since there is a possibility that all partitions evicted in this round have same endTime,
-      // and there may be more partitions that are not evicted with same endTime. If we didnt advance the watermark,
-      // we would be processing same partIds again and again without moving watermark forward.
-      // We may skip evicting some partitions by doing this, but the imperfection is an acceptable
-      // trade-off for performance and simplicity. The skipped partitions, will ve removed during purge.
-      logger.info(s"dataset=$ref shard=$shardNum: evicted $partsRemoved partitions," +
-        s"skipped $partsSkipped, h20=$evictionWatermark")
-      shardStats.partitionsEvicted.increment(partsRemoved)
+      logger.info(s"dataset=$ref shard=$shardNum: evicted $numPartsEvicted partitions, skipped $partsSkipped")
+      shardStats.partitionsEvicted.increment(numPartsEvicted)
     }
     true
   }
@@ -1454,10 +1438,15 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   private def partitionsToEvict(): EWAHCompressedBitmap = {
-    // Iterate and add eligible partitions to delete to our list
-    // Need to filter out partitions with no endTime. Any endTime calculated would not be set within one flush interval.
-    val numPartsToEvict = partitions.size() * storeConfig.percentTSPsToEvict / 100
-    partKeyIndex.partIdsOrderedByEndTime(numPartsToEvict, evictionWatermark, Long.MaxValue - 1)
+    val partIdsToEvict = new EWAHCompressedBitmap()
+    val numPartsToEvict = Math.max (partitions.size() * storeConfig.percentTSPsToEvict / 100,
+                                    targetMaxPartitions - partitions.size())
+    var i = 0
+    while (i < numPartsToEvict && !evictablePartIds.isEmpty) {
+      partIdsToEvict.set(evictablePartIds.remove())
+      i += 1
+    }
+    partIdsToEvict
   }
 
   private[core] def getPartition(partKey: Array[Byte]): Option[TimeSeriesPartition] = {
