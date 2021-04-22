@@ -9,7 +9,7 @@ import scala.concurrent.duration._
 import monix.execution.Scheduler
 import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
+import filodb.core.query.{EmptyQueryConfig, PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.ChunkSource
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -48,7 +48,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
   val earliestRawTime = now - rawRetention.toMillis
   val latestDownsampleTime = now - 4.minutes.toMillis // say it takes 4 minutes to downsample
 
-  private def disp = InProcessPlanDispatcher
+  private def disp = InProcessPlanDispatcher(EmptyQueryConfig)
   val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
                                                  earliestRawTime, latestDownsampleTime, disp)
   implicit val system = ActorSystem()
