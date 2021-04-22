@@ -13,7 +13,7 @@ trait PartitionEvictionPolicy {
    * @param numPartitions the current number of partitions in the shard
    * @param memManager the MemFactory used to allocate write buffers and partition keys
    */
-  def shouldEvict(numPartitions: Int, memManager: NativeMemoryManager): Boolean
+  def numPartitionsToEvict(numPartitions: Int, memManager: NativeMemoryManager): Int
 }
 
 /**
@@ -27,13 +27,13 @@ trait PartitionEvictionPolicy {
  */
 class WriteBufferFreeEvictionPolicy(minBufferMemPercentage: Double) extends PartitionEvictionPolicy
                                                                               with StrictLogging {
-  def shouldEvict(numPartitions: Int, memManager: NativeMemoryManager): Boolean = {
-    val minBufferMem = memManager.upperBoundSizeInBytes * 10 / 100
+  def numPartitionsToEvict(numPartitions: Int, memManager: NativeMemoryManager): Int = {
+    val minBufferMem = memManager.upperBoundSizeInBytes * minBufferMemPercentage / 100
     if (memManager.numFreeBytes < minBufferMem) {
       logger.info(s"Recommending partition eviction; buffer free memory = ${memManager.numFreeBytes}")
-      true
+      ((minBufferMem.toDouble / memManager.upperBoundSizeInBytes) * numPartitions).toInt
     } else {
-      false
+      0
     }
   }
 }
@@ -42,11 +42,14 @@ class WriteBufferFreeEvictionPolicy(minBufferMemPercentage: Double) extends Part
  * A policy, used for testing, which evicts any partitions if the # of partitions is above a max.
  */
 class FixedMaxPartitionsEvictionPolicy(maxPartitions: Int) extends PartitionEvictionPolicy {
-  def shouldEvict(numPartitions: Int, memManager: NativeMemoryManager): Boolean = numPartitions > maxPartitions
+  def numPartitionsToEvict(numPartitions: Int, memManager: NativeMemoryManager): Int =
+    Math.max(numPartitions - maxPartitions, 0)
 }
 
-class CompositeEvictionPolicy(p: Seq[PartitionEvictionPolicy]) extends PartitionEvictionPolicy {
-  def shouldEvict(numPartitions: Int, memManager: NativeMemoryManager): Boolean = {
-    p.exists(_.shouldEvict(numPartitions, memManager))
+class CompositeEvictionPolicy(maxPartPolicy: FixedMaxPartitionsEvictionPolicy,
+                              freeBufferPolicy: WriteBufferFreeEvictionPolicy) extends PartitionEvictionPolicy {
+  def numPartitionsToEvict(numPartitions: Int, memManager: NativeMemoryManager): Int = {
+    Math.max(maxPartPolicy.numPartitionsToEvict(numPartitions, memManager),
+             freeBufferPolicy.numPartitionsToEvict(numPartitions, memManager))
   }
 }

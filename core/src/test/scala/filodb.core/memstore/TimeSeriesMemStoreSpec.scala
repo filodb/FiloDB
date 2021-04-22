@@ -457,7 +457,6 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     Thread sleep 1000    // see if this will make things pass sooner
 
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 20
-    memStore.getShardE(dataset1.ref, 0).evictionWatermark shouldEqual endTime + 1
     memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual false
     import collection.JavaConverters._
 
@@ -579,7 +578,6 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual true
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 21   // due to the way the eviction policy works
-    memStore.getShardE(dataset1.ref, 0).evictionWatermark shouldEqual 0
 
     memStore.refreshIndexForTesting(dataset1.ref)
     // Check partitions are now 0 to 20, 21/22 did not get added

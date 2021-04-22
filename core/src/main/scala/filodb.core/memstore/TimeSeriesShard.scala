@@ -308,7 +308,7 @@ class TimeSeriesShard(val ref: DatasetRef,
    */
   protected final val evictablePartIds = new MpscChunkedArrayQueue[Int](10000, 100000000)
 
-  private val targetMaxPartitions = filodbConfig.getInt("max-partitions-on-heap-per-shard")
+  private val targetMaxPartitions = filodbConfig.getInt("memstore.max-partitions-on-heap-per-shard")
   /**
     * Keeps track of last offset ingested into memory (not necessarily flushed).
     * This value is used to keep track of the checkpoint to be written for next flush for any group.
@@ -1370,8 +1370,9 @@ class TimeSeriesShard(val ref: DatasetRef,
   // scalastyle:off method.length
   private[filodb] def ensureFreeSpace(): Boolean = {
     assertThreadName(IngestSchedName)
-    while (evictionPolicy.shouldEvict(partSet.size, bufferMemoryManager)) {
-      val partIdsToEvict = partitionsToEvict()
+    var numPartsToEvict = evictionPolicy.numPartitionsToEvict(partSet.size, bufferMemoryManager)
+    while (numPartsToEvict > 0) {
+      val partIdsToEvict = partitionsToEvict(numPartsToEvict)
       if (partIdsToEvict.isEmpty) {
         logger.warn(s"dataset=$ref shard=$shardNum: No partitions to evict but we are still low on space. " +
           s"DATA WILL BE DROPPED")
@@ -1417,9 +1418,11 @@ class TimeSeriesShard(val ref: DatasetRef,
       shardStats.evictedPkBloomFilterSize.update(elemCount)
       logger.info(s"dataset=$ref shard=$shardNum: evicted $numPartsEvicted partitions, skipped $partsSkipped")
       shardStats.partitionsEvicted.increment(numPartsEvicted)
+      numPartsToEvict = evictionPolicy.numPartitionsToEvict(partSet.size, bufferMemoryManager)
     }
     true
   }
+
   //scalastyle:on
 
   // Permanently removes the given partition ID from our in-memory data structures
@@ -1437,10 +1440,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
-  private def partitionsToEvict(): EWAHCompressedBitmap = {
+  private def partitionsToEvict(numPartsToEvict: Int): EWAHCompressedBitmap = {
     val partIdsToEvict = new EWAHCompressedBitmap()
-    val numPartsToEvict = Math.max (partitions.size() * storeConfig.percentTSPsToEvict / 100,
-                                    targetMaxPartitions - partitions.size())
     var i = 0
     while (i < numPartsToEvict && !evictablePartIds.isEmpty) {
       partIdsToEvict.set(evictablePartIds.remove())

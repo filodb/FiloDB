@@ -20,8 +20,6 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              // Number of bytes to allocate to ingestion write buffers per shard
                              ingestionBufferMemSize: Long,
                              maxBufferPoolSize: Int,
-
-                             percentTSPsToEvict: Int,
                              groupsPerShard: Int,
                              numPagesPerBlock: Int,
                              failureRetries: Int,
@@ -54,7 +52,6 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "shard-mem-size" -> shardMemSize,
                                "ingestion-buffer-mem-size" -> ingestionBufferMemSize,
                                "max-buffer-pool-size" -> maxBufferPoolSize,
-                               "percent-partitions-to-evict" -> percentTSPsToEvict,
                                "groups-per-shard" -> groupsPerShard,
                                "max-chunk-time" -> (maxChunkTime.toSeconds + "s"),
                                "num-block-pages" -> numPagesPerBlock,
@@ -92,7 +89,6 @@ object StoreConfig {
                                            |max-blob-buffer-size = 15000
                                            |ingestion-buffer-mem-size = 10M
                                            |max-buffer-pool-size = 10000
-                                           |percent-partitions-to-evict = 10
                                            |groups-per-shard = 60
                                            |num-block-pages = 100
                                            |failure-retries = 3
@@ -134,7 +130,6 @@ object StoreConfig {
                 config.getMemorySize("shard-mem-size").toBytes,
                 config.getMemorySize("ingestion-buffer-mem-size").toBytes,
                 config.getInt("max-buffer-pool-size"),
-                config.getInt("num-partitions-to-evict"),
                 config.getInt("groups-per-shard"),
                 config.getInt("num-block-pages"),
                 config.getInt("failure-retries"),
