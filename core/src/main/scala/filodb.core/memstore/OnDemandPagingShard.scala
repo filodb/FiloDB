@@ -203,8 +203,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
                           if sch != Schemas.UnknownSchema } yield {
             val stamp = partSetLock.writeLock()
             try {
-              part.ingesting = false
-              evictablePartIds.add(part.partID)
+              markPartAsNotIngesting(part)
               partSet.add(part)
             } finally {
               partSetLock.unlockWrite(stamp)

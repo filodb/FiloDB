@@ -301,14 +301,16 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   private final var ingested = 0L
 
+  private val targetMaxPartitions = filodbConfig.getInt("memstore.max-partitions-on-heap-per-shard")
+
   /**
    * Queue of partIds that are eligible for eviction since they have stopped ingesting.
    * Caller needs to double check ingesting status since they may have started to re-ingest
    * since partId was added to this queue.
+   * Mpsc since the producers are flush task and odp part creation task
    */
-  protected final val evictablePartIds = new MpscChunkedArrayQueue[Int](10000, 100000000)
+  protected final val evictablePartIds = new MpscChunkedArrayQueue[Int](10000, targetMaxPartitions)
 
-  private val targetMaxPartitions = filodbConfig.getInt("memstore.max-partitions-on-heap-per-shard")
   /**
     * Keeps track of last offset ingested into memory (not necessarily flushed).
     * This value is used to keep track of the checkpoint to be written for next flush for any group.
@@ -1106,10 +1108,14 @@ class TimeSeriesShard(val ref: DatasetRef,
         updatePartEndTimeInIndex(p, endTime)
         dirtyParts += p.partID
         activelyIngesting -= p.partID
-        p.ingesting = false
-        evictablePartIds.add(p.partID)
+        markPartAsNotIngesting(p)
       }
     }
+  }
+
+  protected def markPartAsNotIngesting(p: TimeSeriesPartition): Unit = {
+    p.ingesting = false
+    evictablePartIds.add(p.partID)
   }
 
   private def commitCheckpoint(ref: DatasetRef, shardNum: Int, flushGroup: FlushGroup): Future[Response] = {
