@@ -308,8 +308,9 @@ class TimeSeriesShard(val ref: DatasetRef,
    * Caller needs to double check ingesting status since they may have started to re-ingest
    * since partId was added to this queue.
    * Mpsc since the producers are flush task and odp part creation task
+   * FIXME we can create a more efficient data structure that stores the ints in unboxed form - uses less heap
    */
-  protected final val evictablePartIds = new MpscChunkedArrayQueue[Int](10000, targetMaxPartitions)
+  protected[memstore] final val evictablePartIds = new MpscChunkedArrayQueue[Int](1000, targetMaxPartitions)
 
   /**
     * Keeps track of last offset ingested into memory (not necessarily flushed).
@@ -1113,7 +1114,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
-  protected def markPartAsNotIngesting(p: TimeSeriesPartition): Unit = {
+  protected[memstore] def markPartAsNotIngesting(p: TimeSeriesPartition): Unit = {
     p.ingesting = false
     evictablePartIds.add(p.partID)
   }
@@ -1330,7 +1331,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     shardStats.dataDropped.increment()
   }
 
-  private def checkEnableAddPartitions(): Unit = {
+  private[memstore] def checkEnableAddPartitions(): Unit = {
     assertThreadName(IngestSchedName)
     if (addPartitionsDisabled()) {
       if (ensureFreeSpace()) {

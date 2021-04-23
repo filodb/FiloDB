@@ -25,8 +25,6 @@ final case class QueryError(id: String, t: Throwable) extends QueryResponse with
   */
 class BadQueryException(message: String) extends RuntimeException(message)
 
-class ServiceUnavailableException(message: String) extends RuntimeException(message)
-
 case class RemoteQueryFailureException(statusCode: Int, requestStatus: String, errorType: String, errorMessage: String )
   extends RuntimeException {
   override def getMessage: String = {

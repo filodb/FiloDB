@@ -16,7 +16,7 @@ import filodb.core.{DatasetRef, Types}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.ratelimit.QuotaSource
 import filodb.core.metadata.Schemas
-import filodb.core.query.QuerySession
+import filodb.core.query.{QuerySession, ServiceUnavailableException}
 import filodb.core.store._
 import filodb.memory.NativeMemoryManager
 
@@ -84,6 +84,18 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
 
     // 1. Fetch partitions from memstore
     val partIdsNotInMemory = partLookupRes.partIdsNotInMemory
+
+    // ensure there is room for full-odp partitions. Need to do this all at one time
+    // because doing it one by one can evict another ODPed partition
+    // TODO need to double check eviction and query races. Failing queries in these situations may be simpler
+    // FIXME partSet read is not protected with lock
+    val numPartitionsToEvict = evictionPolicy.numPartitionsToEvict(partSet.size, bufferMemoryManager)
+    if (numPartitionsToEvict > 0 && // need to evict since we are running out of space
+      evictablePartIds.size() < partIdsNotInMemory.length) { // no room left
+      throw new ServiceUnavailableException("Too many ingesting time series. Not able to evict enough to " +
+        "make room for ODPed TSPs. Try query after sometime")
+    }
+
     // 2. Now determine list of partitions to ODP and the time ranges to ODP
     val partKeyBytesToPage = new ArrayBuffer[Array[Byte]]()
     val pagingMethods = new ArrayBuffer[ChunkScanMethod]

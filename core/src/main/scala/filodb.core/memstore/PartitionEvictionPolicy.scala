@@ -43,7 +43,7 @@ class WriteBufferFreeEvictionPolicy(minBufferMemPercentage: Double) extends Part
  */
 class FixedMaxPartitionsEvictionPolicy(maxPartitions: Int) extends PartitionEvictionPolicy {
   def numPartitionsToEvict(numPartitions: Int, memManager: NativeMemoryManager): Int =
-    Math.max(numPartitions - maxPartitions, 0)
+    Math.max(numPartitions - maxPartitions + 1, 0)
 }
 
 class CompositeEvictionPolicy(maxPartPolicy: FixedMaxPartitionsEvictionPolicy,

@@ -5,10 +5,9 @@ import monix.execution.Scheduler
 
 import filodb.core.{DatasetRef, QueryTimeoutException}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, QueryContext, QuerySession}
+import filodb.core.query.{ColumnFilter, QueryContext, QuerySession, ServiceUnavailableException}
 import filodb.core.store._
 import filodb.query.Query.qLogger
-import filodb.query.ServiceUnavailableException
 
 final case class UnknownSchemaQueryErr(id: Int) extends
   Exception(s"Unknown schema ID $id during query.  This likely means a schema config change happened and " +

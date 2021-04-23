@@ -421,21 +421,15 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
   // returns the "endTime" or last sample time of evicted partitions
   // used for testing only
-  def markPartitionsForEviction(partIDs: Seq[Int]): Long = {
+  def markPartitionsForEviction(partIDs: Seq[Int]): Unit = {
     val shard = memStore.getShardE(dataset1.ref, 0)
-    val blockFactory = shard.blockFactoryPool.checkoutForOverflow(0)
-    var endTime = 0L
     for { n <- partIDs } {
       val part = shard.partitions.get(n)
-      part.switchBuffers(blockFactory, encode = true)
-      shard.updatePartEndTimeInIndex(part, part.timestampOfLatestSample)
-      endTime = part.timestampOfLatestSample
+      shard.markPartAsNotIngesting(part)
     }
-    memStore.refreshIndexForTesting(dataset1.ref)
-    endTime
   }
 
-  it("should be able to evict partitions properly, flush, and still query") {
+  it("should be able to evict partitions properly on ingestion and on ODP") {
     memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
 
     // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
@@ -449,7 +443,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     // Purposely mark two partitions endTime as occurring a while ago to mark them eligible for eviction
     // We also need to switch buffers so that internally ingestionEndTime() is accurate
-    val endTime = markPartitionsForEviction(0 to 1)
+    markPartitionsForEviction(0 to 1)
 
     // Now, ingest 22 partitions.  First two partitions ingested should be evicted. Check numpartitions, stats, index
     val data2 = records(dataset1, linearMultiSeries(numSeries = 22).drop(2).take(20))
@@ -460,49 +454,14 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual false
     import collection.JavaConverters._
 
-    memStore.refreshIndexForTesting(dataset1.ref)
-
     // 0 and 1 are evicted
     memStore.getShardE(dataset1.ref, 0).partitions.keySet().asScala shouldEqual (2 to 21).toSet
     // but they should still stay in the index
     memStore.getShardE(dataset1.ref, 0).partKeyIndex.indexNumEntries shouldEqual 22
 
-    val split = memStore.getScanSplits(dataset1.ref, 1).head
-    val parts = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split),
-      querySession = QuerySession.forTestingOnly)
-                        .toListL.runAsync
-                        .futureValue
-                        .asInstanceOf[Seq[TimeSeriesPartition]]
-    parts.map(_.partID).toSet shouldEqual (2 to 21).toSet ++ Set(0)
-    // Above query will ODP evicted partition 0 back in, but there is no space for evicted part 1,
-    // so it will not be returned as part of query :(
-  }
-
-  it("should be able to ODP/query partitions evicted from memory structures when doing index/tag query") {
-    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
-
-    // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
-    val data = records(dataset1, linearMultiSeries().take(10))
-    memStore.ingest(dataset1.ref, 0, data)
+    markPartitionsForEviction(2 to 3)
 
     memStore.refreshIndexForTesting(dataset1.ref)
-
-    memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
-    memStore.labelValues(dataset1.ref, 0, "series").toSeq should have length (10)
-
-    // Purposely mark two partitions endTime as occurring a while ago to mark them eligible for eviction
-    // We also need to switch buffers so that internally ingestionEndTime() is accurate
-    val endTime = markPartitionsForEviction(0 to 1)
-
-    // Now, ingest 20 partitions.  First two partitions ingested should be evicted. Check numpartitions, stats, index
-    val data2 = records(dataset1, linearMultiSeries(numSeries = 22).drop(2).take(20))
-    memStore.ingest(dataset1.ref, 0, data2)
-    Thread sleep 1000    // see if this will make things pass sooner
-
-    memStore.numPartitions(dataset1.ref, 0) shouldEqual 20
-
-    // Try to query "Series 0" which got evicted.  It should create a new partition, and now there should be
-    // one more part
     val split = memStore.getScanSplits(dataset1.ref, 1).head
     val filter = ColumnFilter("series", Filter.Equals("Series 0".utf8))
     val parts = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter)),
@@ -510,9 +469,49 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
                         .toListL.runAsync
                         .futureValue
                         .asInstanceOf[Seq[TimeSeriesPartition]]
-    parts.map(_.partID) shouldEqual Seq(0)    // newly created ODP partitions get earlier partId
-    dataset1.partKeySchema.asJavaString(parts.head.partKeyBase, parts.head.partKeyOffset, 0) shouldEqual "Series 0"
-    memStore.numPartitions(dataset1.ref, 0) shouldEqual 21
+    parts.map(_.partID).toSet shouldEqual Set(0)
+
+    val filter2 = ColumnFilter("series", Filter.Equals("Series 1".utf8))
+    val parts2 = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter2)),
+      querySession = QuerySession.forTestingOnly)
+      .toListL.runAsync
+      .futureValue
+      .asInstanceOf[Seq[TimeSeriesPartition]]
+    parts2.map(_.partID).toSet shouldEqual Set(1)
+
+    memStore.getShardE(dataset1.ref, 0).evictablePartIds.size() shouldEqual 2 // the ODPed partitions
+
+    val data3 = records(dataset1, linearMultiSeries(numSeries = 30).drop(22).take(6))
+    memStore.ingest(dataset1.ref, 0, data3)
+    memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual true // since we aren't able to evict
+
+    // series 26 should not have been added even though we had attempted to add in previous data3 ingestion run
+    // because add new partitions is now disabled
+    memStore.refreshIndexForTesting(dataset1.ref)
+    val filter3 = ColumnFilter("series", Filter.Equals("Series 26".utf8))
+    val parts3 = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter3)),
+      querySession = QuerySession.forTestingOnly)
+      .toListL.runAsync
+      .futureValue
+      .asInstanceOf[Seq[TimeSeriesPartition]]
+    parts3.map(_.partID).toSet shouldEqual Set()
+
+    markPartitionsForEviction(4 to 10)
+    memStore.getShardE(dataset1.ref, 0).checkEnableAddPartitions()
+
+    val data4 = records(dataset1, linearMultiSeries(numSeries = 30).drop(22).take(6))
+    memStore.ingest(dataset1.ref, 0, data4)
+    memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual false // now there is room
+
+    memStore.refreshIndexForTesting(dataset1.ref)
+    val filter4 = ColumnFilter("series", Filter.Equals("Series 26".utf8))
+    val parts4 = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter4)),
+      querySession = QuerySession.forTestingOnly)
+      .toListL.runAsync
+      .futureValue
+      .asInstanceOf[Seq[TimeSeriesPartition]]
+    parts4.map(_.partID).toSet shouldEqual Set(26)
+
   }
 
   it("should assign same previously assigned partId using bloom filter when evicted series starts re-ingesting") {
@@ -537,7 +536,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     // Purposely mark two partitions endTime as occurring a while ago to mark them eligible for eviction
     // We also need to switch buffers so that internally ingestionEndTime() is accurate
-    markPartitionsForEviction(0 to 1)
+    markPartitionsForEviction(0 to 2)
 
     // Now, ingest 20 partitions.  First two partitions ingested should be evicted.
     val data2 = records(dataset1, linearMultiSeries(numSeries = 22).drop(2).take(20))
@@ -550,6 +549,8 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     shard0Partitions.get(0) shouldEqual null // since partId 0 has been evicted
     shard0.evictedPartKeys.mightContain(pk) shouldEqual true
 
+    markPartitionsForEviction(2 to 3)
+
     // now re-ingest data for evicted partition with partKey "Series 0"
     val data3 = records(dataset1, linearMultiSeries().take(1))
     memStore.ingest(dataset1.ref, 0, data3)
@@ -557,37 +558,6 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     // the partId assigned should still be 0
     part0 = shard0Partitions.get(0)
     dataset1.partKeySchema.asJavaString(part0.partKeyBase, part0.partKeyOffset, 0) shouldEqual "Series 0"
-  }
-
-  it("should be able to skip ingestion/add partitions if there is no more space left") {
-    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
-
-    // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
-    val data = records(dataset1, linearMultiSeries().take(10))
-    memStore.ingest(dataset1.ref, 0, data)
-
-    memStore.refreshIndexForTesting(dataset1.ref)
-
-    memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
-    memStore.labelValues(dataset1.ref, 0, "series").toSeq should have length (10)
-
-    // Don't mark any partitions for eviction
-    // Now, ingest 23 partitions.  Last two partitions cannot be added.  Check numpartitions, stats, index
-    val data2 = records(dataset1, linearMultiSeries(numSeries = 23).take(23))
-    memStore.ingest(dataset1.ref, 0, data2)
-
-    memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual true
-    memStore.numPartitions(dataset1.ref, 0) shouldEqual 21   // due to the way the eviction policy works
-
-    memStore.refreshIndexForTesting(dataset1.ref)
-    // Check partitions are now 0 to 20, 21/22 did not get added
-    val split = memStore.getScanSplits(dataset1.ref, 1).head
-    val parts = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split),
-      querySession = QuerySession.forTestingOnly)
-                        .toListL.runAsync
-                        .futureValue
-                        .asInstanceOf[Seq[TimeSeriesPartition]]
-    parts.map(_.partID).toSet shouldEqual (0 to 20).toSet
   }
 
   it("should return extra WriteBuffers to memoryManager properly") {
