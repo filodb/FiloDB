@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import monix.eval.Task
 import monix.execution.Scheduler
+
 import filodb.core.DatasetRef
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.{ColumnInfo, EmptyQueryConfig, QueryContext, QuerySession, ResultSchema}

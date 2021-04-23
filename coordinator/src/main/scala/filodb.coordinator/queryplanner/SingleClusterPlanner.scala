@@ -44,8 +44,6 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                            minTimeRangeForSplitMs: => Long = 1.day.toMillis,
                            splitSizeMs: => Long = 1.day.toMillis)
                            extends QueryPlanner with StrictLogging with PlannerMaterializer {
-
-  val inproc = InProcessPlanDispatcher(queryConfig)
   override val schemas = schema
   val shardColumns = dsOptions.shardKeyColumns.sorted
 

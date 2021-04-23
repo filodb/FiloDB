@@ -19,8 +19,7 @@ import filodb.query.QueryResponse
   * calls only for children.
   */
 
-//case class InProcessPlanDispatcher1 (queryConfig: QueryConfig)
-case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatcher {
+  case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatcher {
 
   // Empty query config, since its does not apply in case of non-leaf plans
   //val queryConfig: QueryConfig = EmptyQueryConfig
