@@ -88,12 +88,21 @@ object AntlrParser extends StrictLogging {
   */
 class AntlrParser extends PromQLBaseVisitor[Object] {
   override def visitSubqueryOperation(ctx: PromQLParser.SubqueryOperationContext): SubqueryExpression = {
-    // FIXME: implement subquery
-    SubqueryExpression(null, null)
+    val lhs = build[Expression](ctx.vectorExpression())
+    if (!lhs.isInstanceOf[PeriodicSeries] || lhs.isInstanceOf[SubqueryExpression]) {
+      throw new IllegalArgumentException("Subquery can only be applied to instant queries")
+    }
+    val sqcl = build[SubqueryClause](ctx.subquery())
+    // FIXME: Do something with the optional offset.
+    SubqueryExpression(lhs.asInstanceOf[PeriodicSeries], sqcl)
   }
 
-  // FIXME: implement subquery (this just parses the [range:resolution] part)
-  //override def visitSubquery(ctx: PromQLParser.SubqueryContext): ???
+  override def visitSubquery(ctx: PromQLParser.SubqueryContext): SubqueryClause = {
+    val list = ctx.DURATION
+    val window = parseDuration(list.get(0))
+    val step = if (list.size() > 1) Some(parseDuration(list.get(1))) else None
+    SubqueryClause(window, step)
+  }
 
   override def visitBinaryOperation(ctx: PromQLParser.BinaryOperationContext): BinaryExpression = {
     val lhs = build[Expression](ctx.getChild(0))
@@ -194,11 +203,11 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
   }
 
   override def visitWindow(ctx: PromQLParser.WindowContext): Duration = {
-    parseDuration(ctx.DURATION.getSymbol().getText())
+    parseDuration(ctx.DURATION)
   }
 
   override def visitOffset(ctx: PromQLParser.OffsetContext): Duration = {
-    parseDuration(ctx.DURATION.getSymbol().getText())
+    parseDuration(ctx.DURATION)
   }
 
   override def visitLabelMatcher(ctx: PromQLParser.LabelMatcherContext): LabelMatch = {
@@ -379,6 +388,10 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
     }
 
     bob.toString()
+  }
+
+  private def parseDuration(node: TerminalNode): Duration = {
+    parseDuration(node.getSymbol().getText())
   }
 
   private def parseDuration(str: String): Duration = {
