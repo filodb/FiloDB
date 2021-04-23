@@ -20,10 +20,7 @@ import filodb.query.QueryResponse
   */
 
   case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatcher {
-
-  // Empty query config, since its does not apply in case of non-leaf plans
-  //val queryConfig: QueryConfig = EmptyQueryConfig
-
+  
   override def dispatch(plan: ExecPlan)(implicit sched: Scheduler): Task[QueryResponse] = {
     // unsupported source since its does not apply in case of non-leaf plans
     val source = UnsupportedChunkSource()
