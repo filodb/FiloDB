@@ -119,6 +119,13 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
   val chunkFlushTaskLatency = Kamon.histogram("chunk-flush-task-latency-after-retries",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+
+  /**
+   * How much time a thread was potentially stalled while attempting to ensure
+   * free space. Unit is nanoseconds.
+   */
+  val blockHeadroomStall = Kamon.counter("blockstore-headroom-stall-nanos").withTags(TagSet.from(tags))
+
 }
 
 object TimeSeriesShard {
@@ -351,17 +358,18 @@ class TimeSeriesShard(val ref: DatasetRef,
   // occurs in the common case, when there isn't any contention reading from partSet.
   private[memstore] final val partSetLock = new StampedLock
 
+  /**
+   * Lock that protects chunks and TSPs from being reclaimed from Memstore.
+   * This is needed to prevent races between ODP queries and reclaims and ensure that
+   * TSPs and chunks dont get evicted when queries are being served.
+   */
+  private[memstore] final val evictionLock = new EvictionLock()
+
   // The off-heap block store used for encoded chunks
   private val shardTags = Map("dataset" -> ref.dataset, "shard" -> shardNum.toString)
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
-    storeConfig.numPagesPerBlock)
+    storeConfig.numPagesPerBlock, evictionLock)
   private[core] val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
-
-  /**
-    * Lock that protects chunks from being reclaimed from Memstore.
-    * This is needed to prevent races between ODP queries and reclaims.
-    */
-  private[memstore] final val reclaimLock = blockStore.reclaimLock
 
   // Requires blockStore.
   private val headroomTask = startHeadroomTask(ingestSched)
@@ -1492,8 +1500,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   def lookupPartitions(partMethod: PartitionScanMethod,
                        chunkMethod: ChunkScanMethod,
                        querySession: QuerySession): PartLookupResult = {
-    querySession.lock = Some(reclaimLock)
-    reclaimLock.lock()
+    querySession.lock = Some(evictionLock)
+    evictionLock.acquireSharedLock()
     val metricShardKeys = schemas.part.options.shardKeyColumns.dropRight(1)
     // any exceptions thrown here should be caught by a wrapped Task.
     // At the end, MultiSchemaPartitionsExec.execute releases the lock when the task is complete
@@ -1564,17 +1572,44 @@ class TimeSeriesShard(val ref: DatasetRef,
   private def startHeadroomTask(sched: Scheduler) = {
     sched.scheduleWithFixedDelay(1, 1, TimeUnit.MINUTES, new Runnable {
       var numFailures = 0
+      val maxTimeoutMillis = 2048
 
       def run() = {
-        val numFree = blockStore.ensureHeadroom(storeConfig.ensureHeadroomPercent)
-        if (numFree > 0) {
-          numFailures = 0
-        } else {
-          numFailures += 1
-          if (numFailures >= 5) {
-            Shutdown.haltAndCatchFire(new RuntimeException(s"Headroom task was unable to free memory " +
-              s"for $numFailures consecutive attempts. Shutting down process. shard=$shardNum"))
+
+        val blockStoreLockTimeoutMs = blockStore.getHeadroomLockTimeout(storeConfig.ensureHeadroomPercent,
+                                                                        maxTimeoutMillis)
+        val partSetLockTimeoutMs: Int = -1 // TODO based on max partitions
+
+        if (blockStoreLockTimeoutMs > 0 || partSetLockTimeoutMs > 0) { // do only if one of blocks or TSPs need eviction
+          val start = System.nanoTime()
+          val timeoutMillis = Math.max(blockStoreLockTimeoutMs, partSetLockTimeoutMs)
+          val acquired = evictionLock.tryExclusiveReclaimLock(timeoutMillis)
+          if (!acquired) { // if we did not get lock, count failures and judge if the node is in bad state
+            if (timeoutMillis >= maxTimeoutMillis / 2) {
+              // Start warning when the current headroom has dipped below the halfway point.
+              // The lock state is logged in case it's stuck due to a runaway query somewhere.
+              logger.warn(s"Lock for ensureHeadroom timed out: ${evictionLock}")
+            }
+            numFailures += 1
+            if (numFailures >= 5) {
+              Shutdown.haltAndCatchFire(new RuntimeException(s"Headroom task was unable to acquire exclusive lock " +
+                s"for $numFailures consecutive attempts. Shutting down process. shard=$shardNum dataset=$ref"))
+            }
+          } else {
+            numFailures = 0
+            try {
+              if (blockStoreLockTimeoutMs > 0) {
+                blockStore.ensureHeadroom(storeConfig.ensureHeadroomPercent)
+              }
+              if (partSetLockTimeoutMs > 0) {
+                // TODO this is where to evict partitions using ensureFreeSpace()
+              }
+            } finally {
+              evictionLock.releaseExclusive()
+            }
           }
+          val stall = System.nanoTime() - start
+          shardStats.blockHeadroomStall.increment(stall)
         }
       }
     })

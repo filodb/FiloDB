@@ -9,8 +9,9 @@ class PageAlignedBlockManagerConcurrentSpec extends FixtureAnyFunSuite
 with ConductorFixture with Matchers with BeforeAndAfterAll {
   import PageAlignedBlockManagerSpec._
 
+  val evictionLock = new EvictionLock
   val memoryStats = new MemoryStats(Map("test"-> "test"))
-  val blockManager = new PageAlignedBlockManager(2048 * 1024, memoryStats, testReclaimer, 1)
+  val blockManager = new PageAlignedBlockManager(2048 * 1024, memoryStats, testReclaimer, 1, evictionLock)
   val pageSize = blockManager.blockSizeInBytes
 
   override def afterAll(): Unit = {
