@@ -182,7 +182,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     try {
       if (freeBlocks.size < num) {
         if (!odp) {
-          tryReclaimOnDemand(num)
+          tryReclaimWhenAllocating(num)
         } else {
             val msg = s"Unable to allocate ODP block(s) without forcing a reclamation: " +
                       s"num_blocks=$num num_bytes=$memorySize freeBlocks=${freeBlocks.size}"
@@ -219,7 +219,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     * This method must be called with the primary lock object held. To avoid deadlock, this
     * method releases and re-acquires the lock.
     */
-  private def tryReclaimOnDemand(num: Int): Unit = {
+  private def tryReclaimWhenAllocating(num: Int): Unit = {
     lock.unlock()
     var acquired: Boolean = false
     try {
