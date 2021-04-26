@@ -109,30 +109,32 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     // It should have time with offset and lookback as we need raw data at time including offset and lookback.
     lazy val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackTime,
       periodicSeriesTimeWithOffset.endMs)
-    lazy val failures = failureProvider.getFailures(dsRef, queryTimeRange).sortBy(_.timeRange.startMs)
-
-    val tsdbQueryParams = qContext.origQueryParams
-    if (!logicalPlan.isRoutable ||
-        !tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
-        (tsdbQueryParams.isInstanceOf[PromQlQueryParams]
-          && !qContext.plannerParams.processFailure) || // This is a query that was
-                                                                                 // part of failure routing
-        !hasSingleTimeRange(logicalPlan) || // Sub queries have different time ranges (unusual)
-        failures.isEmpty) { // no failures in query time range
+    if (!qContext.plannerParams.processFailure) {
+      // This is a query that was already part of failure routing or failure routing is disabled
       localPlanner.materialize(logicalPlan, qContext)
     } else {
-      val promQlQueryParams = tsdbQueryParams.asInstanceOf[PromQlQueryParams]
-      val routes = if (promQlQueryParams.startSecs == promQlQueryParams.endSecs) { // Instant Query
-        if (failures.forall(!_.isRemote)) {
-          Seq(RemoteRoute(Some(TimeRange(periodicSeriesTimeWithOffset.startMs, periodicSeriesTimeWithOffset.endMs))))
-        } else {
-          Seq(LocalRoute(None))
-        }
+      lazy val failures = failureProvider.getFailures(dsRef, queryTimeRange).sortBy(_.timeRange.startMs)
+
+      val tsdbQueryParams = qContext.origQueryParams
+      if (!logicalPlan.isRoutable ||
+        !tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
+        !hasSingleTimeRange(logicalPlan) || // Sub queries have different time ranges (unusual)
+        failures.isEmpty) { // no failures in query time range
+        localPlanner.materialize(logicalPlan, qContext)
       } else {
-        plan(failures, periodicSeriesTimeWithOffset, lookBackTime, promQlQueryParams.stepSecs * 1000)
+        val promQlQueryParams = tsdbQueryParams.asInstanceOf[PromQlQueryParams]
+        val routes = if (promQlQueryParams.startSecs == promQlQueryParams.endSecs) { // Instant Query
+          if (failures.forall(!_.isRemote)) {
+            Seq(RemoteRoute(Some(TimeRange(periodicSeriesTimeWithOffset.startMs, periodicSeriesTimeWithOffset.endMs))))
+          } else {
+            Seq(LocalRoute(None))
+          }
+        } else {
+          plan(failures, periodicSeriesTimeWithOffset, lookBackTime, promQlQueryParams.stepSecs * 1000)
+        }
+        logger.debug("Routes: " + routes)
+        routeExecPlanMapper(routes, logicalPlan, qContext, lookBackTime)
       }
-      logger.debug("Routes: " + routes)
-      routeExecPlanMapper(routes, logicalPlan, qContext, lookBackTime)
     }
   }
 }
