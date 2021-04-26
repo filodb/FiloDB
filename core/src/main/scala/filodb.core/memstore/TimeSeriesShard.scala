@@ -363,7 +363,7 @@ class TimeSeriesShard(val ref: DatasetRef,
    * This is needed to prevent races between ODP queries and reclaims and ensure that
    * TSPs and chunks dont get evicted when queries are being served.
    */
-  private[memstore] final val evictionLock = new EvictionLock()
+  private[memstore] final val evictionLock = new EvictionLock(s"shard=$shardNum dataset=$ref")
 
   // The off-heap block store used for encoded chunks
   private val shardTags = Map("dataset" -> ref.dataset, "shard" -> shardNum.toString)
@@ -1571,32 +1571,16 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private def startHeadroomTask(sched: Scheduler) = {
     sched.scheduleWithFixedDelay(1, 1, TimeUnit.MINUTES, new Runnable {
-      var numFailures = 0
-      val maxTimeoutMillis = 2048
 
       def run() = {
 
-        val blockStoreLockTimeoutMs = blockStore.getHeadroomLockTimeout(storeConfig.ensureHeadroomPercent,
-                                                                        maxTimeoutMillis)
+        val blockStoreLockTimeoutMs = blockStore.getHeadroomLockTimeout(storeConfig.ensureHeadroomPercent)
         val partSetLockTimeoutMs: Int = -1 // TODO based on max partitions
 
         if (blockStoreLockTimeoutMs > 0 || partSetLockTimeoutMs > 0) { // do only if one of blocks or TSPs need eviction
           val start = System.nanoTime()
           val timeoutMillis = Math.max(blockStoreLockTimeoutMs, partSetLockTimeoutMs)
-          val acquired = evictionLock.tryExclusiveReclaimLock(timeoutMillis)
-          if (!acquired) { // if we did not get lock, count failures and judge if the node is in bad state
-            if (timeoutMillis >= maxTimeoutMillis / 2) {
-              // Start warning when the current headroom has dipped below the halfway point.
-              // The lock state is logged in case it's stuck due to a runaway query somewhere.
-              logger.warn(s"Lock for ensureHeadroom timed out: ${evictionLock}")
-            }
-            numFailures += 1
-            if (numFailures >= 5) {
-              Shutdown.haltAndCatchFire(new RuntimeException(s"Headroom task was unable to acquire exclusive lock " +
-                s"for $numFailures consecutive attempts. Shutting down process. shard=$shardNum dataset=$ref"))
-            }
-          } else {
-            numFailures = 0
+          if (evictionLock.tryExclusiveReclaimLock(timeoutMillis)) {
             try {
               if (blockStoreLockTimeoutMs > 0) {
                 blockStore.ensureHeadroom(storeConfig.ensureHeadroomPercent)

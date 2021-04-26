@@ -257,10 +257,10 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
    * Calculate lock timeout based on headroom space available.
    * Lower the space available, longer the timeout.
    */
-  def getHeadroomLockTimeout(pct: Double, maxTimeoutMillis: Int): Int = {
+  def getHeadroomLockTimeout(ensurePercent: Double): Int = {
     // Ramp up the timeout as the current headroom shrinks. Max timeout per attempt is a little
     // over 2 seconds, and the total timeout can be double that, for a total of 4 seconds.
-    ((1.0 - (currentFreePercent / pct)) * maxTimeoutMillis).toInt
+    ((1.0 - (currentFreePercent / ensurePercent)) * EvictionLock.maxTimeoutMillis).toInt
   }
 
   /**
@@ -270,11 +270,10 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     *
     * Caller MUST acquire eviction lock in exclusive mode before invoking this method.
     * This ensures there are no queries running while eviction is going on.
-    * @param pct percentage: 0.0 to 100.0
+    * @param ensurePercent percentage: 0.0 to 100.0
     */
-  def ensureHeadroom(pct: Double): Int = {
-    var numFree: Int = 0
-      numFree = ensureFreePercent(pct)
+  def ensureHeadroom(ensurePercent: Double): Int = {
+    val numFree = ensureFreePercent(ensurePercent)
     val numBytes = numFree * blockSizeInBytes
     logger.debug(s"BlockManager.ensureHeadroom numFree: $numFree ($numBytes bytes)")
     numFree
