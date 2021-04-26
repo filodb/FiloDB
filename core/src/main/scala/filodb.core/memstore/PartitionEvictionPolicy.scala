@@ -13,7 +13,7 @@ trait PartitionEvictionPolicy {
    * @param numPartitions the current number of partitions in the shard
    * @param memManager the MemFactory used to allocate write buffers and partition keys
    */
-  def numPartitionsToEvict(numPartitions: Int, memManager: NativeMemoryManager): Int
+  def numPartitionsToEvictForHeadroom(numPartitions: Int, maxPartitions: Int, memManager: NativeMemoryManager): Int
 }
 
 /**
@@ -23,33 +23,36 @@ trait PartitionEvictionPolicy {
  *  that WriteBuffers are sized much more than the heap, which should be the normal case.
  * Also, determining heap free space is just really tricky.
  *
- * @param minBufferMemPercentage percent of capacity that should be free in the bufferMemManager
+ * @param headroomPercent percent of capacity that should be free in the bufferMemManager
  */
-class WriteBufferFreeEvictionPolicy(minBufferMemPercentage: Double) extends PartitionEvictionPolicy
+class WriteBufferFreeEvictionPolicy(headroomPercent: Double) extends PartitionEvictionPolicy
                                                                               with StrictLogging {
-  def numPartitionsToEvict(numPartitions: Int, memManager: NativeMemoryManager): Int = {
-    val minBufferMem = memManager.upperBoundSizeInBytes * minBufferMemPercentage / 100
-    if (memManager.numFreeBytes < minBufferMem) {
+  def numPartitionsToEvictForHeadroom(numPartitions: Int, maxPartitions: Int, memManager: NativeMemoryManager): Int = {
+    val headroomMem = memManager.upperBoundSizeInBytes * headroomPercent / 100
+    if (memManager.numFreeBytes < headroomMem) {
       logger.info(s"Recommending partition eviction; buffer free memory = ${memManager.numFreeBytes}")
-      ((minBufferMem.toDouble / memManager.upperBoundSizeInBytes) * numPartitions).toInt
+      ((headroomMem.toDouble / memManager.upperBoundSizeInBytes) * numPartitions).toInt
     } else {
       0
     }
   }
+
 }
 
 /**
  * A policy, used for testing, which evicts any partitions if the # of partitions is above a max.
  */
-class FixedMaxPartitionsEvictionPolicy(maxPartitions: Int) extends PartitionEvictionPolicy {
-  def numPartitionsToEvict(numPartitions: Int, memManager: NativeMemoryManager): Int =
-    Math.max(numPartitions - maxPartitions + 1, 0)
+class FixedMaxPartitionsEvictionPolicy(headroomPercent: Double) extends PartitionEvictionPolicy {
+  def numPartitionsToEvictForHeadroom(numPartitions: Int, maxPartitions: Int, memManager: NativeMemoryManager): Int = {
+    val headroomCount = (maxPartitions * headroomPercent / 100).toInt
+    Math.max(numPartitions - headroomCount + 1, 0)
+  }
 }
 
 class CompositeEvictionPolicy(maxPartPolicy: FixedMaxPartitionsEvictionPolicy,
                               freeBufferPolicy: WriteBufferFreeEvictionPolicy) extends PartitionEvictionPolicy {
-  def numPartitionsToEvict(numPartitions: Int, memManager: NativeMemoryManager): Int = {
-    Math.max(maxPartPolicy.numPartitionsToEvict(numPartitions, memManager),
-             freeBufferPolicy.numPartitionsToEvict(numPartitions, memManager))
+  def numPartitionsToEvictForHeadroom(numPartitions: Int, maxPartitions: Int, memManager: NativeMemoryManager): Int = {
+    Math.max(maxPartPolicy.numPartitionsToEvictForHeadroom(numPartitions, maxPartitions, memManager),
+             freeBufferPolicy.numPartitionsToEvictForHeadroom(numPartitions, maxPartitions, memManager))
   }
 }

@@ -425,7 +425,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val shard = memStore.getShardE(dataset1.ref, 0)
     for { n <- partIDs } {
       val part = shard.partitions.get(n)
-      shard.markPartAsNotIngesting(part)
+      shard.markPartAsNotIngesting(part, false)
     }
   }
 
@@ -497,7 +497,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     parts3.map(_.partID).toSet shouldEqual Set()
 
     markPartitionsForEviction(4 to 10)
-    memStore.getShardE(dataset1.ref, 0).checkEnableAddPartitions()
+    memStore.getShardE(dataset1.ref, 0).runHeadroomTask()
 
     val data4 = records(dataset1, linearMultiSeries(numSeries = 30).drop(22).take(6))
     memStore.ingest(dataset1.ref, 0, data4)

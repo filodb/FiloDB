@@ -254,16 +254,6 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   }
 
   /**
-   * Calculate lock timeout based on headroom space available.
-   * Lower the space available, longer the timeout.
-   */
-  def getHeadroomLockTimeout(ensurePercent: Double): Int = {
-    // Ramp up the timeout as the current headroom shrinks. Max timeout per attempt is a little
-    // over 2 seconds, and the total timeout can be double that, for a total of 4 seconds.
-    ((1.0 - (currentFreePercent / ensurePercent)) * EvictionLock.maxTimeoutMillis).toInt
-  }
-
-  /**
     * Expected to be called via a background task, to periodically ensure that enough blocks
     * are free for new allocations. This helps prevent ODP activity from reclaiming immediately
     * from itself.
