@@ -32,8 +32,6 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              demandPagingParallelism: Int,
                              demandPagingEnabled: Boolean,
                              evictedPkBfCapacity: Int,
-                             // Amount of free blocks to periodically reclaim, as a percent of total number of blocks
-                             ensureHeadroomPercent: Double,
                              // filters on ingested records to log in detail
                              traceFilters: Map[String, String],
                              maxDataPerShardQuery: Long,
@@ -64,7 +62,6 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "demand-paging-enabled" -> demandPagingEnabled,
                                "max-data-per-shard-query" -> maxDataPerShardQuery,
                                "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity,
-                               "ensure-headroom-percent" -> ensureHeadroomPercent,
                                "metering-enabled" -> meteringEnabled,
                                "accept-duplicate-samples" -> acceptDuplicateSamples,
                                "ingest-resolution-millis" -> estimatedIngestResolutionMillis).asJava)
@@ -99,7 +96,6 @@ object StoreConfig {
                                            |demand-paging-parallelism = 10
                                            |demand-paging-enabled = true
                                            |evicted-pk-bloom-filter-capacity = 5000000
-                                           |ensure-headroom-percent = 5.0
                                            |trace-filters = {}
                                            |metering-enabled = true
                                            |accept-duplicate-samples = false
@@ -141,7 +137,6 @@ object StoreConfig {
                 config.getInt("demand-paging-parallelism"),
                 config.getBoolean("demand-paging-enabled"),
                 config.getInt("evicted-pk-bloom-filter-capacity"),
-                config.getDouble("ensure-headroom-percent"),
                 config.as[Map[String, String]]("trace-filters"),
                 config.getMemorySize("max-data-per-shard-query").toBytes,
                 config.getBoolean("metering-enabled"),

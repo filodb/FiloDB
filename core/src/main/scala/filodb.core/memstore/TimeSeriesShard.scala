@@ -302,6 +302,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private final var ingested = 0L
 
   private val targetMaxPartitions = filodbConfig.getInt("memstore.max-partitions-on-heap-per-shard")
+  private val ensureHeadroomPercent = filodbConfig.getDouble("memstore.ensure-memory-headroom-percent")
 
   /**
    * Queue of partIds that are eligible for eviction since they have stopped ingesting.
@@ -1578,9 +1579,9 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private[filodb] def runHeadroomTask() = {
     val blockEvictionLockTimeoutMs = getHeadroomLockTimeout(blockStore.currentFreePercent,
-      storeConfig.ensureHeadroomPercent)
+      ensureHeadroomPercent)
     val tspEvictionLockTimeoutMs: Int = getHeadroomLockTimeout(partitions.size.toDouble / targetMaxPartitions,
-      storeConfig.ensureHeadroomPercent)
+      ensureHeadroomPercent)
 
     // do only if one of blocks or TSPs need eviction
     if (blockEvictionLockTimeoutMs > 0 || tspEvictionLockTimeoutMs > 0) {
@@ -1589,7 +1590,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       if (evictionLock.tryExclusiveReclaimLock(timeoutMillis)) {
         try {
           if (blockEvictionLockTimeoutMs > 0) {
-            blockStore.ensureHeadroom(storeConfig.ensureHeadroomPercent)
+            blockStore.ensureHeadroom(ensureHeadroomPercent)
           }
           if (tspEvictionLockTimeoutMs > 0) {
             if (ensureFreeSpace()) addPartitionsDisabled := false

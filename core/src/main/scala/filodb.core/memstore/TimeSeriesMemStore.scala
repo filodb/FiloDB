@@ -36,11 +36,12 @@ extends MemStore with StrictLogging {
   val stats = new ChunkSourceStats
 
   private val numParallelFlushes = filodbConfig.getInt("memstore.flush-task-parallelism")
+  private val ensureHeadroomPercent = filodbConfig.getDouble("memstore.ensure-memory-headroom-percent")
 
   private val partEvictionPolicy = evictionPolicy.getOrElse {
     new CompositeEvictionPolicy(
-        new FixedMaxPartitionsEvictionPolicy(filodbConfig.getInt("max-partitions-on-heap-per-shard")),
-        new WriteBufferFreeEvictionPolicy(filodbConfig.getDouble("min-write-buffers-free-percentage"))
+        new FixedMaxPartitionsEvictionPolicy(ensureHeadroomPercent),
+        new WriteBufferFreeEvictionPolicy(ensureHeadroomPercent)
     )
   }
 
