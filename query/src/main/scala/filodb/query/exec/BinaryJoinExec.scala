@@ -131,7 +131,7 @@ final case class BinaryJoinExec(queryContext: QueryContext,
           // OneToOne cardinality case is already handled. this condition handles OneToMany case
           if (results.size >= queryContext.plannerParams.joinQueryCardLimit)
             throw new BadQueryException(s"The result of this join query has cardinality ${results.size} and " +
-              s"is more than limit of ${queryContext.plannerParams.joinQueryCardLimit}. Try applying more filters.")
+              s"has reached the limit of ${queryContext.plannerParams.joinQueryCardLimit}. Try applying more filters.")
 
           val res = if (lhsIsOneSide) binOp(rvOne.rows, rvOtherCorrect.rows) else binOp(rvOtherCorrect.rows, rvOne.rows)
           results.put(resKey, ResultVal(IteratorBackedRangeVector(resKey, res, period), rvOtherCorrect))
