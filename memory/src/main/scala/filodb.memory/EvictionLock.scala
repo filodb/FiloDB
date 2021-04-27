@@ -10,15 +10,25 @@ object EvictionLock {
   val maxTimeoutMillis = 2048
 }
 /**
- * This lock protects memory regions accessed by queries and prevents them from being evicted.
+ * This lock protects memory regions accessed by queries and prevents them from
+ * being evicted.
  */
 class EvictionLock(debugInfo: String = "none") extends StrictLogging {
 
   import EvictionLock._
   // Acquired when reclaiming on demand. Acquire shared lock to prevent block reclamation.
   private final val reclaimLock = new Latch
-  private final var numFailures = 0
+  @volatile private final var numFailures = 0
 
+  /**
+   * Try to acquire lock with multiple retries.
+   * If 5 consecutive attempts to tryExclusiveReclaimLock fail, node is restarted.
+   *
+   * Run only on ingestion thread.
+   *
+   * @param finalTimeoutMillis timeout starts with 1 and doubles each retry to get lock until finalTimeoutMillis
+   * @return if the lock was acquired
+   */
   def tryExclusiveReclaimLock(finalTimeoutMillis: Int): Boolean = {
     // Attempting to acquire the exclusive lock must wait for concurrent queries to finish, but
     // waiting will also stall new queries from starting. To protect against this, attempt with
@@ -35,8 +45,7 @@ class EvictionLock(debugInfo: String = "none") extends StrictLogging {
 
     var timeout = 1;
     while (true) {
-      val acquired = reclaimLock.tryAcquireExclusiveNanos(TimeUnit.MILLISECONDS.toNanos(timeout))
-      if (acquired) {
+      if (reclaimLock.tryAcquireExclusiveNanos(TimeUnit.MILLISECONDS.toNanos(timeout))) {
         numFailures = 0
         return true
       } else { // if we did not get lock, count failures and judge if the node is in bad state
