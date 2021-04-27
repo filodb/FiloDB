@@ -13,7 +13,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, QuerySession}
+import filodb.core.query.{ColumnFilter, Filter, QuerySession, ServiceUnavailableException}
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.vectors.LongHistogram
@@ -26,9 +26,13 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   import MachineMetricsData._
   import ZeroCopyUTF8String._
 
-  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val policy = new FixedMaxPartitionsEvictionPolicy(20)
-  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
+  val config = ConfigFactory.parseString("""
+                                            |filodb.memstore.max-partitions-on-heap-per-shard = 1100
+                                            |filodb.memstore.ensure-memory-headroom-percent = 10
+                                            |  """.stripMargin)
+                            .withFallback(ConfigFactory.load("application_test.conf"))
+                            .getConfig("filodb")
+  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore())
   implicit override val patienceConfig = PatienceConfig(timeout = Span(2, Seconds), interval = Span(50, Millis))
 
   after {
@@ -313,7 +317,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       }
     }
 
-    val memStore = new TimeSeriesMemStore(config, colStore, new InMemoryMetaStore(), Some(policy))
+    val memStore = new TimeSeriesMemStore(config, colStore, new InMemoryMetaStore())
     memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf.copy(groupsPerShard = 2,
       diskTTLSeconds = 1.hour.toSeconds.toInt,
       flushInterval = 10.minutes))
@@ -432,85 +436,94 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   it("should be able to evict partitions properly on ingestion and on ODP") {
     memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
 
+    val shard = memStore.getShardE(dataset1.ref, 0)
     // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
-    val data = records(dataset1, linearMultiSeries(numSeries = 10).take(10))
+    val data = records(dataset1, linearMultiSeries(numSeries = 1000).take(1000))
     memStore.ingest(dataset1.ref, 0, data)
 
     memStore.refreshIndexForTesting(dataset1.ref)
 
-    memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
-    memStore.labelValues(dataset1.ref, 0, "series").toSeq should have length (10)
+    memStore.numPartitions(dataset1.ref, 0) shouldEqual 1000
+    memStore.labelValues(dataset1.ref, 0, "series", 2000).size shouldEqual 1000
 
-    // Purposely mark two partitions endTime as occurring a while ago to mark them eligible for eviction
+    // Purposely mark 100 partitions endTime as occurring a while ago to mark them eligible for eviction
     // We also need to switch buffers so that internally ingestionEndTime() is accurate
-    markPartitionsForEviction(0 to 1)
+    markPartitionsForEviction(0 until 10)
+    shard.runHeadroomTask() // this should evict 10 partitions since maxAllowed is 1100, and headroom is 110
+    shard.partitions.size() shouldEqual 990
 
-    // Now, ingest 22 partitions.  First two partitions ingested should be evicted. Check numpartitions, stats, index
-    val data2 = records(dataset1, linearMultiSeries(numSeries = 22).drop(2).take(20))
+    // Now, ingest 120 partitions.  First 110 partitions should be allowed, 10 partitions should be dropped
+    val data2 = records(dataset1, linearMultiSeries(numSeries = 1120).drop(1000).take(120))
     memStore.ingest(dataset1.ref, 0, data2)
     Thread sleep 1000    // see if this will make things pass sooner
 
-    memStore.numPartitions(dataset1.ref, 0) shouldEqual 20
-    memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual false
-    import collection.JavaConverters._
+    shard.partitions.size() shouldEqual 1100
+    shard.addPartitionsDisabled() shouldEqual true
 
-    // 0 and 1 are evicted
-    memStore.getShardE(dataset1.ref, 0).partitions.keySet().asScala shouldEqual (2 to 21).toSet
-    // but they should still stay in the index
-    memStore.getShardE(dataset1.ref, 0).partKeyIndex.indexNumEntries shouldEqual 22
+    markPartitionsForEviction(10 until 20)
+    shard.runHeadroomTask() // this should evict only 10 partitions, but cannot reach headroom
+    shard.addPartitionsDisabled() shouldEqual false // but add of new partitions is enabled since we were able to evict some
+    shard.partitions.size() shouldEqual 1090
 
-    markPartitionsForEviction(2 to 3)
+    // fill the 10 slots remaining
+    val data3 = records(dataset1, linearMultiSeries(numSeries = 1130).drop(1120).take(10))
+    memStore.ingest(dataset1.ref, 0, data3)
+    shard.partitions.size() shouldEqual 1100
 
+    // now there is no room for any more partitions. Try ODP
     memStore.refreshIndexForTesting(dataset1.ref)
     val split = memStore.getScanSplits(dataset1.ref, 1).head
     val filter = ColumnFilter("series", Filter.Equals("Series 0".utf8))
-    val parts = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter)),
-      querySession = QuerySession.forTestingOnly)
-                        .toListL.runAsync
-                        .futureValue
-                        .asInstanceOf[Seq[TimeSeriesPartition]]
-    parts.map(_.partID).toSet shouldEqual Set(0)
 
-    val filter2 = ColumnFilter("series", Filter.Equals("Series 1".utf8))
-    val parts2 = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter2)),
-      querySession = QuerySession.forTestingOnly)
-      .toListL.runAsync
-      .futureValue
-      .asInstanceOf[Seq[TimeSeriesPartition]]
-    parts2.map(_.partID).toSet shouldEqual Set(1)
+    // ODP query should fail since there is no room
+    intercept[ServiceUnavailableException] {
+      memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter)),
+        querySession = QuerySession.forTestingOnly)
+        .toListL.runAsync.futureValue
+    }
 
-    memStore.getShardE(dataset1.ref, 0).evictablePartIds.size() shouldEqual 2 // the ODPed partitions
-
-    val data3 = records(dataset1, linearMultiSeries(numSeries = 30).drop(22).take(6))
-    memStore.ingest(dataset1.ref, 0, data3)
-    memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual true // since we aren't able to evict
-
-    // series 26 should not have been added even though we had attempted to add in previous data3 ingestion run
-    // because add new partitions is now disabled
-    memStore.refreshIndexForTesting(dataset1.ref)
-    val filter3 = ColumnFilter("series", Filter.Equals("Series 26".utf8))
-    val parts3 = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter3)),
-      querySession = QuerySession.forTestingOnly)
-      .toListL.runAsync
-      .futureValue
-      .asInstanceOf[Seq[TimeSeriesPartition]]
-    parts3.map(_.partID).toSet shouldEqual Set()
-
-    markPartitionsForEviction(4 to 10)
-    memStore.getShardE(dataset1.ref, 0).runHeadroomTask()
-
-    val data4 = records(dataset1, linearMultiSeries(numSeries = 30).drop(22).take(6))
-    memStore.ingest(dataset1.ref, 0, data4)
-    memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual false // now there is room
-
-    memStore.refreshIndexForTesting(dataset1.ref)
-    val filter4 = ColumnFilter("series", Filter.Equals("Series 26".utf8))
-    val parts4 = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter4)),
-      querySession = QuerySession.forTestingOnly)
-      .toListL.runAsync
-      .futureValue
-      .asInstanceOf[Seq[TimeSeriesPartition]]
-    parts4.map(_.partID).toSet shouldEqual Set(26)
+//    parts.map(_.partID).toSet shouldEqual Set(0)
+//
+//    val filter2 = ColumnFilter("series", Filter.Equals("Series 1".utf8))
+//    val parts2 = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter2)),
+//      querySession = QuerySession.forTestingOnly)
+//      .toListL.runAsync
+//      .futureValue
+//      .asInstanceOf[Seq[TimeSeriesPartition]]
+//    parts2.map(_.partID).toSet shouldEqual Set(1)
+//
+//    memStore.getShardE(dataset1.ref, 0).evictablePartIds.size() shouldEqual 2 // the ODPed partitions
+//
+//    val data3 = records(dataset1, linearMultiSeries(numSeries = 30).drop(22).take(6))
+//    memStore.ingest(dataset1.ref, 0, data3)
+//    memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual true // since we aren't able to evict
+//
+//    // series 26 should not have been added even though we had attempted to add in previous data3 ingestion run
+//    // because add new partitions is now disabled
+//    memStore.refreshIndexForTesting(dataset1.ref)
+//    val filter3 = ColumnFilter("series", Filter.Equals("Series 26".utf8))
+//    val parts3 = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter3)),
+//      querySession = QuerySession.forTestingOnly)
+//      .toListL.runAsync
+//      .futureValue
+//      .asInstanceOf[Seq[TimeSeriesPartition]]
+//    parts3.map(_.partID).toSet shouldEqual Set()
+//
+//    markPartitionsForEviction(4 to 10)
+//    memStore.getShardE(dataset1.ref, 0).runHeadroomTask()
+//
+//    val data4 = records(dataset1, linearMultiSeries(numSeries = 30).drop(22).take(6))
+//    memStore.ingest(dataset1.ref, 0, data4)
+//    memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual false // now there is room
+//
+//    memStore.refreshIndexForTesting(dataset1.ref)
+//    val filter4 = ColumnFilter("series", Filter.Equals("Series 26".utf8))
+//    val parts4 = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter4)),
+//      querySession = QuerySession.forTestingOnly)
+//      .toListL.runAsync
+//      .futureValue
+//      .asInstanceOf[Seq[TimeSeriesPartition]]
+//    parts4.map(_.partID).toSet shouldEqual Set(26)
 
   }
 

@@ -202,18 +202,18 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
                 sch   = schemas(RecordSchema.schemaID(partKeyBytesRef.bytes, unsafeKeyOffset))
                 part <- Option(createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, id, sch, 4))
                           if sch != Schemas.UnknownSchema } yield {
-            val stamp = partSetLock.writeLock()
-            try {
-              markPartAsNotIngesting(part, odp = true)
-              partSet.add(part)
-            } finally {
-              partSetLock.unlockWrite(stamp)
+              val stamp = partSetLock.writeLock()
+              try {
+                markPartAsNotIngesting(part, odp = true)
+                partSet.add(part)
+              } finally {
+                partSetLock.unlockWrite(stamp)
+              }
+              val pkBytes = util.Arrays.copyOfRange(partKeyBytesRef.bytes, partKeyBytesRef.offset,
+                partKeyBytesRef.offset + partKeyBytesRef.length)
+              callback(part.partID, pkBytes)
+              part
             }
-            val pkBytes = util.Arrays.copyOfRange(partKeyBytesRef.bytes, partKeyBytesRef.offset,
-                            partKeyBytesRef.offset + partKeyBytesRef.length)
-            callback(part.partID, pkBytes)
-            part
-          }
           // create the partition and update data structures (but no need to add to Lucene!)
           // NOTE: if no memory, then no partition!
         case p: TimeSeriesPartition =>

@@ -126,6 +126,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
    * free space. Unit is nanoseconds.
    */
   val blockHeadroomStall = Kamon.counter("blockstore-headroom-stall-nanos").withTags(TagSet.from(tags))
+  val evictablePartKeysSize = Kamon.gauge("memstore-num-evictable-partkeys").withTags(TagSet.from(tags))
 
 }
 
@@ -311,8 +312,8 @@ class TimeSeriesShard(val ref: DatasetRef,
    * Mpsc since the producers are flush task and odp part creation task
    * FIXME we can create a more efficient data structure that stores the ints in unboxed form - uses less heap
    */
-  protected[memstore] final val evictablePartIds = new MpscChunkedArrayQueue[Int](1000, targetMaxPartitions)
-  protected[memstore] final val evictableOdpPartIds = new MpscChunkedArrayQueue[Int](100, targetMaxPartitions)
+  protected[memstore] final val evictablePartIds = new MpscChunkedArrayQueue[Int](1024, targetMaxPartitions)
+  protected[memstore] final val evictableOdpPartIds = new MpscChunkedArrayQueue[Int](128, targetMaxPartitions)
 
   /**
     * Keeps track of last offset ingested into memory (not necessarily flushed).
@@ -1116,6 +1117,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   protected[memstore] def markPartAsNotIngesting(p: TimeSeriesPartition, odp: Boolean): Unit = {
     p.ingesting = false
+    shardStats.evictablePartKeysSize.increment()
     if (odp) evictableOdpPartIds.add(p.partID) else evictablePartIds.add(p.partID)
   }
 
@@ -1297,10 +1299,8 @@ class TimeSeriesShard(val ref: DatasetRef,
                                    group: Int, usePartId: Int, schema: Schema,
                                    initMapSize: Int = initInfoMapSize): TimeSeriesPartition = {
     assertThreadName(IngestSchedName)
-    // Check and evict, if after eviction we still don't have enough memory, then don't proceed
-    if (addPartitionsDisabled()) {
-      OutOfMemPartition
-    }
+    if (partitions.size() >= targetMaxPartitions) disableAddPartitions()
+    if (addPartitionsDisabled()) OutOfMemPartition
     else {
       // PartitionKey is copied to offheap bufferMemory and stays there until it is freed
       // NOTE: allocateAndCopy and allocNew below could fail if there isn't enough memory.  It is CRUCIAL
@@ -1372,7 +1372,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     assertThreadName(IngestSchedName)
     var numPartsToEvict = evictionPolicy.numPartitionsToEvictForHeadroom(partSet.size,
                                                                          targetMaxPartitions, bufferMemoryManager)
-    while (numPartsToEvict > 0) {
+    if (numPartsToEvict > 0) {
       val partIdsToEvict = partitionsToEvict(numPartsToEvict)
       if (partIdsToEvict.isEmpty) {
         logger.warn(s"dataset=$ref shard=$shardNum: No partitions to evict but we are still low on space. " +
@@ -1420,8 +1420,6 @@ class TimeSeriesShard(val ref: DatasetRef,
       shardStats.evictedPkBloomFilterSize.update(elemCount)
       logger.info(s"dataset=$ref shard=$shardNum: evicted $numPartsEvicted partitions, skipped $partsSkipped")
       shardStats.partitionsEvicted.increment(numPartsEvicted)
-      numPartsToEvict = evictionPolicy.numPartitionsToEvictForHeadroom(partSet.size,
-                                                                       targetMaxPartitions, bufferMemoryManager)
     }
     true
   }
@@ -1454,6 +1452,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       partIdsToEvict.set(evictablePartIds.remove())
       i += 1
     }
+    shardStats.evictablePartKeysSize.decrement(i)
     partIdsToEvict
   }
 

@@ -44,8 +44,8 @@ class WriteBufferFreeEvictionPolicy(headroomPercent: Double) extends PartitionEv
  */
 class FixedMaxPartitionsEvictionPolicy(headroomPercent: Double) extends PartitionEvictionPolicy {
   def numPartitionsToEvictForHeadroom(numPartitions: Int, maxPartitions: Int, memManager: NativeMemoryManager): Int = {
-    val headroomCount = (maxPartitions * headroomPercent / 100).toInt
-    Math.max(numPartitions - headroomCount + 1, 0)
+    val headroom = (maxPartitions * headroomPercent / 100).toInt
+    Math.max(numPartitions - (maxPartitions - headroom), 0)
   }
 }
 
