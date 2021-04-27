@@ -398,8 +398,8 @@ object MachineMetricsData {
 
   val histKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
   val histPartKey = histKeyBuilder.partKeyFromObjects(histDataset.schema, "request-latency", extraTags)
-
-  val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16)
+  val evictionLock = new EvictionLock
+  val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16, evictionLock)
   val histIngestBH = new BlockMemFactory(blockStore, histDataset.schema.data.blockMetaSize,
                                          dummyContext, true)
   val histMaxBH = new BlockMemFactory(blockStore, histMaxDS.schema.data.blockMetaSize,
