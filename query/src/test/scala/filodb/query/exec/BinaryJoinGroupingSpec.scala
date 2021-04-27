@@ -422,8 +422,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     }
 
     thrown.getCause.getClass shouldEqual classOf[BadQueryException]
-    thrown.getCause.getMessage shouldEqual "This query results in more than 1 join cardinality." +
-      " Try applying more filters."
+    thrown.getCause.getMessage shouldEqual "The result of this join query has cardinality 1 and has reached the " +
+      "limit of 1. Try applying more filters."
   }
 
   it("should throw BadQueryException - many-to-one with ignoring - cardinality limit 1") {
@@ -449,8 +449,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     }
 
     thrown.getCause.getClass shouldEqual classOf[BadQueryException]
-    thrown.getCause.getMessage shouldEqual "This query results in more than 1 join cardinality." +
-      " Try applying more filters."
+    thrown.getCause.getMessage shouldEqual "The result of this join query has cardinality 1 and " +
+      "has reached the limit of 1. Try applying more filters."
   }
 
   it("should throw BadQueryException - many-to-one with by and grouping without arguments - cardinality limit 1") {
@@ -481,7 +481,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     }
 
     thrown.getCause.getClass shouldEqual classOf[BadQueryException]
-    thrown.getCause.getMessage shouldEqual "This query results in more than 3 join cardinality." +
-      " Try applying more filters."
+    thrown.getCause.getMessage shouldEqual "The result of this join query has cardinality 3 and " +
+      "has reached the limit of 3. Try applying more filters."
   }
 }

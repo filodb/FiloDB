@@ -1,6 +1,5 @@
 package filodb.memory
 
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 
 import com.kenai.jffi.{MemoryIO, PageManager}
@@ -101,12 +100,6 @@ class MemoryStats(tags: Map[String, String]) {
                                             .withTags(TagSet.from(tags))
 
   /**
-    * How much time a thread was potentially stalled while attempting to ensure
-    * free space. Unit is nanoseconds.
-    */
-  val blockHeadroomStall = Kamon.counter("blockstore-headroom-stall-nanos").withTags(TagSet.from(tags))
-
-  /**
     * How much time a thread was stalled while attempting to acquire the reclaim lock.
     * Unit is nanoseconds.
     */
@@ -132,7 +125,8 @@ object PageAlignedBlockManager {
 class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
                               val stats: MemoryStats,
                               reclaimer: ReclaimListener,
-                              numPagesPerBlock: Int)
+                              numPagesPerBlock: Int,
+                              reclaimLock: EvictionLock)
   extends BlockManager with StrictLogging {
   import PageAlignedBlockManager._
 
@@ -148,9 +142,6 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   val reclaimLog = new collection.mutable.Queue[ReclaimEvent]
 
   protected val lock = new ReentrantLock()
-
-  // Acquired when reclaiming on demand. Acquire shared lock to prevent block reclamation.
-  final val reclaimLock = new Latch
 
   override def blockSizeInBytes: Long = PageManager.getInstance().pageSize() * numPagesPerBlock
 
@@ -191,7 +182,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     try {
       if (freeBlocks.size < num) {
         if (!odp) {
-          tryReclaimOnDemand(num)
+          tryReclaimWhenAllocating(num)
         } else {
             val msg = s"Unable to allocate ODP block(s) without forcing a reclamation: " +
                       s"num_blocks=$num num_bytes=$memorySize freeBlocks=${freeBlocks.size}"
@@ -228,13 +219,13 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     * This method must be called with the primary lock object held. To avoid deadlock, this
     * method releases and re-acquires the lock.
     */
-  private def tryReclaimOnDemand(num: Int): Unit = {
+  private def tryReclaimWhenAllocating(num: Int): Unit = {
     lock.unlock()
     var acquired: Boolean = false
     try {
       val start = System.nanoTime()
       // Give up after waiting (in total) a little over 16 seconds.
-      acquired = tryExclusiveReclaimLock(8192)
+      acquired = reclaimLock.tryExclusiveReclaimLock(8192)
 
       if (!acquired) {
         // Don't stall ingestion forever. Some queries might return invalid results because
@@ -262,33 +253,14 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     }
   }
 
-  private def tryExclusiveReclaimLock(finalTimeoutMillis: Int): Boolean = {
-    // Attempting to acquire the exclusive lock must wait for concurrent queries to finish, but
-    // waiting will also stall new queries from starting. To protect against this, attempt with
-    // a timeout to let any stalled queries through. To prevent starvation of the exclusive
-    // lock attempt, increase the timeout each time, but eventually give up. The reason why
-    // waiting for an exclusive lock causes this problem is that the thread must enqueue itself
-    // into the lock as a waiter, and all new shared requests must wait their turn. The risk
-    // with timing out is that if there's a continuous stream of long running queries (more than
-    // one second), then the exclusive lock will never be acqiured, and then ensureFreeBlocks
-    // won't be able to do its job. The timeout settings might need to be adjusted in that case.
-    // Perhaps the timeout should increase automatically if ensureFreeBlocks failed the last time?
-    // This isn't safe to do until we gain higher confidence that the shared lock is always
-    // released by queries.
-
-    var timeout = 1;
-    while (true) {
-      val acquired = reclaimLock.tryAcquireExclusiveNanos(TimeUnit.MILLISECONDS.toNanos(timeout))
-      if (acquired) {
-        return true
-      }
-      if (timeout >= finalTimeoutMillis) {
-        return false
-      }
-      Thread.`yield`()
-      timeout = Math.min(finalTimeoutMillis, timeout << 1)
-    }
-    false // never reached, but scala compiler complains otherwise
+  /**
+   * Calculate lock timeout based on headroom space available.
+   * Lower the space available, longer the timeout.
+   */
+  def getHeadroomLockTimeout(ensurePercent: Double): Int = {
+    // Ramp up the timeout as the current headroom shrinks. Max timeout per attempt is a little
+    // over 2 seconds, and the total timeout can be double that, for a total of 4 seconds.
+    ((1.0 - (currentFreePercent / ensurePercent)) * EvictionLock.maxTimeoutMillis).toInt
   }
 
   /**
@@ -296,40 +268,14 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     * are free for new allocations. This helps prevent ODP activity from reclaiming immediately
     * from itself.
     *
-    * @param pct percentage: 0.0 to 100.0
+    * Caller MUST acquire eviction lock in exclusive mode before invoking this method.
+    * This ensures there are no queries running while eviction is going on.
+    * @param ensurePercent percentage: 0.0 to 100.0
     */
-  def ensureHeadroom(pct: Double): Int = {
-    // Ramp up the timeout as the current headroom shrinks. Max timeout per attempt is a little
-    // over 2 seconds, and the total timeout can be double that, for a total of 4 seconds.
-    val maxTimeoutMillis = 2048
-    val timeoutMillis = ((1.0 - (currentFreePercent / pct)) * maxTimeoutMillis).toInt
-
-    if (timeoutMillis <= 0) {
-      // Headroom target is already met.
-      return numFreeBlocks
-    }
-
-    var numFree: Int = 0
-    val start = System.nanoTime()
-    val acquired = tryExclusiveReclaimLock(timeoutMillis)
-    if (!acquired) {
-      if (timeoutMillis >= maxTimeoutMillis / 2) {
-        // Start warning when the current headroom has dipped below the halfway point.
-        // The lock state is logged in case it's stuck due to a runaway query somewhere.
-        logger.warn(s"Lock for BlockManager.ensureHeadroom timed out: ${reclaimLock}")
-      }
-      numFree = numFreeBlocks
-    } else {
-      try {
-        numFree = ensureFreePercent(pct)
-      } finally {
-        reclaimLock.releaseExclusive()
-      }
-      val numBytes = numFree * blockSizeInBytes
-      logger.debug(s"BlockManager.ensureHeadroom numFree: $numFree ($numBytes bytes)")
-    }
-    val stall = System.nanoTime() - start
-    stats.blockHeadroomStall.increment(stall)
+  def ensureHeadroom(ensurePercent: Double): Int = {
+    val numFree = ensureFreePercent(ensurePercent)
+    val numBytes = numFree * blockSizeInBytes
+    logger.debug(s"BlockManager.ensureHeadroom numFree: $numFree ($numBytes bytes)")
     numFree
   }
 
