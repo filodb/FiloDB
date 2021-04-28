@@ -176,4 +176,48 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
       case Left(ex)             => throw ex
     }
   }
+
+  it("should parse remote partial response") {
+    val input = """[{
+                  |  "status" : "partial",
+                  |  "data" : {
+                  |        "result": [
+                  |            {
+                  |                "metric": {
+                  |                    "__name__": "my_counter",
+                  |                    "_ns_": "test_001",
+                  |                    "_partIds_": "2530",
+                  |                    "_shards_": "25",
+                  |                    "_step_": "10",
+                  |                    "_type_": "prom-counter",
+                  |                    "_ws_": "demo",
+                  |                    "instance": "c70cac88-928e-4905-9f37-c1c6ed27cf27",
+                  |                },
+                  |                "value": [
+                  |                    1619636156,
+                  |                    "1.8329092E7"
+                  |                ]
+                  |            }
+                  |        ],
+                  |        "resultType": "vector"
+                  |    },
+                  |  "partial": true,
+                  |  "message": "Result may be partial since some shards are still bootstrapping",
+                  |  "errorType": null,
+                  |  "error": null
+                  |}]""".stripMargin
+
+    parser.decode[List[SuccessResponse]](input) match {
+      case Right(successResponse) => {
+        val response = successResponse.head
+        response.isPartial.get shouldEqual true
+        response.message.get shouldEqual "Result may be partial since some shards are still bootstrapping"
+        response.status shouldEqual "partial"
+        val result = response.data.result.head
+        result.metric.size shouldEqual 8
+        result.value.size shouldEqual 1
+      }
+      case Left(ex) => println(ex)
+    }
+  }
 }
