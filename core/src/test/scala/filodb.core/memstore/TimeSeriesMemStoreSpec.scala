@@ -450,10 +450,12 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     // Purposely mark 100 partitions endTime as occurring a while ago to mark them eligible for eviction
     // We also need to switch buffers so that internally ingestionEndTime() is accurate
     markPartitionsForEviction(0 until 10)
-    shard.runHeadroomTask() // this should evict 10 partitions since maxAllowed is 1100, and headroom is 110
-    shard.partitions.size() shouldEqual 990
 
-    // Now, ingest 120 partitions.  First 110 partitions should be allowed, 10 partitions should be dropped
+    // Note that we didn't explicitly evict. The code below will test force-eviction. It will also
+    // ensure TimeSeriesShard maintains the invariant of not more than maxPartitions (1100 here) limit
+
+    // Now, ingest 120 partitions.  First 110 partitions should be allowed after force-eviction,
+    // 10 partitions should be dropped
     val data2 = records(dataset1, linearMultiSeries(numSeries = 1120).drop(1000).take(120))
     memStore.ingest(dataset1.ref, 0, data2)
     Thread sleep 1000    // see if this will make things pass sooner
@@ -462,8 +464,9 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     shard.addPartitionsDisabled() shouldEqual true
 
     markPartitionsForEviction(10 until 20)
-    shard.runHeadroomTask() // this should evict only 10 partitions, but cannot reach headroom
-    shard.addPartitionsDisabled() shouldEqual false // but add of new partitions is enabled since we were able to evict some
+    shard.evictForHeadroom() // this should evict only 10 partitions, but cannot reach headroom
+    // but add of new partitions is enabled since we were able to evict some
+    shard.addPartitionsDisabled() shouldEqual false
     shard.partitions.size() shouldEqual 1090
 
     // fill the 10 slots remaining
@@ -488,7 +491,19 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     // mark 1 partition for eviction
     markPartitionsForEviction(20 until 21)
-    shard.runHeadroomTask() // this should evict only 1 partition, but cannot reach headroom
+    // Not we are not explicitly evicting. ODP should not evict
+    // ODP query should fail even though there is room for eviction
+    // Reason is we dont want ODP cannibalism of partitions
+    val ex2 = intercept[TestFailedException] {
+      memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter)),
+        querySession = session)
+        .toListL.runAsync.futureValue
+    }
+    session.close() // release lock
+    ex2.getCause.isInstanceOf[ServiceUnavailableException] shouldEqual true
+
+    // after next headroom task run....
+    shard.evictForHeadroom()
 
     // now query should succeed
     val parts = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter)),
@@ -501,7 +516,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     // mark some parts as evictable
     markPartitionsForEviction(21 until 25)
-    shard.runHeadroomTask()
+    shard.evictForHeadroom()
     // odp partitions should be evicted first before regular partitions
     shard.evictableOdpPartIds.size() shouldEqual 0
 
@@ -527,7 +542,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     // Purposely mark 100 partitions endTime as occurring a while ago to mark them eligible for eviction
     // We also need to switch buffers so that internally ingestionEndTime() is accurate
     markPartitionsForEviction(0 until 10)
-    shard0.runHeadroomTask() // this should evict 10 partitions since maxAllowed is 1100, and headroom is 110
+    shard0.evictForHeadroom() // this should evict 10 partitions since maxAllowed is 1100, and headroom is 110
 
     // bloom filter should contain the pk
     shard0.evictedPartKeys.mightContain(pk) shouldEqual true

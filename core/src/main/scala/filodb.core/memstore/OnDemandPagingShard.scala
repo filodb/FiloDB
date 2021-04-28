@@ -201,7 +201,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
                 group = partKeyGroup(schemas.part.binSchema, partKeyBytesRef.bytes, unsafeKeyOffset, numGroups)
                 sch  <- Option(schemas(RecordSchema.schemaID(partKeyBytesRef.bytes, unsafeKeyOffset)))
                           } yield {
-            val part = createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, id, sch, 4)
+            val part = createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, id, sch, true, 4)
             if (part == OutOfMemPartition) throw new ServiceUnavailableException("The server has too many ingesting " +
               "time series and does not have resources to serve this long time range query. Please try " +
               "after sometime.")

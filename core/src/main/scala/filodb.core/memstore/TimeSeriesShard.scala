@@ -618,7 +618,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       // this is an actively ingesting partition
       val group = partKeyGroup(schemas.part.binSchema, pk.partKey, UnsafeUtils.arayOffset, numGroups)
       if (schema != Schemas.UnknownSchema) {
-        val part = createNewPartition(pk.partKey, UnsafeUtils.arayOffset, group, CREATE_NEW_PARTID, schema, 4)
+        val part = createNewPartition(pk.partKey, UnsafeUtils.arayOffset, group, CREATE_NEW_PARTID, schema, false, 4)
         // In theory, we should not get an OutOfMemPartition here since
         // it should have occurred before node failed too, and with data stopped,
         // index would not be updated. But if for some reason we see it, drop data
@@ -1201,7 +1201,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     val previousPartId = lookupPreviouslyAssignedPartId(partKeyArray, partKeyOffset)
     // TODO: remove when no longer needed
     logger.trace(s"Adding part key details: ${schema.partKeySchema.debugString(partKeyArray, partKeyOffset)}")
-    val newPart = createNewPartition(partKeyArray, partKeyOffset, group, previousPartId, schema)
+    val newPart = createNewPartition(partKeyArray, partKeyOffset, group, previousPartId, schema, false)
     if (newPart != OutOfMemPartition) {
       val partId = newPart.partID
       val startTime = schema.ingestionSchema.getLong(recordBase, recordOff, 0)
@@ -1297,9 +1297,16 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   protected def createNewPartition(partKeyBase: Array[Byte], partKeyOffset: Long,
                                    group: Int, usePartId: Int, schema: Schema,
+                                   odp: Boolean,
                                    initMapSize: Int = initInfoMapSize): TimeSeriesPartition = {
     assertThreadName(IngestSchedName)
-    if (partitions.size() >= targetMaxPartitions) disableAddPartitions()
+    if (partitions.size() >= targetMaxPartitions) {
+      disableAddPartitions()
+    }
+    // Check and evict, if after eviction we still don't have enough memory, then don't proceed
+    // We do not evict in ODP cases since we do not want eviction of ODP partitions that we already paged
+    // in for same query. Calling this as ODP cannibalism. :-)
+    if (addPartitionsDisabled() && !odp) evictForHeadroom()
     if (addPartitionsDisabled()) OutOfMemPartition
     else {
       // PartitionKey is copied to offheap bufferMemory and stays there until it is freed
@@ -1326,8 +1333,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   private def disableAddPartitions(): Unit = {
     assertThreadName(IngestSchedName)
     if (addPartitionsDisabled.compareAndSet(false, true))
-      logger.warn(s"dataset=$ref shard=$shardNum: Out of native memory and not able to evict enough; " +
-        s"adding partitions disabled")
+      logger.warn(s"dataset=$ref shard=$shardNum: Out of native memory, or max partitions reached. " +
+        s"Not able to evict enough; adding partitions disabled")
     shardStats.dataDropped.increment()
   }
 
@@ -1363,15 +1370,16 @@ class TimeSeriesShard(val ref: DatasetRef,
    * Check and evict partitions to free up memory and heap space.  NOTE: This must be called in the ingestion
    * stream so that there won't be concurrent other modifications.  Ideally this is called when trying to add partitions
    *
-   * CALL FROM HEADROOM TASK AFTER OBTAINING EVICTION LOCK PRIOR TO THIS CALL
+   * Call after obtaining evictionLock to prevent wrong query results.
+   * Lock must be skipped only in dire circumstances.
    *
    * @return true if able to evict enough or there was already space, false if not able to evict and not enough mem
    */
   // scalastyle:off method.length
-  private[filodb] def ensureFreeSpace(): Boolean = {
+  private[memstore] def makeSpaceForNewPartitions(forceEvict: Boolean): Boolean = {
     assertThreadName(IngestSchedName)
-    var numPartsToEvict = evictionPolicy.numPartitionsToEvictForHeadroom(partSet.size,
-                                                                         targetMaxPartitions, bufferMemoryManager)
+    val numPartsToEvict = if (forceEvict) (targetMaxPartitions * ensureHeadroomPercent / 100).toInt
+    else evictionPolicy.numPartitionsToEvictForHeadroom(partSet.size, targetMaxPartitions, bufferMemoryManager)
     if (numPartsToEvict > 0) {
       val partIdsToEvict = partitionsToEvict(numPartsToEvict)
       if (partIdsToEvict.isEmpty) {
@@ -1445,11 +1453,15 @@ class TimeSeriesShard(val ref: DatasetRef,
     val partIdsToEvict = new EWAHCompressedBitmap()
     var i = 0
     while (i < numPartsToEvict && !evictableOdpPartIds.isEmpty) {
-      partIdsToEvict.set(evictableOdpPartIds.remove())
+      val partId = evictableOdpPartIds.remove()
+      partIdsToEvict.set(partId)
+      logger.debug(s"Preparing to evict ODP partId=$partIdsToEvict")
       i += 1
     }
     while (i < numPartsToEvict && !evictablePartIds.isEmpty) {
-      partIdsToEvict.set(evictablePartIds.remove())
+      val partId = evictablePartIds.remove()
+      partIdsToEvict.set(partId)
+      logger.debug(s"Preparing to evict partId=$partIdsToEvict")
       i += 1
     }
     shardStats.evictablePartKeysSize.decrement(i)
@@ -1576,29 +1588,32 @@ class TimeSeriesShard(val ref: DatasetRef,
     ((1.0 - (currentFreePercent / ensurePercent)) * EvictionLock.maxTimeoutMillis).toInt
   }
 
-  private[filodb] def runHeadroomTask() = {
+  private[memstore] def evictForHeadroom() = {
     val blockEvictionLockTimeoutMs = getHeadroomLockTimeout(blockStore.currentFreePercent,
       ensureHeadroomPercent)
     val tspEvictionLockTimeoutMs: Int = getHeadroomLockTimeout(partitions.size.toDouble / targetMaxPartitions,
       ensureHeadroomPercent)
+    val higherTimeoutMs = Math.max(blockEvictionLockTimeoutMs, tspEvictionLockTimeoutMs)
 
-    // do only if one of blocks or TSPs need eviction
-    if (blockEvictionLockTimeoutMs > 0 || tspEvictionLockTimeoutMs > 0) {
+    // whether to force evict even if lock cannot be acquired, if situation is dire
+    val forceEvict = addPartitionsDisabled.get
+
+    // do only if one of blocks or TSPs need eviction or if addition of partitions disabled
+    if (higherTimeoutMs > 0 || forceEvict) {
       val start = System.nanoTime()
-      val timeoutMillis = Math.max(blockEvictionLockTimeoutMs, tspEvictionLockTimeoutMs)
-      logger.info(s"Trying exclusive lock with timeout of $timeoutMillis ms")
-      if (evictionLock.tryExclusiveReclaimLock(timeoutMillis)) {
-        logger.info(s"Acquired EvictionLock")
+      val timeoutMs = if (forceEvict) EvictionLock.maxTimeoutMillis else higherTimeoutMs
+      val acquired = evictionLock.tryExclusiveReclaimLock(timeoutMs)
+      // if forceEvict is true, then proceed even if we dont have a lock
+      if (forceEvict || acquired) {
         try {
           if (blockEvictionLockTimeoutMs > 0) {
             blockStore.ensureHeadroom(ensureHeadroomPercent)
           }
           if (tspEvictionLockTimeoutMs > 0) {
-            if (ensureFreeSpace()) addPartitionsDisabled := false
+            if (makeSpaceForNewPartitions(forceEvict)) addPartitionsDisabled := false
           }
         } finally {
-          evictionLock.releaseExclusive()
-          logger.info(s"Released EvictionLock")
+          if (acquired) evictionLock.releaseExclusive()
         }
       }
       val stall = System.nanoTime() - start
@@ -1609,7 +1624,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private def startHeadroomTask(sched: Scheduler) = {
     sched.scheduleWithFixedDelay(1, 1, TimeUnit.MINUTES, new Runnable {
       def run() = {
-        runHeadroomTask()
+        evictForHeadroom()
       }
     })
   }
