@@ -21,7 +21,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   import Filter._
   import GdeltTestData._
 
-  val keyIndex = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, 0, 1.hour)
+  val keyIndex = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, 0, 1.hour.toMillis)
   val partBuilder = new RecordBuilder(TestData.nativeMem)
 
   def partKeyOnHeap(dataset: Dataset,
@@ -269,7 +269,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   }
 
   it("should ignore unsupported columns and return empty filter") {
-    val index2 = new PartKeyLuceneIndex(dataset1.ref, dataset1.schema.partition, 0, 1.hour)
+    val index2 = new PartKeyLuceneIndex(dataset1.ref, dataset1.schema.partition, 0, 1.hour.toMillis)
     partKeyFromRecords(dataset1, records(dataset1, readers.take(10))).zipWithIndex.foreach { case (addr, i) =>
       index2.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, System.currentTimeMillis())()
     }

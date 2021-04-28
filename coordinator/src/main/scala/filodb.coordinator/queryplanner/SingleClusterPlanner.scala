@@ -17,6 +17,7 @@ import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
 import filodb.query.{exec, _}
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
+import filodb.query.exec.InternalRangeFunction.Last
 
 object SingleClusterPlanner {
   private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests").withoutTags
@@ -58,32 +59,64 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     ActorPlanDispatcher(targetActor)
   }
 
+  /**
+   * Change start time of logical plan according to earliestRetainedTimestampFn
+   */
+  private def updateStartTime(logicalPlan: LogicalPlan): Option[LogicalPlan] = {
+    val periodicSeriesPlan = LogicalPlanUtils.getPeriodicSeriesPlan(logicalPlan)
+    if (periodicSeriesPlan.isEmpty) Some(logicalPlan)
+    else {
+      //For binary join LHS & RHS should have same times
+      val boundParams = periodicSeriesPlan.get.head match {
+        case p: PeriodicSeries => (p.startMs, p.stepMs, WindowConstants.staleDataLookbackMillis,
+          p.offsetMs.getOrElse(0L), p.endMs)
+        case w: PeriodicSeriesWithWindowing => (w.startMs, w.stepMs, w.window, w.offsetMs.getOrElse(0L), w.endMs)
+        case _  => throw new UnsupportedOperationException(s"Invalid plan: ${periodicSeriesPlan.get.head}")
+      }
+
+      val newStartMs = boundToStartTimeToEarliestRetained(boundParams._1, boundParams._2, boundParams._3,
+        boundParams._4)
+      if (newStartMs <= boundParams._5) { // if there is an overlap between query and retention ranges
+        if (newStartMs != boundParams._1)
+          Some(LogicalPlanUtils.copyLogicalPlanWithUpdatedTimeRange(logicalPlan, TimeRange(newStartMs, boundParams._5)))
+        else Some(logicalPlan)
+      } else { // query is outside retention period, simply return empty result
+        None
+      }
+    }
+  }
+
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     val plannerParams = qContext.plannerParams
-    val timeSplitConfig = if (plannerParams.timeSplitEnabled)
-      (plannerParams.timeSplitEnabled, plannerParams.minTimeRangeForSplitMs, plannerParams.splitSizeMs)
-    else (timeSplitEnabled, minTimeRangeForSplitMs, splitSizeMs)
+    val updatedPlan = updateStartTime(logicalPlan)
+    if (updatedPlan.isEmpty) EmptyResultExec(qContext, dsRef)
+    else {
+     val logicalPlan = updatedPlan.get
+      val timeSplitConfig = if (plannerParams.timeSplitEnabled)
+        (plannerParams.timeSplitEnabled, plannerParams.minTimeRangeForSplitMs, plannerParams.splitSizeMs)
+      else (timeSplitEnabled, minTimeRangeForSplitMs, splitSizeMs)
 
-    if (shardMapperFunc.numShards <= 0) throw new IllegalStateException("No shards available")
-    val logicalPlans = if (logicalPlan.isInstanceOf[PeriodicSeriesPlan])
-      LogicalPlanUtils.splitPlans(logicalPlan, qContext, timeSplitConfig._1,
-        timeSplitConfig._2, timeSplitConfig._3)
-    else
-      Seq(logicalPlan)
-    val materialized = logicalPlans match {
-      case Seq(one) => materializeTimeSplitPlan(one, qContext)
-      case many =>
-        val meterializedPlans = many.map(materializeTimeSplitPlan(_, qContext))
-        val targetActor = pickDispatcher(meterializedPlans)
+      if (shardMapperFunc.numShards <= 0) throw new IllegalStateException("No shards available")
+      val logicalPlans = if (updatedPlan.get.isInstanceOf[PeriodicSeriesPlan])
+        LogicalPlanUtils.splitPlans(updatedPlan.get, qContext, timeSplitConfig._1,
+          timeSplitConfig._2, timeSplitConfig._3)
+      else
+        Seq(logicalPlan)
+      val materialized = logicalPlans match {
+        case Seq(one) => materializeTimeSplitPlan(one, qContext)
+        case many =>
+          val materializedPlans = many.map(materializeTimeSplitPlan(_, qContext))
+          val targetActor = pickDispatcher(materializedPlans)
 
-        // create SplitLocalPartitionDistConcatExec that will execute child execplanss sequentially and stitches
-        // results back with StitchRvsMapper transformer.
-        val stitchPlan = SplitLocalPartitionDistConcatExec(qContext, targetActor, meterializedPlans)
-        stitchPlan
+          // create SplitLocalPartitionDistConcatExec that will execute child execplanss sequentially and stitches
+          // results back with StitchRvsMapper transformer.
+          val stitchPlan = SplitLocalPartitionDistConcatExec(qContext, targetActor, materializedPlans)
+          stitchPlan
+      }
+      logger.debug(s"Materialized logical plan for dataset=$dsRef :" +
+        s" $logicalPlan to \n${materialized.printTree()}")
+      materialized
     }
-    logger.debug(s"Materialized logical plan for dataset=$dsRef :" +
-      s" $logicalPlan to \n${materialized.printTree()}")
-    materialized
   }
 
   private def materializeTimeSplitPlan(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
@@ -231,43 +264,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   private def materializeAggregate(qContext: QueryContext,
                                    lp: Aggregate): PlanResult = {
     val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, qContext)
-    val byKeysReal = ExtraOnByKeysUtil.getRealByLabels(lp, queryConfig.addExtraOnByKeysTimeRanges)
-
-    // Now we have one exec plan per shard
-    /*
-     * Note that in order for same overlapping RVs to not be double counted when spread is increased,
-     * one of the following must happen
-     * 1. Step instants must be chosen so time windows dont span shards.
-     * 2. We pump data into multiple shards for sometime so atleast one shard will fully contain any time window
-     *
-     * Pulling all data into one node and stich before reducing (not feasible, doesnt scale). So we will
-     * not stitch
-     *
-     * Starting off with solution 1 first until (2) or some other approach is decided on.
-     */
-    toReduceLevel1.plans.foreach {
-      _.addRangeVectorTransformer(AggregateMapReduce(lp.operator, lp.params,
-        LogicalPlanUtils.renameLabels(lp.without, dsOptions.metricColumn),
-        LogicalPlanUtils.renameLabels(byKeysReal, dsOptions.metricColumn)))
-    }
-
-    val toReduceLevel2 =
-      if (toReduceLevel1.plans.size >= 16) {
-        // If number of children is above a threshold, parallelize aggregation
-        val groupSize = Math.sqrt(toReduceLevel1.plans.size).ceil.toInt
-        toReduceLevel1.plans.grouped(groupSize).map { nodePlans =>
-          val reduceDispatcher = nodePlans.head.dispatcher
-          LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, nodePlans, lp.operator, lp.params)
-        }.toList
-      } else toReduceLevel1.plans
-
-    val reduceDispatcher = pickDispatcher(toReduceLevel2)
-    val reducer = LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
-    val promQlQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-
-    if (!qContext.plannerParams.skipAggregatePresent)
-      reducer.addRangeVectorTransformer(AggregatePresenter(lp.operator, lp.params, RangeParams(
-        promQlQueryParams.startSecs, promQlQueryParams.stepSecs, promQlQueryParams.endSecs)))
+    val reducer = addAggregator(lp, qContext, toReduceLevel1, queryConfig.addExtraOnByKeysTimeRanges)
     PlanResult(Seq(reducer), false) // since we have aggregated, no stitching
   }
 
@@ -275,33 +272,35 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                                                      lp: PeriodicSeriesWithWindowing): PlanResult = {
     val series = walkLogicalPlanTree(lp.series, qContext)
     val rawSource = lp.series.isRaw
-    val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
-    val paramsExec = materializeFunctionArgs(lp.functionArgs, qContext)
 
-    val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs, lp.window, lp.offsetMs.getOrElse(0))
-    if (newStartMs <= lp.endMs) { // if there is an overlap between query and retention ranges
-      val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
-      series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs,
-        lp.endMs, window, Some(execRangeFn), qContext, lp.stepMultipleNotationUsed,
-        paramsExec, lp.offsetMs, rawSource)))
-      series
-    } else { // query is outside retention period, simply return empty result
-      PlanResult(Seq(EmptyResultExec(qContext, dsRef)))
-    }
+    /* Last function is used to get the latest value in the window for absent_over_time
+    If no data is present AbsentFunctionMapper will return range vector with value 1 */
+
+    val execRangeFn = if (lp.function == RangeFunctionId.AbsentOverTime) Last
+                      else InternalRangeFunction.lpToInternalFunc(lp.function)
+
+    val paramsExec = materializeFunctionArgs(lp.functionArgs, qContext)
+    val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
+    series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs,
+      lp.endMs, window, Some(execRangeFn), qContext, lp.stepMultipleNotationUsed,
+      paramsExec, lp.offsetMs, rawSource)))
+    if (lp.function == RangeFunctionId.AbsentOverTime) {
+      val aggregate = Aggregate(AggregationOperator.Sum, lp, Nil, Seq("job"))
+      // Add sum to aggregate all child responses
+      // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
+      val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
+        qContext.plannerParams.copy(skipAggregatePresent = true)), series, Seq.empty)))
+      addAbsentFunctionMapper(aggregatePlanResult, lp.columnFilters,
+        RangeParams(lp.startMs / 1000, lp.stepMs / 1000, lp.endMs / 1000), qContext)
+    } else series
   }
 
   private def materializePeriodicSeries(qContext: QueryContext,
                                         lp: PeriodicSeries): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, qContext)
-    val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs,
-      WindowConstants.staleDataLookbackMillis, lp.offsetMs.getOrElse(0))
-    if (newStartMs <= lp.endMs) {  // if there is an overlap between query and retention ranges
-      rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs, lp.endMs,
+      rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
         None, None, qContext, false, Nil, lp.offsetMs)))
-      rawSeries
-    } else { // query is outside retention period, simply return empty result
-      PlanResult(Seq(EmptyResultExec(qContext, dsRef)))
-    }
+   rawSeries
   }
 
   /**

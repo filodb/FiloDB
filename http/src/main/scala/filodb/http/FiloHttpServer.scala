@@ -1,5 +1,6 @@
 package filodb.http
 
+import scala.collection.JavaConverters._
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.FiniteDuration
 
@@ -49,10 +50,21 @@ class FiloHttpServer(actorSystem: ActorSystem, filoSettings: FilodbSettings) ext
     implicit val system = actorSystem
     implicit val materializer = ActorMaterializer()
     // This is a preliminary implementation of routes. Will be enhanced later
-    val filoRoutes: List[FiloRoute] = List(AdminRoutes,
+    val defaultRoutes: List[FiloRoute] = List(AdminRoutes,
                                            new ClusterApiRoute(clusterProxy),
                                            new HealthRoute(coordinatorRef),
                                            new PrometheusApiRoute(coordinatorRef, settings))
+
+    // Load runtime api routes from class names.
+    // The class should implement filodb.http.FiloRoute
+    // and contain an empty constructor.
+    val runtimeRoutes = settings.httpRuntimeApiRoutes.asScala.map {
+      Class.forName(_)
+        .getConstructor()
+        .newInstance()
+        .asInstanceOf[FiloRoute]
+    }
+    val filoRoutes = defaultRoutes ++ runtimeRoutes
     val reduced = filoRoutes.foldLeft[Route](reject)((acc, r) => r.route ~ acc)
     val finalRoute = handleExceptions(filoExceptionHandler) {
       reduced ~ externalRoutes

@@ -73,6 +73,8 @@ case class UnsupportedChunkSource() extends ChunkSource {
 
   override def isDownsampleStore: Boolean = false
 
+  override def isReadyForQuery(ref: DatasetRef, shard: Int): Boolean = true
+
   override def topKCardinality(ref: DatasetRef,
                                shards: Seq[Int],
                                shardKeyPrefix: scala.Seq[String],

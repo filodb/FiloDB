@@ -57,6 +57,8 @@ object InternalRangeFunction {
 
   case object Timestamp extends InternalRangeFunction
 
+  case object AbsentOverTime extends InternalRangeFunction
+
   //scalastyle:off cyclomatic.complexity
   def lpToInternalFunc(extFuncId: RangeFunctionId): InternalRangeFunction = extFuncId match {
     case RangeFunctionId.AvgOverTime      => AvgOverTime
@@ -80,6 +82,7 @@ object InternalRangeFunction {
     case RangeFunctionId.SumOverTime      => SumOverTime
     case RangeFunctionId.Timestamp        => Timestamp
     case RangeFunctionId.Last             => Last
+    case RangeFunctionId.AbsentOverTime   => AbsentOverTime
   }
   //scalastyle:on cyclomatic.complexity
 }

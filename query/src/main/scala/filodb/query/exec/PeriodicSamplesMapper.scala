@@ -24,9 +24,9 @@ import filodb.query.util.IndexedArrayQueue
   * @param stepMultipleNotationUsed if counter based range function is used, and this flag is
   *                                 enabled, then publish interval is padded to lookback window length
   */
-final case class PeriodicSamplesMapper(start: Long,
-                                       step: Long,
-                                       end: Long,
+final case class PeriodicSamplesMapper(startMs: Long,
+                                       stepMs: Long,
+                                       endMs: Long,
                                        window: Option[Long],
                                        functionId: Option[InternalRangeFunction],
                                        queryContext: QueryContext,
@@ -34,12 +34,12 @@ final case class PeriodicSamplesMapper(start: Long,
                                        funcParams: Seq[FuncArgs] = Nil,
                                        offsetMs: Option[Long] = None,
                                        rawSource: Boolean = true) extends RangeVectorTransformer {
-  require(start <= end, s"start $start should be <= end $end")
-  require(start == end || step > 0, s"step $step should be > 0 for range query")
-  val adjustedStep = if (step > 0) step else step + 1 // needed for iterators to terminate when start == end
+  require(startMs <= endMs, s"start $startMs should be <= end $endMs")
+  require(startMs == endMs || stepMs > 0, s"step $stepMs should be > 0 for range query")
+  val adjustedStep = if (stepMs > 0) stepMs else stepMs + 1 // needed for iterators to terminate when start == end
 
-  val startWithOffset = start - offsetMs.getOrElse(0L)
-  val endWithOffset = end - offsetMs.getOrElse(0L)
+  val startWithOffset = startMs - offsetMs.getOrElse(0L)
+  val endWithOffset = endMs - offsetMs.getOrElse(0L)
 
   val isLastFn = functionId.isEmpty || functionId.contains(InternalRangeFunction.LastSampleHistMax) ||
     functionId.contains(InternalRangeFunction.Timestamp)
@@ -48,7 +48,7 @@ final case class PeriodicSamplesMapper(start: Long,
                                   "Need positive window lengths to apply range function")
   else require(window.isEmpty, "Should not specify window length when not applying windowing function")
 
-  protected[exec] def args: String = s"start=$start, step=$step, end=$end," +
+  protected[exec] def args: String = s"start=$startMs, step=$stepMs, end=$endMs," +
     s" window=$window, functionId=$functionId, rawSource=$rawSource, offsetMs=$offsetMs"
 
  //scalastyle:off method.length
@@ -58,7 +58,7 @@ final case class PeriodicSamplesMapper(start: Long,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     // enforcement of minimum step is good since we have a high limit on number of samples
-    if (start < end && step < querySession.queryConfig.minStepMs) // range query with small step
+    if (startMs < endMs && stepMs < querySession.queryConfig.minStepMs) // range query with small step
       throw new BadQueryException(s"step should be at least ${querySession.queryConfig.minStepMs/1000}s")
     val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
     // If a max column is present, the ExecPlan's job is to put it into column 2
@@ -172,7 +172,7 @@ final case class PeriodicSamplesMapper(start: Long,
         case (ColumnInfo(name, ColumnType.DoubleColumn), i) if i == 1 =>
           ColumnInfo("value", ColumnType.DoubleColumn)
         case (c: ColumnInfo, _) => c
-      }, fixedVectorLen = if (end == start) Some(1) else Some(((end - start) / adjustedStep).toInt + 1))
+      }, fixedVectorLen = if (endMs == startMs) Some(1) else Some(((endMs - startMs) / adjustedStep).toInt + 1))
     }
   }
 }

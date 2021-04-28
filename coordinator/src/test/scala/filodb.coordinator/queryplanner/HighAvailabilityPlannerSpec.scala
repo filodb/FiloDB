@@ -87,8 +87,8 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
       l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
       l1.rangeVectorTransformers.size shouldEqual 2
       l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual (100)
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual (10000)
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].startMs shouldEqual (100)
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].endMs shouldEqual (10000)
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
   }
@@ -159,8 +159,8 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
         2000000
       l1.rangeVectorTransformers.size shouldEqual 2
       l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual (1060000)
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual (2000000)
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].startMs shouldEqual (1060000)
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].endMs shouldEqual (2000000)
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
     val queryParams = child2.queryContext.origQueryParams.
@@ -293,8 +293,8 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
         2000000
       l1.rangeVectorTransformers.size shouldEqual 2
       l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual 1080000
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual 2000000
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].startMs shouldEqual 1080000
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].endMs shouldEqual 2000000
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
 
@@ -373,8 +373,8 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
       l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
       l1.rangeVectorTransformers.size shouldEqual 2
       l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual from *1000
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual  to * 1000
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].startMs shouldEqual from *1000
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].endMs shouldEqual  to * 1000
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
   }

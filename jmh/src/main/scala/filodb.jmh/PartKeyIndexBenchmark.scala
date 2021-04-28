@@ -22,7 +22,7 @@ class PartKeyIndexBenchmark {
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
 
   val ref = DatasetRef("prometheus")
-  val partKeyIndex = new PartKeyLuceneIndex(ref, untyped.partition, 0, 1.hour)
+  val partKeyIndex = new PartKeyLuceneIndex(ref, untyped.partition, 0, 1.hour.toMillis)
   val numSeries = 1000000
   val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory)
   val untypedData = TestTimeseriesProducer.timeSeriesData(0, numSeries) take numSeries

@@ -27,14 +27,19 @@ trait ReduceAggregateExec extends NonLeafExecPlan {
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     val results = childResponses.flatMap {
-        case (QueryResult(_, _, result), _) => Observable.fromIterable(result)
+        case (QueryResult(_, _, result, _, _), _) => Observable.fromIterable(result)
         case (QueryError(_, ex), _)         => throw ex
     }
-    val task = for { schema <- firstSchema }
+
+    val task = for { schema <- firstSchema}
                yield {
-                 val aggregator = RowAggregator(aggrOp, aggrParams, schema)
-                 RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key,
-                   querySession.qContext.plannerParams.groupByCardLimit)
+                 // For absent function schema can be empty
+                 if (schema == ResultSchema.empty) Observable.empty
+                 else {
+                   val aggregator = RowAggregator(aggrOp, aggrParams, schema)
+                   RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key,
+                     querySession.qContext.plannerParams.groupByCardLimit)
+                 }
                }
     Observable.fromTask(task).flatten
   }
@@ -122,7 +127,7 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
                                     rangeParams: RangeParams,
                                     funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
 
-  protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
+  protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams, rangeParams=$rangeParams"
 
   def apply(source: Observable[RangeVector],
             querySession: QuerySession,

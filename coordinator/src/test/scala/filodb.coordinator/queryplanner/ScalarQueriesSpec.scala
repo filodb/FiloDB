@@ -406,7 +406,7 @@ class ScalarQueriesSpec extends AnyFunSpec with Matchers {
   }
 
   it("should generate BinaryJoinExec for query node_info > bool http_requests_total") {
-    val lp = Parser.queryToLogicalPlan("node_info{job = \"app\"} > bool" +
+    val lp = Parser.queryToLogicalPlan("node_info{job = \"app\"} > bool " +
       "http_requests_total{job = \"app\"}", 1000, 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
@@ -480,7 +480,7 @@ class ScalarQueriesSpec extends AnyFunSpec with Matchers {
       """T~ScalarOperationMapper(operator=SUB, scalarOnLhs=false)
         |-FA1~
         |-E~ScalarBinaryOperationExec(params = RangeParams(1000,1000,1000), operator = DIV, lhs = Left(10.0), rhs = Left(2.0)) on InProcessPlanDispatcher
-        |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List())
+        |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,1000,1000))
         |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-669137818])
         |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
         |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)

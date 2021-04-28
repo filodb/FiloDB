@@ -25,13 +25,12 @@ class IndexBootstrapper(colStore: ColumnStore) {
     * @param assignPartId the function to invoke to get the partitionId to be used to populate the index record
     * @return number of updated records
     */
-  def bootstrapIndex(index: PartKeyLuceneIndex,
-                     shardNum: Int,
-                     ref: DatasetRef)
-                     (assignPartId: PartKeyRecord => Int): Task[Long] = {
+  def bootstrapIndexRaw(index: PartKeyLuceneIndex,
+                        shardNum: Int,
+                        ref: DatasetRef)
+                       (assignPartId: PartKeyRecord => Int): Task[Long] = {
 
-    val recoverIndexLatency = Kamon.histogram("shard-recover-index-latency",
-      MeasurementUnit.time.milliseconds)
+    val recoverIndexLatency = Kamon.gauge("shard-recover-index-latency", MeasurementUnit.time.milliseconds)
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum)
     val start = System.currentTimeMillis()
@@ -43,7 +42,37 @@ class IndexBootstrapper(colStore: ColumnStore) {
       .countL
       .map { count =>
         index.refreshReadersBlocking()
-        recoverIndexLatency.record(System.currentTimeMillis() - start)
+        recoverIndexLatency.update(System.currentTimeMillis() - start)
+        count
+      }
+  }
+
+  /**
+   * Same as bootstrapIndexRaw, except that we parallelize lucene update for
+   * faster bootstrap of large number of index entries in downsample cluster.
+   * Not doing this in raw cluster since parallel TimeSeriesPartition
+   * creation requires more careful contention analysis
+   */
+  def bootstrapIndexDownsample(index: PartKeyLuceneIndex,
+                     shardNum: Int,
+                     ref: DatasetRef)
+                    (assignPartId: PartKeyRecord => Int): Task[Long] = {
+
+    val recoverIndexLatency = Kamon.gauge("shard-recover-index-latency", MeasurementUnit.time.milliseconds)
+      .withTag("dataset", ref.dataset)
+      .withTag("shard", shardNum)
+    val start = System.currentTimeMillis()
+    colStore.scanPartKeys(ref, shardNum)
+      .mapAsync(Runtime.getRuntime.availableProcessors()) { pk =>
+        Task {
+          val partId = assignPartId(pk)
+          index.addPartKey(pk.partKey, partId, pk.startTime, pk.endTime)()
+        }
+      }
+      .countL
+      .map { count =>
+        index.refreshReadersBlocking()
+        recoverIndexLatency.update(System.currentTimeMillis() - start)
         count
       }
   }
@@ -66,7 +95,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
                    schemas: Schemas,
                    parallelism: Int = Runtime.getRuntime.availableProcessors())
                    (lookUpOrAssignPartId: Array[Byte] => Int): Task[Long] = {
-    val recoverIndexLatency = Kamon.histogram("downsample-store-refresh-index-latency",
+    val recoverIndexLatency = Kamon.gauge("downsample-store-refresh-index-latency",
       MeasurementUnit.time.milliseconds)
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum)
@@ -85,7 +114,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
      .countL
      .map { count =>
        index.refreshReadersBlocking()
-       recoverIndexLatency.record(System.currentTimeMillis() - start)
+       recoverIndexLatency.update(System.currentTimeMillis() - start)
        count
      }
   }
