@@ -238,9 +238,9 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       val rangeFrom = from + (splitSizeMs * i) + (stepMs * i)
       val rangeTo = min(rangeFrom + splitSizeMs, to)
       exec.children.head.children.head.rangeVectorTransformers
-        .head.asInstanceOf[PeriodicSamplesMapper].start shouldEqual rangeFrom
+        .head.asInstanceOf[PeriodicSamplesMapper].startMs shouldEqual rangeFrom
       exec.children.head.children.head.rangeVectorTransformers
-        .head.asInstanceOf[PeriodicSamplesMapper].end shouldEqual rangeTo
+        .head.asInstanceOf[PeriodicSamplesMapper].endMs shouldEqual rangeTo
     }
 
     // assert that all child plans are not altered
@@ -396,76 +396,66 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
 
     val splitEp1 = planner.materialize(logicalPlan1, QueryContext(plannerParams = plannerParams2))
                           .asInstanceOf[SplitLocalPartitionDistConcatExec]
-    splitEp1.children should have length(4)
+    splitEp1.children should have length(3)
 
-    splitEp1.children.head.isInstanceOf[EmptyResultExec] shouldEqual true // outside retention period
-
-    val ep11 = splitEp1.children(1)
+    val ep11 = splitEp1.children(0)
     val psm11 = ep11.children.head.asInstanceOf[MultiSchemaPartitionsExec]
                 .rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
-    psm11.start shouldEqual (nowSeconds * 1000
+    psm11.startMs shouldEqual (nowSeconds * 1000
                             - 3.days.toMillis // retention
                             + 1.minute.toMillis // step
                             + WindowConstants.staleDataLookbackMillis) // default window
-    psm11.end shouldEqual psm11.start - WindowConstants.staleDataLookbackMillis + 1.day.toMillis
+   psm11.endMs shouldEqual psm11.startMs + 1.day.toMillis
 
-    val ep12 = splitEp1.children(2)
+    val ep12 = splitEp1.children(1)
     val psm12 = ep12.children.head.asInstanceOf[MultiSchemaPartitionsExec]
                 .rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
-    psm12.start shouldEqual psm11.end + 1.minute.toMillis // step
-    psm12.end shouldEqual psm12.start + 1.day.toMillis
+    psm12.startMs shouldEqual psm11.endMs + 1.minute.toMillis // step
+    psm12.endMs shouldEqual psm12.startMs + 1.day.toMillis
 
-    val ep13 = splitEp1.children(3)
+    val ep13 = splitEp1.children(2)
     val psm13 = ep13.children.head.asInstanceOf[MultiSchemaPartitionsExec]
       .rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
-    psm13.start shouldEqual psm12.end + 1.minute.toMillis // step
-    psm13.end shouldEqual min(psm13.start + 1.day.toMillis, nowSeconds*1000)
+    psm13.startMs shouldEqual psm12.endMs + 1.minute.toMillis // step
+    psm13.endMs shouldEqual min(psm13.startMs + 1.day.toMillis, nowSeconds*1000)
 
     // Case 2: no offset, some window
     val logicalPlan2 = Parser.queryRangeToLogicalPlan("""rate(foo{job="bar"}[20m])""",
       TimeStepParams(nowSeconds - 4.days.toSeconds, 1.minute.toSeconds, nowSeconds))
     val splitEp2 = planner.materialize(logicalPlan2, QueryContext(plannerParams = plannerParams2)).asInstanceOf[SplitLocalPartitionDistConcatExec]
-    splitEp2.children should have length(4)
+    splitEp2.children should have length(3)
 
-    splitEp2.children.head.isInstanceOf[EmptyResultExec] shouldEqual true
-    val ep21 = splitEp2.children(1)
+    val ep21 = splitEp2.children(0)
     val psm21 = ep21.children.head.asInstanceOf[MultiSchemaPartitionsExec]
       .rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
-    psm21.start shouldEqual (nowSeconds * 1000
+    psm21.startMs shouldEqual (nowSeconds * 1000
       - 3.days.toMillis // retention
       + 1.minute.toMillis // step
       + 20.minutes.toMillis) // window
-    psm21.end shouldEqual psm21.start - 20.minutes.toMillis + 1.day.toMillis
+    psm21.endMs shouldEqual psm21.startMs + 1.day.toMillis
 
     // Case 3: offset and some window
     val logicalPlan3 = Parser.queryRangeToLogicalPlan("""rate(foo{job="bar"}[20m] offset 15m)""",
       TimeStepParams(nowSeconds - 4.days.toSeconds, 1.minute.toSeconds, nowSeconds))
 
     val splitEp3 = planner.materialize(logicalPlan3, QueryContext(plannerParams = plannerParams2)).asInstanceOf[SplitLocalPartitionDistConcatExec]
-    splitEp3.children should have length(4)
+    splitEp3.children should have length(3)
 
-    splitEp3.children.head.isInstanceOf[EmptyResultExec] shouldEqual true
-    val ep31 = splitEp3.children(1)
+    val ep31 = splitEp3.children(0)
     val psm31 = ep31.children.head.asInstanceOf[MultiSchemaPartitionsExec]
       .rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
-    psm31.start shouldEqual (nowSeconds * 1000
+    psm31.startMs shouldEqual (nowSeconds * 1000
       - 3.days.toMillis // retention
       + 1.minute.toMillis // step
       + 20.minutes.toMillis  // window
       + 15.minutes.toMillis) // offset
-    psm31.end shouldEqual psm31.start - 20.minutes.toMillis - 15.minutes.toMillis + 1.day.toMillis
+    psm31.endMs shouldEqual psm31.startMs + 1.day.toMillis
 
     // Case 4: outside retention
     val logicalPlan4 = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""",
       TimeStepParams(nowSeconds - 10.days.toSeconds, 1.minute.toSeconds, nowSeconds - 5.days.toSeconds))
     val ep4 = planner.materialize(logicalPlan4, QueryContext(plannerParams = plannerParams2))
-    ep4.children should have length (5)
-    ep4.children.foreach { childPlan =>
-      childPlan.isInstanceOf[EmptyResultExec] shouldEqual true
-      import filodb.core.GlobalScheduler._
-      val res = childPlan.dispatcher.dispatch(childPlan).runAsync.futureValue.asInstanceOf[QueryResult]
-      res.result.isEmpty shouldEqual true
-    }
+    ep4.isInstanceOf[EmptyResultExec] shouldEqual true
   }
 
   it("should generate SplitExec wrapper with appropriate splits " +
@@ -483,8 +473,8 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     ("""sum(rate(foo{job="bar"}[3d]))""",1000, 100, 1000), plannerParams = plannerParams2)).asInstanceOf[LocalPartitionReduceAggregateExec]
     val psm = ep.children.head.asInstanceOf[MultiSchemaPartitionsExec]
       .rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
-    psm.start shouldEqual (nowSeconds * 1000)
-    psm.end shouldEqual (nowSeconds * 1000)
+    psm.startMs shouldEqual (nowSeconds * 1000)
+    psm.endMs shouldEqual (nowSeconds * 1000)
   }
 
   it("should generate SplitExec wrapper with appropriate splits and should generate child execPlans with offset") {
@@ -519,9 +509,9 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       rvt.offsetMs.get shouldEqual 300000
       rvt.startWithOffset shouldEqual(expRvtStartOffset) // (700 - 300) * 1000
       rvt.endWithOffset shouldEqual (expRvtEndOffset) // (10000 - 300) * 1000
-      rvt.start shouldEqual expRvtStart // start and end should be same as query TimeStepParams
-      rvt.end shouldEqual expRvtEnd
-      rvt.step shouldEqual 1000000
+      rvt.startMs shouldEqual expRvtStart // start and end should be same as query TimeStepParams
+      rvt.endMs shouldEqual expRvtEnd
+      rvt.stepMs shouldEqual 1000000
     }
 
   }
@@ -559,9 +549,9 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       rvt.offsetMs.get shouldEqual 300000
       rvt.startWithOffset shouldEqual(expRvtStartOffset) // (700 - 300) * 1000
       rvt.endWithOffset shouldEqual (expRvtEndOffset) // (10000 - 300) * 1000
-      rvt.start shouldEqual expRvtStart // start and end should be same as query TimeStepParams
-      rvt.end shouldEqual expRvtEnd
-      rvt.step shouldEqual 1000000
+      rvt.startMs shouldEqual expRvtStart // start and end should be same as query TimeStepParams
+      rvt.endMs shouldEqual expRvtEnd
+      rvt.stepMs shouldEqual 1000000
     }
   }
 
@@ -631,7 +621,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     }
 
     val logicalPlan2 = Parser.queryRangeToLogicalPlan(
-      """sum(foo{_ns_="bar1", _ws_="test"}) + group_left(__name__)
+      """sum(foo{_ns_="bar1", _ws_="test"}) + ignoring(__name__) group_left(__name__)
         | sum(foo{_ns_="bar2", _ws_="test"})""".stripMargin,
       TimeStepParams(1000, 20, 2000))
     val execPlan2 = engine.materialize(logicalPlan2, QueryContext(origQueryParams = promQlQueryParams, plannerParams = plannerParams2))
@@ -685,9 +675,9 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       rvt1.offsetMs.get shouldEqual(300000)
       rvt1.startWithOffset shouldEqual(expRvtStartOffset) // (700 - 300) * 1000
       rvt1.endWithOffset shouldEqual (expRvtEndOffset) // (10000 - 300) * 1000
-      rvt1.start shouldEqual expRvtStart
-      rvt1.end shouldEqual expRvtEnd
-      rvt1.step shouldEqual 1000000
+      rvt1.startMs shouldEqual expRvtStart
+      rvt1.endMs shouldEqual expRvtEnd
+      rvt1.stepMs shouldEqual 1000000
 
       binaryJoin.rhs(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
       val multiSchemaExec2 = binaryJoin.rhs(0).asInstanceOf[MultiSchemaPartitionsExec]
@@ -700,9 +690,9 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       rvt2.offsetMs.isEmpty shouldEqual true
       rvt2.startWithOffset shouldEqual(expRvtStart)
       rvt2.endWithOffset shouldEqual (expRvtEnd)
-      rvt2.start shouldEqual expRvtStart
-      rvt2.end shouldEqual expRvtEnd
-      rvt2.step shouldEqual 1000000
+      rvt2.startMs shouldEqual expRvtStart
+      rvt2.endMs shouldEqual expRvtEnd
+      rvt2.stepMs shouldEqual 1000000
     }
 
   }

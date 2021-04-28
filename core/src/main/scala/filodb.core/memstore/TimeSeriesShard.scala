@@ -40,6 +40,8 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
 
   val timeseriesCount = Kamon.gauge("memstore-timeseries-count")
+  val shardTotalRecoveryTime = Kamon.gauge("memstore-total-shard-recovery-time",
+    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
   val chunksQueried = Kamon.counter("memstore-chunks-queried").withTags(TagSet.from(tags))
   val chunksQueriedByShardKey = Kamon.counter("memstore-chunks-queried-by-shardkey")
   val tsCountBySchema = Kamon.gauge("memstore-timeseries-by-schema").withTags(TagSet.from(tags))
@@ -246,9 +248,13 @@ class TimeSeriesShard(val ref: DatasetRef,
   import FiloSchedulers._
   import TimeSeriesShard._
 
+  @volatile var isReadyForQuery = false
+
   val shardStats = new TimeSeriesShardStats(ref, shardNum)
-  val shardKeyLevelIngestionMetricsEnabled = filodbConfig.getBoolean("shard-key-level-igestion-metrics-enabled")
-  val shardKeyLevelQueryMetricsEnabled = filodbConfig.getBoolean("shard-key-level-igestion-metrics-enabled")
+  val shardKeyLevelIngestionMetricsEnabled = filodbConfig.getBoolean("shard-key-level-ingestion-metrics-enabled")
+  val shardKeyLevelQueryMetricsEnabled = filodbConfig.getBoolean("shard-key-level-query-metrics-enabled")
+
+  val creationTime = System.currentTimeMillis()
 
   /**
     * Map of all partitions in the shard stored in memory, indexed by partition ID
@@ -266,7 +272,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Maintained using a high-performance bitmap index.
     */
   private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, shardNum,
-    storeConfig.demandPagedRetentionPeriod)
+    storeConfig.diskTTLSeconds * 1000)
 
   private val cardTracker: CardinalityTracker = if (storeConfig.meteringEnabled) {
     // FIXME switch this to some local-disk based store when we graduate out of POC mode
@@ -334,7 +340,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private val blockMemorySize = storeConfig.shardMemSize
   protected val numGroups = storeConfig.groupsPerShard
-  private val chunkRetentionHours = (storeConfig.demandPagedRetentionPeriod.toSeconds / 3600).toInt
+  private val chunkRetentionHours = (storeConfig.diskTTLSeconds / 3600).toInt
   val pagingEnabled = storeConfig.demandPagingEnabled
 
   /**
@@ -572,7 +578,8 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   def recoverIndex(): Future[Unit] = {
     val indexBootstrapper = new IndexBootstrapper(colStore)
-    indexBootstrapper.bootstrapIndex(partKeyIndex, shardNum, ref)(bootstrapPartKey)
+    indexBootstrapper.bootstrapIndexRaw(partKeyIndex, shardNum, ref)(bootstrapPartKey)
+                     .executeOn(ingestSched) // to make sure bootstrapIndex task is run on ingestion thread
                      .map { count =>
                         startFlushingIndex()
                        logger.info(s"Bootstrapped index for dataset=$ref shard=$shardNum with $count records")
@@ -813,7 +820,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     // TODO Much of the purging work other of removing TSP from shard data structures can be done
     // asynchronously on another thread. No need to block ingestion thread for this.
     val start = System.currentTimeMillis()
-    val partsToPurge = partKeyIndex.partIdsEndedBefore(start - storeConfig.demandPagedRetentionPeriod.toMillis)
+    val partsToPurge = partKeyIndex.partIdsEndedBefore(start - storeConfig.diskTTLSeconds * 1000)
     val removedParts = debox.Buffer.empty[Int]
     val partIter = InMemPartitionIterator2(partsToPurge)
     partIter.foreach { p =>

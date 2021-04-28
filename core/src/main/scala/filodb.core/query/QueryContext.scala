@@ -12,6 +12,7 @@ trait TsdbQueryParams
 /**
   * This class provides PromQl query parameters
   * Config has routing parameters
+ *  startSecs, stepSecs, endSecs should not be used for query execution as it can be changed by query planner
   */
 case class PromQlQueryParams(promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long , remoteQueryPath:
                             Option[String] = None, verbose: Boolean = false) extends TsdbQueryParams
@@ -19,19 +20,20 @@ case class PromQlQueryParams(promQl: String, startSecs: Long, stepSecs: Long, en
 case object UnavailablePromQlQueryParams extends TsdbQueryParams
 
 case class PlannerParams(applicationId: String = "filodb",
-                        spread: Option[Int] = None,
-                        spreadOverride: Option[SpreadProvider] = None,
-                        shardOverrides: Option[Seq[Int]] = None,
-                        queryTimeoutMillis: Int = 30000,
-                        sampleLimit: Int = 1000000,
-                        groupByCardLimit: Int = 100000,
-                        joinQueryCardLimit: Int = 100000,
-                        timeSplitEnabled: Boolean = false,
-                        minTimeRangeForSplitMs: Long = 1.day.toMillis,
-                        splitSizeMs: Long = 1.day.toMillis,
-                        skipAggregatePresent: Boolean = false,
-                        processFailure: Boolean = true,
-                        processMultiPartition: Boolean = false)
+                         spread: Option[Int] = None,
+                         spreadOverride: Option[SpreadProvider] = None,
+                         shardOverrides: Option[Seq[Int]] = None,
+                         queryTimeoutMillis: Int = 30000,
+                         sampleLimit: Int = 1000000,
+                         groupByCardLimit: Int = 100000,
+                         joinQueryCardLimit: Int = 100000,
+                         timeSplitEnabled: Boolean = false,
+                         minTimeRangeForSplitMs: Long = 1.day.toMillis,
+                         splitSizeMs: Long = 1.day.toMillis,
+                         skipAggregatePresent: Boolean = false,
+                         processFailure: Boolean = true,
+                         processMultiPartition: Boolean = false,
+                         allowPartialResults: Boolean = false)
 object PlannerParams {
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): PlannerParams =
     PlannerParams(spreadOverride = constSpread, sampleLimit = sampleLimit)
@@ -83,7 +85,9 @@ object QueryContext {
   */
 case class QuerySession(qContext: QueryContext,
                         queryConfig: QueryConfig,
-                        var lock: Option[Lock] = None) {
+                        var lock: Option[Lock] = None,
+                        var resultCouldBePartial: Boolean = false,
+                        var partialResultsReason: Option[String] = None) {
   def close(): Unit = {
     lock.foreach(_.unlock())
     lock = None

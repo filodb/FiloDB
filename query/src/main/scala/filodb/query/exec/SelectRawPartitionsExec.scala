@@ -67,7 +67,9 @@ object SelectRawPartitionsExec extends  {
     Schemas.rowKeyIDs ++ {
       if (colNames.nonEmpty) {
         // query is selecting specific columns
-        dataSchema.colIDs(colNames: _*).get
+        val colIds = dataSchema.colIDs(colNames: _*)
+        require(colIds.isGood, s"$colNames is not a valid column name.")
+        colIds.get
       } else if (dataSchema != Schemas.dsGauge) {
         // needs to select raw data
         dataSchema.colIDs(dataSchema.data.valueColName).get

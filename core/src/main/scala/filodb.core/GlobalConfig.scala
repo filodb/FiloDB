@@ -15,7 +15,7 @@ object GlobalConfig extends StrictLogging {
   val defaultsFromUrl = ConfigFactory.load("filodb-defaults")
   val defaultFiloConfig = defaultsFromUrl.getConfig("filodb")
 
-  val systemConfig: Config = {
+  val unresolvedSystemConfig: Config = {
     ConfigFactory.invalidateCaches()
 
     val customConfig = sys.props.get("filodb.config.file").orElse(sys.props.get("config.file"))
@@ -27,6 +27,9 @@ object GlobalConfig extends StrictLogging {
     ConfigFactory.defaultOverrides.withFallback(customConfig) // spark overrides cluster.roles, cli doesn't
                  .withFallback(defaultsFromUrl)
                  .withFallback(ConfigFactory.defaultReference())
-                 .resolve()
+  }
+
+  val systemConfig: Config = {
+    unresolvedSystemConfig.resolve()
   }
 }
