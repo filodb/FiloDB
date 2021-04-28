@@ -464,7 +464,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     shard.addPartitionsDisabled() shouldEqual true
 
     markPartitionsForEviction(10 until 20)
-    shard.evictForHeadroom() // this should evict only 10 partitions, but cannot reach headroom
+    shard.evictForHeadroom() shouldEqual true // this should evict only 10 partitions, but cannot reach headroom
     // but add of new partitions is enabled since we were able to evict some
     shard.addPartitionsDisabled() shouldEqual false
     shard.partitions.size() shouldEqual 1090
@@ -503,7 +503,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     ex2.getCause.isInstanceOf[ServiceUnavailableException] shouldEqual true
 
     // after next headroom task run....
-    shard.evictForHeadroom()
+    shard.evictForHeadroom() shouldEqual true
 
     // now query should succeed
     val parts = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter)),
@@ -516,7 +516,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     // mark some parts as evictable
     markPartitionsForEviction(21 until 25)
-    shard.evictForHeadroom()
+    shard.evictForHeadroom() shouldEqual true
     // odp partitions should be evicted first before regular partitions
     shard.evictableOdpPartIds.size() shouldEqual 0
 

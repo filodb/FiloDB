@@ -1588,7 +1588,12 @@ class TimeSeriesShard(val ref: DatasetRef,
     ((1.0 - (currentFreePercent / ensurePercent)) * EvictionLock.maxTimeoutMillis).toInt
   }
 
-  private[memstore] def evictForHeadroom() = {
+  /**
+   * Acquire eviction lock and reclaim block and TSP memory.
+   * If addPartitions is disabled, we force eviction even if we cannot acquire eviction lock.
+   * @return true if eviction was attempted
+   */
+  private[memstore] def evictForHeadroom(): Boolean = {
     val blockEvictionLockTimeoutMs = getHeadroomLockTimeout(blockStore.currentFreePercent,
       ensureHeadroomPercent)
     val tspEvictionLockTimeoutMs: Int = getHeadroomLockTimeout(partitions.size.toDouble / targetMaxPartitions,
@@ -1604,7 +1609,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       val timeoutMs = if (forceEvict) EvictionLock.maxTimeoutMillis else higherTimeoutMs
       val acquired = evictionLock.tryExclusiveReclaimLock(timeoutMs)
       // if forceEvict is true, then proceed even if we dont have a lock
-      if (forceEvict || acquired) {
+      val jobDone = if (forceEvict || acquired) {
         try {
           if (blockEvictionLockTimeoutMs > 0) {
             blockStore.ensureHeadroom(ensureHeadroomPercent)
@@ -1615,9 +1620,15 @@ class TimeSeriesShard(val ref: DatasetRef,
         } finally {
           if (acquired) evictionLock.releaseExclusive()
         }
+        true
+      } else {
+        false
       }
       val stall = System.nanoTime() - start
       shardStats.blockHeadroomStall.increment(stall)
+      jobDone
+    } else {
+      true
     }
   }
 

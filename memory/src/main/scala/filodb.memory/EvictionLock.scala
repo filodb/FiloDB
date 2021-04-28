@@ -54,13 +54,13 @@ class EvictionLock(debugInfo: String = "none") extends StrictLogging {
           // The lock state is logged in case it's stuck due to a runaway query somewhere.
           logger.warn(s"Lock for ensureHeadroom timed out: ${this}")
         }
+      }
+      if (timeout >= finalTimeoutMillis) {
         numFailures += 1
         if (numFailures >= 5) {
           Shutdown.haltAndCatchFire(new RuntimeException(s"Headroom task was unable to acquire exclusive lock " +
             s"for $numFailures consecutive attempts. Shutting down process. $debugInfo"))
         }
-      }
-      if (timeout >= finalTimeoutMillis) {
         return false
       }
       Thread.`yield`()
