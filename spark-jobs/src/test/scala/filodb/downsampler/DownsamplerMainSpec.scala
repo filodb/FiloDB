@@ -679,7 +679,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     Seq(gaugeName, gaugeLowFreqName, counterName, histName).foreach { metricName =>
       val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(metricName))
       val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams = PlannerParams(sampleLimit = 1000)),
-        InProcessPlanDispatcher, batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
+        InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
 
       val querySession = QuerySession(QueryContext(), queryConfig)
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
@@ -708,7 +708,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(counterName))
     val qc = QueryContext(plannerParams = PlannerParams(sampleLimit = 1000))
     val exec = MultiSchemaPartitionsExec(qc,
-      InProcessPlanDispatcher, batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
+      InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
     exec.addRangeVectorTransformer(PeriodicSamplesMapper(74373042000L, 10, 74373042000L,Some(150000),
       Some(InternalRangeFunction.Rate), qc))
 
@@ -738,7 +738,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
       val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(untypedName))
       val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams
-        = PlannerParams(sampleLimit = 1000)), InProcessPlanDispatcher, batchDownsampler.rawDatasetRef, 0,
+        = PlannerParams(sampleLimit = 1000)), InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0,
         queryFilters, AllChunkScan)
 
       val querySession = QuerySession(QueryContext(), queryConfig)
@@ -761,7 +761,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(gaugeName))
     val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams = PlannerParams(sampleLimit = 1000)),
-      InProcessPlanDispatcher, batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan, colName = Option("sum"))
+      InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan,
+      colName = Option("sum"))
     val querySession = QuerySession(QueryContext(), queryConfig)
     val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
     val res = exec.execute(downsampleTSStore, querySession)(queryScheduler)
@@ -885,6 +886,4 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     // readKeys should not contain bulk PK records
     readKeys2 shouldEqual metricNames.toSet
   }
-
-
 }

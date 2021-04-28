@@ -34,15 +34,17 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   val remoteHttpTimeoutMs: Long =
     queryConfig.routingConfig.config.as[Option[Long]]("remote.http.timeout").getOrElse(60000)
 
+  val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
+
   private def stitchPlans(rootLogicalPlan: LogicalPlan,
                           execPlans: Seq[ExecPlan],
                           queryContext: QueryContext)= {
     rootLogicalPlan match {
-        case lp: LabelValues         => LabelValuesDistConcatExec(queryContext, InProcessPlanDispatcher,
+        case lp: LabelValues         => LabelValuesDistConcatExec(queryContext, inProcessPlanDispatcher,
                                         execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
-        case lp: SeriesKeysByFilters => PartKeysDistConcatExec(queryContext, InProcessPlanDispatcher,
+        case lp: SeriesKeysByFilters => PartKeysDistConcatExec(queryContext, inProcessPlanDispatcher,
                                         execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
-        case _                       => StitchRvsExec(queryContext, InProcessPlanDispatcher,
+        case _                       => StitchRvsExec(queryContext, inProcessPlanDispatcher,
                                          execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
       // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
       // Sort to move RemoteExec in end as it does not have schema
@@ -81,13 +83,13 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           rootLogicalPlan match {
             case lp: LabelValues         => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                             PlannerUtil.getLabelValuesUrlParams(lp, queryParams), newQueryContext,
-                                            InProcessPlanDispatcher, dsRef, remoteExecHttpClient)
+                                            inProcessPlanDispatcher, dsRef, remoteExecHttpClient)
             case lp: SeriesKeysByFilters => val urlParams = Map("match[]" -> queryParams.promQl)
                                             MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                              urlParams, newQueryContext, InProcessPlanDispatcher,
+                                              urlParams, newQueryContext, inProcessPlanDispatcher,
                                               dsRef, remoteExecHttpClient)
             case _                       => PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                            newQueryContext, InProcessPlanDispatcher, dsRef, remoteExecHttpClient)
+                                            newQueryContext, inProcessPlanDispatcher, dsRef, remoteExecHttpClient)
           }
 
       }
