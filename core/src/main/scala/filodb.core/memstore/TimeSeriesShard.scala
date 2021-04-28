@@ -1326,7 +1326,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private def disableAddPartitions(): Unit = {
     assertThreadName(IngestSchedName)
     if (addPartitionsDisabled.compareAndSet(false, true))
-      logger.warn(s"dataset=$ref shard=$shardNum: Out of buffer memory and not able to evict enough; " +
+      logger.warn(s"dataset=$ref shard=$shardNum: Out of native memory and not able to evict enough; " +
         s"adding partitions disabled")
     shardStats.dataDropped.increment()
   }
@@ -1586,7 +1586,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     if (blockEvictionLockTimeoutMs > 0 || tspEvictionLockTimeoutMs > 0) {
       val start = System.nanoTime()
       val timeoutMillis = Math.max(blockEvictionLockTimeoutMs, tspEvictionLockTimeoutMs)
+      logger.info(s"Trying exclusive lock with timeout of $timeoutMillis ms")
       if (evictionLock.tryExclusiveReclaimLock(timeoutMillis)) {
+        logger.info(s"Acquired EvictionLock")
         try {
           if (blockEvictionLockTimeoutMs > 0) {
             blockStore.ensureHeadroom(ensureHeadroomPercent)
@@ -1596,6 +1598,7 @@ class TimeSeriesShard(val ref: DatasetRef,
           }
         } finally {
           evictionLock.releaseExclusive()
+          logger.info(s"Released EvictionLock")
         }
       }
       val stall = System.nanoTime() - start

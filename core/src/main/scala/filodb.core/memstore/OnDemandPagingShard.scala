@@ -16,7 +16,7 @@ import filodb.core.{DatasetRef, Types}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.ratelimit.QuotaSource
 import filodb.core.metadata.Schemas
-import filodb.core.query.QuerySession
+import filodb.core.query.{QuerySession, ServiceUnavailableException}
 import filodb.core.store._
 import filodb.memory.NativeMemoryManager
 
@@ -199,10 +199,13 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
           for { partKeyBytesRef <- partKeyIndex.partKeyFromPartId(id)
                 unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(partKeyBytesRef.offset)
                 group = partKeyGroup(schemas.part.binSchema, partKeyBytesRef.bytes, unsafeKeyOffset, numGroups)
-                sch   = schemas(RecordSchema.schemaID(partKeyBytesRef.bytes, unsafeKeyOffset))
-                part <- Option(createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, id, sch, 4))
-                          if sch != Schemas.UnknownSchema } yield {
-              val stamp = partSetLock.writeLock()
+                sch  <- Option(schemas(RecordSchema.schemaID(partKeyBytesRef.bytes, unsafeKeyOffset)))
+                          } yield {
+            val part = createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, id, sch, 4)
+            if (part == OutOfMemPartition) throw new ServiceUnavailableException("The server has too many ingesting " +
+              "time series and does not have resources to serve this long time range query. Please try " +
+              "after sometime.")
+            val stamp = partSetLock.writeLock()
               try {
                 markPartAsNotIngesting(part, odp = true)
                 partSet.add(part)

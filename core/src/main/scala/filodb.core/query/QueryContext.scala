@@ -95,5 +95,5 @@ case class QuerySession(qContext: QueryContext,
 }
 
 object QuerySession {
-  def forTestingOnly: QuerySession = QuerySession(QueryContext(), EmptyQueryConfig)
+  def makeForTestingOnly(): QuerySession = QuerySession(QueryContext(), EmptyQueryConfig)
 }
