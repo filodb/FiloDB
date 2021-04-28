@@ -49,8 +49,9 @@ class FixedMaxPartitionsEvictionPolicy(headroomPercent: Double) extends Partitio
   }
 }
 
-class CompositeEvictionPolicy(maxPartPolicy: FixedMaxPartitionsEvictionPolicy,
-                              freeBufferPolicy: WriteBufferFreeEvictionPolicy) extends PartitionEvictionPolicy {
+class CompositeEvictionPolicy(headroomPercent: Double) extends PartitionEvictionPolicy {
+  val maxPartPolicy = new FixedMaxPartitionsEvictionPolicy(headroomPercent)
+  val freeBufferPolicy = new WriteBufferFreeEvictionPolicy(headroomPercent)
   def numPartitionsToEvictForHeadroom(numPartitions: Int, maxPartitions: Int, memManager: NativeMemoryManager): Int = {
     Math.max(maxPartPolicy.numPartitionsToEvictForHeadroom(numPartitions, maxPartitions, memManager),
              freeBufferPolicy.numPartitionsToEvictForHeadroom(numPartitions, maxPartitions, memManager))

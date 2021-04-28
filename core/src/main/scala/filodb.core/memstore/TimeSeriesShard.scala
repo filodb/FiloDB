@@ -303,7 +303,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   private final var ingested = 0L
 
   private val targetMaxPartitions = filodbConfig.getInt("memstore.max-partitions-on-heap-per-shard")
-  private val ensureHeadroomPercent = filodbConfig.getDouble("memstore.ensure-memory-headroom-percent")
+  private val ensureTspHeadroomPercent = filodbConfig.getDouble("memstore.ensure-tsp-headroom-percent")
+  private val ensureBlockHeadroomPercent = filodbConfig.getDouble("memstore.ensure-block-memory-headroom-percent")
 
   /**
    * Queue of partIds that are eligible for eviction since they have stopped ingesting.
@@ -1378,7 +1379,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   // scalastyle:off method.length
   private[memstore] def makeSpaceForNewPartitions(forceEvict: Boolean): Boolean = {
     assertThreadName(IngestSchedName)
-    val numPartsToEvict = if (forceEvict) (targetMaxPartitions * ensureHeadroomPercent / 100).toInt
+    val numPartsToEvict = if (forceEvict) (targetMaxPartitions * ensureTspHeadroomPercent / 100).toInt
     else evictionPolicy.numPartitionsToEvictForHeadroom(partSet.size, targetMaxPartitions, bufferMemoryManager)
     if (numPartsToEvict > 0) {
       val partIdsToEvict = partitionsToEvict(numPartsToEvict)
@@ -1595,9 +1596,9 @@ class TimeSeriesShard(val ref: DatasetRef,
    */
   private[memstore] def evictForHeadroom(): Boolean = {
     val blockEvictionLockTimeoutMs = getHeadroomLockTimeout(blockStore.currentFreePercent,
-      ensureHeadroomPercent)
+      ensureBlockHeadroomPercent)
     val tspEvictionLockTimeoutMs: Int = getHeadroomLockTimeout(partitions.size.toDouble / targetMaxPartitions,
-      ensureHeadroomPercent)
+      ensureTspHeadroomPercent)
     val higherTimeoutMs = Math.max(blockEvictionLockTimeoutMs, tspEvictionLockTimeoutMs)
 
     // whether to force evict even if lock cannot be acquired, if situation is dire
@@ -1612,7 +1613,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       val jobDone = if (forceEvict || acquired) {
         try {
           if (blockEvictionLockTimeoutMs > 0) {
-            blockStore.ensureHeadroom(ensureHeadroomPercent)
+            blockStore.ensureHeadroom(ensureBlockHeadroomPercent)
           }
           if (tspEvictionLockTimeoutMs > 0) {
             if (makeSpaceForNewPartitions(forceEvict)) addPartitionsDisabled := false

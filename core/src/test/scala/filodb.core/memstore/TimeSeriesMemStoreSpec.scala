@@ -29,7 +29,8 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
   val config = ConfigFactory.parseString("""
                                             |filodb.memstore.max-partitions-on-heap-per-shard = 1100
-                                            |filodb.memstore.ensure-memory-headroom-percent = 10
+                                            |filodb.memstore.ensure-block-memory-headroom-percent = 10
+                                            |filodb.memstore.ensure-tsp-headroom-percent = 10
                                             |  """.stripMargin)
                             .withFallback(ConfigFactory.load("application_test.conf"))
                             .getConfig("filodb")
@@ -542,7 +543,9 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     // Purposely mark 100 partitions endTime as occurring a while ago to mark them eligible for eviction
     // We also need to switch buffers so that internally ingestionEndTime() is accurate
     markPartitionsForEviction(0 until 10)
-    shard0.evictForHeadroom() // this should evict 10 partitions since maxAllowed is 1100, and headroom is 110
+    shard0.evictForHeadroom() shouldEqual true // this should evict 10 partitions since maxAllowed is 1100, and headroom is 110
+
+    shard0Partitions.get(0) shouldEqual null
 
     // bloom filter should contain the pk
     shard0.evictedPartKeys.mightContain(pk) shouldEqual true
