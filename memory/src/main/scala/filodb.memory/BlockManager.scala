@@ -1,6 +1,7 @@
 package filodb.memory
 
 import java.util.concurrent.locks.ReentrantLock
+import javax.naming.ServiceUnavailableException
 
 import com.kenai.jffi.{MemoryIO, PageManager}
 import com.typesafe.scalalogging.StrictLogging
@@ -184,9 +185,10 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         if (!odp) {
           tryReclaimWhenAllocating(num)
         } else {
-            val msg = s"Unable to allocate ODP block(s) without forcing a reclamation: " +
-                      s"num_blocks=$num num_bytes=$memorySize freeBlocks=${freeBlocks.size}"
-            throw new MemoryRequestException(msg)
+            logger.error(s"Unable to allocate ODP block(s) without forcing a reclamation: " +
+                      s"num_blocks=$num num_bytes=$memorySize freeBlocks=${freeBlocks.size}")
+            throw new ServiceUnavailableException(s"This query requires paging of chunks for which " +
+              s"memory is currently not available. Please try again after sometime")
         }
       }
 
@@ -231,9 +233,9 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         // Don't stall ingestion forever. Some queries might return invalid results because
         // the lock isn't held. If the lock state is broken, then ingestion is really stuck
         // and the node must be restarted. Queries should always release the lock.
-        logger.error(s"Lock for BlockManager.tryReclaimOnDemand timed out: ${reclaimLock}")
+        logger.error(s"Lock for BlockManager.tryReclaimWhenAllocating timed out: ${reclaimLock}")
       } else {
-        logger.debug("Lock for BlockManager.tryReclaimOnDemand aquired")
+        logger.debug("Lock for BlockManager.tryReclaimWhenAllocating acquired")
       }
 
       val stall = System.nanoTime() - start
