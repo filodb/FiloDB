@@ -71,6 +71,6 @@ case class ScalarFixedDoubleExec(queryContext: QueryContext,
     * to the node where it will be executed. The Query Engine
     * will supply this parameter
     */
-  override def dispatcher: PlanDispatcher = InProcessPlanDispatcher
+  override def dispatcher: PlanDispatcher = InProcessPlanDispatcher(EmptyQueryConfig)
 
 }

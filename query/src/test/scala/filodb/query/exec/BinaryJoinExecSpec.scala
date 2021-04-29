@@ -524,8 +524,8 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         .toListL.runAsync.futureValue
     }
     thrown.getCause.getClass shouldEqual classOf[BadQueryException]
-    thrown.getCause.getMessage shouldEqual "This query results in more than 1 join cardinality." +
-      " Try applying more filters."
+    thrown.getCause.getMessage shouldEqual "The join in this query has input cardinality of 2 which is more than " +
+      "limit of 1. Try applying more filters or reduce time range."
   }
 
   it("should throw BadQueryException - one-to-one with on - cardinality limit 1") {
@@ -548,8 +548,8 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         .toListL.runAsync.futureValue
     }
     thrown.getCause.getClass shouldEqual classOf[BadQueryException]
-    thrown.getCause.getMessage shouldEqual "This query results in more than 1 join cardinality." +
-      " Try applying more filters."
+    thrown.getCause.getMessage shouldEqual "The join in this query has input cardinality of 2 which is more than " +
+      "limit of 1. Try applying more filters or reduce time range."
   }
 
   it ("should stitch same RVs from multiple shards on LHS and RHS before joining by ignoring NaN") {

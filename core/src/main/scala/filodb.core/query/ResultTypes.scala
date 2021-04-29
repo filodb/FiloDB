@@ -150,3 +150,5 @@ object ResultMaker extends StrictLogging {
     def fromResult(res: Result): Unit = {}
   }
 }
+
+class ServiceUnavailableException(message: String) extends RuntimeException(message)
