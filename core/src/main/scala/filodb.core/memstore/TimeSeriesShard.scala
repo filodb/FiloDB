@@ -1627,7 +1627,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         if (!acquired) logger.error(s"Since addPartitionsDisabled is true, proceeding with reclaim " +
           s"even though eviction lock couldn't be acquired with final timeout of $timeoutMs ms. Trading " +
           s"off possibly wrong query results (due to old inactive partitions that would be evicted " +
-          s"and skipped) in order to unblock ingestion and stop data loss.")
+          s"and skipped) in order to unblock ingestion and stop data loss. LockState: $evictionLock")
         try {
           if (blockEvictionLockTimeoutMs > 0) {
             blockStore.ensureHeadroom(ensureBlockHeadroomPercent)

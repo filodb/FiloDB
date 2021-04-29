@@ -10,8 +10,6 @@ import kamon.Kamon
 import kamon.metric.{Counter, Gauge}
 import kamon.tag.TagSet
 
-final case class MemoryRequestException(msg: String) extends Exception(msg)
-
 /**
   * Allows requesting blocks.
   */
@@ -226,14 +224,14 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     var acquired: Boolean = false
     try {
       val start = System.nanoTime()
-      // Give up after waiting (in total) a little over 16 seconds.
       acquired = reclaimLock.tryExclusiveReclaimLock(EvictionLock.direCircumstanceTimeoutMillis)
 
       if (!acquired) {
         // Don't stall ingestion forever. Some queries might return invalid results because
         // the lock isn't held. If the lock state is broken, then ingestion is really stuck
         // and the node must be restarted. Queries should always release the lock.
-        logger.error(s"Lock for BlockManager.tryReclaimWhenAllocating timed out: ${reclaimLock}")
+        logger.error(s"Lock for BlockManager.tryReclaimWhenAllocating timed out; proceeding to " +
+          s"force-eviction to avoid blocking ingestion. Lock state: $reclaimLock")
       } else {
         logger.debug("Lock for BlockManager.tryReclaimWhenAllocating acquired")
       }
