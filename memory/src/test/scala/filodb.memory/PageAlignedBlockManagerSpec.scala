@@ -3,6 +3,7 @@ package filodb.memory
 import scala.language.reflectiveCalls
 
 import com.kenai.jffi.PageManager
+import javax.naming.ServiceUnavailableException
 import org.scalatest.BeforeAndAfter
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -192,11 +193,9 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
     blockManager.usedOdpBlocks.size() shouldEqual 4
 
     // reclaim should fail now because none of the blocks are reclaimable
-    try {
+    intercept[ServiceUnavailableException] {
       blockManager.requestBlock(true)
       fail
-    } catch {
-      case e: MemoryRequestException => // expected
     }
 
     blockManager.releaseBlocks()

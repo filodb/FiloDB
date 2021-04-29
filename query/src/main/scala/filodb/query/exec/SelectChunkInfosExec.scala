@@ -6,9 +6,8 @@ import monix.execution.Scheduler
 import filodb.core.DatasetRef
 import filodb.core.memstore.TimeSeriesShard
 import filodb.core.metadata.Column
-import filodb.core.query._
+import filodb.core.query.{ServiceUnavailableException, _}
 import filodb.core.store._
-import filodb.query.ServiceUnavailableException
 
 object SelectChunkInfosExec {
   import Column.ColumnType._
