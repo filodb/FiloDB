@@ -227,7 +227,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     try {
       val start = System.nanoTime()
       // Give up after waiting (in total) a little over 16 seconds.
-      acquired = reclaimLock.tryExclusiveReclaimLock(8192)
+      acquired = reclaimLock.tryExclusiveReclaimLock(EvictionLock.direCircumstanceTimeoutMillis)
 
       if (!acquired) {
         // Don't stall ingestion forever. Some queries might return invalid results because

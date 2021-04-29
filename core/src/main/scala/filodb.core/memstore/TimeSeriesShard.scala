@@ -125,7 +125,8 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
    * How much time a thread was potentially stalled while attempting to ensure
    * free space. Unit is nanoseconds.
    */
-  val blockHeadroomStall = Kamon.counter("blockstore-headroom-stall-nanos").withTags(TagSet.from(tags))
+  val memstoreEvictionStall = Kamon.counter("memstore-eviction-stall",
+                           MeasurementUnit.time.nanoseconds).withTags(TagSet.from(tags))
   val evictablePartKeysSize = Kamon.gauge("memstore-num-evictable-partkeys").withTags(TagSet.from(tags))
 
 }
@@ -1331,6 +1332,15 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
+  /**
+   * Called during ingestion if we run out of memory while creating TimeSeriesPartition, or
+   * if we went above the maxPartitionsLimit without being able to evict. Can appens if
+   * within 1 minute (time between headroom tasks) too many new time series was added and it
+   * went beyond limit of max partitions (or ran out of native memory).
+   *
+   * When partition addition is disabled, headroom task begins to run inline during ingestion
+   * with force-eviction enabled.
+   */
   private def disableAddPartitions(): Unit = {
     assertThreadName(IngestSchedName)
     if (addPartitionsDisabled.compareAndSet(false, true))
@@ -1371,8 +1381,8 @@ class TimeSeriesShard(val ref: DatasetRef,
    * Check and evict partitions to free up memory and heap space.  NOTE: This must be called in the ingestion
    * stream so that there won't be concurrent other modifications.  Ideally this is called when trying to add partitions
    *
-   * Call after obtaining evictionLock to prevent wrong query results.
-   * Lock must be skipped only in dire circumstances.
+   * Expected to be called from evictForHeadroom method, only after obtaining evictionLock
+   * to prevent wrong query results.
    *
    * @return true if able to evict enough or there was already space, false if not able to evict and not enough mem
    */
@@ -1590,7 +1600,10 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   /**
-   * Acquire eviction lock and reclaim block and TSP memory.
+   * This task is run every 1 minute to make headroom in memory. It is also called
+   * from createNewPartition method (inline during ingestion) if we run out of space between
+   * headroom task runs.
+   * This method acquires eviction lock and reclaim block and TSP memory.
    * If addPartitions is disabled, we force eviction even if we cannot acquire eviction lock.
    * @return true if eviction was attempted
    */
@@ -1607,10 +1620,14 @@ class TimeSeriesShard(val ref: DatasetRef,
     // do only if one of blocks or TSPs need eviction or if addition of partitions disabled
     if (higherTimeoutMs > 0 || forceEvict) {
       val start = System.nanoTime()
-      val timeoutMs = if (forceEvict) EvictionLock.maxTimeoutMillis else higherTimeoutMs
+      val timeoutMs = if (forceEvict) EvictionLock.direCircumstanceTimeoutMillis else higherTimeoutMs
       val acquired = evictionLock.tryExclusiveReclaimLock(timeoutMs)
       // if forceEvict is true, then proceed even if we dont have a lock
       val jobDone = if (forceEvict || acquired) {
+        if (!acquired) logger.error(s"Since addPartitionsDisabled is true, proceeding with reclaim " +
+          s"even though eviction lock couldn't be acquired with final timeout of $timeoutMs ms. Trading " +
+          s"off possibly wrong query results (due to old inactive partitions that would be evicted " +
+          s"and skipped) in order to unblock ingestion and stop data loss.")
         try {
           if (blockEvictionLockTimeoutMs > 0) {
             blockStore.ensureHeadroom(ensureBlockHeadroomPercent)
@@ -1626,7 +1643,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         false
       }
       val stall = System.nanoTime() - start
-      shardStats.blockHeadroomStall.increment(stall)
+      shardStats.memstoreEvictionStall.increment(stall)
       jobDone
     } else {
       true

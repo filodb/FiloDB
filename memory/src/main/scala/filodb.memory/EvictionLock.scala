@@ -8,6 +8,7 @@ import filodb.memory.data.Shutdown
 
 object EvictionLock {
   val maxTimeoutMillis = 2048
+  val direCircumstanceTimeoutMillis = 32768
 }
 /**
  * This lock protects memory regions accessed by queries and prevents them from
