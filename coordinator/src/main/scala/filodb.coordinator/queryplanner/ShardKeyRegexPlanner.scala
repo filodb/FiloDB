@@ -30,6 +30,7 @@ class ShardKeyRegexPlanner(dataset: Dataset,
                            queryConfig: QueryConfig)
   extends QueryPlanner with PlannerMaterializer {
   val datasetMetricColumn = dataset.options.metricColumn
+  val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
 
   override val schemas = Schemas(dataset.schema)
 
@@ -114,11 +115,11 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
 
     val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
-         SetOperatorExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+         SetOperatorExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
           LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
           LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
       else
-         BinaryJoinExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+         BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
           logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
           LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
           LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn)
@@ -138,7 +139,7 @@ class ShardKeyRegexPlanner(dataset: Dataset,
       if (aggregate.operator.equals(AggregationOperator.TopK) || aggregate.operator.equals(AggregationOperator.BottomK)
         || aggregate.operator.equals(AggregationOperator.CountValues))
          throw new UnsupportedOperationException(s"Shard Key regex not supported for ${aggregate.operator}")
-      val reducer = MultiPartitionReduceAggregateExec(queryContext, InProcessPlanDispatcher,
+      val reducer = MultiPartitionReduceAggregateExec(queryContext, inProcessPlanDispatcher,
         execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
       val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
       reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
@@ -160,7 +161,7 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     val exec = if (nonMetricShardKeyFilters.head.isEmpty) queryPlanner.materialize(logicalPlan, queryContext)
     else {
       val execPlans = generateExecWithoutRegex(logicalPlan, nonMetricShardKeyFilters.head, queryContext)
-      if (execPlans.size == 1) execPlans.head else MultiPartitionDistConcatExec(queryContext, InProcessPlanDispatcher,
+      if (execPlans.size == 1) execPlans.head else MultiPartitionDistConcatExec(queryContext, inProcessPlanDispatcher,
         execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
     }
     PlanResult(Seq(exec))

@@ -1,6 +1,7 @@
 package filodb.memory
 
 import java.util.concurrent.locks.ReentrantLock
+import javax.naming.ServiceUnavailableException
 
 import com.kenai.jffi.{MemoryIO, PageManager}
 import com.typesafe.scalalogging.StrictLogging
@@ -8,8 +9,6 @@ import java.util
 import kamon.Kamon
 import kamon.metric.{Counter, Gauge}
 import kamon.tag.TagSet
-
-final case class MemoryRequestException(msg: String) extends Exception(msg)
 
 /**
   * Allows requesting blocks.
@@ -184,9 +183,10 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         if (!odp) {
           tryReclaimWhenAllocating(num)
         } else {
-            val msg = s"Unable to allocate ODP block(s) without forcing a reclamation: " +
-                      s"num_blocks=$num num_bytes=$memorySize freeBlocks=${freeBlocks.size}"
-            throw new MemoryRequestException(msg)
+            logger.error(s"Unable to allocate ODP block(s) without forcing a reclamation: " +
+                      s"num_blocks=$num num_bytes=$memorySize freeBlocks=${freeBlocks.size}")
+            throw new ServiceUnavailableException(s"This query requires paging of chunks for which " +
+              s"memory is currently not available. Please try again after sometime")
         }
       }
 
@@ -224,16 +224,16 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     var acquired: Boolean = false
     try {
       val start = System.nanoTime()
-      // Give up after waiting (in total) a little over 16 seconds.
-      acquired = reclaimLock.tryExclusiveReclaimLock(8192)
+      acquired = reclaimLock.tryExclusiveReclaimLock(EvictionLock.direCircumstanceTimeoutMillis)
 
       if (!acquired) {
         // Don't stall ingestion forever. Some queries might return invalid results because
         // the lock isn't held. If the lock state is broken, then ingestion is really stuck
         // and the node must be restarted. Queries should always release the lock.
-        logger.error(s"Lock for BlockManager.tryReclaimOnDemand timed out: ${reclaimLock}")
+        logger.error(s"Lock for BlockManager.tryReclaimWhenAllocating timed out; proceeding to " +
+          s"force-eviction to avoid blocking ingestion. Lock state: $reclaimLock")
       } else {
-        logger.debug("Lock for BlockManager.tryReclaimOnDemand aquired")
+        logger.debug("Lock for BlockManager.tryReclaimWhenAllocating acquired")
       }
 
       val stall = System.nanoTime() - start
@@ -251,16 +251,6 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         reclaimLock.releaseExclusive()
       }
     }
-  }
-
-  /**
-   * Calculate lock timeout based on headroom space available.
-   * Lower the space available, longer the timeout.
-   */
-  def getHeadroomLockTimeout(ensurePercent: Double): Int = {
-    // Ramp up the timeout as the current headroom shrinks. Max timeout per attempt is a little
-    // over 2 seconds, and the total timeout can be double that, for a total of 4 seconds.
-    ((1.0 - (currentFreePercent / ensurePercent)) * EvictionLock.maxTimeoutMillis).toInt
   }
 
   /**
