@@ -354,7 +354,7 @@ trait ExpressionParser extends AggregatesParser with SelectorParser with Numeric
 
   lazy val precedenceExpression: PackratParser[PrecedenceExpression] = {
 
-    "(" ~ binaryExpression ~ ")" ^^ {
+    "(" ~ expression ~ ")" ^^ {
       case "(" ~ ep ~ ")" => PrecedenceExpression(ep)
     }
   }
@@ -388,8 +388,7 @@ trait ExpressionParser extends AggregatesParser with SelectorParser with Numeric
 
   lazy val expression: PackratParser[Expression] =
     binaryExpression | subqueryExpression | aggregateExpression2 | aggregateExpression1 |
-    function | unaryExpression | vector | numericalExpression | simpleSeries | precedenceExpression |
-    "(" ~> expression <~ ")"
+    function | unaryExpression | vector | numericalExpression | simpleSeries | precedenceExpression
 
   // Generally most expressions can be subqueries except for those that return range vectors,
   // for example, subquery itself or range vector selectors cannot be "subqueryable"
