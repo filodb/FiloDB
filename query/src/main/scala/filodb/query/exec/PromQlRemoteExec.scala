@@ -64,7 +64,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
         else {
           response.unsafeBody match {
             case Left(error)            => QueryError(queryContext.queryId, error.error)
-            case Right(successResponse) => toQueryResponse(successResponse.data, queryContext.queryId, execPlan2Span)
+            case Right(successResponse) => toQueryResponse(successResponse, queryContext.queryId, execPlan2Span)
           }
         }
       }
@@ -73,24 +73,24 @@ case class PromQlRemoteExec(queryEndpoint: String,
   // TODO: Set histogramMap=true and parse histogram maps.  The problem is that code below assumes normal double
   //   schema.  Would need to detect ahead of time to use TransientHistRow(), so we'd need to add schema to output,
   //   and detect it in execute() above.  Need to discuss compatibility issues with Prometheus.
-  def toQueryResponse(data: Data, id: String, parentSpan: kamon.trace.Span): QueryResponse = {
-    val queryResponse = if (data.result.isEmpty) {
+  def toQueryResponse(response: SuccessResponse, id: String, parentSpan: kamon.trace.Span): QueryResponse = {
+    val queryResponse = if (response.data.result.isEmpty) {
       logger.debug("PromQlRemoteExec generating empty QueryResult as result is empty")
-      // TODO need to actually get isPartialResponse from http response
-      QueryResult(id, ResultSchema.empty, Seq.empty, false, None)
+      QueryResult(id, ResultSchema.empty, Seq.empty,
+        if (response.isPartial.isDefined) response.isPartial.get else false, response.message)
     } else {
-      if (data.result.head.aggregateResponse.isDefined) genAggregateResult(data, id)
+      if (response.data.result.head.aggregateResponse.isDefined) genAggregateResult(response, id)
       else {
-        val samples = data.result.head.values.getOrElse(Seq(data.result.head.value.get))
+        val samples = response.data.result.head.values.getOrElse(Seq(response.data.result.head.value.get))
         if (samples.isEmpty) {
           logger.debug("PromQlRemoteExec generating empty QueryResult as samples is empty")
-          // TODO need to actually get isPartialResponse from http response
-          QueryResult(id, ResultSchema.empty, Seq.empty, false, None)
+          QueryResult(id, ResultSchema.empty, Seq.empty,
+            if (response.isPartial.isDefined) response.isPartial.get else false, response.message)
         } else {
           samples.head match {
             // Passing histogramMap = true so DataSampl will be HistSampl for histograms
-            case HistSampl(timestamp, buckets) => genHistQueryResult(data, id)
-            case _ => genDefaultQueryResult(data, id)
+            case HistSampl(timestamp, buckets) => genHistQueryResult(response, id)
+            case _ => genDefaultQueryResult(response, id)
           }
         }
       }
@@ -98,22 +98,22 @@ case class PromQlRemoteExec(queryEndpoint: String,
     queryResponse
   }
 
-  def genAggregateResult(data: Data, id: String): QueryResult = {
+  def genAggregateResult(response: SuccessResponse, id: String): QueryResult = {
 
-    val aggregateResponse = data.result.head.aggregateResponse.get
+    val aggregateResponse = response.data.result.head.aggregateResponse.get
     if (aggregateResponse.aggregateSampl.isEmpty) {
-      // TODO need to actually get isPartialResponse from http response
-      QueryResult(id, ResultSchema.empty, Seq.empty, false, None)
+      QueryResult(id, ResultSchema.empty, Seq.empty,
+        if (response.isPartial.isDefined) response.isPartial.get else false, response.message)
     } else {
       aggregateResponse.aggregateSampl.head match {
-        case AvgSampl(timestamp, value, count)           => genAvgQueryResult(data, id)
-        case StdValSampl(timestamp, stddev, mean, count) => genStdValQueryResult(data, id)
+        case AvgSampl(timestamp, value, count)           => genAvgQueryResult(response, id)
+        case StdValSampl(timestamp, stddev, mean, count) => genStdValQueryResult(response, id)
       }
     }
   }
 
-  def genDefaultQueryResult(data: Data, id: String): QueryResult = {
-    val rangeVectors = data.result.map { r =>
+  def genDefaultQueryResult(response: SuccessResponse, id: String): QueryResult = {
+    val rangeVectors = response.data.result.map { r =>
       val samples = r.values.getOrElse(Seq(r.value.get))
 
       val rv = new RangeVector {
@@ -136,13 +136,13 @@ case class PromQlRemoteExec(queryEndpoint: String,
         queryWithPlanName(queryContext))
       // TODO: Handle stitching with verbose flag
     }
-    // TODO need to actually get isPartialResponse from http response
-    QueryResult(id, resultSchema.get("default").get, rangeVectors, false, None)
+    QueryResult(id, resultSchema.get("default").get, rangeVectors,
+      if (response.isPartial.isDefined) response.isPartial.get else false, response.message)
   }
 
-  def genHistQueryResult(data: Data, id: String): QueryResult = {
+  def genHistQueryResult(response: SuccessResponse, id: String): QueryResult = {
 
-    val rangeVectors = data.result.map { r =>
+    val rangeVectors = response.data.result.map { r =>
       val samples = r.values.getOrElse(Seq(r.value.get))
 
       val rv = new RangeVector {
@@ -171,12 +171,12 @@ case class PromQlRemoteExec(queryEndpoint: String,
       SerializedRangeVector(rv, builder, recordSchema.get("histogram").get, queryContext.origQueryParams.toString)
       // TODO: Handle stitching with verbose flag
     }
-    // TODO need to actually get isPartialResponse from http response
-    QueryResult(id, resultSchema.get("histogram").get, rangeVectors, false, None)
+    QueryResult(id, resultSchema.get("histogram").get, rangeVectors,
+      if (response.isPartial.isDefined) response.isPartial.get else false, response.message)
   }
 
-  def genAvgQueryResult(data: Data, id: String): QueryResult = {
-    val rangeVectors = data.result.map { d =>
+  def genAvgQueryResult(response: SuccessResponse, id: String): QueryResult = {
+    val rangeVectors = response.data.result.map { d =>
       val rv = new RangeVector {
           val row = new AvgAggTransientRow()
 
@@ -198,12 +198,12 @@ case class PromQlRemoteExec(queryEndpoint: String,
     }
 
     // TODO: Handle stitching with verbose flag
-    // TODO need to actually get isPartialResponse from http response
-    QueryResult(id, resultSchema.get(Avg.entryName).get, rangeVectors, false, None)
+    QueryResult(id, resultSchema.get(Avg.entryName).get, rangeVectors,
+      if (response.isPartial.isDefined) response.isPartial.get else false, response.message)
   }
 
-  def genStdValQueryResult(data: Data, id: String): QueryResult = {
-    val rangeVectors = data.result.map { d =>
+  def genStdValQueryResult(response: SuccessResponse, id: String): QueryResult = {
+    val rangeVectors = response.data.result.map { d =>
       val rv = new RangeVector {
         val row = new StdValAggTransientRow()
 
@@ -226,7 +226,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
     }
 
     // TODO: Handle stitching with verbose flag
-    // TODO need to actually get isPartialResponse from http response
-    QueryResult(id, resultSchema.get("stdval").get, rangeVectors, false, None)
+    QueryResult(id, resultSchema.get("stdval").get, rangeVectors,
+      if (response.isPartial.isDefined) response.isPartial.get else false, response.message)
   }
 }
