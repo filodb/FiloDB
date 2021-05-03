@@ -363,32 +363,7 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
   /**
     * Strip quotes and process escape codes a string terminal node.
     */
-  private def dequote(str: TerminalNode): String = dequote(str.getSymbol().getText())
-
-  /**
-    * Strip quotes and process escape codes.
-    */
-  private def dequote(str: String): String = {
-    val bob = new StringBuilder()
-    var offset = 1
-    while (offset < str.length() - 1) {
-      var c = str.charAt(offset); offset += 1
-      if (c == '\\') {
-        val next = str.charAt(offset); offset += 1
-        c = next match {
-          case '\\' | '\'' | '"' => next
-          case 'f' => '\f'
-          case 'n' => '\n'
-          case 'r' => '\r'
-          case 't' => '\t'
-          case _ => throw new IllegalArgumentException("illegal string escape: " + next)
-        }
-      }
-      bob.append(c)
-    }
-
-    bob.toString()
-  }
+  private def dequote(str: TerminalNode): String = ParserUtil.dequote(str.getSymbol().getText())
 
   private def parseDuration(node: TerminalNode): Duration = {
     parseDuration(node.getSymbol().getText())
