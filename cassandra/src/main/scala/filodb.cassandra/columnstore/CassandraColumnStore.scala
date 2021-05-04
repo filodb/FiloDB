@@ -460,13 +460,22 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     ret
   }
 
-  def deletePartKeys(ref: DatasetRef,
-                     shard: Int,
-                     pks: Observable[Array[Byte]]): Future[Long] = {
+  def scanPartKeysByStartEndTimeRangeNoAsync(ref: DatasetRef,
+                                             shard: Int,
+                                             split: (String, String),
+                                             startTimeGTE: Long,
+                                             startTimeLTE: Long,
+                                             endTimeGTE: Long,
+                                             endTimeLTE: Long): Iterator[Array[Byte]] = {
     val pkTable = getOrCreatePartitionKeysTable(ref, shard)
-    pks.mapAsync(writeParallelism) { pk =>
-      Task.fromFuture(pkTable.deletePartKey(pk))
-    }.countL.runAsync
+    pkTable.scanPksByStartEndTimeRangeNoAsync(split, startTimeGTE, startTimeLTE, endTimeGTE, endTimeLTE)
+  }
+
+  def deletePartKeyNoAsync(ref: DatasetRef,
+                           shard: Int,
+                           pk: Array[Byte]): Response = {
+    val pkTable = getOrCreatePartitionKeysTable(ref, shard)
+    pkTable.deletePartKeyNoAsync(pk)
   }
 
   def getPartKeysByUpdateHour(ref: DatasetRef,

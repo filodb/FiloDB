@@ -42,6 +42,11 @@ trait FiloCassandraConnector extends StrictLogging {
 
   import Util._
 
+  def execCqlNoAsync(cql: Statement, notAppliedResponse: Response = NotApplied): Response = {
+    val res = session.execute(cql)
+    if (res.wasApplied()) Success else notAppliedResponse
+  }
+
   def execCql(cql: String, notAppliedResponse: Response = NotApplied): Future[Response] =
     session.executeAsync(cql).toScalaFuture.toResponse(notAppliedResponse)
 
