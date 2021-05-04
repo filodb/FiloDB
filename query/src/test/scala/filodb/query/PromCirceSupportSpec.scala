@@ -210,7 +210,6 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
     parser.decode[List[SuccessResponse]](input) match {
       case Right(successResponse) => {
         val response = successResponse.head
-        println(response)
         response.partial.get shouldEqual true
         response.message.get shouldEqual "Result may be partial since some shards are still bootstrapping"
         response.status shouldEqual "partial"
