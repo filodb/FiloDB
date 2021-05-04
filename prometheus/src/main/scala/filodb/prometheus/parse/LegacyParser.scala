@@ -257,8 +257,8 @@ trait JoinParser extends NumericParser {
 ////////////////////// END JOINS ///////////////////////////////////////////
 ////////////////////// SELECTORS ///////////////////////////////////////////
 trait SelectorParser extends OperatorParser with UnitParser with BaseParser {
-  protected lazy val simpleSeries: PackratParser[InstantExpression] =
-    "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str => InstantExpression(Some(str), Seq.empty, None) }
+  protected lazy val simpleSeries: PackratParser[StringLiteral] =
+    "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str => StringLiteral(ParserUtil.dequote(str))}
 
 
   lazy val instantVectorSelector: PackratParser[InstantExpression]
@@ -354,7 +354,7 @@ trait ExpressionParser extends AggregatesParser with SelectorParser with Numeric
 
   lazy val precedenceExpression: PackratParser[PrecedenceExpression] = {
 
-    "(" ~ binaryExpression ~ ")" ^^ {
+    "(" ~ expression ~ ")" ^^ {
       case "(" ~ ep ~ ")" => PrecedenceExpression(ep)
     }
   }
@@ -388,8 +388,7 @@ trait ExpressionParser extends AggregatesParser with SelectorParser with Numeric
 
   lazy val expression: PackratParser[Expression] =
     binaryExpression | subqueryExpression | aggregateExpression2 | aggregateExpression1 |
-    function | unaryExpression | vector | numericalExpression | simpleSeries | precedenceExpression |
-    "(" ~> expression <~ ")"
+    function | unaryExpression | vector | numericalExpression | simpleSeries | precedenceExpression
 
   // Generally most expressions can be subqueries except for those that return range vectors,
   // for example, subquery itself or range vector selectors cannot be "subqueryable"
@@ -500,6 +499,7 @@ object LegacyParser extends ExpressionParser with StrictLogging {
       case s: Scalar                => s
       case i: InstantExpression     => i
       case r: RangeExpression       => r
+      case l: StringLiteral         => l
     }
   }
 
