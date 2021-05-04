@@ -84,7 +84,7 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
             ex.timestamp shouldEqual(ex.timestamp)
           } else ex shouldEqual(res)
         }
-      case Left(ex) => println(ex)
+      case Left(ex) => throw ex
     }
   }
 
@@ -136,7 +136,7 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
             ex.timestamp shouldEqual(res.timestamp)
           } else ex shouldEqual(res)
         }
-      case Left(ex) => println(ex)
+      case Left(ex) => throw ex
     }
   }
 
@@ -191,7 +191,7 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
                   |                    "_step_": "10",
                   |                    "_type_": "prom-counter",
                   |                    "_ws_": "demo",
-                  |                    "instance": "c70cac88-928e-4905-9f37-c1c6ed27cf27",
+                  |                    "instance": "c70cac88-928e-4905-9f37-c1c6ed27cf27"
                   |                },
                   |                "value": [
                   |                    1619636156,
@@ -210,14 +210,14 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
     parser.decode[List[SuccessResponse]](input) match {
       case Right(successResponse) => {
         val response = successResponse.head
-        response.isPartial.get shouldEqual true
+        response.partial.get shouldEqual true
         response.message.get shouldEqual "Result may be partial since some shards are still bootstrapping"
         response.status shouldEqual "partial"
         val result = response.data.result.head
         result.metric.size shouldEqual 8
         result.value.size shouldEqual 1
       }
-      case Left(ex) => println(ex)
+      case Left(ex) => throw ex
     }
   }
 }
