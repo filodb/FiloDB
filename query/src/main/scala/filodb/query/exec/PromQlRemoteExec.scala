@@ -77,7 +77,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
     val queryResponse = if (response.data.result.isEmpty) {
       logger.debug("PromQlRemoteExec generating empty QueryResult as result is empty")
       QueryResult(id, ResultSchema.empty, Seq.empty,
-        if (response.isPartial.isDefined) response.isPartial.get else false, response.message)
+        if (response.partial.isDefined) response.partial.get else false, response.message)
     } else {
       if (response.data.result.head.aggregateResponse.isDefined) genAggregateResult(response, id)
       else {
@@ -85,7 +85,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
         if (samples.isEmpty) {
           logger.debug("PromQlRemoteExec generating empty QueryResult as samples is empty")
           QueryResult(id, ResultSchema.empty, Seq.empty,
-            if (response.isPartial.isDefined) response.isPartial.get else false, response.message)
+            if (response.partial.isDefined) response.partial.get else false, response.message)
         } else {
           samples.head match {
             // Passing histogramMap = true so DataSampl will be HistSampl for histograms
@@ -103,7 +103,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
     val aggregateResponse = response.data.result.head.aggregateResponse.get
     if (aggregateResponse.aggregateSampl.isEmpty) {
       QueryResult(id, ResultSchema.empty, Seq.empty,
-        if (response.isPartial.isDefined) response.isPartial.get else false, response.message)
+        if (response.partial.isDefined) response.partial.get else false, response.message)
     } else {
       aggregateResponse.aggregateSampl.head match {
         case AvgSampl(timestamp, value, count)           => genAvgQueryResult(response, id)
@@ -140,7 +140,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
       // TODO: Handle stitching with verbose flag
     }
     QueryResult(id, resultSchema.get("default").get, rangeVectors,
-      if (response.isPartial.isDefined) response.isPartial.get else false, response.message)
+      if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 
   def genHistQueryResult(response: SuccessResponse, id: String): QueryResult = {
@@ -179,7 +179,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
       // TODO: Handle stitching with verbose flag
     }
     QueryResult(id, resultSchema.get("histogram").get, rangeVectors,
-      if (response.isPartial.isDefined) response.isPartial.get else false, response.message)
+      if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 
   def genAvgQueryResult(response: SuccessResponse, id: String): QueryResult = {
@@ -210,7 +210,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
     // TODO: Handle stitching with verbose flag
     QueryResult(id, resultSchema.get(Avg.entryName).get, rangeVectors,
-      if (response.isPartial.isDefined) response.isPartial.get else false, response.message)
+      if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 
   def genStdValQueryResult(response: SuccessResponse, id: String): QueryResult = {
@@ -242,6 +242,6 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
     // TODO: Handle stitching with verbose flag
     QueryResult(id, resultSchema.get("stdval").get, rangeVectors,
-      if (response.isPartial.isDefined) response.isPartial.get else false, response.message)
+      if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 }
