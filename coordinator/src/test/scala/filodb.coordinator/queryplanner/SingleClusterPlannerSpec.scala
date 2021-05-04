@@ -202,7 +202,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(25000000, 2)) // spread change time is in ms
     }
-    val execPlan = engine.materialize(lp,QueryContext(promQlQueryParams, plannerParams = PlannerParams
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
     (spreadOverride = Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000)))
     execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
   }
