@@ -72,6 +72,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
         "end" -> promQlQueryParams.endSecs,
         "time" -> promQlQueryParams.endSecs,
         "step" -> promQlQueryParams.stepSecs,
+        "allowPartialResults" -> queryContext.plannerParams.allowPartialResults,
         "processFailure" -> queryContext.plannerParams.processFailure,
         "processMultiPartition" -> queryContext.plannerParams.processMultiPartition,
         "histogramMap" -> "true",

@@ -8,14 +8,20 @@ final case class RemoteErrorResponse(status: String, errorType: String, error: S
 
 final case class ErrorResponse(errorType: String, error: String, status: String = "error") extends PromQueryResponse
 
-final case class SuccessResponse(data: Data, status: String = "success") extends PromQueryResponse
+final case class SuccessResponse(data: Data, status: String = "success",
+                                 partial: Option[Boolean] = None,
+                                 message: Option[String] = None) extends PromQueryResponse
 
-final case class ExplainPlanResponse(debugInfo: Seq[String], status: String = "success") extends PromQueryResponse
+final case class ExplainPlanResponse(debugInfo: Seq[String], status: String = "success",
+                                     partial: Option[Boolean]= None,
+                                     message: Option[String]= None) extends PromQueryResponse
 
 final case class Data(resultType: String, result: Seq[Result])
 
 final case class MetadataSuccessResponse(data: Seq[Map[String, String]],
-                                         status: String = "success") extends PromQueryResponse
+                                         status: String = "success",
+                                         partial: Option[Boolean]= None,
+                                         message: Option[String]= None) extends PromQueryResponse
 
 final case class Result(metric: Map[String, String], values: Option[Seq[DataSampl]], value: Option[DataSampl] = None,
                         aggregateResponse: Option[AggregateResponse] = None)
