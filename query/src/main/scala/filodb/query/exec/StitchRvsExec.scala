@@ -71,7 +71,7 @@ final case class StitchRvsExec(queryContext: QueryContext,
 
   protected def args: String = ""
 
-  protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"StitchRvsExec: Stitching results:")
