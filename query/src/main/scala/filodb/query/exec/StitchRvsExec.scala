@@ -81,9 +81,12 @@ final case class StitchRvsExec(queryContext: QueryContext,
     }.toListL.map(_.flatten).map { srvs =>
       val groups = srvs.groupBy(_.key.labelValues)
       groups.mapValues { toMerge =>
-        val rows = StitchRvsExec.merge(toMerge.map(_.rows))
+        val rows = StitchRvsExec.merge(toMerge.map(_.rows()))
         val key = toMerge.head.key
-        IteratorBackedRangeVector(key, rows, toMerge.headOption.flatMap(_.outputRange))
+        val outputRange = toMerge.map(_.outputRange).reduce { (rv1Range, rv2Range) =>
+          RvRange.union(rv1Range, rv2Range)
+        }
+        IteratorBackedRangeVector(key, rows, outputRange)
       }.values
     }.map(Observable.fromIterable)
     Observable.fromTask(stitched).flatten
