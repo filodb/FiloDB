@@ -71,7 +71,7 @@ final case class StitchRvsExec(queryContext: QueryContext,
 
   protected def args: String = ""
 
-  protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"StitchRvsExec: Stitching results:")
@@ -81,9 +81,12 @@ final case class StitchRvsExec(queryContext: QueryContext,
     }.toListL.map(_.flatten).map { srvs =>
       val groups = srvs.groupBy(_.key.labelValues)
       groups.mapValues { toMerge =>
-        val rows = StitchRvsExec.merge(toMerge.map(_.rows))
+        val rows = StitchRvsExec.merge(toMerge.map(_.rows()))
         val key = toMerge.head.key
-        IteratorBackedRangeVector(key, rows, toMerge.headOption.flatMap(_.outputRange))
+        val outputRange = toMerge.map(_.outputRange).reduce { (rv1Range, rv2Range) =>
+          RvRange.union(rv1Range, rv2Range)
+        }
+        IteratorBackedRangeVector(key, rows, outputRange)
       }.values
     }.map(Observable.fromIterable)
     Observable.fromTask(stitched).flatten
@@ -109,7 +112,10 @@ final case class StitchRvsMapper() extends RangeVectorTransformer {
       groups.mapValues { toMerge =>
         val rows = StitchRvsExec.merge(toMerge.map(_.rows))
         val key = toMerge.head.key
-        IteratorBackedRangeVector(key, rows, toMerge.headOption.flatMap(_.outputRange))
+        val outputRange = toMerge.map(_.outputRange).reduce { (rv1Range, rv2Range) =>
+          RvRange.union(rv1Range, rv2Range)
+        }
+        IteratorBackedRangeVector(key, rows, outputRange)
       }.values
     }.map(Observable.fromIterable)
     Observable.fromTask(stitched).flatten

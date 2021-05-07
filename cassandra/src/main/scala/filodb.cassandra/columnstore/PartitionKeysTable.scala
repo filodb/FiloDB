@@ -46,6 +46,14 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
     s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ?")
     .setConsistencyLevel(ConsistencyLevel.ONE)
 
+  private lazy val scanCqlForStartEndTime = session.prepare(
+    s"SELECT partKey FROM $tableString " +
+      s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ? AND " +
+      s"startTime >= ? AND startTime <= ? AND " +
+      s"endTime >= ? AND endTime <= ? " +
+      s"ALLOW FILTERING")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
   private lazy val scanCqlForStartTime = session.prepare(
     s"SELECT partKey, startTime, endTime FROM $tableString " +
       s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ? AND startTime >= ? AND startTime <= ? " +
@@ -139,6 +147,29 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
   }.toSet
 
   /**
+   * Method used by Cardinality Buster job.
+   * Return PartitionKeyRecord objects where timeSeries start and end Time falls within the specified window.
+   */
+  def scanPksByStartEndTimeRangeNoAsync(split: (String, String),
+                                        startTimeGTE: Long,
+                                        startTimeLTE: Long,
+                                        endTimeGTE: Long,
+                                        endTimeLTE: Long): Iterator[Array[Byte]] = {
+      /*
+       * FIXME conversion of tokens to Long works only for Murmur3Partitioner because it generates
+       * Long based tokens. If other partitioners are used, this can potentially break.
+       * Correct way is to pass Token objects around and bind tokens with stmt.bind().setPartitionKeyToken(token)
+       */
+      val stmt = scanCqlForStartEndTime.bind(split._1.toLong: java.lang.Long,
+        split._2.toLong: java.lang.Long,
+        startTimeGTE: java.lang.Long,
+        startTimeLTE: java.lang.Long,
+        endTimeGTE: java.lang.Long,
+        endTimeLTE: java.lang.Long)
+    session.execute(stmt).iterator.asScala.map(row => row.getBytes("partKey").array())
+  }
+
+  /**
    * Returns PartKeyRecord for a given partKey bytes.
    *
    * @param pk partKey bytes
@@ -159,9 +190,9 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
    * @param pk partKey bytes
    * @return Future[Response]
    */
-  def deletePartKey(pk: Array[Byte]): Future[Response] = {
-    val  stmt = deleteCql.bind().setBytes(0, toBuffer(pk)).setConsistencyLevel(writeConsistencyLevel)
-    connector.execStmtWithRetries(stmt)
+  def deletePartKeyNoAsync(pk: Array[Byte]): Response = {
+    val stmt = deleteCql.bind().setBytes(0, toBuffer(pk)).setConsistencyLevel(writeConsistencyLevel)
+    connector.execCqlNoAsync(stmt)
   }
 
 }

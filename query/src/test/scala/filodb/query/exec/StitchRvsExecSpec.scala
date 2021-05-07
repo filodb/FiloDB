@@ -1,16 +1,23 @@
 package filodb.query.exec
 
 import scala.annotation.tailrec
-import filodb.core.metadata.Column.ColumnType.{DoubleColumn, TimestampColumn}
-import filodb.core.query.{ColumnInfo, CustomRangeVectorKey, EmptyQueryConfig, QueryContext, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange, TransientRow}
-import filodb.core.query.NoCloseCursor.NoCloseCursor
-import filodb.memory.format.UnsafeUtils
-import filodb.query.QueryResult
+
+import monix.eval.Task
+import monix.execution.Scheduler.Implicits.global
+import monix.reactive.Observable
+import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
+import filodb.core.metadata.Column.ColumnType.{DoubleColumn, TimestampColumn}
+import filodb.core.query._
+import filodb.core.query.NoCloseCursor.NoCloseCursor
+import filodb.core.MetricsTestData
+import filodb.memory.format.UnsafeUtils
+import filodb.query.QueryResult
+
 // scalastyle:off null
-class StitchRvsExecSpec extends AnyFunSpec with Matchers {
+class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
   val error = 0.0000001d
 
   it ("should merge with two overlapping RVs correctly") {
@@ -134,10 +141,58 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers {
     mergeAndValidate(rvs, expected)
   }
 
+  it ("should reduce output range") {
+
+    val rvsData = Seq (
+      Seq(  (10L, 3d),
+        (20L, 3d),
+        (30L, 3d),
+        (40L, 3d),
+        (50L, 3d)
+      ),
+      Seq(
+        (60L, 3d),
+        (70L, 3d),
+        (80L, 3d),
+        (90L, 3d),
+        (100L, 3d)
+      )
+    )
+    val expected =
+      Seq(  (10L, 3d),
+        (20L, 3d),
+        (30L, 3d),
+        (40L, 3d),
+        (50L, 3d),
+        (60L, 3d),
+        (70L, 3d),
+        (80L, 3d),
+        (90L, 3d),
+        (100L, 3d)
+      )
+
+    // null needed below since there is a require in code that prevents empty children
+    val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(EmptyQueryConfig),
+      Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
+    val rs = ResultSchema(List(ColumnInfo("timestamp",
+      TimestampColumn), ColumnInfo("value", DoubleColumn)), 1)
+
+    val res0 = QueryResult("id", rs, Seq(MetricsTestData.makeRv(CustomRangeVectorKey.empty, rvsData(0), RvRange(10, 10, 50))))
+    val res1 = QueryResult("id", rs, Seq(MetricsTestData.makeRv(CustomRangeVectorKey.empty, rvsData(1), RvRange(30, 10, 100))))
+
+    val inputRes = Seq(res0, res1).zipWithIndex
+    val output = exec.compose(Observable.fromIterable(inputRes), Task.now(null), QuerySession.makeForTestingOnly())
+      .toListL.runAsync.futureValue
+    output.size shouldEqual 1
+    output.head.rows().map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual expected
+    output.head.outputRange shouldEqual Some(RvRange(10, 10, 100))
+  }
+
   it ("should reduce result schemas with different fixedVecLengths without error") {
 
     // null needed below since there is a require in code that prevents empty children
-    val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(EmptyQueryConfig), Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
+    val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(EmptyQueryConfig),
+                             Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
 
     val rs1 = ResultSchema(List(ColumnInfo("timestamp",
       TimestampColumn), ColumnInfo("value", DoubleColumn)), 1, Map(), Some(430), List(0, 1))

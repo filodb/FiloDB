@@ -81,9 +81,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     val readData2 = colStore.scanPartKeys(dataset, 0).toListL.runAsync.futureValue.toSet
     readData2.map(pk => new String(pk.partKey, StandardCharsets.UTF_8).toInt) shouldEqual expectedKeys
 
-    val numDeleted = colStore.deletePartKeys(dataset, 0,
-      Observable.fromIterable(readData2.map(_.partKey))).futureValue
-    numDeleted shouldEqual readData2.size
+    readData2.map(_.partKey).foreach(pk => colStore.deletePartKeyNoAsync(dataset, 0, pk))
 
     val readData3 = colStore.scanPartKeys(dataset, 0).toListL.runAsync.futureValue
     readData3.isEmpty shouldEqual true
