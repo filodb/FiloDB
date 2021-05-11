@@ -198,8 +198,20 @@ case class SubqueryWithWindowing(
   stepMs: Long, // ST
   endMs: Long, // E
   functionId: RangeFunctionId, // sum_over_time
+  functionArgs: Seq[FunctionArgsPlan] = Nil,
   subqueryWindowMs: Long, // 5m
   subqueryStepMs: Long //1m
+) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = ???
+}
+
+case class TopLevelSubquery(
+  innerPeriodicSeries: PeriodicSeriesPlan, // someExpression
+  startMs: Long,
+  stepMs: Long,
+  endMs: Long,
+  subqueryStepMs: Long
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = ???
