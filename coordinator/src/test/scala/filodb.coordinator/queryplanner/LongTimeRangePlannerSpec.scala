@@ -251,7 +251,6 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
 
     val rawRetention = 10090.minutes
     val downsampleRetention= 183.days
-
     val earliestRawTime = now - rawRetention.toMillis
     val earliestDownSampleTime = now - downsampleRetention.toMillis
     val latestDownsampleTime = now - 12.hours.toMillis
@@ -262,9 +261,9 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
       .asInstanceOf[PeriodicSeriesPlan]
 
     val rawPlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = earliestRawTime,
-      queryConfig)
+      queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
-      earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig)
+      earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
     val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, datasetMetricColumn)
 
@@ -273,6 +272,42 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
     ep.isInstanceOf[BinaryJoinExec] shouldEqual(true)
     val binaryJoinExec = ep.asInstanceOf[BinaryJoinExec]
 
+    binaryJoinExec.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual true
+    binaryJoinExec.lhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
+    binaryJoinExec.rhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
+  }
+
+  it("should direct binary join to raw cluster and use ActorPlanDispatcher") {
+
+    val start = now/1000 - 5.minutes.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now/1000 - 2.minutes.toSeconds
+
+    val rawRetention = 10090.minutes
+    val downsampleRetention= 183.days
+    val earliestRawTime = now - rawRetention.toMillis
+    val earliestDownSampleTime = now - downsampleRetention.toMillis
+    val latestDownsampleTime = now - 12.hours.toMillis
+
+    val query ="""sum(rate(foo{job = "app"}[5m])) - sum(rate(foo{job = "app"}[5m] offset 2d))"""
+    val logicalPlan = Parser.queryRangeToLogicalPlan(query,
+      TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan]
+
+    val rawPlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = earliestRawTime,
+      queryConfig, "raw")
+    val downsamplePlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
+      earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+      earliestRawTime, latestDownsampleTime, disp, queryConfig, datasetMetricColumn)
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
+
+    ep.isInstanceOf[BinaryJoinExec] shouldEqual(true)
+    val binaryJoinExec = ep.asInstanceOf[BinaryJoinExec]
+
+    // Since LHS and RHS both belong to raw cluster, we use ActorPlanDispatcher
+    ep.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual true
     binaryJoinExec.lhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
     binaryJoinExec.rhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
   }

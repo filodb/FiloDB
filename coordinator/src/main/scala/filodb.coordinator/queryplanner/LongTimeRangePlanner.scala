@@ -32,11 +32,14 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
                            queryConfig: QueryConfig,
                            datasetMetricColumn: String) extends QueryPlanner {
 
+  val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
+
   private def materializePeriodicSeriesPlan(periodicSeriesPlan: PeriodicSeriesPlan, qContext: QueryContext) = {
     val earliestRawTime = earliestRawTimestampFn
     lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(periodicSeriesPlan)
     lazy val lookbackMs = LogicalPlanUtils.getLookBackMillis(periodicSeriesPlan).max
     lazy val startWithOffsetMs = periodicSeriesPlan.startMs - offsetMillis.max
+    // For scalar binary operation queries like sum(rate(foo{job = "app"}[5m] offset 8d)) * 0.5
     lazy val endWithOffsetMs = periodicSeriesPlan.endMs - offsetMillis.max
     if (!periodicSeriesPlan.isRoutable)
       rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
@@ -90,12 +93,21 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
 
     val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
 
+
+    val dispatcher = if (lhsExec.dispatcher.isInstanceOf[ActorPlanDispatcher] &&
+      rhsExec.dispatcher.isInstanceOf[ActorPlanDispatcher]) {
+      val lhsCluster = lhsExec.dispatcher.asInstanceOf[ActorPlanDispatcher].clusterName
+      val rhsCluster = rhsExec.dispatcher.asInstanceOf[ActorPlanDispatcher].clusterName
+      if (rhsCluster.equals(lhsCluster)) PlannerUtil.pickDispatcher(lhsExec.children ++ rhsExec.children)
+      else inProcessPlanDispatcher
+    } else inProcessPlanDispatcher
+
     if (logicalPlan.operator.isInstanceOf[SetOperator])
-      SetOperatorExec(qContext, InProcessPlanDispatcher(queryConfig), Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+      SetOperatorExec(qContext, dispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
         LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
     else
-      BinaryJoinExec(qContext, InProcessPlanDispatcher(queryConfig), Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+      BinaryJoinExec(qContext, dispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
         logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), logicalPlan.include,
         datasetMetricColumn)

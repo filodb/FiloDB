@@ -26,7 +26,7 @@ trait PlanDispatcher extends java.io.Serializable {
   * This implementation provides a way to distribute query execution
   * using Akka Actors.
   */
-case class ActorPlanDispatcher(target: ActorRef) extends PlanDispatcher {
+case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends PlanDispatcher {
 
   def dispatch(plan: ExecPlan)(implicit sched: Scheduler): Task[QueryResponse] = {
     val queryTimeElapsed = System.currentTimeMillis() - plan.queryContext.submitTime
