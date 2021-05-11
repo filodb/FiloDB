@@ -229,6 +229,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
       case lp: ScalarBinaryOperation       => materializeScalarBinaryOperation(qContext, lp)
       case lp: SubqueryWithWindowing       => materializeSubqueryWithWindowing(qContext, lp)
+      case lp: TopLevelSubquery            => materializeTopLevelSubquery(qContext, lp)
       case _                               => throw new BadQueryException("Invalid logical plan")
     }
   }
@@ -269,15 +270,45 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     // is optimal, if there is no overlap and even worse significant gap between the individual subqueries, retrieving
     // the entire range might be suboptimal, this still might be a better option than issuing and concatenating numerous
     // subqueries separately
-    val innerExecPlan = walkLogicalPlanTree(sqww.innerPeriodicSeries, qContext)
     val rangeFn = InternalRangeFunction.lpToInternalFunc(sqww.functionId)
-    innerExecPlan.plans.foreach { p => p.addRangeVectorTransformer(ApplySubqueryRangeFunction(
+    var innerPeriodicSeriesPlan = sqww.innerPeriodicSeries
+    val rangeVectorTransformer = if (queryConfig.fastSubquery) {
+      val paramsExec = materializeFunctionArgs(sqww.functionArgs, qContext)
+      val window = if (rangeFn == InternalRangeFunction.Timestamp)
+        None
+      else
+        Some(sqww.subqueryWindowMs)
+      PeriodicSamplesMapper(
+        sqww.startMs, sqww.stepMs, sqww.endMs,
+        window,
+        Some(rangeFn),
+        qContext,
+        false,
+        paramsExec,
+        None,
+        false,
+        true
+      )
+    } else {
+      ApplySubqueryRangeFunction(
         RangeParams(sqww.startMs / 1000, sqww.stepMs / 1000, sqww.endMs / 1000),
         sqww.subqueryWindowMs,
         sqww.subqueryStepMs,
         rangeFn
-    ))}
+      )
+    }
+    val innerExecPlan = walkLogicalPlanTree(sqww.innerPeriodicSeries, qContext)
+    innerExecPlan.plans.foreach { p => p.addRangeVectorTransformer(rangeVectorTransformer)}
     innerExecPlan
+  }
+
+  private def materializeTopLevelSubquery(qContext: QueryContext, tlsq: TopLevelSubquery): PlanResult = {
+    // This physical plan will try to execute only one range query instead of a number of individual subqueries.
+    // If ranges of each of the subqueries have overlap, retrieving the total range
+    // is optimal, if there is no overlap and even worse significant gap between the individual subqueries, retrieving
+    // the entire range might be suboptimal, this still might be a better option than issuing and concatenating numerous
+    // subqueries separately
+    walkLogicalPlanTree(tlsq.innerPeriodicSeries, qContext)
   }
 
   private def materializeBinaryJoin(qContext: QueryContext,
