@@ -2,9 +2,18 @@ package filodb.prometheus.ast
 
 import scala.annotation.tailrec
 
+import filodb.core.GlobalConfig
 import filodb.core.query.{ColumnFilter, RangeParams}
 import filodb.query._
 import filodb.query.RangeFunctionId.Timestamp
+
+object SubqueryConfig {
+  val conf = GlobalConfig.systemConfig
+
+  val fastSubquery = if (conf.hasPath("filodb.query.fastSubquery")) {
+    conf.getBoolean("filodb.query.fastSubquery")
+  } else true
+}
 
 case class Function(name: String, allParams: Seq[Expression]) extends Expression with PeriodicSeries {
   private val ignoreChecks = name.equalsIgnoreCase("vector") || name.equalsIgnoreCase("time")
@@ -216,34 +225,50 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
     rangeFunctionId: RangeFunctionId,
     otherParams: Seq[FunctionArgsPlan]
   ) : PeriodicSeriesPlan = {
-    var subqueryStepToUseMs = 60000L
-    if (sqe.sqcl.step.isDefined) {
-      subqueryStepToUseMs = sqe.sqcl.step.get.millis(1L)
-    }
+    var subqueryStepToUseMs = SubqueryUtils.getSubqueryStepMs(sqe.sqcl.step)
     // when start and stop are the same, step should be zero too
     var outerStepMs = timeParams.step * 1000
     if (timeParams.start == timeParams.end) {
       outerStepMs = 0
     }
 
+    val stepForInnerMs  = if (SubqueryConfig.fastSubquery) {
+      subqueryStepToUseMs
+    } else {
+      @tailrec def gcd(a: Long, b: Long): Long = if (b == 0) a else gcd(b, a % b)
+      gcd(outerStepMs, subqueryStepToUseMs)
+    }
+
+    val preciseStartForInnerS = timeParams.start - (sqe.sqcl.window.millis(1L) / 1000)
+    val startForInnerS = if (SubqueryConfig.fastSubquery) {
+      SubqueryUtils.getStartForFastSubquery(preciseStartForInnerS, subqueryStepToUseMs/1000)
+    } else {
+      preciseStartForInnerS
+    }
+
+    val preciseEndForInnerS = timeParams.end
+    val endForInnerS = if (SubqueryConfig.fastSubquery) {
+      SubqueryUtils.getEndForFastSubquery(preciseEndForInnerS, subqueryStepToUseMs/1000)
+    } else {
+      timeParams.end
+    }
+
+    val timeParamsForInner = TimeStepParams(
+      startForInnerS,
+      stepForInnerMs/1000,
+      endForInnerS
+    )
     // We don't want to naively execute subquery by concatenating
     // the results of multiple queries. Instead, the inner subqueries are executed
     // as a wider single query with newly calculated start and step. Later we
     // apply a transformation against the resulting time series to form the actual
     // response of the subquery.
-    @tailrec def gcd(a: Long, b: Long): Long = if (b == 0) a else gcd(b, a % b)
-    val newStepForInner = gcd(outerStepMs, subqueryStepToUseMs)
-
-    val timeParamsForInner = TimeStepParams(
-      timeParams.start - (sqe.sqcl.window.millis(1L) / 1000),
-      newStepForInner/1000,
-      timeParams.end
-    )
     val subquery = sqe.subquery.toSeriesPlan(timeParamsForInner)
     SubqueryWithWindowing(
       subquery,
       timeParams.start * 1000 , outerStepMs, timeParams.end * 1000,
       rangeFunctionId,
+      otherParams,
       sqe.sqcl.window.millis(1L),
       subqueryStepToUseMs
     )

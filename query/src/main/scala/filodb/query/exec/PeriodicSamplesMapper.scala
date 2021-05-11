@@ -33,7 +33,9 @@ final case class PeriodicSamplesMapper(startMs: Long,
                                        stepMultipleNotationUsed: Boolean = false,
                                        funcParams: Seq[FuncArgs] = Nil,
                                        offsetMs: Option[Long] = None,
-                                       rawSource: Boolean = true) extends RangeVectorTransformer {
+                                       rawSource: Boolean = true,
+                                       inclusive: Boolean = false
+) extends RangeVectorTransformer {
   require(startMs <= endMs, s"start $startMs should be <= end $endMs")
   require(startMs == endMs || stepMs > 0, s"step $stepMs should be > 0 for range query")
   val adjustedStep = if (stepMs > 0) stepMs else stepMs + 1 // needed for iterators to terminate when start == end
@@ -100,7 +102,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), startWithOffset, adjustedStep, endWithOffset,
-              windowPlusPubInt, rangeFuncGen().asSliding, querySession.queryConfig))
+              windowPlusPubInt, rangeFuncGen().asSliding, querySession.queryConfig, inclusive))
         }
       // Otherwise just feed in the double column
       case f: RangeFunction =>
@@ -108,7 +110,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(rv.rows, startWithOffset, adjustedStep, endWithOffset, windowPlusPubInt,
-              rangeFuncGen().asSliding, querySession.queryConfig))
+              rangeFuncGen().asSliding, querySession.queryConfig, inclusive))
         }
     }
 
@@ -291,7 +293,9 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
                             end: Long,
                             window: Long,
                             rangeFunction: RangeFunction,
-                            queryConfig: QueryConfig) extends RangeVectorCursor {
+                            queryConfig: QueryConfig,
+                            inclusive : Boolean = false
+) extends RangeVectorCursor {
   require(step > 0, s"Adjusted step $step not > 0")
   private val sampleToEmit = new TransientRow()
   private var curWindowEnd = start
@@ -357,9 +361,13 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
     */
   private def shouldAddCurToWindow(curWindowStart: Long, cur: TransientRow): Boolean = {
     // One of the following three conditions need to hold true:
+    val insideCurWindow = if (inclusive)
+      cur.timestamp >= curWindowStart
+    else
+      cur.timestamp > curWindowStart
 
     // 1. cur is inside current window
-    (cur.timestamp > curWindowStart) ||
+    insideCurWindow ||
       // 2. needLastSample and cur is the last sample because next sample is inside window
       (rangeFunction.needsLastSample && rows.hasNext && rows.head.timestamp > curWindowStart) ||
       // 3. needLastSample and no more rows after cur
@@ -376,14 +384,20 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
     */
   private def shouldRemoveWindowHead(curWindowStart: Long): Boolean = {
 
-    (!windowQueue.isEmpty) && (
+    if (windowQueue.isEmpty) {
+      false
+    } else {
+      val headIsOutsideWindow = if (inclusive) {
+        windowQueue.head.timestamp < curWindowStart
+      } else {
+        windowQueue.head.timestamp <= curWindowStart
+      }
       // One of the following two conditions need to hold true:
-
       // 1. if no need for last sample, and head is outside the window
-      (!rangeFunction.needsLastSample && windowQueue.head.timestamp <= curWindowStart) ||
+      (!rangeFunction.needsLastSample && headIsOutsideWindow) ||
         // 2. if needs last sample, then ok to remove window's head only if there is more than one item in window
-        (rangeFunction.needsLastSample && windowQueue.size > 1 && windowQueue.head.timestamp <= curWindowStart)
-    )
+        (rangeFunction.needsLastSample && windowQueue.size > 1 && headIsOutsideWindow)
+    }
   }
 }
 

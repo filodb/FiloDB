@@ -103,19 +103,26 @@ case class SubqueryExpression(subquery: PeriodicSeries, sqcl: SubqueryClause) ex
     if (timeParams.start != timeParams.end) {
       throw new UnsupportedOperationException("Subquery is not allowed as a top level expression for query_range")
     }
-    // According to PromQL docs, the subquery step is an optional parameter and
-    // defaults to Prometheus node collection interval.
-    // Mosaic does not have a default step, defaulting to hard coded 60 seconds here.
-    var stepToUse = 60L
-    if (sqcl.step.isDefined) {
-      stepToUse = sqcl.step.get.millis(1L) / 1000
+    val stepToUseMs = SubqueryUtils.getSubqueryStepMs(sqcl.step);
+    var startS = timeParams.start - (sqcl.window.millis(1L) / 1000)
+    var endS = timeParams.start
+    if (SubqueryConfig.fastSubquery) {
+      startS = SubqueryUtils.getStartForFastSubquery(startS, stepToUseMs/1000 )
+      endS = SubqueryUtils.getEndForFastSubquery(endS, stepToUseMs/1000 )
     }
     val timeParamsToUse = TimeStepParams(
-      timeParams.start - (sqcl.window.millis(1L) / 1000),
-      stepToUse,
-      timeParams.start
+      startS,
+      stepToUseMs/1000,
+      endS
     )
-    subquery.toSeriesPlan(timeParamsToUse)
+    TopLevelSubquery(
+      subquery.toSeriesPlan(timeParamsToUse),
+      timeParams.start * 1000,
+      timeParams.step * 1000,
+      timeParams.end *1000,
+      stepToUseMs
+    )
+
   }
 
 }
@@ -260,3 +267,6 @@ case class RangeExpression(metricName: Option[String],
     }.getOrElse(rs)
   }
 }
+
+
+
