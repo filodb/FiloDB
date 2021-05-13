@@ -359,7 +359,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       Seq(74372982000L, 15d, 15d, LongHistogram(bucketScheme, Array(0L, 15, 15)), histNameNaN, seriesTagsNaN),
 
       Seq(74373041000L, 18d, 19d, LongHistogram(bucketScheme, Array(1L, 16, 19)), histNameNaN, seriesTagsNaN),
-      Seq(74373042000L, 20d, 25d, LongHistogram(bucketScheme, Array(4L, 20, 25)), histNameNaN, seriesTagsNaN)
+      Seq(74373041500L, 20d, 25d, LongHistogram(bucketScheme, Array(4L, 20, 25)), histNameNaN, seriesTagsNaN),
+      Seq(74373042000L, Double.NaN, Double.NaN, LongHistogram(bucketScheme, Array(0L, 0, 0)), histNameNaN, seriesTagsNaN)
     )
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
@@ -626,9 +627,9 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
     val acc = ctrChunkInfo.vectorAccessor(2)
-    val add = ctrChunkInfo.vectorAddress(2)
-    DoubleVector(acc, add).dropPositions(acc, add).toList shouldEqual Seq(2, 4, 6, 8, 11)
-    PrimitiveVectorReader.dropped(acc, add) shouldEqual true
+    val addr = ctrChunkInfo.vectorAddress(2)
+    DoubleVector(acc, addr).dropPositions(acc, addr).toList shouldEqual Seq(2, 4, 6, 8, 11, 14)
+    PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
       Kamon.counter("dummy").withoutTags())
@@ -659,7 +660,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       (74372981500L, 1d, 1d, Vector(0d, 1d, 1d)), // drop (11)
       (74372982000L, 15d, 15d, Vector(0d, 15d, 15d)),
 
-      (74373042000L, 20d, 25d, Vector(4d, 20d, 25d))
+      (74373041500L, 20d, 25d, Vector(4d, 20d, 25d)),
+      (74373042000L, Double.NaN, Double.NaN, Vector(0.0, 0.0, 0.0)) // drop (14)
     )
     // time, sum, count, histogram
     downsampledData1.filter(_._2.isNaN).map(_._1) shouldEqual expected.filter(_._2.isNaN).map(_._1) // timestamp of NaN records should match
@@ -749,9 +751,9 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
     val acc = ctrChunkInfo.vectorAccessor(2)
-    val add = ctrChunkInfo.vectorAddress(2)
-    DoubleVector(acc, add).dropPositions(acc, add).toList shouldEqual Seq(2, 4)
-    PrimitiveVectorReader.dropped(acc, add) shouldEqual true
+    val addr = ctrChunkInfo.vectorAddress(2)
+    DoubleVector(acc, addr).dropPositions(acc, addr).toList shouldEqual Seq(2, 4)
+    PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
       Kamon.counter("dummy").withoutTags())
@@ -791,7 +793,10 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     downsampledPart1.partKeyBytes shouldEqual histNaNPartKeyBytes
 
     val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
-    PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(2), ctrChunkInfo.vectorAddress(2)) shouldEqual true
+    val acc = ctrChunkInfo.vectorAccessor(2)
+    val addr = ctrChunkInfo.vectorAddress(2)
+    DoubleVector(acc, addr).dropPositions(acc, addr).toList shouldEqual Seq(2, 4, 6, 8, 10, 13)
+    PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
       Kamon.counter("dummy").withoutTags())
@@ -807,21 +812,21 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val expected = Seq(
       (74372801000L, 0d, 1d, Vector(0d, 0d, 1d)),
       (74372802000L, 5.0, 6.0, Vector(2.0, 5.0, 6.0)),
-      (74372802500L, Double.NaN, Double.NaN, Vector(0.0, 0.0, 0.0)),
+      (74372802500L, Double.NaN, Double.NaN, Vector(0.0, 0.0, 0.0)), // drop (2)
 
       (74372861500L, 10.0, 10.0, Vector(2.0, 5.0, 10.0)),
-      (74372862000L, Double.NaN, Double.NaN, Vector(0.0, 0.0, 0.0)),
+      (74372862000L, Double.NaN, Double.NaN, Vector(0.0, 0.0, 0.0)), // drop (4)
       (74372862500L, 11d, 14d, Vector(2d, 8d, 14d)),
 
-      (74372921000L, 2d, 2d, Vector(0d, 0d, 2d)),
+      (74372921000L, 2d, 2d, Vector(0d, 0d, 2d)), // drop (6)
       (74372921500L, 7.0, 9.0, Vector(1.0, 7.0, 9.0)),
-      (74372922000L, Double.NaN, Double.NaN, Vector(0.0, 0.0, 0.0)),
+      (74372922000L, Double.NaN, Double.NaN, Vector(0.0, 0.0, 0.0)), // drop (8)
 
       (74372981000L, 17d, 21d, Vector(2d, 16d, 21d)),
-      (74372981500L, 1d, 1d, Vector(0d, 1d, 1d)),
+      (74372981500L, 1d, 1d, Vector(0d, 1d, 1d)), // drop 10
       (74372982000L, 15.0d, 15.0d, Vector(0.0, 15.0, 15.0)),
-
-      (74373042000L, 20.0d, 25.0d, Vector(4.0, 20.0, 25.0))
+      (74373041500L, 20.0d, 25.0d, Vector(4.0, 20.0, 25.0)),
+      (74373042000L, Double.NaN, Double.NaN, Vector(0.0, 0.0, 0.0)) // drop (13)
     )
     // time, sum, count, histogram
     downsampledData1.filter(_._2.isNaN).map(_._1) shouldEqual expected.filter(_._2.isNaN).map(_._1) // timestamp of NaN records should match
