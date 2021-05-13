@@ -48,6 +48,6 @@ case class MetadataRemoteExec(queryEndpoint: String,
                         queryWithPlanName(queryContext)))
 
     QueryResult(id, resultSchema, srvSeq,
-      if (response.isPartial.isDefined) response.isPartial.get else false, response.message)
+      if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 }
