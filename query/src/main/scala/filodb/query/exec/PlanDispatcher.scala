@@ -18,6 +18,7 @@ import filodb.query.QueryResponse
   * from the ExecPlan.
   */
 trait PlanDispatcher extends java.io.Serializable {
+  def clusterName: String
   def dispatch(plan: ExecPlan)
               (implicit sched: Scheduler): Task[QueryResponse]
 }

@@ -38,6 +38,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
+
+    override def clusterName: String = ???
   }
 
   val sampleNodeCpu: Array[RangeVector] = Array(

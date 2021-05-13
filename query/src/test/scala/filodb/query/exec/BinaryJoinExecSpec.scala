@@ -35,6 +35,8 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
+
+    override def clusterName: String = ???
   }
 
   private def data(i: Int) = Stream.from(0).map(n => new TransientRow(n.toLong, i.toDouble)).take(20)

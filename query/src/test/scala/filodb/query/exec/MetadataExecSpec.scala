@@ -79,6 +79,8 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
+
+    override def clusterName: String = ???
   }
 
   it ("should read the job names from timeseriesindex matching the columnfilters") {

@@ -22,6 +22,8 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
+
+    override def clusterName: String = ???
   }
 
   val params = PromQlQueryParams("", 0, 0 , 0)

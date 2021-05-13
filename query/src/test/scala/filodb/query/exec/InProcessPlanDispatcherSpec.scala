@@ -176,4 +176,6 @@ case class DummyDispatcher(memStore: TimeSeriesMemStore, querySession: QuerySess
                        (implicit sched: Scheduler): Task[QueryResponse] = {
     plan.execute(memStore, querySession)
   }
+
+  override def clusterName: String = ???
 }

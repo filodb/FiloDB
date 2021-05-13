@@ -1,5 +1,7 @@
 package filodb.query.exec
 
+import java.net.InetAddress
+
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
@@ -13,6 +15,7 @@ import filodb.core.query.{QueryConfig, QuerySession}
 import filodb.core.store._
 import filodb.query.QueryResponse
 
+
 /**
   * Dispatcher which will make a No-Op style call to ExecPlan#excecute().
   * Goal is that Non-Leaf plans can be executed locally in JVM and make network
@@ -21,6 +24,7 @@ import filodb.query.QueryResponse
 
   case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatcher {
 
+  val clusterName = InetAddress.getLocalHost().getHostName()
   override def dispatch(plan: ExecPlan)(implicit sched: Scheduler): Task[QueryResponse] = {
     // unsupported source since its does not apply in case of non-leaf plans
     val source = UnsupportedChunkSource()
