@@ -84,6 +84,7 @@ object LogicalPlanUtils extends StrictLogging {
     * NOTE: Plan should be PeriodicSeriesPlan
     */
   //scalastyle:off cyclomatic.complexity
+  //scalastyle:off method.length
   def copyWithUpdatedTimeRange(logicalPlan: PeriodicSeriesPlan,
                                timeRange: TimeRange): PeriodicSeriesPlan = {
     logicalPlan match {
