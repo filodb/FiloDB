@@ -96,8 +96,8 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
 
     val dispatcher = if (lhsExec.dispatcher.isInstanceOf[ActorPlanDispatcher] &&
       rhsExec.dispatcher.isInstanceOf[ActorPlanDispatcher]) {
-      val lhsCluster = lhsExec.dispatcher.asInstanceOf[ActorPlanDispatcher].clusterName
-      val rhsCluster = rhsExec.dispatcher.asInstanceOf[ActorPlanDispatcher].clusterName
+      val lhsCluster = lhsExec.dispatcher.clusterName
+      val rhsCluster = rhsExec.dispatcher.clusterName
       if (rhsCluster.equals(lhsCluster)) PlannerUtil.pickDispatcher(lhsExec.children ++ rhsExec.children)
       else inProcessPlanDispatcher
     } else inProcessPlanDispatcher
