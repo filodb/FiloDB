@@ -206,6 +206,10 @@ case class SubqueryWithWindowing(
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = ???
 }
 
+/**
+* Please, refer to documentation of SubqueryWithWindowing, this class
+* corresponds to case A)
+*/
 case class TopLevelSubquery(
   innerPeriodicSeries: PeriodicSeriesPlan, // someExpression
   startMs: Long,

@@ -102,6 +102,17 @@ class SubquerySlidingWindowIterator(
     }
   }
 
+  // The general idea is to keep a buffer of samples that are
+  // in the range of the next window to evaluate. The trick, however, is NOT to expose
+  // the entire buffer to a range function to produce next value. Instead, we have
+  // to recompute the entire window on every next() call.
+  // The complexity would be N*B, where N is the total number of samples to emit (next calls)
+  // and B is the number of samples needed to compute one sample to emit.
+  // for example, you have a window of 5 minutes and your outer step is 30 seconds, but inner
+  // step is 60 seconds. To compute one sample you need 6 points, however, your buffer will have
+  // 11 points (5 points in between). If total number of outer steps is 20, and total number
+  // 6 points need to be re-evaluated at every step, the complexity would be 20*6.
+  // Space complexity would be approximately 2x of PeriodicSamplesMapper.
   override def next(): TransientRow = {
     cleanBuffer()
     addSamplesToBuffer()
