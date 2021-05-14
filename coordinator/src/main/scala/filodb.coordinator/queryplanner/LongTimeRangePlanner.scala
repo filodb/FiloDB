@@ -93,9 +93,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
 
     val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
 
-
-    val dispatcher = if (lhsExec.dispatcher.isInstanceOf[ActorPlanDispatcher] &&
-      rhsExec.dispatcher.isInstanceOf[ActorPlanDispatcher]) {
+    val dispatcher = if (!lhsExec.dispatcher.isLocalCall && !rhsExec.dispatcher.isLocalCall) {
       val lhsCluster = lhsExec.dispatcher.clusterName
       val rhsCluster = rhsExec.dispatcher.clusterName
       if (rhsCluster.equals(lhsCluster)) PlannerUtil.pickDispatcher(lhsExec.children ++ rhsExec.children)

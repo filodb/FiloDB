@@ -41,6 +41,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
 
     override def clusterName: String = ???
+
+    override def isLocalCall: Boolean = ???
   }
   val resultSchema = ResultSchema(MetricsTestData.timeseriesSchema.infosFromIDs(0 to 1), 1)
   val resSchemaTask = Task.now(resultSchema)

@@ -29,6 +29,8 @@ object MultiSchemaPartitionsExecSpec {
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
 
     override def clusterName: String = ???
+
+    override def isLocalCall: Boolean = ???
   }
 
   val dsRef = DatasetRef("raw-metrics")

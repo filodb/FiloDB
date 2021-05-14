@@ -21,6 +21,7 @@ trait PlanDispatcher extends java.io.Serializable {
   def clusterName: String
   def dispatch(plan: ExecPlan)
               (implicit sched: Scheduler): Task[QueryResponse]
+  def isLocalCall: Boolean
 }
 
 /**
@@ -51,4 +52,6 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
       Task.fromFuture(fut)
     }
   }
+
+  override def isLocalCall: Boolean = false
 }

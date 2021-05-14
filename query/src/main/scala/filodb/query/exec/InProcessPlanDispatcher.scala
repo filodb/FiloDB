@@ -39,6 +39,8 @@ import filodb.query.QueryResponse
       plan.execute(source, querySession)
     }
   }
+
+  override def isLocalCall: Boolean = true
 }
 
 /**

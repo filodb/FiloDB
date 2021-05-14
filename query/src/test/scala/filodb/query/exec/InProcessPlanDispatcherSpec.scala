@@ -178,4 +178,6 @@ case class DummyDispatcher(memStore: TimeSeriesMemStore, querySession: QuerySess
   }
 
   override def clusterName: String = ???
+
+  override def isLocalCall: Boolean = ???
 }

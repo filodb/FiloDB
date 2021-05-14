@@ -81,6 +81,8 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
 
     override def clusterName: String = ???
+
+    override def isLocalCall: Boolean = ???
   }
 
   it ("should read the job names from timeseriesindex matching the columnfilters") {

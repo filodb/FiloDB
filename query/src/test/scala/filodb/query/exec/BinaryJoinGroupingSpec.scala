@@ -40,6 +40,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
 
     override def clusterName: String = ???
+
+    override def isLocalCall: Boolean = ???
   }
 
   val sampleNodeCpu: Array[RangeVector] = Array(
