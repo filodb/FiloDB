@@ -196,10 +196,13 @@ object PlannerUtil extends StrictLogging {
    * Picks one dispatcher randomly from child exec plans passed in as parameter
    */
   def pickDispatcher(children: Seq[ExecPlan]): PlanDispatcher = {
+
+    children.find(_.dispatcher.isLocalCall).map(_.dispatcher).getOrElse {
     val childTargets = children.map(_.dispatcher)
     // Above list can contain duplicate dispatchers, and we don't make them distinct.
     // Those with more shards must be weighed higher
     val rnd = ThreadLocalRandom.current()
     childTargets.iterator.drop(rnd.nextInt(childTargets.size)).next
+   }
   }
 }

@@ -81,9 +81,9 @@ class HistogramQueryBenchmark {
 
   // Query configuration
   val hEngine = new SingleClusterPlanner(histDataset.ref, histSchemas, shardMapper, 0,
-    queryConfig)
+    queryConfig, "raw")
   val pEngine = new SingleClusterPlanner(promDataset.ref, promSchemas, shardMapper, 0,
-    queryConfig)
+    queryConfig, "raw")
   val startTime = 100000L + 100*1000  // 100 samples in.  Look back 30 samples, which normally would be 5min
 
   val histQuery = """histogram_quantile(0.9, sum_over_time(http_requests_total::h{job="prometheus"}[30s]))"""
