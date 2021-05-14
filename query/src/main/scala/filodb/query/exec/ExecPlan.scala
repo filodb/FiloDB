@@ -155,7 +155,7 @@ trait ExecPlan extends QueryCommand {
           .doOnStart(_ => span.mark("before-first-materialized-result-rv"))
           .map {
             case srv: SerializableRangeVector =>
-              numResultSamples += srv.numRowsInt
+              numResultSamples += srv.numRowsSerialized
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
               if (enforceLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
                 throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
@@ -164,7 +164,7 @@ trait ExecPlan extends QueryCommand {
             case rv: RangeVector =>
               // materialize, and limit rows per RV
               val srv = SerializedRangeVector(rv, builder, recSchema, queryWithPlanName(queryContext))
-              numResultSamples += srv.numRowsInt
+              numResultSamples += srv.numRowsSerialized
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
               if (enforceLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
                 throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
@@ -416,21 +416,21 @@ abstract class NonLeafExecPlan extends ExecPlan {
     val processedTasks = childTasks
       .doOnStart(_ => span.mark("first-child-result-received"))
       .doOnTerminate(_ => span.mark("last-child-result-received"))
-      .collect {
-      case (res @ QueryResult(_, schema, _, isPartialResult, partialResultReason), i) if schema != ResultSchema.empty =>
+      .map {
+      case (res @ QueryResult(_, _, _, isPartialResult, partialResultReason), i) =>
         if (isPartialResult) {
           querySession.resultCouldBePartial = true
           querySession.partialResultsReason = partialResultReason
         }
-        sch = reduceSchemas(sch, res)
+        if (res.resultSchema != ResultSchema.empty) sch = reduceSchemas(sch, res)
         (res, i.toInt)
       case (e: QueryError, _) =>
         throw e.t
-    // cache caches results so that multiple subscribers can process
-    }.cache
+    }.filter(_._1.resultSchema != ResultSchema.empty)
+     .cache // cache caches results so that multiple subscribers can process
 
     val outputSchema = processedTasks.collect { // collect schema of first result that is nonEmpty
-      case (QueryResult(_, schema, _, _, _), _) if schema.colIDs.nonEmpty => schema
+      case (QueryResult(_, schema, _, _, _), _) if schema.columns.nonEmpty => schema
     }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
       // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {

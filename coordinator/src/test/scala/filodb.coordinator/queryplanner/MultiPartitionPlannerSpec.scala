@@ -577,4 +577,38 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
     execPlan.children(0).isInstanceOf[PartKeysExec] shouldEqual(true)
     execPlan.children(1).isInstanceOf[PartKeysExec] shouldEqual(true)
   }
+
+  it ("should add config to InprocessDispatcher") {
+
+    val startSeconds = 1594309980L
+    val endSeconds = 1594310280L
+    val localPartitionStartMs: Long = 1594309980001L
+    val step = 15L
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        if (routingKey.equals(Map("job" -> "app"))) List(
+          PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
+            endSeconds * 1000)))
+        else Nil
+      }
+
+      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = List(
+        PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
+          localPartitionStartMs - 1)), PartitionAssignment("remote", "remote-url",
+          TimeRange(localPartitionStartMs, endSeconds * 1000)))
+
+    }
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
+
+    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+    val config = execPlan.dispatcher.asInstanceOf[InProcessPlanDispatcher].queryConfig
+    config.fastReduceMaxWindows shouldEqual(queryConfig.fastReduceMaxWindows)
+  }
 }

@@ -36,10 +36,9 @@ extends MemStore with StrictLogging {
   val stats = new ChunkSourceStats
 
   private val numParallelFlushes = filodbConfig.getInt("memstore.flush-task-parallelism")
+  private val ensureTspHeadroomPercent = filodbConfig.getDouble("memstore.ensure-tsp-headroom-percent")
 
-  private val partEvictionPolicy = evictionPolicy.getOrElse {
-    new WriteBufferFreeEvictionPolicy(filodbConfig.getMemorySize("memstore.min-write-buffers-free").toBytes)
-  }
+  private val partEvictionPolicy = evictionPolicy.getOrElse(new CompositeEvictionPolicy(ensureTspHeadroomPercent))
 
   private lazy val ingestionMemory = filodbConfig.getMemorySize("memstore.ingestion-buffer-mem-size").toBytes
 

@@ -5,7 +5,6 @@ import filodb.core.query.{MutableRowReader, RangeParams, RangeVector, RangeVecto
 import filodb.memory.format.RowReader
 import filodb.query.AggregationOperator
 import filodb.query.AggregationOperator._
-import filodb.query.exec._
 
 trait AggregateHolder {
   /**
@@ -119,7 +118,7 @@ object RowAggregator {
     * Factory for RowAggregator
     */
   def apply(aggrOp: AggregationOperator, params: Seq[Any], schema: ResultSchema): RowAggregator = {
-    val valColType = RangeVectorTransformer.valueColumnType(schema)
+    val valColType = ResultSchema.valueColumnType(schema)
     aggrOp match {
       case Min      => MinRowAggregator
       case Max      => MaxRowAggregator
@@ -134,7 +133,7 @@ object RowAggregator {
       case Quantile => new QuantileRowAggregator(params(0).asInstanceOf[Double])
       case Stdvar   => StdvarRowAggregator
       case Stddev   => StddevRowAggregator
-      case CountValues => new CountValuesRowAggregator(params(0).asInstanceOf[String].replaceAll("^\"|\"$", ""))
+      case CountValues => new CountValuesRowAggregator(params(0).asInstanceOf[String])
       case _     => ???
     }
   }

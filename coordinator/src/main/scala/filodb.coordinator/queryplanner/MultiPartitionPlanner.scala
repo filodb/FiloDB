@@ -31,6 +31,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   val datasetMetricColumn: String = dataset.options.metricColumn
 
+  val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
+
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
     val tsdbQueryParams = qContext.origQueryParams
@@ -151,11 +153,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         else {
           val httpEndpoint = p.endPoint + queryParams.remoteQueryPath.getOrElse("")
           PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, generateRemoteExecParams(qContext, startMs, endMs),
-            InProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
+            inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
         }
       }
       if (execPlans.size == 1) execPlans.head
-      else StitchRvsExec(qContext, InProcessPlanDispatcher,
+      else StitchRvsExec(qContext, inProcessPlanDispatcher,
         execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
       // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
       // Sort to move RemoteExec in end as it does not have schema
@@ -181,11 +183,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
 
     if (logicalPlan.operator.isInstanceOf[SetOperator])
-      SetOperatorExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+      SetOperatorExec(qContext, InProcessPlanDispatcher(queryConfig), Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
         LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
     else
-      BinaryJoinExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+      BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
         logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn)
@@ -209,7 +211,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           val httpEndpoint = partitions.head.endPoint + queryParams.remoteQueryPath.getOrElse("")
           PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, generateRemoteExecParams(qContext,
             queryParams.startSecs * 1000, queryParams.endSecs * 1000),
-            InProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
+            inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
         }
       }
       else materializeMultiPartitionBinaryJoin(logicalPlan, qContext)
@@ -233,7 +235,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           createMetadataRemoteExec(qContext, queryParams, p, Map("match[]" -> queryParams.promQl))
       }
       if (execPlans.size == 1) execPlans.head
-      else PartKeysDistConcatExec(qContext, InProcessPlanDispatcher,
+      else PartKeysDistConcatExec(qContext, inProcessPlanDispatcher,
         execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
     }
   }
@@ -254,7 +256,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           createMetadataRemoteExec(qContext, queryParams, p, PlannerUtil.getLabelValuesUrlParams(lp, queryParams))
       }
       if (execPlans.size == 1) execPlans.head
-      else LabelValuesDistConcatExec(qContext, InProcessPlanDispatcher,
+      else LabelValuesDistConcatExec(qContext, inProcessPlanDispatcher,
         execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
     }
   }
@@ -266,6 +268,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val httpEndpoint = partitionAssignment.endPoint + finalQueryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       remoteQueryPath.getOrElse("")
     MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-      urlParams, finalQueryContext, InProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
+      urlParams, finalQueryContext, inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
   }
 }

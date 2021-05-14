@@ -49,8 +49,10 @@ class ScalarQueriesSpec extends AnyFunSpec with Matchers {
   val windowed1 = PeriodicSeriesWithWindowing(raw1, from, 1000, to, 5000, RangeFunctionId.Rate)
   val summed1 = Aggregate(AggregationOperator.Sum, windowed1, Nil, Seq("job"))
 
-  def maskDispatcher(input: String) = {
-    input.replaceAll("Actor\\[.*\\]", "Actor\\[\\]").replaceAll("\\s+", "")
+  private def maskDispatcher(input: String) = {
+   input.replaceAll("Actor\\[.*\\]", "Actor\\[\\]").
+     replaceAll("InProcessPlanDispatcher\\(.*\\)", "InProcessPlanDispatcher").
+     replaceAll("\\s+", "")
   }
 
   it("should generate Scalar exec plan") {
@@ -273,7 +275,7 @@ class ScalarQueriesSpec extends AnyFunSpec with Matchers {
     val expected =
       """T~InstantVectorFunctionMapper(function=Minute)
         |-T~VectorFunctionMapper(funcParams=List())
-        |--E~ScalarFixedDoubleExec(params=RangeParams(1000,1000,1000), value=1.136239445E9) on InProcessPlanDispatcher
+        |--E~ScalarFixedDoubleExec(params=RangeParams(1000,1000,1000), value=1.136239445E9) on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@1d4fb213)
         |""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
   }
@@ -406,7 +408,7 @@ class ScalarQueriesSpec extends AnyFunSpec with Matchers {
   }
 
   it("should generate BinaryJoinExec for query node_info > bool http_requests_total") {
-    val lp = Parser.queryToLogicalPlan("node_info{job = \"app\"} > bool" +
+    val lp = Parser.queryToLogicalPlan("node_info{job = \"app\"} > bool " +
       "http_requests_total{job = \"app\"}", 1000, 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
@@ -488,6 +490,6 @@ class ScalarQueriesSpec extends AnyFunSpec with Matchers {
         |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
         |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-669137818])""".stripMargin
-    maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
+    maskDispatcher(execPlan.printTree()).shouldEqual(maskDispatcher(expected))
   }
 }

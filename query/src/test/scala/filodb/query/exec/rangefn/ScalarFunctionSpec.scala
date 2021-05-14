@@ -51,6 +51,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 1d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
@@ -58,6 +59,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 5d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey1
@@ -67,6 +69,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
         new TransientRow(1L, 3d),
         new TransientRow(2L, 3d),
         new TransientRow(3L, 3d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey1
@@ -74,6 +77,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 2d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
@@ -81,6 +85,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 4d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
@@ -88,6 +93,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 6d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey1
@@ -95,6 +101,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 0d)).iterator
+      override def outputRange: Option[RvRange] = None
     })
 
   val oneSample: Array[RangeVector] = Array(
@@ -107,6 +114,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
         new TransientRow(2L, 10d),
         new TransientRow(3L, 30d)
       ).iterator
+      override def outputRange: Option[RvRange] = None
     })
   
   it("should generate scalar") {

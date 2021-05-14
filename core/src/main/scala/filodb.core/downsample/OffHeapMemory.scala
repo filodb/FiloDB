@@ -19,12 +19,13 @@ class OffHeapMemory(schemas: Seq[Schema],
 
   logger.info(s"Allocating OffHeap memory $this with nativeMemManagerSize=$nativeMemSize " +
     s"and blockMemorySize=$blockMemSize")
+  val evictionLock = new EvictionLock
   val blockStore = new PageAlignedBlockManager(blockMemSize,
     stats = new MemoryStats(kamonTags),
     reclaimer = new ReclaimListener {
       override def onReclaim(metadata: Long, numBytes: Int): Unit = {}
     },
-    numPagesPerBlock = 50)
+    numPagesPerBlock = 50, evictionLock)
 
   val blockMemFactory = new BlockMemFactory(blockStore, maxMetaSize, kamonTags, false)
 

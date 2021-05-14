@@ -5,6 +5,7 @@ import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
+
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, StaticSpreadProvider}
 import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange}
@@ -14,6 +15,7 @@ import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
 import filodb.query._
+import filodb.query.exec.InternalRangeFunction.Last
 import filodb.query.exec._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -432,7 +434,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       execPlan2.asInstanceOf[BinaryJoinExec].ignoring shouldEqual Seq("_metric_")
 
       val logicalPlan2 = Parser.queryRangeToLogicalPlan(
-        """sum(foo{_ns_="bar1", _ws_="test"}) + group_left(__name__)
+        """sum(foo{_ns_="bar1", _ws_="test"}) + ignoring(__name__) group_left(__name__)
           | sum(foo{_ns_="bar2", _ws_="test"})""".stripMargin,
         TimeStepParams(1000, 20, 2000))
       val execPlan3 = engine.materialize(logicalPlan2, QueryContext(origQueryParams = promQlQueryParams))
@@ -510,5 +512,48 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       queryConfig)
     val ep = engine.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
    ep.isInstanceOf[EmptyResultExec] shouldEqual(true)
+  }
+
+  it("should generate execPlan for absent over time") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan("""absent_over_time(http_requests_total{job = "app"}[10m])""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
+    execPlan.rangeVectorTransformers.head.isInstanceOf[AbsentFunctionMapper] shouldEqual true
+    execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
+    val multiSchemaExec = execPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
+
+    multiSchemaExec.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual(true)
+    val rvt = multiSchemaExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
+    rvt.window.get shouldEqual(10*60*1000)
+    rvt.functionId.get.toString shouldEqual(Last.toString)
+  }
+
+  it("should generate execPlan for sum on absent over time") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan("""sum(absent_over_time(http_requests_total{job = "app"}[10m]))""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
+
+    execPlan.children.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
+    execPlan.children.head.rangeVectorTransformers.head.isInstanceOf[AbsentFunctionMapper] shouldEqual true
+
+    val multiSchemaExec = execPlan.children.head.children.head
+    multiSchemaExec.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual(true)
+    val rvt = multiSchemaExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
+    rvt.window.get shouldEqual(10*60*1000)
+    rvt.functionId.get.toString shouldEqual(Last.toString)
+  }
+
+  it("should generate execPlan for absent function") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan("""absent(http_requests_total{job = "app"})""", t)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
+    execPlan.rangeVectorTransformers.head.isInstanceOf[AbsentFunctionMapper] shouldEqual true
+    execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
   }
 }

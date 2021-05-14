@@ -17,6 +17,7 @@ import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
 import filodb.query.{exec, _}
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
+import filodb.query.exec.InternalRangeFunction.Last
 
 object SingleClusterPlanner {
   private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests").withoutTags
@@ -43,7 +44,6 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                            minTimeRangeForSplitMs: => Long = 1.day.toMillis,
                            splitSizeMs: => Long = 1.day.toMillis)
                            extends QueryPlanner with StrictLogging with PlannerMaterializer {
-
   override val schemas = schema
   val shardColumns = dsOptions.shardKeyColumns.sorted
 
@@ -263,43 +263,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   private def materializeAggregate(qContext: QueryContext,
                                    lp: Aggregate): PlanResult = {
     val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, qContext)
-    val byKeysReal = ExtraOnByKeysUtil.getRealByLabels(lp, queryConfig.addExtraOnByKeysTimeRanges)
-
-    // Now we have one exec plan per shard
-    /*
-     * Note that in order for same overlapping RVs to not be double counted when spread is increased,
-     * one of the following must happen
-     * 1. Step instants must be chosen so time windows dont span shards.
-     * 2. We pump data into multiple shards for sometime so atleast one shard will fully contain any time window
-     *
-     * Pulling all data into one node and stich before reducing (not feasible, doesnt scale). So we will
-     * not stitch
-     *
-     * Starting off with solution 1 first until (2) or some other approach is decided on.
-     */
-    toReduceLevel1.plans.foreach {
-      _.addRangeVectorTransformer(AggregateMapReduce(lp.operator, lp.params,
-        LogicalPlanUtils.renameLabels(lp.without, dsOptions.metricColumn),
-        LogicalPlanUtils.renameLabels(byKeysReal, dsOptions.metricColumn)))
-    }
-
-    val toReduceLevel2 =
-      if (toReduceLevel1.plans.size >= 16) {
-        // If number of children is above a threshold, parallelize aggregation
-        val groupSize = Math.sqrt(toReduceLevel1.plans.size).ceil.toInt
-        toReduceLevel1.plans.grouped(groupSize).map { nodePlans =>
-          val reduceDispatcher = nodePlans.head.dispatcher
-          LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, nodePlans, lp.operator, lp.params)
-        }.toList
-      } else toReduceLevel1.plans
-
-    val reduceDispatcher = pickDispatcher(toReduceLevel2)
-    val reducer = LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
-    val promQlQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-
-    if (!qContext.plannerParams.skipAggregatePresent)
-      reducer.addRangeVectorTransformer(AggregatePresenter(lp.operator, lp.params, RangeParams(
-       lp.startMs / 1000, lp.stepMs / 1000, lp.endMs / 1000)))
+    val reducer = addAggregator(lp, qContext, toReduceLevel1, queryConfig.addExtraOnByKeysTimeRanges)
     PlanResult(Seq(reducer), false) // since we have aggregated, no stitching
   }
 
@@ -307,13 +271,27 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                                                      lp: PeriodicSeriesWithWindowing): PlanResult = {
     val series = walkLogicalPlanTree(lp.series, qContext)
     val rawSource = lp.series.isRaw
-    val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
+
+    /* Last function is used to get the latest value in the window for absent_over_time
+    If no data is present AbsentFunctionMapper will return range vector with value 1 */
+
+    val execRangeFn = if (lp.function == RangeFunctionId.AbsentOverTime) Last
+                      else InternalRangeFunction.lpToInternalFunc(lp.function)
+
     val paramsExec = materializeFunctionArgs(lp.functionArgs, qContext)
     val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
     series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs,
       lp.endMs, window, Some(execRangeFn), qContext, lp.stepMultipleNotationUsed,
       paramsExec, lp.offsetMs, rawSource)))
-    series
+    if (lp.function == RangeFunctionId.AbsentOverTime) {
+      val aggregate = Aggregate(AggregationOperator.Sum, lp, Nil, Seq("job"))
+      // Add sum to aggregate all child responses
+      // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
+      val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
+        qContext.plannerParams.copy(skipAggregatePresent = true)), series, Seq.empty)))
+      addAbsentFunctionMapper(aggregatePlanResult, lp.columnFilters,
+        RangeParams(lp.startMs / 1000, lp.stepMs / 1000, lp.endMs / 1000), qContext)
+    } else series
   }
 
   private def materializePeriodicSeries(qContext: QueryContext,
