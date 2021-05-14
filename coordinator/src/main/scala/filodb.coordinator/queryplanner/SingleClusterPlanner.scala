@@ -271,10 +271,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     var innerPeriodicSeriesPlan = sqww.innerPeriodicSeries
     val rangeVectorTransformer = if (queryConfig.fastSubquery) {
       val paramsExec = materializeFunctionArgs(sqww.functionArgs, qContext)
-      val window = if (rangeFn == InternalRangeFunction.Timestamp)
-        None
-      else
-        Some(sqww.subqueryWindowMs)
+      val window = Some(sqww.subqueryWindowMs)
       PeriodicSamplesMapper(
         sqww.startMs, sqww.stepMs, sqww.endMs,
         window,
@@ -294,6 +291,8 @@ class SingleClusterPlanner(dsRef: DatasetRef,
         rangeFn
       )
     }
+    // Here the inner periodic series already has start/end/step populated
+    // in Function's toSeriesPlan(), Functions.scala subqqueryArgument() method.
     val innerExecPlan = walkLogicalPlanTree(sqww.innerPeriodicSeries, qContext)
     innerExecPlan.plans.foreach { p => p.addRangeVectorTransformer(rangeVectorTransformer)}
     innerExecPlan

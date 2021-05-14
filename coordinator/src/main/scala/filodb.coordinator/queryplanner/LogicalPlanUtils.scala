@@ -133,8 +133,8 @@ object LogicalPlanUtils extends StrictLogging {
                                               lp.copy(lhs = updatedLhs, rhs = updatedRhs, rangeParams =
                                                 RangeParams(timeRange.startMs / 1000, lp.rangeParams.stepSecs,
                                                   timeRange.endMs / 1000))
-      case sq: SubqueryWithWindowing       => ???
-      case tlsq: TopLevelSubquery          => ???
+      case sq: SubqueryWithWindowing       => ??? // TODO needed for Long Time Range Planner
+      case tlsq: TopLevelSubquery          => ??? // TODO needed for Long Time Range Planner
     }
   }
 
