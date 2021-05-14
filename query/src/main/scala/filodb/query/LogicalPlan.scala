@@ -203,6 +203,7 @@ case class SubqueryWithWindowing(
   subqueryStepMs: Long //1m
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
+  //TODO needs to be implemented for long time range planner
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = ???
 }
 
@@ -218,6 +219,7 @@ case class TopLevelSubquery(
   subqueryStepMs: Long
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
+  //TODO needs to be implemented for long time range planner
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = ???
 }
 

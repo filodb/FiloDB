@@ -7,6 +7,14 @@ import filodb.query.exec.rangefn.RangeFunction
 import filodb.query.exec.rangefn.RangeFunction.RangeFunctionGenerator
 import filodb.query.util.IndexedArrayQueue
 
+// This is an experimental feature of FiloDB not to be used
+// in production settings. The class can be used to produce
+// subquery results equivalent to range_query API. Currently,
+// Prometheus implementation of subqueries and range_query is
+// different, ie equivalent queries like range query for 5 minutes
+// with step 1 minute might not produce same results as subquery
+// with 5 minute lookback and 1 minute step. This class provides
+// subquery implementation that is equivalent to range query API.
 // sum_over_time(foo[6:3])[4:2], where now=18
 final case class ApplySubqueryRangeFunction(
   subqueryExpRangeParams: RangeParams, // start = now-4, end=now, step = 2
@@ -149,6 +157,8 @@ class SubquerySlidingWindowIterator(
     while(ts < curWindowEndMs && ts <=endMs && rvc.hasNext) {
       val cur = rvc.next()
 
+      //TODO verify that windowSamplesPool won't be leaking memory
+      //as the samples need to be pushed back
       val toAdd = windowSamplesPool.get
       toAdd.copyFrom(cur)
       ts = toAdd.timestamp
