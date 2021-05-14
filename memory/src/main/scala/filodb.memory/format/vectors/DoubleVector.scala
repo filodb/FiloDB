@@ -137,7 +137,7 @@ trait DoubleVectorDataReader extends CounterVectorReader {
   def debugString(acc: MemoryReader, vector: BinaryVectorPtr, sep: String = ","): String = {
     val it = iterate(acc, vector)
     val size = length(acc, vector)
-    (0 to size).map(_ => it.next).mkString(sep)
+    (0 until size).map(_ => it.next).mkString(sep)
   }
 
   /**
@@ -443,7 +443,7 @@ class DoubleCounterAppender(addr: BinaryRegion.NativePointer, maxBytes: Int, dis
 extends DoubleAppendingVector(addr, maxBytes, dispose) {
   private var last = Double.MinValue
   override final def addData(data: Double): AddResponse = {
-    if (!data.isNaN && data < last)
+    if (data.isNaN || data < last)
       PrimitiveVectorReader.markDrop(MemoryAccessor.nativePtrAccessor, addr)
     if (!data.isNaN)
       last = data

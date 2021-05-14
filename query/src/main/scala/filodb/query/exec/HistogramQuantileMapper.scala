@@ -91,7 +91,7 @@ final case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends Rang
           }
           override def close(): Unit = rvs.foreach(_.rows().close())
         }
-        IteratorBackedRangeVector(histBuckets._1, quantileResult)
+        IteratorBackedRangeVector(histBuckets._1, quantileResult, sortedBucketRvs.headOption.flatMap(_._2.outputRange))
       }
       Observable.fromIterable(quantileResults)
     }

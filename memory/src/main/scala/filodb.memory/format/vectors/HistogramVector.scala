@@ -520,7 +520,7 @@ class RowHistogramReader(val acc: MemoryReader, histVect: Ptr.U8) extends Histog
   def debugString(acc: MemoryReader, vector: BinaryVectorPtr, sep: String = System.lineSeparator): String = {
     val it = iterate(acc, vector)
     val size = length(acc, vector)
-    (0 to size).map(_ => it.asHistIt).mkString(sep)
+    (0 until size).map(_ => it.asHistIt.mkString(sep)).mkString(sep)
   }
 
   def length(accNotUsed: MemoryReader, vectorNotUsed: BinaryVectorPtr): Int = length

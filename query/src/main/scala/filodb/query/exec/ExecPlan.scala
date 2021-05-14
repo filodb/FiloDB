@@ -155,7 +155,7 @@ trait ExecPlan extends QueryCommand {
           .doOnStart(_ => span.mark("before-first-materialized-result-rv"))
           .map {
             case srv: SerializableRangeVector =>
-              numResultSamples += srv.numRowsInt
+              numResultSamples += srv.numRowsSerialized
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
               if (enforceLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
                 throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
@@ -164,7 +164,7 @@ trait ExecPlan extends QueryCommand {
             case rv: RangeVector =>
               // materialize, and limit rows per RV
               val srv = SerializedRangeVector(rv, builder, recSchema, queryWithPlanName(queryContext))
-              numResultSamples += srv.numRowsInt
+              numResultSamples += srv.numRowsSerialized
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
               if (enforceLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
                 throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.

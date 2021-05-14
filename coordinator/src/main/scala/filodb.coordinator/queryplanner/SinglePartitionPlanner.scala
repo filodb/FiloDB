@@ -18,6 +18,7 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
                              queryConfig: QueryConfig)
   extends QueryPlanner {
 
+  val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
     logicalPlan match {
@@ -85,11 +86,11 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
       val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
 
       if (logicalPlan.operator.isInstanceOf[SetOperator])
-        SetOperatorExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+        SetOperatorExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
           LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
           LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
       else
-        BinaryJoinExec(qContext, InProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+        BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
           logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
           LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
           LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn)
@@ -99,13 +100,13 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
   private def materializeLabelValues(logicalPlan: LogicalPlan, qContext: QueryContext) = {
     val execPlans = planners.values.toList.distinct.map(_.materialize(logicalPlan, qContext))
     if (execPlans.size == 1) execPlans.head
-    else LabelValuesDistConcatExec(qContext, InProcessPlanDispatcher, execPlans)
+    else LabelValuesDistConcatExec(qContext, inProcessPlanDispatcher, execPlans)
   }
 
   private def materializeSeriesKeysFilters(logicalPlan: LogicalPlan, qContext: QueryContext) = {
     val execPlans = planners.values.toList.distinct.map(_.materialize(logicalPlan, qContext))
     if (execPlans.size == 1) execPlans.head
-    else PartKeysDistConcatExec(qContext, InProcessPlanDispatcher, execPlans)
+    else PartKeysDistConcatExec(qContext, inProcessPlanDispatcher, execPlans)
   }
 }
 

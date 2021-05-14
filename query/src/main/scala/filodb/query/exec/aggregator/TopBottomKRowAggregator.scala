@@ -140,7 +140,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator wi
           i += 2
         }
         resRvs.keySet.foreach { rvs =>
-          if (!rvkSeen.contains(rvs)) addRecordToBuilder(resRvs.get(rvs).get, timestamp * 1000, Double.NaN)
+          if (!rvkSeen.contains(rvs)) addRecordToBuilder(resRvs(rvs), timestamp * 1000, Double.NaN)
         }
       }
       // address step == 0 case
@@ -151,9 +151,12 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator wi
     }
 
     resRvs.map { case (key, builder) =>
-      val numRows = builder.allContainers.map(_.countRecords).sum
+      val numRows = builder.allContainers.map(_.countRecords()).sum
       logger.debug(s"TopkPresent before creating SRV key = ${key.labelValues.mkString(",")}")
-      new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0)
+      new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0,
+                                                    Some(RvRange(rangeParams.startSecs * 1000,
+                                                      rangeParams.stepSecs * 1000,
+                                                      rangeParams.endSecs * 1000)))
     }.toSeq
   }
 

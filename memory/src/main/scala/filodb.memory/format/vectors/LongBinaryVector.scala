@@ -129,7 +129,7 @@ trait LongVectorDataReader extends VectorDataReader {
   def debugString(acc: MemoryReader, vector: BinaryVectorPtr, sep: String = ","): String = {
     val it = iterate(acc, vector)
     val size = length(acc, vector)
-    (0 to size).map(_ => it.next).mkString(sep)
+    (0 until size).map(_ => it.next).mkString(sep)
   }
 
   /**

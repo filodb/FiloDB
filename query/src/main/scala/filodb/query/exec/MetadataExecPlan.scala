@@ -52,7 +52,7 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
       }
       import NoCloseCursor._
       IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-        new UTF8MapIteratorRowReader(metadataResult.toIterator))
+        new UTF8MapIteratorRowReader(metadataResult.toIterator), None)
     }
     Observable.fromTask(taskOfResults)
   }
@@ -86,7 +86,7 @@ final case class PartKeysExec(queryContext: QueryContext,
           fetchFirstLastSampleTimes, end, start, queryContext.plannerParams.sampleLimit)
         import NoCloseCursor._
         Observable.now(IteratorBackedRangeVector(
-          new CustomRangeVectorKey(Map.empty), UTF8MapIteratorRowReader(response)))
+          new CustomRangeVectorKey(Map.empty), UTF8MapIteratorRowReader(response), None))
       case other =>
         Observable.empty
     }
@@ -131,7 +131,7 @@ final case class LabelValuesExec(queryContext: QueryContext,
       }
       import NoCloseCursor._
       Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-        new UTF8MapIteratorRowReader(response)))
+        new UTF8MapIteratorRowReader(response), None))
     } else {
       Observable.empty
     }

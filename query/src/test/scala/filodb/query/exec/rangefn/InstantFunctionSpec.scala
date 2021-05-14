@@ -26,6 +26,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 3.3d),
         new TransientRow(2L, 5.1d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = ignoreKey
@@ -33,6 +34,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(3L, 3239.3423d),
         new TransientRow(4L, 94935.1523d)).iterator
+      override def outputRange: Option[RvRange] = None
     })
   val rand = new Random()
   val error = 0.00000001d
@@ -51,6 +53,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
 
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = data.iterator
+      override def outputRange: Option[RvRange] = None
     })
     fireInstantFunctionTests(samples)
   }
@@ -66,6 +69,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, Double.NaN),
           new TransientRow(2L, 5.6d)).iterator
+        override def outputRange: Option[RvRange] = None
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
@@ -73,6 +77,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 4.6d),
           new TransientRow(2L, 4.4d)).iterator
+        override def outputRange: Option[RvRange] = None
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
@@ -80,6 +85,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 0d),
           new TransientRow(2L, 5.4d)).iterator
+        override def outputRange: Option[RvRange] = None
       }
     )
     fireInstantFunctionTests(samples)
@@ -102,6 +108,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
           new TransientRow(2L, 5.9d),
           new TransientRow(2L, Double.NaN),
           new TransientRow(2L, 3.3d)).iterator
+        override def outputRange: Option[RvRange] = None
       }
     )
     fireInstantFunctionTests(samples)
@@ -290,6 +297,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
           new TransientRow(4L, 1230767999), // 2008-12-31 23:59:59 just before leap second.
           new TransientRow(5L, 1569179748)  // 2019-09-22 19:15:48 Sunday
         ).iterator
+        override def outputRange: Option[RvRange] = None
       }
     )
     applyFunctionAndAssertResult(samples, Array(List(2.0, 3.0, 1.0, 12.0, 9.0).toIterator), InstantFunctionId.Month)
@@ -310,6 +318,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
           new TransientRow(1L, Double.NaN),
           new TransientRow(2L, Double.NaN)
         ).iterator
+        override def outputRange: Option[RvRange] = None
       }
     )
     applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).toIterator), InstantFunctionId.Month)

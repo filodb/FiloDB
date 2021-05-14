@@ -5,6 +5,7 @@ import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 
+import filodb.cassandra.columnstore.CassandraTokenRangeSplit
 import filodb.downsampler.chunk.DownsamplerSettings
 import filodb.downsampler.index.DSIndexJobSettings
 
@@ -55,9 +56,16 @@ class CardinalityBuster(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSI
 
     spark.sparkContext
       .makeRDD(0 until numShards)
-      .foreach { shard =>
+      .mapPartitions { shards =>
         Kamon.init() // kamon init should be first thing in worker jvm
-        busterForShard.bustIndexRecords(shard)
+        val splits = busterForShard.colStore.getScanSplits(busterForShard.dataset)
+        for { sh <- shards
+              sp <- splits.flatMap(_.asInstanceOf[CassandraTokenRangeSplit].tokens).iterator } yield {
+          (sh, sp)
+        }
+      }.foreach { case (shard, sp) =>
+        Kamon.init() // kamon init should be first thing in worker jvm
+        busterForShard.bustIndexRecords(shard, sp)
       }
     BusterContext.log.info(s"CardinalityBuster completed successfully")
     spark
