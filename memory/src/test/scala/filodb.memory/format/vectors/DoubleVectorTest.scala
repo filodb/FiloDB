@@ -101,6 +101,35 @@ class DoubleVectorTest extends NativeVectorTest {
       }
     }
 
+
+    it("should encode counter drops when NaN is ingested at the end") {
+      val orig = Seq(3904.0,3904.0,3905.0,3908.0,3909.0,3910.0,3912.0,3914.0,3914.0,3915.0,3916.0,3917.0,3918.0,3919.0,3920.0,3922.0,Double.NaN)
+      val appender = DoubleVector.appendingVectorNoNA(memFactory, 100, true)
+      orig.foreach(appender.addData)
+      appender.length shouldEqual orig.length
+
+      val optimized = appender.optimize(memFactory)
+      DoubleVector(acc, optimized).length(acc, optimized) shouldEqual orig.length
+      DoubleVector(acc, optimized).toBuffer(acc, optimized).toList.dropRight(1) shouldEqual orig.dropRight(1)
+      PrimitiveVectorReader.dropped(acc, optimized) shouldEqual true
+    }
+
+    it("should encode counter drops when NaN is ingested") {
+      val orig = Seq(3904.0,3904.0,3905.0,3908.0,3909.0,Double.NaN, 3910.0,3912.0,3914.0,3914.0,3915.0, Double.NaN,
+        3905.0,3906.0,3907.0,3908.0,3909.0,3910.0)
+      val appender = DoubleVector.appendingVectorNoNA(memFactory, 100, true)
+      val dropPos = orig.zipWithIndex.filter(_._1.isNaN).map(_._2)
+      orig.foreach(appender.addData)
+      appender.length shouldEqual orig.length
+
+      val optimized = appender.optimize(memFactory)
+      DoubleVector(acc, optimized).length(acc, optimized) shouldEqual orig.length
+      DoubleVector(acc, optimized).dropPositions(acc, optimized).toList shouldEqual dropPos
+      DoubleVector(acc, optimized).toBuffer(acc, optimized).toList.filter(!_.isNaN) shouldEqual orig.filter(!_.isNaN)
+      DoubleVector(acc, optimized).debugString(acc, optimized) shouldEqual orig.mkString(",")
+      PrimitiveVectorReader.dropped(acc, optimized) shouldEqual true
+    }
+
     it("should encode some edge cases correctly to DDV") {
       val orig = Seq(55.0, 60.0) ++ Seq.fill(10)(60.0)
       val appender = DoubleVector.appendingVectorNoNA(memFactory, 100)

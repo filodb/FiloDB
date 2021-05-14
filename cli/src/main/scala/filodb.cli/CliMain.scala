@@ -371,6 +371,7 @@ object CliMain extends FilodbClusterNode {
     val str = vecReader.debugString(memReader, 0)
     println(s"Dropped: ${PrimitiveVectorReader.dropped(memReader, 0)}")
     println(s"VectorType: ${vecReader.getClass.getSimpleName}")
+    println(s"NumRows: ${vecReader.length(memReader, 0)}")
     println(str)
   }
 
