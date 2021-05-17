@@ -1,11 +1,11 @@
 package filodb.core.query
 
 import java.util.UUID
-import java.util.concurrent.locks.Lock
 
 import scala.concurrent.duration._
 
 import filodb.core.{SpreadChange, SpreadProvider}
+import filodb.memory.EvictionLock
 
 trait TsdbQueryParams
 
@@ -85,15 +85,15 @@ object QueryContext {
   */
 case class QuerySession(qContext: QueryContext,
                         queryConfig: QueryConfig,
-                        var lock: Option[Lock] = None,
+                        var lock: Option[EvictionLock] = None,
                         var resultCouldBePartial: Boolean = false,
                         var partialResultsReason: Option[String] = None) {
   def close(): Unit = {
-    lock.foreach(_.unlock())
+    lock.foreach(_.releaseSharedLock())
     lock = None
   }
 }
 
 object QuerySession {
-  def forTestingOnly: QuerySession = QuerySession(QueryContext(), EmptyQueryConfig)
+  def makeForTestingOnly(): QuerySession = QuerySession(QueryContext(), EmptyQueryConfig)
 }

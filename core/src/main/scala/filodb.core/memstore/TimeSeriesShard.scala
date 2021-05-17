@@ -3,6 +3,7 @@ package filodb.core.memstore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.StampedLock
 
+import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
@@ -22,6 +23,7 @@ import monix.execution.{Scheduler, UncaughtExceptionReporter}
 import monix.execution.atomic.AtomicBoolean
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
+import org.jctools.queues.MpscChunkedArrayQueue
 import spire.syntax.cfor._
 
 import filodb.core.{ErrorResponse, _}
@@ -119,6 +121,15 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
   val chunkFlushTaskLatency = Kamon.histogram("chunk-flush-task-latency-after-retries",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+
+  /**
+   * How much time a thread was potentially stalled while attempting to ensure
+   * free space. Unit is nanoseconds.
+   */
+  val memstoreEvictionStall = Kamon.counter("memstore-eviction-stall",
+                           MeasurementUnit.time.nanoseconds).withTags(TagSet.from(tags))
+  val evictablePartKeysSize = Kamon.gauge("memstore-num-evictable-partkeys").withTags(TagSet.from(tags))
+
 }
 
 object TimeSeriesShard {
@@ -293,6 +304,20 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   private final var ingested = 0L
 
+  private val targetMaxPartitions = filodbConfig.getInt("memstore.max-partitions-on-heap-per-shard")
+  private val ensureTspHeadroomPercent = filodbConfig.getDouble("memstore.ensure-tsp-headroom-percent")
+  private val ensureBlockHeadroomPercent = filodbConfig.getDouble("memstore.ensure-block-memory-headroom-percent")
+
+  /**
+   * Queue of partIds that are eligible for eviction since they have stopped ingesting.
+   * Caller needs to double check ingesting status since they may have started to re-ingest
+   * since partId was added to this queue.
+   * Mpsc since the producers are flush task and odp part creation task
+   * FIXME we can create a more efficient data structure that stores the ints in unboxed form - uses less heap
+   */
+  protected[memstore] final val evictablePartIds = new MpscChunkedArrayQueue[Int](1024, targetMaxPartitions)
+  protected[memstore] final val evictableOdpPartIds = new MpscChunkedArrayQueue[Int](128, targetMaxPartitions)
+
   /**
     * Keeps track of last offset ingested into memory (not necessarily flushed).
     * This value is used to keep track of the checkpoint to be written for next flush for any group.
@@ -351,17 +376,18 @@ class TimeSeriesShard(val ref: DatasetRef,
   // occurs in the common case, when there isn't any contention reading from partSet.
   private[memstore] final val partSetLock = new StampedLock
 
+  /**
+   * Lock that protects chunks and TSPs from being reclaimed from Memstore.
+   * This is needed to prevent races between ODP queries and reclaims and ensure that
+   * TSPs and chunks dont get evicted when queries are being served.
+   */
+  private[memstore] final val evictionLock = new EvictionLock(s"shard=$shardNum dataset=$ref")
+
   // The off-heap block store used for encoded chunks
   private val shardTags = Map("dataset" -> ref.dataset, "shard" -> shardNum.toString)
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
-    storeConfig.numPagesPerBlock)
+    storeConfig.numPagesPerBlock, evictionLock)
   private[core] val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
-
-  /**
-    * Lock that protects chunks from being reclaimed from Memstore.
-    * This is needed to prevent races between ODP queries and reclaims.
-    */
-  private[memstore] final val reclaimLock = blockStore.reclaimLock
 
   // Requires blockStore.
   private val headroomTask = startHeadroomTask(ingestSched)
@@ -391,12 +417,6 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   // Use 1/4 of flush intervals within retention period for initial ChunkMap size
   private val initInfoMapSize = Math.max((numFlushIntervalsDuringRetention / 4) + 4, 20)
-
-  /**
-    * Timestamp to start searching for partitions to evict. Advances as more and more partitions are evicted.
-    * Used to ensure we keep searching for newer and newer partitions to evict.
-    */
-  private[core] var evictionWatermark: Long = 0L
 
   /**
     * Dirty partitions whose start/end times have not been updated to cassandra.
@@ -601,7 +621,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       // this is an actively ingesting partition
       val group = partKeyGroup(schemas.part.binSchema, pk.partKey, UnsafeUtils.arayOffset, numGroups)
       if (schema != Schemas.UnknownSchema) {
-        val part = createNewPartition(pk.partKey, UnsafeUtils.arayOffset, group, CREATE_NEW_PARTID, schema, 4)
+        val part = createNewPartition(pk.partKey, UnsafeUtils.arayOffset, group, CREATE_NEW_PARTID, schema, false, 4)
         // In theory, we should not get an OutOfMemPartition here since
         // it should have occurred before node failed too, and with data stopped,
         // index would not be updated. But if for some reason we see it, drop data
@@ -685,18 +705,18 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   /**
-    * Iterator for lazy traversal of partIdIterator, value for the given label will be extracted from the ParitionKey.
-    */
+   * Iterator for traversal of partIds, value for the given label will be extracted from the ParitionKey.
+   * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
+   */
   case class LabelValueResultIterator(partIds: debox.Buffer[Int], labelNames: Seq[String], limit: Int)
     extends Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] {
-    var currVal: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = _
-    var numResultsReturned = 0
-    var partIndex = 0
+    private lazy val rows = labelValues
 
-    override def hasNext: Boolean = {
-      var foundValue = false
-      while(partIndex < partIds.length && numResultsReturned < limit && !foundValue) {
-        val partId = partIds(partIndex)
+    def labelValues: Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
+      var partLoopIndx = 0
+      val rows = new mutable.HashSet[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]()
+      while(partLoopIndx < partIds.length && rows.size < limit) {
+        val partId = partIds(partLoopIndx)
 
         //retrieve PartKey either from In-memory map or from PartKeyIndex
         val nextPart = partKeyFromPartId(partId)
@@ -704,20 +724,19 @@ class TimeSeriesShard(val ref: DatasetRef,
         // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
         // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
         // have a centralized service/store for serving metadata
-        currVal = schemas.part.binSchema.toStringPairs(nextPart.base, nextPart.offset)
-          .filter(labelNames contains _._1).map(pair => {
-          pair._1.utf8 -> pair._2.utf8
-        }).toMap
-        foundValue = currVal.nonEmpty
-        partIndex += 1
+
+        val currVal = schemas.part.binSchema.colValues(nextPart.base, nextPart.offset, labelNames).
+          zipWithIndex.filter(_._1 != null).map{case(value, ind) => labelNames(ind).utf8 -> value.utf8}.toMap
+
+        if (currVal.nonEmpty) rows.add(currVal)
+        partLoopIndx += 1
       }
-      foundValue
+      rows.toIterator
     }
 
-    override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = {
-      numResultsReturned += 1
-      currVal
-    }
+    override def hasNext: Boolean = rows.hasNext
+
+    override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = rows.next
   }
 
   /**
@@ -1024,8 +1043,6 @@ class TimeSeriesShard(val ref: DatasetRef,
       logger.info(s"Flush of dataset=$ref shard=$shardNum group=${flushGroup.groupNum} " +
         s"flushWatermark=${flushGroup.flushWatermark} response=$resp offset=${_offset}")
     }
-    // Some partitions might be evictable, see if need to free write buffer memory
-    checkEnableAddPartitions()
     updateGauges()
   }
 
@@ -1095,9 +1112,15 @@ class TimeSeriesShard(val ref: DatasetRef,
         updatePartEndTimeInIndex(p, endTime)
         dirtyParts += p.partID
         activelyIngesting -= p.partID
-        p.ingesting = false
+        markPartAsNotIngesting(p, odp = false)
       }
     }
+  }
+
+  protected[memstore] def markPartAsNotIngesting(p: TimeSeriesPartition, odp: Boolean): Unit = {
+    p.ingesting = false
+    shardStats.evictablePartKeysSize.increment()
+    if (odp) evictableOdpPartIds.add(p.partID) else evictablePartIds.add(p.partID)
   }
 
   private def commitCheckpoint(ref: DatasetRef, shardNum: Int, flushGroup: FlushGroup): Future[Response] = {
@@ -1180,7 +1203,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     val previousPartId = lookupPreviouslyAssignedPartId(partKeyArray, partKeyOffset)
     // TODO: remove when no longer needed
     logger.trace(s"Adding part key details: ${schema.partKeySchema.debugString(partKeyArray, partKeyOffset)}")
-    val newPart = createNewPartition(partKeyArray, partKeyOffset, group, previousPartId, schema)
+    val newPart = createNewPartition(partKeyArray, partKeyOffset, group, previousPartId, schema, false)
     if (newPart != OutOfMemPartition) {
       val partId = newPart.partID
       val startTime = schema.ingestionSchema.getLong(recordBase, recordOff, 0)
@@ -1276,12 +1299,17 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   protected def createNewPartition(partKeyBase: Array[Byte], partKeyOffset: Long,
                                    group: Int, usePartId: Int, schema: Schema,
+                                   odp: Boolean,
                                    initMapSize: Int = initInfoMapSize): TimeSeriesPartition = {
     assertThreadName(IngestSchedName)
-    // Check and evict, if after eviction we still don't have enough memory, then don't proceed
-    if (addPartitionsDisabled() || !ensureFreeSpace()) {
-      OutOfMemPartition
+    if (partitions.size() >= targetMaxPartitions) {
+      disableAddPartitions()
     }
+    // Check and evict, if after eviction we still don't have enough memory, then don't proceed
+    // We do not evict in ODP cases since we do not want eviction of ODP partitions that we already paged
+    // in for same query. Calling this as ODP cannibalism. :-)
+    if (addPartitionsDisabled() && !odp) evictForHeadroom()
+    if (addPartitionsDisabled()) OutOfMemPartition
     else {
       // PartitionKey is copied to offheap bufferMemory and stays there until it is freed
       // NOTE: allocateAndCopy and allocNew below could fail if there isn't enough memory.  It is CRUCIAL
@@ -1304,22 +1332,21 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
+  /**
+   * Called during ingestion if we run out of memory while creating TimeSeriesPartition, or
+   * if we went above the maxPartitionsLimit without being able to evict. Can appens if
+   * within 1 minute (time between headroom tasks) too many new time series was added and it
+   * went beyond limit of max partitions (or ran out of native memory).
+   *
+   * When partition addition is disabled, headroom task begins to run inline during ingestion
+   * with force-eviction enabled.
+   */
   private def disableAddPartitions(): Unit = {
     assertThreadName(IngestSchedName)
     if (addPartitionsDisabled.compareAndSet(false, true))
-      logger.warn(s"dataset=$ref shard=$shardNum: Out of buffer memory and not able to evict enough; " +
-        s"adding partitions disabled")
+      logger.warn(s"dataset=$ref shard=$shardNum: Out of native memory, or max partitions reached. " +
+        s"Not able to evict enough; adding partitions disabled")
     shardStats.dataDropped.increment()
-  }
-
-  private def checkEnableAddPartitions(): Unit = {
-    assertThreadName(IngestSchedName)
-    if (addPartitionsDisabled()) {
-      if (ensureFreeSpace()) {
-        logger.info(s"dataset=$ref shard=$shardNum: Enough free space to add partitions again!  Yay!")
-        addPartitionsDisabled := false
-      }
-    }
   }
 
   /**
@@ -1353,43 +1380,35 @@ class TimeSeriesShard(val ref: DatasetRef,
   /**
    * Check and evict partitions to free up memory and heap space.  NOTE: This must be called in the ingestion
    * stream so that there won't be concurrent other modifications.  Ideally this is called when trying to add partitions
+   *
+   * Expected to be called from evictForHeadroom method, only after obtaining evictionLock
+   * to prevent wrong query results.
+   *
    * @return true if able to evict enough or there was already space, false if not able to evict and not enough mem
    */
   // scalastyle:off method.length
-  private[filodb] def ensureFreeSpace(): Boolean = {
+  private[memstore] def makeSpaceForNewPartitions(forceEvict: Boolean): Boolean = {
     assertThreadName(IngestSchedName)
-    var lastPruned = EmptyBitmap
-    while (evictionPolicy.shouldEvict(partSet.size, bufferMemoryManager)) {
-      // Eliminate partitions evicted from last cycle so we don't have an endless loop
-      val prunedPartitions = partitionsToEvict().andNot(lastPruned)
-      if (prunedPartitions.isEmpty) {
+    val numPartsToEvict = if (forceEvict) (targetMaxPartitions * ensureTspHeadroomPercent / 100).toInt
+    else evictionPolicy.numPartitionsToEvictForHeadroom(partSet.size, targetMaxPartitions, bufferMemoryManager)
+    if (numPartsToEvict > 0) {
+      val partIdsToEvict = partitionsToEvict(numPartsToEvict)
+      if (partIdsToEvict.isEmpty) {
         logger.warn(s"dataset=$ref shard=$shardNum: No partitions to evict but we are still low on space. " +
           s"DATA WILL BE DROPPED")
         return false
       }
-      lastPruned = prunedPartitions
-
-      // Pruning group bitmaps
-      for { group <- 0 until numGroups } {
-        partitionGroups(group) = partitionGroups(group).andNot(prunedPartitions)
-      }
 
       // Finally, prune partitions and keyMap data structures
-      logger.info(s"Evicting partitions from dataset=$ref shard=$shardNum, watermark=$evictionWatermark...")
-      val intIt = prunedPartitions.intIterator
-      var partsRemoved = 0
+      logger.info(s"Evicting partitions from dataset=$ref shard=$shardNum ...")
+      val intIt = partIdsToEvict.intIterator
+      var numPartsEvicted = 0
       var partsSkipped = 0
-      var maxEndTime = evictionWatermark
+      val successfullyEvictedParts = new EWAHCompressedBitmap()
       while (intIt.hasNext) {
         val partitionObj = partitions.get(intIt.next)
         if (partitionObj != UnsafeUtils.ZeroPointer) {
-          // TODO we can optimize fetching of endTime by getting them along with top-k query
-          val endTime = partKeyIndex.endTimeFromPartId(partitionObj.partID)
-          if (partitionObj.ingesting)
-            logger.warn(s"Partition ${partitionObj.partID} is ingesting, but it was eligible for eviction. How?")
-          if (endTime == PartKeyLuceneIndex.NOT_FOUND || endTime == Long.MaxValue) {
-            logger.warn(s"endTime $endTime was not correct. how?", new IllegalStateException())
-          } else {
+          if (!partitionObj.ingesting) { // could have started re-ingesting after it got into evictablePartIds queue
             logger.debug(s"Evicting partId=${partitionObj.partID} ${partitionObj.stringPartition} " +
               s"from dataset=$ref shard=$shardNum")
             // add the evicted partKey to a bloom filter so that we are able to quickly
@@ -1401,33 +1420,29 @@ class TimeSeriesShard(val ref: DatasetRef,
             }
             // The previously created PartKey is just meant for bloom filter and will be GCed
             removePartition(partitionObj)
-            partsRemoved += 1
-            maxEndTime = Math.max(maxEndTime, endTime)
+            successfullyEvictedParts.set(partitionObj.partID)
+            numPartsEvicted += 1
+          } else {
+            partsSkipped += 1
           }
         } else {
           partsSkipped += 1
         }
       }
+      // Pruning group bitmaps.
+      for { group <- 0 until numGroups } {
+        partitionGroups(group) = partitionGroups(group).andNot(successfullyEvictedParts)
+      }
       val elemCount = evictedPartKeys.synchronized {
-        if (!evictedPartKeysDisposed) {
-          evictedPartKeys.approximateElementCount()
-        } else {
-          0
-        }
+        if (!evictedPartKeysDisposed) evictedPartKeys.approximateElementCount() else 0
       }
       shardStats.evictedPkBloomFilterSize.update(elemCount)
-      evictionWatermark = maxEndTime + 1
-      // Plus one needed since there is a possibility that all partitions evicted in this round have same endTime,
-      // and there may be more partitions that are not evicted with same endTime. If we didnt advance the watermark,
-      // we would be processing same partIds again and again without moving watermark forward.
-      // We may skip evicting some partitions by doing this, but the imperfection is an acceptable
-      // trade-off for performance and simplicity. The skipped partitions, will ve removed during purge.
-      logger.info(s"dataset=$ref shard=$shardNum: evicted $partsRemoved partitions," +
-        s"skipped $partsSkipped, h20=$evictionWatermark")
-      shardStats.partitionsEvicted.increment(partsRemoved)
+      logger.info(s"dataset=$ref shard=$shardNum: evicted $numPartsEvicted partitions, skipped $partsSkipped")
+      shardStats.partitionsEvicted.increment(numPartsEvicted)
     }
     true
   }
+
   //scalastyle:on
 
   // Permanently removes the given partition ID from our in-memory data structures
@@ -1445,10 +1460,23 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
-  private def partitionsToEvict(): EWAHCompressedBitmap = {
-    // Iterate and add eligible partitions to delete to our list
-    // Need to filter out partitions with no endTime. Any endTime calculated would not be set within one flush interval.
-    partKeyIndex.partIdsOrderedByEndTime(storeConfig.numToEvict, evictionWatermark, Long.MaxValue - 1)
+  private def partitionsToEvict(numPartsToEvict: Int): EWAHCompressedBitmap = {
+    val partIdsToEvict = new EWAHCompressedBitmap()
+    var i = 0
+    while (i < numPartsToEvict && !evictableOdpPartIds.isEmpty) {
+      val partId = evictableOdpPartIds.remove()
+      partIdsToEvict.set(partId)
+      logger.debug(s"Preparing to evict ODP partId=$partIdsToEvict")
+      i += 1
+    }
+    while (i < numPartsToEvict && !evictablePartIds.isEmpty) {
+      val partId = evictablePartIds.remove()
+      partIdsToEvict.set(partId)
+      logger.debug(s"Preparing to evict partId=$partIdsToEvict")
+      i += 1
+    }
+    shardStats.evictablePartKeysSize.decrement(i)
+    partIdsToEvict
   }
 
   private[core] def getPartition(partKey: Array[Byte]): Option[TimeSeriesPartition] = {
@@ -1492,8 +1520,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   def lookupPartitions(partMethod: PartitionScanMethod,
                        chunkMethod: ChunkScanMethod,
                        querySession: QuerySession): PartLookupResult = {
-    querySession.lock = Some(reclaimLock)
-    reclaimLock.lock()
+    querySession.lock = Some(evictionLock)
+    evictionLock.acquireSharedLock()
     val metricShardKeys = schemas.part.options.shardKeyColumns.dropRight(1)
     // any exceptions thrown here should be caught by a wrapped Task.
     // At the end, MultiSchemaPartitionsExec.execute releases the lock when the task is complete
@@ -1561,21 +1589,71 @@ class TimeSeriesShard(val ref: DatasetRef,
     })
   }
 
+  /**
+   * Calculate lock timeout based on headroom space available.
+   * Lower the space available, longer the timeout.
+   */
+  def getHeadroomLockTimeout(currentFreePercent: Double, ensurePercent: Double): Int = {
+    // Ramp up the timeout as the current headroom shrinks. Max timeout per attempt is a little
+    // over 2 seconds, and the total timeout can be double that, for a total of 4 seconds.
+    ((1.0 - (currentFreePercent / ensurePercent)) * EvictionLock.maxTimeoutMillis).toInt
+  }
+
+  /**
+   * This task is run every 1 minute to make headroom in memory. It is also called
+   * from createNewPartition method (inline during ingestion) if we run out of space between
+   * headroom task runs.
+   * This method acquires eviction lock and reclaim block and TSP memory.
+   * If addPartitions is disabled, we force eviction even if we cannot acquire eviction lock.
+   * @return true if eviction was attempted
+   */
+  private[memstore] def evictForHeadroom(): Boolean = {
+    val blockEvictionLockTimeoutMs = getHeadroomLockTimeout(blockStore.currentFreePercent,
+      ensureBlockHeadroomPercent)
+    val tspEvictionLockTimeoutMs: Int = getHeadroomLockTimeout(partitions.size.toDouble / targetMaxPartitions,
+      ensureTspHeadroomPercent)
+    val higherTimeoutMs = Math.max(blockEvictionLockTimeoutMs, tspEvictionLockTimeoutMs)
+
+    // whether to force evict even if lock cannot be acquired, if situation is dire
+    val forceEvict = addPartitionsDisabled.get
+
+    // do only if one of blocks or TSPs need eviction or if addition of partitions disabled
+    if (higherTimeoutMs > 0 || forceEvict) {
+      val start = System.nanoTime()
+      val timeoutMs = if (forceEvict) EvictionLock.direCircumstanceTimeoutMillis else higherTimeoutMs
+      val acquired = evictionLock.tryExclusiveReclaimLock(timeoutMs)
+      // if forceEvict is true, then proceed even if we dont have a lock
+      val jobDone = if (forceEvict || acquired) {
+        if (!acquired) logger.error(s"Since addPartitionsDisabled is true, proceeding with reclaim " +
+          s"even though eviction lock couldn't be acquired with final timeout of $timeoutMs ms. Trading " +
+          s"off possibly wrong query results (due to old inactive partitions that would be evicted " +
+          s"and skipped) in order to unblock ingestion and stop data loss. LockState: $evictionLock")
+        try {
+          if (blockEvictionLockTimeoutMs > 0) {
+            blockStore.ensureHeadroom(ensureBlockHeadroomPercent)
+          }
+          if (tspEvictionLockTimeoutMs > 0) {
+            if (makeSpaceForNewPartitions(forceEvict)) addPartitionsDisabled := false
+          }
+        } finally {
+          if (acquired) evictionLock.releaseExclusive()
+        }
+        true
+      } else {
+        false
+      }
+      val stall = System.nanoTime() - start
+      shardStats.memstoreEvictionStall.increment(stall)
+      jobDone
+    } else {
+      true
+    }
+  }
+
   private def startHeadroomTask(sched: Scheduler) = {
     sched.scheduleWithFixedDelay(1, 1, TimeUnit.MINUTES, new Runnable {
-      var numFailures = 0
-
       def run() = {
-        val numFree = blockStore.ensureHeadroom(storeConfig.ensureHeadroomPercent)
-        if (numFree > 0) {
-          numFailures = 0
-        } else {
-          numFailures += 1
-          if (numFailures >= 5) {
-            Shutdown.haltAndCatchFire(new RuntimeException(s"Headroom task was unable to free memory " +
-              s"for $numFailures consecutive attempts. Shutting down process. shard=$shardNum"))
-          }
-        }
+        evictForHeadroom()
       }
     })
   }

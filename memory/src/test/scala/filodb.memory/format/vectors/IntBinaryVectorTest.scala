@@ -4,7 +4,7 @@ import java.nio.ByteBuffer
 
 import debox.Buffer
 
-import filodb.memory.{BlockMemFactory, MemoryStats, PageAlignedBlockManager}
+import filodb.memory.{BlockMemFactory, EvictionLock, MemoryStats, PageAlignedBlockManager}
 import filodb.memory.format._
 
 class IntBinaryVectorTest extends NativeVectorTest {
@@ -115,8 +115,9 @@ class IntBinaryVectorTest extends NativeVectorTest {
 
     it("should append correctly when memory has previous values / was not zeroed") {
       import collection.JavaConverters._
+      val evictionLock = new EvictionLock
       val blockStore = new PageAlignedBlockManager(10 * 1024 * 1024,
-        new MemoryStats(Map("test"-> "test")), null, 16) {
+        new MemoryStats(Map("test"-> "test")), null, 16, evictionLock) {
         freeBlocks.asScala.foreach(_.set(0x55))   // initialize blocks to nonzero value
       }
       val blockFactory = new BlockMemFactory(blockStore, 24, Map("foo" -> "bar"), true)

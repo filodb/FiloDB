@@ -25,8 +25,16 @@ import filodb.downsampler.chunk.DownsamplerSettings
   * and is cached.
   */
 class ChunkCopier(conf: SparkConf) {
-  private def openConfig(str: String) = {
-    ConfigFactory.parseFile(new File(conf.get(str))).withFallback(GlobalConfig.systemConfig)
+
+  // Get filo config from spark conf or file.
+  private def getFiloConfig(valueConf: String, filePathConf: String) = {
+    val configString = conf.get(valueConf, "")
+    val config = if (!configString.isBlank) {
+      ConfigFactory.parseString(configString)
+    } else {
+      ConfigFactory.parseFile(new File(conf.get(filePathConf))).withFallback(GlobalConfig.systemConfig)
+    }
+    config
   }
 
   def datasetConfig(mainConfig: Config, datasetName: String): Config = {
@@ -46,8 +54,14 @@ class ChunkCopier(conf: SparkConf) {
       .orElseThrow()
   }
 
-  val rawSourceConfig = openConfig("spark.filodb.chunks.copier.source.configFile")
-  val rawTargetConfig = openConfig("spark.filodb.chunks.copier.target.configFile")
+  val rawSourceConfig = getFiloConfig(
+    "spark.filodb.chunks.copier.source.config.value",
+    "spark.filodb.chunks.copier.source.config.file"
+  )
+  val rawTargetConfig = getFiloConfig(
+    "spark.filodb.chunks.copier.target.config.value",
+    "spark.filodb.chunks.copier.target.config.file"
+  )
   val sourceConfig = rawSourceConfig.getConfig("filodb")
   val targetConfig = rawTargetConfig.getConfig("filodb")
   val sourceCassConfig = sourceConfig.getConfig("cassandra")

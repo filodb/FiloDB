@@ -3,8 +3,7 @@ package filodb.repair
 import java.io.File
 import java.time.Instant
 import java.time.format.DateTimeFormatter
-
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
 import monix.reactive.Observable
 import org.apache.spark.SparkConf
 import org.scalatest.BeforeAndAfterAll
@@ -64,8 +63,8 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
     val conf = new SparkConf(loadDefaults = true)
     conf.setMaster("local[2]")
 
-    conf.set("spark.filodb.partitionkeys.copier.source.configFile", sourceConfigPath)
-    conf.set("spark.filodb.partitionkeys.copier.target.configFile", targetConfigPath)
+    conf.set("spark.filodb.partitionkeys.copier.source.config.file", sourceConfigPath)
+    conf.set("spark.filodb.partitionkeys.copier.target.config.file", targetConfigPath)
 
     conf.set("spark.filodb.partitionkeys.copier.dataset", datasetName)
 
@@ -81,6 +80,13 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
   def getSeriesTags(workspace: String, namespace: String): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = {
     Map("_ws_".utf8 -> workspace.utf8, "_ns_".utf8 -> namespace.utf8)
+  }
+
+  def parseFileConfig(confStr: String) = {
+    val config = ConfigFactory
+      .parseFile(new File(confStr))
+      .withFallback(GlobalConfig.systemConfig)
+    config.root().render(ConfigRenderOptions.concise())
   }
 
   describe("raw data repair") {
@@ -100,6 +106,13 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
   describe("downsample data repair") {
     it("should copy data for repair window") {
       sparkConf.set("spark.filodb.partitionkeys.copier.isDownsampleCopy", "true")
+
+      // Test this with value based configs
+      sparkConf.remove("spark.filodb.partitionkeys.copier.source.config.file")
+      sparkConf.remove("spark.filodb.partitionkeys.copier.target.config.file")
+      sparkConf.set("spark.filodb.partitionkeys.copier.source.config.value", parseFileConfig(sourceConfigPath))
+      sparkConf.set("spark.filodb.partitionkeys.copier.target.config.value", parseFileConfig(targetConfigPath))
+
       val sourceColStore = new CassandraColumnStore(sourceConfig, s, sourceSession, true)
       val targetColStore = new CassandraColumnStore(targetConfig, s, targetSession, true)
       truncateColStore(sourceColStore)
@@ -109,6 +122,9 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
       PartitionKeysCopierMain.run(sparkConf).close()
 
       validateRepairData(targetColStore)
+
+      sparkConf.set("spark.filodb.partitionkeys.copier.source.config.file", sourceConfigPath)
+      sparkConf.set("spark.filodb.partitionkeys.copier.target.config.file", targetConfigPath)
     }
   }
 
