@@ -41,9 +41,10 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
 
   private val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000)
 
-  val localPlanner = new SingleClusterPlanner(dsRef, schemas, localMapper, earliestRetainedTimestampFn = 0, queryConfig)
+  val localPlanner = new SingleClusterPlanner(dsRef, schemas, localMapper, earliestRetainedTimestampFn = 0, queryConfig,
+    "raw")
   val remotePlanner = new SingleClusterPlanner(dsRef, schemas, remoteMapper, earliestRetainedTimestampFn = 0,
-    queryConfig)
+    queryConfig, "raw")
 
   val failureProvider = new FailureProvider {
     override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {

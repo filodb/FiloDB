@@ -34,11 +34,14 @@ object SingleClusterPlanner {
   * @param minTimeRangeForSplitMs if time range is longer than this, plan will be split into multiple plans
   * @param splitSizeMs time range for each split, if plan needed to be split
   */
+
+//cluster name
 class SingleClusterPlanner(dsRef: DatasetRef,
                            schema: Schemas,
                            shardMapperFunc: => ShardMapper,
                            earliestRetainedTimestampFn: => Long,
                            queryConfig: QueryConfig,
+                           clusterName: String,
                            spreadProvider: SpreadProvider = StaticSpreadProvider(),
                            timeSplitEnabled: Boolean = false,
                            minTimeRangeForSplitMs: => Long = 1.day.toMillis,
@@ -55,7 +58,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       logger.debug(s"ShardMapper: $shardMapperFunc")
       throw new RuntimeException(s"Shard: $shard is not available") // TODO fix this
     }
-    ActorPlanDispatcher(targetActor)
+    ActorPlanDispatcher(targetActor, clusterName)
   }
 
   /**
@@ -105,7 +108,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
         case Seq(one) => materializeTimeSplitPlan(one, qContext)
         case many =>
           val materializedPlans = many.map(materializeTimeSplitPlan(_, qContext))
-          val targetActor = pickDispatcher(materializedPlans)
+          val targetActor = PlannerUtil.pickDispatcher(materializedPlans)
 
           // create SplitLocalPartitionDistConcatExec that will execute child execplanss sequentially and stitches
           // results back with StitchRvsMapper transformer.
@@ -125,7 +128,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
         if (stitch) justOne.addRangeVectorTransformer(StitchRvsMapper())
         justOne
       case PlanResult(many, stitch) =>
-        val targetActor = pickDispatcher(many)
+        val targetActor = PlannerUtil.pickDispatcher(many)
         many.head match {
           case lve: LabelValuesExec => LabelValuesDistConcatExec(qContext, targetActor, many)
           case ske: PartKeysExec => PartKeysDistConcatExec(qContext, targetActor, many)
@@ -233,10 +236,12 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   private def materializeBinaryJoin(qContext: QueryContext,
                                     lp: BinaryJoin): PlanResult = {
     val lhs = walkLogicalPlanTree(lp.lhs, qContext)
-    val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext, pickDispatcher(lhs.plans), lhs.plans))
+    val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext,
+      PlannerUtil.pickDispatcher(lhs.plans), lhs.plans))
     else lhs.plans
     val rhs = walkLogicalPlanTree(lp.rhs, qContext)
-    val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext, pickDispatcher(rhs.plans), rhs.plans))
+    val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext,
+      PlannerUtil.pickDispatcher(rhs.plans), rhs.plans))
     else rhs.plans
 
     val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(lp, queryConfig.addExtraOnByKeysTimeRanges)
@@ -247,7 +252,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     // In theory, more efficient to use transformer than to have separate exec plan node to avoid IO.
     // In the interest of keeping it simple, deferring decorations to the ExecPlan. Add only if needed after measuring.
 
-    val targetActor = pickDispatcher(stitchedLhs ++ stitchedRhs)
+    val targetActor = PlannerUtil.pickDispatcher(stitchedLhs ++ stitchedRhs)
     val joined = if (lp.operator.isInstanceOf[SetOperator])
       Seq(exec.SetOperatorExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator,
         LogicalPlanUtils.renameLabels(onKeysReal, dsOptions.metricColumn),
