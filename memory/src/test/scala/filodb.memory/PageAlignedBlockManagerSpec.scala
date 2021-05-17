@@ -3,6 +3,7 @@ package filodb.memory
 import scala.language.reflectiveCalls
 
 import com.kenai.jffi.PageManager
+import javax.naming.ServiceUnavailableException
 import org.scalatest.BeforeAndAfter
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -27,10 +28,11 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
     testReclaimer.reclaimedBytes = 0
   }
 
+  val evictionLock = new EvictionLock
   it should "Allocate blocks as requested for size" in {
     //2MB
     val stats = new MemoryStats(Map("test1" -> "test1"))
-    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1)
+    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1, evictionLock)
 
 //    val fbm = freeBlocksMetric(stats)
 //    fbm.max should be(512)
@@ -47,7 +49,7 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
 
   it should "Align block size to page size" in {
     val stats = new MemoryStats(Map("test2" -> "test2"))
-    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1)
+    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1, evictionLock)
     val blockSize = blockManager.blockSizeInBytes
     blockSize should be(pageSize)
 
@@ -57,7 +59,7 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
   it should "Not allow a request of blocks over the upper bound if no blocks are reclaimable" in {
     //2 pages
     val stats = new MemoryStats(Map("test3" -> "test3"))
-    val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, testReclaimer, 1)
+    val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, testReclaimer, 1, evictionLock)
     val blockSize = blockManager.blockSizeInBytes
 //    val fbm = freeBlocksMetric(stats)
 //    fbm.max should be(2)
@@ -78,7 +80,7 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
   it should "Allocate blocks as requested even when upper bound is reached if blocks can be reclaimed" in {
     //2 pages
     val stats = new MemoryStats(Map("test4" -> "test4"))
-    val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, testReclaimer, 1)
+    val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, testReclaimer, 1, evictionLock)
     val blockSize = blockManager.blockSizeInBytes
     val firstRequest = blockManager.requestBlocks(blockSize * 2, false)
     //used 2 out of 2
@@ -100,7 +102,7 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
   it should "Fail to Allocate blocks when enough blocks cannot be reclaimed" in {
     //4 pages
     val stats = new MemoryStats(Map("test5" -> "test5"))
-    val blockManager = new PageAlignedBlockManager(4 * pageSize, stats, testReclaimer, 1)
+    val blockManager = new PageAlignedBlockManager(4 * pageSize, stats, testReclaimer, 1, evictionLock)
     val blockSize = blockManager.blockSizeInBytes
     val firstRequest = blockManager.requestBlocks(blockSize * 2, false)
     //used 2 out of 4
@@ -174,7 +176,7 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
   it should "fail to allocate time order block" in {
     val stats = new MemoryStats(Map("test5" -> "test5"))
     // This block manager has 5 blocks capacity
-    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1)
+    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1, evictionLock)
 
     blockManager.usedIngestionBlocks.size() shouldEqual 0
     blockManager.usedOdpBlocks.size() shouldEqual 0
@@ -191,11 +193,9 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
     blockManager.usedOdpBlocks.size() shouldEqual 4
 
     // reclaim should fail now because none of the blocks are reclaimable
-    try {
+    intercept[ServiceUnavailableException] {
       blockManager.requestBlock(true)
       fail
-    } catch {
-      case e: MemoryRequestException => // expected
     }
 
     blockManager.releaseBlocks()
@@ -204,7 +204,7 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
   it should ("allocate blocks using BlockMemFactory with ownership and reclaims") in {
     val stats = new MemoryStats(Map("test5" -> "test5"))
     // This block manager has 5 blocks capacity
-    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1)
+    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1, evictionLock)
 
     blockManager.usedIngestionBlocks.size() shouldEqual 0
     blockManager.usedOdpBlocks.size() shouldEqual 0
@@ -236,7 +236,7 @@ class PageAlignedBlockManagerSpec extends AnyFlatSpec with Matchers with BeforeA
   it should "ensure free space" in {
     val stats = new MemoryStats(Map("test5" -> "test5"))
     // This block manager has 5 blocks capacity
-    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1)
+    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1, evictionLock)
 
     blockManager.numFreeBlocks shouldEqual 5
     blockManager.ensureFreePercent(50)

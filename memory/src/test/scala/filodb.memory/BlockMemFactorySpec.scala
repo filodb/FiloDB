@@ -12,9 +12,10 @@ class BlockMemFactorySpec extends AnyFlatSpec with Matchers {
 
   val pageSize = PageManager.getInstance().pageSize()
 
+  val evictionLock = new EvictionLock
   it should "Mark all blocks of BlockMemFactory as reclaimable when used as done in ingestion pipeline" in {
     val stats = new MemoryStats(Map("test1" -> "test1"))
-    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1)
+    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1, evictionLock)
     val bmf = new BlockMemFactory(blockManager, 50, Map("test" -> "val"), false)
 
     // simulate encoding of multiple ts partitions in flush group
@@ -48,7 +49,7 @@ class BlockMemFactorySpec extends AnyFlatSpec with Matchers {
 
   it should "Mark all blocks of BlockMemFactory as reclaimable when used in ODP by DemandPagedChunkStore" in {
     val stats = new MemoryStats(Map("test1" -> "test1"))
-    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1)
+    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1, evictionLock)
 
     // create block mem factories for different time buckets
     val bmf = new BlockMemFactory(blockManager, 50, Map("test" -> "val"), true)
@@ -89,7 +90,7 @@ class BlockMemFactorySpec extends AnyFlatSpec with Matchers {
 
   it should "Reclaim Ingestion and ODP blocks in right order when used together" in {
     val stats = new MemoryStats(Map("test1" -> "test1"))
-    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1)
+    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1, evictionLock)
 
     val ingestionFactory = new BlockMemFactory(blockManager, 50, Map("test" -> "val"), false)
 

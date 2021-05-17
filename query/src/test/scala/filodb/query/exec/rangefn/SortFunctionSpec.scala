@@ -40,6 +40,7 @@ class SortFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 1d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
@@ -47,6 +48,7 @@ class SortFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 5d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey1
@@ -54,6 +56,7 @@ class SortFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 3d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey1
@@ -61,6 +64,7 @@ class SortFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 2d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
@@ -68,6 +72,7 @@ class SortFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 4d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
@@ -75,6 +80,7 @@ class SortFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 6d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey1
@@ -82,12 +88,14 @@ class SortFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 0d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey1
 
       import filodb.core.query.NoCloseCursor._
       override def rows(): RangeVectorCursor = Seq.empty[RowReader].iterator
+      override def outputRange: Option[RvRange] = None
     }
     )
 
@@ -125,6 +133,7 @@ class SortFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
         import filodb.core.query.NoCloseCursor._
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 1d)).iterator
+        override def outputRange: Option[RvRange] = None
       },
       new RangeVector {
         override def key: RangeVectorKey = testKey2
@@ -132,6 +141,7 @@ class SortFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
         import filodb.core.query.NoCloseCursor._
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 5d)).iterator
+        override def outputRange: Option[RvRange] = None
       })
 
     val byLabels = List("src")

@@ -84,8 +84,8 @@ object PrometheusModel {
                     qr.result.map(toHistResult(_, verbose, qr.resultType))
                   else
                     qr.result.map(toPromResult(_, verbose, qr.resultType))
-    SuccessResponse(Data(toPromResultType(qr.resultType),
-                         results.filter(r => r.values.nonEmpty || r.value.isDefined)))
+    SuccessResponse(Data(toPromResultType(qr.resultType), results.filter(r => r.values.nonEmpty || r.value.isDefined)),
+                    "success", Some(qr.mayBePartial), qr.partialResultReason)
   }
 
   def toPromExplainPlanResponse(ex: ExecPlan): ExplainPlanResponse = {

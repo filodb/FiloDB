@@ -3,13 +3,12 @@ package filodb.repair
 import java.lang.ref.Reference
 import java.nio.ByteBuffer
 import java.util
-
 import com.datastax.driver.core.Row
 import org.apache.spark.SparkConf
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.binaryrecord2.RecordBuilder
@@ -23,6 +22,7 @@ import monix.reactive.Observable
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
+import java.io.File
 import scala.collection.mutable.ArrayBuffer
 
 class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
@@ -60,8 +60,8 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
 
       val sparkConf = new SparkConf(loadDefaults = true)
       sparkConf.setMaster("local[2]")
-      sparkConf.set("spark.filodb.chunks.copier.source.configFile", sourceConfigPath)
-      sparkConf.set("spark.filodb.chunks.copier.target.configFile", targetConfigPath)
+      sparkConf.set("spark.filodb.chunks.copier.source.config.file", sourceConfigPath)
+      sparkConf.set("spark.filodb.chunks.copier.target.config.file", targetConfigPath)
       sparkConf.set("spark.filodb.chunks.copier.dataset", "prometheus")
       sparkConf.set("spark.filodb.chunks.copier.repairStartTime", "2020-10-13T00:00:00Z")
       sparkConf.set("spark.filodb.chunks.copier.repairEndTime", "2020-10-13T05:00:00Z")
@@ -86,8 +86,8 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
 
       val sparkConf = new SparkConf(loadDefaults = true)
       sparkConf.setMaster("local[2]")
-      sparkConf.set("spark.filodb.chunks.copier.source.configFile", sourceConfigPath)
-      sparkConf.set("spark.filodb.chunks.copier.target.configFile", targetConfigPath)
+      sparkConf.set("spark.filodb.chunks.copier.source.config.value", parseFileConfig(sourceConfigPath))
+      sparkConf.set("spark.filodb.chunks.copier.target.config.value", parseFileConfig(targetConfigPath))
       sparkConf.set("spark.filodb.chunks.copier.isDownsampleCopy", "true")
       sparkConf.set("spark.filodb.chunks.copier.dataset", "prometheus")
       sparkConf.set("spark.filodb.chunks.copier.repairStartTime", "2020-10-13T00:00:00Z")
@@ -97,6 +97,13 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
       verifyTestData(sourceColStore, targetColStore,
         part1Bytes, part2Bytes, repairChunks1, repairChunks2)
     }
+  }
+
+  def parseFileConfig(confStr: String) = {
+    val config = ConfigFactory
+      .parseFile(new File(confStr))
+      .withFallback(GlobalConfig.systemConfig)
+    config.root().render(ConfigRenderOptions.concise())
   }
 
   def initColStore(colStore: CassandraColumnStore) = {

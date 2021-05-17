@@ -16,7 +16,7 @@ import filodb.core.{DatasetRef, Types}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.ratelimit.QuotaSource
 import filodb.core.metadata.Schemas
-import filodb.core.query.QuerySession
+import filodb.core.query.{QuerySession, ServiceUnavailableException}
 import filodb.core.store._
 import filodb.memory.NativeMemoryManager
 
@@ -84,6 +84,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
 
     // 1. Fetch partitions from memstore
     val partIdsNotInMemory = partLookupRes.partIdsNotInMemory
+
     // 2. Now determine list of partitions to ODP and the time ranges to ODP
     val partKeyBytesToPage = new ArrayBuffer[Array[Byte]]()
     val pagingMethods = new ArrayBuffer[ChunkScanMethod]
@@ -198,21 +199,24 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
           for { partKeyBytesRef <- partKeyIndex.partKeyFromPartId(id)
                 unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(partKeyBytesRef.offset)
                 group = partKeyGroup(schemas.part.binSchema, partKeyBytesRef.bytes, unsafeKeyOffset, numGroups)
-                sch   = schemas(RecordSchema.schemaID(partKeyBytesRef.bytes, unsafeKeyOffset))
-                part <- Option(createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, id, sch, 4))
-                          if sch != Schemas.UnknownSchema } yield {
+                sch  <- Option(schemas(RecordSchema.schemaID(partKeyBytesRef.bytes, unsafeKeyOffset)))
+                          } yield {
+            val part = createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, id, sch, true, 4)
+            if (part == OutOfMemPartition) throw new ServiceUnavailableException("The server has too many ingesting " +
+              "time series and does not have resources to serve this long time range query. Please try " +
+              "after sometime.")
             val stamp = partSetLock.writeLock()
-            try {
-              part.ingesting = false
-              partSet.add(part)
-            } finally {
-              partSetLock.unlockWrite(stamp)
+              try {
+                markPartAsNotIngesting(part, odp = true)
+                partSet.add(part)
+              } finally {
+                partSetLock.unlockWrite(stamp)
+              }
+              val pkBytes = util.Arrays.copyOfRange(partKeyBytesRef.bytes, partKeyBytesRef.offset,
+                partKeyBytesRef.offset + partKeyBytesRef.length)
+              callback(part.partID, pkBytes)
+              part
             }
-            val pkBytes = util.Arrays.copyOfRange(partKeyBytesRef.bytes, partKeyBytesRef.offset,
-                            partKeyBytesRef.offset + partKeyBytesRef.length)
-            callback(part.partID, pkBytes)
-            part
-          }
           // create the partition and update data structures (but no need to add to Lucene!)
           // NOTE: if no memory, then no partition!
         case p: TimeSeriesPartition =>

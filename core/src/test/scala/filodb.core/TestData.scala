@@ -14,7 +14,7 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{SomeData, TimeSeriesPartitionSpec, WriteBufferPool}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schema, Schemas}
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.query.RawDataRangeVector
+import filodb.core.query.{RangeVector, RangeVectorCursor, RangeVectorKey, RawDataRangeVector, RvRange, TransientRow}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.{vectors => bv, _}
@@ -398,8 +398,8 @@ object MachineMetricsData {
 
   val histKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
   val histPartKey = histKeyBuilder.partKeyFromObjects(histDataset.schema, "request-latency", extraTags)
-
-  val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16)
+  val evictionLock = new EvictionLock
+  val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16, evictionLock)
   val histIngestBH = new BlockMemFactory(blockStore, histDataset.schema.data.blockMetaSize,
                                          dummyContext, true)
   val histMaxBH = new BlockMemFactory(blockStore, histMaxDS.schema.data.blockMetaSize,
@@ -537,4 +537,14 @@ object MetricsTestData {
         }
         Seq(countRec, sumRec) ++ bucketRecs
       }
+
+  def makeRv(rvKey: RangeVectorKey, data: Seq[(Long, Double)], range: RvRange): RangeVector = {
+    val rowData: Iterator[RowReader] = data.map { d => new TransientRow(d._1, d._2) }.iterator
+    import filodb.core.query.NoCloseCursor._
+    new RangeVector {
+      override def key: RangeVectorKey = rvKey
+      override def rows(): RangeVectorCursor = new NoCloseCursor(rowData)
+      override def outputRange: Option[RvRange] = Some(range)
+    }
+  }
 }

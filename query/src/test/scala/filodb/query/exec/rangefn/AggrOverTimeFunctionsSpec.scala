@@ -26,8 +26,9 @@ import org.scalatest.matchers.should.Matchers
 trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
   import MetricsTestData._
 
+  val evictionLock = new EvictionLock
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
-    new MemoryStats(Map("test"-> "test")), null, 16)
+    new MemoryStats(Map("test"-> "test")), null, 16, evictionLock)
   val storeConf = TestData.storeConf.copy(maxChunksSize = 200)
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, timeseriesSchema.data.blockMetaSize,
                                       MMD.dummyContext, true)

@@ -32,21 +32,22 @@ case class MetadataRemoteExec(queryEndpoint: String,
       .map { response =>
         response.unsafeBody match {
           case Left(error) => QueryError(queryContext.queryId, error.error)
-          case Right(successResponse) => toQueryResponse(successResponse.data, queryContext.queryId, execPlan2Span)
+          case Right(successResponse) => toQueryResponse(successResponse, queryContext.queryId, execPlan2Span)
         }
       }
   }
 
-  def toQueryResponse(data: Seq[Map[String, String]], id: String, parentSpan: kamon.trace.Span): QueryResponse = {
-    val iteratorMap = data.map { r => r.map { v => (v._1.utf8, v._2.utf8) }}
+  def toQueryResponse(response: MetadataSuccessResponse, id: String, parentSpan: kamon.trace.Span): QueryResponse = {
+    val iteratorMap = response.data.map { r => r.map { v => (v._1.utf8, v._2.utf8) }}
 
     import NoCloseCursor._
     val rangeVector = IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-      UTF8MapIteratorRowReader(iteratorMap.toIterator))
+      UTF8MapIteratorRowReader(iteratorMap.toIterator), None)
 
     val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, recordSchema,
                         queryWithPlanName(queryContext)))
 
-    QueryResult(id, resultSchema, srvSeq, false, None) // TODO need to actually get isPartialResponse from http response
+    QueryResult(id, resultSchema, srvSeq,
+      if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 }

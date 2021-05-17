@@ -87,6 +87,23 @@ object AntlrParser extends StrictLogging {
   * The real work happens here, by extending the auto-generated visitor.
   */
 class AntlrParser extends PromQLBaseVisitor[Object] {
+  override def visitSubqueryOperation(ctx: PromQLParser.SubqueryOperationContext): SubqueryExpression = {
+    val lhs = build[Expression](ctx.vectorExpression())
+    if (!lhs.isInstanceOf[PeriodicSeries] || lhs.isInstanceOf[SubqueryExpression]) {
+      throw new IllegalArgumentException("Subquery can only be applied to instant queries")
+    }
+    val sqcl = build[SubqueryClause](ctx.subquery())
+    // FIXME: Do something with the optional offset.
+    SubqueryExpression(lhs.asInstanceOf[PeriodicSeries], sqcl)
+  }
+
+  override def visitSubquery(ctx: PromQLParser.SubqueryContext): SubqueryClause = {
+    val list = ctx.DURATION
+    val window = parseDuration(list.get(0))
+    val step = if (list.size() > 1) Some(parseDuration(list.get(1))) else None
+    SubqueryClause(window, step)
+  }
+
   override def visitBinaryOperation(ctx: PromQLParser.BinaryOperationContext): BinaryExpression = {
     val lhs = build[Expression](ctx.getChild(0))
     val op = build[Operator](ctx.getChild(1))
@@ -171,18 +188,26 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
       build[Seq[LabelMatch]](matcherList)
     }
 
-    val offset: Option[Duration] = if (ctx.OFFSET == null) {
+    val offset: Option[Duration] = if (ctx.offset == null) {
       None
     } else {
-      Some(parseDuration(ctx.DURATION.getSymbol().getText()))
+      Some(build[Duration](ctx.offset))
     }
 
-    if (ctx.TIME_RANGE == null) {
+    if (ctx.window == null) {
       InstantExpression(metricName, labelSelection, offset)
     } else {
-      val window = parseWindow(ctx.TIME_RANGE.getSymbol().getText())
+      val window = build[Duration](ctx.window)
       RangeExpression(metricName, labelSelection, window, offset)
     }
+  }
+
+  override def visitWindow(ctx: PromQLParser.WindowContext): Duration = {
+    parseDuration(ctx.DURATION)
+  }
+
+  override def visitOffset(ctx: PromQLParser.OffsetContext): Duration = {
+    parseDuration(ctx.DURATION)
   }
 
   override def visitLabelMatcher(ctx: PromQLParser.LabelMatcherContext): LabelMatch = {
@@ -338,31 +363,10 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
   /**
     * Strip quotes and process escape codes a string terminal node.
     */
-  private def dequote(str: TerminalNode): String = dequote(str.getSymbol().getText())
+  private def dequote(str: TerminalNode): String = ParserUtil.dequote(str.getSymbol().getText())
 
-  /**
-    * Strip quotes and process escape codes.
-    */
-  private def dequote(str: String): String = {
-    val bob = new StringBuilder()
-    var offset = 1
-    while (offset < str.length() - 1) {
-      var c = str.charAt(offset); offset += 1
-      if (c == '\\') {
-        val next = str.charAt(offset); offset += 1
-        c = next match {
-          case '\\' | '\'' | '"' => next
-          case 'f' => '\f'
-          case 'n' => '\n'
-          case 'r' => '\r'
-          case 't' => '\t'
-          case _ => throw new IllegalArgumentException("illegal string escape: " + next)
-        }
-      }
-      bob.append(c)
-    }
-
-    bob.toString()
+  private def parseDuration(node: TerminalNode): Duration = {
+    parseDuration(node.getSymbol().getText())
   }
 
   private def parseDuration(str: String): Duration = {
@@ -379,12 +383,5 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
     val scale = java.lang.Double.parseDouble(str.substring(0, str.length - 1))
 
     Duration(scale, timeUnit)
-  }
-
-  /**
-    * Strip off the brackets and parse as a duration.
-    */
-  private def parseWindow(str: String): Duration = {
-    parseDuration(str.substring(1, str.length - 1))
   }
 }
