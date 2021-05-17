@@ -90,7 +90,8 @@ object StoreConfig {
                                            |num-block-pages = 100
                                            |failure-retries = 3
                                            |retry-delay = 15 seconds
-                                           |part-index-flush-max-delay = 60 seconds
+                                           |// less than 1 min to reduce possibility of double purge of time series
+                                           |part-index-flush-max-delay = 55 seconds
                                            |part-index-flush-min-delay = 30 seconds
                                            |multi-partition-odp = false
                                            |demand-paging-parallelism = 10
