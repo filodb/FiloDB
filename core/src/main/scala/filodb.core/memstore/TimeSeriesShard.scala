@@ -305,8 +305,9 @@ class TimeSeriesShard(val ref: DatasetRef,
   private final var ingested = 0L
 
   private val targetMaxPartitions = filodbConfig.getInt("memstore.max-partitions-on-heap-per-shard")
-  private val ensureTspHeadroomPercent = filodbConfig.getDouble("memstore.ensure-tsp-headroom-percent")
+  private val ensureTspHeadroomPercent = filodbConfig.getDouble("memstore.ensure-tsp-count-headroom-percent")
   private val ensureBlockHeadroomPercent = filodbConfig.getDouble("memstore.ensure-block-memory-headroom-percent")
+  private val ensureNativeMemHeadroomPercent = filodbConfig.getDouble("ensure-native-memory-headroom-percent")
 
   /**
    * Queue of partIds that are eligible for eviction since they have stopped ingesting.
@@ -1608,19 +1609,29 @@ class TimeSeriesShard(val ref: DatasetRef,
    * @return true if eviction was attempted
    */
   private[memstore] def evictForHeadroom(): Boolean = {
-    val blockEvictionLockTimeoutMs = getHeadroomLockTimeout(blockStore.currentFreePercent,
-      ensureBlockHeadroomPercent)
-    val tspEvictionLockTimeoutMs: Int = getHeadroomLockTimeout(partitions.size.toDouble / targetMaxPartitions,
-      ensureTspHeadroomPercent)
-    val higherTimeoutMs = Math.max(blockEvictionLockTimeoutMs, tspEvictionLockTimeoutMs)
+
+    // measure how much headroom we have
+    val blockStoreCurrentFreePercent = blockStore.currentFreePercent
+    val tspCountFreePercent = (targetMaxPartitions - partitions.size.toDouble) / targetMaxPartitions
+    val nativeMemFreePercent = bufferMemoryManager.numFreeBytes.toDouble / bufferMemoryManager.upperBoundSizeInBytes
+
+    // calculate lock timeouts based on free percents and target headroom to maintain. Lesser the headroom,
+    // higher the timeout. Choose highest among the three.
+    val blockTimeoutMs = getHeadroomLockTimeout(blockStoreCurrentFreePercent, ensureBlockHeadroomPercent)
+    val tspTimeoutMs: Int = getHeadroomLockTimeout(tspCountFreePercent, ensureTspHeadroomPercent)
+    val nativeMemTimeoutMs = getHeadroomLockTimeout(nativeMemFreePercent, ensureNativeMemHeadroomPercent)
+    val highestTimeoutMs = Math.max(Math.max(blockTimeoutMs, tspTimeoutMs), nativeMemTimeoutMs)
 
     // whether to force evict even if lock cannot be acquired, if situation is dire
     val forceEvict = addPartitionsDisabled.get
 
     // do only if one of blocks or TSPs need eviction or if addition of partitions disabled
-    if (higherTimeoutMs > 0 || forceEvict) {
+    if (highestTimeoutMs > 0 || forceEvict) {
       val start = System.nanoTime()
-      val timeoutMs = if (forceEvict) EvictionLock.direCircumstanceTimeoutMillis else higherTimeoutMs
+      val timeoutMs = if (forceEvict) EvictionLock.direCircumstanceTimeoutMillis else highestTimeoutMs
+      logger.info(s"Preparing to evictForHeadroom on dataset=$ref shard=$shardNum since " +
+        s"blockStoreCurrentFreePercent=$blockStoreCurrentFreePercent tspCountFreePercent=$tspCountFreePercent " +
+        s"nativeMemFreePercent=$nativeMemFreePercent forceEvict=$forceEvict timeoutMs=$timeoutMs")
       val acquired = evictionLock.tryExclusiveReclaimLock(timeoutMs)
       // if forceEvict is true, then proceed even if we dont have a lock
       val jobDone = if (forceEvict || acquired) {
@@ -1629,10 +1640,10 @@ class TimeSeriesShard(val ref: DatasetRef,
           s"off possibly wrong query results (due to old inactive partitions that would be evicted " +
           s"and skipped) in order to unblock ingestion and stop data loss. LockState: $evictionLock")
         try {
-          if (blockEvictionLockTimeoutMs > 0) {
+          if (blockTimeoutMs > 0) {
             blockStore.ensureHeadroom(ensureBlockHeadroomPercent)
           }
-          if (tspEvictionLockTimeoutMs > 0) {
+          if (tspTimeoutMs > 0 || nativeMemTimeoutMs > 0) {
             if (makeSpaceForNewPartitions(forceEvict)) addPartitionsDisabled := false
           }
         } finally {
