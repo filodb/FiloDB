@@ -35,7 +35,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
   private val queryConfig = new QueryConfig(config)
 
   val localPlanner = new SingleClusterPlanner(dataset.ref, schemas, mapperRef, earliestRetainedTimestampFn = 0,
-    queryConfig)
+    queryConfig, "raw")
 
   val startSeconds = 1000
   val endSeconds = 10000

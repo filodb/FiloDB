@@ -18,6 +18,7 @@ import filodb.query._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
+// scalastyle:off number.of.methods
 class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
   import MultiSchemaPartitionsExecSpec._
@@ -38,6 +39,10 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
+
+    override def clusterName: String = ???
+
+    override def isLocalCall: Boolean = ???
   }
   val resultSchema = ResultSchema(MetricsTestData.timeseriesSchema.infosFromIDs(0 to 1), 1)
   val resSchemaTask = Task.now(resultSchema)
@@ -1365,3 +1370,4 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     rowValues.last.isNaN shouldEqual(true) // As Rhs does not have any value at 3L
   }
 }
+// scalastyle:on number.of.methods
