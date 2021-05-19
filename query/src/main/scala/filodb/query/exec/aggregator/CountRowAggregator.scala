@@ -1,5 +1,6 @@
 package filodb.query.exec.aggregator
 
+import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.RowReader
 
@@ -22,6 +23,11 @@ abstract class CountRowAggregator extends RowAggregator {
 
   def isNull(item: RowReader): Boolean
 
+  val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+    ColumnInfo("value", ColumnType.DoubleColumn))
+
+  val schema = ResultSchema(columns, 1)
+
   def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = {
     mapInto.setLong(0, item.getLong(0))
     mapInto.setDouble(1, if (isNull(item)) 0d else 1d)
@@ -35,7 +41,7 @@ abstract class CountRowAggregator extends RowAggregator {
     acc
   }
   def present(aggRangeVector: RangeVector, limit: Int, rangeParams: RangeParams): Seq[RangeVector] = Seq(aggRangeVector)
-  def reductionSchema(source: ResultSchema): ResultSchema = source
+  def reductionSchema(source: ResultSchema): ResultSchema = schema
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = reductionSchema
 }
 

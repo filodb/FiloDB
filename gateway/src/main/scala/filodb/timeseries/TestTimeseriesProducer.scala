@@ -151,7 +151,7 @@ object TestTimeseriesProducer extends StrictLogging {
    * the cardinality of time series for testing purposes.
    */
   def genHistogramData(startTime: Long, dataset: Dataset, numTimeSeries: Int = 16): Stream[InputRecord] = {
-    require(dataset.dataColumns.map(_.columnType) == Seq(TimestampColumn, LongColumn, LongColumn, HistogramColumn))
+    require(dataset.dataColumns.map(_.columnType) == Seq(TimestampColumn, DoubleColumn, DoubleColumn, HistogramColumn))
     val numBuckets = 10
 
     val histBucketScheme = bv.GeometricBuckets(2.0, 3.0, numBuckets)
@@ -174,8 +174,8 @@ object TestTimeseriesProducer extends StrictLogging {
 
       updateBuckets(n % numBuckets)
       val hist = bv.LongHistogram(histBucketScheme, buckets.map(x => x))
-      val count = util.Random.nextInt(100).toLong
-      val sum = buckets.sum
+      val count = util.Random.nextInt(100).toDouble
+      val sum = buckets.sum.toDouble
 
       val tags = Map(dcUTF8   -> s"DC$dc".utf8,
                      wsUTF8   -> "demo".utf8,

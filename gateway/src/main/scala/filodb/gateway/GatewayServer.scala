@@ -27,7 +27,7 @@ import org.rogach.scallop._
 
 import filodb.coordinator.{FilodbSettings, ShardMapper, StoreFactory}
 import filodb.core.binaryrecord2.RecordBuilder
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.{Dataset, Schemas}
 import filodb.gateway.conversion._
 import filodb.memory.MemFactory
 import filodb.timeseries.TestTimeseriesProducer
@@ -90,7 +90,7 @@ object GatewayServer extends StrictLogging {
     val sourceConfig = ConfigFactory.parseFile(new java.io.File(userOpts.sourceConfigPath()))
     val numShards = sourceConfig.getInt("num-shards")
 
-    val dataset = settings.datasetFromStream(sourceConfig)
+    val histogramDataset = Dataset("prometheus", Schemas.promHistogram)
 
     // NOTE: the spread MUST match the default spread used in the HTTP module for consistency between querying
     //       and ingestion sharding
@@ -98,7 +98,7 @@ object GatewayServer extends StrictLogging {
     val shardMapper = new ShardMapper(numShards)
     val queueFullWait = config.as[FiniteDuration]("gateway.queue-full-wait").toMillis
 
-    val (shardQueues, containerStream) = shardingPipeline(config, numShards, dataset)
+    val (shardQueues, containerStream) = shardingPipeline(config, numShards, histogramDataset)
 
     def calcShardAndQueueHandler(buf: ChannelBuffer): Unit = {
       val initIndex = buf.readerIndex
@@ -128,7 +128,7 @@ object GatewayServer extends StrictLogging {
       val startTime = System.currentTimeMillis
       logger.info(s"Generating $numSamples samples starting at $startTime....")
 
-      val stream = if (genHist) TestTimeseriesProducer.genHistogramData(startTime, dataset, numSeries)
+      val stream = if (genHist) TestTimeseriesProducer.genHistogramData(startTime, histogramDataset, numSeries)
                    else         TestTimeseriesProducer.timeSeriesData(startTime, numSeries)
 
       stream.take(numSamples).foreach { rec =>
