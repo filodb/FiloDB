@@ -72,7 +72,7 @@ trait BlockManager {
   }
 
   def currentFreePercent: Double = {
-    (((numFreeBlocks * blockSizeInBytes).toDouble) / totalMemorySizeInBytes) * 100.0
+    ((numFreeBlocks * blockSizeInBytes).toDouble / totalMemorySizeInBytes) * 100.0
   }
 
   def totalMemorySizeInBytes: Long

@@ -1612,8 +1612,9 @@ class TimeSeriesShard(val ref: DatasetRef,
 
     // measure how much headroom we have
     val blockStoreCurrentFreePercent = blockStore.currentFreePercent
-    val tspCountFreePercent = (targetMaxPartitions - partitions.size.toDouble) / targetMaxPartitions
-    val nativeMemFreePercent = bufferMemoryManager.numFreeBytes.toDouble / bufferMemoryManager.upperBoundSizeInBytes
+    val tspCountFreePercent = (targetMaxPartitions - partitions.size.toDouble) * 100 / targetMaxPartitions
+    val nativeMemFreePercent = bufferMemoryManager.numFreeBytes.toDouble * 100 /
+                                                  bufferMemoryManager.upperBoundSizeInBytes
 
     // calculate lock timeouts based on free percents and target headroom to maintain. Lesser the headroom,
     // higher the timeout. Choose highest among the three.
