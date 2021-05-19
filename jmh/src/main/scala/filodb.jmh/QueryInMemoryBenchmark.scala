@@ -117,7 +117,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
 
   // Stuff for directly executing queries ourselves
   val engine = new SingleClusterPlanner(dataset.ref, Schemas(dataset.schema), shardMapper, 0,
-    queryConfig)
+    queryConfig, "raw")
 
   /**
    * ## ========  Queries ===========

@@ -37,7 +37,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   private val config = ConfigFactory.load("application_test.conf")
   private val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
 
-  private val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig)
+  private val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+    queryConfig, "raw")
 
   /*
   This is the PromQL
@@ -163,7 +164,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val datasetOpts = dataset.options.copy(metricColumn = "kpi", shardKeyColumns = Seq("kpi", "job"))
     val dataset2 = dataset.modify(_.schema.partition.options).setTo(datasetOpts)
     val engine2 = new SingleClusterPlanner(dataset2.ref, Schemas(dataset2.schema), mapperRef,
-      0, queryConfig)
+      0, queryConfig, "raw")
 
     // materialized exec plan
     val execPlan = engine2.materialize(raw2, QueryContext(origQueryParams = promQlQueryParams))
@@ -202,7 +203,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(25000000, 2)) // spread change time is in ms
     }
-    val execPlan = engine.materialize(lp,QueryContext(promQlQueryParams, plannerParams = PlannerParams
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
     (spreadOverride = Some(FunctionalSpreadProvider(spread)), queryTimeoutMillis = 1000000)))
     execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
   }
@@ -267,7 +268,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   it("should bound queries until retention period and drop instants outside retention period") {
     val nowSeconds = System.currentTimeMillis() / 1000
      val planner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
-       earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis, queryConfig)
+       earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis, queryConfig, "raw")
 
     // Case 1: no offset or window
     val logicalPlan1 = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""",
@@ -320,7 +321,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   it("should materialize instant queries with lookback == retention correctly") {
     val nowSeconds = System.currentTimeMillis() / 1000
     val planner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
-      earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis, queryConfig)
+      earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis, queryConfig, "raw")
 
     val logicalPlan = Parser.queryRangeToLogicalPlan("""sum(rate(foo{job="bar"}[3d]))""",
       TimeStepParams(nowSeconds, 1.minute.toSeconds, nowSeconds))
@@ -387,7 +388,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val dsRef = dataset.ref
     val schemas = Schemas(dataset.schema)
 
-    val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig)
+    val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
+      "raw")
 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan("""sum(foo{_ns_="bar", _ws_="test"}) by (__name__)""",
       TimeStepParams(1000, 20, 2000))
@@ -422,7 +424,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       val dsRef = dataset.ref
       val schemas = Schemas(dataset.schema)
 
-      val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig)
+      val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
+        "raw")
 
       val logicalPlan1 = Parser.queryRangeToLogicalPlan(
         """sum(foo{_ns_="bar1", _ws_="test"}) + ignoring(__name__)
@@ -493,7 +496,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val logicalPlan = Parser.queryRangeToLogicalPlan("""topk(2, foo{job = "app"})""",
       TimeStepParams(now/1000 - 20.minutes.toSeconds, 1.minute.toSeconds, now/1000))
     val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = now -
-      rawRetentionTime, queryConfig)
+      rawRetentionTime, queryConfig, "raw")
     val ep = engine.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
     ep.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
     val presenterTime = ep.asInstanceOf[LocalPartitionReduceAggregateExec].rangeVectorTransformers.head.asInstanceOf[AggregatePresenter].rangeParams
@@ -509,7 +512,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val logicalPlan = Parser.queryRangeToLogicalPlan("""topk(2, foo{job = "app"})""",
       TimeStepParams(now/1000 - 20.minutes.toSeconds, 1.minute.toSeconds, now/1000 - 12.minutes.toSeconds))
     val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = now - rawRetention,
-      queryConfig)
+      queryConfig, "raw")
     val ep = engine.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
    ep.isInstanceOf[EmptyResultExec] shouldEqual(true)
   }

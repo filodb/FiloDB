@@ -30,7 +30,8 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   val config = ConfigFactory.parseString("""
                                             |filodb.memstore.max-partitions-on-heap-per-shard = 1100
                                             |filodb.memstore.ensure-block-memory-headroom-percent = 10
-                                            |filodb.memstore.ensure-tsp-headroom-percent = 10
+                                            |filodb.memstore.ensure-tsp-count-headroom-percent = 10
+                                            |filodb.memstore.ensure-native-memory-headroom-percent = 10
                                             |  """.stripMargin)
                             .withFallback(ConfigFactory.load("application_test.conf"))
                             .getConfig("filodb")
