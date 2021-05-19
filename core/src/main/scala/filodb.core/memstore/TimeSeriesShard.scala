@@ -307,7 +307,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val targetMaxPartitions = filodbConfig.getInt("memstore.max-partitions-on-heap-per-shard")
   private val ensureTspHeadroomPercent = filodbConfig.getDouble("memstore.ensure-tsp-count-headroom-percent")
   private val ensureBlockHeadroomPercent = filodbConfig.getDouble("memstore.ensure-block-memory-headroom-percent")
-  private val ensureNativeMemHeadroomPercent = filodbConfig.getDouble("ensure-native-memory-headroom-percent")
+  private val ensureNativeMemHeadroomPercent = filodbConfig.getDouble("memstore.ensure-native-memory-headroom-percent")
 
   /**
    * Queue of partIds that are eligible for eviction since they have stopped ingesting.
