@@ -27,7 +27,7 @@ import org.rogach.scallop._
 
 import filodb.coordinator.{FilodbSettings, ShardMapper, StoreFactory}
 import filodb.core.binaryrecord2.RecordBuilder
-import filodb.core.metadata.{Dataset, Schemas}
+import filodb.core.metadata.Dataset
 import filodb.gateway.conversion._
 import filodb.memory.MemFactory
 import filodb.timeseries.TestTimeseriesProducer
@@ -90,7 +90,7 @@ object GatewayServer extends StrictLogging {
     val sourceConfig = ConfigFactory.parseFile(new java.io.File(userOpts.sourceConfigPath()))
     val numShards = sourceConfig.getInt("num-shards")
 
-    val histogramDataset = Dataset("prometheus", Schemas.promHistogram)
+    val histogramDataset = settings.datasetFromStream(sourceConfig, "schema-histogram")
 
     // NOTE: the spread MUST match the default spread used in the HTTP module for consistency between querying
     //       and ingestion sharding

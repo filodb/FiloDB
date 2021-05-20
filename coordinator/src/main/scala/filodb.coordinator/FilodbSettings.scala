@@ -69,9 +69,9 @@ final class FilodbSettings(val conf: Config) {
   // compatible and minimize changes.  The Dataset name is taken from the dataset/stream config, but the schema
   // underneath points to one of the schemas above and schema may have a different name.  The approach below
   // allows one schema (with one schema name) to be shared amongst datasets using different names.
-  def datasetFromStream(streamConf: Config): Dataset =
+  def datasetFromStream(streamConf: Config, schemaName: String = "schema"): Dataset =
     Dataset(streamConf.getString("dataset"),
-            schemas.schemas(streamConf.getString("schema")))
+            schemas.schemas(streamConf.getString(schemaName)))
 }
 
 object FilodbSettings {
