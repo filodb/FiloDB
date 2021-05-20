@@ -131,24 +131,30 @@ class CardinalityTracker(ref: DatasetRef,
    *         will be shardKeyLen + 1 items in the return value
    */
   def decrementCount(shardKey: Seq[String]): Seq[Cardinality] = {
-    require(shardKey.length == shardKeyLen, "full shard key is needed")
-    val toStore = (0 to shardKey.length).map { i =>
-      val prefix = shardKey.take(i)
-      val old = store.getOrZero(prefix, Cardinality("", 0, 0, defaultChildrenQuota(i)))
-      if (old.timeSeriesCount == 0)
-        throw new IllegalArgumentException(s"$prefix count is already zero - cannot reduce further")
-      val neu = old.copy(timeSeriesCount = old.timeSeriesCount - 1)
-      (prefix, neu)
-    }
-    toStore.map { case (prefix, neu) =>
-      val name = if (prefix.isEmpty) "" else prefix.last
-      if (neu == Cardinality(name, 0, 0, defaultChildrenQuota(prefix.length))) {
-        // node can be removed
-        store.remove(prefix)
-      } else {
-        store.store(prefix, neu)
+    try {
+      require(shardKey.length == shardKeyLen, "full shard key is needed")
+      val toStore = (0 to shardKey.length).map { i =>
+        val prefix = shardKey.take(i)
+        val old = store.getOrZero(prefix, Cardinality("", 0, 0, defaultChildrenQuota(i)))
+        if (old.timeSeriesCount == 0)
+          throw new IllegalArgumentException(s"$prefix count is already zero - cannot reduce " +
+            s"further. A double delete likely happened.")
+        val neu = old.copy(timeSeriesCount = old.timeSeriesCount - 1)
+        (prefix, neu)
       }
-      neu
+      toStore.map { case (prefix, neu) =>
+        val name = if (prefix.isEmpty) "" else prefix.last
+        if (neu == Cardinality(name, 0, 0, defaultChildrenQuota(prefix.length))) {
+          // node can be removed
+          store.remove(prefix)
+        } else {
+          store.store(prefix, neu)
+        }
+        neu
+      }
+    } catch { case e: Exception =>
+      logger.error("Caught and swallowed this exception when reducing cardinality in tracker", e)
+      Nil
     }
   }
 

@@ -21,17 +21,6 @@ trait  PlannerMaterializer {
     def schemas: Schemas
     def dsOptions: DatasetOptions = schemas.part.options
 
-    /**
-      * Picks one dispatcher randomly from child exec plans passed in as parameter
-      */
-    def pickDispatcher(children: Seq[ExecPlan]): PlanDispatcher = {
-      val childTargets = children.map(_.dispatcher)
-      // Above list can contain duplicate dispatchers, and we don't make them distinct.
-      // Those with more shards must be weighed higher
-      val rnd = ThreadLocalRandom.current()
-      childTargets.iterator.drop(rnd.nextInt(childTargets.size)).next
-    }
-
     def materializeVectorPlan(qContext: QueryContext,
                               lp: VectorPlan): PlanResult = {
       val vectors = walkLogicalPlanTree(lp.scalars, qContext)
@@ -99,7 +88,7 @@ trait  PlannerMaterializer {
                                      lp: ApplySortFunction): PlanResult = {
       val vectors = walkLogicalPlanTree(lp.vectors, qContext)
       if (vectors.plans.length > 1) {
-        val targetActor = pickDispatcher(vectors.plans)
+        val targetActor = PlannerUtil.pickDispatcher(vectors.plans)
         val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, vectors.plans)
         topPlan.addRangeVectorTransformer(SortFunctionMapper(lp.function))
         PlanResult(Seq(topPlan), vectors.needsStitch)
@@ -113,7 +102,7 @@ trait  PlannerMaterializer {
                               lp: ScalarVaryingDoublePlan): PlanResult = {
       val vectors = walkLogicalPlanTree(lp.vectors, qContext)
       if (vectors.plans.length > 1) {
-        val targetActor = pickDispatcher(vectors.plans)
+        val targetActor = PlannerUtil.pickDispatcher(vectors.plans)
         val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, vectors.plans)
         topPlan.addRangeVectorTransformer(ScalarFunctionMapper(lp.function,
           RangeParams(lp.startMs, lp.stepMs, lp.endMs)))
@@ -167,7 +156,7 @@ trait  PlannerMaterializer {
         }.toList
       } else toReduceLevel.plans
 
-    val reduceDispatcher = pickDispatcher(toReduceLevel2)
+    val reduceDispatcher = PlannerUtil.pickDispatcher(toReduceLevel2)
     val reducer = LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
 
     if (!qContext.plannerParams.skipAggregatePresent)
@@ -203,4 +192,17 @@ object PlannerUtil extends StrictLogging {
     Map("filter" -> filters, "labels" -> lp.labelNames.mkString(","))
   }
 
+  /**
+   * Picks one dispatcher randomly from child exec plans passed in as parameter
+   */
+  def pickDispatcher(children: Seq[ExecPlan]): PlanDispatcher = {
+
+    children.find(_.dispatcher.isLocalCall).map(_.dispatcher).getOrElse {
+    val childTargets = children.map(_.dispatcher)
+    // Above list can contain duplicate dispatchers, and we don't make them distinct.
+    // Those with more shards must be weighed higher
+    val rnd = ThreadLocalRandom.current()
+    childTargets.iterator.drop(rnd.nextInt(childTargets.size)).next
+   }
+  }
 }

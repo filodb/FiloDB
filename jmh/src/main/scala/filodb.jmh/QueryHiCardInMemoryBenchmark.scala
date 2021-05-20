@@ -101,7 +101,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
 
   // Stuff for directly executing queries ourselves
   val engine = new SingleClusterPlanner(dataset.ref, Schemas(dataset.schema), shardMapper, 0,
-    queryConfig)
+    queryConfig, "raw")
 
   val numQueries = 100       // Please make sure this number matches the OperationsPerInvocation below
   val queryIntervalSec = samplesDuration.toSeconds  // # minutes between start and stop
