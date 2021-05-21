@@ -34,8 +34,10 @@ final case class PeriodicSamplesMapper(startMs: Long,
                                        funcParams: Seq[FuncArgs] = Nil,
                                        offsetMs: Option[Long] = None,
                                        rawSource: Boolean = true,
-                                       inclusive: Boolean = false
+                                       leftInclusiveWindow: Boolean = false
 ) extends RangeVectorTransformer {
+  val windowToUse =
+    window.map(windowLengthMs => if (leftInclusiveWindow) (windowLengthMs + 1) else windowLengthMs)
   require(startMs <= endMs, s"start $startMs should be <= end $endMs")
   require(startMs == endMs || stepMs > 0, s"step $stepMs should be > 0 for range query")
   val adjustedStep = if (stepMs > 0) stepMs else stepMs + 1 // needed for iterators to terminate when start == end
@@ -47,12 +49,12 @@ final case class PeriodicSamplesMapper(startMs: Long,
   val isLastFn = functionId.isEmpty || functionId.contains(InternalRangeFunction.LastSampleHistMax) ||
     functionId.contains(InternalRangeFunction.Timestamp)
 
-  if (!isLastFn) require(window.nonEmpty && window.get > 0,
+  if (!isLastFn) require(windowToUse.nonEmpty && windowToUse.get > 0,
                                   "Need positive window lengths to apply range function")
-  else require(window.isEmpty, "Should not specify window length when not applying windowing function")
+  else require(windowToUse.isEmpty, "Should not specify window length when not applying windowing function")
 
   protected[exec] def args: String = s"start=$startMs, step=$stepMs, end=$endMs," +
-    s" window=$window, functionId=$functionId, rawSource=$rawSource, offsetMs=$offsetMs"
+    s" windowToUse=$windowToUse, functionId=$functionId, rawSource=$rawSource, offsetMs=$offsetMs"
 
  //scalastyle:off method.length
   def apply(source: Observable[RangeVector],
@@ -75,7 +77,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
     // Really, use the stale lookback window size, not 0 which doesn't make sense
     // Default value for window  should be queryConfig.staleSampleAfterMs + 1 for empty functionId,
     // so that it returns value present at time - staleSampleAfterMs
-    val windowLength = window.getOrElse(if (isLastFn) querySession.queryConfig.staleSampleAfterMs + 1 else 0L)
+    val windowLength = windowToUse.getOrElse(if (isLastFn) querySession.queryConfig.staleSampleAfterMs + 1 else 0L)
 
     val rvs = sampleRangeFunc match {
       case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
@@ -103,7 +105,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), startWithOffset, adjustedStep, endWithOffset,
-              windowPlusPubInt, rangeFuncGen().asSliding, querySession.queryConfig, inclusive), outputRvRange)
+              windowPlusPubInt, rangeFuncGen().asSliding, querySession.queryConfig, leftInclusiveWindow), outputRvRange)
         }
       // Otherwise just feed in the double column
       case f: RangeFunction =>
@@ -111,7 +113,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
           val windowPlusPubInt = extendLookback(rv, windowLength)
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(rv.rows, startWithOffset, adjustedStep, endWithOffset, windowPlusPubInt,
-              rangeFuncGen().asSliding, querySession.queryConfig, inclusive), outputRvRange)
+              rangeFuncGen().asSliding, querySession.queryConfig, leftInclusiveWindow), outputRvRange)
         }
     }
 
@@ -294,7 +296,7 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
                             window: Long,
                             rangeFunction: RangeFunction,
                             queryConfig: QueryConfig,
-                            inclusive : Boolean = false
+                            leftWindowInclusive : Boolean = false
 ) extends RangeVectorCursor {
   require(step > 0, s"Adjusted step $step not > 0")
   private val sampleToEmit = new TransientRow()
@@ -361,11 +363,7 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
     */
   private def shouldAddCurToWindow(curWindowStart: Long, cur: TransientRow): Boolean = {
     // One of the following three conditions need to hold true:
-    val insideCurWindow = if (inclusive)
-      cur.timestamp >= curWindowStart
-    else
-      cur.timestamp > curWindowStart
-
+    val insideCurWindow = cur.timestamp > curWindowStart
     // 1. cur is inside current window
     insideCurWindow ||
       // 2. needLastSample and cur is the last sample because next sample is inside window
@@ -387,11 +385,7 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
     if (windowQueue.isEmpty) {
       false
     } else {
-      val headIsOutsideWindow = if (inclusive) {
-        windowQueue.head.timestamp < curWindowStart
-      } else {
-        windowQueue.head.timestamp <= curWindowStart
-      }
+      val headIsOutsideWindow = windowQueue.head.timestamp <= curWindowStart
       // One of the following two conditions need to hold true:
       // 1. if no need for last sample, and head is outside the window
       (!rangeFunction.needsLastSample && headIsOutsideWindow) ||

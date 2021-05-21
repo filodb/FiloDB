@@ -198,6 +198,124 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     }
   }
 
+  it("should generate correct plan for subqueries with one child node for subquery") {
+    val lp = Parser.queryRangeToLogicalPlan("""min_over_time(sum(rate(foo{job="bar"}[5m]))[3m:1m])""",
+      TimeStepParams(20900, 90, 21800))
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
+    execPlan.children should have length (2)
+    execPlan.rangeVectorTransformers should have length (2)
+    execPlan.rangeVectorTransformers(1).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+    val topPsm = execPlan.rangeVectorTransformers(1).asInstanceOf[PeriodicSamplesMapper]
+    topPsm.startMs shouldEqual 20900000
+    topPsm.endMs shouldEqual 21800000
+    topPsm.stepMs shouldEqual 90000
+    topPsm.window shouldEqual Some(180000)
+    topPsm.functionId shouldEqual Some(InternalRangeFunction.MinOverTime)
+    execPlan.children(0).rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper]
+    val middlePsm = execPlan.children(0).rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
+    //Notice that the start  is not 20 720 000, because 20 720 000 is not divisible by 60
+    //Instead it's 20 760 000, ie next divisible after 20 720 000
+    middlePsm.startMs shouldEqual 20760000
+    //Similarly the end is not 21 800 000, because 20 800 000 is not divisible by 60
+    //Instead it's 21 780 000, ie next divisible to the left of 20 800 000
+    middlePsm.endMs shouldEqual 21780000
+    middlePsm.stepMs shouldEqual 60000
+    middlePsm.window shouldEqual Some(300000)
+    val partExec = execPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
+    // 20 460 000 = 21 780 000 - 300 000
+    partExec.chunkMethod.startTime shouldEqual 20460000
+    partExec.chunkMethod.endTime shouldEqual 21780000
+  }
+
+  it("should generate correct plan for subqueries with multiple child nodes for subqueries") {
+    val lp = Parser.queryRangeToLogicalPlan("""min_over_time(rate(foo{job="bar"}[5m])[3m:1m])""",
+      TimeStepParams(20900, 90, 21800))
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
+    execPlan.children should have length (2)
+    execPlan.children(1).isInstanceOf[MultiSchemaPartitionsExec]
+    val partExec = execPlan.children(1).asInstanceOf[MultiSchemaPartitionsExec]
+    partExec.rangeVectorTransformers should have length (2)
+    val topPsm = partExec.rangeVectorTransformers(1).asInstanceOf[PeriodicSamplesMapper]
+    topPsm.startMs shouldEqual 20900000
+    topPsm.endMs shouldEqual 21800000
+    topPsm.stepMs shouldEqual 90000
+    topPsm.window shouldEqual Some(180000)
+    topPsm.functionId shouldEqual Some(InternalRangeFunction.MinOverTime)
+    partExec.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper]
+    val middlePsm = partExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
+    //Notice that the start  is not 20 720 000, because 20 720 000 is not divisible by 60
+    //Instead it's 20 760 000, ie next divisible after 20 720 000
+    middlePsm.startMs shouldEqual 20760000
+    //Similarly the end is not 21 800 000, because 20 800 000 is not divisible by 60
+    //Instead it's 21 780 000, ie next divisible to the left of 20 800 000
+    middlePsm.endMs shouldEqual 21780000
+    middlePsm.stepMs shouldEqual 60000
+    middlePsm.window shouldEqual Some(300000)
+    // 20 460 000 = 21 780 000 - 300 000
+    partExec.chunkMethod.startTime shouldEqual 20460000
+    partExec.chunkMethod.endTime shouldEqual 21780000
+  }
+
+  it("should generate correct plan for nested subqueries") {
+    val lp = Parser.queryRangeToLogicalPlan("""avg_over_time(max_over_time(rate(foo{job="bar"}[5m])[5m:1m])[10m:2m])""",
+      TimeStepParams(20900, 90, 21800))
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
+    execPlan.children should have length (2)
+    execPlan.children(1).isInstanceOf[MultiSchemaPartitionsExec]
+    val partExec = execPlan.children(1).asInstanceOf[MultiSchemaPartitionsExec]
+    partExec.rangeVectorTransformers should have length (3)
+    val topPsm = partExec.rangeVectorTransformers(2).asInstanceOf[PeriodicSamplesMapper]
+    topPsm.startMs shouldEqual 20900000
+    topPsm.endMs shouldEqual 21800000
+    topPsm.stepMs shouldEqual 90000
+    topPsm.window shouldEqual Some(600000)
+    topPsm.functionId shouldEqual Some(InternalRangeFunction.AvgOverTime)
+    partExec.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper]
+    val middlePsm = partExec.rangeVectorTransformers(1).asInstanceOf[PeriodicSamplesMapper]
+    // 20 900 000 - 600 000 = 20 300 000
+    // 20 300 000 / 120 000 =  20 280 000
+    // 20 280 000 + 120 000 = 20 400 000
+    middlePsm.startMs shouldEqual 20400000
+    //Similarly the end is not 21 800 000, because 20 800 000 is not divisible by 120
+    //Instead it's 21 720 000, ie next divisible to the left of 20 800 000
+    middlePsm.endMs shouldEqual 21720000
+    middlePsm.stepMs shouldEqual 120000
+    middlePsm.window shouldEqual Some(300000)
+    val bottomPsm = partExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
+    // 20 400 000 - 300 000 = 20 100 000
+    bottomPsm.startMs shouldEqual 20100000
+    bottomPsm.endMs shouldEqual 21720000
+    bottomPsm.stepMs shouldEqual 60000
+    bottomPsm.window shouldEqual Some(300000)
+    // 20 100 000 - 300 000 = 19 800 000
+    partExec.chunkMethod.startTime shouldEqual 19800000
+    partExec.chunkMethod.endTime shouldEqual 21720000
+  }
+
+  it("should generate correct plan for top level subqueries") {
+    val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}[10m:2m]""",
+      TimeStepParams(20900, 0, 20900))
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
+    execPlan.children should have length (2)
+    execPlan.children(1).isInstanceOf[MultiSchemaPartitionsExec]
+    val partExec = execPlan.children(1).asInstanceOf[MultiSchemaPartitionsExec]
+    partExec.rangeVectorTransformers should have length (1)
+    val topPsm = partExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
+    // (20 900 000 - 600 000)/ 120 000 = 169
+    // (169 + 1) * 120 000 = 20 400 000
+    topPsm.startMs shouldEqual 20400000
+    topPsm.endMs shouldEqual 20880000
+    topPsm.stepMs shouldEqual 120000
+    topPsm.window shouldEqual None
+    topPsm.functionId shouldEqual None
+    partExec.chunkMethod.startTime shouldEqual 20100000
+    partExec.chunkMethod.endTime shouldEqual 20880000
+  }
+
   it("should stitch results when spread changes during query range") {
     val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {

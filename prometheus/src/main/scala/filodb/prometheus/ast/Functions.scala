@@ -1,19 +1,8 @@
 package filodb.prometheus.ast
 
-import scala.annotation.tailrec
-
-import filodb.core.GlobalConfig
 import filodb.core.query.{ColumnFilter, RangeParams}
 import filodb.query._
 import filodb.query.RangeFunctionId.Timestamp
-
-object SubqueryConfig {
-  val conf = GlobalConfig.systemConfig
-
-  val fastSubquery = if (conf.hasPath("filodb.query.fastSubquery")) {
-    conf.getBoolean("filodb.query.fastSubquery")
-  } else true
-}
 
 case class Function(name: String, allParams: Seq[Expression]) extends Expression with PeriodicSeries {
   private val ignoreChecks = name.equalsIgnoreCase("vector") || name.equalsIgnoreCase("time")
@@ -231,27 +220,13 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
     if (timeParams.start == timeParams.end) {
       outerStepMs = 0
     }
-
-    val stepForInnerMs  = if (SubqueryConfig.fastSubquery) {
-      subqueryStepToUseMs
-    } else {
-      @tailrec def gcd(a: Long, b: Long): Long = if (b == 0) a else gcd(b, a % b)
-      gcd(outerStepMs, subqueryStepToUseMs)
-    }
-
+    val stepForInnerMs = subqueryStepToUseMs
     val preciseStartForInnerS = timeParams.start - (sqe.sqcl.window.millis(1L) / 1000)
-    val startForInnerS = if (SubqueryConfig.fastSubquery) {
-      SubqueryUtils.getStartForFastSubquery(preciseStartForInnerS, subqueryStepToUseMs/1000)
-    } else {
-      preciseStartForInnerS
-    }
+    val startForInnerS = SubqueryUtils.getStartForFastSubquery(preciseStartForInnerS, subqueryStepToUseMs/1000)
 
     val preciseEndForInnerS = timeParams.end
-    val endForInnerS = if (SubqueryConfig.fastSubquery) {
+    val endForInnerS =
       SubqueryUtils.getEndForFastSubquery(preciseEndForInnerS, subqueryStepToUseMs/1000)
-    } else {
-      timeParams.end
-    }
 
     val timeParamsForInner = TimeStepParams(
       startForInnerS,

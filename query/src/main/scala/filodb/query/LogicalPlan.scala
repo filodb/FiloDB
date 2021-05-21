@@ -189,8 +189,9 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
  *  Below is an example of B) case:
  *  sum_over_time(<someExpression>[5m:1m]) called with query_range API parameters:
  *  start=S, end=E, step=ST
- *  The above is equivalent to query API call:
- *  sum_over_time(<someExpression[5m:1m])[(now-S):ST] offset (now-E)
+ *  Here query range API start,end, and step correspond to startMs, stepMs, and endMs,
+ *  however, it's not necessarily the case for nested subqueries because start, step, and en
+ *  will depend on the parent expression of the subquery
  */
 case class SubqueryWithWindowing(
   innerPeriodicSeries: PeriodicSeriesPlan, // someExpression
@@ -208,15 +209,24 @@ case class SubqueryWithWindowing(
 }
 
 /**
-* Please, refer to documentation of SubqueryWithWindowing, this class
-* corresponds to case A)
-*/
+ * Please, refer to documentation of SubqueryWithWindowing, this class
+ * corresponds to case A) for example foo[5m:1m]
+ *
+ * @param stepMs the value of step is irrelevant since startMs and endMs should always be he same, needed since
+ *               TopLevelSubquery is a PeriodicSeriesPlan
+ * @param endMs should always be the same as startMs, top level subquery cannot be used in range query API
+ * @param subqeryLookbackMs not used in the actual codepath currenty but for debugging purposes, if we, however,
+ *                          decide to do planning entirely in the SingleClusterPlanner, this parameter would be needed
+ * @param subqueryStepMs not used in the actual codepath currenty but for debugging purposes, if we, however,
+ *                          decide to do planning entirely in the SingleClusterPlanner, this parameter would be needed
+ **/
 case class TopLevelSubquery(
   innerPeriodicSeries: PeriodicSeriesPlan, // someExpression
   startMs: Long,
   stepMs: Long,
   endMs: Long,
-  subqueryStepMs: Long
+  originalSubqueryLookbackMs: Long,
+  originalSubqueryStepMs: Long
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
   //TODO needs to be implemented for long time range planner

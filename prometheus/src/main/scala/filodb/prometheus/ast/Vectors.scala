@@ -100,16 +100,12 @@ case class SubqueryExpression(subquery: PeriodicSeries, sqcl: SubqueryClause) ex
     // instant vector but subqueries by definition return range vectors.
     // It's illegal to have a top level subquery expression to be called from query_range API
     // when start and end parameters are not the same.
-    if (timeParams.start != timeParams.end) {
-      throw new UnsupportedOperationException("Subquery is not allowed as a top level expression for query_range")
-    }
+    require(timeParams.start == timeParams.end, "Subquery is not allowed as a top level expression for query_range")
     val stepToUseMs = SubqueryUtils.getSubqueryStepMs(sqcl.step);
     var startS = timeParams.start - (sqcl.window.millis(1L) / 1000)
     var endS = timeParams.start
-    if (SubqueryConfig.fastSubquery) {
-      startS = SubqueryUtils.getStartForFastSubquery(startS, stepToUseMs/1000 )
-      endS = SubqueryUtils.getEndForFastSubquery(endS, stepToUseMs/1000 )
-    }
+    startS = SubqueryUtils.getStartForFastSubquery(startS, stepToUseMs/1000 )
+    endS = SubqueryUtils.getEndForFastSubquery(endS, stepToUseMs/1000 )
     val timeParamsToUse = TimeStepParams(
       startS,
       stepToUseMs/1000,
@@ -119,7 +115,8 @@ case class SubqueryExpression(subquery: PeriodicSeries, sqcl: SubqueryClause) ex
       subquery.toSeriesPlan(timeParamsToUse),
       timeParams.start * 1000,
       timeParams.step * 1000,
-      timeParams.end *1000,
+      timeParams.end * 1000,
+      sqcl.window.millis(1L),
       stepToUseMs
     )
 

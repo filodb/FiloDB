@@ -21,8 +21,6 @@ class QueryConfig(queryConfig: Config) {
     v
   }
   lazy val parser = queryConfig.as[String]("parser")
-  lazy val fastSubquery = if (queryConfig.hasPath("fast-subquery"))
-    queryConfig.as[Boolean]("fast-subquery") else true
 
   /**
    * Feature flag test: returns true if the config has an entry with "true", "t" etc
