@@ -44,7 +44,6 @@ object TestData {
       disk-time-to-live = 10 hours
       shard-mem-size = 100MB
       groups-per-shard = 4
-      ingestion-buffer-mem-size = 80MB
       max-buffer-pool-size = 250
       flush-interval = 10 minutes
       part-index-flush-max-delay = 10 seconds

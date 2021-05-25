@@ -57,6 +57,9 @@ class QueryOnDemandBenchmark extends StrictLogging {
     |    port = 9042
     |    partition-list-num-groups = 1
     |  }
+    |  memstore {
+    |    ingestion-buffer-mem-size = 50MB
+    |  }
     |}
   """.stripMargin).withFallback(ConfigFactory.load("filodb-defaults.conf"))
   val system = ActorSystem("test", config)
@@ -81,7 +84,6 @@ class QueryOnDemandBenchmark extends StrictLogging {
   val storeConf = StoreConfig(ConfigFactory.parseString("""
                   | flush-interval = 1h
                   | shard-mem-size = 512MB
-                  | ingestion-buffer-mem-size = 50MB
                   | groups-per-shard = 4
                   | multi-partition-odp = false
                   | demand-paging-parallelism = 4

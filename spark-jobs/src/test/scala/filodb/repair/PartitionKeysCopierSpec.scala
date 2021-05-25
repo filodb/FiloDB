@@ -50,7 +50,6 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
     """
       |flush-interval = 1h
       |shard-mem-size = 1MB
-      |ingestion-buffer-mem-size = 30MB
                 """.stripMargin))
   val offheapMem = new OffHeapMemory(Seq(Schemas.gauge, Schemas.promCounter, Schemas.promHistogram, Schemas.untyped),
     Map.empty, 100, rawDataStoreConfig)

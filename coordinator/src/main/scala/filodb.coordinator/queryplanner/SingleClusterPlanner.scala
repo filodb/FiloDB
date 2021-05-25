@@ -34,11 +34,14 @@ object SingleClusterPlanner {
   * @param minTimeRangeForSplitMs if time range is longer than this, plan will be split into multiple plans
   * @param splitSizeMs time range for each split, if plan needed to be split
   */
+
+//cluster name
 class SingleClusterPlanner(dsRef: DatasetRef,
                            schema: Schemas,
                            shardMapperFunc: => ShardMapper,
                            earliestRetainedTimestampFn: => Long,
                            queryConfig: QueryConfig,
+                           clusterName: String,
                            spreadProvider: SpreadProvider = StaticSpreadProvider(),
                            timeSplitEnabled: Boolean = false,
                            minTimeRangeForSplitMs: => Long = 1.day.toMillis,
@@ -55,7 +58,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       logger.debug(s"ShardMapper: $shardMapperFunc")
       throw new RuntimeException(s"Shard: $shard is not available") // TODO fix this
     }
-    ActorPlanDispatcher(targetActor)
+    ActorPlanDispatcher(targetActor, clusterName)
   }
 
   /**
@@ -105,7 +108,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
         case Seq(one) => materializeTimeSplitPlan(one, qContext)
         case many =>
           val materializedPlans = many.map(materializeTimeSplitPlan(_, qContext))
-          val targetActor = pickDispatcher(materializedPlans)
+          val targetActor = PlannerUtil.pickDispatcher(materializedPlans)
 
           // create SplitLocalPartitionDistConcatExec that will execute child execplanss sequentially and stitches
           // results back with StitchRvsMapper transformer.
@@ -125,7 +128,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
         if (stitch) justOne.addRangeVectorTransformer(StitchRvsMapper())
         justOne
       case PlanResult(many, stitch) =>
-        val targetActor = pickDispatcher(many)
+        val targetActor = PlannerUtil.pickDispatcher(many)
         many.head match {
           case lve: LabelValuesExec => LabelValuesDistConcatExec(qContext, targetActor, many)
           case ske: PartKeysExec => PartKeysDistConcatExec(qContext, targetActor, many)
@@ -225,18 +228,75 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       case lp: ScalarFixedDoublePlan       => materializeFixedScalar(qContext, lp)
       case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
       case lp: ScalarBinaryOperation       => materializeScalarBinaryOperation(qContext, lp)
+      case lp: SubqueryWithWindowing       => materializeSubqueryWithWindowing(qContext, lp)
+      case lp: TopLevelSubquery            => materializeTopLevelSubquery(qContext, lp)
       case _                               => throw new BadQueryException("Invalid logical plan")
     }
   }
   // scalastyle:on cyclomatic.complexity
 
+  /**
+   * Example:
+   * min_over_time(foo{job="bar"}[3m:1m])
+   *
+   * outerStart = S
+   * outerEnd = E
+   * outerStep = 90s
+   *
+   * Resulting Exec Plan (hand edited and simplified to make it easier to read):
+   * E~LocalPartitionDistConcatExec()
+   * -T~PeriodicSamplesMapper(start=S, step=90s, end=E, window=3m, functionId=MinOverTime)
+   * --T~PeriodicSamplesMapper(start=((S-3m)/1m)*1m+1m, step=1m, end=(E/1m)*1m, window=None, functionId=None)
+   * ---E~MultiSchemaPartitionsExec
+   */
+  private def materializeSubqueryWithWindowing(qContext: QueryContext, sqww: SubqueryWithWindowing): PlanResult = {
+    // This physical plan will try to execute only one range query instead of a number of individual subqueries.
+    // If ranges of each of the subqueries have overlap, retrieving the total range
+    // is optimal, if there is no overlap and even worse significant gap between the individual subqueries, retrieving
+    // the entire range might be suboptimal, this still might be a better option than issuing and concatenating numerous
+    // subqueries separately
+    val rangeFn = InternalRangeFunction.lpToInternalFunc(sqww.functionId)
+    var innerPeriodicSeriesPlan = sqww.innerPeriodicSeries
+    val paramsExec = materializeFunctionArgs(sqww.functionArgs, qContext)
+    val window = Some(sqww.subqueryWindowMs)
+    val rangeVectorTransformer =
+      PeriodicSamplesMapper(
+        sqww.startMs, sqww.stepMs, sqww.endMs,
+        window,
+        Some(rangeFn),
+        qContext,
+        false,
+        paramsExec,
+        None,
+        false,
+        true
+      )
+
+    // Here the inner periodic series already has start/end/step populated
+    // in Function's toSeriesPlan(), Functions.scala subqqueryArgument() method.
+    val innerExecPlan = walkLogicalPlanTree(sqww.innerPeriodicSeries, qContext)
+    innerExecPlan.plans.foreach { p => p.addRangeVectorTransformer(rangeVectorTransformer)}
+    innerExecPlan
+  }
+
+  private def materializeTopLevelSubquery(qContext: QueryContext, tlsq: TopLevelSubquery): PlanResult = {
+    // This physical plan will try to execute only one range query instead of a number of individual subqueries.
+    // If ranges of each of the subqueries have overlap, retrieving the total range
+    // is optimal, if there is no overlap and even worse significant gap between the individual subqueries, retrieving
+    // the entire range might be suboptimal, this still might be a better option than issuing and concatenating numerous
+    // subqueries separately
+    walkLogicalPlanTree(tlsq.innerPeriodicSeries, qContext)
+  }
+
   private def materializeBinaryJoin(qContext: QueryContext,
                                     lp: BinaryJoin): PlanResult = {
     val lhs = walkLogicalPlanTree(lp.lhs, qContext)
-    val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext, pickDispatcher(lhs.plans), lhs.plans))
+    val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext,
+      PlannerUtil.pickDispatcher(lhs.plans), lhs.plans))
     else lhs.plans
     val rhs = walkLogicalPlanTree(lp.rhs, qContext)
-    val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext, pickDispatcher(rhs.plans), rhs.plans))
+    val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext,
+      PlannerUtil.pickDispatcher(rhs.plans), rhs.plans))
     else rhs.plans
 
     val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(lp, queryConfig.addExtraOnByKeysTimeRanges)
@@ -247,7 +307,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     // In theory, more efficient to use transformer than to have separate exec plan node to avoid IO.
     // In the interest of keeping it simple, deferring decorations to the ExecPlan. Add only if needed after measuring.
 
-    val targetActor = pickDispatcher(stitchedLhs ++ stitchedRhs)
+    val targetActor = PlannerUtil.pickDispatcher(stitchedLhs ++ stitchedRhs)
     val joined = if (lp.operator.isInstanceOf[SetOperator])
       Seq(exec.SetOperatorExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator,
         LogicalPlanUtils.renameLabels(onKeysReal, dsOptions.metricColumn),

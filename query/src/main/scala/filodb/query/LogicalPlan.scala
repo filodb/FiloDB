@@ -156,6 +156,84 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
 }
 
 /**
+ *  Subquery represents a series of N points conceptually generated
+ *  by running N homogeneous queries where
+ *  SW = subquery window
+ *  SS = subquery step
+ *  N = SW / SS + 1
+ *  For example, foo[5m:1m], would generate a series of 6 points 1 minute apart.
+ *
+ *  query_range API is an equivalent of subquery though the concept of subquery
+ *  is wider. query_range can be called with start/end/step parameters only on the
+ *  top most expression in the query while subqueries can be:
+ *  (1) top level expression (complete equivalent to query_range)
+ *  (2) arguments to time range functions, potentially nested several levels deep
+ *
+ *  So, there are two major cases for a subquery expression:
+ *  A) any_instant_expression[W:S] as a top level expression. In this case, subquery
+ *     would issue "any_instant_expression" with its own start, end, and step
+ *     parameters. If such an expression is called with query_range API, where start != end
+ *     and step is not zero, an exception is thrown. No special subquery
+ *     node in logical plan is generated as all of the PeriodicSeries logical plans can
+ *     handle range_query API's start, step, and end parameters.
+ *  B) RangeFunction(any_instant_expression[W:S]) at any node/level of abstract syntax tree.
+ *     In this case, we ALWAYS have a range function involved and SubqueryWithWindowing
+ *     logical plan node is generated. The plan is almost identical in the functionality to
+ *     PeriodicSeriesWithWindowing. The difference between the two is that currently
+ *     PeriodicSeriesWithWindowing expects a RawSeriesLikePlan while subquery is NOT
+ *     necessarily an instant selector. PeriodicSeriesWithWindowing needs to be refactored,
+ *     so, it could handle any PeriodicSeries; however, at this point we are going to
+ *     replicate the functionality in the specialized SubqueryWithWindowing logical plan.
+ *     We do so, that we can integrage subquery code without affecting existing existing
+ *     code paths, stabilize the codebase, and later merge the two.
+ *  Below is an example of B) case:
+ *  sum_over_time(<someExpression>[5m:1m]) called with query_range API parameters:
+ *  start=S, end=E, step=ST
+ *  Here query range API start,end, and step correspond to startMs, stepMs, and endMs,
+ *  however, it's not necessarily the case for nested subqueries because start, step, and en
+ *  will depend on the parent expression of the subquery
+ */
+case class SubqueryWithWindowing(
+  innerPeriodicSeries: PeriodicSeriesPlan, // someExpression
+  startMs: Long, // S
+  stepMs: Long, // ST
+  endMs: Long, // E
+  functionId: RangeFunctionId, // sum_over_time
+  functionArgs: Seq[FunctionArgsPlan] = Nil,
+  subqueryWindowMs: Long, // 5m
+  subqueryStepMs: Long //1m
+) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
+  //TODO needs to be implemented for long time range planner
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = ???
+}
+
+/**
+ * Please, refer to documentation of SubqueryWithWindowing, this class
+ * corresponds to case A) for example foo[5m:1m]
+ *
+ * @param stepMs the value of step is irrelevant since startMs and endMs should always be he same, needed since
+ *               TopLevelSubquery is a PeriodicSeriesPlan
+ * @param endMs should always be the same as startMs, top level subquery cannot be used in range query API
+ * @param subqeryLookbackMs not used in the actual codepath currenty but for debugging purposes, if we, however,
+ *                          decide to do planning entirely in the SingleClusterPlanner, this parameter would be needed
+ * @param subqueryStepMs not used in the actual codepath currenty but for debugging purposes, if we, however,
+ *                          decide to do planning entirely in the SingleClusterPlanner, this parameter would be needed
+ **/
+case class TopLevelSubquery(
+  innerPeriodicSeries: PeriodicSeriesPlan, // someExpression
+  startMs: Long,
+  stepMs: Long,
+  endMs: Long,
+  originalSubqueryLookbackMs: Long,
+  originalSubqueryStepMs: Long
+) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
+  //TODO needs to be implemented for long time range planner
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = ???
+}
+
+/**
   * Concrete logical plan to query for data in a given range
   * with results in a regular time interval.
   *
