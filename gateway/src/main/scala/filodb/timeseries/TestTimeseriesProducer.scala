@@ -150,7 +150,7 @@ object TestTimeseriesProducer extends StrictLogging {
    * the cardinality of time series for testing purposes.
    */
   def genHistogramData(startTime: Long, numTimeSeries: Int = 16): Stream[InputRecord] = {
-    val numBuckets = 5
+    val numBuckets = 10
     val histBucketScheme = bv.GeometricBuckets(2.0, 3.0, numBuckets)
     val buckets = new Array[Long](numBuckets)
     def updateBuckets(bucketNo: Int): Unit = {
