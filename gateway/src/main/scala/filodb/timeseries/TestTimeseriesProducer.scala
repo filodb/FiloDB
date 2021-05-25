@@ -13,7 +13,7 @@ import monix.reactive.Observable
 
 import filodb.coordinator.ShardMapper
 import filodb.core.GlobalConfig
-import filodb.core.metadata.{Column, Dataset, Schemas}
+import filodb.core.metadata.{Dataset, Schemas}
 import filodb.gateway.GatewayServer
 import filodb.gateway.conversion.{InputRecord, MetricTagInputRecord, PrometheusInputRecord}
 import filodb.memory.format.{vectors => bv, ZeroCopyUTF8String => ZCUTF8}
@@ -134,7 +134,6 @@ object TestTimeseriesProducer extends StrictLogging {
   }
 
   import ZCUTF8._
-  import Column.ColumnType._
 
   val dcUTF8 = "dc".utf8
   val wsUTF8 = "_ws_".utf8
@@ -150,10 +149,8 @@ object TestTimeseriesProducer extends StrictLogging {
    * Note: the set of "instance" tags is unique for each invocation of genHistogramData.  This helps increase
    * the cardinality of time series for testing purposes.
    */
-  def genHistogramData(startTime: Long, dataset: Dataset, numTimeSeries: Int = 16): Stream[InputRecord] = {
-    require(dataset.dataColumns.map(_.columnType) == Seq(TimestampColumn, DoubleColumn, DoubleColumn, HistogramColumn))
-    val numBuckets = 10
-
+  def genHistogramData(startTime: Long, numTimeSeries: Int = 16): Stream[InputRecord] = {
+    val numBuckets = 5
     val histBucketScheme = bv.GeometricBuckets(2.0, 3.0, numBuckets)
     val buckets = new Array[Long](numBuckets)
     def updateBuckets(bucketNo: Int): Unit = {
@@ -184,7 +181,7 @@ object TestTimeseriesProducer extends StrictLogging {
                      hostUTF8 -> s"H$host".utf8,
                      instUTF8 -> s"Instance-$instance".utf8)
 
-      new MetricTagInputRecord(Seq(timestamp, sum, count, hist), "http_request_latency", tags, dataset.schema)
+      new MetricTagInputRecord(Seq(timestamp, sum, count, hist), "http_request_latency", tags, Schemas.promHistogram)
     }
   }
 }

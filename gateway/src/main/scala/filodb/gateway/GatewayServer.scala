@@ -90,7 +90,7 @@ object GatewayServer extends StrictLogging {
     val sourceConfig = ConfigFactory.parseFile(new java.io.File(userOpts.sourceConfigPath()))
     val numShards = sourceConfig.getInt("num-shards")
 
-    val histogramDataset = settings.datasetFromStream(sourceConfig, "schema-histogram")
+    val dataset = settings.datasetFromStream(sourceConfig)
 
     // NOTE: the spread MUST match the default spread used in the HTTP module for consistency between querying
     //       and ingestion sharding
@@ -98,7 +98,7 @@ object GatewayServer extends StrictLogging {
     val shardMapper = new ShardMapper(numShards)
     val queueFullWait = config.as[FiniteDuration]("gateway.queue-full-wait").toMillis
 
-    val (shardQueues, containerStream) = shardingPipeline(config, numShards, histogramDataset)
+    val (shardQueues, containerStream) = shardingPipeline(config, numShards, dataset)
 
     def calcShardAndQueueHandler(buf: ChannelBuffer): Unit = {
       val initIndex = buf.readerIndex
@@ -128,7 +128,7 @@ object GatewayServer extends StrictLogging {
       val startTime = System.currentTimeMillis
       logger.info(s"Generating $numSamples samples starting at $startTime....")
 
-      val stream = if (genHist) TestTimeseriesProducer.genHistogramData(startTime, histogramDataset, numSeries)
+      val stream = if (genHist) TestTimeseriesProducer.genHistogramData(startTime, numSeries)
                    else         TestTimeseriesProducer.timeSeriesData(startTime, numSeries)
 
       stream.take(numSamples).foreach { rec =>
