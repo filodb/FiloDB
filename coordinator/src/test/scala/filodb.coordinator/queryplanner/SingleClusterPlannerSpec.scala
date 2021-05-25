@@ -284,6 +284,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     middlePsm.endMs shouldEqual 21720000
     middlePsm.stepMs shouldEqual 120000
     middlePsm.window shouldEqual Some(300000)
+    middlePsm.functionId shouldEqual Some(InternalRangeFunction.MaxOverTime)
     val bottomPsm = partExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
     // 20 400 000 - 300 000 = 20 100 000
     bottomPsm.startMs shouldEqual 20100000

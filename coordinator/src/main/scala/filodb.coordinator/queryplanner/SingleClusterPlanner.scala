@@ -236,33 +236,18 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   // scalastyle:on cyclomatic.complexity
 
   /**
-   * Example1:
-   * min_over_time(<someQueryReturningInstantVector>[3m:1m])
+   * Example:
+   * min_over_time(foo{job="bar"}[3m:1m])
    *
    * outerStart = S
    * outerEnd = E
    * outerStep = 90s
    *
-   * Resulting Exec Plan:
-   *
-   * - ApplySubqueryRangeFunction MinOverTime from S to E, at lookback of 3m, innerStep of 60s, outerStep = 90s
-   *     - Execute Range Query someQueryReturningInstantVector from start=S-3m until end=E at step=30 GCD(60,90)
-   *
-   *
-   * Example2:
-   * min_over_time(avg_over_time(<someNestedQueryReturningInstantVector>[6m:2m])[3m:1m])
-   *
-   * outerStart = S
-   * outerEnd = E
-   * outerStep = 90s
-   *
-   * - ApplySubqueryRangeFunction MinOverTime from S to E, at lookback of 3m, innerStep of 60s, outerStep = 90s
-   *    - Execute Range Query sum(avg_over_time(<anotherNestedQueryReturningInstantVector>[6m:2m]))
-   *      from start=S-3m until end=E at step=30s i.e. GCD(60s,90s)
-   *         - ApplySubqueryRangeFunction AvgOverTime from S-3m to E,
-   *           at lookback of 6m, innerStep of 120s, outerStep = 30s
-   *                - Execute Range Query <anotherNestedQueryReturningInstantVector>
-   *                  from start=S-3m-6m until end=E at step=30s i.e. GCD(30s,120s)
+   * Resulting Exec Plan (hand edited and simplified to make it easier to read):
+   * E~LocalPartitionDistConcatExec()
+   * -T~PeriodicSamplesMapper(start=S, step=90s, end=E, window=3m, functionId=MinOverTime)
+   * --T~PeriodicSamplesMapper(start=((S-3m)/1m)*1m+1m, step=1m, end=(E/1m)*1m, window=None, functionId=None)
+   * ---E~MultiSchemaPartitionsExec
    */
   private def materializeSubqueryWithWindowing(qContext: QueryContext, sqww: SubqueryWithWindowing): PlanResult = {
     // This physical plan will try to execute only one range query instead of a number of individual subqueries.
