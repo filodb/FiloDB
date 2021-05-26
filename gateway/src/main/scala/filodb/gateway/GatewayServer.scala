@@ -128,7 +128,7 @@ object GatewayServer extends StrictLogging {
       val startTime = System.currentTimeMillis
       logger.info(s"Generating $numSamples samples starting at $startTime....")
 
-      val stream = if (genHist) TestTimeseriesProducer.genHistogramData(startTime, dataset, numSeries)
+      val stream = if (genHist) TestTimeseriesProducer.genHistogramData(startTime, numSeries)
                    else         TestTimeseriesProducer.timeSeriesData(startTime, numSeries)
 
       stream.take(numSamples).foreach { rec =>
