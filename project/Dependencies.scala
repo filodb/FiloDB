@@ -111,7 +111,8 @@ object Dependencies {
     "com.opencsv"            % "opencsv"                      % "3.3",
     "org.sisioh"             %% "akka-cluster-custom-downing" % "0.0.21",
     "com.typesafe.akka"      %% "akka-testkit"                % akkaVersion % Test,
-    "com.typesafe.akka"      %% "akka-multi-node-testkit"     % akkaVersion % Test
+    "com.typesafe.akka"      %% "akka-multi-node-testkit"     % akkaVersion % Test,
+    "org.apache.commons" % "commons-text" % "1.9"
   )
 
   lazy val cliDeps = Seq(
