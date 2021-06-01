@@ -229,6 +229,9 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
       }
       true
     } else {
+      cforRange { 0 until numBuckets } { b =>
+        values(b) = Double.NaN
+      }
       false
       // TODO: In the future, support adding buckets of different scheme.  Below is an example
       // NOTE: there are two issues here: below add picks the existing bucket scheme (not commutative)
