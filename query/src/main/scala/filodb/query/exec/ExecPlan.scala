@@ -164,6 +164,8 @@ trait ExecPlan extends QueryCommand {
             case rv: RangeVector =>
               // materialize, and limit rows per RV
               val srv = SerializedRangeVector(rv, builder, recSchema, queryWithPlanName(queryContext))
+              if (rv.outputRange.isEmpty) qLogger.debug(s"rv class is:  ${rv.getClass.getSimpleName}")
+
               numResultSamples += srv.numRowsSerialized
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
               if (enforceLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
