@@ -166,8 +166,9 @@ trait ExecPlan extends QueryCommand {
               val execPlanString = queryWithPlanName(queryContext)
               val srv = SerializedRangeVector(rv, builder, recSchema, execPlanString)
               if (rv.outputRange.isEmpty)
-                qLogger.debug(s"Empty rangevector found. Rv class is:  ${rv.getClass.getSimpleName}, " +
-                  s"execPlan is: $execPlanString, execPlan children ${this.children}")
+                qLogger.debug(s"Empty outputRange found. Rv class is:  ${rv.getClass.getSimpleName}, " +
+                  s"execPlan is: $execPlanString, execPlan children ${this.children}, " +
+                  s"execPlan rangeVectorTransformers ${this.rangeVectorTransformers}")
 
               numResultSamples += srv.numRowsSerialized
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
