@@ -167,7 +167,7 @@ trait ExecPlan extends QueryCommand {
               val srv = SerializedRangeVector(rv, builder, recSchema, execPlanString)
               if (rv.outputRange.isEmpty)
                 qLogger.debug(s"Empty outputRange found. Rv class is:  ${rv.getClass.getSimpleName}, " +
-                  s"execPlan is: $execPlanString, execPlan children ${this.children}, " +
+                  s"execPlan is: {$this}, execPlan children ${this.children}, " +
                   s"execPlan rangeVectorTransformers ${this.rangeVectorTransformers}")
 
               numResultSamples += srv.numRowsSerialized
