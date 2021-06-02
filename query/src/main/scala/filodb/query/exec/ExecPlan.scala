@@ -163,11 +163,12 @@ trait ExecPlan extends QueryCommand {
               srv
             case rv: RangeVector =>
               // materialize, and limit rows per RV
-              val execPlanString = queryWithPlanName(queryContext)
-              val srv = SerializedRangeVector(rv, builder, recSchema, execPlanString)
+              val srv = SerializedRangeVector(rv, builder, recSchema, queryWithPlanName(queryContext))
+              val execPlanString = this.printTree()
               if (rv.outputRange.isEmpty)
                 qLogger.debug(s"Empty outputRange found. Rv class is:  ${rv.getClass.getSimpleName}, " +
-                  s"execPlan is: {$this}, execPlan children ${this.children}, " +
+                  s"execPlan:\n $execPlanString, " +
+                  s"execPlan children ${this.children}, " +
                   s"execPlan rangeVectorTransformers ${this.rangeVectorTransformers}")
 
               numResultSamples += srv.numRowsSerialized
