@@ -268,6 +268,7 @@ object RangeVectorAggregator extends StrictLogging {
       source.foldLeftF(accs) { case (_, rv) =>
         count += 1
         val rowIter = rv.rows
+        if (period.isEmpty) period = rv.outputRange
         try {
           cforRange { 0 until outputLen } { i =>
             val mapped = rowAgg.map(rv.key, rowIter.next, mapIntos(i))
