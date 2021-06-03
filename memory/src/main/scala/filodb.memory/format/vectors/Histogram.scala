@@ -216,8 +216,10 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
 
   /**
    * Adds the values from another Histogram.
-   * If the other histogram has the same bucket scheme, then the values are just added per bucket and true is returned.
-   * If the scheme is different, it assigns NaN to values and false is returned.
+   * If the other histogram has the same bucket scheme, then the values are just added per bucket.
+   * If the scheme is different, it assigns NaN to values.
+   * @param other Histogram to be added
+   * @return true when input histogram has same schema and false when schema is different
    */
   final def addNoCorrection(other: HistogramWithBuckets): Boolean = {
     // Allow addition when type of bucket is different
@@ -251,7 +253,8 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
    * Adds the values from another Histogram, making a monotonic correction to ensure correctness
    */
   final def add(other: HistogramWithBuckets): Unit = {
-    // Call makeMonotonic only when buckets have same schema
+    // Call makeMonotonic only when buckets have same schema as result is NaN otherwise and monotonic correction
+    // isn't needed
     if (addNoCorrection(other)) makeMonotonic()
   }
 
