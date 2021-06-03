@@ -1,7 +1,6 @@
 package filodb.standalone
 
 import scala.concurrent.duration._
-import scala.util.control.NonFatal
 
 import akka.actor.ActorRef
 import akka.cluster.Cluster
@@ -59,26 +58,21 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
   }
 
   def start(): Unit = {
-    try {
-      coordinatorActor
-      scala.concurrent.Await.result(metaStore.initialize(), cluster.settings.InitializationTimeout)
-      val bootstrapper = bootstrap(cluster.cluster)
-      val singleton = cluster.clusterSingleton(role, watcher)
-      filoHttpServer = new FiloHttpServer(cluster.system, cluster.settings)
-      filoHttpServer.start(coordinatorActor, singleton, bootstrapper.getAkkaHttpRoute())
-      // Launch the profiler after startup, if configured.
-      SimpleProfiler.launch(systemConfig.getConfig("filodb.profiler"))
-      KamonShutdownHook.registerShutdownHook()
-    } catch {
-      // if there is an error in the initialization, we need to fail fast so that the process can be rescheduled
-      case NonFatal(e) =>
-        logger.error("Could not initialize server", e)
-        shutdown()
-    }
+    coordinatorActor
+    scala.concurrent.Await.result(metaStore.initialize(), cluster.settings.InitializationTimeout)
+    val bootstrapper = bootstrap(cluster.cluster)
+    val singleton = cluster.clusterSingleton(role, watcher)
+    filoHttpServer = new FiloHttpServer(cluster.system, cluster.settings)
+    filoHttpServer.start(coordinatorActor, singleton, bootstrapper.getAkkaHttpRoute())
+    // Launch the profiler after startup, if configured.
+    SimpleProfiler.launch(systemConfig.getConfig("filodb.profiler"))
+    KamonShutdownHook.registerShutdownHook()
   }
 
   override def shutdown(): Unit = {
-    filoHttpServer.shutdown(5.seconds) // TODO configure
+    if (filoHttpServer != null) {
+      filoHttpServer.shutdown(5.seconds) // TODO configure
+    }
     super.shutdown()
   }
 
@@ -90,10 +84,17 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
 
 object FiloServer extends StrictLogging {
   def main(args: Array[String]): Unit = {
+    var filoServer: Option[FiloServer] = None
     try {
-      new FiloServer().start()
+      filoServer = Some(new FiloServer())
+      filoServer.get.start()
     } catch { case e: Exception =>
+      // if there is an error in the initialization, we need to fail fast so that the process can be rescheduled
       logger.error("Could not start FiloDB server", e)
+      if (filoServer.isDefined) {
+        filoServer.get.shutdown()
+      }
+      sys.exit(1)
     }
   }
 }
