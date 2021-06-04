@@ -179,8 +179,6 @@ object RangeVectorAggregator extends StrictLogging {
           s"Try applying more filters")
       groupedResult.map { case (rvk, aggHolder) =>
         val rowIterator = new CustomCloseCursor(aggHolder.map(_.toRowReader))(aggHolder.close())
-        if (period.isEmpty)
-         logger.debug(s"Creating IteratorBackedRangeVector with empty period")
         IteratorBackedRangeVector(rvk, rowIterator, period)
       }
     }
@@ -285,8 +283,6 @@ object RangeVectorAggregator extends StrictLogging {
     aggObs.flatMap { _ =>
       if (count > 0) {
         import NoCloseCursor._ // The base range vectors are already closed, so no close propagation needed
-        if (period.isEmpty)
-         logger.debug(s"Creating Observable with IteratorBackedRangeVector with empty period")
         Observable.now(IteratorBackedRangeVector(CustomRangeVectorKey.empty,
           NoCloseCursor(accs.toIterator.map(_.toRowReader)), period))
       } else {
