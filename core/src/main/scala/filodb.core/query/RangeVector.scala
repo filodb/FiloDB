@@ -282,6 +282,8 @@ final case class RawDataRangeVector(key: RangeVectorKey,
   def publishInterval: Option[Long] = partition.publishInterval
 
   override def outputRange: Option[RvRange] = None
+
+  def minResolutionMs: Int = partition.minResolutionMs
 }
 
 /**
