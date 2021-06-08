@@ -328,18 +328,18 @@ final case class Schemas(part: PartitionSchema,
     val numSamplesPerChunk = chunkDurationMillis / resolutionMs
     val bytesPerSample = bytesPerSampleSwag(schemaId)
     var estDataSize = 0d
-    val quRange = chunkMethod.startTime to chunkMethod.endTime
     pkRecs.foreach { pkRec =>
       val intersection = Math.min(chunkMethod.endTime, pkRec.endTime) - Math.max(chunkMethod.startTime, pkRec.startTime)
       // find number of chunks to be scanned. Ceil division needed here
       val numChunks = (intersection + chunkDurationMillis - 1) / chunkDurationMillis
       estDataSize += bytesPerSample * numSamplesPerChunk * numChunks
     }
+    val quRange = chunkMethod.endTime - chunkMethod.startTime + 1
     require(estDataSize < dataSizeLimit,
       s"With match of ${pkRecs.length} time series, estimate of $estDataSize bytes exceeds limit of " +
         s"$dataSizeLimit bytes queried per shard for ${_schemas(schemaId).name} schema. Try one or more of these: " +
         s"(a) narrow your query filters to reduce to fewer than the current ${pkRecs.length} matches " +
-        s"(b) reduce query time range, currently at ${quRange.length / 1000 / 60 } minutes")
+        s"(b) reduce query time range, currently at ${quRange / 1000 / 60 } minutes")
   }
 
   /**
