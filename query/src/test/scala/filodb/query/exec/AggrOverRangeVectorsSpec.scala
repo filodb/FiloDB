@@ -2,12 +2,10 @@ package filodb.query.exec
 
 import scala.annotation.tailrec
 import scala.util.Random
-
 import com.tdunning.math.stats.TDigest
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
-
 import filodb.core.{MachineMetricsData => MMD}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
@@ -640,6 +638,34 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result6b.size shouldEqual 1
     result6b(0).key shouldEqual ignoreKey
     compareIter(result6b(0).rows.map(_.getDouble(1)), Seq(42d).iterator)
+  }
+
+  it("should sum histogram RVs with uneven bucket size") {
+
+    val (data1, rv1) = histogramRV(numSamples = 5, numBuckets = 8)
+    val (data2, rv2) = histogramRV(numSamples = 5, numBuckets = 7)
+
+    val samples: Array[RangeVector] = Array(rv1, rv2)
+
+    val agg1 = RowAggregator(AggregationOperator.Sum, Nil, histSchema)
+    val resultObs1 = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs = RangeVectorAggregator.mapReduce(agg1, true, resultObs1, rv=>rv.key)
+
+    val result = resultObs.toListL.runAsync.futureValue
+    result.size shouldEqual 1
+    result(0).key shouldEqual noKey
+
+    val sums = data1.zip(data2).map { case (row1, row2) =>
+      val h1 = bv.MutableHistogram(row1(3).asInstanceOf[bv.LongHistogram])
+      h1.add(row2(3).asInstanceOf[bv.LongHistogram])
+      h1
+    }.toList
+
+    val res = Seq.fill(8)(Double.NaN)
+    // Since bucket size is different value should be NaN
+    sums.foreach( s => compareIter(s.values.toIterator, res.toIterator))
+    result(0).rows.map(_.getHistogram(1)).toList shouldEqual sums
+
   }
 
 

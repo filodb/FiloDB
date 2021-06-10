@@ -7,7 +7,7 @@ import scala.concurrent.duration._
 
 import akka.actor.ActorSystem
 import ch.qos.logback.classic.{Level, Logger}
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{ConfigFactory, ConfigValueFactory}
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.reactive.Observable
@@ -44,6 +44,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   val ingestionStartTime = System.currentTimeMillis - samplesDuration.toMillis
   val spread = 0
   val config = ConfigFactory.load("filodb-defaults.conf")
+    .withValue("filodb.memstore.ingestion-buffer-mem-size", ConfigValueFactory.fromAnyRef("1GB"))
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   implicit val _ = queryConfig.askTimeout
 
@@ -67,7 +68,6 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   val storeConf = StoreConfig(ConfigFactory.parseString("""
                   | flush-interval = 1h
                   | shard-mem-size = 2GB
-                  | ingestion-buffer-mem-size = 1GB
                   | groups-per-shard = 4
                   | demand-paging-enabled = false
                   """.stripMargin))

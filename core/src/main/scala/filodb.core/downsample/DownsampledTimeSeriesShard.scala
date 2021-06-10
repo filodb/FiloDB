@@ -251,10 +251,10 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                      querySession: QuerySession): Observable[ReadablePartition] = {
 
     // Step 1: Choose the downsample level depending on the range requested
-    val (resolution, downsampledDataset) = chooseDownsampleResolution(lookup.chunkMethod)
+    val (resolutionMs, downsampledDataset) = chooseDownsampleResolution(lookup.chunkMethod)
     logger.debug(s"Chose resolution $downsampledDataset for chunk method ${lookup.chunkMethod}")
 
-    capDataScannedPerShardCheck(lookup, resolution)
+    capDataScannedPerShardCheck(lookup, resolutionMs)
 
     // Step 2: Query Cassandra table for that downsample level using downsampleColStore
     // Create a ReadablePartition objects that contain the time series data. This can be either a
@@ -269,13 +269,13 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                 SinglePartitionScan(partRec.partKey, shardNum),
                                 lookup.chunkMethod)
           .map { pd =>
-            val part = makePagedPartition(pd, lookup.firstSchemaId.get, Some(resolution), colIds)
+            val part = makePagedPartition(pd, lookup.firstSchemaId.get, resolutionMs, colIds)
             stats.partitionsQueried.increment()
             stats.singlePartCassFetchLatency.record(Math.max(0, System.currentTimeMillis - startExecute))
             part
           }
           .defaultIfEmpty(makePagedPartition(RawPartData(partRec.partKey, Seq.empty),
-            lookup.firstSchemaId.get, Some(resolution), colIds))
+            lookup.firstSchemaId.get, resolutionMs, colIds))
           .headL
       }
   }
@@ -288,29 +288,29 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     }
   }
 
-  private def chooseDownsampleResolution(chunkScanMethod: ChunkScanMethod): (Long, DatasetRef) = {
+  private def chooseDownsampleResolution(chunkScanMethod: ChunkScanMethod): (Int, DatasetRef) = {
     chunkScanMethod match {
       case AllChunkScan =>
-        // since it is the highest resolution/ttl
-        downsampleTtls.last.toMillis -> downsampledDatasetRefs.last
+        // pick last since it is the highest resolution
+        downsampleConfig.resolutions.last.toMillis.toInt -> downsampledDatasetRefs.last
       case TimeRangeChunkScan(startTime, _) =>
         var ttlIndex = downsampleTtls.indexWhere(t => startTime > System.currentTimeMillis() - t.toMillis)
         // -1 return value means query startTime is before the earliest retention. Just pick the highest resolution
         if (ttlIndex == -1) ttlIndex = downsampleTtls.size - 1
-        downsampleConfig.resolutions(ttlIndex).toMillis -> downsampledDatasetRefs(ttlIndex)
+        downsampleConfig.resolutions(ttlIndex).toMillis.toInt -> downsampledDatasetRefs(ttlIndex)
       case _ => ???
     }
   }
 
   private def makePagedPartition(part: RawPartData, firstSchemaId: Int,
-                                 resolution: Option[Long],
+                                 minResolutionMs: Int,
                                  colIds: Seq[Types.ColumnId]): ReadablePartition = {
     val schemaId = RecordSchema.schemaID(part.partitionKey, UnsafeUtils.arayOffset)
     if (schemaId != firstSchemaId) {
       throw SchemaMismatch(schemas.schemaName(firstSchemaId), schemas.schemaName(schemaId))
     }
     // FIXME It'd be nice to pass in the correct partId here instead of -1
-    new PagedReadablePartition(schemas(schemaId), shardNum, -1, part, resolution, colIds)
+    new PagedReadablePartition(schemas(schemaId), shardNum, -1, part, minResolutionMs, colIds)
   }
 
   /**
