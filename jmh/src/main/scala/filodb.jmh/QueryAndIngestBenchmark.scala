@@ -7,7 +7,7 @@ import scala.concurrent.duration._
 
 import akka.actor.ActorSystem
 import ch.qos.logback.classic.{Level, Logger}
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{ConfigFactory, ConfigValueFactory}
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.reactive.Observable
@@ -53,7 +53,8 @@ class QueryAndIngestBenchmark extends StrictLogging {
   val spread = 1
 
   // TODO: move setup and ingestion to another trait
-  val system = ActorSystem("test", ConfigFactory.load("filodb-defaults.conf"))
+  val system = ActorSystem("test", ConfigFactory.load("filodb-defaults.conf")
+    .withValue("filodb.memstore.ingestion-buffer-mem-size", ConfigValueFactory.fromAnyRef("50MB")))
   private val cluster = FilodbCluster(system)
   cluster.join()
 
@@ -69,7 +70,6 @@ class QueryAndIngestBenchmark extends StrictLogging {
   val storeConf = StoreConfig(ConfigFactory.parseString("""
                   | flush-interval = 10s     # Ensure regular flushes so we can clear out old blocks
                   | shard-mem-size = 512MB
-                  | ingestion-buffer-mem-size = 50MB
                   | groups-per-shard = 4
                   | demand-paging-enabled = false
                   """.stripMargin))

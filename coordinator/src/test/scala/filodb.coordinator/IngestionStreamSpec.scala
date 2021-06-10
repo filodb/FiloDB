@@ -31,7 +31,10 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
 
-  val config = ConfigFactory.parseString("""filodb.memstore.groups-per-shard = 4""".stripMargin)
+  val config = ConfigFactory.parseString(
+    """filodb.memstore.groups-per-shard = 4
+      |filodb.memstore.ingestion-buffer-mem-size = 50MB
+      |""".stripMargin)
                             .withFallback(ConfigFactory.load("application_test.conf"))
                             .getConfig("filodb")
 
@@ -84,7 +87,6 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
                                            noflush = true
                                            store {
                                              flush-interval = 1 hour
-                                             ingestion-buffer-mem-size = 50MB
                                              retry-delay = 500ms
                                            }
                                            """).withFallback(TestData.sourceConf)

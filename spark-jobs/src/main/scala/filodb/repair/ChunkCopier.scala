@@ -1,9 +1,9 @@
 package filodb.repair
 
-import java.{lang, util}
 import java.io.File
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+import java.util
 
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
@@ -30,23 +30,18 @@ class ChunkCopier(conf: SparkConf) {
   private def getFiloConfig(valueConf: String, filePathConf: String) = {
     val configString = conf.get(valueConf, "")
     val config = if (!configString.isBlank) {
-      ConfigFactory.parseString(configString)
+      ConfigFactory.parseString(configString).resolve()
     } else {
-      ConfigFactory.parseFile(new File(conf.get(filePathConf))).withFallback(GlobalConfig.systemConfig)
+      ConfigFactory.parseFile(new File(conf.get(filePathConf)))
+        .withFallback(GlobalConfig.systemConfig)
+        .resolve()
     }
     config
   }
 
   def datasetConfig(mainConfig: Config, datasetName: String): Config = {
-    def getConfig(path: lang.String): Config = {
-      ConfigFactory.parseFile(new File(path))
-    }
-
-    val sourceConfigPaths: util.List[lang.String] = mainConfig.getStringList("dataset-configs")
+    val sourceConfigPaths = mainConfig.getConfigList("inline-dataset-configs")
     sourceConfigPaths.stream()
-      .map[Config](new util.function.Function[lang.String, Config]() {
-        override def apply(path: lang.String): Config = getConfig(path)
-      })
       .filter(new util.function.Predicate[Config] {
         override def test(conf: Config): Boolean = conf.getString("dataset").equals(datasetName)
       })

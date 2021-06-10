@@ -1,6 +1,7 @@
 package filodb.downsampler
 
 import com.typesafe.config.{ConfigException, ConfigFactory}
+
 import filodb.cardbuster.CardinalityBuster
 import filodb.core.GlobalScheduler._
 import filodb.core.MachineMetricsData
@@ -17,7 +18,7 @@ import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
 import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.memory.format.vectors.{CustomBuckets, DoubleVector, LongHistogram}
-import filodb.query.QueryResult
+import filodb.query.{QueryError, QueryResult}
 import filodb.query.exec.{InProcessPlanDispatcher, InternalRangeFunction, MultiSchemaPartitionsExec, PeriodicSamplesMapper}
 import kamon.Kamon
 import monix.execution.Scheduler
@@ -28,9 +29,9 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import java.io.File
 import java.time.Instant
+
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
@@ -42,7 +43,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
-  val conf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf"))
+  val conf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf")).resolve()
 
   val settings = new DownsamplerSettings(conf)
   val queryConfig = new QueryConfig(settings.filodbConfig.getConfig("query"))
@@ -59,7 +60,6 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   val rawDataStoreConfig = StoreConfig(ConfigFactory.parseString( """
                   |flush-interval = 1h
                   |shard-mem-size = 1MB
-                  |ingestion-buffer-mem-size = 30MB
                 """.stripMargin))
 
   val offheapMem = new OffHeapMemory(Seq(Schemas.gauge, Schemas.promCounter, Schemas.promHistogram, Schemas.untyped),
@@ -467,7 +467,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0,
-      downsampledPartData1, Some(1.minute.toMillis))
+      downsampledPartData1, 1.minute.toMillis.toInt)
 
     downsampledPart1.partKeyBytes shouldEqual dsGaugePartKeyBytes
 
@@ -504,7 +504,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0,
-      downsampledPartData1, Some(1.minute.toMillis))
+      downsampledPartData1, 1.minute.toMillis.toInt)
 
     downsampledPart1.partKeyBytes shouldEqual dsGaugeLowFreqPartKeyBytes
 
@@ -532,7 +532,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.promCounter.downsample.get, 0, 0,
-      downsampledPartData1, Some(1.minute.toMillis))
+      downsampledPartData1, 1.minute.toMillis.toInt)
 
     downsampledPart1.partKeyBytes shouldEqual counterPartKeyBytes
 
@@ -575,7 +575,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.promHistogram.downsample.get, 0, 0,
-      downsampledPartData1, Some(5.minutes.toMillis))
+      downsampledPartData1, 5.minutes.toMillis.toInt)
 
     downsampledPart1.partKeyBytes shouldEqual histPartKeyBytes
 
@@ -621,7 +621,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.promHistogram.downsample.get, 0, 0,
-      downsampledPartData1, Some(5.minutes.toMillis))
+      downsampledPartData1, 5.minutes.toMillis.toInt)
 
     downsampledPart1.partKeyBytes shouldEqual histNaNPartKeyBytes
 
@@ -677,7 +677,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .toListL.runAsync.futureValue.head
 
     val downsampledPart2 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0,
-      downsampledPartData2, Some(5.minutes.toMillis))
+      downsampledPartData2, 5.minutes.toMillis.toInt)
 
     downsampledPart2.partKeyBytes shouldEqual dsGaugePartKeyBytes
 
@@ -704,7 +704,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.promCounter.downsample.get, 0, 0,
-      downsampledPartData1, Some(5.minutes.toMillis))
+      downsampledPartData1, 5.minutes.toMillis.toInt)
 
     downsampledPart1.partKeyBytes shouldEqual counterPartKeyBytes
 
@@ -745,7 +745,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.promHistogram.downsample.get, 0, 0,
-      downsampledPartData1, Some(5.minutes.toMillis))
+      downsampledPartData1, 5.minutes.toMillis.toInt)
 
     downsampledPart1.partKeyBytes shouldEqual histPartKeyBytes
 
@@ -788,7 +788,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.promHistogram.downsample.get, 0, 0,
-      downsampledPartData1, Some(5.minutes.toMillis))
+      downsampledPartData1, 5.minutes.toMillis.toInt)
 
     downsampledPart1.partKeyBytes shouldEqual histNaNPartKeyBytes
 
@@ -880,7 +880,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val qc = QueryContext(plannerParams = PlannerParams(sampleLimit = 1000))
     val exec = MultiSchemaPartitionsExec(qc,
       InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
-    exec.addRangeVectorTransformer(PeriodicSamplesMapper(74373042000L, 10, 74373042000L,Some(150000),
+    exec.addRangeVectorTransformer(PeriodicSamplesMapper(74373042000L, 10, 74373042000L,Some(310000),
       Some(InternalRangeFunction.Rate), qc))
 
     val querySession = QuerySession(QueryContext(), queryConfig)
@@ -894,6 +894,34 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
   }
 
+  it("should encounter error when doing rate on DownsampledTimeSeriesShard when lookback < 5m resolution ") {
+
+    val downsampleTSStore = new DownsampledTimeSeriesStore(downsampleColStore, rawColStore,
+      settings.filodbConfig)
+
+    downsampleTSStore.setup(batchDownsampler.rawDatasetRef, settings.filodbSettings.schemas,
+      0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
+
+    downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
+
+    val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
+
+    val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(counterName))
+    val qc = QueryContext(plannerParams = PlannerParams(sampleLimit = 1000))
+    val exec = MultiSchemaPartitionsExec(qc,
+      InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
+    exec.addRangeVectorTransformer(PeriodicSamplesMapper(74373042000L, 10, 74373042000L,Some(290000),
+      Some(InternalRangeFunction.Rate), qc))
+
+    val querySession = QuerySession(QueryContext(), queryConfig)
+    val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
+    val res = exec.execute(downsampleTSStore, querySession)(queryScheduler)
+      .runAsync(queryScheduler).futureValue.asInstanceOf[QueryError]
+    queryScheduler.shutdown()
+
+    // exception thrown because lookback is < downsample data resolution of 5m
+    res.t.isInstanceOf[IllegalArgumentException] shouldEqual true
+  }
 
   it("should bring up DownsampledTimeSeriesShard and NOT be able to read untyped data using SelectRawPartitionsExec") {
 

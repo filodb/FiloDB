@@ -16,8 +16,10 @@ class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction {
   val minMaxDeque = new util.ArrayDeque[TransientRow]()
 
   override def addedToWindow(row: TransientRow, window: Window): Unit = {
-    while (!minMaxDeque.isEmpty && ord.compare(minMaxDeque.peekLast().value, row.value) < 0) minMaxDeque.removeLast()
-    minMaxDeque.addLast(row)
+    if (!row.value.isNaN) {
+      while (!minMaxDeque.isEmpty && ord.compare(minMaxDeque.peekLast().value, row.value) < 0) minMaxDeque.removeLast()
+      minMaxDeque.addLast(row)
+    }
   }
 
   override def removedFromWindow(row: TransientRow, window: Window): Unit = {
@@ -449,15 +451,19 @@ class StdDevOverTimeFunction(var sum: Double = 0d,
                              var count: Int = 0,
                              var squaredSum: Double = 0d) extends RangeFunction {
   override def addedToWindow(row: TransientRow, window: Window): Unit = {
-    sum += row.value
-    squaredSum += row.value * row.value
-    count += 1
+    if (!row.value.isNaN) {
+      sum += row.value
+      squaredSum += row.value * row.value
+      count += 1
+    }
   }
 
   override def removedFromWindow(row: TransientRow, window: Window): Unit = {
-    sum -= row.value
-    squaredSum -= row.value * row.value
-    count -= 1
+    if (!row.value.isNaN) {
+      sum -= row.value
+      squaredSum -= row.value * row.value
+      count -= 1
+    }
   }
 
   override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,

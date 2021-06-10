@@ -70,7 +70,7 @@ object Dependencies {
     "com.googlecode.javaewah"      % "JavaEWAH"           % "1.1.6" withJavadoc(),
     "com.github.rholder.fauxflake" % "fauxflake-core"     % "1.1.0",
     "org.scalactic"                %% "scalactic"         % "3.2.0" withJavadoc(),
-    "org.apache.lucene"            % "lucene-core"        % "7.3.0" withJavadoc(),
+    "org.apache.lucene"            % "lucene-core"        % "8.8.2" withJavadoc(),
     "com.github.alexandrnikitin"   %% "bloom-filter"      % "0.11.0",
     "org.rocksdb"                  % "rocksdbjni"         % "6.11.4",
     "com.esotericsoftware"         % "kryo"               % "4.0.0" excludeAll(excludeMinlog),
@@ -111,7 +111,8 @@ object Dependencies {
     "com.opencsv"            % "opencsv"                      % "3.3",
     "org.sisioh"             %% "akka-cluster-custom-downing" % "0.0.21",
     "com.typesafe.akka"      %% "akka-testkit"                % akkaVersion % Test,
-    "com.typesafe.akka"      %% "akka-multi-node-testkit"     % akkaVersion % Test
+    "com.typesafe.akka"      %% "akka-multi-node-testkit"     % akkaVersion % Test,
+    "org.apache.commons" % "commons-text" % "1.9"
   )
 
   lazy val cliDeps = Seq(

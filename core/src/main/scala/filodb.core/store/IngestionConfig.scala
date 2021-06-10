@@ -17,8 +17,6 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              maxBlobBufferSize: Int,
                              // Number of bytes to allocate to chunk storage in each shard
                              shardMemSize: Long,
-                             // Number of bytes to allocate to ingestion write buffers per shard
-                             ingestionBufferMemSize: Long,
                              maxBufferPoolSize: Int,
                              groupsPerShard: Int,
                              numPagesPerBlock: Int,
@@ -48,7 +46,6 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "max-chunks-size" -> maxChunksSize,
                                "max-blob-buffer-size" -> maxBlobBufferSize,
                                "shard-mem-size" -> shardMemSize,
-                               "ingestion-buffer-mem-size" -> ingestionBufferMemSize,
                                "max-buffer-pool-size" -> maxBufferPoolSize,
                                "groups-per-shard" -> groupsPerShard,
                                "max-chunk-time" -> (maxChunkTime.toSeconds + "s"),
@@ -84,7 +81,6 @@ object StoreConfig {
                                            |max-chunks-size = 400
                                            |max-data-per-shard-query = 300 MB
                                            |max-blob-buffer-size = 15000
-                                           |ingestion-buffer-mem-size = 10M
                                            |max-buffer-pool-size = 10000
                                            |groups-per-shard = 60
                                            |num-block-pages = 100
@@ -125,7 +121,6 @@ object StoreConfig {
                 config.getInt("max-chunks-size"),
                 config.getInt("max-blob-buffer-size"),
                 config.getMemorySize("shard-mem-size").toBytes,
-                config.getMemorySize("ingestion-buffer-mem-size").toBytes,
                 config.getInt("max-buffer-pool-size"),
                 config.getInt("groups-per-shard"),
                 config.getInt("num-block-pages"),
