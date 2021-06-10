@@ -43,7 +43,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
-  val conf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf"))
+  val conf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf")).resolve()
 
   val settings = new DownsamplerSettings(conf)
   val queryConfig = new QueryConfig(settings.filodbConfig.getConfig("query"))
