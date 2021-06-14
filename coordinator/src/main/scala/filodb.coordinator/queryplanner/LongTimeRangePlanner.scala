@@ -1,5 +1,7 @@
 package filodb.coordinator.queryplanner
 
+import com.typesafe.scalalogging.StrictLogging
+
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.query.{BinaryJoin, LogicalPlan, PeriodicSeriesPlan, SetOperator}
@@ -30,7 +32,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
                            latestDownsampleTimestampFn: => Long,
                            stitchDispatcher: => PlanDispatcher,
                            queryConfig: QueryConfig,
-                           datasetMetricColumn: String) extends QueryPlanner {
+                           datasetMetricColumn: String) extends QueryPlanner with StrictLogging {
 
   val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
 
@@ -44,6 +46,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
     if (!periodicSeriesPlan.isRoutable)
       rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
     else if (endWithOffsetMs < earliestRawTime) // full time range in downsampled cluster
+      logger.info("materializing against downsample cluster: {}", logicalPlan)
       downsampleClusterPlanner.materialize(periodicSeriesPlan, qContext)
     else if (startWithOffsetMs - lookbackMs >= earliestRawTime) // full time range in raw cluster
       rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
@@ -55,6 +58,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
         copyLogicalPlanWithUpdatedTimeRange(periodicSeriesPlan,
           TimeRange(periodicSeriesPlan.startMs, latestDownsampleTimestampFn + offsetMillis.min))
       }
+      logger.info("materializing against downsample cluster: {}", downsampleLp)
       downsampleClusterPlanner.materialize(downsampleLp, qContext)
     } else { // raw/downsample overlapping query without long lookback
       // Split the query between raw and downsample planners
@@ -67,6 +71,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
       val downsampleLp = copyLogicalPlanWithUpdatedTimeRange(periodicSeriesPlan,
         TimeRange(periodicSeriesPlan.startMs, lastDownsampleInstant))
       val downsampleEp = downsampleClusterPlanner.materialize(downsampleLp, qContext)
+      logger.info("materializing against downsample cluster: {}", downsampleLp)
 
       val rawLp = copyLogicalPlanWithUpdatedTimeRange(periodicSeriesPlan, TimeRange(firstInstantInRaw,
         periodicSeriesPlan.endMs))
