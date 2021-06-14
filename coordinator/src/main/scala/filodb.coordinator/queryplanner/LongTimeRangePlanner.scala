@@ -1,5 +1,6 @@
 package filodb.coordinator.queryplanner
 
+import com.typesafe.scalalogging.StrictLogging
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.query.QueryContext
 import filodb.query.{LogicalPlan, PeriodicSeriesPlan}
@@ -28,7 +29,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
                            downsampleClusterPlanner: QueryPlanner,
                            earliestRawTimestampFn: => Long,
                            latestDownsampleTimestampFn: => Long,
-                           stitchDispatcher: => PlanDispatcher) extends QueryPlanner {
+                           stitchDispatcher: => PlanDispatcher) extends QueryPlanner with StrictLogging {
 
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     logicalPlan match {
@@ -40,9 +41,10 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
         lazy val endWithOffsetMs = p.endMs - offsetMillis.min
         if (!logicalPlan.isRoutable)
           rawClusterPlanner.materialize(logicalPlan, qContext)
-        else if (endWithOffsetMs < earliestRawTime) // full time range in downsampled cluster
+        else if (endWithOffsetMs < earliestRawTime) { // full time range in downsampled cluster
+          logger.info("executing query against downsample cluster: {}", logicalPlan)
           downsampleClusterPlanner.materialize(logicalPlan, qContext)
-        else if (startWithOffsetMs - lookbackMs >= earliestRawTime) // full time range in raw cluster
+        } else if (startWithOffsetMs - lookbackMs >= earliestRawTime) // full time range in raw cluster
           rawClusterPlanner.materialize(logicalPlan, qContext)
         else if (endWithOffsetMs - lookbackMs < earliestRawTime) {// raw/downsample overlapping query with long lookback
           val lastDownsampleSampleTime = latestDownsampleTimestampFn
@@ -52,6 +54,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
             copyLogicalPlanWithUpdatedTimeRange(logicalPlan,
               TimeRange(p.startMs, latestDownsampleTimestampFn + offsetMillis.min))
           }
+          logger.info("executing query against downsample cluster: {}", downsampleLp)
           downsampleClusterPlanner.materialize(downsampleLp, qContext)
         } else { // raw/downsample overlapping query without long lookback
           // Split the query between raw and downsample planners
@@ -64,6 +67,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
           val downsampleLp = copyLogicalPlanWithUpdatedTimeRange(logicalPlan,
                                                       TimeRange(p.startMs, lastDownsampleInstant))
           val downsampleEp = downsampleClusterPlanner.materialize(downsampleLp, qContext)
+          logger.info("executing query against downsample cluster: {}", downsampleLp)
 
           val rawLp = copyLogicalPlanWithUpdatedTimeRange(logicalPlan, TimeRange(firstInstantInRaw, p.endMs))
           val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
