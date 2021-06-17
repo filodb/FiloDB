@@ -15,6 +15,7 @@ import filodb.query._
 import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, SortFunctionId}
 import filodb.query.InstantFunctionId.HistogramQuantile
 import filodb.query.MiscellaneousFunctionId.{LabelJoin, LabelReplace}
+import filodb.query.Query.qLogger
 import filodb.query.ScalarFunctionId.Scalar
 import filodb.query.SortFunctionId.{Sort, SortDesc}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
@@ -197,15 +198,16 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
             paramResponse: Seq[Observable[ScalarRangeVector]] = Nil): Observable[RangeVector] = {
     // Multiple ExecPlanFunArgs not supported yet
     funcParams.head match {
-    case s: StaticFuncArgs   => evaluate(source, ScalarFixedDouble(s.timeStepParams, s.scalar))
-    case t: TimeFuncArgs     => evaluate(source, TimeScalar(t.timeStepParams))
+    case s: StaticFuncArgs   => evaluate(source, ScalarFixedDouble(s.timeStepParams, s.scalar), querySession)
+    case t: TimeFuncArgs     => evaluate(source, TimeScalar(t.timeStepParams), querySession)
     case e: ExecPlanFuncArgs => if (paramResponse.size > 1)
                                  throw new UnsupportedOperationException("Multiple ExecPlanFunArgs not supported yet")
-                                paramResponse.head.map(param => evaluate(source, param)).flatten
+                                paramResponse.head.map(param => evaluate(source, param, querySession)).flatten
    }
   }
 
-  private def evaluate(source: Observable[RangeVector], scalarRangeVector: ScalarRangeVector) = {
+  private def evaluate(source: Observable[RangeVector], scalarRangeVector: ScalarRangeVector,
+                       querySession: QuerySession) = {
     source.map { rv =>
       val resultIterator: RangeVectorCursor = new WrappedCursor(rv.rows) {
         private val rows = rv.rows
@@ -218,9 +220,14 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
           val nextVal = next.getDouble(1)
           val timestamp = next.getLong(0)
           val sclrVal = scalarRangeVector.getValue(timestamp)
+          qLogger.debug(s"QueryId: ${querySession.qContext.queryId} ScalarOperationMapper calling calculate on " +
+            s"sclrVal: $sclrVal and nextVal: $nextVal for " +
+            s"timestamp: $timestamp")
           val newValue = if (scalarOnLhs) operatorFunction.calculate(sclrVal, nextVal)
                          else operatorFunction.calculate(nextVal, sclrVal)
           result.setValues(timestamp, newValue)
+          qLogger.debug(s"QueryId: ${querySession.qContext.queryId} Added timestamp: $timestamp, " +
+            s"newValue: $newValue to final result " )
           result
         }
       }
@@ -368,9 +375,13 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
       val it = Iterator.from(0, rangeParams.stepSecs.toInt)
         .takeWhile(_ <= rangeParams.endSecs - rangeParams.startSecs).map { i =>
         val timestamp = i + rangeParams.startSecs
-        if (!t.contains(timestamp * 1000))
+        if (!t.contains(timestamp * 1000)) {
           rowList += new TransientRow(timestamp * 1000, 1)
-       }
+          qLogger.debug(s"QueryId: ${querySession.qContext.queryId} Adding timestamp:${timestamp * 1000} and " +
+            s"value 1 in absent")
+        }
+      }
+
 
       // address step == 0 case
       if (rangeParams.startSecs == rangeParams.endSecs || rangeParams.stepSecs == 0) it.take(1).toList else it.toList
