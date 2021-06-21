@@ -404,8 +404,7 @@ object SerializedRangeVector extends StrictLogging {
   def apply(rv: RangeVector,
             builder: RecordBuilder,
             schema: RecordSchema,
-            execPlan: String,
-            queryId: String = "empty"): SerializedRangeVector = {
+            execPlan: String): SerializedRangeVector = {
     var numRows = 0
     val oldContainerOpt = builder.currentContainer
     val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
@@ -434,9 +433,7 @@ object SerializedRangeVector extends StrictLogging {
       case None                 => builder.allContainers
       case Some(firstContainer) => builder.allContainers.dropWhile(_ != firstContainer)
     }
-   val srv = new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo, rv.outputRange)
-   logger.debug(s"QueryId: $queryId SerializedRangeVector: ${srv.prettyPrint(true)}")
-    srv
+    new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo, rv.outputRange)
   }
   // scalastyle:on null
 
