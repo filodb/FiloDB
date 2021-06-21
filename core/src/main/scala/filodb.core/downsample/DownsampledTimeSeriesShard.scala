@@ -114,7 +114,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60
 
   def recoverIndex(): Future[Unit] = {
-    indexBootstrapper.bootstrapIndexDownsample(partKeyIndex, shardNum, indexDataset){ _ => createPartitionID() }
+    indexBootstrapper
+      .bootstrapIndexDownsample(partKeyIndex, shardNum, indexDataset, indexTtlMs){ _ => createPartitionID() }
       .map { count =>
         logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
       }.map { _ =>
