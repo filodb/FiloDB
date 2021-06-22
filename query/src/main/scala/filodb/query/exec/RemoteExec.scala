@@ -91,13 +91,14 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
  */
 trait RemoteExecHttpClient extends StrictLogging {
 
+  val traceInfoHeader = "trace-info"
   def httpGet(applicationId: String, httpEndpoint: String,
-              httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
+              httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any], traceInfo: Map[String, Any])
              (implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]]
 
   def httpMetadataGet(applicationId: String, httpEndpoint: String,
-                      httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
+                      httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any], traceInfo: Map[String, Any])
                      (implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], MetadataSuccessResponse]]]
 
@@ -116,15 +117,17 @@ class RemoteHttpClient private(asyncHttpClientConfig: AsyncHttpClientConfig) ext
   ShutdownHookThread(shutdown())
 
   def httpGet(applicationId: String, httpEndpoint: String,
-              httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
+              httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any], traceInfo: Map[String, Any])
              (implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
     val queryTimeElapsed = System.currentTimeMillis() - submitTime
     val readTimeout = FiniteDuration(httpTimeoutMs - queryTimeElapsed, TimeUnit.MILLISECONDS)
     val url = uri"$httpEndpoint?$urlParams"
+    val traceInfoStr = traceInfo.map{case (k, v) => k + "=" + v}.mkString(",")
     logger.debug("promQlExec url={}", url)
     sttp
       .header(HeaderNames.UserAgent, applicationId)
+      .header(traceInfoHeader, traceInfoStr)
       .get(url)
       .readTimeout(readTimeout)
       .response(asJson[SuccessResponse])
@@ -132,15 +135,17 @@ class RemoteHttpClient private(asyncHttpClientConfig: AsyncHttpClientConfig) ext
   }
 
   def httpMetadataGet(applicationId: String, httpEndpoint: String,
-                      httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
+                      httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any], traceInfo: Map[String, Any])
                      (implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], MetadataSuccessResponse]]] = {
     val queryTimeElapsed = System.currentTimeMillis() - submitTime
     val readTimeout = FiniteDuration(httpTimeoutMs - queryTimeElapsed, TimeUnit.MILLISECONDS)
     val url = uri"$httpEndpoint?$urlParams"
-    logger.debug("promMetadataExec url={}", url)
+    val traceInfoStr = traceInfo.map{case (k, v) => k + "=" + v}.mkString(",")
+    logger.debug("promMetadataExec url={} traceInfo={}", url, traceInfoStr)
     sttp
       .header(HeaderNames.UserAgent, applicationId)
+      .header(traceInfoHeader, traceInfoStr)
       .get(url)
       .readTimeout(readTimeout)
       .response(asJson[MetadataSuccessResponse])
