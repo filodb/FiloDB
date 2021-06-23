@@ -134,7 +134,8 @@ class RemoteHttpClient private(asyncHttpClientConfig: AsyncHttpClientConfig) ext
   }
 
   def httpMetadataGet(applicationId: String, httpEndpoint: String,
-                      httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any], traceInfo: Map[String, String])
+                      httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any],
+                      traceInfo: Map[String, String])
                      (implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], MetadataSuccessResponse]]] = {
     val queryTimeElapsed = System.currentTimeMillis() - submitTime
