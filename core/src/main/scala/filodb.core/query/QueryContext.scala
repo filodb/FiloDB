@@ -45,7 +45,7 @@ final case class QueryContext(origQueryParams: TsdbQueryParams = UnavailableProm
                               queryId: String = UUID.randomUUID().toString,
                               submitTime: Long = System.currentTimeMillis(),
                               plannerParams: PlannerParams = PlannerParams(),
-                              traceInfo: Map[String, Any] = Map.empty[String, Any])
+                              traceInfo: Map[String, String] = Map.empty[String, String])
 
 object QueryContext {
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): QueryContext =
