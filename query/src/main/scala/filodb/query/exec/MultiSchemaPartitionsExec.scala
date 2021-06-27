@@ -2,9 +2,9 @@ package filodb.query.exec
 
 import kamon.Kamon
 import monix.execution.Scheduler
-
 import filodb.core.{DatasetRef, QueryTimeoutException}
 import filodb.core.metadata.Schemas
+import filodb.core.query.Filter.Equals
 import filodb.core.query.{ColumnFilter, QueryContext, QuerySession, ServiceUnavailableException}
 import filodb.core.store._
 import filodb.query.Query.qLogger
@@ -30,6 +30,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
                                            shard: Int,
                                            filters: Seq[ColumnFilter],
                                            chunkMethod: ChunkScanMethod,
+                                           metricColumn: String,
                                            schema: Option[String] = None,
                                            colName: Option[String] = None) extends LeafExecPlan {
   import SelectRawPartitionsExec._
@@ -39,11 +40,45 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   @transient // dont serialize the SelectRawPartitionsExec plan created for plan execution
   var finalPlan: SelectRawPartitionsExec = _
 
+  // Remove _columnName from metricColumn and generate PartLookupResult
+  private def removeColumn(filters: Seq[ColumnFilter], metricName: String,
+                           columnName: String, source: ChunkSource,
+                           querySession: QuerySession) = {
+    // Assume metric name has only equal filter
+    val filterWithoutColumn = filters.filterNot(_.column == metricColumn) :+
+      ColumnFilter(metricColumn, Equals(metricName.replace(s"_$columnName", "")))
+
+    val partMethod = FilteredPartitionScan(ShardSplit(shard), filterWithoutColumn)
+    val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
+    (lookupRes, Some(columnName))
+  }
+
+  // scalastyle:off method.length
   private def finalizePlan(source: ChunkSource,
                            querySession: QuerySession): SelectRawPartitionsExec = {
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
+    var lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
+    val metricNameList = filters.filter(_.column == metricColumn).map(_.filter.valuesStrings.head.toString)
+    var newColName = colName
     Kamon.currentSpan().mark("filtered-partition-scan")
-    val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
+
+  // _bucket & le are removed in SingleClusterPlanner
+   if (lookupRes.firstSchemaId.isEmpty && querySession.queryConfig.translatePromHistogram) {
+     require(colName.isEmpty, "Prom query should not have colName")
+
+     if (!metricNameList.isEmpty ) {
+       val metricName = metricNameList.head
+       val res = if (metricName.endsWith("_sum"))  removeColumn(filters, metricName, "sum",
+                 source, querySession)
+                 else if (metricName.endsWith("_count"))  removeColumn(filters, metricName, "count",
+                 source, querySession)
+                 else (lookupRes, newColName)
+
+       lookupRes = res._1
+       newColName = res._2
+     }
+   }
+
     Kamon.currentSpan().mark("lookup-partitions-done")
 
     val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
@@ -82,6 +117,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
                                     schema.isDefined, Nil)
           }
   }
+  // scalastyle:on method.length
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)

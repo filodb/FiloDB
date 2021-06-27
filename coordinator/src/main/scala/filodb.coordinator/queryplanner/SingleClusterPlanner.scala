@@ -1,20 +1,20 @@
 package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration._
-
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{DatasetRef, SpreadProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
+import filodb.core.query.Filter.Equals
 import filodb.core.query._
 import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
+import filodb.query.InstantFunctionId.{HistogramBucket}
 import filodb.query.{exec, _}
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
 import filodb.query.exec.InternalRangeFunction.Last
@@ -356,9 +356,32 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   private def materializePeriodicSeries(qContext: QueryContext,
                                         lp: PeriodicSeries): PlanResult = {
-    val rawSeries = walkLogicalPlanTree(lp.rawSeries, qContext)
-      rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
-        None, None, qContext, false, Nil, lp.offsetMs)))
+
+    var nameFilter: Seq[String] = Nil;
+    var leFilter: Seq[String] = Nil;
+
+   // _sum and _count are removed in MultiSchemaPartitionsExec
+    val lpWithoutBucket: PeriodicSeries = if (lp.rawSeries.isInstanceOf[RawSeries] && queryConfig.
+      translatePromHistogram) {
+     val rawSeriesLp = lp.rawSeries.asInstanceOf[RawSeries]
+     nameFilter = rawSeriesLp.filters.filter(_.column=="__name__").map(_.filter.valuesStrings.head.toString)
+     leFilter = rawSeriesLp.filters.filter(_.column=="le").map(_.filter.valuesStrings.head.toString)
+
+      val filtersWithoutBucket= rawSeriesLp.filters.filterNot(_.column=="__name__").filterNot(_.column=="le") :+
+        ColumnFilter("__name__", Equals(nameFilter.head.replace("_bucket", "")))
+     lp.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket))
+    } else lp
+
+    val rawSeries = walkLogicalPlanTree(lpWithoutBucket.rawSeries, qContext)
+    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
+      None, None, qContext, false, Nil, lp.offsetMs)))
+
+    if (!nameFilter.isEmpty && nameFilter.head.endsWith("_bucket") && !leFilter.isEmpty) {
+      val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(lp.startMs/1000, lp.stepMs/1000,
+        lp.endMs/1000))
+      rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
+        Seq(paramsExec))))
+    }
    rawSeries
   }
 
@@ -426,7 +449,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val execPlans = shardsFromFilters(renamedFilters, qContext).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       MultiSchemaPartitionsExec(qContext, dispatcher, dsRef, shard, renamedFilters,
-        toChunkScanMethod(rangeSelectorWithOffset), schemaOpt, colName)
+        toChunkScanMethod(rangeSelectorWithOffset), dsOptions.metricColumn, schemaOpt, colName)
     }
     PlanResult(execPlans, needsStitch)
   }
