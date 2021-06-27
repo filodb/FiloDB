@@ -2,10 +2,11 @@ package filodb.query.exec
 
 import kamon.Kamon
 import monix.execution.Scheduler
+
 import filodb.core.{DatasetRef, QueryTimeoutException}
 import filodb.core.metadata.Schemas
-import filodb.core.query.Filter.Equals
 import filodb.core.query.{ColumnFilter, QueryContext, QuerySession, ServiceUnavailableException}
+import filodb.core.query.Filter.Equals
 import filodb.core.store._
 import filodb.query.Query.qLogger
 

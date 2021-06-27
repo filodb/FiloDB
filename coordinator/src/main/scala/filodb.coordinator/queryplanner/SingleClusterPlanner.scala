@@ -1,21 +1,23 @@
 package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration._
+
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{DatasetRef, SpreadProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
-import filodb.core.query.Filter.Equals
 import filodb.core.query._
+import filodb.core.query.Filter.Equals
 import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
-import filodb.query.InstantFunctionId.{HistogramBucket}
 import filodb.query.{exec, _}
+import filodb.query.InstantFunctionId.{HistogramBucket}
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
 import filodb.query.exec.InternalRangeFunction.Last
 
@@ -367,7 +369,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
      nameFilter = rawSeriesLp.filters.filter(_.column=="__name__").map(_.filter.valuesStrings.head.toString)
      leFilter = rawSeriesLp.filters.filter(_.column=="le").map(_.filter.valuesStrings.head.toString)
 
-      val filtersWithoutBucket= rawSeriesLp.filters.filterNot(_.column=="__name__").filterNot(_.column=="le") :+
+     val filtersWithoutBucket= rawSeriesLp.filters.filterNot(_.column=="__name__").filterNot(_.column=="le") :+
         ColumnFilter("__name__", Equals(nameFilter.head.replace("_bucket", "")))
      lp.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket))
     } else lp
