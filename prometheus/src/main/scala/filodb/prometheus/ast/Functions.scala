@@ -221,10 +221,15 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
       outerStepMs = 0
     }
     val stepForInnerMs = subqueryStepToUseMs
-    val preciseStartForInnerS = timeParams.start - (sqe.sqcl.window.millis(1L) / 1000)
+    val offsetMs = sqe.offset.map { _.millis(1L) }
+    val offsetSecForInner = offsetMs match {
+      case None => 0
+      case Some(ofMs) => ofMs / 1000
+    }
+    val preciseStartForInnerS = timeParams.start - (sqe.sqcl.window.millis(1L) / 1000) - offsetSecForInner
     val startForInnerS = SubqueryUtils.getStartForFastSubquery(preciseStartForInnerS, subqueryStepToUseMs/1000)
 
-    val preciseEndForInnerS = timeParams.end
+    val preciseEndForInnerS = timeParams.end - offsetSecForInner
     val endForInnerS =
       SubqueryUtils.getEndForFastSubquery(preciseEndForInnerS, subqueryStepToUseMs/1000)
 
@@ -241,11 +246,12 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
     val subquery = sqe.subquery.toSeriesPlan(timeParamsForInner)
     SubqueryWithWindowing(
       subquery,
-      timeParams.start * 1000 , outerStepMs, timeParams.end * 1000,
+      timeParams.start * 1000, outerStepMs, timeParams.end * 1000,
       rangeFunctionId,
       otherParams,
       sqe.sqcl.window.millis(1L),
-      subqueryStepToUseMs
+      subqueryStepToUseMs,
+      offsetMs
     )
   }
   // scalastyle:on method.length
