@@ -1,6 +1,6 @@
 package filodb.prometheus.parse
 
-import filodb.prometheus.ast.TimeStepParams
+import filodb.prometheus.ast.{PeriodicSeries, SimpleSeries, TimeStepParams}
 import filodb.query.{BinaryJoin, LogicalPlan}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -438,6 +438,38 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSubqueryError("log2(foo)[5m:1m][5m:1m]")
   }
 
+  // TODO
+  // it's impossible to parse subqueries with offsets and binary expressions
+  // using Packrat parsers, here we will be explicitely calling antlr parser until antlr
+  // becomes the default parser
+  it("parse subquery using antl"){
+    parseWithAntlr(
+      "min_over_time( rate(http_requests_total[5m])[30m:1m] offset 1m)",
+      "SubqueryWithWindowing(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524854160000,1524855900000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524854160000,60000,1524855900000,300000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(http_requests_total)))),1524855988000,0,1524855988000,MinOverTime,List(),1800000,60000,Some(60000))"
+    )
+    parseWithAntlr(
+      "(heap_usage + heap_usage)[5m:1m]",
+      "TopLevelSubquery(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),List(),List(),List()),1524855988000,1000000,1524855988000,300000,60000)"
+    )
+    parseWithAntlr(
+      "heap_usage[10m:1m] offset 30s",
+      "TopLevelSubquery(PeriodicSeries(RawSeries(IntervalSelector(1524855360000,1524855900000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855360000,60000,1524855900000,None),1524855988000,1000000,1524855988000,600000,60000)"
+    )
+
+    parseWithAntlr(
+      "sum_over_time(heap_usage[10m:1m] offset 3m)[2m:1m] offset 1m",
+      "TopLevelSubquery(SubqueryWithWindowing(PeriodicSeries(RawSeries(IntervalSelector(1524855060000,1524855720000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855060000,60000,1524855720000,None),1524855840000,60000,1524855900000,SumOverTime,List(),600000,60000,Some(180000)),1524855988000,1000000,1524855988000,120000,60000)"
+    )
+    parseWithAntlr(
+      "sum_over_time(heap_usage[3m:1m] offset 3m)",
+      "SubqueryWithWindowing(PeriodicSeries(RawSeries(IntervalSelector(1524855660000,1524855780000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855660000,60000,1524855780000,None),1524855988000,0,1524855988000,SumOverTime,List(),180000,60000,Some(180000))"
+    )
+    parseWithAntlr(
+      "sum_over_time(sum_over_time(heap_usage[3m:1m] offset 3m)[2m:1m] offset 1m)",
+      "SubqueryWithWindowing(SubqueryWithWindowing(PeriodicSeries(RawSeries(IntervalSelector(1524855480000,1524855720000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855480000,60000,1524855720000,None),1524855840000,60000,1524855900000,SumOverTime,List(),180000,60000,Some(180000)),1524855988000,0,1524855988000,SumOverTime,List(),120000,60000,Some(60000))"
+    )
+  }
+
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
       "http_requests_total + time()" -> "ScalarVectorBinaryOperation(ADD,ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),false)",
@@ -668,6 +700,20 @@ class ParserSpec extends AnyFunSpec with Matchers {
         }
       }
     }
+  }
+
+  private def parseWithAntlr(query: String, expectedLp: String) = {
+    info(s"Parsing $query")
+    val qts: Long = 1524855988L
+    val step = 1000
+    val defaultQueryParams = TimeStepParams(qts, step, qts)
+    val result = AntlrParser.parseQuery(query)
+    val lp: LogicalPlan = result match {
+      case p: PeriodicSeries => p.toSeriesPlan(defaultQueryParams)
+      case r: SimpleSeries   => r.toSeriesPlan(defaultQueryParams, isRoot = true)
+      case _ => throw new UnsupportedOperationException()
+    }
+    lp.toString shouldEqual (expectedLp)
   }
 
   private def parseSubqueryError(query: String) = {
