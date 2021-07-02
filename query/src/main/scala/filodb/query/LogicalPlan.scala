@@ -205,8 +205,11 @@ case class SubqueryWithWindowing(
   offsetMs: Option[Long]
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
-  //TODO needs to be implemented for long time range planner
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = ???
+
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = {
+    val updatedInnerPeriodicSeries = innerPeriodicSeries.replacePeriodicSeriesFilters(filters)
+    this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries)
+  }
 }
 
 /**
@@ -230,8 +233,12 @@ case class TopLevelSubquery(
   originalSubqueryStepMs: Long
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
-  //TODO needs to be implemented for long time range planner
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = ???
+
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = {
+    val updatedInnerPeriodicSeries = innerPeriodicSeries.replacePeriodicSeriesFilters(filters)
+    this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries)
+  }
+
 }
 
 /**
