@@ -3,13 +3,14 @@ package filodb.repair
 import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
 import filodb.core.GlobalConfig
 import org.apache.spark.SparkConf
-import org.scalatest.BeforeAndAfterAll
+import org.scalatest.{BeforeAndAfterAll, DoNotDiscover}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.io.File
 
+@DoNotDiscover
 class PartitionKeysCopierValidatorSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
 
   val sourceConfigPath = "conf/timeseries-filodb-server.conf"
