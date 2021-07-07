@@ -192,12 +192,20 @@ object PartitionKeysCopierValidatorMain extends App with StrictLogging {
         .mapPartitions(splits => PartitionKeysCopierValidator.lookup(conf).getTargetRows(splits))
     )
 
-    assert(
-      sourceRows.except(targetRows).isEmpty &&
-      targetRows.except(sourceRows).isEmpty
-    )
+    val sourceDiff = sourceRows.except(targetRows)
+    val targetDiff = targetRows.except(sourceRows)
 
-    logger.info(s"PartitionKeysCopierValidator validated data successfully!")
+    if (sourceDiff.isEmpty) {
+      logger.info(s"PartitionKeysCopierValidator validated successfully with no diff.")
+    } else {
+      logger.info(s"PartitionKeysCopierValidator found diff! " +
+        s"Source rows size: ${sourceRows.count()} " +
+        s"Target rows size: ${targetRows.count()} " +
+        s"Source diff size: ${sourceDiff.count()} " +
+        s"Target diff size: ${targetDiff.count()} ")
+      sourceDiff.show(1000, false)
+      targetDiff.show(1000, false)
+    }
 
     validator.shutdown()
     spark
