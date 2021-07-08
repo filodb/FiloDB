@@ -57,7 +57,7 @@ object Util {
       Futures.addCallback(lf, new FutureCallback[A] {
         def onFailure(t: Throwable): Unit = promise failure t
         def onSuccess(result: A): Unit = promise success result
-      })
+      }, GlobalScheduler.globalImplicitScheduler)
 
       promise.future
     }

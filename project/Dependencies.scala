@@ -19,9 +19,7 @@ object Dependencies {
   val akkaHttpVersion   = "10.1.8"
   val cassDriverVersion = "3.7.1"
   val ficusVersion      = "1.3.4"
-  val kamonBundleVersion = "2.1.4"
-  val kamonZipkinVersion = "2.1.4"
-  val kamonPrometheusVersion = "2.1.4"
+  val kamonBundleVersion = "2.2.2"
   val monixKafkaVersion = "0.15"
   val sparkVersion      = "2.4.4"
   val sttpVersion       = "1.3.3"
@@ -62,7 +60,8 @@ object Dependencies {
 
   lazy val coreDeps = commonDeps ++ Seq(
     scalaLoggingDep,
-    "io.kamon"                     %% "kamon-zipkin"      % kamonZipkinVersion,
+    "io.kamon"                     %% "kamon-zipkin"      % kamonBundleVersion,
+    "io.kamon"                     %% "kamon-opentelemetry" % kamonBundleVersion,
     "org.slf4j"                    % "slf4j-api"          % "1.7.10",
     "com.beachape"                 %% "enumeratum"        % "1.5.10",
     "io.monix"                     %% "monix"             % "2.3.3",
@@ -107,7 +106,7 @@ object Dependencies {
     "com.typesafe.akka"      %% "akka-cluster"                % akkaVersion withJavadoc(),
     "io.altoo"               %% "akka-kryo-serialization"     % "1.0.0" excludeAll(excludeMinlog, excludeOldLz4),
     "de.javakaffee"          % "kryo-serializers"             % "0.42" excludeAll(excludeMinlog),
-    "io.kamon"               %% "kamon-prometheus"            % kamonPrometheusVersion,
+    "io.kamon"               %% "kamon-prometheus"            % kamonBundleVersion,
     // Redirect minlog logs to SLF4J
     "com.dorkbox"            % "MinLog-SLF4J"                 % "1.12",
     "com.opencsv"            % "opencsv"                      % "3.3",
@@ -155,7 +154,7 @@ object Dependencies {
 
   lazy val standaloneDeps = Seq(
     logbackDep,
-    "io.kamon"              %% "kamon-zipkin"            % kamonZipkinVersion,
+    "io.kamon"              %% "kamon-zipkin"            % kamonBundleVersion,
     "com.iheart"            %% "ficus"                   % ficusVersion      % Test,
     "com.typesafe.akka"     %% "akka-multi-node-testkit" % akkaVersion       % Test,
     "com.softwaremill.sttp" %% "circe"                   % sttpVersion       % Test,

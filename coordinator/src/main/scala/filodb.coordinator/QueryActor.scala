@@ -124,6 +124,7 @@ final class QueryActor(memStore: MemStore,
         .start()
       // Dont finish span since we finish it asynchronously when response is received
       Kamon.runWithSpan(queryExecuteSpan, false) {
+        queryExecuteSpan.mark("__TailSampled__")
         queryExecuteSpan.tag("query", q.getClass.getSimpleName)
         queryExecuteSpan.tag("query-id", q.queryContext.queryId)
         val querySession = QuerySession(q.queryContext, queryConfig)
