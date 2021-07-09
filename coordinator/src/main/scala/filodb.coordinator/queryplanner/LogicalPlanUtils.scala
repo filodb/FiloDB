@@ -6,6 +6,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils.{getLookBackMillis, getTimeFromLogicalPlan}
 import filodb.core.query.{QueryContext, RangeParams}
+import filodb.prometheus.ast.SubqueryUtils
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
 import filodb.query._
@@ -133,10 +134,35 @@ object LogicalPlanUtils extends StrictLogging {
                                               lp.copy(lhs = updatedLhs, rhs = updatedRhs, rangeParams =
                                                 RangeParams(timeRange.startMs / 1000, lp.rangeParams.stepSecs,
                                                   timeRange.endMs / 1000))
-      case sq: SubqueryWithWindowing       => ??? // TODO needed for Long Time Range Planner
-      case tlsq: TopLevelSubquery          => ??? // TODO needed for Long Time Range Planner
+      case sq: SubqueryWithWindowing       => copySubqueryWithWindowingWithUpdatedTimeRange(timeRange, sq)
+      case tlsq: TopLevelSubquery          => copyTopLevelSubqueryWithUpdatedTimeRange(timeRange, tlsq)
     }
   }
+
+  private def copyTopLevelSubqueryWithUpdatedTimeRange(
+    timeRange: TimeRange, topLevelSubquery: TopLevelSubquery
+  ): TopLevelSubquery = {
+    val newInner = copyWithUpdatedTimeRange(topLevelSubquery.innerPeriodicSeries, timeRange)
+    topLevelSubquery.copy(innerPeriodicSeries = newInner, startMs = timeRange.startMs, endMs = timeRange.endMs)
+  }
+
+  def copySubqueryWithWindowingWithUpdatedTimeRange(
+    timeRange: TimeRange, sqww: SubqueryWithWindowing
+  ) : PeriodicSeriesPlan = {
+    val offsetMs = sqww.offsetMs match {
+      case None => 0
+      case Some(ofMs) => ofMs
+    }
+    val preciseStartForInnerMs = timeRange.startMs - sqww.subqueryWindowMs - offsetMs
+    val startForInnerMs = SubqueryUtils.getStartForFastSubquery(preciseStartForInnerMs, sqww.subqueryStepMs)
+    val preciseEndForInnerMs = timeRange.endMs - offsetMs
+    val endForInnerMs = SubqueryUtils.getEndForFastSubquery(preciseEndForInnerMs, sqww.subqueryStepMs)
+    val innerTimeRange = TimeRange(startForInnerMs, endForInnerMs)
+    val updatedInner = copyWithUpdatedTimeRange(sqww.innerPeriodicSeries, innerTimeRange)
+    sqww.copy(innerPeriodicSeries = updatedInner, startMs = timeRange.startMs, endMs = timeRange.endMs)
+
+  }
+
 
   /**
     * Used to change rangeSelector of RawSeriesLikePlan

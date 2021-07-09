@@ -192,6 +192,9 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
  *  Here query range API start,end, and step correspond to startMs, stepMs, and endMs,
  *  however, it's not necessarily the case for nested subqueries because start, step, and en
  *  will depend on the parent expression of the subquery
+ *  subqueryStepMs is used exclusively for debugging/logging, as the actual subquery step is
+ *  already baked into innerPeriodicSeries which is constructed with the subquery step before
+ *  passing to the constructor of SubqueryWithWindowing
  */
 case class SubqueryWithWindowing(
   innerPeriodicSeries: PeriodicSeriesPlan, // someExpression
@@ -214,23 +217,30 @@ case class SubqueryWithWindowing(
 
 /**
  * Please, refer to documentation of SubqueryWithWindowing, this class
- * corresponds to case A) for example foo[5m:1m]
- *
- * @param stepMs the value of step is irrelevant since startMs and endMs should always be he same, needed since
- *               TopLevelSubquery is a PeriodicSeriesPlan
- * @param endMs should always be the same as startMs, top level subquery cannot be used in range query API
- * @param subqeryLookbackMs not used in the actual codepath currenty but for debugging purposes, if we, however,
- *                          decide to do planning entirely in the SingleClusterPlanner, this parameter would be needed
- * @param subqueryStepMs not used in the actual codepath currenty but for debugging purposes, if we, however,
- *                          decide to do planning entirely in the SingleClusterPlanner, this parameter would be needed
+ * corresponds to case A), for example, foo[5m:1m]
+ * Overall, TopLevelSubquery is just a wrapper on top of the actual underlying PeriodicSeriesPlan, and is used
+ * primarily to record the existence of the actual subquery construct in the original query.
+ * When we parse top level subquery to create a logical plan, start and end parameters passed from query_range API
+ * are supposed to be the same. However, TopLevelSubquery logical plan as a PeriodicSeriesPlan
+ * will have its own startMs set to (original_start - subquery lookback), 5m in case of the above example.
+ * endMs will stay the same as the original end.
+ * The original start time needs to be modified in order for the TopLevelSubquery to be splittable to support
+ * long range subqueries. If logical plan has its start and end equal, this plan is impossible to split.
+ * Subqueries, however, should be splittable. Generally, the parameters:
+ * startMs, stepMs, endMs are not used by the further planners,
+ * they are needed only for the logic to modify the logical plan to enable spanning long range queries across
+ * several clusters.
+ * original_start, original_end are the start and end parameters of TimeRangeParam passed to toSeriesPlan()
+ * invoked to generate TopLevelSubquery
+ * @param startMs = original_start  - subquery_lookback
+ * @param stepMs is the value of the subquery step, not used by the planners but for debugging/documentation
+ * @param endMs should always be the same as original_start
  **/
 case class TopLevelSubquery(
   innerPeriodicSeries: PeriodicSeriesPlan, // someExpression
-  startMs: Long,
+  startMs: Long, //original start - 5m
   stepMs: Long,
-  endMs: Long,
-  originalSubqueryLookbackMs: Long,
-  originalSubqueryStepMs: Long
+  endMs: Long
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
 
@@ -238,6 +248,7 @@ case class TopLevelSubquery(
     val updatedInnerPeriodicSeries = innerPeriodicSeries.replacePeriodicSeriesFilters(filters)
     this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries)
   }
+
 
 }
 
