@@ -106,7 +106,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   private val endTimeSort = new Sort(new SortField(END_TIME, SortField.Type.LONG),
                                      new SortField(START_TIME, SortField.Type.LONG))
   config.setIndexSort(endTimeSort)
-  private val indexWriter = new IndexWriter(mMapDirectory, config)
+  private val indexWriter = new IndexWriterPlus(mMapDirectory, config, ref, shardNum)
 
   private val utf8ToStrCache = concurrentCache[UTF8Str, String](PartKeyLuceneIndex.MAX_STR_INTERN_ENTRIES)
 

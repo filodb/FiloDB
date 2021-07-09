@@ -1,14 +1,20 @@
 package filodb.core.memstore
 
+import java.lang.management.{BufferPoolMXBean, ManagementFactory}
+import java.util.concurrent.TimeUnit
+
+import scala.collection.JavaConverters._
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
+import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 
-import filodb.core.{DatasetRef, ErrorResponse, Response}
+import filodb.core.{DatasetRef, ErrorResponse, GlobalScheduler, Response}
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.{Column, DataSchema, Schemas}
@@ -41,6 +47,19 @@ final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error 
  * each shard.
  */
 trait MemStore extends ChunkSource {
+
+  // this is added since Kamon does not report stats on direct and mapped memory pools which lucene uses
+  Observable.interval(FiniteDuration.apply(1, TimeUnit.MINUTES))
+    .foreach { _ =>
+      val pools = ManagementFactory.getPlatformMXBeans(classOf[BufferPoolMXBean])
+      for (pool <- pools.asScala) {
+        Kamon.gauge("filodb_jvm_memory_buffer_pool_count").withTag("poolName", pool.getName).update(pool.getCount)
+        Kamon.gauge("filodb_jvm_memory_buffer_pool_used", MeasurementUnit.information.bytes)
+          .withTag("poolName", pool.getName).update(pool.getMemoryUsed)
+        Kamon.gauge("filodb_jvm_memory_buffer_pool_capacity", MeasurementUnit.information.bytes)
+          .withTag("poolName", pool.getName).update(pool.getTotalCapacity)
+      }
+    }(GlobalScheduler.globalImplicitScheduler)
 
   /**
     * Persistent column store. Ingested data will eventually be poured into this sink for persistence, and
