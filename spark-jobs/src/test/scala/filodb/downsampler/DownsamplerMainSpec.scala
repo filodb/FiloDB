@@ -1,7 +1,6 @@
 package filodb.downsampler
 
 import com.typesafe.config.{ConfigException, ConfigFactory}
-
 import filodb.cardbuster.CardinalityBuster
 import filodb.core.GlobalScheduler._
 import filodb.core.MachineMetricsData
@@ -12,7 +11,7 @@ import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
-import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig}
+import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig, TimeRangeChunkScan}
 import filodb.downsampler.chunk.{BatchDownsampler, Downsampler, DownsamplerSettings}
 import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
 import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
@@ -29,9 +28,9 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
+
 import java.io.File
 import java.time.Instant
-
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
@@ -89,6 +88,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
   def hour(millis: Long = System.currentTimeMillis()): Long = millis / 1000 / 60 / 60
 
+  val currTime = System.currentTimeMillis()
+
   override def beforeAll(): Unit = {
     batchDownsampler.downsampleRefsByRes.values.foreach { ds =>
       downsampleColStore.initialize(ds, 4).futureValue
@@ -141,7 +142,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
-    val pk = PartKeyRecord(untypedPartKeyBytes, 74372801000L, 74373042000L, Some(150))
+    val pk = PartKeyRecord(untypedPartKeyBytes, 74372801000L, currTime, Some(150))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
@@ -184,7 +185,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
-    val pk = PartKeyRecord(gaugePartKeyBytes, 74372801000L, 74373042000L, Some(150))
+    val pk = PartKeyRecord(gaugePartKeyBytes, 74372801000L, currTime, Some(150))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
@@ -225,7 +226,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
-    val pk = PartKeyRecord(gaugeLowFreqPartKeyBytes, 74372801000L, 74373042000L, Some(150))
+    val pk = PartKeyRecord(gaugeLowFreqPartKeyBytes, 74372801000L, currTime, Some(150))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
@@ -272,7 +273,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
-    val pk = PartKeyRecord(counterPartKeyBytes, 74372801000L, 74373042000L, Some(1))
+    val pk = PartKeyRecord(counterPartKeyBytes, 74372801000L, currTime, Some(1))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
@@ -320,7 +321,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
-    val pk = PartKeyRecord(histPartKeyBytes, 74372801000L, 74373042000L, Some(199))
+    val pk = PartKeyRecord(histPartKeyBytes, 74372801000L, currTime, Some(199))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
@@ -372,7 +373,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
-    val pk = PartKeyRecord(histNaNPartKeyBytes, 74372801000L, 74373042000L, Some(199))
+    val pk = PartKeyRecord(histNaNPartKeyBytes, 74372801000L, currTime, Some(199))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
@@ -850,7 +851,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       val colFltrs = if (metricName == histNameNaN) colFiltersNaN else colFilters
       val queryFilters = colFltrs :+ ColumnFilter("_metric_", Equals(metricName))
       val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams = PlannerParams(sampleLimit = 1000)),
-        InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
+        InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters, TimeRangeChunkScan(74372801000L, 74373042000L))
 
       val querySession = QuerySession(QueryContext(), queryConfig)
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
