@@ -31,7 +31,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
                                            shard: Int,
                                            filters: Seq[ColumnFilter],
                                            chunkMethod: ChunkScanMethod,
-                                           metricColumn: String,
+                                           metricColumn: String = "",
                                            schema: Option[String] = None,
                                            colName: Option[String] = None) extends LeafExecPlan {
   import SelectRawPartitionsExec._
@@ -42,12 +42,12 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   var finalPlan: SelectRawPartitionsExec = _
 
   // Remove _columnName from metricColumn and generate PartLookupResult
-  private def removeColumn(filters: Seq[ColumnFilter], metricName: String,
-                           columnName: String, source: ChunkSource,
-                           querySession: QuerySession) = {
+  private def removeColumnAndGenerateLookupResult(filters: Seq[ColumnFilter], metricName: String, columnName: String,
+                                                  source: ChunkSource,
+                                                  querySession: QuerySession) = {
     // Assume metric name has only equal filter
     val filterWithoutColumn = filters.filterNot(_.column == metricColumn) :+
-      ColumnFilter(metricColumn, Equals(metricName.replace(s"_$columnName", "")))
+      ColumnFilter(metricColumn, Equals(metricName.stripSuffix(s"_$columnName")))
 
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filterWithoutColumn)
     val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
@@ -58,21 +58,25 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   private def finalizePlan(source: ChunkSource,
                            querySession: QuerySession): SelectRawPartitionsExec = {
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
-    var lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
-    val metricNameList = filters.filter(_.column == metricColumn).map(_.filter.valuesStrings.head.toString)
-    var newColName = colName
     Kamon.currentSpan().mark("filtered-partition-scan")
+    var lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
+    val metricName = filters.find(_.column == metricColumn).map(_.filter.valuesStrings.head.toString)
+    var newColName = colName
 
-  // _bucket & le are removed in SingleClusterPlanner
-   if (lookupRes.firstSchemaId.isEmpty && querySession.queryConfig.translatePromHistogram) {
+  /**
+   * Remove _sum & _count suffix. _bucket & le are removed in SingleClusterPlanner
+   * Metric name can have _sum & _count as suffix. So we remove the suffix only when partition lookup does not
+   * return any results
+   */
+   if (lookupRes.firstSchemaId.isEmpty && querySession.queryConfig.translatePromToFilodbHistogram) {
      require(colName.isEmpty, "Prom query should not have colName")
 
-     if (!metricNameList.isEmpty ) {
-       val metricName = metricNameList.head
-       val res = if (metricName.endsWith("_sum"))  removeColumn(filters, metricName, "sum",
-                 source, querySession)
-                 else if (metricName.endsWith("_count"))  removeColumn(filters, metricName, "count",
-                 source, querySession)
+     if (metricName.isDefined) {
+       val res = if (metricName.get.endsWith("_sum"))
+                  removeColumnAndGenerateLookupResult(filters, metricName.get, "sum", source, querySession)
+                 else if (metricName.get.endsWith("_count"))
+                  removeColumnAndGenerateLookupResult(filters, metricName.get, "count", source,
+                    querySession)
                  else (lookupRes, newColName)
 
        lookupRes = res._1

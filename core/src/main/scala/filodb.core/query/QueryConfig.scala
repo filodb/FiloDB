@@ -21,7 +21,7 @@ class QueryConfig(queryConfig: Config) {
     v
   }
   lazy val parser = queryConfig.as[String]("parser")
-  lazy val translatePromHistogram= queryConfig.getBoolean("translate-prom-histogram")
+  lazy val translatePromToFilodbHistogram= queryConfig.getBoolean("translate-prom-to-filodb-histogram")
 
   /**
    * Feature flag test: returns true if the config has an entry with "true", "t" etc

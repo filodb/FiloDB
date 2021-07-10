@@ -359,26 +359,27 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   private def materializePeriodicSeries(qContext: QueryContext,
                                         lp: PeriodicSeries): PlanResult = {
 
-    var nameFilter: Seq[String] = Nil;
-    var leFilter: Seq[String] = Nil;
-
+   // Convert to FiloDB histogram by removing le label  and bucket prefix
    // _sum and _count are removed in MultiSchemaPartitionsExec
-    val lpWithoutBucket: PeriodicSeries = if (lp.rawSeries.isInstanceOf[RawSeries] && queryConfig.
-      translatePromHistogram) {
-     val rawSeriesLp = lp.rawSeries.asInstanceOf[RawSeries]
-     nameFilter = rawSeriesLp.filters.filter(_.column=="__name__").map(_.filter.valuesStrings.head.toString)
-     leFilter = rawSeriesLp.filters.filter(_.column=="le").map(_.filter.valuesStrings.head.toString)
+    val (nameFilter: Option[String], leFilter: Option[String], lpWithoutBucket: PeriodicSeries) =
+      if (lp.rawSeries.isInstanceOf[RawSeries] && queryConfig.translatePromToFilodbHistogram) {
 
-     val filtersWithoutBucket= rawSeriesLp.filters.filterNot(_.column=="__name__").filterNot(_.column=="le") :+
-        ColumnFilter("__name__", Equals(nameFilter.head.replace("_bucket", "")))
-     lp.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket))
-    } else lp
+     val rawSeriesLp = lp.rawSeries.asInstanceOf[RawSeries]
+     val nameFilter = rawSeriesLp.filters.find(_.column.equals(PromMetricLabel)).
+       map(_.filter.valuesStrings.head.toString)
+     val leFilter = rawSeriesLp.filters.find(_.column =="le").map(_.filter.valuesStrings.head.toString)
+
+     val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
+       filterNot(_.column=="le") :+ ColumnFilter(PromMetricLabel,
+       Equals(nameFilter.get.replace("_bucket", "")))
+      (nameFilter, leFilter, lp.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+    } else (None, None, lp)
 
     val rawSeries = walkLogicalPlanTree(lpWithoutBucket.rawSeries, qContext)
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
       None, None, qContext, false, Nil, lp.offsetMs)))
 
-    if (!nameFilter.isEmpty && nameFilter.head.endsWith("_bucket") && !leFilter.isEmpty) {
+    if (nameFilter.isDefined && nameFilter.head.endsWith("_bucket") && leFilter.isDefined) {
       val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(lp.startMs/1000, lp.stepMs/1000,
         lp.endMs/1000))
       rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
