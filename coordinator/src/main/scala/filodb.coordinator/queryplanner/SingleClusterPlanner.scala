@@ -267,7 +267,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
         qContext,
         false,
         paramsExec,
-        None,
+        sqww.offsetMs,
         false,
         true
       )

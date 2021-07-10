@@ -118,4 +118,4 @@ do
     create_chunk_tables ${FILO_DOWNSAMPLE_KEYSPACE} "${DATASET}_ds_${RES}"
 done
 
-create_partkey_tables ${FILO_DOWNSAMPLE_KEYSPACE} "${DATASET}_ds_${RESOLUTIONS[-1]}"
+create_partkey_tables ${FILO_DOWNSAMPLE_KEYSPACE} "${DATASET}_ds_${RESOLUTIONS[@]: -1}"
