@@ -397,7 +397,7 @@ trait ExpressionParser extends AggregatesParser with SelectorParser with Numeric
 
   lazy val subqueryExpression: PackratParser[SubqueryExpression] =
     subqueryableExpression ~ subqueryClause ^^ {
-      case sqe ~ sqc => SubqueryExpression( sqe, sqc)
+      case sqe ~ sqc => SubqueryExpression( sqe, sqc, None) //we do not support offset in the legacy parser
     }
 }
 

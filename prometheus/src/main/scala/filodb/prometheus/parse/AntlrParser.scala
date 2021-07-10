@@ -93,8 +93,12 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
       throw new IllegalArgumentException("Subquery can only be applied to instant queries")
     }
     val sqcl = build[SubqueryClause](ctx.subquery())
-    // FIXME: Do something with the optional offset.
-    SubqueryExpression(lhs.asInstanceOf[PeriodicSeries], sqcl)
+    val offset: Option[Duration] = if (ctx.offset == null) {
+      None
+    } else {
+      Some(build[Duration](ctx.offset))
+    }
+    SubqueryExpression(lhs.asInstanceOf[PeriodicSeries], sqcl, offset)
   }
 
   override def visitSubquery(ctx: PromQLParser.SubqueryContext): SubqueryClause = {

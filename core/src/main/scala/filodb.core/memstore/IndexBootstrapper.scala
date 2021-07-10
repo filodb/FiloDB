@@ -55,7 +55,8 @@ class IndexBootstrapper(colStore: ColumnStore) {
    */
   def bootstrapIndexDownsample(index: PartKeyLuceneIndex,
                      shardNum: Int,
-                     ref: DatasetRef)
+                     ref: DatasetRef,
+                     ttlMs: Long)
                     (assignPartId: PartKeyRecord => Int): Task[Long] = {
 
     val recoverIndexLatency = Kamon.gauge("shard-recover-index-latency", MeasurementUnit.time.milliseconds)
@@ -63,6 +64,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
       .withTag("shard", shardNum)
     val start = System.currentTimeMillis()
     colStore.scanPartKeys(ref, shardNum)
+      .filter(_.endTime > start - ttlMs)
       .mapAsync(Runtime.getRuntime.availableProcessors()) { pk =>
         Task {
           val partId = assignPartId(pk)

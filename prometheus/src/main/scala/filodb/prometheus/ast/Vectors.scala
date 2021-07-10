@@ -88,7 +88,9 @@ case class VectorMatch(matching: Option[JoinMatching],
   }
 }
 
-case class SubqueryExpression(subquery: PeriodicSeries, sqcl: SubqueryClause) extends Expression with PeriodicSeries {
+case class SubqueryExpression(
+    subquery: PeriodicSeries, sqcl: SubqueryClause, offset: Option[Duration]
+) extends Expression with PeriodicSeries {
 
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     // There are only two places for the subquery to be defined in the abstract syntax tree:
@@ -101,9 +103,13 @@ case class SubqueryExpression(subquery: PeriodicSeries, sqcl: SubqueryClause) ex
     // It's illegal to have a top level subquery expression to be called from query_range API
     // when start and end parameters are not the same.
     require(timeParams.start == timeParams.end, "Subquery is not allowed as a top level expression for query_range")
+    val offsetSec : Long = offset match {
+      case None => 0
+      case Some(duration) => duration.millis(1L) / 1000
+    }
     val stepToUseMs = SubqueryUtils.getSubqueryStepMs(sqcl.step);
-    var startS = timeParams.start - (sqcl.window.millis(1L) / 1000)
-    var endS = timeParams.start
+    var startS = timeParams.start - (sqcl.window.millis(1L) / 1000) - offsetSec
+    var endS = timeParams.start - offsetSec
     startS = SubqueryUtils.getStartForFastSubquery(startS, stepToUseMs/1000 )
     endS = SubqueryUtils.getEndForFastSubquery(endS, stepToUseMs/1000 )
     val timeParamsToUse = TimeStepParams(

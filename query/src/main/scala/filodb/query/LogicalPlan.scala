@@ -201,7 +201,8 @@ case class SubqueryWithWindowing(
   functionId: RangeFunctionId, // sum_over_time
   functionArgs: Seq[FunctionArgsPlan] = Nil,
   subqueryWindowMs: Long, // 5m
-  subqueryStepMs: Long //1m
+  subqueryStepMs: Long, //1m
+  offsetMs: Option[Long]
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
   //TODO needs to be implemented for long time range planner
