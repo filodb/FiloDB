@@ -31,7 +31,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
                                            shard: Int,
                                            filters: Seq[ColumnFilter],
                                            chunkMethod: ChunkScanMethod,
-                                           metricColumn: String = "",
+                                           metricColumn: String,
                                            schema: Option[String] = None,
                                            colName: Option[String] = None) extends LeafExecPlan {
   import SelectRawPartitionsExec._
