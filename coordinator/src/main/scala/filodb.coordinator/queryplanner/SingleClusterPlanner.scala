@@ -359,7 +359,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   private def materializePeriodicSeries(qContext: QueryContext,
                                         lp: PeriodicSeries): PlanResult = {
 
-   // Convert to FiloDB histogram by removing le label  and bucket prefix
+   // Convert to FiloDB histogram by removing le label and bucket prefix
    // _sum and _count are removed in MultiSchemaPartitionsExec since we need to check whether there is a metric name
    // with _sum/_count as suffix
     val (nameFilter: Option[String], leFilter: Option[String], lpWithoutBucket: PeriodicSeries) =
