@@ -11,12 +11,14 @@ import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{EmptyQueryConfig, PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.ChunkSource
+import filodb.prometheus.ast.WindowConstants
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{LogicalPlan, PeriodicSeriesPlan, PeriodicSeriesWithWindowing}
 import filodb.query.exec._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
 
 class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
 
@@ -78,8 +80,48 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
     ep.lp shouldEqual logicalPlan
   }
 
+  it("should direct raw-cluster-only top level subqueries to raw planner") {
+    val logicalPlan = Parser.queryRangeToLogicalPlan(
+      "foo[2m:1m]",
+      TimeStepParams(now/1000 - 1.minutes.toSeconds, 1.minute.toSeconds, now/1000 - 1.minutes.toSeconds)
+    )
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
+    ep.name shouldEqual "raw"
+    ep.lp shouldEqual logicalPlan
+  }
+
+  it("should direct raw-cluster-only range function subqueries to raw planner") {
+    val logicalPlan = Parser.queryRangeToLogicalPlan(
+      "sum_over_time(foo[2m:1m])",
+      TimeStepParams(now/1000 - 2.minutes.toSeconds, 1.minute.toSeconds, now/1000 - 1.minutes.toSeconds)
+    )
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
+    ep.name shouldEqual "raw"
+    ep.lp shouldEqual logicalPlan
+  }
+
   it("should direct downsample-only queries to downsample planner") {
     val logicalPlan = Parser.queryRangeToLogicalPlan("rate(foo[2m])",
+      TimeStepParams(now/1000 - 20.minutes.toSeconds, 1.minute.toSeconds, now/1000 - 15.minutes.toSeconds))
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
+    ep.name shouldEqual "downsample"
+    ep.lp shouldEqual logicalPlan
+  }
+
+  it("should directed downsample-only top level subqueries to downsample planner") {
+    val logicalPlan = Parser.queryRangeToLogicalPlan("foo[2m:1m]",
+      TimeStepParams(now/1000 - 20.minutes.toSeconds, 1.minute.toSeconds, now/1000 - 20.minutes.toSeconds))
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
+    ep.name shouldEqual "downsample"
+    ep.lp shouldEqual logicalPlan
+  }
+
+  it("should directed downsample-only range function subqueries to downsample planner") {
+    val logicalPlan = Parser.queryRangeToLogicalPlan("sum_over_time(foo[2m:1m])",
       TimeStepParams(now/1000 - 20.minutes.toSeconds, 1.minute.toSeconds, now/1000 - 15.minutes.toSeconds))
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
@@ -119,6 +161,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
     val downsampleLp = downsampleEp.lp.asInstanceOf[PeriodicSeriesPlan]
 
     // find first instant with range available within raw data
+    // 2 minutes is a lookback here, so, we make sure that raw cluster has enough data for lookback
     val rawStart = ((start*1000) to (end*1000) by (step*1000)).find { instant =>
       instant - 2.minutes.toMillis > earliestRawTime
     }.get
@@ -128,6 +171,124 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
 
     downsampleLp.startMs shouldEqual logicalPlan.startMs
     downsampleLp.endMs shouldEqual rawStart - 1.minute.toMillis
+  }
+
+  it("should direct overlapping top level subquery to both raw & downsample planner and stitch") {
+
+    val start = now/1000 - 1.minutes.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now/1000 - 1.minutes.toSeconds
+    val logicalPlan = Parser.queryRangeToLogicalPlan("foo[28m:1m]",
+      TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan]
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
+    val stitchExec = ep.asInstanceOf[StitchRvsExec]
+    stitchExec.children.size shouldEqual 2
+
+    val rawEp = stitchExec.children.head.asInstanceOf[MockExecPlan]
+    val downsampleEp = stitchExec.children.last.asInstanceOf[MockExecPlan]
+
+    rawEp.name shouldEqual "raw"
+    downsampleEp.name shouldEqual "downsample"
+    val rawLp = rawEp.lp.asInstanceOf[PeriodicSeriesPlan]
+    val downsampleLp = downsampleEp.lp.asInstanceOf[PeriodicSeriesPlan]
+    val actualStart = (start - 28.minutes.toSeconds)
+
+    // LogicalPlanUtils.getLookBackMillis() will return 300s as a default stale data lookback
+    val rawStartForSubquery =
+      getStartForSubquery(earliestRawTime, 60000) + WindowConstants.staleDataLookbackMillis
+
+    rawLp.startMs shouldEqual rawStartForSubquery
+    rawLp.endMs shouldEqual logicalPlan.endMs
+
+    downsampleLp.startMs shouldEqual logicalPlan.startMs
+    downsampleLp.endMs shouldEqual rawStartForSubquery - 1.minute.toMillis
+  }
+
+//  it("TODO should direct subquery with windowing to downsample planner and verify subquery lookback") {
+//    val start = now/1000 - 30.minutes.toSeconds
+//    val step = 1.minute.toSeconds
+//    val end = now/1000 - 2.minutes.toSeconds
+//    val logicalPlan = Parser.queryRangeToLogicalPlan("max_over_time(foo[3m:1m])",
+//      TimeStepParams(start, step, end))
+//      .asInstanceOf[PeriodicSeriesPlan]
+//    val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
+//    val exp = ep.asInstanceOf[MockExecPlan]
+//    exp.name shouldEqual "downsample"
+//  }
+
+//  it("TODO here we have raw plan start bigger than the actual end of the original plan") {
+//
+//    val start = now/1000 - 30.minutes.toSeconds
+//    val step = 1.minute.toSeconds
+//    val end = now/1000 - 2.minutes.toSeconds
+//    val logicalPlan = Parser.queryRangeToLogicalPlan("max_over_time(foo[3m:1m])",
+//      TimeStepParams(start, step, end))
+//      .asInstanceOf[PeriodicSeriesPlan]
+//
+//    val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
+//    val stitchExec = ep.asInstanceOf[StitchRvsExec]
+//    stitchExec.children.size shouldEqual 2
+//
+//    val rawEp = stitchExec.children.head.asInstanceOf[MockExecPlan]
+//    val downsampleEp = stitchExec.children.last.asInstanceOf[MockExecPlan]
+//
+//    rawEp.name shouldEqual "raw"
+//    downsampleEp.name shouldEqual "downsample"
+//    val rawLp = rawEp.lp.asInstanceOf[PeriodicSeriesPlan]
+//    val downsampleLp = downsampleEp.lp.asInstanceOf[PeriodicSeriesPlan]
+//
+//    // find first instant with range available within raw data
+//    // 8 minutes is a lookback here composed of 3 minutes of subquery and 5 minutues of staleness
+//    val rawStart = ((start*1000) to (end*1000) by (step*1000)).find { instant =>
+//      instant - 8.minutes.toMillis >= earliestRawTime
+//    }.get
+//
+//    rawLp.startMs shouldEqual rawStart
+//    rawLp.endMs shouldEqual logicalPlan.endMs
+//
+//    downsampleLp.startMs shouldEqual logicalPlan.startMs
+//    downsampleLp.endMs shouldEqual rawStart - 1.minute.toMillis
+//  }
+
+  it("should direct overlapping subquery with windowing to both raw & downsample planner and stitch") {
+
+    val start = now/1000 - 30.minutes.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now/1000 - 1.minutes.toSeconds
+    val logicalPlan = Parser.queryRangeToLogicalPlan("max_over_time(foo[3m:1m])",
+      TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan]
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
+    val stitchExec = ep.asInstanceOf[StitchRvsExec]
+    stitchExec.children.size shouldEqual 2
+
+    val rawEp = stitchExec.children.head.asInstanceOf[MockExecPlan]
+    val downsampleEp = stitchExec.children.last.asInstanceOf[MockExecPlan]
+
+    rawEp.name shouldEqual "raw"
+    downsampleEp.name shouldEqual "downsample"
+    val rawLp = rawEp.lp.asInstanceOf[PeriodicSeriesPlan]
+    val downsampleLp = downsampleEp.lp.asInstanceOf[PeriodicSeriesPlan]
+
+    // find first instant with range available within raw data
+    // 8 minutes is a lookback here composed of 3 minutes of subquery and 5 minutues of staleness
+    val rawStart = ((start*1000) to (end*1000) by (step*1000)).find { instant =>
+      instant - 8.minutes.toMillis > earliestRawTime
+    }.get
+
+    rawLp.startMs shouldEqual rawStart
+    rawLp.endMs shouldEqual logicalPlan.endMs
+
+    downsampleLp.startMs shouldEqual logicalPlan.startMs
+    downsampleLp.endMs shouldEqual rawStart - 1.minute.toMillis
+  }
+
+  def getStartForSubquery(startMs: Long, stepMs: Long) : Long = {
+    val remainder = startMs % stepMs
+    startMs - remainder + stepMs
   }
 
   it("should delegate to downsample cluster and omit recent instants when there is a long lookback") {

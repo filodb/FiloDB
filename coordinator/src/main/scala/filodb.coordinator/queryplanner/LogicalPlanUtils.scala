@@ -211,16 +211,25 @@ object LogicalPlanUtils extends StrictLogging {
   }
 
   def getLookBackMillis(logicalPlan: LogicalPlan): Seq[Long] = {
-    val staleDataLookbackMillis = WindowConstants.staleDataLookbackMillis
-    val leaf = LogicalPlan.findLeafLogicalPlans(logicalPlan)
-    if (leaf.isEmpty) Seq(0L) else {
-      leaf.map { l =>
-        l match {
-          case lp: RawSeries => lp.lookbackMs.getOrElse(staleDataLookbackMillis)
-          case _             => 0
+    logicalPlan match {
+      case sww: SubqueryWithWindowing => Seq(sww.subqueryWindowMs + getLookBackMillis(sww.innerPeriodicSeries).max)
+      case _ => {
+        val staleDataLookbackMillis = WindowConstants.staleDataLookbackMillis
+        val leaf = LogicalPlan.findLeafLogicalPlans(logicalPlan)
+        val valToReturn = {
+          if (leaf.isEmpty) Seq(0L) else {
+            leaf.map { l =>
+              l match {
+                case lp: RawSeries => lp.lookbackMs.getOrElse(staleDataLookbackMillis)
+                case _             => 0
+              }
+            }
+          }
         }
+        valToReturn
       }
     }
+
   }
 
   def getMetricName(logicalPlan: LogicalPlan, datasetMetricColumn: String): Set[String] = {
