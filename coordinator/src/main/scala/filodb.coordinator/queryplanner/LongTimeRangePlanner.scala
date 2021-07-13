@@ -50,11 +50,20 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
       downsampleClusterPlanner.materialize(periodicSeriesPlan, qContext)
     } else if (startWithOffsetMs - lookbackMs >= earliestRawTime) // full time range in raw cluster
       rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
+      // the below looks like a bug, probably should be "<=", check case in LongTimeRangePlannerSpec
+      // "TODO here we have raw plan start bigger than the actual end of top plan"
+      // in the last "else" firstInstantInRaw can end up to be bigger than lastDownsampleInstant
     else if (endWithOffsetMs - lookbackMs < earliestRawTime) {// raw/downsample overlapping query with long lookback
       val lastDownsampleSampleTime = latestDownsampleTimestampFn
       val downsampleLp = if (endWithOffsetMs < lastDownsampleSampleTime) {
         periodicSeriesPlan
       } else {
+        // TODO: can be a bug, suppose start=end and this is a query like:
+        // avg_over_time(foo[7d]) or avg_over_time(foo[7d:1d])
+        // these queries are not splittable by design and should keep their start and end the same
+        // the queestion is only from which cluster: raw or downsample to pull potentially partial data
+        // how does copyLogicalPlan with updated end changes the meanings of these queries entirely
+        // Why not get rid of this else all together and just send original logical plan to downsample cluster?
         copyLogicalPlanWithUpdatedTimeRange(periodicSeriesPlan,
           TimeRange(periodicSeriesPlan.startMs, latestDownsampleTimestampFn + offsetMillis.min))
       }
@@ -67,7 +76,6 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
       val numStepsInDownsample = (earliestRawTime - startWithOffsetMs + lookbackMs) / periodicSeriesPlan.stepMs
       val lastDownsampleInstant = periodicSeriesPlan.startMs + numStepsInDownsample * periodicSeriesPlan.stepMs
       val firstInstantInRaw = lastDownsampleInstant + periodicSeriesPlan.stepMs
-
       val downsampleLp = copyLogicalPlanWithUpdatedTimeRange(periodicSeriesPlan,
         TimeRange(periodicSeriesPlan.startMs, lastDownsampleInstant))
       val downsampleEp = downsampleClusterPlanner.materialize(downsampleLp, qContext)

@@ -119,11 +119,9 @@ case class SubqueryExpression(
     )
     TopLevelSubquery(
       subquery.toSeriesPlan(timeParamsToUse),
-      timeParams.start * 1000,
-      timeParams.step * 1000,
-      timeParams.end * 1000,
-      sqcl.window.millis(1L),
-      stepToUseMs
+      startS * 1000,
+      stepToUseMs,
+      endS * 1000
     )
 
   }
