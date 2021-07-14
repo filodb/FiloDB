@@ -158,7 +158,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
 
     // read from an interval of 100000ms, resulting in 11 samples, count column
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, MMD.dataset1.ref, 0,
-                                             filters, TimeRangeChunkScan(100000L, 150000L), colName = Some("count"))
+                                             filters, TimeRangeChunkScan(100000L, 150000L),"_metric_", colName = Some("count"))
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -174,7 +174,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)),
                       ColumnFilter("_metric_", Filter.Equals("request-latency".utf8)))
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, dsRef, 0,
-                                             filters, TimeRangeChunkScan(100000L, 150000L), colName=Some("h"))
+                                             filters, TimeRangeChunkScan(100000L, 150000L), "_metric_", colName=Some("h"))
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -190,7 +190,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher,
-                                             dsRef, 0, filters, AllChunkScan)
+                                             dsRef, 0, filters, AllChunkScan, "_metric_")
     val start = now - numRawSamples * reportingInterval - 100 // reduce by 100 to not coincide with reporting intervals
     val step = 20000
     val end = now - (numRawSamples-100) * reportingInterval
@@ -225,7 +225,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher,
-      dsRef, 0, filters, AllChunkScan)
+      dsRef, 0, filters, AllChunkScan, "_metric_")
     val start = now - (numRawSamples-100) * reportingInterval
     val step = 0
     val end = now - (numRawSamples-100) * reportingInterval
@@ -250,7 +250,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     import ZeroCopyUTF8String._
     val filters = Seq(ColumnFilter("series", Filter.Equals("Series 1".utf8)))
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, MMD.dataset1.ref, 0,
-                                             filters, AllChunkScan, colName = Some("count"))
+                                             filters, AllChunkScan, "_metric_", colName = Some("count"))
 
     // Raw data like 101000, 111000, ....
     val start = 105000L
@@ -272,7 +272,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)),
                       ColumnFilter("_metric_", Filter.Equals("request-latency".utf8)))
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, dsRef, 0,
-                                             filters, AllChunkScan)   // should default to h column
+                                             filters, AllChunkScan,"_metric_")   // should default to h column
 
     val start = 105000L
     val step = 20000L
@@ -295,7 +295,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)),
                       ColumnFilter("_metric_", Filter.Equals("request-latency".utf8)))
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, dsRef, 0,
-                                             filters, AllChunkScan)   // should default to h column
+                                             filters, AllChunkScan,"_metric_")   // should default to h column
 
     val start = 105000L
     val step = 20000L
@@ -321,7 +321,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
 
   it("should return SchemaMismatch QueryError if multiple schemas found in query") {
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher,
-      dsRef, 0, Nil, AllChunkScan)
+      dsRef, 0, Nil, AllChunkScan, "_metric_")
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp.asInstanceOf[QueryError]
@@ -330,7 +330,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
 
   it("should select only specified schema if schema option given even if multiple schemas match") {
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher,
-      dsRef, 0, Nil, AllChunkScan, schema = Some("prom-counter"))
+      dsRef, 0, Nil, AllChunkScan, "_metric_", schema = Some("prom-counter"))
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -344,7 +344,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
   it("should sum Histogram records with max correctly") {
     val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)))
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, MMD.histMaxDS.ref, 0,
-                                             filters, AllChunkScan, colName = Some("h"))
+                                             filters, AllChunkScan, "_metric_", colName = Some("h"))
 
     val start = 105000L
     val step = 20000L
@@ -390,7 +390,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
   it("should extract Histogram with max using Last/None function correctly") {
     val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)))
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, MMD.histMaxDS.ref, 0,
-                                             filters, AllChunkScan)   // should default to h column
+                                             filters, AllChunkScan, "_metric_")   // should default to h column
 
     val start = 105000L
     val step = 20000L
@@ -451,7 +451,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     // Query returns n ("numRawSamples") samples - Applying Limit (n-1) to fail the query execution
     // with ResponseTooLargeException
     val execPlan = MultiSchemaPartitionsExec(QueryContext(plannerParams= PlannerParams(sampleLimit = 999)),
-                                             dummyDispatcher, dsRef, 0, filters, AllChunkScan)
+                                             dummyDispatcher, dsRef, 0, filters, AllChunkScan, "_metric_")
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp.asInstanceOf[QueryError]
     result.t.getClass shouldEqual classOf[BadQueryException]
@@ -462,7 +462,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val filters = Seq (ColumnFilter("_metric_", Filter.Equals("not_a_metric!".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = MultiSchemaPartitionsExec(QueryContext(submitTime = System.currentTimeMillis() - 180000),
-      dummyDispatcher, dsRef, 0, filters, AllChunkScan)
+      dummyDispatcher, dsRef, 0, filters, AllChunkScan, "_metric_")
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp.asInstanceOf[QueryError]
@@ -479,7 +479,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val endTime   = now - (numRawSamples-10) * reportingInterval
 
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher,
-      dsRef, 0, filters, TimeRangeChunkScan(startTime, endTime))
+      dsRef, 0, filters, TimeRangeChunkScan(startTime, endTime), "_metric_")
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -495,7 +495,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val endTime   = now - (numRawSamples-10) * reportingInterval
 
     val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher,
-      dsRef, 0, filters, TimeRangeChunkScan(startTime, endTime))
+      dsRef, 0, filters, TimeRangeChunkScan(startTime, endTime), "_metric_")
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
