@@ -235,7 +235,7 @@ case class SubqueryWithWindowing(
  * @param startMs = original_start  - subquery_lookback
  * @param stepMs is the value of the subquery step, not used by the planners but for debugging/documentation
  * @param endMs should always be the same as original_start
- **/
+ */
 case class TopLevelSubquery(
   innerPeriodicSeries: PeriodicSeriesPlan, // someExpression
   startMs: Long, //original start - 5m
