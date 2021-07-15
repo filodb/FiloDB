@@ -63,8 +63,8 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
     val metricName = filters.find(_.column == metricColumn).map(_.filter.valuesStrings.head.toString)
     var newColName = colName
 
-  /**
-   * Remove _sum & _count suffix. _bucket & le are removed in SingleClusterPlanner
+  /*
+   * Remove _sum & _count suffix. _bucket  le are removed in SingleClusterPlanner
    * Metric name can have _sum & _count as suffix. So we remove the suffix only when partition lookup does not
    * return any results
    */
