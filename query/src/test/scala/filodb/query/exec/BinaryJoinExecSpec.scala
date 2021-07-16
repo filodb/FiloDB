@@ -35,6 +35,10 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
+
+    override def clusterName: String = ???
+
+    override def isLocalCall: Boolean = ???
   }
 
   private def data(i: Int) = Stream.from(0).map(n => new TransientRow(n.toLong, i.toDouble)).take(20)
@@ -47,6 +51,8 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
           "tag2".utf8 -> s"tag2-$i".utf8))
       import NoCloseCursor._
       val rows: RangeVectorCursor = data(i).iterator
+      override def outputRange: Option[RvRange] = None
+
     }
   }
 
@@ -58,6 +64,8 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
           "tag2".utf8 -> samplesLhs(i).key.labelValues("tag2".utf8)))
       import NoCloseCursor._
       val rows: RangeVectorCursor = data(i).iterator
+      override def outputRange: Option[RvRange] = None
+
     }
   }
 
@@ -70,6 +78,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
           "job".utf8 -> s"somejob".utf8))
       import NoCloseCursor._
       val rows: RangeVectorCursor = data(i).iterator
+      override def outputRange: Option[RvRange] = None
     }
   }
 
@@ -81,6 +90,8 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
           "job".utf8 -> s"somejob".utf8))
       import NoCloseCursor._
       val rows: RangeVectorCursor = data(i).iterator
+      override def outputRange: Option[RvRange] = None
+
     }
   }
 
@@ -149,6 +160,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         Map("__name__".utf8 -> s"someMetricLhs".utf8, "_pi_".utf8 -> "0".utf8, "tag2".utf8 -> "tag2Val".utf8))
       import NoCloseCursor._
       val rows: RangeVectorCursor = data(2).iterator
+      override def outputRange: Option[RvRange] = None
     }
 
     val lhs2: RangeVector = new RangeVector {
@@ -156,6 +168,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         Map("__name__".utf8 -> s"someMetricLhs".utf8, "_step_".utf8 -> "0".utf8, "tag2".utf8 -> "tag2Val".utf8))
       import NoCloseCursor._
       val rows: RangeVectorCursor = data(2).iterator
+      override def outputRange: Option[RvRange] = None
     }
 
     val rhs1: RangeVector = new RangeVector {
@@ -163,6 +176,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         Map("__name__".utf8 -> s"someMetricRhs".utf8,"_pi_".utf8 -> "0".utf8, "tag2".utf8 -> "tag2Val".utf8))
       import NoCloseCursor._
       val rows: RangeVectorCursor = data(2).iterator
+      override def outputRange: Option[RvRange] = None
     }
 
     val rhs2: RangeVector = new RangeVector {
@@ -170,6 +184,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         Map("__name__".utf8 -> s"someMetricRhs".utf8, "_step_".utf8 -> "0".utf8, "tag2".utf8 -> "tag2Val".utf8))
       import NoCloseCursor._
       val rows: RangeVectorCursor = data(2).iterator
+      override def outputRange: Option[RvRange] = None
     }
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
@@ -199,6 +214,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         Map("__name__".utf8 -> s"someMetricLhs".utf8, "_pi_".utf8 -> "0".utf8, "tag2".utf8 -> "tag2Val".utf8))
       import NoCloseCursor._
       val rows: RangeVectorCursor = data(2).iterator
+      override def outputRange: Option[RvRange] = None
     }
 
     val lhs2: RangeVector = new RangeVector {
@@ -206,6 +222,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         Map("__name__".utf8 -> s"someMetricLhs".utf8, "_step_".utf8 -> "0".utf8, "tag2".utf8 -> "tag2Val".utf8))
       import NoCloseCursor._
       val rows: RangeVectorCursor = data(2).iterator
+      override def outputRange: Option[RvRange] = None
     }
 
     val rhs1: RangeVector = new RangeVector {
@@ -214,6 +231,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
           "tag2".utf8 -> "tag2Val".utf8, "tag1".utf8 -> "tag1Val1".utf8))
       import NoCloseCursor._
       val rows: RangeVectorCursor = data(2).iterator
+      override def outputRange: Option[RvRange] = None
     }
 
     val rhs2: RangeVector = new RangeVector {
@@ -222,6 +240,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
           "tag2".utf8 -> "tag2Val".utf8, "tag1".utf8 -> "tag1Val1".utf8))
       import NoCloseCursor._
       val rows: RangeVectorCursor = data(2).iterator
+      override def outputRange: Option[RvRange] = None
     }
 
     val rhs3: RangeVector = new RangeVector {
@@ -230,6 +249,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
           "tag2".utf8 -> "tag2Val".utf8, "tag1".utf8 -> "tag1Val2".utf8))
       import NoCloseCursor._
       val rows: RangeVectorCursor = data(2).iterator
+      override def outputRange: Option[RvRange] = None
     }
 
     val rhs4: RangeVector = new RangeVector {
@@ -238,6 +258,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
           "tag2".utf8 -> "tag2Val".utf8, "tag1".utf8 -> "tag1Val2".utf8))
       import NoCloseCursor._
       val rows: RangeVectorCursor = data(2).iterator
+      override def outputRange: Option[RvRange] = None
     }
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
@@ -271,6 +292,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
           "tag2".utf8 -> samplesLhs(2).key.labelValues("tag2".utf8))) // duplicate value
       import NoCloseCursor._
       val rows: RangeVectorCursor = data(2).iterator
+      override def outputRange: Option[RvRange] = None
     }
 
     val samplesRhs2 = scala.util.Random.shuffle(duplicate +: samplesRhs.toList) // they may come out of order
@@ -302,6 +324,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
           "tag2".utf8 -> samplesLhs(2).key.labelValues("tag2".utf8))) // duplicate value
       import NoCloseCursor._
       val rows: RangeVectorCursor = data(2).iterator
+      override def outputRange: Option[RvRange] = None
     }
 
     val samplesLhs2 = scala.util.Random.shuffle(duplicate +: samplesLhs.toList) // they may come out of order
@@ -398,6 +421,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
             "tag2".utf8 -> s"tag2-$i".utf8))
         import NoCloseCursor._
         val rows: RangeVectorCursor = data(i).iterator
+        override def outputRange: Option[RvRange] = None
       }
     }
 
@@ -409,6 +433,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
             "tag2".utf8 -> samplesLhs(i).key.labelValues("tag2".utf8)))
         import NoCloseCursor._
         val rows: RangeVectorCursor = data(i).iterator
+        override def outputRange: Option[RvRange] = None
       }
     }
 
@@ -442,6 +467,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
             "tag2".utf8 -> s"tag2-$i".utf8))
         import NoCloseCursor._
         val rows: RangeVectorCursor = data(i).iterator
+        override def outputRange: Option[RvRange] = None
       }
     }
 
@@ -453,6 +479,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
             "tag2".utf8 -> samplesLhs(i).key.labelValues("tag2".utf8)))
         import NoCloseCursor._
         val rows: RangeVectorCursor = data(i).iterator
+        override def outputRange: Option[RvRange] = None
       }
     }
 
@@ -501,8 +528,8 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         .toListL.runAsync.futureValue
     }
     thrown.getCause.getClass shouldEqual classOf[BadQueryException]
-    thrown.getCause.getMessage shouldEqual "This query results in more than 1 join cardinality." +
-      " Try applying more filters."
+    thrown.getCause.getMessage shouldEqual "The join in this query has input cardinality of 2 which is more than " +
+      "limit of 1. Try applying more filters or reduce time range."
   }
 
   it("should throw BadQueryException - one-to-one with on - cardinality limit 1") {
@@ -525,8 +552,8 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         .toListL.runAsync.futureValue
     }
     thrown.getCause.getClass shouldEqual classOf[BadQueryException]
-    thrown.getCause.getMessage shouldEqual "This query results in more than 1 join cardinality." +
-      " Try applying more filters."
+    thrown.getCause.getMessage shouldEqual "The join in this query has input cardinality of 2 which is more than " +
+      "limit of 1. Try applying more filters or reduce time range."
   }
 
   it ("should stitch same RVs from multiple shards on LHS and RHS before joining by ignoring NaN") {
@@ -551,6 +578,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         new TransientRow(5900, Double.NaN ),
         new TransientRow(6000, Double.NaN )
       ).iterator
+      override def outputRange: Option[RvRange] = None
     }
 
     val lhs2 = new RangeVector {
@@ -573,6 +601,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         new TransientRow(5900,2.0 ),
         new TransientRow(6000,2.0 )
       ).iterator
+      override def outputRange: Option[RvRange] = None
     }
 
     val rhs1 = new RangeVector {
@@ -597,6 +626,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         new TransientRow(5900, Double.NaN ),
         new TransientRow(6000, Double.NaN )
       ).iterator
+      override def outputRange: Option[RvRange] = None
     }
 
     val rhs2 = new RangeVector {
@@ -621,6 +651,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         new TransientRow(5900,2.0 ),
         new TransientRow(6000,2.0 )
       ).iterator
+      override def outputRange: Option[RvRange] = None
     }
 
     // scalastyle:off

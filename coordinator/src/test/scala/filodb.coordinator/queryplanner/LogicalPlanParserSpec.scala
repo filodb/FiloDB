@@ -69,4 +69,11 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     // Converted query has time in seconds
     res shouldEqual("http_requests_total{job=\"app\"} offset 300s")
   }
+
+  it("should generate query from LogicalPlan having escape characters") {
+    val query = """sum(rate(my_counter{_ws_="demo",_ns_=~".+",app_identity=~".+\\.test\\.identity",status=~"5.."}[60s]))"""
+    val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+    val res = LogicalPlanParser.convertToQuery(lp)
+    res shouldEqual query
+  }
 }

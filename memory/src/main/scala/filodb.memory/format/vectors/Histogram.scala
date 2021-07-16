@@ -217,10 +217,11 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
   /**
    * Adds the values from another Histogram.
    * If the other histogram has the same bucket scheme, then the values are just added per bucket.
-   * If the scheme is different, then an approximation is used so that the resulting histogram has
-   * an approximate sum of the individual distributions, with the original scheme.  Modifies itself.
+   * If the scheme is different, it assigns NaN to values.
+   * @param other Histogram to be added
+   * @return true when input histogram has same schema and false when schema is different
    */
-  final def addNoCorrection(other: HistogramWithBuckets): Unit = {
+  final def addNoCorrection(other: HistogramWithBuckets): Boolean = {
     // Allow addition when type of bucket is different
     if (buckets.similarForMath(other.buckets)) {
       // If it was NaN before, reset to 0 to sum another hist
@@ -228,8 +229,12 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
       cforRange { 0 until numBuckets } { b =>
         values(b) += other.bucketValue(b)
       }
+      true
     } else {
-      throw new UnsupportedOperationException(s"Cannot add histogram of scheme ${other.buckets} to $buckets")
+      cforRange { 0 until numBuckets } { b =>
+        values(b) = Double.NaN
+      }
+      false
       // TODO: In the future, support adding buckets of different scheme.  Below is an example
       // NOTE: there are two issues here: below add picks the existing bucket scheme (not commutative)
       //       and the newer different buckets are lost (one may want more granularity)
@@ -248,8 +253,9 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
    * Adds the values from another Histogram, making a monotonic correction to ensure correctness
    */
   final def add(other: HistogramWithBuckets): Unit = {
-    addNoCorrection(other)
-    makeMonotonic()
+    // Call makeMonotonic only when buckets have same schema as result is NaN otherwise and monotonic correction
+    // isn't needed
+    if (addNoCorrection(other)) makeMonotonic()
   }
 
   /**

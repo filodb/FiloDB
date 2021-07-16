@@ -257,8 +257,8 @@ trait JoinParser extends NumericParser {
 ////////////////////// END JOINS ///////////////////////////////////////////
 ////////////////////// SELECTORS ///////////////////////////////////////////
 trait SelectorParser extends OperatorParser with UnitParser with BaseParser {
-  protected lazy val simpleSeries: PackratParser[InstantExpression] =
-    "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str => InstantExpression(Some(str), Seq.empty, None) }
+  protected lazy val simpleSeries: PackratParser[StringLiteral] =
+    "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str => StringLiteral(ParserUtil.dequote(str))}
 
 
   lazy val instantVectorSelector: PackratParser[InstantExpression]
@@ -397,7 +397,7 @@ trait ExpressionParser extends AggregatesParser with SelectorParser with Numeric
 
   lazy val subqueryExpression: PackratParser[SubqueryExpression] =
     subqueryableExpression ~ subqueryClause ^^ {
-      case sqe ~ sqc => SubqueryExpression( sqe, sqc)
+      case sqe ~ sqc => SubqueryExpression( sqe, sqc, None) //we do not support offset in the legacy parser
     }
 }
 
@@ -499,6 +499,8 @@ object LegacyParser extends ExpressionParser with StrictLogging {
       case s: Scalar                => s
       case i: InstantExpression     => i
       case r: RangeExpression       => r
+      case l: StringLiteral         => l
+      case s: SubqueryExpression    => s
     }
   }
 

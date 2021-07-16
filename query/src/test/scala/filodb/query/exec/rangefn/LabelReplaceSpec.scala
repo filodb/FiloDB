@@ -35,6 +35,7 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 3.3d),
         new TransientRow(2L, 5.1d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
@@ -43,6 +44,7 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(3L, 100d),
         new TransientRow(4L, 200d)).iterator
+      override def outputRange: Option[RvRange] = None
     })
 
   val queryConfig = new QueryConfig(config.getConfig("query"))
@@ -63,6 +65,7 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 3.3d),
           new TransientRow(2L, 5.1d)).iterator
+        override def outputRange: Option[RvRange] = None
       },
       new RangeVector {
         override def key: RangeVectorKey = sampleKey2
@@ -71,6 +74,7 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(3L, 100d),
           new TransientRow(4L, 200d)).iterator
+        override def outputRange: Option[RvRange] = None
       })
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("demo.io new Label Value 90"),
@@ -109,6 +113,7 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 3.3d),
           new TransientRow(2L, 5.1d)).iterator
+        override def outputRange: Option[RvRange] = None
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
@@ -117,6 +122,7 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(3L, 100d),
           new TransientRow(4L, 200d)).iterator
+        override def outputRange: Option[RvRange] = None
       })
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("Instance-100"),
@@ -156,6 +162,7 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(1L, 3.3d),
           new TransientRow(2L, 5.1d)).iterator
+        override def outputRange: Option[RvRange] = None
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
@@ -164,6 +171,7 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
         override def rows(): RangeVectorCursor = Seq(
           new TransientRow(3L, 100d),
           new TransientRow(4L, 200d)).iterator
+        override def outputRange: Option[RvRange] = None
       })
 
     val expectedLabels = sampleWithKey.toList.map(_.key.labelValues)

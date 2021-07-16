@@ -41,9 +41,10 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
 
   private val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000)
 
-  val localPlanner = new SingleClusterPlanner(dsRef, schemas, localMapper, earliestRetainedTimestampFn = 0, queryConfig)
+  val localPlanner = new SingleClusterPlanner(dsRef, schemas, localMapper, earliestRetainedTimestampFn = 0, queryConfig,
+    "raw")
   val remotePlanner = new SingleClusterPlanner(dsRef, schemas, remoteMapper, earliestRetainedTimestampFn = 0,
-    queryConfig)
+    queryConfig, "raw")
 
   val failureProvider = new FailureProvider {
     override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -59,7 +60,7 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     override def children: Seq[ExecPlan] = Nil
     override def submitTime: Long = 1000
     override def dataset: DatasetRef = ???
-    override def dispatcher: PlanDispatcher = InProcessPlanDispatcher
+    override def dispatcher: PlanDispatcher = InProcessPlanDispatcher(queryConfig)
     override def doExecute(source: ChunkSource, querySession: QuerySession)
                           (implicit sched: Scheduler): ExecResult = ???
     override protected def args: String = "mock-args"
@@ -122,7 +123,8 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     val lp = Parser.queryToLogicalPlan("test{job = \"app\"} + rr1{job = \"app\"}", 1000, 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    execPlan.dispatcher shouldEqual (InProcessPlanDispatcher) //rr1 and test belong to different clusters
+    // rr1 and test belong to different clusters
+    execPlan.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual true
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.asInstanceOf[BinaryJoinExec].rhs.head.asInstanceOf[MockExecPlan].name shouldEqual ("rules1")
     execPlan.asInstanceOf[BinaryJoinExec].lhs.head.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
@@ -132,7 +134,8 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     val lp = Parser.queryToLogicalPlan("rr1{job = \"app\"} + rr2{job = \"app\"}", 1000, 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    execPlan.dispatcher shouldEqual (InProcessPlanDispatcher) //rr1 and rr2 belong to different clusters
+    // rr1 and rr2 belong to different clusters
+    execPlan.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual true
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.asInstanceOf[BinaryJoinExec].lhs.head.asInstanceOf[MockExecPlan].name shouldEqual ("rules1")
     execPlan.asInstanceOf[BinaryJoinExec].rhs.head.asInstanceOf[MockExecPlan].name shouldEqual ("rules2")

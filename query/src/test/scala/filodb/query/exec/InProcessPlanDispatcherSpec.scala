@@ -1,24 +1,21 @@
 package filodb.query.exec
 
 import java.util.concurrent.{Executors, TimeUnit}
-
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
-
 import com.typesafe.config.{Config, ConfigFactory}
 import monix.eval.Task
 import monix.execution.Scheduler
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.core.MetricsTestData.{builder, timeseriesDataset, timeseriesSchema}
 import filodb.core.TestData
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.{Column, Dataset, Schemas}
-import filodb.core.query.{ColumnFilter, Filter, QueryConfig, QueryContext, QuerySession}
+import filodb.core.query.{ColumnFilter, EmptyQueryConfig, Filter, QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.MemFactory
 import filodb.memory.data.ChunkMap
@@ -100,7 +97,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val dispatcher: PlanDispatcher = InProcessPlanDispatcher
+    val dispatcher: PlanDispatcher = InProcessPlanDispatcher(EmptyQueryConfig)
 
     val dummyDispatcher = DummyDispatcher(memStore, querySession)
 
@@ -128,7 +125,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
     val emptyFilters = Seq (ColumnFilter("__name__", Filter.Equals("nonsense".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val dispatcher: PlanDispatcher = InProcessPlanDispatcher
+    val dispatcher: PlanDispatcher = InProcessPlanDispatcher(EmptyQueryConfig)
 
     val dummyDispatcher = DummyDispatcher(memStore, querySession)
 
@@ -179,4 +176,8 @@ case class DummyDispatcher(memStore: TimeSeriesMemStore, querySession: QuerySess
                        (implicit sched: Scheduler): Task[QueryResponse] = {
     plan.execute(memStore, querySession)
   }
+
+  override def clusterName: String = ???
+
+  override def isLocalCall: Boolean = ???
 }

@@ -3,6 +3,7 @@ package filodb.core.downsample
 import java.util
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
+import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 
@@ -251,10 +252,10 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                      querySession: QuerySession): Observable[ReadablePartition] = {
 
     // Step 1: Choose the downsample level depending on the range requested
-    val (resolution, downsampledDataset) = chooseDownsampleResolution(lookup.chunkMethod)
+    val (resolutionMs, downsampledDataset) = chooseDownsampleResolution(lookup.chunkMethod)
     logger.debug(s"Chose resolution $downsampledDataset for chunk method ${lookup.chunkMethod}")
 
-    capDataScannedPerShardCheck(lookup, resolution)
+    capDataScannedPerShardCheck(lookup, resolutionMs)
 
     // Step 2: Query Cassandra table for that downsample level using downsampleColStore
     // Create a ReadablePartition objects that contain the time series data. This can be either a
@@ -269,13 +270,13 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                 SinglePartitionScan(partRec.partKey, shardNum),
                                 lookup.chunkMethod)
           .map { pd =>
-            val part = makePagedPartition(pd, lookup.firstSchemaId.get, Some(resolution), colIds)
+            val part = makePagedPartition(pd, lookup.firstSchemaId.get, resolutionMs, colIds)
             stats.partitionsQueried.increment()
             stats.singlePartCassFetchLatency.record(Math.max(0, System.currentTimeMillis - startExecute))
             part
           }
           .defaultIfEmpty(makePagedPartition(RawPartData(partRec.partKey, Seq.empty),
-            lookup.firstSchemaId.get, Some(resolution), colIds))
+            lookup.firstSchemaId.get, resolutionMs, colIds))
           .headL
       }
   }
@@ -288,44 +289,44 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     }
   }
 
-  private def chooseDownsampleResolution(chunkScanMethod: ChunkScanMethod): (Long, DatasetRef) = {
+  private def chooseDownsampleResolution(chunkScanMethod: ChunkScanMethod): (Int, DatasetRef) = {
     chunkScanMethod match {
       case AllChunkScan =>
-        // since it is the highest resolution/ttl
-        downsampleTtls.last.toMillis -> downsampledDatasetRefs.last
+        // pick last since it is the highest resolution
+        downsampleConfig.resolutions.last.toMillis.toInt -> downsampledDatasetRefs.last
       case TimeRangeChunkScan(startTime, _) =>
         var ttlIndex = downsampleTtls.indexWhere(t => startTime > System.currentTimeMillis() - t.toMillis)
         // -1 return value means query startTime is before the earliest retention. Just pick the highest resolution
         if (ttlIndex == -1) ttlIndex = downsampleTtls.size - 1
-        downsampleConfig.resolutions(ttlIndex).toMillis -> downsampledDatasetRefs(ttlIndex)
+        downsampleConfig.resolutions(ttlIndex).toMillis.toInt -> downsampledDatasetRefs(ttlIndex)
       case _ => ???
     }
   }
 
   private def makePagedPartition(part: RawPartData, firstSchemaId: Int,
-                                 resolution: Option[Long],
+                                 minResolutionMs: Int,
                                  colIds: Seq[Types.ColumnId]): ReadablePartition = {
     val schemaId = RecordSchema.schemaID(part.partitionKey, UnsafeUtils.arayOffset)
     if (schemaId != firstSchemaId) {
       throw SchemaMismatch(schemas.schemaName(firstSchemaId), schemas.schemaName(schemaId))
     }
     // FIXME It'd be nice to pass in the correct partId here instead of -1
-    new PagedReadablePartition(schemas(schemaId), shardNum, -1, part, resolution, colIds)
+    new PagedReadablePartition(schemas(schemaId), shardNum, -1, part, minResolutionMs, colIds)
   }
 
   /**
-    * Iterator for lazy traversal of partIdIterator, value for the given label will be extracted from the ParitionKey.
+    * Iterator for traversal of partIds, value for the given label will be extracted from the ParitionKey.
+    * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
     */
   case class LabelValueResultIterator(partIds: debox.Buffer[Int], labelNames: Seq[String], limit: Int)
     extends Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] {
-    var currVal: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = _
-    var numResultsReturned = 0
-    var partIndex = 0
+    private lazy val rows = labelValues
 
-    override def hasNext: Boolean = {
-      var foundValue = false
-      while(partIndex < partIds.length && numResultsReturned < limit && !foundValue) {
-        val partId = partIds(partIndex)
+    def labelValues: Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
+      var partLoopIndx = 0
+      val rows = new mutable.HashSet[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]()
+      while(partLoopIndx < partIds.length && rows.size < limit) {
+        val partId = partIds(partLoopIndx)
 
         //retrieve PartKey either from In-memory map or from PartKeyIndex
         val nextPart = partKeyFromPartId(partId)
@@ -333,20 +334,19 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
         // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
         // have a centralized service/store for serving metadata
-        currVal = schemas.part.binSchema.toStringPairs(nextPart, UnsafeUtils.arayOffset)
-          .filter(labelNames contains _._1).map(pair => {
-          pair._1.utf8 -> pair._2.utf8
-        }).toMap
-        foundValue = currVal.nonEmpty
-        partIndex += 1
+
+        val currVal = schemas.part.binSchema.colValues(nextPart, UnsafeUtils.arayOffset, labelNames).
+          zipWithIndex.filter(_._1 != null).map{case(value, ind) => labelNames(ind).utf8 -> value.utf8}.toMap
+
+        if (currVal.nonEmpty) rows.add(currVal)
+        partLoopIndx += 1
       }
-      foundValue
+      rows.toIterator
     }
 
-    override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = {
-      numResultsReturned += 1
-      currVal
-    }
+    override def hasNext: Boolean = rows.hasNext
+
+    override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = rows.next
   }
 
   /**

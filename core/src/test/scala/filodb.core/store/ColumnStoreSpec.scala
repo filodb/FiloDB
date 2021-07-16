@@ -154,10 +154,10 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val filter = ColumnFilter("MonthYear", Filter.Equals(197902))
     val method = FilteredPartitionScan(paramSet.head, Seq(filter))
     val lookupRes = memStore.lookupPartitions(dataset2.ref, method, AllChunkScan,
-      querySession = QuerySession.forTestingOnly)
+      querySession = QuerySession.makeForTestingOnly)
     val rangeVectorObs = memStore.rangeVectors(dataset2.ref, lookupRes, schema2.colIDs("NumArticles").get,
                                                schema2, false,
-                                               QuerySession.forTestingOnly)
+                                               QuerySession.makeForTestingOnly)
     val rangeVectors = rangeVectorObs.toListL.runAsync.futureValue
 
     rangeVectors should have length (1)

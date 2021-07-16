@@ -28,7 +28,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                               (implicit sched: Scheduler): Future[QueryResponse] = {
     remoteExecHttpClient.httpMetadataGet(queryContext.plannerParams.applicationId, queryEndpoint,
-      httpTimeoutMs, queryContext.submitTime, getUrlParams())
+      httpTimeoutMs, queryContext.submitTime, getUrlParams(), queryContext.traceInfo)
       .map { response =>
         response.unsafeBody match {
           case Left(error) => QueryError(queryContext.queryId, error.error)
@@ -42,7 +42,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
 
     import NoCloseCursor._
     val rangeVector = IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-      UTF8MapIteratorRowReader(iteratorMap.toIterator))
+      UTF8MapIteratorRowReader(iteratorMap.toIterator), None)
 
     val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, recordSchema,
                         queryWithPlanName(queryContext)))

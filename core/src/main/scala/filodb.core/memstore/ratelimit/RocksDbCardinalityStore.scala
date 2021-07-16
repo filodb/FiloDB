@@ -221,20 +221,24 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
 
   override def scanChildren(shardKeyPrefix: Seq[String]): Seq[Cardinality] = {
     val it = db.newIterator()
-    val searchPrefix = toStringKey(shardKeyPrefix, true)
-    logger.debug(s"Scanning shard=$shard dataset=$ref ${new String(searchPrefix)}")
-    it.seek(searchPrefix.getBytes(StandardCharsets.UTF_8))
     val buf = ArrayBuffer[Cardinality]()
-    import scala.util.control.Breaks._
+    try {
+      val searchPrefix = toStringKey(shardKeyPrefix, true)
+      logger.debug(s"Scanning shard=$shard dataset=$ref ${new String(searchPrefix)}")
+      it.seek(searchPrefix.getBytes(StandardCharsets.UTF_8))
+      import scala.util.control.Breaks._
 
-    breakable {
-      while (it.isValid()) {
-        val key = new String(it.key(), StandardCharsets.UTF_8)
-        if (key.startsWith(searchPrefix)) {
-          buf += bytesToCardinality(it.value())
-        } else break // dont continue beyond valid results
-        it.next()
+      breakable {
+        while (it.isValid()) {
+          val key = new String(it.key(), StandardCharsets.UTF_8)
+          if (key.startsWith(searchPrefix)) {
+            buf += bytesToCardinality(it.value())
+          } else break // dont continue beyond valid results
+          it.next()
+        }
       }
+    } finally {
+      it.close();
     }
     buf
   }

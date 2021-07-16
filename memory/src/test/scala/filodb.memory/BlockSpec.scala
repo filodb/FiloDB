@@ -9,8 +9,9 @@ import org.scalatest.matchers.should.Matchers
 class BlockSpec extends AnyFlatSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
   import PageAlignedBlockManagerSpec._
 
+  val evictionLock = new EvictionLock
   val stats = new MemoryStats(Map("test1" -> "test1"))
-  val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1)
+  val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1, evictionLock)
 
   before {
     testReclaimer.reclaimedBytes = 0

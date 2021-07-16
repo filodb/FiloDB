@@ -45,9 +45,11 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
       paramSpec.zipWithIndex.foreach {
         case (specType, index) => specType match {
           case RangeVectorParam(errorMsg) =>
-            if (!allParams(index).isInstanceOf[RangeExpression])
-              throw new IllegalArgumentException(s"$errorMsg $funcName, " +
-                s"got ${allParams(index).getClass.getSimpleName}")
+            if (
+              !allParams(index).isInstanceOf[RangeExpression] &&
+              !allParams(index).isInstanceOf[SubqueryExpression]
+            ) throw new IllegalArgumentException(s"$errorMsg $funcName, " +
+              s"got ${allParams(index).getClass.getSimpleName}")
 
           case InstantVectorParam(errorMsg) =>
             if (!allParams(index).isInstanceOf[InstantExpression])
@@ -151,7 +153,7 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
     // Get parameters other than  series like label names. Parameters can be quoted so remove special characters
     val stringParam = allParams.filter(!_.equals(seriesParam)).collect {
       case e: InstantExpression => e.realMetricName.replaceAll("^\"|\"$", "")
-      case s: StringLiteral     => s.str
+      case s: StringLiteral => s.str
     }
 
     if (miscellaneousFunctionIdOpt.isDefined) {
@@ -172,7 +174,7 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
       ApplyAbsentFunction(periodicSeriesPlan, columnFilter, RangeParams(timeParams.start, timeParams.step,
         timeParams.end))
     } else {
-        val rangeFunctionId = RangeFunctionId.withNameInsensitiveOption(name).get
+      val rangeFunctionId = RangeFunctionId.withNameInsensitiveOption(name).get
       if (rangeFunctionId == Timestamp) {
         val instantExpression = seriesParam.asInstanceOf[InstantExpression]
 
@@ -180,17 +182,77 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
           timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000, 0,
           rangeFunctionId, false, otherParams, instantExpression.offset.map(_.millis(timeParams.step * 1000)))
       } else {
-        val rangeExpression = seriesParam.asInstanceOf[RangeExpression]
-
-        // absent_over_time creates range vector with column filters in original query
-        PeriodicSeriesWithWindowing(
-          rangeExpression.toSeriesPlan(timeParams, isRoot = false),
-          timeParams.start * 1000 , timeParams.step * 1000, timeParams.end * 1000,
-          rangeExpression.window.millis(timeParams.step * 1000),
-          rangeFunctionId, rangeExpression.window.timeUnit == IntervalMultiple,
-          otherParams, rangeExpression.offset.map(_.millis(timeParams.step * 1000)), rangeExpression.columnFilters)
+        seriesParam match {
+          case re: RangeExpression => rangeExpressionArgument(re, timeParams, rangeFunctionId, otherParams)
+          case sq: SubqueryExpression => subqueryArgument(sq, timeParams, rangeFunctionId, otherParams)
+        }
       }
     }
+  }
+
+  def rangeExpressionArgument(
+    rangeExpression : RangeExpression,
+    timeParams: TimeRangeParams,
+    rangeFunctionId: RangeFunctionId,
+    otherParams: Seq[FunctionArgsPlan]
+  ) : PeriodicSeriesPlan = {
+    PeriodicSeriesWithWindowing(
+      rangeExpression.toSeriesPlan(timeParams, isRoot = false),
+      timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
+      rangeExpression.window.millis(timeParams.step * 1000),
+      rangeFunctionId,
+      rangeExpression.window.timeUnit == IntervalMultiple,
+      otherParams,
+      rangeExpression.offset.map(_.millis(timeParams.step * 1000)),
+      rangeExpression.columnFilters
+    )
+  }
+
+  def subqueryArgument(
+    sqe : SubqueryExpression,
+    timeParams: TimeRangeParams,
+    rangeFunctionId: RangeFunctionId,
+    otherParams: Seq[FunctionArgsPlan]
+  ) : PeriodicSeriesPlan = {
+    var subqueryStepToUseMs = SubqueryUtils.getSubqueryStepMs(sqe.sqcl.step)
+    // when start and stop are the same, step should be zero too
+    var outerStepMs = timeParams.step * 1000
+    if (timeParams.start == timeParams.end) {
+      outerStepMs = 0
+    }
+    val stepForInnerMs = subqueryStepToUseMs
+    val offsetMs = sqe.offset.map { _.millis(1L) }
+    val offsetSecForInner = offsetMs match {
+      case None => 0
+      case Some(ofMs) => ofMs / 1000
+    }
+    val preciseStartForInnerS = timeParams.start - (sqe.sqcl.window.millis(1L) / 1000) - offsetSecForInner
+    val startForInnerS = SubqueryUtils.getStartForFastSubquery(preciseStartForInnerS, subqueryStepToUseMs/1000)
+
+    val preciseEndForInnerS = timeParams.end - offsetSecForInner
+    val endForInnerS =
+      SubqueryUtils.getEndForFastSubquery(preciseEndForInnerS, subqueryStepToUseMs/1000)
+
+    val timeParamsForInner = TimeStepParams(
+      startForInnerS,
+      stepForInnerMs/1000,
+      endForInnerS
+    )
+    // We don't want to naively execute subquery by concatenating
+    // the results of multiple queries. Instead, the inner subqueries are executed
+    // as a wider single query with newly calculated start and step. Later we
+    // apply a transformation against the resulting time series to form the actual
+    // response of the subquery.
+    val subquery = sqe.subquery.toSeriesPlan(timeParamsForInner)
+    SubqueryWithWindowing(
+      subquery,
+      timeParams.start * 1000, outerStepMs, timeParams.end * 1000,
+      rangeFunctionId,
+      otherParams,
+      sqe.sqcl.window.millis(1L),
+      subqueryStepToUseMs,
+      offsetMs
+    )
   }
   // scalastyle:on method.length
 }

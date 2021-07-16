@@ -2,6 +2,7 @@ package filodb.core.downsample
 
 import com.typesafe.scalalogging.StrictLogging
 
+import filodb.core.GlobalConfig.systemConfig
 import filodb.core.memstore.WriteBufferPool
 import filodb.core.metadata.Schema
 import filodb.core.store.StoreConfig
@@ -14,16 +15,17 @@ class OffHeapMemory(schemas: Seq[Schema],
   extends StrictLogging {
 
   private val blockMemSize = storeConfig.shardMemSize
-  private val nativeMemSize = storeConfig.ingestionBufferMemSize
+  private val nativeMemSize = systemConfig.getMemorySize("filodb.memstore.ingestion-buffer-mem-size").toBytes
 
   logger.info(s"Allocating OffHeap memory $this with nativeMemManagerSize=$nativeMemSize " +
     s"and blockMemorySize=$blockMemSize")
+  val evictionLock = new EvictionLock
   val blockStore = new PageAlignedBlockManager(blockMemSize,
     stats = new MemoryStats(kamonTags),
     reclaimer = new ReclaimListener {
       override def onReclaim(metadata: Long, numBytes: Int): Unit = {}
     },
-    numPagesPerBlock = 50)
+    numPagesPerBlock = 50, evictionLock)
 
   val blockMemFactory = new BlockMemFactory(blockStore, maxMetaSize, kamonTags, false)
 

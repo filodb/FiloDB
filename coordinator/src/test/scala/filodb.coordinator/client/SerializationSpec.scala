@@ -144,6 +144,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
           rowbuf.iterator
         }
         override val key: RangeVectorKey = rvKey
+        override def outputRange: Option[RvRange] = None
       }
       val srv = SerializedRangeVector(rv, cols)
       val observedTs = srv.rows.toSeq.map(_.getLong(0))
@@ -180,7 +181,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val mapper = new ShardMapper(1)
     mapper.registerNode(Seq(0), node0)
     def mapperRef: ShardMapper = mapper
-    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef, 0, queryConfig)
+    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef, 0,
+      queryConfig, "raw")
     val f1 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_bucket")),
       ColumnFilter("job", Filter.Equals("myService")),
       ColumnFilter("le", Filter.Equals("0.3")),
@@ -219,7 +221,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val to = System.currentTimeMillis() / 1000
     val from = to - 50
     val qParams = TimeStepParams(from, 10, to)
-    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef, 0, queryConfig)
+    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef, 0,
+      queryConfig, "raw")
 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan(
       s"""sum(rate(http_request_duration_seconds_bucket{job="prometheus",$shardKeyStr}[20s])) by (handler)""",
@@ -254,7 +257,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val to = System.currentTimeMillis() / 1000
     val from = to - 50
     val qParams = TimeStepParams(from, 10, to)
-    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef, 0, queryConfig)
+    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef, 0,
+      queryConfig, "raw")
 
     // with column filters having shardcolumns
     val logicalPlan1 = Parser.metadataQueryToLogicalPlan(
@@ -294,7 +298,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val key = CustomRangeVectorKey(keysMap)
     val cols = Seq(ColumnInfo("value", ColumnType.DoubleColumn))
     import filodb.core.query.NoCloseCursor._
-    val ser = SerializedRangeVector(IteratorBackedRangeVector(key, Iterator.empty), cols)
+    val ser = SerializedRangeVector(IteratorBackedRangeVector(key, Iterator.empty, None), cols)
 
     val schema = ResultSchema(MachineMetricsData.dataset1.schema.infosFromIDs(0 to 0), 1)
 
@@ -312,7 +316,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val cols = Seq(ColumnInfo("value", ColumnType.MapColumn))
     import filodb.core.query.NoCloseCursor._
     val ser = Seq(SerializedRangeVector(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-      new UTF8MapIteratorRowReader(input.toIterator)), cols))
+      new UTF8MapIteratorRowReader(input.toIterator), None), cols))
 
     val result = QueryResult2("someId", schema, ser)
     val roundTripResult = roundTrip(result).asInstanceOf[QueryResult2]
@@ -336,7 +340,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val to = System.currentTimeMillis() / 1000
     val from = to - 50
     val qParams = TimeStepParams(from, 10, to)
-    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef, 0, queryConfig)
+    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef, 0,
+      queryConfig, "raw")
 
     val logicalPlan = Parser.queryRangeToLogicalPlan(
       s"""http_request_duration_seconds_bucket{job="prometheus",$shardKeyStr}""",
