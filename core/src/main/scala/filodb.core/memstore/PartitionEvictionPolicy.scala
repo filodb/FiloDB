@@ -2,7 +2,7 @@ package filodb.core.memstore
 
 import com.typesafe.scalalogging.StrictLogging
 
-import filodb.memory.MemFactory
+import filodb.memory.NativeMemoryManager
 
 /**
  * This is a policy that determines when partitions should be evicted out of memory
@@ -13,7 +13,7 @@ trait PartitionEvictionPolicy {
    * @param numPartitions the current number of partitions in the shard
    * @param memManager the MemFactory used to allocate write buffers and partition keys
    */
-  def shouldEvict(numPartitions: Int, memManager: MemFactory): Boolean
+  def numPartitionsToEvictForHeadroom(numPartitions: Int, maxPartitions: Int, memManager: NativeMemoryManager): Int
 }
 
 /**
@@ -23,22 +23,38 @@ trait PartitionEvictionPolicy {
  *  that WriteBuffers are sized much more than the heap, which should be the normal case.
  * Also, determining heap free space is just really tricky.
  *
- * @param minBufferMem the minimum number of bytes that should be free in the bufferMemManager
+ * @param headroomPercent percent of capacity that should be free in the bufferMemManager
  */
-class WriteBufferFreeEvictionPolicy(minBufferMem: Long = 1024*1024) extends PartitionEvictionPolicy with StrictLogging {
-  def shouldEvict(numPartitions: Int, memManager: MemFactory): Boolean = {
-    if (memManager.numFreeBytes < minBufferMem) {
+class WriteBufferFreeEvictionPolicy(headroomPercent: Double) extends PartitionEvictionPolicy
+                                                                              with StrictLogging {
+  def numPartitionsToEvictForHeadroom(numPartitions: Int, maxPartitions: Int, memManager: NativeMemoryManager): Int = {
+    val headroomMem = memManager.upperBoundSizeInBytes * headroomPercent / 100
+    if (memManager.numFreeBytes < headroomMem) {
       logger.info(s"Recommending partition eviction; buffer free memory = ${memManager.numFreeBytes}")
-      true
+      ((headroomMem.toDouble / memManager.upperBoundSizeInBytes) * numPartitions).toInt
     } else {
-      false
+      0
     }
   }
+
 }
 
 /**
  * A policy, used for testing, which evicts any partitions if the # of partitions is above a max.
  */
-class FixedMaxPartitionsEvictionPolicy(maxPartitions: Int) extends PartitionEvictionPolicy with StrictLogging {
-  def shouldEvict(numPartitions: Int, memManager: MemFactory): Boolean = numPartitions > maxPartitions
+class FixedMaxPartitionsEvictionPolicy(headroomPercent: Double) extends PartitionEvictionPolicy {
+  def numPartitionsToEvictForHeadroom(numPartitions: Int, maxPartitions: Int, memManager: NativeMemoryManager): Int = {
+    val headroom = (maxPartitions * headroomPercent / 100).toInt
+    Math.max(numPartitions - (maxPartitions - headroom), 0)
+  }
+}
+
+class CompositeEvictionPolicy(tspCountHeadroomPercent: Double,
+                              nativeMemHeadroomPercent: Double) extends PartitionEvictionPolicy {
+  val maxPartPolicy = new FixedMaxPartitionsEvictionPolicy(tspCountHeadroomPercent)
+  val freeBufferPolicy = new WriteBufferFreeEvictionPolicy(nativeMemHeadroomPercent)
+  def numPartitionsToEvictForHeadroom(numPartitions: Int, maxPartitions: Int, memManager: NativeMemoryManager): Int = {
+    Math.max(maxPartPolicy.numPartitionsToEvictForHeadroom(numPartitions, maxPartitions, memManager),
+             freeBufferPolicy.numPartitionsToEvictForHeadroom(numPartitions, maxPartitions, memManager))
+  }
 }

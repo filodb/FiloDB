@@ -17,10 +17,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              maxBlobBufferSize: Int,
                              // Number of bytes to allocate to chunk storage in each shard
                              shardMemSize: Long,
-                             // Number of bytes to allocate to ingestion write buffers per shard
-                             ingestionBufferMemSize: Long,
                              maxBufferPoolSize: Int,
-                             numToEvict: Int,
                              groupsPerShard: Int,
                              numPagesPerBlock: Int,
                              failureRetries: Int,
@@ -33,8 +30,6 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              demandPagingParallelism: Int,
                              demandPagingEnabled: Boolean,
                              evictedPkBfCapacity: Int,
-                             // Amount of free blocks to periodically reclaim, as a percent of total number of blocks
-                             ensureHeadroomPercent: Double,
                              // filters on ingested records to log in detail
                              traceFilters: Map[String, String],
                              maxDataPerShardQuery: Long,
@@ -51,9 +46,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "max-chunks-size" -> maxChunksSize,
                                "max-blob-buffer-size" -> maxBlobBufferSize,
                                "shard-mem-size" -> shardMemSize,
-                               "ingestion-buffer-mem-size" -> ingestionBufferMemSize,
                                "max-buffer-pool-size" -> maxBufferPoolSize,
-                               "num-partitions-to-evict" -> numToEvict,
                                "groups-per-shard" -> groupsPerShard,
                                "max-chunk-time" -> (maxChunkTime.toSeconds + "s"),
                                "num-block-pages" -> numPagesPerBlock,
@@ -66,7 +59,6 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "demand-paging-enabled" -> demandPagingEnabled,
                                "max-data-per-shard-query" -> maxDataPerShardQuery,
                                "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity,
-                               "ensure-headroom-percent" -> ensureHeadroomPercent,
                                "metering-enabled" -> meteringEnabled,
                                "accept-duplicate-samples" -> acceptDuplicateSamples,
                                "ingest-resolution-millis" -> estimatedIngestResolutionMillis).asJava)
@@ -89,20 +81,18 @@ object StoreConfig {
                                            |max-chunks-size = 400
                                            |max-data-per-shard-query = 300 MB
                                            |max-blob-buffer-size = 15000
-                                           |ingestion-buffer-mem-size = 10M
                                            |max-buffer-pool-size = 10000
-                                           |num-partitions-to-evict = 1000
                                            |groups-per-shard = 60
                                            |num-block-pages = 100
                                            |failure-retries = 3
                                            |retry-delay = 15 seconds
-                                           |part-index-flush-max-delay = 60 seconds
+                                           |// less than 1 min to reduce possibility of double purge of time series
+                                           |part-index-flush-max-delay = 55 seconds
                                            |part-index-flush-min-delay = 30 seconds
                                            |multi-partition-odp = false
                                            |demand-paging-parallelism = 10
                                            |demand-paging-enabled = true
                                            |evicted-pk-bloom-filter-capacity = 5000000
-                                           |ensure-headroom-percent = 5.0
                                            |trace-filters = {}
                                            |metering-enabled = true
                                            |accept-duplicate-samples = false
@@ -131,9 +121,7 @@ object StoreConfig {
                 config.getInt("max-chunks-size"),
                 config.getInt("max-blob-buffer-size"),
                 config.getMemorySize("shard-mem-size").toBytes,
-                config.getMemorySize("ingestion-buffer-mem-size").toBytes,
                 config.getInt("max-buffer-pool-size"),
-                config.getInt("num-partitions-to-evict"),
                 config.getInt("groups-per-shard"),
                 config.getInt("num-block-pages"),
                 config.getInt("failure-retries"),
@@ -145,7 +133,6 @@ object StoreConfig {
                 config.getInt("demand-paging-parallelism"),
                 config.getBoolean("demand-paging-enabled"),
                 config.getInt("evicted-pk-bloom-filter-capacity"),
-                config.getDouble("ensure-headroom-percent"),
                 config.as[Map[String, String]]("trace-filters"),
                 config.getMemorySize("max-data-per-shard-query").toBytes,
                 config.getBoolean("metering-enabled"),

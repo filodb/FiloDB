@@ -106,7 +106,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   private val endTimeSort = new Sort(new SortField(END_TIME, SortField.Type.LONG),
                                      new SortField(START_TIME, SortField.Type.LONG))
   config.setIndexSort(endTimeSort)
-  private val indexWriter = new IndexWriter(mMapDirectory, config)
+  private val indexWriter = new IndexWriterPlus(mMapDirectory, config, ref, shardNum)
 
   private val utf8ToStrCache = concurrentCache[UTF8Str, String](PartKeyLuceneIndex.MAX_STR_INTERN_ENTRIES)
 
@@ -213,12 +213,12 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   /**
     * Number of documents in flushed index, excludes tombstones for deletes
     */
-  def indexNumEntries: Long = indexWriter.numDocs()
+  def indexNumEntries: Long = indexWriter.getDocStats().numDocs
 
   /**
     * Number of documents in flushed index, includes tombstones for deletes
     */
-  def indexNumEntriesWithTombstones: Long = indexWriter.maxDoc()
+  def indexNumEntriesWithTombstones: Long = indexWriter.getDocStats().maxDoc
 
   def closeIndex(): Unit = {
     logger.info(s"Closing index on dataset=$ref shard=$shardNum")
@@ -580,7 +580,7 @@ class NumericDocValueCollector(docValueName: String) extends SimpleCollector {
     }
   }
 
-  override def needsScores(): Boolean = false
+  override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
 }
 
 class SinglePartKeyCollector extends SimpleCollector {
@@ -602,7 +602,7 @@ class SinglePartKeyCollector extends SimpleCollector {
     }
   }
 
-  override def needsScores(): Boolean = false
+  override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
 }
 
 class SinglePartIdCollector extends SimpleCollector {
@@ -624,7 +624,7 @@ class SinglePartIdCollector extends SimpleCollector {
     }
   }
 
-  override def needsScores(): Boolean = false
+  override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
 }
 
 /**
@@ -651,8 +651,7 @@ class TopKPartIdsCollector(limit: Int) extends Collector with StrictLogging {
     partIdDv = DocValues.getNumeric(context.reader, PART_ID)
 
     new LeafCollector() {
-      def setScorer(scorer: Scorer): Unit = {}
-
+      override def setScorer(scorer: Scorable): Unit = {}
       // gets called for each matching document in the segment.
       def collect(doc: Int): Unit = {
         val partIdValue = if (partIdDv.advanceExact(doc)) {
@@ -675,7 +674,7 @@ class TopKPartIdsCollector(limit: Int) extends Collector with StrictLogging {
     }
   }
 
-  def needsScores(): Boolean = false
+  override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
 
   def topKPartIds(): IntIterator = {
     val result = new EWAHCompressedBitmap()
@@ -694,7 +693,7 @@ class PartIdCollector extends SimpleCollector {
   val result: debox.Buffer[Int] = debox.Buffer.empty[Int]
   private var partIdDv: NumericDocValues = _
 
-  override def needsScores(): Boolean = false
+  override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
 
   override def doSetNextReader(context: LeafReaderContext): Unit = {
     //set the subarray of the numeric values for all documents in the context
@@ -715,7 +714,7 @@ class PartIdStartTimeCollector extends SimpleCollector {
   private var partIdDv: NumericDocValues = _
   private var startTimeDv: NumericDocValues = _
 
-  override def needsScores(): Boolean = false
+  override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
 
   override def doSetNextReader(context: LeafReaderContext): Unit = {
     //set the subarray of the numeric values for all documents in the context
@@ -740,7 +739,7 @@ class PartKeyRecordCollector extends SimpleCollector {
   private var startTimeDv: NumericDocValues = _
   private var endTimeDv: NumericDocValues = _
 
-  override def needsScores(): Boolean = false
+  override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
 
   override def doSetNextReader(context: LeafReaderContext): Unit = {
     partKeyDv = context.reader().getBinaryDocValues(PartKeyLuceneIndex.PART_KEY)
@@ -765,7 +764,7 @@ class ActionCollector(action: (Int, BytesRef) => Unit) extends SimpleCollector {
   private var partKeyDv: BinaryDocValues = _
   private var counter: Int = 0
 
-  override def needsScores(): Boolean = false
+  override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
 
   override def doSetNextReader(context: LeafReaderContext): Unit = {
     partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID)

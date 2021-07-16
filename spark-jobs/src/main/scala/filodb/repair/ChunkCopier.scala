@@ -1,9 +1,9 @@
 package filodb.repair
 
-import java.{lang, util}
 import java.io.File
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+import java.util
 
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
@@ -25,20 +25,23 @@ import filodb.downsampler.chunk.DownsamplerSettings
   * and is cached.
   */
 class ChunkCopier(conf: SparkConf) {
-  private def openConfig(str: String) = {
-    ConfigFactory.parseFile(new File(conf.get(str))).withFallback(GlobalConfig.systemConfig)
+
+  // Get filo config from spark conf or file.
+  private def getFiloConfig(valueConf: String, filePathConf: String) = {
+    val configString = conf.get(valueConf, "")
+    val config = if (!configString.isBlank) {
+      ConfigFactory.parseString(configString).resolve()
+    } else {
+      ConfigFactory.parseFile(new File(conf.get(filePathConf)))
+        .withFallback(GlobalConfig.systemConfig)
+        .resolve()
+    }
+    config
   }
 
   def datasetConfig(mainConfig: Config, datasetName: String): Config = {
-    def getConfig(path: lang.String): Config = {
-      ConfigFactory.parseFile(new File(path))
-    }
-
-    val sourceConfigPaths: util.List[lang.String] = mainConfig.getStringList("dataset-configs")
+    val sourceConfigPaths = mainConfig.getConfigList("inline-dataset-configs")
     sourceConfigPaths.stream()
-      .map[Config](new util.function.Function[lang.String, Config]() {
-        override def apply(path: lang.String): Config = getConfig(path)
-      })
       .filter(new util.function.Predicate[Config] {
         override def test(conf: Config): Boolean = conf.getString("dataset").equals(datasetName)
       })
@@ -46,8 +49,14 @@ class ChunkCopier(conf: SparkConf) {
       .orElseThrow()
   }
 
-  val rawSourceConfig = openConfig("spark.filodb.chunks.copier.source.configFile")
-  val rawTargetConfig = openConfig("spark.filodb.chunks.copier.target.configFile")
+  val rawSourceConfig = getFiloConfig(
+    "spark.filodb.chunks.copier.source.config.value",
+    "spark.filodb.chunks.copier.source.config.file"
+  )
+  val rawTargetConfig = getFiloConfig(
+    "spark.filodb.chunks.copier.target.config.value",
+    "spark.filodb.chunks.copier.target.config.file"
+  )
   val sourceConfig = rawSourceConfig.getConfig("filodb")
   val targetConfig = rawTargetConfig.getConfig("filodb")
   val sourceCassConfig = sourceConfig.getConfig("cassandra")

@@ -1,5 +1,7 @@
 package filodb.coordinator.queryplanner
 
+import org.apache.commons.text.StringEscapeUtils
+
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query._
 import filodb.query.AggregationOperator.CountValues
@@ -23,7 +25,7 @@ object LogicalPlanParser {
   import QueryConstants._
 
   private def getFiltersFromRawSeries(lp: RawSeries)= lp.filters.map(f => (f.column, f.filter.operatorString,
-    Quotes + f.filter.valuesStrings.head.toString + Quotes))
+    Quotes + StringEscapeUtils.escapeJava(f.filter.valuesStrings.head.toString) + Quotes))
 
   private def filtersToQuery(filters: Seq[(String, String, String)], columns: Seq[String]): String = {
     val columnString = if (columns.isEmpty) "" else s"::${columns.head}"

@@ -1,20 +1,6 @@
 package filodb.downsampler
 
-import java.io.File
-import java.time.Instant
-
-import scala.concurrent.Await
-import scala.concurrent.duration._
-
 import com.typesafe.config.{ConfigException, ConfigFactory}
-import kamon.Kamon
-import monix.execution.Scheduler
-import monix.reactive.Observable
-import org.apache.spark.{SparkConf, SparkException}
-import org.scalatest.BeforeAndAfterAll
-import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.cardbuster.CardinalityBuster
 import filodb.core.GlobalScheduler._
 import filodb.core.MachineMetricsData
@@ -25,16 +11,28 @@ import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
-import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig}
+import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig, TimeRangeChunkScan}
 import filodb.downsampler.chunk.{BatchDownsampler, Downsampler, DownsamplerSettings}
 import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
 import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
-import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
-import filodb.query.QueryResult
+import filodb.memory.format.vectors.{CustomBuckets, DoubleVector, LongHistogram}
+import filodb.query.{QueryError, QueryResult}
 import filodb.query.exec.{InProcessPlanDispatcher, InternalRangeFunction, MultiSchemaPartitionsExec, PeriodicSamplesMapper}
+import kamon.Kamon
+import monix.execution.Scheduler
+import monix.reactive.Observable
+import org.apache.spark.{SparkConf, SparkException}
+import org.scalatest.BeforeAndAfterAll
+import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.{Millis, Seconds, Span}
+
+import java.io.File
+import java.time.Instant
+import scala.concurrent.Await
+import scala.concurrent.duration._
 
 /**
   * Spec tests downsampling round trip.
@@ -44,7 +42,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
-  val conf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf"))
+  val conf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf")).resolve()
 
   val settings = new DownsamplerSettings(conf)
   val queryConfig = new QueryConfig(settings.filodbConfig.getConfig("query"))
@@ -52,6 +50,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   val batchDownsampler = new BatchDownsampler(settings)
 
   val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8)
+  val seriesTagsNaN = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8, "nan_support".utf8 -> "yes".utf8)
   val bulkSeriesTags = Map("_ws_".utf8 -> "bulk_ws".utf8, "_ns_".utf8 -> "bulk_ns".utf8)
 
   val rawColStore = batchDownsampler.rawCassandraColStore
@@ -60,7 +59,6 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   val rawDataStoreConfig = StoreConfig(ConfigFactory.parseString( """
                   |flush-interval = 1h
                   |shard-mem-size = 1MB
-                  |ingestion-buffer-mem-size = 30MB
                 """.stripMargin))
 
   val offheapMem = new OffHeapMemory(Seq(Schemas.gauge, Schemas.promCounter, Schemas.promHistogram, Schemas.untyped),
@@ -76,7 +74,9 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   var counterPartKeyBytes: Array[Byte] = _
 
   val histName = "my_histogram"
+  val histNameNaN = "my_histogram_NaN"
   var histPartKeyBytes: Array[Byte] = _
+  var histNaNPartKeyBytes: Array[Byte] = _
 
   val gaugeLowFreqName = "my_gauge_low_freq"
   var gaugeLowFreqPartKeyBytes: Array[Byte] = _
@@ -84,9 +84,11 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   val lastSampleTime = 74373042000L
   val pkUpdateHour = hour(lastSampleTime)
 
-  val metricNames = Seq(gaugeName, gaugeLowFreqName, counterName, histName, untypedName)
+  val metricNames = Seq(gaugeName, gaugeLowFreqName, counterName, histName, histNameNaN, untypedName)
 
   def hour(millis: Long = System.currentTimeMillis()): Long = millis / 1000 / 60 / 60
+
+  val currTime = System.currentTimeMillis()
 
   override def beforeAll(): Unit = {
     batchDownsampler.downsampleRefsByRes.values.foreach { ds =>
@@ -140,7 +142,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
-    val pk = PartKeyRecord(untypedPartKeyBytes, 74372801000L, 74373042000L, Some(150))
+    val pk = PartKeyRecord(untypedPartKeyBytes, 74372801000L, currTime, Some(150))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
@@ -183,7 +185,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
-    val pk = PartKeyRecord(gaugePartKeyBytes, 74372801000L, 74373042000L, Some(150))
+    val pk = PartKeyRecord(gaugePartKeyBytes, 74372801000L, currTime, Some(150))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
@@ -224,7 +226,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
-    val pk = PartKeyRecord(gaugeLowFreqPartKeyBytes, 74372801000L, 74373042000L, Some(150))
+    val pk = PartKeyRecord(gaugeLowFreqPartKeyBytes, 74372801000L, currTime, Some(150))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
@@ -271,7 +273,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
-    val pk = PartKeyRecord(counterPartKeyBytes, 74372801000L, 74373042000L, Some(1))
+    val pk = PartKeyRecord(counterPartKeyBytes, 74372801000L, currTime, Some(1))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
@@ -319,7 +321,59 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
-    val pk = PartKeyRecord(histPartKeyBytes, 74372801000L, 74373042000L, Some(199))
+    val pk = PartKeyRecord(histPartKeyBytes, 74372801000L, currTime, Some(199))
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
+  }
+
+  it ("should write prom histogram data with NaNs to cassandra") {
+
+    val rawDataset = Dataset("prometheus", Schemas.promHistogram)
+
+    val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
+    val partKey = partBuilder.partKeyFromObjects(Schemas.promHistogram, histNameNaN, seriesTagsNaN)
+
+    val part = new TimeSeriesPartition(0, Schemas.promHistogram, partKey,
+      0, offheapMem.bufferPools(Schemas.promHistogram.schemaHash), batchDownsampler.shardStats,
+      offheapMem.nativeMemoryManager, 1)
+
+    histNaNPartKeyBytes = part.partKeyBytes
+
+    val bucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
+    val rawSamples = Stream( // time, sum, count, hist, name, tags
+      Seq(74372801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), histNameNaN, seriesTagsNaN),
+      Seq(74372801500L, 2d, 3d, LongHistogram(bucketScheme, Array(0L, 2, 3)), histNameNaN, seriesTagsNaN),
+      Seq(74372802000L, 5d, 6d, LongHistogram(bucketScheme, Array(2L, 5, 6)), histNameNaN, seriesTagsNaN),
+      Seq(74372802500L, Double.NaN, Double.NaN, LongHistogram(bucketScheme, Array(0L, 0, 0)), histNameNaN, seriesTagsNaN),
+
+      Seq(74372861000L, 9d, 9d, LongHistogram(bucketScheme, Array(2L, 5, 9)), histNameNaN, seriesTagsNaN),
+      Seq(74372861500L, 10d, 10d, LongHistogram(bucketScheme, Array(2L, 5, 10)), histNameNaN, seriesTagsNaN),
+      Seq(74372862000L, Double.NaN, Double.NaN, LongHistogram(bucketScheme, Array(0L, 0, 0)), histNameNaN, seriesTagsNaN),
+      Seq(74372862500L, 11d, 14d, LongHistogram(bucketScheme, Array(2L, 8, 14)), histNameNaN, seriesTagsNaN),
+
+      Seq(74372921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), histNameNaN, seriesTagsNaN),
+      Seq(74372921500L, 7d, 9d, LongHistogram(bucketScheme, Array(1L, 7, 9)), histNameNaN, seriesTagsNaN),
+      Seq(74372922000L, Double.NaN, Double.NaN, LongHistogram(bucketScheme, Array(0L, 0, 0)), histNameNaN, seriesTagsNaN),
+      Seq(74372922500L, 4d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), histNameNaN, seriesTagsNaN),
+
+      Seq(74372981000L, 17d, 21d, LongHistogram(bucketScheme, Array(2L, 16, 21)), histNameNaN, seriesTagsNaN),
+      Seq(74372981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), histNameNaN, seriesTagsNaN),
+      Seq(74372982000L, 15d, 15d, LongHistogram(bucketScheme, Array(0L, 15, 15)), histNameNaN, seriesTagsNaN),
+
+      Seq(74373041000L, 18d, 19d, LongHistogram(bucketScheme, Array(1L, 16, 19)), histNameNaN, seriesTagsNaN),
+      Seq(74373041500L, 20d, 25d, LongHistogram(bucketScheme, Array(4L, 20, 25)), histNameNaN, seriesTagsNaN),
+      Seq(74373042000L, Double.NaN, Double.NaN, LongHistogram(bucketScheme, Array(0L, 0, 0)), histNameNaN, seriesTagsNaN)
+    )
+
+    MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
+      val rr = new BinaryRecordRowReader(Schemas.promHistogram.ingestionSchema, base, offset)
+      part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory, createChunkAtFlushBoundary = false,
+        flushIntervalMillis = Option.empty, acceptDuplicateSamples = false)
+    }
+    part.switchBuffers(offheapMem.blockMemFactory, true)
+    val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
+
+    rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+    val pk = PartKeyRecord(histNaNPartKeyBytes, 74372801000L, currTime, Some(199))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
@@ -381,7 +435,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val metrics = Set((counterName, Schemas.promCounter.name),
       (gaugeName, Schemas.dsGauge.name),
       (gaugeLowFreqName, Schemas.dsGauge.name),
-      (histName, Schemas.promHistogram.name))
+      (histName, Schemas.promHistogram.name),
+      (histNameNaN, Schemas.promHistogram.name))
     val partKeys = downsampleColStore.scanPartKeys(batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")), 0)
     val tsSchemaMetric = Await.result(partKeys.map(pkMetricSchemaReader).toListL.runAsync, 1 minutes)
     tsSchemaMetric.filter(k => metricNames.contains(k._1)).toSet shouldEqual metrics
@@ -413,7 +468,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0,
-      downsampledPartData1, Some(1.minute.toMillis))
+      downsampledPartData1, 1.minute.toMillis.toInt)
 
     downsampledPart1.partKeyBytes shouldEqual dsGaugePartKeyBytes
 
@@ -450,7 +505,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0,
-      downsampledPartData1, Some(1.minute.toMillis))
+      downsampledPartData1, 1.minute.toMillis.toInt)
 
     downsampledPart1.partKeyBytes shouldEqual dsGaugeLowFreqPartKeyBytes
 
@@ -478,7 +533,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.promCounter.downsample.get, 0, 0,
-      downsampledPartData1, Some(1.minute.toMillis))
+      downsampledPartData1, 1.minute.toMillis.toInt)
 
     downsampledPart1.partKeyBytes shouldEqual counterPartKeyBytes
 
@@ -521,7 +576,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.promHistogram.downsample.get, 0, 0,
-      downsampledPartData1, Some(5.minutes.toMillis))
+      downsampledPartData1, 5.minutes.toMillis.toInt)
 
     downsampledPart1.partKeyBytes shouldEqual histPartKeyBytes
 
@@ -557,6 +612,63 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     )
   }
 
+  it("should read and verify prom histogram data with NaNs in cassandra using " +
+    "PagedReadablePartition for 1-min downsampled data") {
+
+    val downsampledPartData1 = downsampleColStore.readRawPartitions(
+      batchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
+      0,
+      SinglePartitionScan(histNaNPartKeyBytes))
+      .toListL.runAsync.futureValue.head
+
+    val downsampledPart1 = new PagedReadablePartition(Schemas.promHistogram.downsample.get, 0, 0,
+      downsampledPartData1, 5.minutes.toMillis.toInt)
+
+    downsampledPart1.partKeyBytes shouldEqual histNaNPartKeyBytes
+
+    val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
+    val acc = ctrChunkInfo.vectorAccessor(2)
+    val addr = ctrChunkInfo.vectorAddress(2)
+    DoubleVector(acc, addr).dropPositions(acc, addr).toList shouldEqual Seq(2, 4, 6, 8, 11, 14)
+    PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
+
+    val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
+      Kamon.counter("dummy").withoutTags())
+
+    val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
+    val downsampledData1 = rv1.rows.map { r =>
+      val h = r.getHistogram(3)
+      h.numBuckets shouldEqual 3
+      (0 until h.numBuckets).map(i => h.bucketTop(i)) shouldEqual bucketScheme
+      (r.getLong(0), r.getDouble(1), r.getDouble(2), (0 until h.numBuckets).map(i => h.bucketValue(i)))
+    }.toList
+
+    val expected = Seq(
+      (74372801000L, 0d, 1d, Vector(0d, 0d, 1d)),
+      (74372802000L, 5d, 6d, Vector(2d, 5d, 6d)),
+      (74372802500L, Double.NaN, Double.NaN, Vector(0.0, 0.0, 0.0)), // drop(2)
+
+      (74372861500L, 10.0, 10.0, Vector(2.0, 5.0, 10.0)),
+      (74372862000L, Double.NaN, Double.NaN, Vector(0.0, 0.0, 0.0)), // drop(4)
+      (74372862500L, 11.0, 14.0, Vector(2.0, 8.0, 14.0)),
+
+      (74372921000L, 2d, 2d, Vector(0d, 0d, 2d)), // drop (6)
+      (74372921500L, 7.0, 9.0, Vector(1.0, 7.0, 9.0)),
+      (74372922000L, Double.NaN, Double.NaN, Vector(0.0, 0.0, 0.0)), // drop (8)
+      (74372922500L, 4.0, 1.0, Vector(0.0, 1.0, 1.0)),
+
+      (74372981000L, 17d, 21d, Vector(2d, 16d, 21d)),
+      (74372981500L, 1d, 1d, Vector(0d, 1d, 1d)), // drop (11)
+      (74372982000L, 15d, 15d, Vector(0d, 15d, 15d)),
+
+      (74373041500L, 20d, 25d, Vector(4d, 20d, 25d)),
+      (74373042000L, Double.NaN, Double.NaN, Vector(0.0, 0.0, 0.0)) // drop (14)
+    )
+    // time, sum, count, histogram
+    downsampledData1.filter(_._2.isNaN).map(_._1) shouldEqual expected.filter(_._2.isNaN).map(_._1) // timestamp of NaN records should match
+    downsampledData1.filter(!_._2.isNaN) shouldEqual expected.filter(!_._2.isNaN) // Non NaN records should match
+  }
+
   it("should read and verify gauge data in cassandra using PagedReadablePartition for 5-min downsampled data") {
     val dsGaugePartKeyBytes = RecordBuilder.buildDownsamplePartKey(gaugePartKeyBytes, batchDownsampler.schemas).get
     val downsampledPartData2 = downsampleColStore.readRawPartitions(
@@ -566,7 +678,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .toListL.runAsync.futureValue.head
 
     val downsampledPart2 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0,
-      downsampledPartData2, Some(5.minutes.toMillis))
+      downsampledPartData2, 5.minutes.toMillis.toInt)
 
     downsampledPart2.partKeyBytes shouldEqual dsGaugePartKeyBytes
 
@@ -593,7 +705,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.promCounter.downsample.get, 0, 0,
-      downsampledPartData1, Some(5.minutes.toMillis))
+      downsampledPartData1, 5.minutes.toMillis.toInt)
 
     downsampledPart1.partKeyBytes shouldEqual counterPartKeyBytes
 
@@ -634,12 +746,15 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.promHistogram.downsample.get, 0, 0,
-      downsampledPartData1, Some(5.minutes.toMillis))
+      downsampledPartData1, 5.minutes.toMillis.toInt)
 
     downsampledPart1.partKeyBytes shouldEqual histPartKeyBytes
 
     val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
-    PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(2), ctrChunkInfo.vectorAddress(2)) shouldEqual true
+    val acc = ctrChunkInfo.vectorAccessor(2)
+    val addr = ctrChunkInfo.vectorAddress(2)
+    DoubleVector(acc, addr).dropPositions(acc, addr).toList shouldEqual Seq(2, 4)
+    PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
       Kamon.counter("dummy").withoutTags())
@@ -656,12 +771,67 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     downsampledData1 shouldEqual Seq(
       (74372801000L, 0d, 1d, Seq(0d, 0d, 1d)),
       (74372862000L, 11d, 14d, Seq(2d, 8d, 14d)),
-      (74372921000L, 2d, 2d, Seq(0d, 0d, 2d)),
+      (74372921000L, 2d, 2d, Seq(0d, 0d, 2d)), // drop (2)
       (74372981000L, 17d, 21d, Seq(2d, 16d, 21d)),
-      (74372981500L, 1d, 1d, Seq(0d, 1d, 1d)),
+      (74372981500L, 1d, 1d, Seq(0d, 1d, 1d)), // drop (4)
       (74372982000L, 15.0d, 15.0d, Seq(0.0, 15.0, 15.0)),
       (74373042000L, 20.0d, 25.0d, Seq(4.0, 20.0, 25.0))
     )
+  }
+
+  it("should read and verify prom histogram data with NaN in cassandra using " +
+    "PagedReadablePartition for 5-min downsampled data") {
+
+    val downsampledPartData1 = downsampleColStore.readRawPartitions(
+      batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
+      0,
+      SinglePartitionScan(histNaNPartKeyBytes))
+      .toListL.runAsync.futureValue.head
+
+    val downsampledPart1 = new PagedReadablePartition(Schemas.promHistogram.downsample.get, 0, 0,
+      downsampledPartData1, 5.minutes.toMillis.toInt)
+
+    downsampledPart1.partKeyBytes shouldEqual histNaNPartKeyBytes
+
+    val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
+    val acc = ctrChunkInfo.vectorAccessor(2)
+    val addr = ctrChunkInfo.vectorAddress(2)
+    DoubleVector(acc, addr).dropPositions(acc, addr).toList shouldEqual Seq(2, 4, 6, 8, 10, 13)
+    PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
+
+    val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
+      Kamon.counter("dummy").withoutTags())
+
+    val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
+    val downsampledData1 = rv1.rows.map { r =>
+      val h = r.getHistogram(3)
+      h.numBuckets shouldEqual 3
+      (0 until h.numBuckets).map(i => h.bucketTop(i)) shouldEqual bucketScheme
+      (r.getLong(0), r.getDouble(1), r.getDouble(2), (0 until h.numBuckets).map(i => h.bucketValue(i)))
+    }.toList
+
+    val expected = Seq(
+      (74372801000L, 0d, 1d, Vector(0d, 0d, 1d)),
+      (74372802000L, 5.0, 6.0, Vector(2.0, 5.0, 6.0)),
+      (74372802500L, Double.NaN, Double.NaN, Vector(0.0, 0.0, 0.0)), // drop (2)
+
+      (74372861500L, 10.0, 10.0, Vector(2.0, 5.0, 10.0)),
+      (74372862000L, Double.NaN, Double.NaN, Vector(0.0, 0.0, 0.0)), // drop (4)
+      (74372862500L, 11d, 14d, Vector(2d, 8d, 14d)),
+
+      (74372921000L, 2d, 2d, Vector(0d, 0d, 2d)), // drop (6)
+      (74372921500L, 7.0, 9.0, Vector(1.0, 7.0, 9.0)),
+      (74372922000L, Double.NaN, Double.NaN, Vector(0.0, 0.0, 0.0)), // drop (8)
+
+      (74372981000L, 17d, 21d, Vector(2d, 16d, 21d)),
+      (74372981500L, 1d, 1d, Vector(0d, 1d, 1d)), // drop 10
+      (74372982000L, 15.0d, 15.0d, Vector(0.0, 15.0, 15.0)),
+      (74373041500L, 20.0d, 25.0d, Vector(4.0, 20.0, 25.0)),
+      (74373042000L, Double.NaN, Double.NaN, Vector(0.0, 0.0, 0.0)) // drop (13)
+    )
+    // time, sum, count, histogram
+    downsampledData1.filter(_._2.isNaN).map(_._1) shouldEqual expected.filter(_._2.isNaN).map(_._1) // timestamp of NaN records should match
+    downsampledData1.filter(!_._2.isNaN) shouldEqual expected.filter(!_._2.isNaN) // Non NaN records should match
   }
 
   it("should bring up DownsampledTimeSeriesShard and be able to read data using SelectRawPartitionsExec") {
@@ -675,11 +845,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
 
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
+    val colFiltersNaN = seriesTagsNaN.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
 
-    Seq(gaugeName, gaugeLowFreqName, counterName, histName).foreach { metricName =>
-      val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(metricName))
+    Seq(gaugeName, gaugeLowFreqName, counterName, histNameNaN, histName).foreach { metricName =>
+      val colFltrs = if (metricName == histNameNaN) colFiltersNaN else colFilters
+      val queryFilters = colFltrs :+ ColumnFilter("_metric_", Equals(metricName))
       val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams = PlannerParams(sampleLimit = 1000)),
-        InProcessPlanDispatcher, batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
+        InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters, TimeRangeChunkScan(74372801000L, 74373042000L))
 
       val querySession = QuerySession(QueryContext(), queryConfig)
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
@@ -708,8 +880,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(counterName))
     val qc = QueryContext(plannerParams = PlannerParams(sampleLimit = 1000))
     val exec = MultiSchemaPartitionsExec(qc,
-      InProcessPlanDispatcher, batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
-    exec.addRangeVectorTransformer(PeriodicSamplesMapper(74373042000L, 10, 74373042000L,Some(150000),
+      InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
+    exec.addRangeVectorTransformer(PeriodicSamplesMapper(74373042000L, 10, 74373042000L,Some(310000),
       Some(InternalRangeFunction.Rate), qc))
 
     val querySession = QuerySession(QueryContext(), queryConfig)
@@ -723,6 +895,34 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
   }
 
+  it("should encounter error when doing rate on DownsampledTimeSeriesShard when lookback < 5m resolution ") {
+
+    val downsampleTSStore = new DownsampledTimeSeriesStore(downsampleColStore, rawColStore,
+      settings.filodbConfig)
+
+    downsampleTSStore.setup(batchDownsampler.rawDatasetRef, settings.filodbSettings.schemas,
+      0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
+
+    downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
+
+    val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
+
+    val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(counterName))
+    val qc = QueryContext(plannerParams = PlannerParams(sampleLimit = 1000))
+    val exec = MultiSchemaPartitionsExec(qc,
+      InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
+    exec.addRangeVectorTransformer(PeriodicSamplesMapper(74373042000L, 10, 74373042000L,Some(290000),
+      Some(InternalRangeFunction.Rate), qc))
+
+    val querySession = QuerySession(QueryContext(), queryConfig)
+    val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
+    val res = exec.execute(downsampleTSStore, querySession)(queryScheduler)
+      .runAsync(queryScheduler).futureValue.asInstanceOf[QueryError]
+    queryScheduler.shutdown()
+
+    // exception thrown because lookback is < downsample data resolution of 5m
+    res.t.isInstanceOf[IllegalArgumentException] shouldEqual true
+  }
 
   it("should bring up DownsampledTimeSeriesShard and NOT be able to read untyped data using SelectRawPartitionsExec") {
 
@@ -738,7 +938,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
       val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(untypedName))
       val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams
-        = PlannerParams(sampleLimit = 1000)), InProcessPlanDispatcher, batchDownsampler.rawDatasetRef, 0,
+        = PlannerParams(sampleLimit = 1000)), InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0,
         queryFilters, AllChunkScan)
 
       val querySession = QuerySession(QueryContext(), queryConfig)
@@ -761,7 +961,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(gaugeName))
     val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams = PlannerParams(sampleLimit = 1000)),
-      InProcessPlanDispatcher, batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan, colName = Option("sum"))
+      InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan,
+      colName = Option("sum"))
     val querySession = QuerySession(QueryContext(), queryConfig)
     val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
     val res = exec.execute(downsampleTSStore, querySession)(queryScheduler)
@@ -823,7 +1024,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     }.toSet
 
     // downsample set should not have a few bulk metrics
-    readKeys.size shouldEqual 9904
+    readKeys.size shouldEqual 9905
 
     val readKeys2 = (0 until 4).flatMap { shard =>
       val partKeys = rawColStore.scanPartKeys(batchDownsampler.rawDatasetRef, shard)
@@ -831,7 +1032,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     }.toSet
 
     // raw set should remain same since inDownsampleTables=true in
-    readKeys2.size shouldEqual 10006
+    readKeys2.size shouldEqual 10007
   }
 
   it ("should be able to bust cardinality in both raw and downsample tables with spark job") {
@@ -885,6 +1086,4 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     // readKeys should not contain bulk PK records
     readKeys2 shouldEqual metricNames.toSet
   }
-
-
 }

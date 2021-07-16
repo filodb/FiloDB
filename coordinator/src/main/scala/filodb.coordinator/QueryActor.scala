@@ -72,7 +72,8 @@ final class QueryActor(memStore: MemStore,
   logger.info(s"Starting QueryActor and QueryEngine for ds=$dsRef schemas=$schemas")
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   val queryPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapFunc,
-                                              earliestRawTimestampFn, queryConfig, functionalSpreadProvider)
+                                              earliestRawTimestampFn, queryConfig, "raw",
+                                              functionalSpreadProvider)
   val queryScheduler = createInstrumentedQueryScheduler()
 
   private val tags = Map("dataset" -> dsRef.toString)

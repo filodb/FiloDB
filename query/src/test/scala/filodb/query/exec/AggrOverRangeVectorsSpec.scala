@@ -2,12 +2,10 @@ package filodb.query.exec
 
 import scala.annotation.tailrec
 import scala.util.Random
-
 import com.tdunning.math.stats.TDigest
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
-
 import filodb.core.{MachineMetricsData => MMD}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
@@ -39,6 +37,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       }.take(20)
       override def key: RangeVectorKey = ignoreKey
       override def rows(): RangeVectorCursor = data.iterator
+      override def outputRange: Option[RvRange] = None
     })
 
     val rangeParams = RangeParams(0, 1, 0)
@@ -177,9 +176,9 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   it ("should ignore NaN while aggregating") {
 
     val samples: Array[RangeVector] = Array(
-      toRv(Seq((1000L, Double.NaN), (2000L, 5.6d))),
-      toRv(Seq((1000L, 4.6d), (2000L, 4.4d))),
-      toRv(Seq((1000L, 2.1d), (2000L, 5.4d)))
+      toRv(Seq((1000L, Double.NaN), (2000L, 5.6d)), CustomRangeVectorKey(Map("a".utf8 -> "1".utf8))),
+      toRv(Seq((1000L, 4.6d), (2000L, 4.4d)), CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))),
+      toRv(Seq((1000L, 2.1d), (2000L, 5.4d)), CustomRangeVectorKey(Map("a".utf8 -> "3".utf8)))
     )
 
     val rangeParams = RangeParams(1,1,2)
@@ -229,9 +228,12 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     compareIter2(result5(0).rows.map(r=> Set(r.getDouble(2), r.getDouble(4))),
       Seq(Set(2.1d, 4.6d), Set(4.4, 5.4d)).iterator)
     val result5b = resultObs5b.toListL.runAsync.futureValue
-    result5b.size shouldEqual 1
-    result5b(0).key shouldEqual ignoreKey
-    compareIter(result5b(0).rows.map(_.getDouble(1)), Seq(4.6d,2.1d,5.4d,4.4d).iterator)
+    result5b.size shouldEqual 2
+    result5b(0).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))
+    result5b(1).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))
+
+    compareIter(result5b(0).rows.map(_.getDouble(1)), Seq(4.6d, 4.4d).iterator)
+    compareIter(result5b(1).rows.map(_.getDouble(1)), Seq(2.1d, 5.4d).iterator)
 
     // TopK
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(2.0), tvSchema)
@@ -244,9 +246,14 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     compareIter2(result6(0).rows.map(r=> Set(r.getDouble(2), r.getDouble(4))),
       Seq(Set(4.6d, 2.1d), Set(5.6, 5.4d)).iterator)
     val result6b = resultObs6b.toListL.runAsync.futureValue
-    result6b.size shouldEqual 1
-    result6b(0).key shouldEqual ignoreKey
-    compareIter(result6b(0).rows.map(_.getDouble(1)), Seq(2.1d,4.6d,5.4d,5.6d).iterator)
+    result6b.size shouldEqual 3
+    result6b(0).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))
+    result6b(1).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))
+    result6b(2).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "1".utf8))
+
+    compareIter(result6b(0).rows.map(_.getDouble(1)), Seq(4.6d,Double.NaN).iterator)
+    compareIter(result6b(1).rows.map(_.getDouble(1)), Seq(2.1d,5.4d).iterator)
+    compareIter(result6b(2).rows.map(_.getDouble(1)), Seq(Double.NaN,5.6d).iterator)
 
     // Quantile
     val agg7 = RowAggregator(AggregationOperator.Quantile, Seq(0.5), tvSchema)
@@ -307,6 +314,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       import NoCloseCursor._
       override def key: RangeVectorKey = rangeVectorKey
       override def rows(): RangeVectorCursor = samples.map(r => new TransientRow(r._1, r._2)).iterator
+      override def outputRange: Option[RvRange] = None
     }
   }
 
@@ -366,9 +374,9 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   it("should return NaN when all values are NaN for a timestamp ") {
 
     val samples: Array[RangeVector] = Array(
-      toRv(Seq((1000L, Double.NaN), (2000L, 5.6d))),
-      toRv(Seq((1000L, Double.NaN), (2000L, 4.4d))),
-      toRv(Seq((1000L, Double.NaN), (2000L, 5.4d)))
+      toRv(Seq((1000L, Double.NaN), (2000L, 5.6d)), CustomRangeVectorKey(Map("a".utf8 -> "1".utf8))),
+      toRv(Seq((1000L, Double.NaN), (2000L, 4.4d)), CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))),
+      toRv(Seq((1000L, Double.NaN), (2000L, 5.4d)), CustomRangeVectorKey(Map("a".utf8 -> "3".utf8)))
     )
 
     // Sum
@@ -409,18 +417,21 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val agg5 = RowAggregator(AggregationOperator.BottomK, Seq(2.0), tvSchema)
     val resultObs5a = RangeVectorAggregator.mapReduce(agg5, false, Observable.fromIterable(samples), noGrouping)
     val resultObs5 = RangeVectorAggregator.mapReduce(agg5, true, resultObs5a, rv=>rv.key)
-    val resultObs5b = RangeVectorAggregator.present(agg5, resultObs5, 1000, RangeParams(1,1,2))
     val result5 = resultObs5.toListL.runAsync.futureValue
     result5.size shouldEqual 1
     result5(0).key shouldEqual noKey
     // mapReduce returns range vector which has all values as Double.Max
     compareIter2(result5(0).rows.map(r=> Set(r.getDouble(2), r.getDouble(4))),
       Seq(Set(1.7976931348623157E308d, 1.7976931348623157E308d), Set(4.4d, 5.4d)).iterator)
+    // present
+    val resultObs5b = RangeVectorAggregator.present(agg5, resultObs5, 1000, RangeParams(1,1,2))
     val result5b = resultObs5b.toListL.runAsync.futureValue
-    result5b.size shouldEqual 1
-    result5b(0).key shouldEqual ignoreKey
+    result5b.size shouldEqual 2
+    result5b(0).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))
+    result5b(1).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))
 
-    compareIter(result5b(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 5.4d, 4.4d).iterator)
+    compareIter(result5b(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 4.4d).iterator)
+    compareIter(result5b(1).rows.map(_.getDouble(1)), Seq(Double.NaN, 5.4d).iterator)
 
     // TopK
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(2.0), tvSchema)
@@ -433,9 +444,12 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     compareIter2(result6(0).rows.map(r=> Set(r.getDouble(2), r.getDouble(4))),
       Seq(Set(-1.7976931348623157E308d, -1.7976931348623157E308d), Set(5.6, 5.4d)).iterator)
     val result6b = resultObs6b.toListL.runAsync.futureValue
-    result6b.size shouldEqual 1
-    result6b(0).key shouldEqual ignoreKey
-    compareIter(result6b(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 5.4d, 5.6d).iterator)
+    result6b.size shouldEqual 2
+    result6b(0).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "3".utf8))
+    result6b(1).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "1".utf8))
+
+    compareIter(result6b(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 5.4d).iterator)
+    compareIter(result6b(1).rows.map(_.getDouble(1)), Seq(Double.NaN, 5.6d).iterator)
 
     // Stdvar
     val agg8 = RowAggregator(AggregationOperator.Stdvar, Nil, tvSchema)
@@ -624,6 +638,34 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result6b.size shouldEqual 1
     result6b(0).key shouldEqual ignoreKey
     compareIter(result6b(0).rows.map(_.getDouble(1)), Seq(42d).iterator)
+  }
+
+  it("should sum histogram RVs with uneven bucket size") {
+
+    val (data1, rv1) = histogramRV(numSamples = 5, numBuckets = 8)
+    val (data2, rv2) = histogramRV(numSamples = 5, numBuckets = 7)
+
+    val samples: Array[RangeVector] = Array(rv1, rv2)
+
+    val agg1 = RowAggregator(AggregationOperator.Sum, Nil, histSchema)
+    val resultObs1 = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs = RangeVectorAggregator.mapReduce(agg1, true, resultObs1, rv=>rv.key)
+
+    val result = resultObs.toListL.runAsync.futureValue
+    result.size shouldEqual 1
+    result(0).key shouldEqual noKey
+
+    val sums = data1.zip(data2).map { case (row1, row2) =>
+      val h1 = bv.MutableHistogram(row1(3).asInstanceOf[bv.LongHistogram])
+      h1.add(row2(3).asInstanceOf[bv.LongHistogram])
+      h1
+    }.toList
+
+    val res = Seq.fill(8)(Double.NaN)
+    // Since bucket size is different value should be NaN
+    sums.foreach( s => compareIter(s.values.toIterator, res.toIterator))
+    result(0).rows.map(_.getHistogram(1)).toList shouldEqual sums
+
   }
 
 

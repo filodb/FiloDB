@@ -88,8 +88,46 @@ case class VectorMatch(matching: Option[JoinMatching],
   }
 }
 
-case class SubqueryExpression(subquery: PeriodicSeries, sqcl: SubqueryClause) extends Expression with PeriodicSeries {
-  def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = ???
+case class SubqueryExpression(
+    subquery: PeriodicSeries, sqcl: SubqueryClause, offset: Option[Duration]
+) extends Expression with PeriodicSeries {
+
+  def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
+    // There are only two places for the subquery to be defined in the abstract syntax tree:
+    // a) top level expression (equivalent of query_range API)
+    // b) argument of a range function
+    // In case b), the toSeriesPlan is called on the inner subquery expression, not
+    // on this class itself, hence this method is only for case a).
+    // Top level expression of a range query, should return an
+    // instant vector but subqueries by definition return range vectors.
+    // It's illegal to have a top level subquery expression to be called from query_range API
+    // when start and end parameters are not the same.
+    require(timeParams.start == timeParams.end, "Subquery is not allowed as a top level expression for query_range")
+    val offsetSec : Long = offset match {
+      case None => 0
+      case Some(duration) => duration.millis(1L) / 1000
+    }
+    val stepToUseMs = SubqueryUtils.getSubqueryStepMs(sqcl.step);
+    var startS = timeParams.start - (sqcl.window.millis(1L) / 1000) - offsetSec
+    var endS = timeParams.start - offsetSec
+    startS = SubqueryUtils.getStartForFastSubquery(startS, stepToUseMs/1000 )
+    endS = SubqueryUtils.getEndForFastSubquery(endS, stepToUseMs/1000 )
+    val timeParamsToUse = TimeStepParams(
+      startS,
+      stepToUseMs/1000,
+      endS
+    )
+    TopLevelSubquery(
+      subquery.toSeriesPlan(timeParamsToUse),
+      timeParams.start * 1000,
+      timeParams.step * 1000,
+      timeParams.end * 1000,
+      sqcl.window.millis(1L),
+      stepToUseMs
+    )
+
+  }
+
 }
 
 sealed trait Vector extends Expression {
@@ -232,3 +270,6 @@ case class RangeExpression(metricName: Option[String],
     }.getOrElse(rs)
   }
 }
+
+
+

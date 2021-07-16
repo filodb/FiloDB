@@ -57,6 +57,8 @@ trait ReadablePartition extends FiloPartition {
 
   def shard: Int
 
+  def minResolutionMs: Int = 1
+
   /**
    * Obtains the native offheap pointer for the chunk id for data column columnID
    */

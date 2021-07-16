@@ -60,6 +60,7 @@ class LableJoinSpec extends AnyFunSpec with Matchers with ScalaFutures {
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 3.3d),
         new TransientRow(2L, 5.1d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
@@ -68,6 +69,7 @@ class LableJoinSpec extends AnyFunSpec with Matchers with ScalaFutures {
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(3L, 100d),
         new TransientRow(4L, 200d)).iterator
+      override def outputRange: Option[RvRange] = None
     })
 
   val sampleWithoutDst: Array[RangeVector] = Array(
@@ -78,6 +80,7 @@ class LableJoinSpec extends AnyFunSpec with Matchers with ScalaFutures {
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(1L, 3.3d),
         new TransientRow(2L, 5.1d)).iterator
+      override def outputRange: Option[RvRange] = None
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey4
@@ -86,6 +89,7 @@ class LableJoinSpec extends AnyFunSpec with Matchers with ScalaFutures {
       override def rows(): RangeVectorCursor = Seq(
         new TransientRow(3L, 100d),
         new TransientRow(4L, 200d)).iterator
+      override def outputRange: Option[RvRange] = None
     })
 
   val queryConfig = new QueryConfig(config.getConfig("query"))

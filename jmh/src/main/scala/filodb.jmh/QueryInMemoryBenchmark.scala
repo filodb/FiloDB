@@ -7,7 +7,7 @@ import scala.concurrent.duration._
 
 import akka.actor.ActorSystem
 import ch.qos.logback.classic.{Level, Logger}
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{ConfigFactory, ConfigValueFactory}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.eval.Task
@@ -51,7 +51,6 @@ class QueryInMemoryBenchmark extends StrictLogging {
   import client.QueryCommands._
   import NodeClusterActor._
   import Params._
-
   import filodb.standalone.SimpleProfiler
   val prof = new SimpleProfiler(10, 120, 50)
 
@@ -61,7 +60,9 @@ class QueryInMemoryBenchmark extends StrictLogging {
   val spread = 5
 
   // TODO: move setup and ingestion to another trait
-  val system = ActorSystem("test", ConfigFactory.load("filodb-defaults.conf"))
+  val system = ActorSystem("test", ConfigFactory.load("filodb-defaults.conf")
+    .withValue("filodb.memstore.ingestion-buffer-mem-size", ConfigValueFactory.fromAnyRef("30MB")))
+
   private val cluster = FilodbCluster(system)
   cluster.join()
 
@@ -80,7 +81,6 @@ class QueryInMemoryBenchmark extends StrictLogging {
   val storeConf = StoreConfig(ConfigFactory.parseString("""
                   | flush-interval = 1h
                   | shard-mem-size = 96MB
-                  | ingestion-buffer-mem-size = 30MB
                   | groups-per-shard = 4
                   | demand-paging-enabled = false
                   """.stripMargin))
@@ -117,7 +117,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
 
   // Stuff for directly executing queries ourselves
   val engine = new SingleClusterPlanner(dataset.ref, Schemas(dataset.schema), shardMapper, 0,
-    queryConfig)
+    queryConfig, "raw")
 
   /**
    * ## ========  Queries ===========

@@ -1,9 +1,9 @@
 package filodb.repair
 
-import java.{lang, util}
 import java.io.File
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+import java.util
 
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
@@ -23,22 +23,24 @@ import filodb.memory.format.UnsafeUtils
 
 class PartitionKeysCopier(conf: SparkConf) {
 
-  private def openConfig(str: String) = {
-    ConfigFactory.parseFile(new File(conf.get(str))).withFallback(GlobalConfig.systemConfig)
+  // Get filo config from spark conf or file.
+  private def getFiloConfig(valueConf: String, filePathConf: String) = {
+    val configString = conf.get(valueConf, "")
+    val config = if (!configString.isBlank) {
+      ConfigFactory.parseString(configString).resolve()
+    } else {
+      ConfigFactory.parseFile(new File(conf.get(filePathConf)))
+        .withFallback(GlobalConfig.systemConfig)
+        .resolve()
+    }
+    config
   }
 
-  def datasetConfig(mainConfig: Config): Config = {
-    def getConfig(path: lang.String): Config = {
-      ConfigFactory.parseFile(new File(path))
-    }
-
-    val sourceConfigPaths: util.List[lang.String] = mainConfig.getStringList("dataset-configs")
+  def datasetConfig(mainConfig: Config, datasetName: String): Config = {
+    val sourceConfigPaths = mainConfig.getConfigList("inline-dataset-configs")
     sourceConfigPaths.stream()
-      .map[Config](new util.function.Function[lang.String, Config]() {
-        override def apply(path: lang.String): Config = getConfig(path)
-      })
       .filter(new util.function.Predicate[Config] {
-        override def test(config: Config): Boolean = config.getString("dataset").equals(datasetName)
+        override def test(conf: Config): Boolean = conf.getString("dataset").equals(datasetName)
       })
       .findFirst()
       .orElseThrow()
@@ -49,16 +51,22 @@ class PartitionKeysCopier(conf: SparkConf) {
 
   // Both "source" and "target" refer to file paths which define config files that have a
   // top-level "filodb" section and a "cassandra" subsection.
-  private val rawSourceConfig = openConfig("spark.filodb.partitionkeys.copier.source.configFile")
-  private val rawTargetConfig = openConfig("spark.filodb.partitionkeys.copier.target.configFile")
+  private val rawSourceConfig = getFiloConfig(
+    "spark.filodb.partitionkeys.copier.source.config.value",
+    "spark.filodb.partitionkeys.copier.source.config.file"
+  )
+  private val rawTargetConfig = getFiloConfig(
+    "spark.filodb.partitionkeys.copier.target.config.value",
+    "spark.filodb.partitionkeys.copier.target.config.file"
+  )
   private val sourceConfig = rawSourceConfig.getConfig("filodb")
   private val targetConfig = rawTargetConfig.getConfig("filodb")
   private val sourceCassConfig = sourceConfig.getConfig("cassandra")
   private val targetCassConfig = targetConfig.getConfig("cassandra")
   private val datasetName = conf.get("spark.filodb.partitionkeys.copier.dataset")
   private val datasetRef = DatasetRef.fromDotString(datasetName)
-  private val sourceDatasetConfig = datasetConfig(sourceConfig)
-  private val targetDatasetConfig = datasetConfig(targetConfig)
+  private val sourceDatasetConfig = datasetConfig(sourceConfig, datasetName)
+  private val targetDatasetConfig = datasetConfig(targetConfig, datasetName)
   private val sourceSession = FiloSessionProvider.openSession(sourceCassConfig)
   private val targetSession = FiloSessionProvider.openSession(targetCassConfig)
 

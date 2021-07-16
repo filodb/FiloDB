@@ -381,7 +381,7 @@ object RangeFunction {
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionH
     case Some(Rate)           => () => new HistRateFunction
     case Some(Increase)       => () => new HistIncreaseFunction
-    case _                    => ???
+    case _                    => ??? //TODO enumerate all possible cases
   }
 
   /**
@@ -407,7 +407,7 @@ object RangeFunction {
     case Some(AvgOverTime)      => () => new AvgOverTimeFunction()
     case Some(StdDevOverTime)   => () => new StdDevOverTimeFunction()
     case Some(StdVarOverTime)   => () => new StdVarOverTimeFunction()
-    case _                      => ???
+    case _                      => ??? //TODO enumerate all possible cases
   }
 }
 
