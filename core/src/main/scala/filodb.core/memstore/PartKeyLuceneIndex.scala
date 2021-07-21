@@ -6,6 +6,7 @@ import java.util.PriorityQueue
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable.HashSet
+import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
@@ -116,7 +117,46 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   //start this thread to flush the segments and refresh the searcher every specific time period
   private var flushThread: ControlledRealTimeReopenThread[IndexSearcher] = _
-  private val luceneDocument = new ThreadLocal[Document]()
+
+  case class ReusableLuceneDocument() {
+    val document = new Document()
+    private val partIdField = new StringField(PART_ID, "0", Store.NO)
+    private val partIdDv = new NumericDocValuesField(PART_ID, 0)
+    private val partKeyDv = new BinaryDocValuesField(PART_KEY, new BytesRef())
+    private val startTimeField = new LongPoint(START_TIME, 0L)
+    private val startTimeDv = new NumericDocValuesField(START_TIME, 0L)
+    private val endTimeField = new LongPoint(END_TIME, 0L)
+    private val endTimeDv = new NumericDocValuesField(END_TIME, 0L)
+    private val otherFields = mutable.WeakHashMap[String, StringField]() // weak so that it is GCed when unused
+
+    def addField(name: String, value: String): Unit = {
+      val field = otherFields.getOrElseUpdate(name, new StringField(name, "", Store.NO))
+      field.setStringValue(value)
+      document.add(field)
+    }
+
+    def reset(partId: Int, partKey: BytesRef, startTime: Long, endTime: Long): Document = {
+      document.clear();
+      partIdField.setStringValue(String.valueOf(partId))
+      partIdDv.setLongValue(partId)
+      partKeyDv.setBytesValue(partKey)
+      startTimeField.setLongValue(startTime)
+      startTimeDv.setLongValue(startTime)
+      endTimeField.setLongValue(endTime)
+      endTimeDv.setLongValue(endTime)
+      document.add(partIdField)
+      document.add(partIdDv)
+      document.add(partKeyDv)
+      document.add(startTimeField)
+      document.add(startTimeDv)
+      document.add(endTimeField)
+      document.add(endTimeDv)
+      document
+    }
+  }
+  private val luceneDocument = new ThreadLocal[ReusableLuceneDocument]() {
+    override def initialValue(): ReusableLuceneDocument = new ReusableLuceneDocument
+  }
 
   private val mapConsumer = new MapItemConsumer {
     def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
@@ -124,10 +164,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       val key = utf8ToStrCache.getOrElseUpdate(new UTF8Str(keyBase, keyOffset + 1,
                                                            UTF8StringShort.numBytes(keyBase, keyOffset)),
                                                _.toString)
-      val value = new BytesRef(valueBase.asInstanceOf[Array[Byte]],
+      val value = new String(valueBase.asInstanceOf[Array[Byte]],
                                unsafeOffsetToBytesRefOffset(valueOffset + 2), // add 2 to move past numBytes
                                UTF8StringMedium.numBytes(valueBase, valueOffset))
-      addIndexEntry(key, value, index)
+      addIndexedField(key, value)
     }
   }
 
@@ -142,8 +182,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
           val strOffset = schema.binSchema.blobOffset(base, offset, pos)
           val numBytes = schema.binSchema.blobNumBytes(base, offset, pos)
-          val value = new BytesRef(base.asInstanceOf[Array[Byte]], strOffset.toInt - UnsafeUtils.arayOffset, numBytes)
-          addIndexEntry(colName.toString, value, partIndex)
+          val value = new String(base.asInstanceOf[Array[Byte]], strOffset.toInt - UnsafeUtils.arayOffset, numBytes)
+          addIndexedField(colName.toString, value)
         }
         def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] = ??? // not used
       }
@@ -285,8 +325,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     ret
   }
 
-  private def addIndexEntry(labelName: String, value: BytesRef, partIndex: Int): Unit = {
-    luceneDocument.get().add(new StringField(labelName, value, Store.NO))
+  private def addIndexedField(labelName: String, value: String): Unit = {
+    luceneDocument.get().addField(labelName, value)
   }
 
   def addPartKey(partKeyOnHeapBytes: Array[Byte],
@@ -329,30 +369,12 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                            partKeyBytesRefOffset: Int,
                            partKeyNumBytes: Int,
                            partId: Int, startTime: Long, endTime: Long): Document = {
-    val document = new Document()
-    // TODO We can use RecordSchema.toStringPairs to get the name/value pairs from partKey.
-    // That is far more simpler with much of the logic abstracted out.
-    // Currently there is a bit of leak in abstraction of Binary Record processing in this class.
-
-    luceneDocument.set(document) // threadlocal since we are not able to pass the document into mapconsumer
+    val partKeyBytesRef = new BytesRef(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes)
+    luceneDocument.get().reset(partId, partKeyBytesRef, startTime, endTime)
     cforRange { 0 until numPartColumns } { i =>
       indexers(i).fromPartKey(partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset), partId)
     }
-    // partId
-    document.add(new StringField(PART_ID, partId.toString, Store.NO)) // cant store as an IntPoint because of lucene bug
-    document.add(new NumericDocValuesField(PART_ID, partId))
-    // partKey
-    val bytesRef = new BytesRef(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes)
-    document.add(new BinaryDocValuesField(PART_KEY, bytesRef))
-    // startTime
-    document.add(new LongPoint(START_TIME, startTime))
-    document.add(new NumericDocValuesField(START_TIME, startTime))
-    // endTime
-    document.add(new LongPoint(END_TIME, endTime))
-    document.add(new NumericDocValuesField(END_TIME, endTime))
-
-    luceneDocument.remove()
-    document
+    luceneDocument.get().document
   }
 
   /**
