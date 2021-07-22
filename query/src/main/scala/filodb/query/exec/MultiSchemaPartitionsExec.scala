@@ -68,8 +68,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
    * Metric name can have _sum & _count as suffix. So we remove the suffix only when partition lookup does not
    * return any results
    */
-   if (lookupRes.firstSchemaId.isEmpty && querySession.queryConfig.translatePromToFilodbHistogram) {
-    // require(colName.isEmpty, "Prom query should not have colName")
+   if (lookupRes.firstSchemaId.isEmpty && querySession.queryConfig.translatePromToFilodbHistogram && colName.isEmpty) {
 
      if (metricName.isDefined) {
        val res = if (metricName.get.endsWith("_sum"))
