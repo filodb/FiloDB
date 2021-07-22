@@ -69,7 +69,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
    * return any results
    */
    if (lookupRes.firstSchemaId.isEmpty && querySession.queryConfig.translatePromToFilodbHistogram) {
-     require(colName.isEmpty, "Prom query should not have colName")
+    // require(colName.isEmpty, "Prom query should not have colName")
 
      if (metricName.isDefined) {
        val res = if (metricName.get.endsWith("_sum"))
