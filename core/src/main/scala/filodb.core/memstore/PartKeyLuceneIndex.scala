@@ -166,7 +166,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                                                _.toString)
       val value = new String(valueBase.asInstanceOf[Array[Byte]],
                                unsafeOffsetToBytesRefOffset(valueOffset + 2), // add 2 to move past numBytes
-                               UTF8StringMedium.numBytes(valueBase, valueOffset))
+                               UTF8StringMedium.numBytes(valueBase, valueOffset), StandardCharsets.UTF_8)
       addIndexedField(key, value)
     }
   }
@@ -182,7 +182,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
           val strOffset = schema.binSchema.blobOffset(base, offset, pos)
           val numBytes = schema.binSchema.blobNumBytes(base, offset, pos)
-          val value = new String(base.asInstanceOf[Array[Byte]], strOffset.toInt - UnsafeUtils.arayOffset, numBytes)
+          val value = new String(base.asInstanceOf[Array[Byte]], strOffset.toInt - UnsafeUtils.arayOffset,
+                                 numBytes, StandardCharsets.UTF_8)
           addIndexedField(colName.toString, value)
         }
         def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] = ??? // not used
