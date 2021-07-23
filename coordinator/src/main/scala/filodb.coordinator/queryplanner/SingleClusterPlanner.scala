@@ -363,17 +363,20 @@ class SingleClusterPlanner(dsRef: DatasetRef,
    // _sum and _count are removed in MultiSchemaPartitionsExec since we need to check whether there is a metric name
    // with _sum/_count as suffix
     val (nameFilter: Option[String], leFilter: Option[String], lpWithoutBucket: PeriodicSeries) =
-      if (lp.rawSeries.isInstanceOf[RawSeries] && queryConfig.translatePromToFilodbHistogram) {
+    if (lp.rawSeries.isInstanceOf[RawSeries] && queryConfig.translatePromToFilodbHistogram) {
 
-     val rawSeriesLp = lp.rawSeries.asInstanceOf[RawSeries]
-     val nameFilter = rawSeriesLp.filters.find(_.column.equals(PromMetricLabel)).
+      val rawSeriesLp = lp.rawSeries.asInstanceOf[RawSeries]
+      val nameFilter = rawSeriesLp.filters.find(_.column.equals(PromMetricLabel)).
        map(_.filter.valuesStrings.head.toString)
-     val leFilter = rawSeriesLp.filters.find(_.column =="le").map(_.filter.valuesStrings.head.toString)
+      val leFilter = rawSeriesLp.filters.find(_.column =="le").map(_.filter.valuesStrings.head.toString)
 
-     val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
-       filterNot(_.column=="le") :+ ColumnFilter(PromMetricLabel,
-       Equals(nameFilter.get.replace("_bucket", "")))
-      (nameFilter, leFilter, lp.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+      if (nameFilter.isEmpty) (nameFilter, leFilter, lp)
+      else {
+       val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
+        filterNot(_.column == "le") :+ ColumnFilter(PromMetricLabel,
+        Equals(nameFilter.get.replace("_bucket", "")))
+       (nameFilter, leFilter, lp.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+      }
     } else (None, None, lp)
 
     val rawSeries = walkLogicalPlanTree(lpWithoutBucket.rawSeries, qContext)
