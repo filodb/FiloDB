@@ -28,6 +28,10 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val cassandraConfig = filodbConfig.getConfig("cassandra")
 
+  @transient lazy val cronEnabled = downsamplerConfig.getBoolean("cron-scheduler.enabled")
+
+  @transient lazy val cronExpression = downsamplerConfig.getAs[String]("cron-scheduler.schedule")
+
   @transient lazy val rawDatasetName = downsamplerConfig.getString("raw-dataset-name")
 
   @transient lazy val rawDatasetIngestionConfig = {

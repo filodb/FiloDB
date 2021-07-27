@@ -24,7 +24,9 @@ class DSIndexJobSettings(settings: DownsamplerSettings) extends Serializable {
     conf
   }
 
-  @transient lazy val batchSize = dsIndexJobConfig.getInt("cass-write-batch-size")
+  @transient lazy val cronEnabled = dsIndexJobConfig.getBoolean("cron-scheduler.enabled")
+
+  @transient lazy val cronExpression = dsIndexJobConfig.getAs[String]("cron-scheduler.schedule")
 
   @transient lazy val splitsPerNode = dsIndexJobConfig.getInt("splits-per-node")
 
