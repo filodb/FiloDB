@@ -145,8 +145,8 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     materialized
   }
 
-  private def shardsFromFilters(filters: Seq[ColumnFilter],
-                                qContext: QueryContext): Seq[Int] = {
+  def shardsFromFilters(filters: Seq[ColumnFilter],
+                        qContext: QueryContext): Seq[Int] = {
 
     val spreadProvToUse = qContext.plannerParams.spreadOverride.getOrElse(spreadProvider)
 
@@ -192,7 +192,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     * Renames Prom AST __name__ metric name filters to one based on the actual metric column of the dataset,
     * if it is not the prometheus standard
     */
-  private def renameMetricFilter(filters: Seq[ColumnFilter]): Seq[ColumnFilter] =
+  def renameMetricFilter(filters: Seq[ColumnFilter]): Seq[ColumnFilter] =
     if (dsOptions.metricColumn != PromMetricLabel) {
       filters map {
         case ColumnFilter(PromMetricLabel, filt) => ColumnFilter(dsOptions.metricColumn, filt)
