@@ -13,6 +13,7 @@ import filodb.core.query._
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig, TimeRangeChunkScan}
 import filodb.downsampler.chunk.{BatchDownsampler, Downsampler, DownsamplerSettings}
+import filodb.downsampler.chunk.DownsamplerMain.sparkConf
 import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
 import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -23,6 +24,7 @@ import kamon.Kamon
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.spark.{SparkConf, SparkException}
+import org.apache.spark.sql.SparkSession
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
@@ -411,7 +413,11 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     sparkConf.setMaster("local[2]")
     sparkConf.set("spark.filodb.downsampler.userTimeOverride", Instant.ofEpochMilli(lastSampleTime).toString)
     val downsampler = new Downsampler(settings, batchDownsampler)
-    downsampler.run(sparkConf).close()
+    val sparkSession = SparkSession.builder()
+      .appName("FiloDBDownsampler")
+      .config(sparkConf)
+      .getOrCreate()
+    downsampler.run(sparkSession, Seq(lastSampleTime)).close()
   }
 
   it ("should migrate partKey data into the downsample dataset tables in cassandra using spark job") {
@@ -420,7 +426,11 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     sparkConf.set("spark.filodb.downsampler.index.timeInPeriodOverride", Instant.ofEpochMilli(lastSampleTime).toString)
     sparkConf.set("spark.filodb.downsampler.index.toHourExclOverride", (pkUpdateHour + 6 + 1).toString)
     val indexUpdater = new IndexJobDriver(settings, dsIndexJobSettings)
-    indexUpdater.run(sparkConf).close()
+    val sparkSession = SparkSession.builder()
+      .appName("FiloDB_Index_Downsampler")
+      .config(sparkConf)
+      .getOrCreate()
+    indexUpdater.run(sparkSession, lastSampleTime).close()
   }
 
   it ("should verify migrated partKey data and match the downsampled schema") {

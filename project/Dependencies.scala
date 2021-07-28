@@ -24,6 +24,7 @@ object Dependencies {
   val monixKafkaVersion = "0.15"
   val sparkVersion      = "2.4.4"
   val sttpVersion       = "1.3.3"
+  val quartzVersion     = "2.3.1"
 
   /* Dependencies shared */
   val logbackDep        = "ch.qos.logback"             % "logback-classic"       % "1.2.3"
@@ -81,7 +82,8 @@ object Dependencies {
     "org.apache.spark"       %%      "spark-core" % sparkVersion % Provided,
     "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Provided,
     "org.apache.spark"       %%      "spark-core" % sparkVersion % Test excludeAll(excludeNetty),
-    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Test excludeAll(excludeNetty)
+    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Test excludeAll(excludeNetty),
+    "org.quartz-scheduler"   %       "quartz"     % quartzVersion
   )
 
   lazy val cassDeps = commonDeps ++ Seq(

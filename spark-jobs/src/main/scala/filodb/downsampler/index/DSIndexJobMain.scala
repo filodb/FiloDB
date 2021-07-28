@@ -4,8 +4,10 @@ import java.time.Instant
 import java.time.format.DateTimeFormatter
 
 import kamon.Kamon
-import org.apache.spark.SparkConf
+import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.SparkSession
+import org.quartz._
+import org.quartz.impl.StdSchedulerFactory
 
 import filodb.coordinator.KamonShutdownHook
 import filodb.downsampler.DownsamplerContext
@@ -38,20 +40,88 @@ object DSIndexJobMain extends App {
   //migrate partkeys between these hours
   val iu = new IndexJobDriver(dsSettings, dsIndexJobSettings)
   val sparkConf = new SparkConf(loadDefaults = true)
-  iu.run(sparkConf)
+  val sparkSession = SparkSession.builder()
+                      .appName("FiloDB_Index_Downsampler")
+                      .config(sparkConf)
+                      .getOrCreate()
 
+  private[this] def scheduleJob(scheduler: Scheduler,
+                                sparkSession: SparkSession,
+                                cronExpression: String): Unit = {
+    val job = JobBuilder.newJob(classOf[SparkDSIndexJob])
+      .withIdentity("DSIndexJob", "Group")
+      .build
+    val trigger = TriggerBuilder
+      .newTrigger()
+      .withIdentity(s"cron trigger $cronExpression", "triggerGroup")
+      .withSchedule(CronScheduleBuilder.cronSchedule(cronExpression)).build()
+    DownsamplerContext.dsLogger.info(s"triggering job with schedule $cronExpression")
+    scheduler.scheduleJob(job, trigger)
+  }
+
+  private[this] class SparkDSIndexJob extends Job {
+    override def execute(context: JobExecutionContext): Unit = {
+      // get the timeInPeriod from JobContext (rerun failed job) or derive from configuration
+      val timeInPeriod = context.getScheduler.getContext.getOrDefault("timeInPeriod", -1L)
+        .asInstanceOf[Long] match {
+        case -1L => timeInMigrationPeriod(sparkSession)
+        case time: Long => time
+      }
+      if (context.getRefireCount > 5) { // triggered job run failed count
+        val jee = new JobExecutionException("Retries exceeded the threshold count 3")
+        DownsamplerContext.dsLogger
+          .error(s"Job failed to run for period: ${java.time.Instant.ofEpochMilli(timeInPeriod)}")
+        //make sure job doesn't run again. index job need to run in sequence. so EXIT the job.
+        jee.setUnscheduleAllTriggers(true)
+        throw jee
+      }
+      try {
+        // set the timeInPeriod in context, will be used for reruns
+        context.getScheduler.getContext.put("timeInPeriod", timeInPeriod)
+        iu.run(sparkSession, timeInPeriod)
+      } catch {
+        case e1: Exception =>
+          DownsamplerContext.dsLogger.error("exception during scheduled job run", e1)
+          val jee = new JobExecutionException(e1)
+          Thread.sleep(300000) //backoff for 5 mins
+          //fire it again
+          jee.setRefireImmediately(true)
+          throw jee
+      }
+    }
+  }
+
+  def timeInMigrationPeriod(spark: SparkSession): Long = {
+    spark.sparkContext.getConf
+      .getOption ("spark.filodb.downsampler.index.timeInPeriodOverride") match {
+      // by default assume a time in the previous downsample period
+      case None => System.currentTimeMillis () - dsSettings.downsampleChunkDuration
+      // examples: 2019-10-20T12:34:56Z  or  2019-10-20T12:34:56-08:00
+      case Some (str) => Instant.from (DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse (str) ).toEpochMilli
+    }
+  }
+  def startJob: Unit = {
+    if (dsIndexJobSettings.cronEnabled && sparkSession.sparkContext.getConf
+      .getOption("spark.filodb.downsampler.index.timeInPeriodOverride").isEmpty) {
+      val sf = new StdSchedulerFactory
+      val sched = sf.getScheduler()
+      scheduleJob(sched, sparkSession, dsIndexJobSettings.cronExpression.get)
+    } else
+      iu.run(sparkSession, timeInPeriod = timeInMigrationPeriod(sparkSession))
+  }
+
+  // entry-point for the execution
+  startJob
 }
+
+
 
 class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSIndexJobSettings) extends Serializable {
 
   @transient lazy private val jobCompleted = Kamon.counter("index-migration-completed").withoutTags()
 
   // scalastyle:off method.length
-  def run(conf: SparkConf): SparkSession = {
-    val spark = SparkSession.builder()
-      .appName("FiloDB_Index_Downsampler")
-      .config(conf)
-      .getOrCreate()
+  def run(spark: SparkSession, timeInPeriod: Long): SparkSession = {
 
     def hour(millis: Long) = millis / 1000 / 60 / 60
 
@@ -60,7 +130,7 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
       // by default assume a time in the previous downsample period
       case None => System.currentTimeMillis() - dsSettings.downsampleChunkDuration
       // examples: 2019-10-20T12:34:56Z  or  2019-10-20T12:34:56-08:00
-      case Some(str) => Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str)).toEpochMilli()
+      case Some(str) => Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str)).toEpochMilli
     }
 
     val hourInMigrationPeriod = hour(timeInMigrationPeriod)
