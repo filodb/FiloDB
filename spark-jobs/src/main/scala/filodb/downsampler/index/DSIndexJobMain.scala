@@ -100,14 +100,18 @@ object DSIndexJobMain extends App {
       case Some (str) => Instant.from (DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse (str) ).toEpochMilli
     }
   }
-
-  if (dsIndexJobSettings.cronEnabled && sparkSession.sparkContext.getConf
+  def startJob: Unit = {
+    if (dsIndexJobSettings.cronEnabled && sparkSession.sparkContext.getConf
       .getOption("spark.filodb.downsampler.index.timeInPeriodOverride").isEmpty) {
-    val sf = new StdSchedulerFactory
-    val sched = sf.getScheduler()
-    scheduleJob(sched, sparkSession, dsIndexJobSettings.cronExpression.get)
-  } else
-    iu.run(sparkSession, timeInPeriod = timeInMigrationPeriod(sparkSession))
+      val sf = new StdSchedulerFactory
+      val sched = sf.getScheduler()
+      scheduleJob(sched, sparkSession, dsIndexJobSettings.cronExpression.get)
+    } else
+      iu.run(sparkSession, timeInPeriod = timeInMigrationPeriod(sparkSession))
+  }
+
+  // entry-point for the execution
+  startJob
 }
 
 
