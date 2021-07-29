@@ -80,6 +80,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   private val baseName = s"cardStore-$ref-$shard-${System.currentTimeMillis()}"
   private val dbDirInTmp = new File(baseDir, baseName)
   private val db = RocksDB.open(options, dbDirInTmp.getAbsolutePath)
+  @volatile private var closed = false;
   logger.info(s"Opening new Cardinality DB for shard=$shard dataset=$ref at ${dbDirInTmp.getAbsolutePath}")
 
   private val kryo = new ThreadLocal[Kryo]() {
@@ -109,17 +110,19 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
 
   var lastMetricsReportTime = 0L
   private def updateMetrics(): Unit = {
-    val now = System.currentTimeMillis()
-    // dump DB stats every 5 minutes
-    if (now - lastMetricsReportTime > 1000 * 60 * 5 ) {
-      logger.info(s"Card Store Stats dataset=$ref shard=$shard $statsAsString")
-      lastMetricsReportTime = now
+    if (!closed) {
+      val now = System.currentTimeMillis()
+      // dump DB stats every 5 minutes
+      if (now - lastMetricsReportTime > 1000 * 60 * 5) {
+        logger.info(s"Card Store Stats dataset=$ref shard=$shard $statsAsString")
+        lastMetricsReportTime = now
+      }
+      diskSpaceUsedMetric.update(diskSpaceUsed)
+      numKeysMetric.update(estimatedNumKeys)
+      memoryUsedMetric.update(memTablesSize + blockCacheSize + tableReadersSize)
+      compactionBytesPendingMetric.update(compactionBytesPending)
+      numRunningCompactionsMetric.update(numRunningCompactions)
     }
-    diskSpaceUsedMetric.update(diskSpaceUsed)
-    numKeysMetric.update(estimatedNumKeys)
-    memoryUsedMetric.update(memTablesSize + blockCacheSize + tableReadersSize)
-    compactionBytesPendingMetric.update(compactionBytesPending)
-    numRunningCompactionsMetric.update(numRunningCompactions)
   }
 
   //  List of all RocksDB properties at https://github.com/facebook/rocksdb/blob/6.12.fb/include/rocksdb/db.h#L720
@@ -244,6 +247,8 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   }
 
   def close(): Unit = {
+    closed = true
+    metricsReporter.cancel()
     db.cancelAllBackgroundWork(true)
     db.close()
     writeBufferManager.close()
@@ -251,6 +256,5 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
     options.close()
     val directory = new Directory(dbDirInTmp)
     directory.deleteRecursively()
-    metricsReporter.cancel()
   }
 }
