@@ -48,8 +48,8 @@ object Parser extends StrictLogging {
   }
 
   // TODO: Once fully switched to AntlrParser, get rid of the special precedence methods.
-  private def parseQueryWithPrecedence(query: String): Expression = {
-    mode match {
+  private def parseQueryWithPrecedence(query: String, modeParam: Mode = mode): Expression = {
+    modeParam match {
       case Antlr => AntlrParser.parseQuery(query)
       case Legacy => LegacyParser.parseQueryWithPrecedence(query)
       case Shadow => {
@@ -125,15 +125,16 @@ object Parser extends StrictLogging {
     }
   }
 
-  def queryToLogicalPlan(query: String, queryTimestamp: Long, step: Long): LogicalPlan = {
+  def queryToLogicalPlan(query: String, queryTimestamp: Long, step: Long, mode: Mode = Shadow): LogicalPlan = {
     // Remember step matters here in instant query, when lookback is provided in step factor
     // notation as in [5i]
     val defaultQueryParams = TimeStepParams(queryTimestamp, step, queryTimestamp)
-    queryRangeToLogicalPlan(query, defaultQueryParams)
+    queryRangeToLogicalPlan(query, defaultQueryParams, mode)
   }
 
-  def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
-    parseQueryWithPrecedence(query) match {
+  def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams, mode: Mode = Shadow): LogicalPlan = {
+    val ex = parseQueryWithPrecedence(query, mode)
+    ex match {
       case p: PeriodicSeries => p.toSeriesPlan(timeParams)
       case r: SimpleSeries   => r.toSeriesPlan(timeParams, isRoot = true)
       case _ => throw new UnsupportedOperationException()
