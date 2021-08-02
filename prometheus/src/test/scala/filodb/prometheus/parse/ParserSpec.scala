@@ -646,7 +646,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
 
     // Parsing with Legacy Parser
     queryToLpString.foreach { case (q, e) =>
-      info(s"Parsing $q")
+      info(s"Parsing with Legacy parser $q")
       val lp = Parser.queryToLogicalPlan(q, qts, step, Shadow)
       if (lp.isInstanceOf[BinaryJoin]) printBinaryJoin(lp)
       lp.toString shouldEqual (e)
@@ -654,7 +654,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
 
     // Parsing with Antlr
     queryToLpString.foreach { case (q, e) =>
-      info(s"Parsing $q")
+      info(s"Parsing with Antlr Parser$q")
       val lp = Parser.queryToLogicalPlan(q, qts, step, Antlr)
       if (lp.isInstanceOf[BinaryJoin]) printBinaryJoin(lp)
       lp.toString shouldEqual (e)
