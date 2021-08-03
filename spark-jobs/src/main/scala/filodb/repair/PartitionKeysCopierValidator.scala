@@ -18,6 +18,7 @@ import filodb.cassandra.columnstore.{CassandraColumnStore, CassandraTokenRangeSp
 import filodb.core.{DatasetRef, GlobalConfig}
 import filodb.core.metadata.Schemas
 import filodb.core.store.ScanSplit
+import filodb.downsampler.chunk.DownsamplerSettings
 import filodb.memory.format.UnsafeUtils
 
 case class ExpandedPartKeyRecord(pkPair: Seq[(String, String)],
@@ -66,13 +67,19 @@ class PartitionKeysCopierValidator(sparkConf: SparkConf) extends StrictLogging {
   val sourceCassConfig = sourceConfig.getConfig("cassandra")
   val targetCassConfig = targetConfig.getConfig("cassandra")
   val datasetName = sparkConf.get("spark.filodb.partitionkeys.validator.dataset")
+  val isDownsampleRepair = sparkConf.getBoolean("spark.filodb.partitionkeys.validator.isDownsampleCopy", false)
+
   val sourceDatasetConfig = datasetConfig(sourceConfig, datasetName)
   val targetDatasetConfig = datasetConfig(targetConfig, datasetName)
-
-  val datasetRef = DatasetRef.fromDotString(datasetName)
+  val datasetRef = if (isDownsampleRepair) {
+    val dsSettings = new DownsamplerSettings(rawSourceConfig)
+    val highestDSResolution = dsSettings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
+    DatasetRef(s"${datasetName}_ds_${highestDSResolution.toMinutes}")
+  } else {
+    DatasetRef.fromDotString(datasetName)
+  }
   val sourceSession = FiloSessionProvider.openSession(sourceCassConfig)
   val targetSession = FiloSessionProvider.openSession(targetCassConfig)
-
   val numOfShards: Int = sourceDatasetConfig.getInt("num-shards")
   val repairStartTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.validator.repairStartTime"))
   val repairEndTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.validator.repairEndTime"))
@@ -81,10 +88,10 @@ class PartitionKeysCopierValidator(sparkConf: SparkConf) extends StrictLogging {
   val writeSched = Scheduler.io("cass-write-sched")
 
   val sourceCassandraColStore = new CassandraColumnStore(
-    sourceConfig, readSched, sourceSession, false
+    sourceConfig, readSched, sourceSession, isDownsampleRepair
   )(writeSched)
   val targetCassandraColStore = new CassandraColumnStore(
-    targetConfig, readSched, targetSession, false
+    targetConfig, readSched, targetSession, isDownsampleRepair
   )(writeSched)
 
   val numSplitsForScans = sourceCassConfig.getInt("num-token-range-splits-for-scans")
@@ -196,7 +203,9 @@ object PartitionKeysCopierValidatorMain extends App with StrictLogging {
     val targetDiff = targetRows.except(sourceRows)
 
     if (sourceDiff.isEmpty) {
-      logger.info(s"PartitionKeysCopierValidator validated successfully with no diff.")
+      logger.info(s"PartitionKeysCopierValidator validated successfully with no diff." +
+        s"Source rows size: ${sourceRows.count()} " +
+        s"Target rows size: ${targetRows.count()} ")
     } else {
       logger.info(s"PartitionKeysCopierValidator found diff! " +
         s"Source rows size: ${sourceRows.count()} " +
