@@ -64,7 +64,6 @@ class PartitionKeysCopier(conf: SparkConf) {
   private val sourceCassConfig = sourceConfig.getConfig("cassandra")
   private val targetCassConfig = targetConfig.getConfig("cassandra")
   private val datasetName = conf.get("spark.filodb.partitionkeys.copier.dataset")
-  private val datasetRef = DatasetRef.fromDotString(datasetName)
   private val sourceDatasetConfig = datasetConfig(sourceConfig, datasetName)
   private val targetDatasetConfig = datasetConfig(targetConfig, datasetName)
   private val sourceSession = FiloSessionProvider.openSession(sourceCassConfig)
@@ -78,14 +77,21 @@ class PartitionKeysCopier(conf: SparkConf) {
   private val isDownsampleRepair = conf.getBoolean("spark.filodb.partitionkeys.copier.isDownsampleCopy", false)
   private val repairStartTime = parseDateTime(conf.get("spark.filodb.partitionkeys.copier.repairStartTime"))
   private val repairEndTime = parseDateTime(conf.get("spark.filodb.partitionkeys.copier.repairEndTime"))
+
+  private val dsSettings = new DownsamplerSettings(rawSourceConfig)
+  private val highestDSResolution = dsSettings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
   private val diskTimeToLiveSeconds = if (isDownsampleRepair) {
-    val dsSettings = new DownsamplerSettings(rawSourceConfig)
-    val highestDSResolution = dsSettings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
     dsSettings.ttlByResolution(highestDSResolution)
   } else {
     targetDatasetConfig.getConfig("sourceconfig.store")
       .as[FiniteDuration]("disk-time-to-live").toSeconds.toInt
   }
+  private val datasetRef = if (isDownsampleRepair) {
+    DatasetRef(s"${datasetName}_ds_${highestDSResolution.toMinutes}")
+  } else {
+    DatasetRef.fromDotString(datasetName)
+  }
+
   private val readSched = Scheduler.io("cass-read-sched")
   private val writeSched = Scheduler.io("cass-write-sched")
 
