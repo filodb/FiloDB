@@ -49,18 +49,20 @@ class EvictionLock(debugInfo: String = "none") extends StrictLogging {
       if (reclaimLock.tryAcquireExclusiveNanos(TimeUnit.MILLISECONDS.toNanos(timeout))) {
         numFailures = 0
         return true
-      } else { // if we did not get lock, count failures and judge if the node is in bad state
-        if (finalTimeoutMillis >= maxTimeoutMillis / 2) {
-          // Start warning when the current headroom has dipped below the halfway point.
-          // The lock state is logged in case it's stuck due to a runaway query somewhere.
+      } else {
+      if (finalTimeoutMillis >= maxTimeoutMillis / 2) {
+        // Start warning when the current headroom has dipped below the halfway point.
+        // The lock state is logged in case it's stuck due to a runaway query somewhere.
           logger.warn(s"Lock for ensureHeadroom timed out: ${this}")
         }
       }
+      // if we did not get lock, count failures and judge if the node is in bad state
       if (timeout >= finalTimeoutMillis) {
         numFailures += 1
         if (numFailures >= 5) {
           Shutdown.haltAndCatchFire(new RuntimeException(s"Headroom task was unable to acquire exclusive lock " +
-            s"for $numFailures consecutive attempts. Shutting down process. $debugInfo"))
+            s"for $numFailures consecutive attempts. Shutting down process. $debugInfo " +
+            s"LockState: $this"))
         }
         return false
       }
