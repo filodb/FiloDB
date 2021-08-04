@@ -13,15 +13,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-    - uses: fabasoad/setup-cassandra-action@v1.0.0
-        with:
-          host: '192.13.131.0'
-          port: 9042
-          username: ${{ secrets.CASSANDRA_USERNAME }}
-          password: ${{ secrets.CASSANDRA_PASSWORD }}
-          connect-timeout: 30
-          keyspace: test
-          scripts_path: './scripts'    
     - name: Set up JDK 11
       uses: actions/setup-java@v2
         with:
