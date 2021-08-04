@@ -12,7 +12,7 @@ import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.binaryrecord2.RecordBuilder
-import filodb.core.{GlobalConfig, TestData, store}
+import filodb.core.{DatasetRef, GlobalConfig, TestData, store}
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.store.{ChunkSet, ChunkSetInfo}
 import filodb.memory.BinaryRegionLarge
@@ -44,19 +44,18 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
   lazy val sourceSession = new DefaultFiloSessionProvider(sourceConfig.getConfig("cassandra")).session
   lazy val targetSession = new DefaultFiloSessionProvider(targetConfig.getConfig("cassandra")).session
 
-  val datasetRef = Dataset(datasetName, Schemas.gauge).ref
-
   describe("raw chunk copy") {
     it("should work") {
       // This test verifies that the configuration can be read and that Spark runs. A full test
       // that verifies chunks are copied correctly is found in CassandraColumnStoreSpec.
+      val datasetRef = Dataset(datasetName, Schemas.gauge).ref
       val sourceColStore = new CassandraColumnStore(sourceConfig, s, sourceSession)
       val targetColStore = new CassandraColumnStore(targetConfig, s, targetSession)
-      initColStore(sourceColStore)
-      initColStore(targetColStore)
+      initColStore(sourceColStore, datasetRef)
+      initColStore(targetColStore, datasetRef)
 
       val (part1Bytes, part2Bytes,
-      repairChunks1, repairChunks2) = prepareTestData(sourceColStore, targetColStore)
+      repairChunks1, repairChunks2) = prepareTestData(sourceColStore, targetColStore, datasetRef)
 
       val sparkConf = new SparkConf(loadDefaults = true)
       sparkConf.setMaster("local[2]")
@@ -68,7 +67,7 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
       ChunkCopierMain.run(sparkConf).close()
 
       verifyTestData(sourceColStore, targetColStore,
-        part1Bytes, part2Bytes, repairChunks1, repairChunks2)
+        part1Bytes, part2Bytes, repairChunks1, repairChunks2, datasetRef)
     }
   }
 
@@ -76,26 +75,28 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
     it("should work") {
       // This test verifies that the configuration can be read and that Spark runs. A full test
       // that verifies chunks are copied correctly is found in CassandraColumnStoreSpec.
+      val datasetRef = Dataset(s"${datasetName}_ds_5", Schemas.gauge).ref
       val sourceColStore = new CassandraColumnStore(sourceConfig, s, sourceSession, true)
       val targetColStore = new CassandraColumnStore(targetConfig, s, targetSession, true)
-      initColStore(sourceColStore)
-      initColStore(targetColStore)
+      initColStore(sourceColStore, datasetRef)
+      initColStore(targetColStore, datasetRef)
 
       val (part1Bytes, part2Bytes,
-      repairChunks1, repairChunks2) = prepareTestData(sourceColStore, targetColStore)
+      repairChunks1, repairChunks2) = prepareTestData(sourceColStore, targetColStore, datasetRef)
 
       val sparkConf = new SparkConf(loadDefaults = true)
       sparkConf.setMaster("local[2]")
       sparkConf.set("spark.filodb.chunks.copier.source.config.value", parseFileConfig(sourceConfigPath))
       sparkConf.set("spark.filodb.chunks.copier.target.config.value", parseFileConfig(targetConfigPath))
       sparkConf.set("spark.filodb.chunks.copier.is.downsample.copy", "true")
+      sparkConf.set("spark.filodb.chunks.copier.dataset.downsample.resolution", "5 minutes")
       sparkConf.set("spark.filodb.chunks.copier.dataset", "prometheus")
       sparkConf.set("spark.filodb.chunks.copier.start.time", "2020-10-13T00:00:00Z")
       sparkConf.set("spark.filodb.chunks.copier.end.time", "2020-10-13T05:00:00Z")
       ChunkCopierMain.run(sparkConf).close()
 
       verifyTestData(sourceColStore, targetColStore,
-        part1Bytes, part2Bytes, repairChunks1, repairChunks2)
+        part1Bytes, part2Bytes, repairChunks1, repairChunks2, datasetRef)
     }
   }
 
@@ -106,12 +107,12 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
     config.root().render(ConfigRenderOptions.concise())
   }
 
-  def initColStore(colStore: CassandraColumnStore) = {
+  def initColStore(colStore: CassandraColumnStore, datasetRef: DatasetRef) = {
     colStore.initialize(datasetRef, 1).futureValue
     colStore.truncate(datasetRef, 1).futureValue
   }
 
-  def prepareTestData(sourceColStore: CassandraColumnStore, targetColStore: CassandraColumnStore) = {
+  def prepareTestData(sourceColStore: CassandraColumnStore, targetColStore: CassandraColumnStore, datasetRef: DatasetRef) = {
     val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8)
     var partBuilder = new RecordBuilder(TestData.nativeMem)
     val partKey1 = partBuilder.partKeyFromObjects(Schemas.gauge, "stuff", seriesTags)
@@ -190,7 +191,8 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
 
   def verifyTestData(sourceColStore: CassandraColumnStore, targetColStore: CassandraColumnStore,
                      part1Bytes: ByteBuffer, part2Bytes: ByteBuffer,
-                     repairChunks1: util.List[Row], repairChunks2: util.List[Row]) = {
+                     repairChunks1: util.List[Row], repairChunks2: util.List[Row],
+                     datasetRef: DatasetRef) = {
     def checkRow(a: Row, b: Row): Unit = {
       val size = a.getColumnDefinitions().size()
       b.getColumnDefinitions().size() shouldBe size

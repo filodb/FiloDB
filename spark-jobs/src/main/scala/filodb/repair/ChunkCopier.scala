@@ -11,7 +11,7 @@ import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{Duration, FiniteDuration}
 
 import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
@@ -62,9 +62,16 @@ class ChunkCopier(conf: SparkConf) {
   val sourceCassConfig = sourceConfig.getConfig("cassandra")
   val targetCassConfig = targetConfig.getConfig("cassandra")
 
+  val isDownsampleCopy = conf.getBoolean("spark.filodb.chunks.copier.is.downsample.copy", false)
+
   val datasetName = conf.get("spark.filodb.chunks.copier.dataset")
-  val datasetRef = DatasetRef.fromDotString(datasetName)
   val targetDatasetConfig = datasetConfig(targetConfig, datasetName)
+  val datasetRef = if (isDownsampleCopy) {
+    val downsampleResolution = Duration(conf.get("spark.filodb.chunks.copier.dataset.downsample.resolution"))
+    DatasetRef(s"${datasetName}_ds_${downsampleResolution.toMinutes}")
+  } else {
+    DatasetRef.fromDotString(datasetName)
+  }
 
   // Examples: 2019-10-20T12:34:56Z  or  2019-10-20T12:34:56-08:00
   private def parseDateTime(str: String) = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str))
@@ -78,8 +85,7 @@ class ChunkCopier(conf: SparkConf) {
   // Disable the copy phase either for fully deleting with no replacement, or for no-op testing.
   val noCopy = conf.getBoolean("spark.filodb.chunks.copier.noCopy", false)
 
-  val isDownsampleRepair = conf.getBoolean("spark.filodb.chunks.copier.is.downsample.copy", false)
-  val diskTimeToLiveSeconds = if (isDownsampleRepair) {
+  val diskTimeToLiveSeconds = if (isDownsampleCopy) {
     val dsSettings = new DownsamplerSettings(rawSourceConfig)
     val highestDSResolution = dsSettings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
     dsSettings.ttlByResolution(highestDSResolution)
@@ -98,9 +104,9 @@ class ChunkCopier(conf: SparkConf) {
   val targetSession = FiloSessionProvider.openSession(targetCassConfig)
 
   val sourceCassandraColStore = new CassandraColumnStore(
-    sourceConfig, readSched, sourceSession, isDownsampleRepair)(writeSched)
+    sourceConfig, readSched, sourceSession, isDownsampleCopy)(writeSched)
   val targetCassandraColStore = new CassandraColumnStore(
-    targetConfig, readSched, targetSession, isDownsampleRepair)(writeSched)
+    targetConfig, readSched, targetSession, isDownsampleCopy)(writeSched)
 
   private[repair] def getSourceScanSplits = sourceCassandraColStore.getScanSplits(datasetRef, numSplitsForScans)
 
