@@ -1,4 +1,4 @@
-name: Scala CI
+name: CI
 
 on:
   push:
@@ -19,10 +19,5 @@ jobs:
       with:
         java-version: '11'
         distribution: 'adopt'
-    - name: Set up C*
-      uses: fabasoad/setup-cassandra-action@v1.0.2
-      with:
-        host: '192.13.131.0'
-        keyspace: test
     - name: Run tests
-      run: sbt test
+      run: .github/workflows/runtests.sh
