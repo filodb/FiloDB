@@ -514,13 +514,13 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     parts.size shouldEqual 1
     parts.head.partID shouldEqual 0 // same partId as before for ODPed partitions
     session.close() // release lock
-    shard.evictableOdpPartIds.size() shouldEqual 1
+    shard.evictableOdpPartIds.size shouldEqual 1
 
     // mark some parts as evictable
     markPartitionsForEviction(21 until 25)
     shard.evictForHeadroom() shouldEqual true
     // odp partitions should be evicted first before regular partitions
-    shard.evictableOdpPartIds.size() shouldEqual 0
+    shard.evictableOdpPartIds.size shouldEqual 0
 
   }
 
