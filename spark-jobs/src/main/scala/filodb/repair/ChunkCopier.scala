@@ -69,16 +69,16 @@ class ChunkCopier(conf: SparkConf) {
   // Examples: 2019-10-20T12:34:56Z  or  2019-10-20T12:34:56-08:00
   private def parseDateTime(str: String) = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str))
 
-  val ingestionTimeStart = parseDateTime(conf.get("spark.filodb.chunks.copier.repairStartTime"))
-  val ingestionTimeEnd = parseDateTime(conf.get("spark.filodb.chunks.copier.repairEndTime"))
+  val copyStartTime = parseDateTime(conf.get("spark.filodb.chunks.copier.start.time"))
+  val copyEndTime = parseDateTime(conf.get("spark.filodb.chunks.copier.end.time"))
 
   // Destructively deletes everything in the target before updating anthing. Is used when chunks aren't aligned.
-  val deleteFirst = conf.getBoolean("spark.filodb.chunks.copier.deleteFirst", false)
+  val deleteFirst = conf.getBoolean("spark.filodb.chunks.copier.delete.first", false)
 
   // Disable the copy phase either for fully deleting with no replacement, or for no-op testing.
   val noCopy = conf.getBoolean("spark.filodb.chunks.copier.noCopy", false)
 
-  val isDownsampleRepair = conf.getBoolean("spark.filodb.chunks.copier.isDownsampleCopy", false)
+  val isDownsampleRepair = conf.getBoolean("spark.filodb.chunks.copier.is.downsample.copy", false)
   val diskTimeToLiveSeconds = if (isDownsampleRepair) {
     val dsSettings = new DownsamplerSettings(rawSourceConfig)
     val highestDSResolution = dsSettings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
@@ -110,8 +110,8 @@ class ChunkCopier(conf: SparkConf) {
     sourceCassandraColStore.copyOrDeleteChunksByIngestionTimeRange(
       datasetRef,
       splitIter,
-      ingestionTimeStart.toEpochMilli(),
-      ingestionTimeEnd.toEpochMilli(),
+      copyStartTime.toEpochMilli(),
+      copyEndTime.toEpochMilli(),
       batchSize,
       targetCassandraColStore,
       diskTimeToLiveSeconds)
@@ -121,8 +121,8 @@ class ChunkCopier(conf: SparkConf) {
     targetCassandraColStore.copyOrDeleteChunksByIngestionTimeRange(
       datasetRef,
       splitIter,
-      ingestionTimeStart.toEpochMilli(),
-      ingestionTimeEnd.toEpochMilli(),
+      copyStartTime.toEpochMilli(),
+      copyEndTime.toEpochMilli(),
       batchSize,
       targetCassandraColStore,
       0) // ttl 0 is interpreted as delete

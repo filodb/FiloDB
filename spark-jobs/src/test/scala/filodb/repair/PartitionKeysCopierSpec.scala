@@ -67,8 +67,8 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
     conf.set("spark.filodb.partitionkeys.copier.dataset", datasetName)
 
-    conf.set("spark.filodb.partitionkeys.copier.repairStartTime", "2020-10-13T00:00:00Z")
-    conf.set("spark.filodb.partitionkeys.copier.repairEndTime", "2020-10-13T05:00:00Z")
+    conf.set("spark.filodb.partitionkeys.copier.start.time", "2020-10-13T00:00:00Z")
+    conf.set("spark.filodb.partitionkeys.copier.end.time", "2020-10-13T05:00:00Z")
     conf
   }
 
@@ -104,7 +104,7 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
   describe("downsample data repair") {
     it("should copy data for repair window") {
-      sparkConf.set("spark.filodb.partitionkeys.copier.isDownsampleCopy", "true")
+      sparkConf.set("spark.filodb.partitionkeys.copier.is.downsample.copy", "true")
 
       // Test this with value based configs
       sparkConf.remove("spark.filodb.partitionkeys.copier.source.config.file")
@@ -207,8 +207,8 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
       map
     }
 
-    val startTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.copier.repairStartTime")).toEpochMilli()
-    val endTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.copier.repairEndTime")).toEpochMilli()
+    val startTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.copier.start.time")).toEpochMilli()
+    val endTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.copier.end.time")).toEpochMilli()
 
     // verify data in index table.
     for (shard <- 0 until numOfShards) {

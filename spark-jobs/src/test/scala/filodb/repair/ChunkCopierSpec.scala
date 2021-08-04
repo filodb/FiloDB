@@ -63,8 +63,8 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
       sparkConf.set("spark.filodb.chunks.copier.source.config.file", sourceConfigPath)
       sparkConf.set("spark.filodb.chunks.copier.target.config.file", targetConfigPath)
       sparkConf.set("spark.filodb.chunks.copier.dataset", "prometheus")
-      sparkConf.set("spark.filodb.chunks.copier.repairStartTime", "2020-10-13T00:00:00Z")
-      sparkConf.set("spark.filodb.chunks.copier.repairEndTime", "2020-10-13T05:00:00Z")
+      sparkConf.set("spark.filodb.chunks.copier.start.time", "2020-10-13T00:00:00Z")
+      sparkConf.set("spark.filodb.chunks.copier.end.time", "2020-10-13T05:00:00Z")
       ChunkCopierMain.run(sparkConf).close()
 
       verifyTestData(sourceColStore, targetColStore,
@@ -88,10 +88,10 @@ class ChunkCopierSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll wi
       sparkConf.setMaster("local[2]")
       sparkConf.set("spark.filodb.chunks.copier.source.config.value", parseFileConfig(sourceConfigPath))
       sparkConf.set("spark.filodb.chunks.copier.target.config.value", parseFileConfig(targetConfigPath))
-      sparkConf.set("spark.filodb.chunks.copier.isDownsampleCopy", "true")
+      sparkConf.set("spark.filodb.chunks.copier.is.downsample.copy", "true")
       sparkConf.set("spark.filodb.chunks.copier.dataset", "prometheus")
-      sparkConf.set("spark.filodb.chunks.copier.repairStartTime", "2020-10-13T00:00:00Z")
-      sparkConf.set("spark.filodb.chunks.copier.repairEndTime", "2020-10-13T05:00:00Z")
+      sparkConf.set("spark.filodb.chunks.copier.start.time", "2020-10-13T00:00:00Z")
+      sparkConf.set("spark.filodb.chunks.copier.end.time", "2020-10-13T05:00:00Z")
       ChunkCopierMain.run(sparkConf).close()
 
       verifyTestData(sourceColStore, targetColStore,

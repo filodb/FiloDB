@@ -74,19 +74,19 @@ class PartitionKeysCopier(conf: SparkConf) {
     Option(schemas.part.binSchema.partitionHash(partKey.partKey, UnsafeUtils.arayOffset))
 
   val numOfShards: Int = sourceDatasetConfig.getInt("num-shards")
-  private val isDownsampleRepair = conf.getBoolean("spark.filodb.partitionkeys.copier.isDownsampleCopy", false)
-  private val repairStartTime = parseDateTime(conf.get("spark.filodb.partitionkeys.copier.repairStartTime"))
-  private val repairEndTime = parseDateTime(conf.get("spark.filodb.partitionkeys.copier.repairEndTime"))
+  private val isDownsampleCopy = conf.getBoolean("spark.filodb.partitionkeys.copier.is.downsample.copy", false)
+  private val copyStartTime = parseDateTime(conf.get("spark.filodb.partitionkeys.copier.start.time"))
+  private val copyEndTime = parseDateTime(conf.get("spark.filodb.partitionkeys.copier.end.time"))
 
   private val dsSettings = new DownsamplerSettings(rawSourceConfig)
   private val highestDSResolution = dsSettings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
-  private val diskTimeToLiveSeconds = if (isDownsampleRepair) {
+  private val diskTimeToLiveSeconds = if (isDownsampleCopy) {
     dsSettings.ttlByResolution(highestDSResolution)
   } else {
     targetDatasetConfig.getConfig("sourceconfig.store")
       .as[FiniteDuration]("disk-time-to-live").toSeconds.toInt
   }
-  private val datasetRef = if (isDownsampleRepair) {
+  private val datasetRef = if (isDownsampleCopy) {
     DatasetRef(s"${datasetName}_ds_${highestDSResolution.toMinutes}")
   } else {
     DatasetRef.fromDotString(datasetName)
@@ -96,10 +96,10 @@ class PartitionKeysCopier(conf: SparkConf) {
   private val writeSched = Scheduler.io("cass-write-sched")
 
   val sourceCassandraColStore = new CassandraColumnStore(
-    sourceConfig, readSched, sourceSession, isDownsampleRepair
+    sourceConfig, readSched, sourceSession, isDownsampleCopy
   )(writeSched)
   val targetCassandraColStore = new CassandraColumnStore(
-    targetConfig, readSched, targetSession, isDownsampleRepair
+    targetConfig, readSched, targetSession, isDownsampleCopy
   )(writeSched)
 
   // Disable the copy phase either for fully deleting with no replacement, or for no-op testing.
@@ -114,8 +114,8 @@ class PartitionKeysCopier(conf: SparkConf) {
       datasetRef,
       numOfShards,
       splitIter,
-      repairStartTime.toEpochMilli(),
-      repairEndTime.toEpochMilli(),
+      copyStartTime.toEpochMilli(),
+      copyEndTime.toEpochMilli(),
       targetCassandraColStore,
       partKeyHashFn,
       diskTimeToLiveSeconds.toInt)

@@ -26,8 +26,8 @@ class PartitionKeysCopierValidatorSpec extends AnyFunSpec with Matchers with Bef
 
       conf.set("spark.filodb.partitionkeys.validator.dataset", "prometheus")
 
-      conf.set("spark.filodb.partitionkeys.validator.repairStartTime", "2020-10-13T00:00:00Z")
-      conf.set("spark.filodb.partitionkeys.validator.repairEndTime", "2020-10-13T05:00:00Z")
+      conf.set("spark.filodb.partitionkeys.validator.start.time", "2020-10-13T00:00:00Z")
+      conf.set("spark.filodb.partitionkeys.validator.end.time", "2020-10-13T05:00:00Z")
       conf
     }
 

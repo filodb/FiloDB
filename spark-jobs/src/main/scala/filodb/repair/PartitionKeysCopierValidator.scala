@@ -67,11 +67,11 @@ class PartitionKeysCopierValidator(sparkConf: SparkConf) extends StrictLogging {
   val sourceCassConfig = sourceConfig.getConfig("cassandra")
   val targetCassConfig = targetConfig.getConfig("cassandra")
   val datasetName = sparkConf.get("spark.filodb.partitionkeys.validator.dataset")
-  val isDownsampleRepair = sparkConf.getBoolean("spark.filodb.partitionkeys.validator.isDownsampleCopy", false)
+  val isDownsampleCopy = sparkConf.getBoolean("spark.filodb.partitionkeys.validator.is.downsample.copy", false)
 
   val sourceDatasetConfig = datasetConfig(sourceConfig, datasetName)
   val targetDatasetConfig = datasetConfig(targetConfig, datasetName)
-  val datasetRef = if (isDownsampleRepair) {
+  val datasetRef = if (isDownsampleCopy) {
     val dsSettings = new DownsamplerSettings(rawSourceConfig)
     val highestDSResolution = dsSettings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
     DatasetRef(s"${datasetName}_ds_${highestDSResolution.toMinutes}")
@@ -81,17 +81,17 @@ class PartitionKeysCopierValidator(sparkConf: SparkConf) extends StrictLogging {
   val sourceSession = FiloSessionProvider.openSession(sourceCassConfig)
   val targetSession = FiloSessionProvider.openSession(targetCassConfig)
   val numOfShards: Int = sourceDatasetConfig.getInt("num-shards")
-  val repairStartTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.validator.repairStartTime"))
-  val repairEndTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.validator.repairEndTime"))
+  val validatorStartTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.validator.start.time"))
+  val validatorEndTime = parseDateTime(sparkConf.get("spark.filodb.partitionkeys.validator.end.time"))
 
   val readSched = Scheduler.io("cass-read-sched")
   val writeSched = Scheduler.io("cass-write-sched")
 
   val sourceCassandraColStore = new CassandraColumnStore(
-    sourceConfig, readSched, sourceSession, isDownsampleRepair
+    sourceConfig, readSched, sourceSession, isDownsampleCopy
   )(writeSched)
   val targetCassandraColStore = new CassandraColumnStore(
-    targetConfig, readSched, targetSession, isDownsampleRepair
+    targetConfig, readSched, targetSession, isDownsampleCopy
   )(writeSched)
 
   val numSplitsForScans = sourceCassConfig.getInt("num-token-range-splits-for-scans")
@@ -109,9 +109,9 @@ class PartitionKeysCopierValidator(sparkConf: SparkConf) extends StrictLogging {
       // CQL does not support OR operator. So we need to query separately to get the timeSeries partitionKeys
       // which were born or died during the data loss period (aka repair window).
       val rowsByStartTime = srcPartKeysTable.scanRowsByStartTimeRangeNoAsync(
-        tokens, repairStartTime.toEpochMilli(), repairEndTime.toEpochMilli())
+        tokens, validatorStartTime.toEpochMilli(), validatorEndTime.toEpochMilli())
       val rowsByEndTime = srcPartKeysTable.scanRowsByEndTimeRangeNoAsync(
-        tokens, repairStartTime.toEpochMilli(), repairEndTime.toEpochMilli())
+        tokens, validatorStartTime.toEpochMilli(), validatorEndTime.toEpochMilli())
       // add to a Set to eliminate duplicate entries.
       val records = (rowsByStartTime.++(rowsByEndTime))
         .map(row => ExpandedPartKeyRecord(

@@ -71,8 +71,8 @@ class ChunkCopierValidator(sparkConf: SparkConf) extends StrictLogging {
   // Examples: 2019-10-20T12:34:56Z  or  2019-10-20T12:34:56-08:00
   private def parseDateTime(str: String) = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str))
 
-  val ingestionTimeStart = parseDateTime(sparkConf.get("spark.filodb.chunks.copier.validator.repairStartTime"))
-  val ingestionTimeEnd = parseDateTime(sparkConf.get("spark.filodb.chunks.copier.validator.repairEndTime"))
+  val copyStartTime = parseDateTime(sparkConf.get("spark.filodb.chunks.copier.validator.start.time"))
+  val copyEndTime = parseDateTime(sparkConf.get("spark.filodb.chunks.copier.validator.end.time"))
 
   val numSplitsForScans = sourceCassConfig.getInt("num-token-range-splits-for-scans")
   val readSched = Scheduler.io("cass-read-sched")
@@ -130,8 +130,8 @@ class ChunkCopierValidator(sparkConf: SparkConf) extends StrictLogging {
       val tokens = split.asInstanceOf[CassandraTokenRangeSplit].tokens
       val rows = indexTable.scanRowsByIngestionTimeNoAsync(
         tokens,
-        ingestionTimeStart.toEpochMilli(),
-        ingestionTimeEnd.toEpochMilli()
+        copyStartTime.toEpochMilli(),
+        copyEndTime.toEpochMilli()
       )
       for (row <- rows) {
         val partition = row.getBytes(0) // partition
@@ -236,7 +236,9 @@ object ChunkCopierValidatorMain extends App with StrictLogging {
     val targetDiff = targetRows.except(sourceRows)
 
     if (sourceDiff.isEmpty) {
-      logger.info(s"ChunkCopierValidator validated successfully with no diff.")
+      logger.info(s"ChunkCopierValidator validated successfully with no diff." +
+        s"Source rows size: ${sourceRows.count()} " +
+        s"Target rows size: ${targetRows.count()} ")
     } else {
       logger.info(s"ChunkCopierValidator found diff! " +
         s"Source rows size: ${sourceRows.count()} " +
