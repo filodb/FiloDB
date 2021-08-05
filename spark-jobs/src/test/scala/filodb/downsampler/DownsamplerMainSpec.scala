@@ -843,6 +843,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
 
     downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
+    downsampleTSStore.refreshIndexForTesting(batchDownsampler.rawDatasetRef)
 
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
     val colFiltersNaN = seriesTagsNaN.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
@@ -864,6 +865,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       res.result.foreach(_.rows.nonEmpty shouldEqual true)
     }
 
+    downsampleTSStore.shutdown()
+
   }
 
   it("should bring up DownsampledTimeSeriesShard and be able to read data PeriodicSeriesMapper") {
@@ -875,7 +878,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
 
     downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
-
+    downsampleTSStore.refreshIndexForTesting(batchDownsampler.rawDatasetRef)
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
 
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(counterName))
@@ -894,6 +897,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     res.result.size shouldEqual 1
     res.result.foreach(_.rows.nonEmpty shouldEqual true)
+    downsampleTSStore.shutdown()
+
 
   }
 
@@ -906,7 +911,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
 
     downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
-
+    downsampleTSStore.refreshIndexForTesting(batchDownsampler.rawDatasetRef)
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
 
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(counterName))
@@ -925,6 +930,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     // exception thrown because lookback is < downsample data resolution of 5m
     res.t.isInstanceOf[IllegalArgumentException] shouldEqual true
+    downsampleTSStore.shutdown()
+
   }
 
   it("should bring up DownsampledTimeSeriesShard and NOT be able to read untyped data using SelectRawPartitionsExec") {
@@ -936,7 +943,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
 
     downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
-
+    downsampleTSStore.refreshIndexForTesting(batchDownsampler.rawDatasetRef)
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
 
       val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(untypedName))
@@ -951,6 +958,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       queryScheduler.shutdown()
 
       res.result.size shouldEqual 0
+    downsampleTSStore.shutdown()
+
   }
 
   it("should bring up DownsampledTimeSeriesShard and be able to read specific columns " +
@@ -961,6 +970,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     downsampleTSStore.setup(batchDownsampler.rawDatasetRef, settings.filodbSettings.schemas,
       0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
     downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
+    downsampleTSStore.refreshIndexForTesting(batchDownsampler.rawDatasetRef)
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(gaugeName))
     val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams = PlannerParams(sampleLimit = 1000)),
@@ -974,6 +984,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     res.result.size shouldEqual 1
     res.result.head.rows.map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual
       List((74372982000L, 88.0), (74373042000L, 24.0))
+    downsampleTSStore.shutdown()
+
   }
 
   it ("should fail when cardinality buster is not configured with any delete filters") {

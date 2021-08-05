@@ -114,7 +114,12 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60
 
+  def startFlushingIndex(): Unit =
+    partKeyIndex.startFlushThread(downsampleStoreConfig.partIndexFlushMinDelaySeconds,
+                                  downsampleStoreConfig.partIndexFlushMaxDelaySeconds)
+
   def recoverIndex(): Future[Unit] = {
+    startFlushingIndex()
     indexBootstrapper
       .bootstrapIndexDownsample(partKeyIndex, shardNum, indexDataset, indexTtlMs){ _ => createPartitionID() }
       .map { count =>
@@ -148,7 +153,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       purgeExpiredIndexEntries()
       indexRefresh()
     }.map { _ =>
-      partKeyIndex.refreshReadersBlocking()
+//      partKeyIndex.refreshReadersBlocking()
     }.onErrorRestartUnlimited.completedL.runAsync(housekeepingSched)
   }
 
@@ -217,7 +222,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     next
   }
 
-  def refreshPartKeyIndexBlocking(): Unit = {}
+  def refreshPartKeyIndexBlocking(): Unit = {
+    partKeyIndex.refreshReadersBlocking()
+  }
 
   def lookupPartitions(partMethod: PartitionScanMethod,
                        chunkMethod: ChunkScanMethod,
@@ -244,6 +251,16 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         } else {
           throw new UnsupportedOperationException("Cannot have empty filters")
         }
+    }
+  }
+
+  def shutdown(): Unit = {
+    try {
+      partKeyIndex.closeIndex();
+      houseKeepingFuture.cancel();
+      gaugeUpdateFuture.cancel();
+    } catch { case e: Exception =>
+      logger.error("Exception when shutting down downsample shard", e)
     }
   }
 
