@@ -13,6 +13,7 @@ import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}
+import scala.concurrent.duration.Duration
 import scala.jdk.CollectionConverters.asScalaIteratorConverter
 
 import filodb.cassandra.FiloSessionProvider
@@ -20,6 +21,7 @@ import filodb.cassandra.columnstore.{CassandraColumnStore, CassandraTokenRangeSp
 import filodb.core.{DatasetRef, GlobalConfig}
 import filodb.core.metadata.Schemas
 import filodb.core.store.{ChunkSetInfoOnHeap, ScanSplit}
+
 
 case class ChunkRecord(partition: String,
                        chunkId: Long,
@@ -64,15 +66,23 @@ class ChunkCopierValidator(sparkConf: SparkConf) extends StrictLogging {
   val targetConfig = rawTargetConfig.getConfig("filodb")
   val sourceCassConfig = sourceConfig.getConfig("cassandra")
   val targetCassConfig = targetConfig.getConfig("cassandra")
+
+  val isDownsampleCopy = sparkConf.getBoolean("spark.filodb.chunks.copier.validator.is.downsample.copy", false)
   val datasetName = sparkConf.get("spark.filodb.chunks.copier.validator.dataset")
-  val datasetRef = DatasetRef.fromDotString(datasetName)
   val targetDatasetConfig = datasetConfig(targetConfig, datasetName)
+  val datasetRef = if (isDownsampleCopy) {
+    val downsampleResolution = Duration(
+      sparkConf.get("spark.filodb.chunks.copier.validator.dataset.downsample.resolution"))
+    DatasetRef(s"${datasetName}_ds_${downsampleResolution.toMinutes}")
+  } else {
+    DatasetRef.fromDotString(datasetName)
+  }
 
   // Examples: 2019-10-20T12:34:56Z  or  2019-10-20T12:34:56-08:00
   private def parseDateTime(str: String) = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str))
 
-  val ingestionTimeStart = parseDateTime(sparkConf.get("spark.filodb.chunks.copier.validator.repairStartTime"))
-  val ingestionTimeEnd = parseDateTime(sparkConf.get("spark.filodb.chunks.copier.validator.repairEndTime"))
+  val copyStartTime = parseDateTime(sparkConf.get("spark.filodb.chunks.copier.validator.start.time"))
+  val copyEndTime = parseDateTime(sparkConf.get("spark.filodb.chunks.copier.validator.end.time"))
 
   val numSplitsForScans = sourceCassConfig.getInt("num-token-range-splits-for-scans")
   val readSched = Scheduler.io("cass-read-sched")
@@ -82,9 +92,9 @@ class ChunkCopierValidator(sparkConf: SparkConf) extends StrictLogging {
   val targetSession = FiloSessionProvider.openSession(targetCassConfig)
 
   val sourceCassandraColStore = new CassandraColumnStore(
-  sourceConfig, readSched, sourceSession, false)(writeSched)
+  sourceConfig, readSched, sourceSession, isDownsampleCopy)(writeSched)
   val targetCassandraColStore = new CassandraColumnStore(
-  targetConfig, readSched, targetSession, false)(writeSched)
+  targetConfig, readSched, targetSession, isDownsampleCopy)(writeSched)
 
   private[filodb] def getSourceScanSplits = sourceCassandraColStore.getScanSplits(datasetRef, numSplitsForScans)
 
@@ -130,8 +140,8 @@ class ChunkCopierValidator(sparkConf: SparkConf) extends StrictLogging {
       val tokens = split.asInstanceOf[CassandraTokenRangeSplit].tokens
       val rows = indexTable.scanRowsByIngestionTimeNoAsync(
         tokens,
-        ingestionTimeStart.toEpochMilli(),
-        ingestionTimeEnd.toEpochMilli()
+        copyStartTime.toEpochMilli(),
+        copyEndTime.toEpochMilli()
       )
       for (row <- rows) {
         val partition = row.getBytes(0) // partition
@@ -236,7 +246,9 @@ object ChunkCopierValidatorMain extends App with StrictLogging {
     val targetDiff = targetRows.except(sourceRows)
 
     if (sourceDiff.isEmpty) {
-      logger.info(s"ChunkCopierValidator validated successfully with no diff.")
+      logger.info(s"ChunkCopierValidator validated successfully with no diff." +
+        s"Source rows size: ${sourceRows.count()} " +
+        s"Target rows size: ${targetRows.count()} ")
     } else {
       logger.info(s"ChunkCopierValidator found diff! " +
         s"Source rows size: ${sourceRows.count()} " +

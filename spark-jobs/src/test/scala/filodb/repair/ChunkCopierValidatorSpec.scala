@@ -24,9 +24,11 @@ class ChunkCopierValidatorSpec extends AnyFunSpec with Matchers with BeforeAndAf
       conf.set("spark.filodb.chunks.copier.validator.target.config.value", parseFileConfig(targetConfigPath))
 
       conf.set("spark.filodb.chunks.copier.validator.dataset", "prometheus")
+      conf.set("spark.filodb.chunks.copier.validator.is.downsample.copy", "false")
+      conf.set("spark.filodb.chunks.copier.validator.dataset.downsample.resolution", "")
 
-      conf.set("spark.filodb.chunks.copier.validator.repairStartTime", "2020-10-13T00:00:00Z")
-      conf.set("spark.filodb.chunks.copier.validator.repairEndTime", "2020-10-13T05:00:00Z")
+      conf.set("spark.filodb.chunks.copier.validator.start.time", "2020-10-13T00:00:00Z")
+      conf.set("spark.filodb.chunks.copier.validator.end.time", "2020-10-13T05:00:00Z")
       conf
     }
 
