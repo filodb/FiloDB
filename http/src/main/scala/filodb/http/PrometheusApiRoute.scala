@@ -9,7 +9,6 @@ import akka.stream.ActorMaterializer
 import akka.util.ByteString
 import com.typesafe.scalalogging.StrictLogging
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
-import kamon.Kamon
 import org.xerial.snappy.Snappy
 import remote.RemoteStorage.ReadRequest
 
@@ -127,7 +126,6 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     }
     onSuccess(asyncAsk(nodeCoord, command, settings.queryAskTimeout)) {
       case qr: QueryResult => val translated = if (histMap) qr else convertHistToPromResult(qr, schemas.part)
-                              Kamon.currentSpan().mark("__TailSampled__")
                               complete(toPromSuccessResponse(translated, verbose))
       case qr: QueryError => complete(toPromErrorResponse(qr))
       case qr: ExecPlan => complete(toPromExplainPlanResponse(qr))
