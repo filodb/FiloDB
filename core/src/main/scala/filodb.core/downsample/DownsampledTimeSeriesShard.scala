@@ -152,8 +152,6 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                                            rawStoreConfig.flushInterval).mapAsync { _ =>
       purgeExpiredIndexEntries()
       indexRefresh()
-    }.map { _ =>
-//      partKeyIndex.refreshReadersBlocking()
     }.onErrorRestartUnlimited.completedL.runAsync(housekeepingSched)
   }
 
