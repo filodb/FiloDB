@@ -76,4 +76,25 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val res = LogicalPlanParser.convertToQuery(lp)
     res shouldEqual query
   }
+
+  it("should preserve brackets in Binary join query") {
+    val query = """foo / (bar + baz)"""
+    val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+    val res = LogicalPlanParser.convertToQuery(lp)
+    res shouldEqual "(foo / (bar + baz))"
+  }
+
+  it("should preserve brackets in scalar binary operation query") {
+    val query = """1 / (2 + 3)"""
+    val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+    val res = LogicalPlanParser.convertToQuery(lp)
+    res shouldEqual "(1.0 / (2.0 + 3.0))"
+  }
+
+  it("should preserve brackets in scalar vector operation query") {
+    val query = """1 / (2 + foo)"""
+    val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+    val res = LogicalPlanParser.convertToQuery(lp)
+    res shouldEqual "(1.0 / (2.0 + foo))"
+  }
 }

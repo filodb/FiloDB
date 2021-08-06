@@ -354,9 +354,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.queryContext.plannerParams.skipAggregatePresent shouldEqual (false)
   }
 
-  it("should generate Exec plan for Binary join with single regex match") {
-    val lp = Parser.queryToLogicalPlan("test1{_ws_ = \"demo\", _ns_ =~ \"App\"} + " +
-      "test2{_ws_ = \"demo\", _ns_ =~ \"App\"}", 1000, 1000)
+  it("should preserve brackets in Binary join with regex query") {
+    val lp = Parser.queryToLogicalPlan("sum(test1{_ws_ = \"demo\", _ns_ =~ \"App\"}) / " +
+      "(sum(test2{_ws_ = \"demo\", _ns_ =~ \"App\"})+sum(test3{_ws_ = \"demo\", _ns_ =~ \"App\"}))", 1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
         ColumnFilter("_ns_", Equals("App"))))
@@ -365,6 +365,6 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      ("""test1{_ws_="demo",_ns_="App"} + test2{_ws_="demo",_ns_="App"}""")
+      ("""(sum(test1{_ws_="demo",_ns_="App"}) / (sum(test2{_ws_="demo",_ns_="App"}) + sum(test3{_ws_="demo",_ns_="App"})))""")
   }
 }
