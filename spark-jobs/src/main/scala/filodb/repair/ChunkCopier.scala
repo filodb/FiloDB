@@ -87,8 +87,9 @@ class ChunkCopier(conf: SparkConf) {
 
   val diskTimeToLiveSeconds = if (isDownsampleCopy) {
     val dsSettings = new DownsamplerSettings(rawSourceConfig)
-    val highestDSResolution = dsSettings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
-    dsSettings.ttlByResolution(highestDSResolution)
+    val downsampleResolution = Duration(conf.get("spark.filodb.chunks.copier.dataset.downsample.resolution"))
+      .asInstanceOf[FiniteDuration]
+    dsSettings.ttlByResolution(downsampleResolution)
   } else {
     targetDatasetConfig.getConfig("sourceconfig.store")
       .as[FiniteDuration]("disk-time-to-live").toSeconds.toInt
