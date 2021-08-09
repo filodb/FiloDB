@@ -40,6 +40,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
   }
 
   it("parse basic scalar expressions") {
+    parseSuccessfully("-5")
+    parseSuccessfully("+5")
     parseSuccessfully("1")
     //    parse("+Inf")
     //    parse("-Inf")
