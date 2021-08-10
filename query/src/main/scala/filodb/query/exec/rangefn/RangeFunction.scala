@@ -420,9 +420,9 @@ object LastSampleFunction extends RangeFunction {
             window: Window,
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
-    if (window.size > 1)
-      throw new IllegalStateException(s"Window had more than 1 sample. Possible out of order samples. Window: $window")
-    if (window.size == 0 || (endTimestamp - window.head.getLong(0)) > queryConfig.staleSampleAfterMs) {
+    if (window.size > 1) {
+      sampleToEmit.setValues(endTimestamp, window.last.getDouble(1))
+    } else if (window.size == 0 || (endTimestamp - window.head.getLong(0)) > queryConfig.staleSampleAfterMs) {
       sampleToEmit.setValues(endTimestamp, Double.NaN)
     } else {
       sampleToEmit.setValues(endTimestamp, window.head.getDouble(1))

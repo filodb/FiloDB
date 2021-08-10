@@ -49,6 +49,7 @@ object RangeFunctionId extends Enum[RangeFunctionId] {
   val values = findValues
 
   case object Last extends RangeFunctionId("last",Seq(RangeVectorParam()))
+  case object LastOverTime extends RangeFunctionId("last_over_time",Seq(RangeVectorParam()))
   case object AvgOverTime extends RangeFunctionId("avg_over_time", Seq(RangeVectorParam()))
   case object Changes extends RangeFunctionId("changes", Seq(RangeVectorParam()))
   case object CountOverTime extends RangeFunctionId("count_over_time", Seq(RangeVectorParam()))
