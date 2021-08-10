@@ -314,15 +314,11 @@ class TimeSeriesShard(val ref: DatasetRef,
    * Caller needs to double check ingesting status since they may have started to re-ingest
    * since partId was added to this queue.
    *
-   * FIXME we can create a more efficient data structure that stores the ints in unboxed form - uses less heap.
-   * As an observation, LinkedHashSet is using 70MB for 1mil Ints. For 8 shards, one can expect 560mb or so.
-   * Compare this with simple array of 8 * 1mil ints: 32MB.
-   * It is a set since intermittent time series can cause duplicates in evictablePartIds
-   *
-   * WARNING: operations need synchronization  since the producers are flush task and odp part creation task
+   * It is a set since intermittent time series can cause duplicates in evictablePartIds.
+   * Max size multiplied by 1.04 to minimize array resizes.
    */
-  protected[memstore] final val evictablePartIds = new mutable.LinkedHashSet[Int]()
-  protected[memstore] final val evictableOdpPartIds = new mutable.LinkedHashSet[Int]()
+  protected[memstore] final val evictablePartIds = new EvictablePartIdQueueSet(math.ceil(targetMaxPartitions * 1.04).toInt)
+  protected[memstore] final val evictableOdpPartIds = new EvictablePartIdQueueSet(8192)
 
   /**
     * Keeps track of last offset ingested into memory (not necessarily flushed).
@@ -1134,13 +1130,9 @@ class TimeSeriesShard(val ref: DatasetRef,
   protected[memstore] def markPartAsNotIngesting(p: TimeSeriesPartition, odp: Boolean): Unit = {
     p.ingesting = false
     if (odp) {
-      evictableOdpPartIds.synchronized {
-        evictableOdpPartIds.add(p.partID)
-      }
+      evictableOdpPartIds.put(p.partID)
     } else {
-      evictablePartIds.synchronized {
-        evictablePartIds.add(p.partID)
-      }
+      evictablePartIds.put(p.partID)
     }
     shardStats.evictablePartKeysSize.increment()
   }
@@ -1483,30 +1475,12 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   private def partitionsToEvict(numPartsToEvict: Int): debox.Buffer[Int] = {
-
-    val partIdsToEvict = debox.Buffer.empty[Int]
-    var i = 0
-    val size1 = evictableOdpPartIds.synchronized {
-      while (i < numPartsToEvict && !evictableOdpPartIds.isEmpty) {
-        val partId = evictableOdpPartIds.head
-        evictableOdpPartIds.remove(partId)
-        partIdsToEvict += partId
-        logger.debug(s"Preparing to evict ODP partId=$partIdsToEvict")
-        i += 1
-      }
-      evictableOdpPartIds.size
+    val partIdsToEvict = debox.Buffer.ofSize[Int](numPartsToEvict)
+    evictableOdpPartIds.removeInto(numPartsToEvict, partIdsToEvict)
+    if (partIdsToEvict.length < numPartsToEvict) {
+      evictablePartIds.removeInto(numPartsToEvict - partIdsToEvict.length, partIdsToEvict)
     }
-    val size2 = evictablePartIds.synchronized {
-      while (i < numPartsToEvict && !evictablePartIds.isEmpty) {
-        val partId = evictablePartIds.head
-        evictablePartIds.remove(partId)
-        partIdsToEvict += partId
-        logger.debug(s"Preparing to evict partId=$partIdsToEvict")
-        i += 1
-      }
-      evictablePartIds.size
-    }
-    shardStats.evictablePartKeysSize.update(size1 + size2)
+    shardStats.evictablePartKeysSize.update(evictableOdpPartIds.size + evictablePartIds.size)
     partIdsToEvict
   }
 
