@@ -525,6 +525,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
+    result.result.head.key.labelValues.get(ZeroCopyUTF8String("metric")).get equals("request-latency")
     result.result.size shouldEqual 1
   }
 }
