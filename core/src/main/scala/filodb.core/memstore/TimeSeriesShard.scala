@@ -317,7 +317,8 @@ class TimeSeriesShard(val ref: DatasetRef,
    * It is a set since intermittent time series can cause duplicates in evictablePartIds.
    * Max size multiplied by 1.04 to minimize array resizes.
    */
-  protected[memstore] final val evictablePartIds = new EvictablePartIdQueueSet(math.ceil(targetMaxPartitions * 1.04).toInt)
+  protected[memstore] final val evictablePartIds =
+      new EvictablePartIdQueueSet(math.ceil(targetMaxPartitions * 1.04).toInt)
   protected[memstore] final val evictableOdpPartIds = new EvictablePartIdQueueSet(8192)
 
   /**
