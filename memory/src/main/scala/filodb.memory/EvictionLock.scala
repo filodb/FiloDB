@@ -1,25 +1,22 @@
 package filodb.memory
 
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 
 import com.typesafe.scalalogging.StrictLogging
 
-import filodb.memory.data.Shutdown
-
 object EvictionLock {
   val maxTimeoutMillis = 2048
-  val direCircumstanceTimeoutMillis = 32768
+  val direCircumstanceMaxTimeoutMillis = 65536
 }
+
 /**
  * This lock protects memory regions accessed by queries and prevents them from
  * being evicted.
  */
 class EvictionLock(debugInfo: String = "none") extends StrictLogging {
-
-  import EvictionLock._
   // Acquired when reclaiming on demand. Acquire shared lock to prevent block reclamation.
   private final val reclaimLock = new Latch
-  @volatile private final var numFailures = 0
+  private final val runningQueries = new ConcurrentHashMap[String, String]()
 
   /**
    * Try to acquire lock with multiple retries.
@@ -47,23 +44,12 @@ class EvictionLock(debugInfo: String = "none") extends StrictLogging {
     var timeout = 1;
     while (true) {
       if (reclaimLock.tryAcquireExclusiveNanos(TimeUnit.MILLISECONDS.toNanos(timeout))) {
-        numFailures = 0
         return true
-      } else {
-      if (finalTimeoutMillis >= maxTimeoutMillis / 2) {
-        // Start warning when the current headroom has dipped below the halfway point.
-        // The lock state is logged in case it's stuck due to a runaway query somewhere.
-          logger.warn(s"Lock for ensureHeadroom timed out: ${this}")
-        }
       }
       // if we did not get lock, count failures and judge if the node is in bad state
       if (timeout >= finalTimeoutMillis) {
-        numFailures += 1
-        if (numFailures >= 5) {
-          Shutdown.haltAndCatchFire(new RuntimeException(s"Headroom task was unable to acquire exclusive lock " +
-            s"for $numFailures consecutive attempts. Shutting down process. $debugInfo " +
-            s"LockState: $this"))
-        }
+        logger.error(s"Could not acquire exclusive access to eviction lock $debugInfo " +
+          s"with finalTimeoutMillis=$finalTimeoutMillis LockState: $this runningQueries: $runningQueries")
         return false
       }
       Thread.`yield`()
@@ -74,9 +60,15 @@ class EvictionLock(debugInfo: String = "none") extends StrictLogging {
 
   def releaseExclusive(): Unit = reclaimLock.releaseExclusive()
 
-  def acquireSharedLock(): Unit = reclaimLock.lock()
+  def acquireSharedLock(holderId: String, promQL: String): Unit = {
+    runningQueries.put(holderId, promQL)
+    reclaimLock.lock()
+  }
 
-  def releaseSharedLock(): Unit = reclaimLock.unlock()
+  def releaseSharedLock(holderId: String): Unit = {
+    runningQueries.remove(holderId)
+    reclaimLock.unlock()
+  }
 
   override def toString: String = reclaimLock.toString
 }

@@ -29,7 +29,7 @@ import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaSource, RocksDbCardinalityStore}
 import filodb.core.metadata.{Schema, Schemas}
-import filodb.core.query.{ColumnFilter, Filter, QuerySession}
+import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QuerySession}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.data.Shutdown
@@ -1543,7 +1543,8 @@ class TimeSeriesShard(val ref: DatasetRef,
                        chunkMethod: ChunkScanMethod,
                        querySession: QuerySession): PartLookupResult = {
     querySession.lock = Some(evictionLock)
-    evictionLock.acquireSharedLock()
+    evictionLock.acquireSharedLock(querySession.qContext.queryId,
+      querySession.qContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl)
     val metricShardKeys = schemas.part.options.shardKeyColumns.dropRight(1)
     // any exceptions thrown here should be caught by a wrapped Task.
     // At the end, MultiSchemaPartitionsExec.execute releases the lock when the task is complete
@@ -1614,11 +1615,18 @@ class TimeSeriesShard(val ref: DatasetRef,
   /**
    * Calculate lock timeout based on headroom space available.
    * Lower the space available, longer the timeout.
+   * If low on free space (under 2%), we make the linear timeout increase steeper.
    */
-  def getHeadroomLockTimeout(currentFreePercent: Double, ensurePercent: Double): Int = {
-    // Ramp up the timeout as the current headroom shrinks. Max timeout per attempt is a little
-    // over 2 seconds, and the total timeout can be double that, for a total of 4 seconds.
-    ((1.0 - (currentFreePercent / ensurePercent)) * EvictionLock.maxTimeoutMillis).toInt
+  private def getHeadroomLockTimeout(currentFreePercent: Double, ensurePercent: Double): Int = {
+    if (currentFreePercent > 2) { // 2% threshold is hardcoded for now; configure later if really needed
+      // Ramp up the timeout as the current headroom shrinks. Max timeout per attempt is a little
+      // over 2 seconds, and the total timeout can be double that, for a total of 4 seconds.
+      ((1.0 - (currentFreePercent / ensurePercent)) * EvictionLock.maxTimeoutMillis).toInt
+    } else {
+      // Ramp up the timeout aggressively as the current headroom shrinks. Max timeout per attempt is a little
+      // over 65 seconds, and the total timeout can be double that, for a total of 65*2 seconds.
+      ((1.0 - (currentFreePercent / ensurePercent)) * EvictionLock.direCircumstanceMaxTimeoutMillis).toInt
+    }
   }
 
   /**
@@ -1650,7 +1658,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     // do only if one of blocks or TSPs need eviction or if addition of partitions disabled
     if (highestTimeoutMs > 0 || forceEvict) {
       val start = System.nanoTime()
-      val timeoutMs = if (forceEvict) EvictionLock.direCircumstanceTimeoutMillis else highestTimeoutMs
+      val timeoutMs = if (forceEvict) EvictionLock.direCircumstanceMaxTimeoutMillis else highestTimeoutMs
       logger.info(s"Preparing to evictForHeadroom on dataset=$ref shard=$shardNum since " +
         s"blockStoreCurrentFreePercent=$blockStoreCurrentFreePercent tspCountFreePercent=$tspCountFreePercent " +
         s"nativeMemFreePercent=$nativeMemFreePercent forceEvict=$forceEvict timeoutMs=$timeoutMs")
