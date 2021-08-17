@@ -395,7 +395,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
     } else (None, None, lp)
 
-    val rawSeries = walkLogicalPlanTree(lpWithoutBucket.series, qContext)
+    val rawSeries = walkLogicalPlanTree(lpWithoutBucket.rawSeries, qContext)
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
       None, None, qContext, false, Nil, lp.offsetMs)))
 
