@@ -128,6 +128,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val memstoreEvictionStall = Kamon.counter("memstore-eviction-stall",
                            MeasurementUnit.time.nanoseconds).withTags(TagSet.from(tags))
   val evictablePartKeysSize = Kamon.gauge("memstore-num-evictable-partkeys").withTags(TagSet.from(tags))
+  val missedEviction = Kamon.counter("memstore-missed-eviction").withTags(TagSet.from(tags))
 
 }
 
@@ -1543,8 +1544,11 @@ class TimeSeriesShard(val ref: DatasetRef,
                        chunkMethod: ChunkScanMethod,
                        querySession: QuerySession): PartLookupResult = {
     querySession.lock = Some(evictionLock)
-    evictionLock.acquireSharedLock(querySession.qContext.queryId,
-      querySession.qContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl)
+    val promQl = querySession.qContext.origQueryParams match {
+      case p: PromQlQueryParams => p.promQl
+      case _ => "unknown"
+    }
+    evictionLock.acquireSharedLock(querySession.qContext.queryId, promQl)
     val metricShardKeys = schemas.part.options.shardKeyColumns.dropRight(1)
     // any exceptions thrown here should be caught by a wrapped Task.
     // At the end, MultiSchemaPartitionsExec.execute releases the lock when the task is complete
@@ -1681,6 +1685,8 @@ class TimeSeriesShard(val ref: DatasetRef,
         }
         true
       } else {
+        // could not do eviction since lock was not obtained
+        shardStats.missedEviction.increment()
         false
       }
       val stall = System.nanoTime() - start

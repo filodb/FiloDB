@@ -46,7 +46,6 @@ class EvictionLock(debugInfo: String = "none") extends StrictLogging {
       if (reclaimLock.tryAcquireExclusiveNanos(TimeUnit.MILLISECONDS.toNanos(timeout))) {
         return true
       }
-      // if we did not get lock, count failures and judge if the node is in bad state
       if (timeout >= finalTimeoutMillis) {
         logger.error(s"Could not acquire exclusive access to eviction lock $debugInfo " +
           s"with finalTimeoutMillis=$finalTimeoutMillis LockState: $this runningQueries: $runningQueries")
