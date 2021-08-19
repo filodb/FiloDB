@@ -420,7 +420,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       1540850640000L->330) // 330 becomes stale now.
 
     val slidingWinIterator = new SlidingWindowIterator(rv.rows, 1540845090000L,
-                               15000, 1540855905000L, 0,
+                               15000, 1540855905000L, queryConfig.staleSampleAfterMs,
                                RangeFunction(tsResSchema,
                                  None, ColumnType.DoubleColumn, queryConfig, useChunked = false).asSliding,
                                queryConfig)
@@ -449,7 +449,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val rv = timeValueRVPk(samples)
 
     val slidingWinIterator = new SlidingWindowIterator(rv.rows, 100000L,
-      100000, 600000L, 0,
+      100000, 600000L, queryConfig.staleSampleAfterMs + 1,
       RangeFunction(tsResSchema,
         None, ColumnType.DoubleColumn, queryConfig, useChunked = false).asSliding,
       queryConfig)

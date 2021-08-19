@@ -37,11 +37,6 @@ sealed trait BaseRangeFunction {
   */
 trait RangeFunction extends BaseRangeFunction {
   /**
-    * Needs last sample prior to window start
-    */
-  def needsLastSample: Boolean = false
-
-  /**
     * Values added to window will be converted to monotonically increasing. Mark
     * as true only if the function will always operate on counters.
     */
@@ -412,7 +407,6 @@ object RangeFunction {
 }
 
 object LastSampleFunction extends RangeFunction {
-  override def needsLastSample: Boolean = true
   def addedToWindow(row: TransientRow, window: Window): Unit = {}
   def removedFromWindow(row: TransientRow, window: Window): Unit = {}
   def apply(startTimestamp: Long,
@@ -420,13 +414,16 @@ object LastSampleFunction extends RangeFunction {
             window: Window,
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
-    if (window.size > 1)
-      throw new IllegalStateException(s"Window had more than 1 sample. Possible out of order samples. Window: $window")
-    if (window.size == 0 || (endTimestamp - window.head.getLong(0)) > queryConfig.staleSampleAfterMs) {
-      sampleToEmit.setValues(endTimestamp, Double.NaN)
-    } else {
-      sampleToEmit.setValues(endTimestamp, window.head.getDouble(1))
+    for (i <- (window.size - 1) to 0 by -1) {
+      val row = window.apply(i)
+      val rowValue = row.getDouble(1)
+      //val rowTimestampMs = row.getLong(0)
+      if (!rowValue.isNaN ) {
+        sampleToEmit.setValues(endTimestamp, rowValue)
+        return
+      }
     }
+    sampleToEmit.setValues(endTimestamp, Double.NaN)
   }
 }
 

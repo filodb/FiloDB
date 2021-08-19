@@ -376,14 +376,8 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
     * @param curWindowStart start time of the current window
     */
   private def shouldAddCurToWindow(curWindowStart: Long, cur: TransientRow): Boolean = {
-    // One of the following three conditions need to hold true:
-    val insideCurWindow = cur.timestamp > curWindowStart
-    // 1. cur is inside current window
-    insideCurWindow ||
-      // 2. needLastSample and cur is the last sample because next sample is inside window
-      (rangeFunction.needsLastSample && rows.hasNext && rows.head.timestamp > curWindowStart) ||
-      // 3. needLastSample and no more rows after cur
-      (rangeFunction.needsLastSample && !rows.hasNext)
+    // cur is inside current window
+    cur.timestamp > curWindowStart
   }
 
   /**
@@ -400,11 +394,7 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
       false
     } else {
       val headIsOutsideWindow = windowQueue.head.timestamp <= curWindowStart
-      // One of the following two conditions need to hold true:
-      // 1. if no need for last sample, and head is outside the window
-      (!rangeFunction.needsLastSample && headIsOutsideWindow) ||
-        // 2. if needs last sample, then ok to remove window's head only if there is more than one item in window
-        (rangeFunction.needsLastSample && windowQueue.size > 1 && headIsOutsideWindow)
+      headIsOutsideWindow
     }
   }
 }
