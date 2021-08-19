@@ -417,7 +417,6 @@ object LastSampleFunction extends RangeFunction {
     for (i <- (window.size - 1) to 0 by -1) {
       val row = window.apply(i)
       val rowValue = row.getDouble(1)
-      //val rowTimestampMs = row.getLong(0)
       if (!rowValue.isNaN ) {
         sampleToEmit.setValues(endTimestamp, rowValue)
         return

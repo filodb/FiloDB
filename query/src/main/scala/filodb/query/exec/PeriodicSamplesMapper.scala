@@ -389,13 +389,7 @@ class SlidingWindowIterator(raw: RangeVectorCursor,
     * @param curWindowStart start time of the current window
     */
   private def shouldRemoveWindowHead(curWindowStart: Long): Boolean = {
-
-    if (windowQueue.isEmpty) {
-      false
-    } else {
-      val headIsOutsideWindow = windowQueue.head.timestamp <= curWindowStart
-      headIsOutsideWindow
-    }
+    (!windowQueue.isEmpty) && windowQueue.head.timestamp <= curWindowStart
   }
 }
 
