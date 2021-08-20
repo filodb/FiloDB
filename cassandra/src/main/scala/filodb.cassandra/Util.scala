@@ -1,6 +1,7 @@
 package filodb.cassandra
 
 import java.nio.ByteBuffer
+import java.util.concurrent.Executor
 
 import scala.concurrent.{Future, Promise}
 import scala.util.Random
@@ -52,12 +53,12 @@ object Util {
   import com.google.common.util.concurrent.{FutureCallback, Futures, ListenableFuture}
 
   implicit class CassandraFutureOps[A](lf: ListenableFuture[A]) {
-    def toScalaFuture: Future[A] = {
+    def toScalaFuture(implicit executor: Executor): Future[A] = {
       val promise = Promise[A]()
       Futures.addCallback(lf, new FutureCallback[A] {
         def onFailure(t: Throwable): Unit = promise failure t
         def onSuccess(result: A): Unit = promise success result
-      })
+      }, executor)
 
       promise.future
     }

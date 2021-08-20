@@ -328,6 +328,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset1.ref, 0).get
     tsShard.recoverIndex().futureValue
+    tsShard.refreshPartKeyIndexBlocking()
 
     tsShard.partitions.size shouldEqual 1 // only ingesting partitions should be loaded into heap
     tsShard.partKeyIndex.indexNumEntries shouldEqual 2 // all partitions should be added to index
@@ -342,6 +343,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     tsShard.partKeyIndex.endTimeFromPartId(1) shouldEqual Long.MaxValue
     tsShard.partKeyIndex.partKeyFromPartId(0).get shouldEqual new BytesRef(pks(0))
     tsShard.partKeyIndex.partKeyFromPartId(1).get shouldEqual new BytesRef(pks(1))
+    tsShard.shutdown()
 
   }
 
