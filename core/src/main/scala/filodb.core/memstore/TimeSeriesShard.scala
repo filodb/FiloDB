@@ -856,7 +856,11 @@ class TimeSeriesShard(val ref: DatasetRef,
         val shardKey = schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset, schema.options.shardKeyColumns)
         captureTimeseriesCount(schema, shardKey, -1)
         if (storeConfig.meteringEnabled) {
-          cardTracker.decrementCount(shardKey)
+          try {
+            cardTracker.decrementCount(shardKey)
+          } catch { case e: Exception =>
+            logger.error("Got exception when reducing cardinality in tracker", e)
+          }
         }
         removePartition(p)
         removedParts += p.partID
@@ -869,7 +873,11 @@ class TimeSeriesShard(val ref: DatasetRef,
         val shardKey = schema.partKeySchema.colValues(pk.bytes, unsafePkOffset,
           schemas.part.options.shardKeyColumns)
         if (storeConfig.meteringEnabled) {
-          cardTracker.decrementCount(shardKey)
+          try {
+            cardTracker.decrementCount(shardKey)
+          } catch { case e: Exception =>
+            logger.error("Got exception when reducing cardinality in tracker", e)
+          }
         }
         captureTimeseriesCount(schema, shardKey, -1)
       }
