@@ -496,12 +496,20 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         val term = new Term(column, value.toString)
         new TermQuery(term)
       case NotEquals(value) =>
-        val term = new Term(column, value.toString)
+        val str = value.toString
+        val term = new Term(column, str)
         val booleanQuery = new BooleanQuery.Builder
-        val termAll = new Term(column, ".*")
-        booleanQuery.add(new RegexpQuery(termAll, RegExp.NONE), Occur.FILTER)
+        str.isEmpty match {
+          case true =>
+            val termAll = new Term(column, ".*")
+            booleanQuery.add(new RegexpQuery(termAll, RegExp.NONE), Occur.FILTER)
+          case false =>
+            val allDocs = new MatchAllDocsQuery
+            booleanQuery.add(allDocs, Occur.FILTER)
+        }
         booleanQuery.add(new TermQuery(term), Occur.MUST_NOT)
         booleanQuery.build()
+
       case In(values) =>
         if (values.size < 2)
           throw new IllegalArgumentException("In filter should have atleast 2 values")
