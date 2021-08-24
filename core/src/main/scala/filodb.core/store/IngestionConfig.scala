@@ -11,7 +11,7 @@ import filodb.core.downsample.DownsampleConfig
 
 final case class StoreConfig(flushInterval: FiniteDuration,
                              timeAlignedChunksEnabled: Boolean,
-                             diskTTLSeconds: Int,
+                             diskTTLSeconds: Long,
                              maxChunksSize: Int,
                              // Max write buffer size for Histograms, UTF8Strings, other blobs
                              maxBlobBufferSize: Int,
@@ -117,7 +117,7 @@ object StoreConfig {
     val maxChunkTime = config.as[Option[FiniteDuration]]("max-chunk-time").getOrElse(fallbackMaxChunkTime)
     StoreConfig(flushInterval,
                 timeAlignedChunksEnabled,
-                config.as[FiniteDuration]("disk-time-to-live").toSeconds.toInt,
+                config.as[FiniteDuration]("disk-time-to-live").toSeconds,
                 config.getInt("max-chunks-size"),
                 config.getInt("max-blob-buffer-size"),
                 config.getMemorySize("shard-mem-size").toBytes,
