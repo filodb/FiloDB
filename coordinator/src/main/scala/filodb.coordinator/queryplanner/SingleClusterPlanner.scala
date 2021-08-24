@@ -363,7 +363,11 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   }
 
   private def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]) = {
-    val rawSeries = if (lp.isLeft) lp.left.get.rawSeries else lp.right.get.series
+    val rawSeries = lp match {
+      case Right(value) => value.series
+      case Left(value)  => value.rawSeries
+    }
+
     if (rawSeries.isInstanceOf[RawSeries]) {
       val rawSeriesLp = rawSeries.asInstanceOf[RawSeries]
 
