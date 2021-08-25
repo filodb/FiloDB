@@ -50,6 +50,9 @@ object Submodules {
     .settings(
       commonSettings,
       name := "filodb-prometheus",
+      publishArtifact in (Compile, packageDoc) := false,
+      publishArtifact in packageDoc := false,
+      sources in (Compile,doc) := Seq.empty,
       libraryDependencies ++= promDeps
     )
 
@@ -101,7 +104,7 @@ object Submodules {
     .settings(
       commonSettings,
       name := "spark-jobs",
-      fork in Test := true,
+      fork in Test := false,
       baseDirectory in Test := file("."),   // since we have a config using FiloDB project root as relative path
       assemblySettings,
       scalacOptions += "-language:postfixOps",

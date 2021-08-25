@@ -1,6 +1,7 @@
 package filodb.prometheus.parse
 
 import filodb.prometheus.ast.{PeriodicSeries, SimpleSeries, TimeStepParams}
+import filodb.prometheus.parse.Parser.{Antlr, Shadow}
 import filodb.query.{BinaryJoin, LogicalPlan}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -44,6 +45,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
   }
 
   it("parse basic scalar expressions") {
+    parseSuccessfully("-5")
+    parseSuccessfully("+5")
     parseSuccessfully("1")
     //    parse("+Inf")
     //    parse("-Inf")
@@ -650,14 +653,27 @@ class ParserSpec extends AnyFunSpec with Matchers {
       "max_over_time(rate(foo[5m])[5m:1m])" -> "SubqueryWithWindowing(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855720000,60000,1524855960000,300000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(foo)))),1524855988000,0,1524855988000,MaxOverTime,List(),300000,60000,None)",
       "max_over_time(sum(foo)[5m:1m])" -> "SubqueryWithWindowing(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),List(),List(),List()),1524855988000,0,1524855988000,MaxOverTime,List(),300000,60000,None)",
       "sum(foo)[5m:1m]" -> "TopLevelSubquery(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),List(),List(),List()),1524855720000,60000,1524855960000)",
-      "avg_over_time(max_over_time(rate(foo[5m])[5m:1m])[10m:2m])" -> "SubqueryWithWindowing(SubqueryWithWindowing(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855180000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855180000,60000,1524855960000,300000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(foo)))),1524855480000,120000,1524855960000,MaxOverTime,List(),300000,60000,None),1524855988000,0,1524855988000,AvgOverTime,List(),600000,120000,None)"
+      "avg_over_time(max_over_time(rate(foo[5m])[5m:1m])[10m:2m])" -> "SubqueryWithWindowing(SubqueryWithWindowing(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855180000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855180000,60000,1524855960000,300000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(foo)))),1524855480000,120000,1524855960000,MaxOverTime,List(),300000,60000,None),1524855988000,0,1524855988000,AvgOverTime,List(),600000,120000,None)",
+      "1-1" -> "ScalarBinaryOperation(SUB,Left(1.0),Left(1.0),RangeParams(1524855988,1000,1524855988))",
+      "rate(___http_requests_total{job=\"api-server\"}[10m])" -> "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(___http_requests_total))),List(),Some(600000),None),1524855988000,1000000,1524855988000,600000,Rate,false,List(),None,List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(___http_requests_total))))",
+      "(http_requests_total{job=\"api-server\"}==1)+4 " -> "ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(4.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(EQL,ScalarFixedDoublePlan(1.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),false),false)"
     )
 
     val qts: Long = 1524855988L
     val step = 1000
+
+    // Parsing with Legacy Parser
     queryToLpString.foreach { case (q, e) =>
-      info(s"Parsing $q")
-      val lp = Parser.queryToLogicalPlan(q, qts, step)
+      info(s"Parsing with Legacy parser $q")
+      val lp = Parser.queryToLogicalPlan(q, qts, step, Shadow)
+      if (lp.isInstanceOf[BinaryJoin]) printBinaryJoin(lp)
+      lp.toString shouldEqual (e)
+    }
+
+    // Parsing with Antlr
+    queryToLpString.foreach { case (q, e) =>
+      info(s"Parsing with Antlr Parser$q")
+      val lp = Parser.queryToLogicalPlan(q, qts, step, Antlr)
       if (lp.isInstanceOf[BinaryJoin]) printBinaryJoin(lp)
       //if(lp.toString != e) {
         //println("\""+q.replaceAll("\"","\\\\\"")+"\" -> \""+lp.toString+"\",")

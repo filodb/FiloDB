@@ -3,12 +3,12 @@ package filodb.cli
 import java.io.OutputStream
 import java.math.BigInteger
 import java.sql.Timestamp
+import java.util
 
 import scala.concurrent.duration._
 import scala.util.Try
 
 import com.opencsv.CSVWriter
-import java.util
 import monix.reactive.Observable
 import org.rogach.scallop.ScallopConf
 import org.rogach.scallop.exceptions.ScallopException
@@ -17,6 +17,7 @@ import org.scalactic._
 import filodb.coordinator._
 import filodb.coordinator.client._
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
+import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Column, Schemas}
@@ -27,6 +28,7 @@ import filodb.memory.format.{BinaryVector, Classes, MemoryReader, PrimitiveVecto
 import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
 import filodb.query._
+import filodb.query.LogicalPlan.getRawSeriesFilters
 
 // scalastyle:off
 class Arguments(args: Seq[String]) extends ScallopConf(args) {
@@ -66,6 +68,7 @@ class Arguments(args: Seq[String]) extends ScallopConf(args) {
   val spread = opt[Int]()
   val k = opt[Int]()
   val shardkeyprefix = opt[List[String]](default = Some(List()))
+  val queries = opt[List[String]](default = Some(List()))
 
   verify()
 
@@ -105,6 +108,7 @@ object CliMain extends FilodbClusterNode {
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labelvalues --labelName <lable-names> --labelfilter <label-filter> --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command topkcard --dataset prometheus --k 2 --shardkeyprefix demo App-0")
+    println("  --host <hostname/IP> [--port ...] --command findqueryshards --queries <query> --spread <spread>")
     println("""  --command promFilterToPartKeyBR --promql "myMetricName{_ws_='myWs',_ns_='myNs'}" --schema prom-counter""")
     println("""  --command partKeyBrAsString --hexpk 0x2C0000000F1712000000200000004B8B36940C006D794D65747269634E616D650E00C104006D794E73C004006D795773""")
     println("""  --command decodeChunkInfo --hexchunkinfo 0x12e8253a267ea2db060000005046fc896e0100005046fc896e010000""")
@@ -192,6 +196,10 @@ object CliMain extends FilodbClusterNode {
 
         case Some("validateSchemas") => validateSchemas()
 
+        case Some("findqueryshards") =>
+          require(args.queries.isDefined && args.queries().nonEmpty && args.spread.isDefined, "--queries and --spread must be defined")
+          findQueryShards(args)
+
         case Some("promFilterToPartKeyBR") =>
           require(args.promql.isDefined && args.schema.isDefined, "--promql and --schema must be defined")
           promFilterToPartKeyBr(args.promql(), args.schema())
@@ -244,6 +252,27 @@ object CliMain extends FilodbClusterNode {
       // No need to shutdown, just exit.  This ensures things like C* client are not started by accident and
       // ensures a much quicker exit, which is important for CLI.
       sys.exit(exitCode)
+    }
+  }
+
+  private def findQueryShards(args: Arguments) = {
+    val (client, dsRef) = getClientAndRef(args)
+    val FindShardFormatStr = "%5s\t\t%s"
+    client.getShardMapper(dsRef) match {
+      case Some(mapper) =>
+        def mapperRef = mapper
+        val queryConfig = new QueryConfig (config.getConfig ("query") )
+        val planner = new SingleClusterPlanner(dsRef, Schemas.global,
+          mapperRef, earliestRetainedTimestampFn = 0, queryConfig, "raw",
+          StaticSpreadProvider(SpreadChange(0, args.spread())))
+        println(FindShardFormatStr.format("Shards", "Query"))
+        args.queries().foreach(query => {
+          val lp = Parser.queryToLogicalPlan(query, 100, 1)
+          val shardRange = planner.shardsFromFilters(planner.renameMetricFilter(getRawSeriesFilters(lp).head), QueryContext())
+          println(FindShardFormatStr.format(shardRange.mkString(","), query))
+        })
+      case _ =>
+        println(s"Unable to obtain shard list for dataset $dsRef, has it been setup yet?")
     }
   }
 

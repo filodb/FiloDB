@@ -90,7 +90,7 @@ case class QuerySession(qContext: QueryContext,
                         var resultCouldBePartial: Boolean = false,
                         var partialResultsReason: Option[String] = None) {
   def close(): Unit = {
-    lock.foreach(_.releaseSharedLock())
+    lock.foreach(_.releaseSharedLock(qContext.queryId))
     lock = None
   }
 }

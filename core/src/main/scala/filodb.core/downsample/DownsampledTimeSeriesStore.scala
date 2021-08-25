@@ -144,6 +144,9 @@ extends MemStore with StrictLogging {
   }
 
   def shutdown(): Unit = {
+    datasets.valuesIterator.foreach { d =>
+      d.values().asScala.foreach(_.shutdown())
+    }
     reset()
   }
 

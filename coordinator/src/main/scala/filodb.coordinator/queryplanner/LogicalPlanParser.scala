@@ -95,14 +95,14 @@ object LogicalPlanParser {
   private def scalarBinaryOperationToQuery(lp: ScalarBinaryOperation): String = {
     val rhs = if (lp.rhs.isLeft) lp.rhs.left.get.toString else convertToQuery(lp.rhs.right.get)
     val lhs = if (lp.lhs.isLeft) lp.lhs.left.get.toString else convertToQuery(lp.lhs.right.get)
-    s"$lhs$Space${lp.operator.operatorString}$Space$rhs"
+    s"($lhs$Space${lp.operator.operatorString}$Space$rhs)"
   }
 
   private def scalarVectorBinaryOperationToQuery(lp: ScalarVectorBinaryOperation): String = {
     val periodicSeriesQuery = convertToQuery(lp.vector)
-    if (lp.scalarIsLhs) s"${functionArgsToQuery(lp.scalarArg)}$Space${lp.operator.operatorString}$Space" +
-      s"$periodicSeriesQuery"
-    else s"$periodicSeriesQuery ${lp.operator.operatorString} ${functionArgsToQuery(lp.scalarArg)}"
+    if (lp.scalarIsLhs) s"(${functionArgsToQuery(lp.scalarArg)}$Space${lp.operator.operatorString}$Space" +
+      s"$periodicSeriesQuery)"
+    else s"($periodicSeriesQuery ${lp.operator.operatorString} ${functionArgsToQuery(lp.scalarArg)})"
   }
 
   private def periodicSeriesWithWindowingToQuery(lp: PeriodicSeriesWithWindowing): String = {
@@ -140,7 +140,7 @@ object LogicalPlanParser {
     }
     val grouping = if (lp.include.isEmpty) groupingType else s"$groupingType$OpeningRoundBracket" +
       s"${lp.include.mkString(Comma)}$ClosingRoundBracket"
-    s"$lhs$Space${lp.operator.operatorString}$on$ignoring$grouping$Space$rhs"
+    s"($lhs$Space${lp.operator.operatorString}$on$ignoring$grouping$Space$rhs)"
   }
 
   def miscellaneousFnToQuery(lp: ApplyMiscellaneousFunction): String = {

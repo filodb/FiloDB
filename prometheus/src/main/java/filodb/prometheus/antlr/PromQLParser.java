@@ -1,4 +1,4 @@
-// Generated from PromQL.g4 by ANTLR 4.5.3
+// Generated from PromQL.g4 by ANTLR 4.9.2
 package filodb.prometheus.antlr;
 import org.antlr.v4.runtime.atn.*;
 import org.antlr.v4.runtime.dfa.DFA;
@@ -11,7 +11,7 @@ import java.util.ArrayList;
 
 @SuppressWarnings({"all", "warnings", "unchecked", "unused", "cast"})
 public class PromQLParser extends Parser {
-	static { RuntimeMetaData.checkVersion("4.5.3", RuntimeMetaData.VERSION); }
+	static { RuntimeMetaData.checkVersion("4.9.2", RuntimeMetaData.VERSION); }
 
 	protected static final DFA[] _decisionToDFA;
 	protected static final PredictionContextCache _sharedContextCache =
@@ -34,28 +34,37 @@ public class PromQLParser extends Parser {
 		RULE_on = 27, RULE_ignoring = 28, RULE_groupLeft = 29, RULE_groupRight = 30, 
 		RULE_metricName = 31, RULE_metricKeyword = 32, RULE_labelName = 33, RULE_labelNameList = 34, 
 		RULE_labelKeyword = 35, RULE_literal = 36;
-	public static final String[] ruleNames = {
-		"expression", "vectorExpression", "unaryOp", "powOp", "multOp", "addOp", 
-		"compareOp", "andUnlessOp", "orOp", "vector", "parens", "instantOrRangeSelector", 
-		"instantSelector", "window", "offset", "limit", "subquery", "labelMatcher", 
-		"labelMatcherOp", "labelMatcherList", "function", "parameter", "parameterList", 
-		"aggregation", "by", "without", "grouping", "on", "ignoring", "groupLeft", 
-		"groupRight", "metricName", "metricKeyword", "labelName", "labelNameList", 
-		"labelKeyword", "literal"
-	};
+	private static String[] makeRuleNames() {
+		return new String[] {
+			"expression", "vectorExpression", "unaryOp", "powOp", "multOp", "addOp", 
+			"compareOp", "andUnlessOp", "orOp", "vector", "parens", "instantOrRangeSelector", 
+			"instantSelector", "window", "offset", "limit", "subquery", "labelMatcher", 
+			"labelMatcherOp", "labelMatcherList", "function", "parameter", "parameterList", 
+			"aggregation", "by", "without", "grouping", "on", "ignoring", "groupLeft", 
+			"groupRight", "metricName", "metricKeyword", "labelName", "labelNameList", 
+			"labelKeyword", "literal"
+		};
+	}
+	public static final String[] ruleNames = makeRuleNames();
 
-	private static final String[] _LITERAL_NAMES = {
-		null, "'('", "')'", "'{'", "'}'", "'['", "']'", "':'", "','", null, null, 
-		"'+'", "'-'", "'*'", "'/'", "'%'", "'^'", "'='", "'=='", "'!='", "'>'", 
-		"'<'", "'>='", "'<='", "'=~'", "'!~'"
-	};
-	private static final String[] _SYMBOLIC_NAMES = {
-		null, null, null, null, null, null, null, null, null, "NUMBER", "STRING", 
-		"ADD", "SUB", "MUL", "DIV", "MOD", "POW", "EQ", "DEQ", "NE", "GT", "LT", 
-		"GE", "LE", "RE", "NRE", "AND", "OR", "UNLESS", "BY", "WITHOUT", "ON", 
-		"IGNORING", "GROUP_LEFT", "GROUP_RIGHT", "OFFSET", "LIMIT", "BOOL", "AGGREGATION_OP", 
-		"DURATION", "IDENTIFIER", "IDENTIFIER_EXTENDED", "WS", "COMMENT"
-	};
+	private static String[] makeLiteralNames() {
+		return new String[] {
+			null, "'('", "')'", "'{'", "'}'", "'['", "']'", "':'", "','", null, null, 
+			"'+'", "'-'", "'*'", "'/'", "'%'", "'^'", "'='", "'=='", "'!='", "'>'", 
+			"'<'", "'>='", "'<='", "'=~'", "'!~'"
+		};
+	}
+	private static final String[] _LITERAL_NAMES = makeLiteralNames();
+	private static String[] makeSymbolicNames() {
+		return new String[] {
+			null, null, null, null, null, null, null, null, null, "NUMBER", "STRING", 
+			"ADD", "SUB", "MUL", "DIV", "MOD", "POW", "EQ", "DEQ", "NE", "GT", "LT", 
+			"GE", "LE", "RE", "NRE", "AND", "OR", "UNLESS", "BY", "WITHOUT", "ON", 
+			"IGNORING", "GROUP_LEFT", "GROUP_RIGHT", "OFFSET", "LIMIT", "BOOL", "AGGREGATION_OP", 
+			"DURATION", "IDENTIFIER", "IDENTIFIER_EXTENDED", "WS", "COMMENT"
+		};
+	}
+	private static final String[] _SYMBOLIC_NAMES = makeSymbolicNames();
 	public static final Vocabulary VOCABULARY = new VocabularyImpl(_LITERAL_NAMES, _SYMBOLIC_NAMES);
 
 	/**
@@ -105,6 +114,7 @@ public class PromQLParser extends Parser {
 		super(input);
 		_interp = new ParserATNSimulator(this,_ATN,_decisionToDFA,_sharedContextCache);
 	}
+
 	public static class ExpressionContext extends ParserRuleContext {
 		public VectorExpressionContext vectorExpression() {
 			return getRuleContext(VectorExpressionContext.class,0);
@@ -264,6 +274,7 @@ public class PromQLParser extends Parser {
 			enterOuterAlt(_localctx, 1);
 			{
 			setState(82);
+			_errHandler.sync(this);
 			switch (_input.LA(1)) {
 			case ADD:
 			case SUB:
@@ -324,6 +335,7 @@ public class PromQLParser extends Parser {
 						setState(85);
 						powOp();
 						setState(87);
+						_errHandler.sync(this);
 						_la = _input.LA(1);
 						if (_la==ON || _la==IGNORING) {
 							{
@@ -345,6 +357,7 @@ public class PromQLParser extends Parser {
 						setState(92);
 						multOp();
 						setState(94);
+						_errHandler.sync(this);
 						_la = _input.LA(1);
 						if (_la==ON || _la==IGNORING) {
 							{
@@ -366,6 +379,7 @@ public class PromQLParser extends Parser {
 						setState(99);
 						addOp();
 						setState(101);
+						_errHandler.sync(this);
 						_la = _input.LA(1);
 						if (_la==ON || _la==IGNORING) {
 							{
@@ -387,6 +401,7 @@ public class PromQLParser extends Parser {
 						setState(106);
 						compareOp();
 						setState(108);
+						_errHandler.sync(this);
 						_la = _input.LA(1);
 						if (_la==ON || _la==IGNORING) {
 							{
@@ -408,6 +423,7 @@ public class PromQLParser extends Parser {
 						setState(113);
 						andUnlessOp();
 						setState(115);
+						_errHandler.sync(this);
 						_la = _input.LA(1);
 						if (_la==ON || _la==IGNORING) {
 							{
@@ -429,6 +445,7 @@ public class PromQLParser extends Parser {
 						setState(120);
 						orOp();
 						setState(122);
+						_errHandler.sync(this);
 						_la = _input.LA(1);
 						if (_la==ON || _la==IGNORING) {
 							{
@@ -516,7 +533,10 @@ public class PromQLParser extends Parser {
 			_la = _input.LA(1);
 			if ( !(_la==ADD || _la==SUB) ) {
 			_errHandler.recoverInline(this);
-			} else {
+			}
+			else {
+				if ( _input.LA(1)==Token.EOF ) matchedEOF = true;
+				_errHandler.reportMatch(this);
 				consume();
 			}
 			}
@@ -592,7 +612,10 @@ public class PromQLParser extends Parser {
 			_la = _input.LA(1);
 			if ( !((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << MUL) | (1L << DIV) | (1L << MOD))) != 0)) ) {
 			_errHandler.recoverInline(this);
-			} else {
+			}
+			else {
+				if ( _input.LA(1)==Token.EOF ) matchedEOF = true;
+				_errHandler.reportMatch(this);
 				consume();
 			}
 			}
@@ -633,7 +656,10 @@ public class PromQLParser extends Parser {
 			_la = _input.LA(1);
 			if ( !(_la==ADD || _la==SUB) ) {
 			_errHandler.recoverInline(this);
-			} else {
+			}
+			else {
+				if ( _input.LA(1)==Token.EOF ) matchedEOF = true;
+				_errHandler.reportMatch(this);
 				consume();
 			}
 			}
@@ -679,10 +705,14 @@ public class PromQLParser extends Parser {
 			_la = _input.LA(1);
 			if ( !((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << DEQ) | (1L << NE) | (1L << GT) | (1L << LT) | (1L << GE) | (1L << LE))) != 0)) ) {
 			_errHandler.recoverInline(this);
-			} else {
+			}
+			else {
+				if ( _input.LA(1)==Token.EOF ) matchedEOF = true;
+				_errHandler.reportMatch(this);
 				consume();
 			}
 			setState(148);
+			_errHandler.sync(this);
 			_la = _input.LA(1);
 			if (_la==BOOL) {
 				{
@@ -729,7 +759,10 @@ public class PromQLParser extends Parser {
 			_la = _input.LA(1);
 			if ( !(_la==AND || _la==UNLESS) ) {
 			_errHandler.recoverInline(this);
-			} else {
+			}
+			else {
+				if ( _input.LA(1)==Token.EOF ) matchedEOF = true;
+				_errHandler.reportMatch(this);
 				consume();
 			}
 			}
@@ -987,6 +1020,7 @@ public class PromQLParser extends Parser {
 		int _la;
 		try {
 			setState(184);
+			_errHandler.sync(this);
 			switch (_input.LA(1)) {
 			case AND:
 			case OR:
@@ -1010,6 +1044,7 @@ public class PromQLParser extends Parser {
 					setState(173);
 					match(T__2);
 					setState(175);
+					_errHandler.sync(this);
 					_la = _input.LA(1);
 					if ((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << ON) | (1L << IGNORING) | (1L << GROUP_LEFT) | (1L << GROUP_RIGHT) | (1L << OFFSET) | (1L << LIMIT) | (1L << BOOL) | (1L << AGGREGATION_OP) | (1L << IDENTIFIER))) != 0)) {
 						{
@@ -1193,6 +1228,7 @@ public class PromQLParser extends Parser {
 			setState(198);
 			match(T__6);
 			setState(200);
+			_errHandler.sync(this);
 			_la = _input.LA(1);
 			if (_la==DURATION) {
 				{
@@ -1287,7 +1323,10 @@ public class PromQLParser extends Parser {
 			_la = _input.LA(1);
 			if ( !((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << EQ) | (1L << NE) | (1L << RE) | (1L << NRE))) != 0)) ) {
 			_errHandler.recoverInline(this);
-			} else {
+			}
+			else {
+				if ( _input.LA(1)==Token.EOF ) matchedEOF = true;
+				_errHandler.reportMatch(this);
 				consume();
 			}
 			}
@@ -1478,6 +1517,7 @@ public class PromQLParser extends Parser {
 			setState(225);
 			match(T__0);
 			setState(234);
+			_errHandler.sync(this);
 			_la = _input.LA(1);
 			if ((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << T__0) | (1L << T__2) | (1L << NUMBER) | (1L << STRING) | (1L << ADD) | (1L << SUB) | (1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << OFFSET) | (1L << LIMIT) | (1L << AGGREGATION_OP) | (1L << IDENTIFIER) | (1L << IDENTIFIER_EXTENDED))) != 0)) {
 				{
@@ -1561,6 +1601,7 @@ public class PromQLParser extends Parser {
 				setState(240);
 				match(AGGREGATION_OP);
 				setState(243);
+				_errHandler.sync(this);
 				switch (_input.LA(1)) {
 				case BY:
 					{
@@ -1589,6 +1630,7 @@ public class PromQLParser extends Parser {
 				setState(248);
 				parameterList();
 				setState(251);
+				_errHandler.sync(this);
 				switch (_input.LA(1)) {
 				case BY:
 					{
@@ -1729,6 +1771,7 @@ public class PromQLParser extends Parser {
 			enterOuterAlt(_localctx, 1);
 			{
 			setState(263);
+			_errHandler.sync(this);
 			switch (_input.LA(1)) {
 			case ON:
 				{
@@ -1746,6 +1789,7 @@ public class PromQLParser extends Parser {
 				throw new NoViableAltException(this);
 			}
 			setState(267);
+			_errHandler.sync(this);
 			switch (_input.LA(1)) {
 			case GROUP_LEFT:
 				{
@@ -1777,7 +1821,7 @@ public class PromQLParser extends Parser {
 			case IDENTIFIER_EXTENDED:
 				break;
 			default:
-				throw new NoViableAltException(this);
+				break;
 			}
 			}
 		}
@@ -1986,6 +2030,7 @@ public class PromQLParser extends Parser {
 		enterRule(_localctx, 62, RULE_metricName);
 		try {
 			setState(286);
+			_errHandler.sync(this);
 			switch (_input.LA(1)) {
 			case AND:
 			case OR:
@@ -2061,7 +2106,10 @@ public class PromQLParser extends Parser {
 			_la = _input.LA(1);
 			if ( !((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << OFFSET) | (1L << LIMIT) | (1L << AGGREGATION_OP))) != 0)) ) {
 			_errHandler.recoverInline(this);
-			} else {
+			}
+			else {
+				if ( _input.LA(1)==Token.EOF ) matchedEOF = true;
+				_errHandler.reportMatch(this);
 				consume();
 			}
 			}
@@ -2098,6 +2146,7 @@ public class PromQLParser extends Parser {
 		enterRule(_localctx, 66, RULE_labelName);
 		try {
 			setState(292);
+			_errHandler.sync(this);
 			switch (_input.LA(1)) {
 			case AND:
 			case OR:
@@ -2168,6 +2217,7 @@ public class PromQLParser extends Parser {
 			setState(294);
 			match(T__0);
 			setState(303);
+			_errHandler.sync(this);
 			_la = _input.LA(1);
 			if ((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << ON) | (1L << IGNORING) | (1L << GROUP_LEFT) | (1L << GROUP_RIGHT) | (1L << OFFSET) | (1L << LIMIT) | (1L << BOOL) | (1L << AGGREGATION_OP) | (1L << IDENTIFIER))) != 0)) {
 				{
@@ -2243,7 +2293,10 @@ public class PromQLParser extends Parser {
 			_la = _input.LA(1);
 			if ( !((((_la) & ~0x3f) == 0 && ((1L << _la) & ((1L << AND) | (1L << OR) | (1L << UNLESS) | (1L << BY) | (1L << WITHOUT) | (1L << ON) | (1L << IGNORING) | (1L << GROUP_LEFT) | (1L << GROUP_RIGHT) | (1L << OFFSET) | (1L << LIMIT) | (1L << BOOL) | (1L << AGGREGATION_OP))) != 0)) ) {
 			_errHandler.recoverInline(this);
-			} else {
+			}
+			else {
+				if ( _input.LA(1)==Token.EOF ) matchedEOF = true;
+				_errHandler.reportMatch(this);
 				consume();
 			}
 			}
@@ -2284,7 +2337,10 @@ public class PromQLParser extends Parser {
 			_la = _input.LA(1);
 			if ( !(_la==NUMBER || _la==STRING) ) {
 			_errHandler.recoverInline(this);
-			} else {
+			}
+			else {
+				if ( _input.LA(1)==Token.EOF ) matchedEOF = true;
+				_errHandler.reportMatch(this);
 				consume();
 			}
 			}
@@ -2330,7 +2386,7 @@ public class PromQLParser extends Parser {
 	}
 
 	public static final String _serializedATN =
-		"\3\u0430\ud6d1\u8206\uad2d\u4417\uaef1\u8d80\uaadd\3-\u013a\4\2\t\2\4"+
+		"\3\u608b\ua72a\u8133\ub9ed\u417c\u3be7\u7786\u5964\3-\u013a\4\2\t\2\4"+
 		"\3\t\3\4\4\t\4\4\5\t\5\4\6\t\6\4\7\t\7\4\b\t\b\4\t\t\t\4\n\t\n\4\13\t"+
 		"\13\4\f\t\f\4\r\t\r\4\16\t\16\4\17\t\17\4\20\t\20\4\21\t\21\4\22\t\22"+
 		"\4\23\t\23\4\24\t\24\4\25\t\25\4\26\t\26\4\27\t\27\4\30\t\30\4\31\t\31"+
@@ -2355,11 +2411,11 @@ public class PromQLParser extends Parser {
 		"$\3$\3$\3$\7$\u012d\n$\f$\16$\u0130\13$\5$\u0132\n$\3$\3$\3%\3%\3&\3&"+
 		"\3&\2\3\4\'\2\4\6\b\n\f\16\20\22\24\26\30\32\34\36 \"$&(*,.\60\62\64\66"+
 		"8:<>@BDFHJ\2\n\3\2\r\16\3\2\17\21\3\2\24\31\4\2\34\34\36\36\5\2\23\23"+
-		"\25\25\32\33\5\2\34 %&((\3\2\34(\3\2\13\f\u0141\2L\3\2\2\2\4T\3\2\2\2"+
-		"\6\u008c\3\2\2\2\b\u008e\3\2\2\2\n\u0090\3\2\2\2\f\u0092\3\2\2\2\16\u0094"+
-		"\3\2\2\2\20\u0098\3\2\2\2\22\u009a\3\2\2\2\24\u00a1\3\2\2\2\26\u00a3\3"+
-		"\2\2\2\30\u00a7\3\2\2\2\32\u00ba\3\2\2\2\34\u00bc\3\2\2\2\36\u00c0\3\2"+
-		"\2\2 \u00c3\3\2\2\2\"\u00c6\3\2\2\2$\u00ce\3\2\2\2&\u00d2\3\2\2\2(\u00d4"+
+		"\25\25\32\33\5\2\34 %&((\3\2\34(\3\2\13\f\2\u0141\2L\3\2\2\2\4T\3\2\2"+
+		"\2\6\u008c\3\2\2\2\b\u008e\3\2\2\2\n\u0090\3\2\2\2\f\u0092\3\2\2\2\16"+
+		"\u0094\3\2\2\2\20\u0098\3\2\2\2\22\u009a\3\2\2\2\24\u00a1\3\2\2\2\26\u00a3"+
+		"\3\2\2\2\30\u00a7\3\2\2\2\32\u00ba\3\2\2\2\34\u00bc\3\2\2\2\36\u00c0\3"+
+		"\2\2\2 \u00c3\3\2\2\2\"\u00c6\3\2\2\2$\u00ce\3\2\2\2&\u00d2\3\2\2\2(\u00d4"+
 		"\3\2\2\2*\u00dc\3\2\2\2,\u00e1\3\2\2\2.\u00e3\3\2\2\2\60\u00ff\3\2\2\2"+
 		"\62\u0101\3\2\2\2\64\u0104\3\2\2\2\66\u0109\3\2\2\28\u010f\3\2\2\2:\u0112"+
 		"\3\2\2\2<\u0115\3\2\2\2>\u0119\3\2\2\2@\u0120\3\2\2\2B\u0122\3\2\2\2D"+
