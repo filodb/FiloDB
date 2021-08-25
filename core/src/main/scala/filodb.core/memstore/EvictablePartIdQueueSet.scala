@@ -14,8 +14,9 @@ import filodb.memory.format.UnsafeUtils
  */
 class EvictablePartIdQueueSet(initSize: Int) {
 
-  private val arr = new IntArrayQueue(initSize)
-  private val set = debox.Set.ofSize[Int](initSize)
+  // package private for unit test validation. Dont access
+  private[memstore] val arr = new IntArrayQueue(initSize)
+  private[memstore] val set = debox.Set.ofSize[Int](initSize)
 
   def put(partId: Int): Unit = synchronized {
     if (!set(partId)) {
@@ -51,7 +52,8 @@ class EvictablePartIdQueueSet(initSize: Int) {
 class IntArrayQueue(initialSize: Int = 8) {
 
   private val minSize = 8
-  private var items: Array[Int] = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Int]]
+  // package private for unit test validation. Dont access
+  private[memstore] var items: Array[Int] = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Int]]
   private var hd: Int = 0 // Points to next item to be removed if non-empty
   private var tl: Int = 0 // Next empty position to add if position is available
 
