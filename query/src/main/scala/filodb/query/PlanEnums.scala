@@ -212,3 +212,11 @@ object AbsentFunctionId extends Enum[AbsentFunctionId] {
 
   case object Absent extends AbsentFunctionId("absent")
 }
+
+sealed abstract class LimitFunctionId(override val entryName: String) extends EnumEntry
+
+object LimitFunctionId extends Enum[LimitFunctionId] {
+  val values = findValues
+
+  case object Limit extends LimitFunctionId("limit")
+}

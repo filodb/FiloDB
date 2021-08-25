@@ -9,8 +9,9 @@ import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.MemStore
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
+import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.store.ChunkSource
-import filodb.memory.format.{UTF8MapIteratorRowReader, ZeroCopyUTF8String}
+import filodb.memory.format.{StringArrayRowReader, UTF8MapIteratorRowReader, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
@@ -50,7 +51,6 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
           }
         }
       }
-      import NoCloseCursor._
       IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
         new UTF8MapIteratorRowReader(metadataResult.toIterator), None)
     }
@@ -65,6 +65,11 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
 final case class LabelValuesDistConcatExec(queryContext: QueryContext,
                                            dispatcher: PlanDispatcher,
                                            children: Seq[ExecPlan]) extends MetadataDistConcatExec
+final case class LabelNamesDistConcatExec(queryContext: QueryContext,
+                                           dispatcher: PlanDispatcher,
+                                           children: Seq[ExecPlan]) extends DistConcatExec {
+  addRangeVectorTransformer(LimitFunctionMapper(1))
+}
 
 final case class PartKeysExec(queryContext: QueryContext,
                               dispatcher: PlanDispatcher,
@@ -84,7 +89,6 @@ final case class PartKeysExec(queryContext: QueryContext,
       case memStore: MemStore =>
         val response = memStore.partKeysWithFilters(dataset, shard, filters,
           fetchFirstLastSampleTimes, end, start, queryContext.plannerParams.sampleLimit)
-        import NoCloseCursor._
         Observable.now(IteratorBackedRangeVector(
           new CustomRangeVectorKey(Map.empty), UTF8MapIteratorRowReader(response), None))
       case other =>
@@ -129,7 +133,6 @@ final case class LabelValuesExec(queryContext: QueryContext,
         case false => memStore.labelValuesWithFilters(dataset, shard, filters, columns, endMs, startMs,
           queryContext.plannerParams.sampleLimit)
       }
-      import NoCloseCursor._
       Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
         new UTF8MapIteratorRowReader(response), None))
     } else {
@@ -140,5 +143,42 @@ final case class LabelValuesExec(queryContext: QueryContext,
   }
 
   def args: String = s"shard=$shard, filters=$filters, col=$columns, limit=${queryContext.plannerParams.sampleLimit}," +
+    s" startMs=$startMs, endMs=$endMs"
+}
+
+final case class LabelNamesExec(queryContext: QueryContext,
+                                 dispatcher: PlanDispatcher,
+                                 dataset: DatasetRef,
+                                 shard: Int,
+                                 filters: Seq[ColumnFilter],
+                                 startMs: Long,
+                                 endMs: Long) extends LeafExecPlan {
+
+  override def enforceLimit: Boolean = false
+
+  def doExecute(source: ChunkSource,
+                querySession: QuerySession)
+               (implicit sched: Scheduler): ExecResult = {
+    if (!source.isReadyForQuery(dataset, shard)) {
+      if (!queryContext.plannerParams.allowPartialResults) {
+        throw new ServiceUnavailableException(s"Unable to answer query since shard $shard is still bootstrapping")
+      }
+      querySession.resultCouldBePartial = true
+      querySession.partialResultsReason = Some("Result may be partial since some shards are still bootstrapping")
+    }
+    val rvs = if (source.isInstanceOf[MemStore]) {
+      val memStore = source.asInstanceOf[MemStore]
+      val response = memStore.labelNames(dataset, shard, filters, endMs, startMs, 1)
+
+      Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
+        NoCloseCursor(StringArrayRowReader(response)), None))
+    } else {
+      Observable.empty
+    }
+    val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.StringColumn)), 1)
+    ExecResult(rvs, Task.eval(sch))
+  }
+
+  def args: String = s"shard=$shard, filters=$filters, limit=5," +
     s" startMs=$startMs, endMs=$endMs"
 }

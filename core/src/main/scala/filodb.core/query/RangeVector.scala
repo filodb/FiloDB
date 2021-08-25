@@ -464,6 +464,7 @@ final case class IteratorBackedRangeVector(key: RangeVectorKey,
                                            rows: RangeVectorCursor,
                                            override val outputRange: Option[RvRange]) extends RangeVector
 
+
 final case class BufferRangeVector(key: RangeVectorKey,
                                    timestamps: Buffer[Long],
                                    values: Buffer[Double],

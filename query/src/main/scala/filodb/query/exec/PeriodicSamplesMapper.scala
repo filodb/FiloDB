@@ -34,7 +34,8 @@ final case class PeriodicSamplesMapper(startMs: Long,
                                        funcParams: Seq[FuncArgs] = Nil,
                                        offsetMs: Option[Long] = None,
                                        rawSource: Boolean = true,
-                                       leftInclusiveWindow: Boolean = false
+                                       leftInclusiveWindow: Boolean = false,
+                                       seriesLimit: Option[Int] = None
 ) extends RangeVectorTransformer {
   val windowToUse =
     window.map(windowLengthMs => if (leftInclusiveWindow) (windowLengthMs + 1) else windowLengthMs)
@@ -130,10 +131,13 @@ final case class PeriodicSamplesMapper(startMs: Long,
               rangeFuncGen().asSliding, querySession.queryConfig, leftInclusiveWindow), outputRvRange)
         }
     }
-
+    val limitRvs = seriesLimit match {
+      case Some(l) => rvs.take(l)
+      case None => rvs
+    }
     // Adds offset to timestamp to generate output of offset function, since the time should be according to query
     // time parameters
-    offsetMs.map(o => rvs.map { rv =>
+    offsetMs.map(o => limitRvs.map { rv =>
       new RangeVector {
         val row = new TransientRow()
         override def key: RangeVectorKey = rv.key
@@ -144,7 +148,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
         }
         override def outputRange: Option[RvRange] = outputRvRange
       }
-    }).getOrElse(rvs)
+    }).getOrElse(limitRvs)
   }
   //scalastyle:on method.length
 

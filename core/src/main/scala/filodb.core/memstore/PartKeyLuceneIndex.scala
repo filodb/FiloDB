@@ -88,6 +88,11 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     .withTag("dataset", ref.dataset)
     .withTag("shard", shardNum)
 
+  val queryIndexTopNLookupLatency = Kamon.histogram("index-top-n-lookup-latency",
+    MeasurementUnit.time.milliseconds)
+    .withTag("dataset", ref.dataset)
+    .withTag("shard", shardNum)
+
   val partIdFromPartKeyLookupLatency = Kamon.histogram("index-ingestion-partId-lookup-latency",
     MeasurementUnit.time.milliseconds)
     .withTag("dataset", ref.dataset)
@@ -522,6 +527,15 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     collector.result
   }
 
+  def labelNamesFromFilters(columnFilters: Seq[ColumnFilter],
+                          startTime: Long,
+                          endTime: Long,
+                          limit: Int): Seq[Int] = {
+    val partIdsOrderedByEndTime = new TopKPartIdsCollector(limit)
+    searchFromFilters(columnFilters, startTime, endTime, partIdsOrderedByEndTime)
+    partIdsOrderedByEndTime.topKPartIDsBitmap().toArray
+  }
+
   def partKeyRecordsFromFilters(columnFilters: Seq[ColumnFilter],
                                 startTime: Long,
                                 endTime: Long): Seq[PartKeyLuceneIndexRecord] = {
@@ -620,28 +634,6 @@ class SinglePartKeyCollector extends SimpleCollector {
   override def collect(doc: Int): Unit = {
     if (partKeyDv.advanceExact(doc)) {
       singleResult = partKeyDv.binaryValue()
-    } else {
-      throw new IllegalStateException("This shouldn't happen since every document should have a partKeyDv")
-    }
-  }
-
-  override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
-}
-
-class SinglePartIdCollector extends SimpleCollector {
-
-  var partIdDv: NumericDocValues = _
-  var singleResult: Int = PartKeyLuceneIndex.NOT_FOUND
-
-  // gets called for each segment
-  override def doSetNextReader(context: LeafReaderContext): Unit = {
-    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID)
-  }
-
-  // gets called for each matching document in current segment
-  override def collect(doc: Int): Unit = {
-    if (partIdDv.advanceExact(doc)) {
-      singleResult = partIdDv.longValue().toInt
     } else {
       throw new IllegalStateException("This shouldn't happen since every document should have a partKeyDv")
     }

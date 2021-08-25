@@ -21,6 +21,7 @@ vectorExpression
     | vectorExpression andUnlessOp grouping? vectorExpression          #binaryOperation
     | vectorExpression orOp grouping? vectorExpression                 #binaryOperation
     | vectorExpression subquery offset?                                #subqueryOperation
+    | vectorExpression limit                                           #limitOperation
     | vector                                                           #vectorOperation
     ;
 
@@ -53,6 +54,8 @@ instantSelector
 window: '[' DURATION ']';
 
 offset: OFFSET DURATION;
+
+limit: LIMIT NUMBER;
 
 subquery: '[' DURATION ':' DURATION? ']';
 
@@ -89,6 +92,7 @@ metricKeyword
     | BY
     | WITHOUT
     | OFFSET
+    | LIMIT
     | AGGREGATION_OP
     ;
 
@@ -107,6 +111,7 @@ labelKeyword
     | GROUP_LEFT
     | GROUP_RIGHT
     | OFFSET
+    | LIMIT
     | BOOL
     | AGGREGATION_OP
     ;
@@ -155,6 +160,7 @@ IGNORING:    I G N O R I N G;
 GROUP_LEFT:  G R O U P '_' L E F T;
 GROUP_RIGHT: G R O U P '_' R I G H T;
 OFFSET:      O F F S E T;
+LIMIT:       L I M I T;
 BOOL:        B O O L;
 
 // See section below: "Magic for case-insensitive matching."

@@ -5,7 +5,7 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.Dataset
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.query.{BinaryJoin, LabelValues, LogicalPlan, SeriesKeysByFilters, SetOperator}
+import filodb.query.{BinaryJoin, LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters, SetOperator}
 import filodb.query.exec._
 
 case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange)
@@ -45,6 +45,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     else logicalPlan match {
       case lp: BinaryJoin          => materializeBinaryJoin(lp, qContext)
       case lp: LabelValues         => materializeLabelValues(lp, qContext)
+      case lp: LabelNames          => materializeLabelNames(lp, qContext)
       case lp: SeriesKeysByFilters => materializeSeriesKeysFilters(lp, qContext)
       case _                       => materializeSimpleQuery(logicalPlan, qContext)
     }
@@ -257,6 +258,27 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       }
       if (execPlans.size == 1) execPlans.head
       else LabelValuesDistConcatExec(qContext, inProcessPlanDispatcher,
+        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
+    }
+  }
+
+  def materializeLabelNames(lp: LabelNames, qContext: QueryContext): ExecPlan = {
+    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val partitions = partitionLocationProvider.getAuthorizedPartitions(
+      TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
+    if (partitions.isEmpty) {
+      logger.warn(s"No partitions found for ${queryParams.startSecs}, ${queryParams.endSecs} ")
+      localPartitionPlanner.materialize(lp, qContext)
+    } else {
+      val execPlans = partitions.map { p =>
+        logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
+        if (p.partitionName.equals(localPartitionName))
+          localPartitionPlanner.materialize(lp.copy(startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
+        else
+          createMetadataRemoteExec(qContext, queryParams, p, PlannerUtil.getLabelNamesUrlParams(lp, queryParams))
+      }
+      if (execPlans.size == 1) execPlans.head
+      else LabelNamesDistConcatExec(qContext, inProcessPlanDispatcher,
         execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
     }
   }

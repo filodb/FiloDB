@@ -1,8 +1,9 @@
 package filodb.query.exec
 
-import monix.reactive.Observable
 import scala.collection.Iterator
 import scala.collection.mutable.ListBuffer
+
+import monix.reactive.Observable
 import spire.syntax.cfor._
 
 import filodb.core.metadata.Column.ColumnType
@@ -11,8 +12,7 @@ import filodb.core.query._
 import filodb.core.query.Filter.Equals
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.memory.format.vectors.{HistogramBuckets, HistogramWithBuckets}
-import filodb.query._
-import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, SortFunctionId}
+import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, SortFunctionId, _}
 import filodb.query.InstantFunctionId.HistogramQuantile
 import filodb.query.MiscellaneousFunctionId.{LabelJoin, LabelReplace}
 import filodb.query.ScalarFunctionId.Scalar
@@ -59,12 +59,13 @@ trait RangeVectorTransformer extends java.io.Serializable {
   * range vectors
   */
 final case class InstantVectorFunctionMapper(function: InstantFunctionId,
-                                             funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
+                                             funcParams: Seq[FuncArgs] = Nil,
+                                             seriesLimit: Option[Int] = None) extends RangeVectorTransformer {
   protected[exec] def args: String = s"function=$function"
 
   def evaluate(source: Observable[RangeVector], scalarRangeVector: Seq[ScalarRangeVector], querySession: QuerySession,
                limit: Int, sourceSchema: ResultSchema) : Observable[RangeVector] = {
-    ResultSchema.valueColumnType(sourceSchema) match {
+    val rvs = ResultSchema.valueColumnType(sourceSchema) match {
       case ColumnType.HistogramColumn =>
         val instantFunction = InstantFunction.histogram(function)
         if (instantFunction.isHToDoubleFunc) {
@@ -94,6 +95,10 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
         }
       case cType: ColumnType =>
         throw new UnsupportedOperationException(s"Column type $cType is not supported for instant functions")
+    }
+    seriesLimit match {
+      case Some(l) => rvs.take(l)
+      case None => rvs
     }
   }
 
@@ -333,6 +338,19 @@ final case class VectorFunctionMapper() extends RangeVectorTransformer {
         override def outputRange: Option[RvRange] = rv.outputRange
       }
     }
+  }
+  override def funcParams: Seq[FuncArgs] = Nil
+}
+
+final case class LimitFunctionMapper(limitToApply: Int) extends RangeVectorTransformer {
+  protected[exec] def args: String = s"limitToApply=$limitToApply"
+
+  def apply(source: Observable[RangeVector],
+            querySession: QuerySession,
+            limit: Int,
+            sourceSchema: ResultSchema,
+            paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
+    source.filter(_.numRows.get > 0).take(limitToApply)
   }
   override def funcParams: Seq[FuncArgs] = Nil
 }
