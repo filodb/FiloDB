@@ -145,7 +145,6 @@ object Parser extends StrictLogging {
     }
   }
 
-  def queryToLogicalPlan(query: String, queryTimestamp: Long, step: Long): LogicalPlan = {
   def queryToLogicalPlan(query: String, queryTimestamp: Long, step: Long, mode: Mode = Shadow): LogicalPlan = {
     // Remember step matters here in instant query, when lookback is provided in step factor
     // notation as in [5i]

@@ -163,20 +163,23 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   }
 
   it ("should be able to query labels with filter") {
+    val expectedLabels = Array("job", "_metric_", "unicode_tag", "instance")
     val filters = Seq (ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = LabelNamesExec(QueryContext(), dummyDispatcher,
       timeseriesDataset.ref, 0, filters, now-5000, now)
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
-    val result = resp match {
+    val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _) => {
         val rv = response(0)
-        rv.rows.size shouldEqual 1
-        val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
-        rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
+        rv.rows.size shouldEqual 4
+        rv.rows.map(row => {
+          val br = row.asInstanceOf[BinaryRecordRowReader]
+          br.schema.colValues(br.recordBase, br.recordOffset, br.schema.colNames).head
+        })
       }
     }
-    result shouldEqual jobQueryResult2
+    result.toArray shouldEqual expectedLabels
   }
 
   it ("should be able to query with unicode filter") {

@@ -75,8 +75,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // [Label names](https://prometheus.io/docs/prometheus/latest/querying/api/#getting-label-names)
     path( "api" / "v1" / "labels") {
       get {
-        parameter('filter.as[String], 'start.as[Double].?, 'end.as[Double].?,
-          'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?)
+        parameter(('filter.as[String], 'start.as[Double].?, 'end.as[Double].?,
+          'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?))
         { (filter, start, end, explainOnly, verbose, spread) =>
           val currentTimeInSecs = System.currentTimeMillis()/1000
           val startLong = start.map(_.toLong).getOrElse(currentTimeInSecs - ONE_DAY_IN_SECS)
