@@ -33,8 +33,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
                                            chunkMethod: ChunkScanMethod,
                                            metricColumn: String,
                                            schema: Option[String] = None,
-                                           colName: Option[String] = None,
-                                           limit: Option[Int] = None) extends LeafExecPlan {
+                                           colName: Option[String] = None) extends LeafExecPlan {
   import SelectRawPartitionsExec._
 
   override def allTransformers: Seq[RangeVectorTransformer] = finalPlan.rangeVectorTransformers
@@ -111,7 +110,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
 
             val newPlan = SelectRawPartitionsExec(queryContext, dispatcher, dataset,
                                                   Some(sch), Some(lookupRes),
-                                                  schema.isDefined, colIDs, limit)
+                                                  schema.isDefined, colIDs)
             qLogger.debug(s"Discovered schema ${sch.name} and created inner plan $newPlan")
             newxformers.foreach { xf => newPlan.addRangeVectorTransformer(xf) }
             newPlan
@@ -119,7 +118,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
             qLogger.debug(s"No time series found for filters $filters... employing empty plan")
             SelectRawPartitionsExec(queryContext, dispatcher, dataset,
                                     None, Some(lookupRes),
-                                    schema.isDefined, Nil, None)
+                                    schema.isDefined, Nil)
           }
   }
   // scalastyle:on method.length

@@ -111,8 +111,7 @@ final case class SelectRawPartitionsExec(queryContext: QueryContext,
                                          dataSchema: Option[Schema],
                                          lookupRes: Option[PartLookupResult],
                                          filterSchemas: Boolean,
-                                         colIds: Seq[Types.ColumnId],
-                                         limit: Option[Int] = None) extends LeafExecPlan {
+                                         colIds: Seq[Types.ColumnId]) extends LeafExecPlan {
   def dataset: DatasetRef = datasetRef
 
   private def schemaOfDoExecute(): ResultSchema = {
@@ -132,8 +131,7 @@ final case class SelectRawPartitionsExec(queryContext: QueryContext,
     val rvs = dataSchema.map { sch =>
       source.rangeVectors(datasetRef, lookupRes.get, colIds, sch, filterSchemas, querySession)
     }.getOrElse(Observable.empty)
-    val rvsLimit = if (limit.nonEmpty) rvs.take(limit.get) else rvs
-    ExecResult(rvsLimit, Task.eval(schemaOfDoExecute()))
+    ExecResult(rvs, Task.eval(schemaOfDoExecute()))
   }
 
   protected def args: String = s"dataset=$dataset, shard=${lookupRes.map(_.shard).getOrElse(-1)}, " +

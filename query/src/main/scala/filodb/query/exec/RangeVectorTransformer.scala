@@ -59,13 +59,12 @@ trait RangeVectorTransformer extends java.io.Serializable {
   * range vectors
   */
 final case class InstantVectorFunctionMapper(function: InstantFunctionId,
-                                             funcParams: Seq[FuncArgs] = Nil,
-                                             seriesLimit: Option[Int] = None) extends RangeVectorTransformer {
+                                             funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
   protected[exec] def args: String = s"function=$function"
 
   def evaluate(source: Observable[RangeVector], scalarRangeVector: Seq[ScalarRangeVector], querySession: QuerySession,
                limit: Int, sourceSchema: ResultSchema) : Observable[RangeVector] = {
-    val rvs = ResultSchema.valueColumnType(sourceSchema) match {
+    ResultSchema.valueColumnType(sourceSchema) match {
       case ColumnType.HistogramColumn =>
         val instantFunction = InstantFunction.histogram(function)
         if (instantFunction.isHToDoubleFunc) {
@@ -95,10 +94,6 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
         }
       case cType: ColumnType =>
         throw new UnsupportedOperationException(s"Column type $cType is not supported for instant functions")
-    }
-    seriesLimit match {
-      case Some(l) => rvs.take(l)
-      case None => rvs
     }
   }
 
