@@ -184,14 +184,15 @@ trait ExecPlan extends QueryCommand {
                   MeasurementUnit.time.milliseconds)
               .withTag("plan", getClass.getSimpleName)
               .record(Math.max(0, System.currentTimeMillis - startExecute))
-            val numBytes = builder.allContainers.map(_.numBytes).sum
-            SerializedRangeVector.queryResultBytes.record(numBytes)
-            span.mark(s"num-bytes: $numBytes")
-            if (numBytes > 5000000) {
+            val numDataBytes = builder.allContainers.map(_.numBytes).sum
+            val numKeyBytes = r.foldLeft(0)(_ + _.key.keySize)
+            SerializedRangeVector.queryResultBytes.record(numDataBytes + numKeyBytes)
+            span.mark(s"num-bytes: $numDataBytes")
+            if (numDataBytes > 5000000) {
               // 5MB limit. Configure if necessary later.
               // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
               // is < 2MB
-              qLogger.warn(s"queryId: ${queryContext.queryId} result was large size $numBytes. May need to " +
+              qLogger.warn(s"queryId: ${queryContext.queryId} result was large size $numDataBytes. May need to " +
                 s"tweak limits. Query was: ${queryContext.origQueryParams}" +
                 s"; Limit was: ${queryContext.plannerParams.sampleLimit}")
             }

@@ -6,6 +6,7 @@ import monix.execution.Scheduler
 import filodb.core.{DatasetRef, QueryTimeoutException}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QueryContext, QuerySession, ServiceUnavailableException}
+import filodb.core.query.Filter.Equals
 import filodb.core.store._
 import filodb.query.Query.qLogger
 
@@ -30,6 +31,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
                                            shard: Int,
                                            filters: Seq[ColumnFilter],
                                            chunkMethod: ChunkScanMethod,
+                                           metricColumn: String,
                                            schema: Option[String] = None,
                                            colName: Option[String] = None) extends LeafExecPlan {
   import SelectRawPartitionsExec._
@@ -39,11 +41,48 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   @transient // dont serialize the SelectRawPartitionsExec plan created for plan execution
   var finalPlan: SelectRawPartitionsExec = _
 
+  // Remove _columnName from metricColumn and generate PartLookupResult
+  private def removeColumnAndGenerateLookupResult(filters: Seq[ColumnFilter], metricName: String, columnName: String,
+                                                  source: ChunkSource,
+                                                  querySession: QuerySession) = {
+    // Assume metric name has only equal filter
+    val filterWithoutColumn = filters.filterNot(_.column == metricColumn) :+
+      ColumnFilter(metricColumn, Equals(metricName.stripSuffix(s"_$columnName")))
+
+    val partMethod = FilteredPartitionScan(ShardSplit(shard), filterWithoutColumn)
+    val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
+    (lookupRes, Some(columnName))
+  }
+
+  // scalastyle:off method.length
   private def finalizePlan(source: ChunkSource,
                            querySession: QuerySession): SelectRawPartitionsExec = {
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     Kamon.currentSpan().mark("filtered-partition-scan")
-    val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
+    var lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
+    val metricName = filters.find(_.column == metricColumn).map(_.filter.valuesStrings.head.toString)
+    var newColName = colName
+
+  /*
+   * Remove _sum & _count suffix. _bucket & le are removed in SingleClusterPlanner
+   * Metric name can have _sum & _count as suffix. So we remove the suffix only when partition lookup does not
+   * return any results
+   */
+   if (lookupRes.firstSchemaId.isEmpty && querySession.queryConfig.translatePromToFilodbHistogram && colName.isEmpty) {
+
+     if (metricName.isDefined) {
+       val res = if (metricName.get.endsWith("_sum"))
+                  removeColumnAndGenerateLookupResult(filters, metricName.get, "sum", source, querySession)
+                 else if (metricName.get.endsWith("_count"))
+                  removeColumnAndGenerateLookupResult(filters, metricName.get, "count", source,
+                    querySession)
+                 else (lookupRes, newColName)
+
+       lookupRes = res._1
+       newColName = res._2
+     }
+   }
+
     Kamon.currentSpan().mark("lookup-partitions-done")
 
     val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
@@ -62,7 +101,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
 
             // Get exact column IDs needed, including max column as needed for histogram calculations.
             // This code is responsible for putting exact IDs needed by any range functions.
-            val colIDs1 = getColumnIDs(sch, colName.toSeq, rangeVectorTransformers)
+            val colIDs1 = getColumnIDs(sch, newColName.toSeq, rangeVectorTransformers)
             val colIDs  = addIDsForHistMax(sch, colIDs1)
 
             // Modify transformers as needed for histogram w/ max, downsample, other schemas
@@ -82,6 +121,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
                                     schema.isDefined, Nil)
           }
   }
+  // scalastyle:on method.length
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)

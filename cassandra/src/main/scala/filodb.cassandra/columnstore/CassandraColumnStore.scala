@@ -140,7 +140,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   // Future optimization: group by token range and batch?
   def write(ref: DatasetRef,
             chunksets: Observable[ChunkSet],
-            diskTimeToLiveSeconds: Int = 259200): Future[Response] = {
+            diskTimeToLiveSeconds: Long = 259200): Future[Response] = {
     chunksets.mapAsync(writeParallelism) { chunkset =>
       val start = System.currentTimeMillis()
       val partBytes = BinaryRegionLarge.asNewByteArray(chunkset.partition)
@@ -165,7 +165,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   private def writeChunks(ref: DatasetRef,
                           partition: Array[Byte],
                           chunkset: ChunkSet,
-                          diskTimeToLiveSeconds: Int): Future[Response] = {
+                          diskTimeToLiveSeconds: Long): Future[Response] = {
     val chunkTable = getOrCreateChunkTable(ref)
     chunkTable.writeChunks(partition, chunkset.info, chunkset.chunks, sinkStats, diskTimeToLiveSeconds)
       .collect {
@@ -262,7 +262,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
       Await.result(
         target.writePartKeys(datasetRef,
-          shard, Observable.fromIterable(partKeys), diskTimeToLiveSeconds, updateHour),
+          shard, Observable.fromIterable(partKeys), diskTimeToLiveSeconds, updateHour, !downsampledData),
         5.minutes
       )
     }
@@ -433,7 +433,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   def writePartKeys(ref: DatasetRef,
                     shard: Int,
                     partKeys: Observable[PartKeyRecord],
-                    diskTTLSeconds: Int, updateHour: Long,
+                    diskTTLSeconds: Long, updateHour: Long,
                     writeToPkUTTable: Boolean = true): Future[Response] = {
     val pkTable = getOrCreatePartitionKeysTable(ref, shard)
     val pkByUTTable = getOrCreatePartitionKeysByUpdateTimeTable(ref)

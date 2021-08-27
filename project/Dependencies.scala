@@ -11,6 +11,7 @@ object Dependencies {
   val excludeMinlog = ExclusionRule(organization = "com.esotericsoftware", name = "minlog")
   val excludeOldLz4 = ExclusionRule(organization = "net.jpountz.lz4", name = "lz4")
   val excludeNetty  = ExclusionRule(organization = "io.netty", name = "netty-handler")
+  val excludeXBean = ExclusionRule(organization = "org.apache.xbean", name = "xbean-asm6-shaded")
 
 
   /* Versions in various modules versus one area of build */
@@ -18,9 +19,7 @@ object Dependencies {
   val akkaHttpVersion   = "10.1.8"
   val cassDriverVersion = "3.7.1"
   val ficusVersion      = "1.3.4"
-  val kamonBundleVersion = "2.1.4"
-  val kamonZipkinVersion = "2.1.4"
-  val kamonPrometheusVersion = "2.1.4"
+  val kamonBundleVersion = "2.2.2"
   val monixKafkaVersion = "0.15"
   val sparkVersion      = "2.4.4"
   val sttpVersion       = "1.3.3"
@@ -35,14 +34,15 @@ object Dependencies {
   val akkaHttp          = "com.typesafe.akka"          %% "akka-http"            % akkaHttpVersion withJavadoc()
   val akkaHttpTestkit   = "com.typesafe.akka"          %% "akka-http-testkit"    % akkaHttpVersion withJavadoc()
   val akkaHttpCirce     = "de.heikoseeberger"          %% "akka-http-circe"      % "1.21.0"
-  val circeGeneric      = "io.circe"                   %% "circe-generic"        % "0.8.0"
-  val circeParser       = "io.circe"                   %% "circe-parser"         % "0.8.0"
+  val circeGeneric      = "io.circe"                   %% "circe-generic"        % "0.9.3"
+  val circeParser       = "io.circe"                   %% "circe-parser"         % "0.9.3"
 
   lazy val commonDeps = Seq(
     "io.kamon" %% "kamon-bundle" % kamonBundleVersion,
     logbackDep % Test,
     scalaTest  % Test,
     "com.softwaremill.quicklens" %% "quicklens" % "1.4.12" % Test,
+    "org.apache.xbean" % "xbean-asm6-shaded" % "4.10" % Test,
     scalaCheck % Test,
     scalaTestPlus % Test
   )
@@ -60,7 +60,8 @@ object Dependencies {
 
   lazy val coreDeps = commonDeps ++ Seq(
     scalaLoggingDep,
-    "io.kamon"                     %% "kamon-zipkin"      % kamonZipkinVersion,
+    "io.kamon"                     %% "kamon-zipkin"      % kamonBundleVersion,
+    "io.kamon"                     %% "kamon-opentelemetry" % kamonBundleVersion,
     "org.slf4j"                    % "slf4j-api"          % "1.7.10",
     "com.beachape"                 %% "enumeratum"        % "1.5.10",
     "io.monix"                     %% "monix"             % "2.3.3",
@@ -80,7 +81,7 @@ object Dependencies {
   lazy val sparkJobsDeps = commonDeps ++ Seq(
     "org.apache.spark"       %%      "spark-core" % sparkVersion % Provided,
     "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Provided,
-    "org.apache.spark"       %%      "spark-core" % sparkVersion % Test excludeAll(excludeNetty),
+    "org.apache.spark"       %%      "spark-core" % sparkVersion % Test excludeAll(excludeNetty, excludeXBean),
     "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Test excludeAll(excludeNetty)
   )
 
@@ -105,7 +106,7 @@ object Dependencies {
     "com.typesafe.akka"      %% "akka-cluster"                % akkaVersion withJavadoc(),
     "io.altoo"               %% "akka-kryo-serialization"     % "1.0.0" excludeAll(excludeMinlog, excludeOldLz4),
     "de.javakaffee"          % "kryo-serializers"             % "0.42" excludeAll(excludeMinlog),
-    "io.kamon"               %% "kamon-prometheus"            % kamonPrometheusVersion,
+    "io.kamon"               %% "kamon-prometheus"            % kamonBundleVersion,
     // Redirect minlog logs to SLF4J
     "com.dorkbox"            % "MinLog-SLF4J"                 % "1.12",
     "com.opencsv"            % "opencsv"                      % "3.3",
@@ -153,7 +154,7 @@ object Dependencies {
 
   lazy val standaloneDeps = Seq(
     logbackDep,
-    "io.kamon"              %% "kamon-zipkin"            % kamonZipkinVersion,
+    "io.kamon"              %% "kamon-zipkin"            % kamonBundleVersion,
     "com.iheart"            %% "ficus"                   % ficusVersion      % Test,
     "com.typesafe.akka"     %% "akka-multi-node-testkit" % akkaVersion       % Test,
     "com.softwaremill.sttp" %% "circe"                   % sttpVersion       % Test,

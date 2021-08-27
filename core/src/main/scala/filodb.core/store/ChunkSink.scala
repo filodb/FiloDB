@@ -29,7 +29,7 @@ trait ChunkSink {
    * @return Success when the chunksets stream ends and is completely written.
    *         Future.failure(exception) if an exception occurs.
    */
-  def write(ref: DatasetRef, chunksets: Observable[ChunkSet], diskTimeToLive: Int = 259200): Future[Response]
+  def write(ref: DatasetRef, chunksets: Observable[ChunkSet], diskTimeToLive: Long = 259200): Future[Response]
 
   /**
     * Used to bootstrap lucene index with partition keys for a shard
@@ -47,7 +47,7 @@ trait ChunkSink {
                               updateHour: Long): Observable[PartKeyRecord]
 
   def writePartKeys(ref: DatasetRef, shard: Int,
-                    partKeys: Observable[PartKeyRecord], diskTTLSeconds: Int,
+                    partKeys: Observable[PartKeyRecord], diskTTLSeconds: Long,
                     updateHour: Long, writeToPkUTTable: Boolean = true): Future[Response]
   /**
    * Initializes the ChunkSink for a given dataset.  Must be called once before writing.
@@ -120,7 +120,7 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
   // in-memory store of partition keys
   val partitionKeys = new ConcurrentHashMap[DatasetRef, scala.collection.mutable.Set[Types.PartitionKey]]().asScala
 
-  def write(ref: DatasetRef, chunksets: Observable[ChunkSet], diskTimeToLive: Int): Future[Response] = {
+  def write(ref: DatasetRef, chunksets: Observable[ChunkSet], diskTimeToLive: Long): Future[Response] = {
     chunksets.foreach { chunkset =>
       val totalBytes = chunkset.chunks.map(_.limit()).sum
       sinkStats.addChunkWriteStats(chunkset.chunks.length, totalBytes, chunkset.info.numRows)
@@ -156,7 +156,7 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
   override def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord] = Observable.empty
 
   override def writePartKeys(ref: DatasetRef, shard: Int,
-                             partKeys: Observable[PartKeyRecord], diskTTLSeconds: Int,
+                             partKeys: Observable[PartKeyRecord], diskTTLSeconds: Long,
                              updateHour: Long, writeToPkUTTable: Boolean = true): Future[Response] = {
     partKeys.countL.map(c => sinkStats.partKeysWrite(c.toInt)).runAsync.map(_ => Success)
   }

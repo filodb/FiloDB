@@ -102,9 +102,9 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
     val dummyDispatcher = DummyDispatcher(memStore, querySession)
 
     val execPlan1 = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, timeseriesDataset.ref,
-      0, filters, AllChunkScan)
+      0, filters, AllChunkScan,"_metric_")
     val execPlan2 = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, timeseriesDataset.ref,
-      0, filters, AllChunkScan)
+      0, filters, AllChunkScan,"_metric_")
 
     val sep = StitchRvsExec(QueryContext(), dispatcher, Seq(execPlan1, execPlan2))
     val result = dispatcher.dispatch(sep).runAsync.futureValue
@@ -130,9 +130,9 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
     val dummyDispatcher = DummyDispatcher(memStore, querySession)
 
     val execPlan1 = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, timeseriesDataset.ref,
-      0, filters, AllChunkScan)
+      0, filters, AllChunkScan, "_metric_")
     val execPlan2 = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, timeseriesDataset.ref,
-      0, emptyFilters, AllChunkScan)
+      0, emptyFilters, AllChunkScan, "_metric_")
 
     val sep = StitchRvsExec(QueryContext(), dispatcher, Seq(execPlan1, execPlan2))
     val result = dispatcher.dispatch(sep).runAsync.futureValue

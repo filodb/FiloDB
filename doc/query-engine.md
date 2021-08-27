@@ -328,3 +328,12 @@ done in three phases:
 
 For details of the map, reduce and present steps of each aggregation visit the scaladoc documentation
 of each type of [RowAggregator](../query/exec/AggrOverRangeVectors.scala)
+
+### Histogram Backward Compatibility
+
+To support Prometheus Histogram queries on FiloDB Histograms we do the following:
+
+1. Remove le column/tag 
+2. Remove _bucket suffix from metric name
+2. Translate _sum and _count suffixes to columns(::sum & ::count) if index does not have match with the suffix
+3. Retain _sum and _count suffixes if index has match with the suffix

@@ -116,7 +116,7 @@ literal: NUMBER | STRING;
 
 // Number format is non-standard.
 // It doesn't support hex, NaN, Inf, and it doesn't require a digit after the decimal point.
-NUMBER: [-+] ? (
+NUMBER: (
       [0-9]* '.'? [0-9]+ ([eE][-+]?[0-9]+)?
     | [0-9]+ '.'
     | '0' [xX] [0-9a-fA-F]+
@@ -180,7 +180,7 @@ DURATION: NUMBER ('s' | 'm' | 'h' | 'd' | 'w' | 'y' | 'i');
 IDENTIFIER: [a-zA-Z_] [a-zA-Z0-9_]*;
 
 // Used for metric names.
-IDENTIFIER_EXTENDED: [_:]? [a-zA-Z] [a-zA-Z0-9_:\-.]*;
+IDENTIFIER_EXTENDED: [_:]* [a-zA-Z] [a-zA-Z0-9_:\-.]*;
 
 // Magic for case-insensitive matching.
 fragment A : [aA]; // match either an 'a' or 'A'

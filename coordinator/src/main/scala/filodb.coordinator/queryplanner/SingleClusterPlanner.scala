@@ -12,10 +12,12 @@ import filodb.core.{DatasetRef, SpreadProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
 import filodb.core.query._
+import filodb.core.query.Filter.Equals
 import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
 import filodb.query.{exec, _}
+import filodb.query.InstantFunctionId.{HistogramBucket}
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
 import filodb.query.exec.InternalRangeFunction.Last
 
@@ -143,8 +145,8 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     materialized
   }
 
-  private def shardsFromFilters(filters: Seq[ColumnFilter],
-                                qContext: QueryContext): Seq[Int] = {
+  def shardsFromFilters(filters: Seq[ColumnFilter],
+                        qContext: QueryContext): Seq[Int] = {
 
     val spreadProvToUse = qContext.plannerParams.spreadOverride.getOrElse(spreadProvider)
 
@@ -190,7 +192,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     * Renames Prom AST __name__ metric name filters to one based on the actual metric column of the dataset,
     * if it is not the prometheus standard
     */
-  private def renameMetricFilter(filters: Seq[ColumnFilter]): Seq[ColumnFilter] =
+  def renameMetricFilter(filters: Seq[ColumnFilter]): Seq[ColumnFilter] =
     if (dsOptions.metricColumn != PromMetricLabel) {
       filters map {
         case ColumnFilter(PromMetricLabel, filt) => ColumnFilter(dsOptions.metricColumn, filt)
@@ -329,36 +331,84 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   private def materializePeriodicSeriesWithWindowing(qContext: QueryContext,
                                                      lp: PeriodicSeriesWithWindowing): PlanResult = {
-    val series = walkLogicalPlanTree(lp.series, qContext)
-    val rawSource = lp.series.isRaw
+    val logicalPlanWithoutBucket = if (queryConfig.translatePromToFilodbHistogram) {
+       removeBucket(Right(lp))._3.right.get
+    } else lp
+
+    val series = walkLogicalPlanTree(logicalPlanWithoutBucket.series, qContext)
+    val rawSource = logicalPlanWithoutBucket.series.isRaw
 
     /* Last function is used to get the latest value in the window for absent_over_time
     If no data is present AbsentFunctionMapper will return range vector with value 1 */
 
-    val execRangeFn = if (lp.function == RangeFunctionId.AbsentOverTime) Last
-                      else InternalRangeFunction.lpToInternalFunc(lp.function)
+    val execRangeFn = if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) Last
+                      else InternalRangeFunction.lpToInternalFunc(logicalPlanWithoutBucket.function)
 
-    val paramsExec = materializeFunctionArgs(lp.functionArgs, qContext)
-    val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
-    series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs,
-      lp.endMs, window, Some(execRangeFn), qContext, lp.stepMultipleNotationUsed,
-      paramsExec, lp.offsetMs, rawSource)))
-    if (lp.function == RangeFunctionId.AbsentOverTime) {
-      val aggregate = Aggregate(AggregationOperator.Sum, lp, Nil, Seq("job"))
+    val paramsExec = materializeFunctionArgs(logicalPlanWithoutBucket.functionArgs, qContext)
+    val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(logicalPlanWithoutBucket.window)
+    series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(logicalPlanWithoutBucket.startMs,
+      logicalPlanWithoutBucket.stepMs, logicalPlanWithoutBucket.endMs, window, Some(execRangeFn), qContext,
+      logicalPlanWithoutBucket.stepMultipleNotationUsed,
+      paramsExec, logicalPlanWithoutBucket.offsetMs, rawSource)))
+    if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
+      val aggregate = Aggregate(AggregationOperator.Sum, logicalPlanWithoutBucket, Nil, Seq("job"))
       // Add sum to aggregate all child responses
       // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
       val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
         qContext.plannerParams.copy(skipAggregatePresent = true)), series, Seq.empty)))
-      addAbsentFunctionMapper(aggregatePlanResult, lp.columnFilters,
-        RangeParams(lp.startMs / 1000, lp.stepMs / 1000, lp.endMs / 1000), qContext)
+      addAbsentFunctionMapper(aggregatePlanResult, logicalPlanWithoutBucket.columnFilters,
+        RangeParams(logicalPlanWithoutBucket.startMs / 1000, logicalPlanWithoutBucket.stepMs / 1000,
+          logicalPlanWithoutBucket.endMs / 1000), qContext)
     } else series
   }
 
+  private def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]) = {
+    val rawSeries = lp match {
+      case Right(value) => value.series
+      case Left(value)  => value.rawSeries
+    }
+
+    if (rawSeries.isInstanceOf[RawSeries]) {
+      val rawSeriesLp = rawSeries.asInstanceOf[RawSeries]
+
+      val nameFilter = rawSeriesLp.filters.find(_.column.equals(PromMetricLabel)).
+        map(_.filter.valuesStrings.head.toString)
+      val leFilter = rawSeriesLp.filters.find(_.column == "le").map(_.filter.valuesStrings.head.toString)
+
+      if (nameFilter.isEmpty) (nameFilter, leFilter, lp)
+      else {
+        val filtersWithoutBucket = rawSeriesLp.filters.filterNot(_.column.equals(PromMetricLabel)).
+          filterNot(_.column == "le") :+ ColumnFilter(PromMetricLabel,
+          Equals(nameFilter.get.replace("_bucket", "")))
+        val newLp = if (lp.isLeft) Left(lp.left.get.copy(rawSeries = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+        else Right(lp.right.get.copy(series = rawSeriesLp.copy(filters = filtersWithoutBucket)))
+        (nameFilter, leFilter, newLp)
+      }
+    }  else (None, None, lp)
+  }
   private def materializePeriodicSeries(qContext: QueryContext,
                                         lp: PeriodicSeries): PlanResult = {
-    val rawSeries = walkLogicalPlanTree(lp.rawSeries, qContext)
-      rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
-        None, None, qContext, false, Nil, lp.offsetMs)))
+
+   // Convert to FiloDB histogram by removing le label and bucket prefix
+   // _sum and _count are removed in MultiSchemaPartitionsExec since we need to check whether there is a metric name
+   // with _sum/_count as suffix
+    val (nameFilter: Option[String], leFilter: Option[String], lpWithoutBucket: PeriodicSeries) =
+    if (queryConfig.translatePromToFilodbHistogram) {
+     val result = removeBucket(Left(lp))
+      (result._1, result._2, result._3.left.get)
+
+    } else (None, None, lp)
+
+    val rawSeries = walkLogicalPlanTree(lpWithoutBucket.rawSeries, qContext)
+    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
+      None, None, qContext, false, Nil, lp.offsetMs)))
+
+    if (nameFilter.isDefined && nameFilter.head.endsWith("_bucket") && leFilter.isDefined) {
+      val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(lp.startMs/1000, lp.stepMs/1000,
+        lp.endMs/1000))
+      rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
+        Seq(paramsExec))))
+    }
    rawSeries
   }
 
@@ -426,7 +476,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val execPlans = shardsFromFilters(renamedFilters, qContext).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       MultiSchemaPartitionsExec(qContext, dispatcher, dsRef, shard, renamedFilters,
-        toChunkScanMethod(rangeSelectorWithOffset), schemaOpt, colName)
+        toChunkScanMethod(rangeSelectorWithOffset), dsOptions.metricColumn, schemaOpt, colName)
     }
     PlanResult(execPlans, needsStitch)
   }
