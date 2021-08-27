@@ -54,6 +54,42 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
   }
 
+  it("should generate Exec plan for subquery with windowing") {
+    val lp = Parser.queryToLogicalPlan(
+      """avg_over_time(test{_ws_ = "demo", _ns_ =~ "App.*", instance = "Inst-1" }[5m:1m])""",
+      1000, 1000
+    )
+    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-2"))))}
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
+    execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
+  }
+
+  it("should generate Exec plan for top level subquery") {
+    val lp = Parser.queryToLogicalPlan(
+      """test{_ws_ = "demo", _ns_ =~ "App.*", instance = "Inst-1" }[5m:1m]""",
+      1000, 1000
+    )
+    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
+      ColumnFilter("_ns_", Equals("App-2"))))}
+    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
+    execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
+    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual(true)
+    execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
+      contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual(true)
+  }
+
   it("should generate Exec plan for Aggregate query") {
     val lp = Parser.queryToLogicalPlan("sum(test{_ws_ = \"demo\", _ns_ =~ \"App.*\", instance = \"Inst-1\" })",
       1000, 1000)

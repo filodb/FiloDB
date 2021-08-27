@@ -61,6 +61,10 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     parseAndAssertResult("""absent(sum(http_requests_total{job="app"}))""")()
     parseAndAssertResult("""absent(sum_over_time(http_requests_total{job="app"}[5s]))""")()
     parseAndAssertResult("""absent(rate(http_requests_total{job="app"}[5s] offset 200s))""")()
+    parseAndAssertResult("""avg_over_time(test{_ws_="demo",_ns_=~"App.*",instance="Inst-1"}[5m:1m])""")("""avg_over_time(test{_ws_="demo",_ns_=~"App.*",instance="Inst-1"}[300s:60s])""")
+    parseAndAssertResult("""quantile_over_time(0.5,test{_ws_="demo",_ns_=~"App.*",instance="Inst-1"}[5m:1m])""")("""quantile_over_time(0.5,test{_ws_="demo",_ns_=~"App.*",instance="Inst-1"}[300s:60s])""")
+    parseAndAssertResult("""foo{_ws_="demo",_ns_="App.*"}[5m:1m]""")("""foo{_ws_="demo",_ns_="App.*"}[300s:60s]""")
+
   }
 
   it("should generate query from LogicalPlan having offset") {

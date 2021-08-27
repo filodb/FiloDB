@@ -121,7 +121,8 @@ case class SubqueryExpression(
       subquery.toSeriesPlan(timeParamsToUse),
       startS * 1000,
       stepToUseMs,
-      endS * 1000
+      endS * 1000,
+      sqcl.window.millis(1L)
     )
 
   }

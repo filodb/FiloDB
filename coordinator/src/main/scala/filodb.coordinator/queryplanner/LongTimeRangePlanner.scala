@@ -36,6 +36,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
 
   val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
 
+  //scalastyle:off method.length
   private def materializePeriodicSeriesPlan(periodicSeriesPlan: PeriodicSeriesPlan, qContext: QueryContext) = {
     val earliestRawTime = earliestRawTimestampFn
     lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(periodicSeriesPlan)
@@ -48,12 +49,21 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
     else if (endWithOffsetMs < earliestRawTime) { // full time range in downsampled cluster
       logger.info("materializing against downsample cluster:: {}", qContext.origQueryParams)
       downsampleClusterPlanner.materialize(periodicSeriesPlan, qContext)
-    } else if (startWithOffsetMs - lookbackMs >= earliestRawTime) // full time range in raw cluster
+    } else if (startWithOffsetMs - lookbackMs >= earliestRawTime) { // full time range in raw cluster
       rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
-      // the below looks like a bug, probably should be "<=", check case in LongTimeRangePlannerSpec
-      // "TODO here we have raw plan start bigger than the actual end of top plan"
-      // in the last "else" firstInstantInRaw can end up to be bigger than lastDownsampleInstant
-    else if (endWithOffsetMs - lookbackMs < earliestRawTime) {// raw/downsample overlapping query with long lookback
+      // "(endWithOffsetMs - lookbackMs) < earliestRawTime" check is erroneous, we claim that we have
+      // a long lookback only if the last lookback window overlaps with earliestRawTime, however, we
+      // should check for ANY interval overalapping earliestRawTime. We
+      // can happen with ANY lookback interval, not just the last one.
+    } else if (
+      endWithOffsetMs - lookbackMs < earliestRawTime ||
+      // For subqueries, we don't even bother to verify overlapping of the aggregation intervals,
+      // we declare all of them "long lookbacks". We do so because stitching nesting subqueries or even
+      // complex expressions with various lookbacks is close to impossible. This document outlines the
+      // issue and possible solutions
+      // https://quip-apple.com/f0T2AAK3XV96
+      LogicalPlan.hasSubqueryWithWindowing(periodicSeriesPlan)
+    ) {// raw/downsample overlapping query with long lookback
       val lastDownsampleSampleTime = latestDownsampleTimestampFn
       val downsampleLp = if (endWithOffsetMs < lastDownsampleSampleTime) {
         periodicSeriesPlan
