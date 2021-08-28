@@ -345,7 +345,7 @@ final case class LimitFunctionMapper(limitToApply: Int) extends RangeVectorTrans
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
-    source.filter(_.numRows.get > 0).take(limitToApply)
+    source.filter(s => s.numRows.getOrElse(1) > 0).take(limitToApply)
   }
   override def funcParams: Seq[FuncArgs] = Nil
 }
