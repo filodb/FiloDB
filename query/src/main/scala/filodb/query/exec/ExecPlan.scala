@@ -136,8 +136,8 @@ trait ExecPlan extends QueryCommand {
         qLogger.debug(s"queryId: ${queryContext.queryId} Empty plan $this, returning empty results")
         span.mark("empty-plan")
         span.mark(s"execute-step2-end-${getClass.getSimpleName}")
-        Task.eval(QueryResult(queryContext.queryId, resSchema, Nil, querySession.resultCouldBePartial,
-          querySession.partialResultsReason))
+        Task.eval(QueryResult(queryContext.queryId, resSchema, Nil, querySession.queryStats,
+          querySession.resultCouldBePartial, querySession.partialResultsReason))
       } else {
         val transformersToRun = if (resSchema == ResultSchema.empty) emptySchemaTransformers else allTransformers
         val finalRes = transformersToRun.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
@@ -186,21 +186,15 @@ trait ExecPlan extends QueryCommand {
               .record(Math.max(0, System.currentTimeMillis - startExecute))
             val numDataBytes = builder.allContainers.map(_.numBytes).sum
             val numKeyBytes = r.foldLeft(0)(_ + _.key.keySize)
-            SerializedRangeVector.queryResultBytes.record(numDataBytes + numKeyBytes)
-            span.mark(s"num-bytes: $numDataBytes")
-            if (numDataBytes > 5000000) {
-              // 5MB limit. Configure if necessary later.
-              // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
-              // is < 2MB
-              qLogger.warn(s"queryId: ${queryContext.queryId} result was large size $numDataBytes. May need to " +
-                s"tweak limits. Query was: ${queryContext.origQueryParams}" +
-                s"; Limit was: ${queryContext.plannerParams.sampleLimit}")
-            }
-            span.mark(s"num-result-samples: $numResultSamples")
-            span.mark(s"num-range-vectors: ${r.size}")
+            val resultSize = numDataBytes + numKeyBytes
+            SerializedRangeVector.queryResultBytes.record(resultSize)
+            querySession.queryStats.getResultSizeCounter(Nil).addAndGet(resultSize)
+            span.mark(s"resultBytes=$resultSize")
+            span.mark(s"resultSamples=$numResultSamples")
+            span.mark(s"numSrv=${r.size}")
             span.mark(s"execute-step2-end-${getClass.getSimpleName}")
-            QueryResult(queryContext.queryId, finalRes._2, r, querySession.resultCouldBePartial,
-              querySession.partialResultsReason)
+            QueryResult(queryContext.queryId, finalRes._2, r, querySession.queryStats,
+              querySession.resultCouldBePartial, querySession.partialResultsReason)
           }
       }
       resultTask.onErrorHandle { case ex: Throwable =>
@@ -322,7 +316,7 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
       execPlan.dispatcher.dispatch(execPlan).onErrorHandle { case ex: Throwable =>
         QueryError(execPlan.queryContext.queryId, ex)
       }.map {
-        case QueryResult(_, _, result, isPartialResult, partialResultReason)  =>
+        case QueryResult(_, _, result, qStats, isPartialResult, partialResultReason)  =>
                         // Result is empty because of NaN so create ScalarFixedDouble with NaN
                       if (isPartialResult) {
                         querySession.resultCouldBePartial = true
@@ -424,20 +418,22 @@ abstract class NonLeafExecPlan extends ExecPlan {
       .doOnStart(_ => span.mark("first-child-result-received"))
       .doOnTerminate(_ => span.mark("last-child-result-received"))
       .map {
-      case (res @ QueryResult(_, _, _, isPartialResult, partialResultReason), i) =>
-        if (isPartialResult) {
-          querySession.resultCouldBePartial = true
-          querySession.partialResultsReason = partialResultReason
-        }
-        if (res.resultSchema != ResultSchema.empty) sch = reduceSchemas(sch, res)
-        (res, i.toInt)
-      case (e: QueryError, _) =>
-        throw e.t
-    }.filter(_._1.resultSchema != ResultSchema.empty)
-     .cache // cache caches results so that multiple subscribers can process
+        case (res @ QueryResult(_, _, _, qStats, isPartialResult, partialResultReason), i) =>
+          if (isPartialResult) {
+            querySession.resultCouldBePartial = true
+            querySession.partialResultsReason = partialResultReason
+          }
+          querySession.queryStats.add(qStats)
+          if (res.resultSchema != ResultSchema.empty) sch = reduceSchemas(sch, res)
+          (res, i.toInt)
+        case (e: QueryError, _) =>
+          throw e.t
+      }
+      .filter(_._1.resultSchema != ResultSchema.empty)
+      .cache // cache caches results so that multiple subscribers can process
 
     val outputSchema = processedTasks.collect { // collect schema of first result that is nonEmpty
-      case (QueryResult(_, schema, _, _, _), _) if schema.columns.nonEmpty => schema
+      case (QueryResult(_, schema, _, qStats, _, _), _) if schema.columns.nonEmpty => schema
     }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
       // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {
@@ -455,9 +451,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
    */
   def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema = {
     resp match {
-      case QueryResult(_, schema, _, _, _) if rs == ResultSchema.empty =>
+      case QueryResult(_, schema, _, _, _, _) if rs == ResultSchema.empty =>
         schema     /// First schema, take as is
-      case QueryResult(_, schema, _, _, _) =>
+      case QueryResult(_, schema, _, _, _, _) =>
         if (rs != schema) throw SchemaMismatch(rs.toString, schema.toString)
         else rs
     }
@@ -481,9 +477,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
 object IgnoreFixedVectorLenAndColumnNamesSchemaReducer {
   def reduceSchema(rs: ResultSchema, resp: QueryResult): ResultSchema = {
     resp match {
-      case QueryResult(_, schema, _, _, _) if rs == ResultSchema.empty =>
+      case QueryResult(_, schema, _, _, _, _) if rs == ResultSchema.empty =>
         schema /// First schema, take as is
-      case QueryResult(_, schema, _, _, _) =>
+      case QueryResult(_, schema, _, _, _, _) =>
         if (!rs.hasSameColumnsAs(schema) && !rs.hasSameColumnTypes(schema))  {
           throw SchemaMismatch(rs.toString, schema.toString)
         }

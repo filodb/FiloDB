@@ -1,7 +1,9 @@
 package filodb.core.query
 
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 
+import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration._
 
 import filodb.core.{SpreadChange, SpreadProvider}
@@ -86,6 +88,7 @@ object QueryContext {
   */
 case class QuerySession(qContext: QueryContext,
                         queryConfig: QueryConfig,
+                        queryStats: QueryStats = QueryStats(),
                         var lock: Option[EvictionLock] = None,
                         var resultCouldBePartial: Boolean = false,
                         var partialResultsReason: Option[String] = None) {
@@ -95,6 +98,43 @@ case class QuerySession(qContext: QueryContext,
   }
 }
 
+case class QueryStats() {
+
+  val partsScanned = TrieMap[Seq[String], AtomicInteger]()
+  val chunksScanned = TrieMap[Seq[String], AtomicInteger]()
+  val resultSize = TrieMap[Seq[String], AtomicInteger]()
+
+  override def toString: String = {
+    s"""
+    partsScanned:  $partsScanned
+    chunksScanned:  $chunksScanned
+    resultSize: $resultSize
+    """
+  }
+
+  def add(s: QueryStats): Unit = {
+    s.partsScanned.foreach(c => partsScanned.getOrElseUpdate(c._1, new AtomicInteger(0)).addAndGet(c._2.get()))
+    s.chunksScanned.foreach(c => chunksScanned.getOrElseUpdate(c._1, new AtomicInteger(0)).addAndGet(c._2.get()))
+    s.resultSize.foreach(c => resultSize.getOrElseUpdate(c._1, new AtomicInteger(0)).addAndGet(c._2.get()))
+  }
+
+  def getPartsScannedCounter(group: Seq[String] = Nil): AtomicInteger = {
+    val theNs = if (group.isEmpty && partsScanned.size == 1) partsScanned.head._1 else group
+    partsScanned.getOrElseUpdate(theNs, new AtomicInteger(0))
+  }
+
+  def getChunksScannedCounter(group: Seq[String] = Nil): AtomicInteger = {
+    val theNs = if (group.isEmpty && chunksScanned.size == 1) chunksScanned.head._1 else group
+    chunksScanned.getOrElseUpdate(theNs, new AtomicInteger(0))
+  }
+
+  def getResultSizeCounter(group: Seq[String] = Nil): AtomicInteger = {
+    val theNs = if (group.isEmpty && resultSize.size == 1) resultSize.head._1 else group
+    resultSize.getOrElseUpdate(theNs, new AtomicInteger(0))
+  }
+
+}
+
 object QuerySession {
-  def makeForTestingOnly(): QuerySession = QuerySession(QueryContext(), EmptyQueryConfig)
+  def makeForTestingOnly(): QuerySession = QuerySession(QueryContext(), EmptyQueryConfig, QueryStats())
 }
