@@ -1,10 +1,10 @@
 package filodb.coordinator.queryplanner
 
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
+import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.query.{BinaryJoin, LogicalPlan, PeriodicSeriesPlan, SetOperator}
+import filodb.query._
 import filodb.query.exec._
 
 /**
@@ -31,29 +31,35 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
                            earliestRawTimestampFn: => Long,
                            latestDownsampleTimestampFn: => Long,
                            stitchDispatcher: => PlanDispatcher,
-                           queryConfig: QueryConfig,
-                           datasetMetricColumn: String) extends QueryPlanner with StrictLogging {
+                           config: QueryConfig,
+                           dataset1: Dataset) extends QueryPlanner with
+  PlannerMaterializer with StrictLogging {
 
+  override def queryConfig: QueryConfig = config
   val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
+  override def dataset: Dataset = dataset1
+  override def schemas: Schemas = Schemas(dataset.schema)
+  private val datasetMetricColumn = dsOptions.metricColumn
 
-  private def materializePeriodicSeriesPlan(periodicSeriesPlan: PeriodicSeriesPlan, qContext: QueryContext) = {
+
+  private def materializePeriodicSeriesPlan(qContext: QueryContext, periodicSeriesPlan: PeriodicSeriesPlan) = {
     val earliestRawTime = earliestRawTimestampFn
     lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(periodicSeriesPlan)
     lazy val lookbackMs = LogicalPlanUtils.getLookBackMillis(periodicSeriesPlan).max
     lazy val startWithOffsetMs = periodicSeriesPlan.startMs - offsetMillis.max
     // For scalar binary operation queries like sum(rate(foo{job = "app"}[5m] offset 8d)) * 0.5
     lazy val endWithOffsetMs = periodicSeriesPlan.endMs - offsetMillis.max
-    if (!periodicSeriesPlan.isRoutable)
+    val execPlan = if (!periodicSeriesPlan.isRoutable)
       rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
     else if (endWithOffsetMs < earliestRawTime) { // full time range in downsampled cluster
       logger.info("materializing against downsample cluster:: {}", qContext.origQueryParams)
       downsampleClusterPlanner.materialize(periodicSeriesPlan, qContext)
     } else if (startWithOffsetMs - lookbackMs >= earliestRawTime) // full time range in raw cluster
       rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
-      // the below looks like a bug, probably should be "<=", check case in LongTimeRangePlannerSpec
-      // "TODO here we have raw plan start bigger than the actual end of top plan"
-      // in the last "else" firstInstantInRaw can end up to be bigger than lastDownsampleInstant
-    else if (endWithOffsetMs - lookbackMs < earliestRawTime) {// raw/downsample overlapping query with long lookback
+    // the below looks like a bug, probably should be "<=", check case in LongTimeRangePlannerSpec
+    // "TODO here we have raw plan start bigger than the actual end of top plan"
+    // in the last "else" firstInstantInRaw can end up to be bigger than lastDownsampleInstant
+    else if (endWithOffsetMs - lookbackMs < earliestRawTime) { // raw/downsample overlapping query with long lookback
       val lastDownsampleSampleTime = latestDownsampleTimestampFn
       val downsampleLp = if (endWithOffsetMs < lastDownsampleSampleTime) {
         periodicSeriesPlan
@@ -86,50 +92,100 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
       val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
       StitchRvsExec(qContext, stitchDispatcher, Seq(rawEp, downsampleEp))
     }
+    PlanResult(Seq(execPlan), false)
   }
 
-  def materializeBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): ExecPlan = {
+
+  def materializeBinaryJoin(qContext: QueryContext, logicalPlan: BinaryJoin): PlanResult = {
+
     val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
     val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
 
-    val lhsExec = logicalPlan.lhs match {
-      case b: BinaryJoin   => materializeBinaryJoin(b, lhsQueryContext)
-      case               _ => materializePeriodicSeriesPlan(logicalPlan.lhs, lhsQueryContext)
-    }
+    val lhs = walkLogicalPlanTree(logicalPlan.lhs, lhsQueryContext)
+    val rhs = walkLogicalPlanTree(logicalPlan.rhs, rhsQueryContext)
 
-    val rhsExec = logicalPlan.rhs match {
-      case b: BinaryJoin => materializeBinaryJoin(b, rhsQueryContext)
-      case _             => materializePeriodicSeriesPlan(logicalPlan.rhs, rhsQueryContext)
-    }
+//    val lhsExec = logicalPlan.lhs match {
+//      case b: BinaryJoin   => materializeBinaryJoin(b, lhsQueryContext)
+//      case               _ => materializePeriodicSeriesPlan(logicalPlan.lhs, lhsQueryContext)
+//    }
+//
+//    val rhsExec = logicalPlan.rhs match {
+//      case b: BinaryJoin => materializeBinaryJoin(b, rhsQueryContext)
+//      case _             => materializePeriodicSeriesPlan(logicalPlan.rhs, rhsQueryContext)
+//    }
 
     val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
 
-    val dispatcher = if (!lhsExec.dispatcher.isLocalCall && !rhsExec.dispatcher.isLocalCall) {
-      val lhsCluster = lhsExec.dispatcher.clusterName
-      val rhsCluster = rhsExec.dispatcher.clusterName
-      if (rhsCluster.equals(lhsCluster)) PlannerUtil.pickDispatcher(lhsExec.children ++ rhsExec.children)
+    val dispatcher = if (!lhs.plans.head.dispatcher.isLocalCall && !rhs.plans.head.dispatcher.isLocalCall) {
+      val lhsCluster = lhs.plans.head.dispatcher.clusterName
+      val rhsCluster = rhs.plans.head.dispatcher.clusterName
+      if (rhsCluster.equals(lhsCluster)) PlannerUtil.pickDispatcher(lhs.plans ++ rhs.plans)
       else inProcessPlanDispatcher
     } else inProcessPlanDispatcher
 
-    if (logicalPlan.operator.isInstanceOf[SetOperator])
-      SetOperatorExec(qContext, dispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+    val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext,
+      dispatcher, lhs.plans))
+    else lhs.plans
+
+    val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext,
+      dispatcher, rhs.plans))
+    else rhs.plans
+  val execPlan =
+  if (logicalPlan.operator.isInstanceOf[SetOperator])
+      SetOperatorExec(qContext, dispatcher, stitchedLhs, stitchedRhs, logicalPlan.operator,
         LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
     else
-      BinaryJoinExec(qContext, dispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+      BinaryJoinExec(qContext, dispatcher, stitchedLhs, stitchedRhs, logicalPlan.operator,
         logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), logicalPlan.include,
         datasetMetricColumn)
 
+   PlanResult(Seq(execPlan), false)
   }
-  def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+   ApplyInstantFunction
+
+//  def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+//    logicalPlan match {
+//      case b: BinaryJoin         => materializeBinaryJoin(b, qContext)
+//      case p: PeriodicSeriesPlan => materializePeriodicSeriesPlan(p, qContext)
+//       // Metadata query not supported for downsample cluster
+//      case _                     => rawClusterPlanner.materialize(logicalPlan, qContext)
+//    }
+//  }
+
+  override def walkLogicalPlanTree(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
     logicalPlan match {
-      case b: BinaryJoin         => materializeBinaryJoin(b, qContext)
-      case p: PeriodicSeriesPlan => materializePeriodicSeriesPlan(p, qContext)
-       // Metadata query not supported for downsample cluster
-      case _                     => rawClusterPlanner.materialize(logicalPlan, qContext)
+      //        case lp: RawSeries                   => materializeRawSeries(qContext, lp)
+      //        case lp: RawChunkMeta                => materializeRawChunkMeta(qContext, lp)
+      case lp: PeriodicSeries              => materializePeriodicSeriesPlan(qContext, lp)
+      case lp: PeriodicSeriesWithWindowing => materializePeriodicSeriesPlan(qContext, lp)
+      case lp: ApplyInstantFunction        => materializeApplyInstantFunction(qContext, lp)
+      case lp: ApplyInstantFunctionRaw     => materializeApplyInstantFunctionRaw(qContext, lp)
+      case lp: Aggregate                   => materializeAggregate(qContext, lp)
+      case lp: BinaryJoin                  => materializeBinaryJoin(qContext, lp)
+      case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp)
+//      case lp: LabelValues                 => materializeLabelValues(qContext, lp)
+//      case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(qContext, lp)
+      case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
+      case lp: ApplySortFunction           => materializeApplySortFunction(qContext, lp)
+      case lp: ScalarVaryingDoublePlan     => materializeScalarPlan(qContext, lp)
+      //case lp: ScalarTimeBasedPlan         => materializeScalarTimeBased(qContext, lp)
+      case lp: VectorPlan                  => materializeVectorPlan(qContext, lp)
+    //  case lp: ScalarFixedDoublePlan       =>  materializeFixedScalar(qContext, lp)
+      case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
+      //case lp: ScalarBinaryOperation       => materializeScalarBinaryOperation(qContext, lp)
+      case lp: SubqueryWithWindowing       => materializeSubqueryWithWindowing(qContext, lp)
+      case lp: TopLevelSubquery            => materializeTopLevelSubquery(qContext, lp)
+      case _                               => PlanResult(Seq(rawClusterPlanner.materialize(logicalPlan, qContext)),
+        false)
     }
+  }
+
+  override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+  //TODO like materializesplitplans in walk
+    walkLogicalPlanTree(logicalPlan, qContext).plans.head
   }
 }

@@ -24,11 +24,13 @@ case class ShardKeyMatcher(columnFilters: Seq[ColumnFilter], query: String)
   * ColumnFilter(ns, Equals(App2))
   */
 
-class ShardKeyRegexPlanner(dataset: Dataset,
+class ShardKeyRegexPlanner(dataset1: Dataset,
                            queryPlanner: QueryPlanner,
                            shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]],
-                           queryConfig: QueryConfig)
+                           config: QueryConfig)
   extends QueryPlanner with PlannerMaterializer {
+
+  override def queryConfig: QueryConfig = config
   val datasetMetricColumn = dataset.options.metricColumn
   val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
 
@@ -166,4 +168,6 @@ class ShardKeyRegexPlanner(dataset: Dataset,
     }
     PlanResult(Seq(exec))
   }
+
+  override def dataset: Dataset = dataset1
 }
