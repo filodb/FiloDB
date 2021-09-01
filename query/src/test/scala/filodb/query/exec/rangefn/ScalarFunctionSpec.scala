@@ -142,7 +142,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
     import monix.execution.Scheduler.Implicits.global
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _) => {
+      case QueryResult(id, _, response, _, _, _) => {
         val rv = response(0)
         rv.isInstanceOf[TimeScalar] shouldEqual(true)
         val res = rv.rows.map(x=>(x.getLong(0), x.getDouble(1))).toList
@@ -157,7 +157,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
     import monix.execution.Scheduler.Implicits.global
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _) => {
+      case QueryResult(id, _, response, _, _, _) => {
         val rv = response(0)
         rv.isInstanceOf[HourScalar] shouldEqual(true)
         val res = rv.rows.map(x=>(x.getLong(0), x.getDouble(1))).toList
@@ -173,7 +173,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
     import monix.execution.Scheduler.Implicits.global
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _) => {
+      case QueryResult(id, _, response, _, _, _) => {
         val rv = response(0)
         rv.isInstanceOf[DayOfWeekScalar] shouldEqual(true)
         val res = rv.rows.map(x=>(x.getLong(0), x.getDouble(1))).toList

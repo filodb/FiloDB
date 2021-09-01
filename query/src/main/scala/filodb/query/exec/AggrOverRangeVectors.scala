@@ -27,7 +27,7 @@ trait ReduceAggregateExec extends NonLeafExecPlan {
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     val results = childResponses.flatMap {
-        case (QueryResult(_, _, result, _, _), _) => Observable.fromIterable(result)
+        case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
         case (QueryError(_, ex), _)         => throw ex
     }
 
