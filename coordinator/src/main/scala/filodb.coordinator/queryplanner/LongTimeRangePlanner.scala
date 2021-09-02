@@ -56,14 +56,13 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
       // should check for ANY interval overalapping earliestRawTime. We
       // can happen with ANY lookback interval, not just the last one.
     } else if (
-      endWithOffsetMs - lookbackMs < earliestRawTime ||
-      // For subqueries, we don't even bother to verify overlapping of the aggregation intervals,
-      // we declare all of them "long lookbacks". We do so because stitching nesting subqueries or even
-      // complex expressions with various lookbacks is close to impossible. This document outlines the
-      // issue and possible solutions
-      // https://quip-apple.com/f0T2AAK3XV96
+      endWithOffsetMs - lookbackMs < earliestRawTime || //TODO lookbacks can overlap in the middle intervals too
       LogicalPlan.hasSubqueryWithWindowing(periodicSeriesPlan)
-    ) {// raw/downsample overlapping query with long lookback
+    ) {
+      // For subqueries and long lookback queries, we keep things simple by routing to
+      // downsample cluster since dealing with lookback windows across raw/downsample
+      // clusters is quite complex and is not in scope now. We omit recent instants for which downsample
+      // cluster may not have complete data
       val lastDownsampleSampleTime = latestDownsampleTimestampFn
       val downsampleLp = if (endWithOffsetMs < lastDownsampleSampleTime) {
         periodicSeriesPlan
