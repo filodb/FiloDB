@@ -405,7 +405,11 @@ class AvgOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) exte
   override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
-    sampleToEmit.setValues(endTimestamp, sum/count)
+    if (count == 0) {
+      sampleToEmit.setValues(endTimestamp, Double.NaN)
+    } else {
+      sampleToEmit.setValues(endTimestamp, sum/count)
+    }
   }
 }
 
