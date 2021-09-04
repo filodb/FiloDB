@@ -143,7 +143,7 @@ class SumOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) exte
   }
 }
 
-class ChangesOverTimeFunction() extends RangeFunction {
+object ChangesOverTimeFunction extends RangeFunction {
   override def addedToWindow(row: TransientRow, window: Window): Unit = {
   }
 
@@ -161,10 +161,12 @@ class ChangesOverTimeFunction() extends RangeFunction {
     var i = 1;
     while (i < window.size) {
       val curValue = window.apply(i).getDouble(1)
-      if (!(curValue.isNaN && curValue.isNaN)) {
+      if (!curValue.isNaN && !lastValue.isNaN) {
         if (curValue != lastValue) changes = changes + 1
       }
-      lastValue = curValue
+      if (!curValue.isNaN) {
+        lastValue = curValue
+      }
       i = i + 1
     }
     sampleToEmit.setValues(endTimestamp, changes)
