@@ -642,6 +642,28 @@ class SinglePartKeyCollector extends SimpleCollector {
   override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
 }
 
+class SinglePartIdCollector extends SimpleCollector {
+
+  var partIdDv: NumericDocValues = _
+  var singleResult: Int = PartKeyLuceneIndex.NOT_FOUND
+
+  // gets called for each segment
+  override def doSetNextReader(context: LeafReaderContext): Unit = {
+    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID)
+  }
+
+  // gets called for each matching document in current segment
+  override def collect(doc: Int): Unit = {
+    if (partIdDv.advanceExact(doc)) {
+      singleResult = partIdDv.longValue().toInt
+    } else {
+      throw new IllegalStateException("This shouldn't happen since every document should have a partKeyDv")
+    }
+  }
+
+  override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
+}
+
 /**
   * A collector that takes advantage of index sorting within segments
   * to collect the top-k results matching the query.
