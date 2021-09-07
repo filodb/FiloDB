@@ -6,14 +6,18 @@ import com.typesafe.scalalogging.StrictLogging
 
 object EvictionLock {
   val maxTimeoutMillis = 2048
-  val direCircumstanceMaxTimeoutMillis = 65536
+  /**
+   * This timeout must be greater than query timeout.
+   */
+  val direCircumstanceMaxTimeoutMillis = 131072
 }
 
 /**
  * This lock protects memory regions accessed by queries and prevents them from
  * being evicted.
  */
-class EvictionLock(debugInfo: String = "none") extends StrictLogging {
+class EvictionLock(trackQueriesHoldingEvictionLock: Boolean = false,
+                   debugInfo: String = "none") extends StrictLogging {
   // Acquired when reclaiming on demand. Acquire shared lock to prevent block reclamation.
   private final val reclaimLock = new Latch
   private final val runningQueries = new ConcurrentHashMap[String, String]()
@@ -47,8 +51,10 @@ class EvictionLock(debugInfo: String = "none") extends StrictLogging {
         return true
       }
       if (timeout >= finalTimeoutMillis) {
-        logger.error(s"Could not acquire exclusive access to eviction lock $debugInfo " +
-          s"with finalTimeoutMillis=$finalTimeoutMillis LockState: $this runningQueries: $runningQueries")
+        if (finalTimeoutMillis > 10000) {
+          logger.error(s"Could not acquire exclusive access to eviction lock $debugInfo " +
+            s"with finalTimeoutMillis=$finalTimeoutMillis $this")
+        }
         return false
       }
       Thread.`yield`()
@@ -60,14 +66,15 @@ class EvictionLock(debugInfo: String = "none") extends StrictLogging {
   def releaseExclusive(): Unit = reclaimLock.releaseExclusive()
 
   def acquireSharedLock(holderId: String, promQL: String): Unit = {
-    runningQueries.put(holderId, promQL)
+    if (trackQueriesHoldingEvictionLock) runningQueries.put(holderId, promQL)
     reclaimLock.lock()
   }
 
   def releaseSharedLock(holderId: String): Unit = {
-    runningQueries.remove(holderId)
+    if (trackQueriesHoldingEvictionLock) runningQueries.remove(holderId)
     reclaimLock.unlock()
   }
 
-  override def toString: String = reclaimLock.toString
+  override def toString: String = s"debugInfo=$debugInfo lockState: ${reclaimLock} " +
+    s"RunningQueries: ${ if (trackQueriesHoldingEvictionLock) runningQueries else "NotTracked"}"
 }
