@@ -143,6 +143,36 @@ class SumOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) exte
   }
 }
 
+object ChangesOverTimeFunction extends RangeFunction {
+  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+  }
+
+  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  }
+
+  override def apply(
+    startTimestamp: Long, endTimestamp: Long, window: Window,
+    sampleToEmit: TransientRow,
+    queryConfig: QueryConfig
+  ): Unit = {
+    var lastValue = Double.NaN
+    var changes = 0
+    if (window.size > 0) lastValue = window.head.getDouble(1)
+    var i = 1;
+    while (i < window.size) {
+      val curValue = window.apply(i).getDouble(1)
+      if (!curValue.isNaN && !lastValue.isNaN) {
+        if (curValue != lastValue) changes = changes + 1
+      }
+      if (!curValue.isNaN) {
+        lastValue = curValue
+      }
+      i = i + 1
+    }
+    sampleToEmit.setValues(endTimestamp, changes)
+  }
+}
+
 abstract class SumOverTimeChunkedFunction(var sum: Double = Double.NaN) extends ChunkedRangeFunction[TransientRow] {
   override final def reset(): Unit = { sum = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
