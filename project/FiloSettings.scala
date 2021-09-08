@@ -216,10 +216,6 @@ object FiloSettings {
         val oldStrategy = (assemblyMergeStrategy in assembly).value
         oldStrategy(x)
     },
-    assemblyShadeRules in assembly := Seq(
-      ShadeRule.rename("com.datastax.driver.**" -> "filodb.datastax.driver.@1").inAll,
-      ShadeRule.rename("org.apache.http.**" -> "filodb.org.apache.http.@1").inAll,
-    ),
     test in assembly := {} //noisy for end-user since the jar is not available and user needs to build the project locally
   )
 
