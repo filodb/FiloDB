@@ -310,6 +310,15 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val ensureBlockHeadroomPercent = filodbConfig.getDouble("memstore.ensure-block-memory-headroom-percent")
   private val ensureNativeMemHeadroomPercent = filodbConfig.getDouble("memstore.ensure-native-memory-headroom-percent")
 
+  private val trackQueriesHoldingEvictionLock = filodbConfig.getBoolean("memstore.track-queries-holding-eviction-lock")
+  /**
+   * Lock that protects chunks and TSPs from being reclaimed from Memstore.
+   * This is needed to prevent races between ODP queries and reclaims and ensure that
+   * TSPs and chunks dont get evicted when queries are being served.
+   */
+  private[memstore] final val evictionLock = new EvictionLock(trackQueriesHoldingEvictionLock,
+    s"shard=$shardNum dataset=$ref")
+
   /**
    * Queue of partIds that are eligible for eviction since they have stopped ingesting.
    * Caller needs to double check ingesting status since they may have started to re-ingest
@@ -379,13 +388,6 @@ class TimeSeriesShard(val ref: DatasetRef,
   // Use a StampedLock because it supports optimistic read locking. This means that no blocking
   // occurs in the common case, when there isn't any contention reading from partSet.
   private[memstore] final val partSetLock = new StampedLock
-
-  /**
-   * Lock that protects chunks and TSPs from being reclaimed from Memstore.
-   * This is needed to prevent races between ODP queries and reclaims and ensure that
-   * TSPs and chunks dont get evicted when queries are being served.
-   */
-  private[memstore] final val evictionLock = new EvictionLock(s"shard=$shardNum dataset=$ref")
 
   // The off-heap block store used for encoded chunks
   private val shardTags = Map("dataset" -> ref.dataset, "shard" -> shardNum.toString)
@@ -1410,7 +1412,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     if (numPartsToEvict > 0) {
       val partIdsToEvict = partitionsToEvict(numPartsToEvict)
       if (partIdsToEvict.isEmpty) {
-        logger.warn(s"dataset=$ref shard=$shardNum: No partitions to evict but we are still low on space. " +
+        logger.warn(s"dataset=$ref shard=$shardNum No partitions to evict but we are still low on space. " +
           s"DATA WILL BE DROPPED")
         return false
       }
@@ -1453,8 +1455,11 @@ class TimeSeriesShard(val ref: DatasetRef,
         if (!evictedPartKeysDisposed) evictedPartKeys.approximateElementCount() else 0
       }
       shardStats.evictedPkBloomFilterSize.update(elemCount)
-      logger.info(s"dataset=$ref shard=$shardNum: evicted $numPartsEvicted partitions, skipped $partsSkipped")
+      logger.info(s"Eviction complete on dataset=$ref shard=$shardNum " +
+        s" numPartsEvicted=$numPartsEvicted numPartsSkipped=$partsSkipped")
       shardStats.partitionsEvicted.increment(numPartsEvicted)
+    } else {
+      logger.error(s"Could not find any partition to evict when eviction is needed! Is the system overloaded?")
     }
     true
   }
@@ -1639,7 +1644,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     val highestTimeoutMs = Math.max(Math.max(blockTimeoutMs, tspTimeoutMs), nativeMemTimeoutMs)
 
     // whether to force evict even if lock cannot be acquired, if situation is dire
-    val forceEvict = addPartitionsDisabled.get
+    // We force evict since we cannot slow down ingestion since alerting queries are at stake.
+    val forceEvict = addPartitionsDisabled.get || blockStoreCurrentFreePercent < 1d ||
+      tspCountFreePercent < 1d || nativeMemFreePercent < 1d
 
     // do only if one of blocks or TSPs need eviction or if addition of partitions disabled
     if (highestTimeoutMs > 0 || forceEvict) {
@@ -1653,8 +1660,8 @@ class TimeSeriesShard(val ref: DatasetRef,
       val jobDone = if (forceEvict || acquired) {
         if (!acquired) logger.error(s"Since addPartitionsDisabled is true, proceeding with reclaim " +
           s"even though eviction lock couldn't be acquired with final timeout of $timeoutMs ms. Trading " +
-          s"off possibly wrong query results (due to old inactive partitions that would be evicted " +
-          s"and skipped) in order to unblock ingestion and stop data loss. LockState: $evictionLock")
+          s"off possibly wrong query results for old timestamps (due to old inactive partitions that would" +
+          s" be evicted and skipped) in order to unblock ingestion and stop data loss. EvictionLock: $evictionLock")
         try {
           if (blockTimeoutMs > 0) {
             blockStore.ensureHeadroom(ensureBlockHeadroomPercent)
