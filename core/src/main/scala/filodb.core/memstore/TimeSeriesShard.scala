@@ -1644,7 +1644,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     val highestTimeoutMs = Math.max(Math.max(blockTimeoutMs, tspTimeoutMs), nativeMemTimeoutMs)
 
     // whether to force evict even if lock cannot be acquired, if situation is dire
-    val forceEvict = addPartitionsDisabled.get
+    // We force evict since we cannot slow down ingestion since alerting queries are at stake.
+    val forceEvict = addPartitionsDisabled.get || blockStoreCurrentFreePercent < 1d ||
+      tspCountFreePercent < 1d || nativeMemFreePercent < 1d
 
     // do only if one of blocks or TSPs need eviction or if addition of partitions disabled
     if (highestTimeoutMs > 0 || forceEvict) {
@@ -1658,8 +1660,8 @@ class TimeSeriesShard(val ref: DatasetRef,
       val jobDone = if (forceEvict || acquired) {
         if (!acquired) logger.error(s"Since addPartitionsDisabled is true, proceeding with reclaim " +
           s"even though eviction lock couldn't be acquired with final timeout of $timeoutMs ms. Trading " +
-          s"off possibly wrong query results (due to old inactive partitions that would be evicted " +
-          s"and skipped) in order to unblock ingestion and stop data loss. EvictionLock: $evictionLock")
+          s"off possibly wrong query results for old timestamps (due to old inactive partitions that would" +
+          s" be evicted and skipped) in order to unblock ingestion and stop data loss. EvictionLock: $evictionLock")
         try {
           if (blockTimeoutMs > 0) {
             blockStore.ensureHeadroom(ensureBlockHeadroomPercent)

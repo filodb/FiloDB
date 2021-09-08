@@ -8,8 +8,10 @@ object EvictionLock {
   val maxTimeoutMillis = 2048
   /**
    * This timeout must be greater than query timeout.
+   * At the same time, we don't want it too high to avoid blocking ingestion
+   * for too long - otherwise, alerting queries can return incomplete data.
    */
-  val direCircumstanceMaxTimeoutMillis = 131072
+  val direCircumstanceMaxTimeoutMillis = 90000
 }
 
 /**
@@ -76,5 +78,5 @@ class EvictionLock(trackQueriesHoldingEvictionLock: Boolean = false,
   }
 
   override def toString: String = s"debugInfo=$debugInfo lockState: ${reclaimLock} " +
-    s"RunningQueries: ${ if (trackQueriesHoldingEvictionLock) runningQueries else "NotTracked"}"
+    s"RunningQueries: ${if (trackQueriesHoldingEvictionLock) runningQueries else "NotTracked"}"
 }
