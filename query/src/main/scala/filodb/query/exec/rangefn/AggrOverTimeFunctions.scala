@@ -173,6 +173,53 @@ object ChangesOverTimeFunction extends RangeFunction {
   }
 }
 
+
+object QuantileOverTimeFunction {
+  def calculateRank(q: Double, counter: Int): (Double, Int, Int) = {
+    val rank = q*(counter - 1)
+    val lowerIndex = Math.max(0, Math.floor(rank))
+    val upperIndex = Math.min(counter - 1, lowerIndex + 1)
+    val weight = rank - math.floor(rank)
+    (weight, upperIndex.toInt, lowerIndex.toInt)
+  }
+}
+
+class QuantileOverTimeFunction(funcParams: Seq[Any]) extends RangeFunction {
+  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+  }
+
+  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+  }
+
+  override def apply(
+    startTimestamp: Long, endTimestamp: Long, window: Window,
+    sampleToEmit: TransientRow,
+    queryConfig: QueryConfig
+  ): Unit = {
+    require(funcParams.head.isInstanceOf[StaticFuncArgs], "quantile parameter must be a number")
+    val q = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
+
+    val values: Buffer[Double] = Buffer.ofSize(window.size)
+    var i = 0;
+    while (i < window.size) {
+      val curValue = window.apply(i).getDouble(1)
+      if (!curValue.isNaN) {
+        values.append(curValue)
+      }
+      i = i + 1
+    }
+    val counter = values.length
+    values.sort(spire.algebra.Order.fromOrdering[Double])
+    val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(q, counter)
+    var quantileResult : Double = Double.NaN
+    if (counter > 0) {
+      quantileResult = values(lowerIndex)*(1-weight) + values(upperIndex)*weight
+    }
+    sampleToEmit.setValues(endTimestamp, quantileResult)
+
+  }
+}
+
 abstract class SumOverTimeChunkedFunction(var sum: Double = Double.NaN) extends ChunkedRangeFunction[TransientRow] {
   override final def reset(): Unit = { sum = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
@@ -689,20 +736,14 @@ abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[FuncArgs],
     if (!quantileResult.equals(Double.NegativeInfinity) || !quantileResult.equals(Double.PositiveInfinity)) {
       val counter = values.length
       values.sort(spire.algebra.Order.fromOrdering[Double])
-      val (weight, upperIndex, lowerIndex) = calculateRank(q, counter)
+      val (weight, upperIndex, lowerIndex) = QuantileOverTimeFunction.calculateRank(q, counter)
       if (counter > 0) {
         quantileResult = values(lowerIndex)*(1-weight) + values(upperIndex)*weight
       }
     }
     sampleToEmit.setValues(endTimestamp, quantileResult)
   }
-  def calculateRank(q: Double, counter: Int): (Double, Int, Int) = {
-    val rank = q*(counter - 1)
-    val lowerIndex = Math.max(0, Math.floor(rank))
-    val upperIndex = Math.min(counter - 1, lowerIndex + 1)
-    val weight = rank - math.floor(rank)
-    (weight, upperIndex.toInt, lowerIndex.toInt)
-  }
+
 }
 
 class QuantileOverTimeChunkedFunctionD(funcParams: Seq[FuncArgs]) extends QuantileOverTimeChunkedFunction(funcParams)
