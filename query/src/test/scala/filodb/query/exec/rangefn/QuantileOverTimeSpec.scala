@@ -101,7 +101,7 @@ class QuantileOverTimeSpec extends RawDataWindowingSpec {
     val toEmit = new TransientRow
     val f = new QuantileOverTimeFunction(Seq(new StaticFuncArgs(0.2,null)))
     f.apply(startTs,endTs, window, toEmit, queryConfig)
-    toEmit.value shouldEqual 2
+    toEmit.value shouldEqual 2.8000000000000003
   }
 
   it("checking 0.9") {
