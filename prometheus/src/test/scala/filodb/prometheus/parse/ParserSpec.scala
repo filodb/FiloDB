@@ -468,16 +468,16 @@ class ParserSpec extends AnyFunSpec with Matchers {
     )
     parseWithAntlr(
       "(heap_usage + heap_usage)[5m:1m]",
-      "TopLevelSubquery(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),List(),List(),List()),1524855720000,60000,1524855960000)"
+      "TopLevelSubquery(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),List(),List(),List()),1524855720000,60000,1524855960000,300000)"
     )
     parseWithAntlr(
       "heap_usage[10m:1m] offset 30s",
-      "TopLevelSubquery(PeriodicSeries(RawSeries(IntervalSelector(1524855360000,1524855900000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855360000,60000,1524855900000,None),1524855360000,60000,1524855900000)"
+      "TopLevelSubquery(PeriodicSeries(RawSeries(IntervalSelector(1524855360000,1524855900000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855360000,60000,1524855900000,None),1524855360000,60000,1524855900000,600000)"
     )
 
     parseWithAntlr(
       "sum_over_time(heap_usage[10m:1m] offset 3m)[2m:1m] offset 1m",
-      "TopLevelSubquery(SubqueryWithWindowing(PeriodicSeries(RawSeries(IntervalSelector(1524855060000,1524855720000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855060000,60000,1524855720000,None),1524855840000,60000,1524855900000,SumOverTime,List(),600000,60000,Some(180000)),1524855840000,60000,1524855900000)"
+      "TopLevelSubquery(SubqueryWithWindowing(PeriodicSeries(RawSeries(IntervalSelector(1524855060000,1524855720000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855060000,60000,1524855720000,None),1524855840000,60000,1524855900000,SumOverTime,List(),600000,60000,Some(180000)),1524855840000,60000,1524855900000,120000)"
     )
     parseWithAntlr(
       "sum_over_time(heap_usage[3m:1m] offset 3m)",
@@ -648,11 +648,11 @@ class ParserSpec extends AnyFunSpec with Matchers {
       "sum((some_metric))" -> "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(some_metric))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List())",
       "sum((foo + foo))" -> "Aggregate(Sum,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),List(),List(),List())",
       "(sum(foo1) + sum(foo2))/(sum(foo3) + sum(foo4))" -> "BinaryJoin(BinaryJoin(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo1))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),ADD,OneToOne,Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo2))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),List(),List(),List()),DIV,OneToOne,BinaryJoin(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo3))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),ADD,OneToOne,Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo4))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),List(),List(),List()),List(),List(),List())",
-      "foo[5m:1m]" -> "TopLevelSubquery(PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),1524855720000,60000,1524855960000)",
-      "deriv(rate(distance_covered_meters_total[1m])[5m:1m])[6m:3m]" -> "TopLevelSubquery(SubqueryWithWindowing(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855480000,1524855960000),List(ColumnFilter(__name__,Equals(distance_covered_meters_total))),List(),Some(60000),None),1524855480000,60000,1524855960000,60000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(distance_covered_meters_total)))),1524855780000,180000,1524855960000,Deriv,List(),300000,60000,None),1524855780000,180000,1524855960000)",
+      "foo[5m:1m]" -> "TopLevelSubquery(PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),1524855720000,60000,1524855960000,300000)",
+      "deriv(rate(distance_covered_meters_total[1m])[5m:1m])[6m:3m]" -> "TopLevelSubquery(SubqueryWithWindowing(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855480000,1524855960000),List(ColumnFilter(__name__,Equals(distance_covered_meters_total))),List(),Some(60000),None),1524855480000,60000,1524855960000,60000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(distance_covered_meters_total)))),1524855780000,180000,1524855960000,Deriv,List(),300000,60000,None),1524855780000,180000,1524855960000,360000)",
       "max_over_time(rate(foo[5m])[5m:1m])" -> "SubqueryWithWindowing(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855720000,60000,1524855960000,300000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(foo)))),1524855988000,0,1524855988000,MaxOverTime,List(),300000,60000,None)",
       "max_over_time(sum(foo)[5m:1m])" -> "SubqueryWithWindowing(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),List(),List(),List()),1524855988000,0,1524855988000,MaxOverTime,List(),300000,60000,None)",
-      "sum(foo)[5m:1m]" -> "TopLevelSubquery(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),List(),List(),List()),1524855720000,60000,1524855960000)",
+      "sum(foo)[5m:1m]" -> "TopLevelSubquery(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),List(),List(),List()),1524855720000,60000,1524855960000,300000)",
       "avg_over_time(max_over_time(rate(foo[5m])[5m:1m])[10m:2m])" -> "SubqueryWithWindowing(SubqueryWithWindowing(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855180000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855180000,60000,1524855960000,300000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(foo)))),1524855480000,120000,1524855960000,MaxOverTime,List(),300000,60000,None),1524855988000,0,1524855988000,AvgOverTime,List(),600000,120000,None)",
       "1-1" -> "ScalarBinaryOperation(SUB,Left(1.0),Left(1.0),RangeParams(1524855988,1000,1524855988))",
       "rate(___http_requests_total{job=\"api-server\"}[10m])" -> "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(___http_requests_total))),List(),Some(600000),None),1524855988000,1000000,1524855988000,600000,Rate,false,List(),None,List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(___http_requests_total))))",
@@ -680,6 +680,17 @@ class ParserSpec extends AnyFunSpec with Matchers {
       //}
       lp.toString shouldEqual (e)
     }
+  }
+
+  it("should find subqueryWithWindowing") {
+    var lp = Parser.queryToLogicalPlan("foo[5m:1m]", 100000, 1000)
+    LogicalPlan.hasSubqueryWithWindowing(lp) shouldEqual false
+    lp = Parser.queryToLogicalPlan("avg_over_time(foo[5m:1m])", 100000, 1000)
+    LogicalPlan.hasSubqueryWithWindowing(lp) shouldEqual true
+    lp = Parser.queryToLogicalPlan("avg_over_time(foo[5m])", 100000, 1000)
+    LogicalPlan.hasSubqueryWithWindowing(lp) shouldEqual false
+    lp = Parser.queryToLogicalPlan("avg_over_time(avg_over_time(foo[5m])[5m:1m]) + avg_over_time(avg_over_time(foo[5m])[5m:1m])", 100000, 1000)
+    LogicalPlan.hasSubqueryWithWindowing(lp) shouldEqual true
   }
 
   it("should error instant queries without step when step multiple notation is used") {

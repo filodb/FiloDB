@@ -36,7 +36,7 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
-      case (QueryResult(_, _, result, _, _), _) => result
+      case (QueryResult(_, _, result, _, _, _), _) => result
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
       var metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]

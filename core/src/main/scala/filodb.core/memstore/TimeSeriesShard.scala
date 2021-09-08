@@ -1,6 +1,7 @@
 package filodb.core.memstore
 
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.locks.StampedLock
 
 import scala.collection.mutable
@@ -16,7 +17,7 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import debox.{Buffer, Map => DMap}
 import kamon.Kamon
-import kamon.metric.{Counter, MeasurementUnit}
+import kamon.metric.MeasurementUnit
 import kamon.tag.TagSet
 import monix.eval.Task
 import monix.execution.{Scheduler, UncaughtExceptionReporter}
@@ -44,7 +45,6 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val shardTotalRecoveryTime = Kamon.gauge("memstore-total-shard-recovery-time",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
   val chunksQueried = Kamon.counter("memstore-chunks-queried").withTags(TagSet.from(tags))
-  val chunksQueriedByShardKey = Kamon.counter("memstore-chunks-queried-by-shardkey")
   val tsCountBySchema = Kamon.gauge("memstore-timeseries-by-schema").withTags(TagSet.from(tags))
   val rowsIngested = Kamon.counter("memstore-rows-ingested").withTags(TagSet.from(tags))
   val partitionsCreated = Kamon.counter("memstore-partitions-created").withTags(TagSet.from(tags))
@@ -216,7 +216,7 @@ case class PartLookupResult(shard: Int,
                             partIdsMemTimeGap: debox.Map[Int, Long] = debox.Map.empty,
                             partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty,
                             pkRecords: Seq[PartKeyLuceneIndexRecord] = Seq.empty,
-                            queriedChunksCounter: Counter)
+                            queriedChunksCounter: AtomicInteger)
 
 final case class SchemaMismatch(expected: String, found: String) extends
 Exception(s"Multiple schemas found, please filter. Expected schema $expected, found schema $found")
@@ -262,8 +262,9 @@ class TimeSeriesShard(val ref: DatasetRef,
   @volatile var isReadyForQuery = false
 
   val shardStats = new TimeSeriesShardStats(ref, shardNum)
-  val shardKeyLevelIngestionMetricsEnabled = filodbConfig.getBoolean("shard-key-level-ingestion-metrics-enabled")
-  val shardKeyLevelQueryMetricsEnabled = filodbConfig.getBoolean("shard-key-level-query-metrics-enabled")
+  private val shardKeyLevelIngestionMetricsEnabled =
+    filodbConfig.getBoolean("shard-key-level-ingestion-metrics-enabled")
+  private val clusterType = filodbConfig.getString("cluster-type")
 
   val creationTime = System.currentTimeMillis()
 
@@ -314,15 +315,12 @@ class TimeSeriesShard(val ref: DatasetRef,
    * Caller needs to double check ingesting status since they may have started to re-ingest
    * since partId was added to this queue.
    *
-   * FIXME we can create a more efficient data structure that stores the ints in unboxed form - uses less heap.
-   * As an observation, LinkedHashSet is using 70MB for 1mil Ints. For 8 shards, one can expect 560mb or so.
-   * Compare this with simple array of 8 * 1mil ints: 32MB.
-   * It is a set since intermittent time series can cause duplicates in evictablePartIds
-   *
-   * WARNING: operations need synchronization  since the producers are flush task and odp part creation task
+   * It is a set since intermittent time series can cause duplicates in evictablePartIds.
+   * Max size multiplied by 1.04 to minimize array resizes.
    */
-  protected[memstore] final val evictablePartIds = new mutable.LinkedHashSet[Int]()
-  protected[memstore] final val evictableOdpPartIds = new mutable.LinkedHashSet[Int]()
+  protected[memstore] final val evictablePartIds =
+      new EvictablePartIdQueueSet(math.ceil(targetMaxPartitions * 1.04).toInt)
+  protected[memstore] final val evictableOdpPartIds = new EvictablePartIdQueueSet(8192)
 
   /**
     * Keeps track of last offset ingested into memory (not necessarily flushed).
@@ -1163,13 +1161,9 @@ class TimeSeriesShard(val ref: DatasetRef,
   protected[memstore] def markPartAsNotIngesting(p: TimeSeriesPartition, odp: Boolean): Unit = {
     p.ingesting = false
     if (odp) {
-      evictableOdpPartIds.synchronized {
-        evictableOdpPartIds.add(p.partID)
-      }
+      evictableOdpPartIds.put(p.partID)
     } else {
-      evictablePartIds.synchronized {
-        evictablePartIds.add(p.partID)
-      }
+      evictablePartIds.put(p.partID)
     }
     shardStats.evictablePartKeysSize.increment()
   }
@@ -1512,30 +1506,12 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   private def partitionsToEvict(numPartsToEvict: Int): debox.Buffer[Int] = {
-
-    val partIdsToEvict = debox.Buffer.empty[Int]
-    var i = 0
-    val size1 = evictableOdpPartIds.synchronized {
-      while (i < numPartsToEvict && !evictableOdpPartIds.isEmpty) {
-        val partId = evictableOdpPartIds.head
-        evictableOdpPartIds.remove(partId)
-        partIdsToEvict += partId
-        logger.debug(s"Preparing to evict ODP partId=$partIdsToEvict")
-        i += 1
-      }
-      evictableOdpPartIds.size
+    val partIdsToEvict = debox.Buffer.ofSize[Int](numPartsToEvict)
+    evictableOdpPartIds.removeInto(numPartsToEvict, partIdsToEvict)
+    if (partIdsToEvict.length < numPartsToEvict) {
+      evictablePartIds.removeInto(numPartsToEvict - partIdsToEvict.length, partIdsToEvict)
     }
-    val size2 = evictablePartIds.synchronized {
-      while (i < numPartsToEvict && !evictablePartIds.isEmpty) {
-        val partId = evictablePartIds.head
-        evictablePartIds.remove(partId)
-        partIdsToEvict += partId
-        logger.debug(s"Preparing to evict partId=$partIdsToEvict")
-        i += 1
-      }
-      evictablePartIds.size
-    }
-    shardStats.evictablePartKeysSize.update(size1 + size2)
+    shardStats.evictablePartKeysSize.update(evictableOdpPartIds.size + evictablePartIds.size)
     partIdsToEvict
   }
 
@@ -1586,7 +1562,6 @@ class TimeSeriesShard(val ref: DatasetRef,
       case _ => "unknown"
     }
     evictionLock.acquireSharedLock(querySession.qContext.queryId, promQl)
-    val metricShardKeys = schemas.part.options.shardKeyColumns.dropRight(1)
     // any exceptions thrown here should be caught by a wrapped Task.
     // At the end, MultiSchemaPartitionsExec.execute releases the lock when the task is complete
     partMethod match {
@@ -1594,26 +1569,25 @@ class TimeSeriesShard(val ref: DatasetRef,
         val partIds = debox.Buffer.empty[Int]
         getPartition(partition).foreach(p => partIds += p.partID)
         PartLookupResult(shardNum, chunkMethod, partIds, Some(RecordSchema.schemaID(partition)),
-          queriedChunksCounter = shardStats.chunksQueried)
+          queriedChunksCounter = querySession.queryStats.getChunksScannedCounter())
       case MultiPartitionScan(partKeys, _)   =>
         val partIds = debox.Buffer.empty[Int]
         partKeys.flatMap(getPartition).foreach(p => partIds += p.partID)
         PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID),
-          queriedChunksCounter = shardStats.chunksQueried)
+          queriedChunksCounter = querySession.queryStats.getChunksScannedCounter())
       case FilteredPartitionScan(_, filters) =>
-        val chunksQueriedMetric = if (shardKeyLevelQueryMetricsEnabled) {
-          val metricTags = metricShardKeys.map { col =>
-            filters.collectFirst {
-              case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => s"metric${col}tag" -> filtVal
-            }.getOrElse(col -> "unknown")
-          }.toMap
-          shardStats.chunksQueriedByShardKey.withTags(TagSet.from(metricTags))
-        } else shardStats.chunksQueried
+        val metricShardKeys = schemas.part.options.shardKeyColumns
+        val metricGroupBy = clusterType +: metricShardKeys.map { col =>
+          filters.collectFirst {
+            case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
+          }.getOrElse("unknown")
+        }.toList
+        val chunksReadCounter = querySession.queryStats.getChunksScannedCounter(metricGroupBy)
         // No matter if there are filters or not, need to run things through Lucene so we can discover potential
         // TSPartitions to read back from disk
         val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
         shardStats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
-
+        querySession.queryStats.getPartsScannedCounter(metricGroupBy).addAndGet(matches.length)
         Kamon.currentSpan().tag(s"num-partitions-from-index-$shardNum", matches.length)
 
         // first find out which partitions are being queried for data not in memory
@@ -1638,7 +1612,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         // now provide an iterator that additionally supplies the startTimes for
         // those partitions that may need to be paged
         PartLookupResult(shardNum, chunkMethod, matches, _schema, startTimes, partIdsNotInMem,
-          Nil, chunksQueriedMetric)
+          Nil, chunksReadCounter)
     }
   }
 

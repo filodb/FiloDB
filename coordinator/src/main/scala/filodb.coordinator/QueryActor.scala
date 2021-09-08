@@ -134,7 +134,7 @@ final class QueryActor(memStore: MemStore,
             querySession.close()
             replyTo ! res
             res match {
-              case QueryResult(_, _, vectors, _, _) => resultVectors.record(vectors.length)
+              case QueryResult(_, _, vectors, _, _, _) => resultVectors.record(vectors.length)
               case e: QueryError =>
                 queryErrors.increment()
                 queryExecuteSpan.fail(e.t.getMessage)

@@ -1,20 +1,20 @@
 package filodb.core.query
 
 import java.time.{LocalDateTime, YearMonth, ZoneOffset}
+import java.util.concurrent.atomic.AtomicInteger
 
 import scala.collection.Iterator
 
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import kamon.Kamon
-import kamon.metric.Counter
 import org.joda.time.DateTime
 
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.store._
-import filodb.memory.{MemFactory, UTF8StringMedium, UTF8StringShort}
+import filodb.memory.{BinaryRegionLarge, MemFactory, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 import filodb.memory.format.vectors.Histogram
@@ -29,6 +29,7 @@ trait RangeVectorKey extends java.io.Serializable {
   def sourceShards: Seq[Int]
   def partIds: Seq[Int]
   def schemaNames: Seq[String]
+  def keySize: Int
   override def toString: String = s"/shard:${sourceShards.mkString(",")}/$labelValues"
 }
 
@@ -64,6 +65,13 @@ final case class PartitionRangeVectorKey(partKeyData: Either[ReadablePartition, 
   override def partIds: Seq[Int] = Seq(partId)
   override def schemaNames: Seq[String] = Seq(schemaName)
 
+  def keySize: Int = {
+    partKeyData match {
+      case Left(part) =>BinaryRegionLarge.numBytes(part.partKeyBase, part.partKeyOffset)
+      case Right((base, off)) =>  BinaryRegionLarge.numBytes(base, off)
+    }
+  }
+
   def labelValues: Map[UTF8Str, UTF8Str] = {
     partKeyCols.zipWithIndex.flatMap { case (c, pos) =>
       c.colType match {
@@ -85,6 +93,11 @@ final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str],
                                       partIds: Seq[Int] = Nil,
                                       schemaNames: Seq[String] = Nil)
   extends RangeVectorKey {
+  def keySize: Int = {
+    labelValues.foldLeft(0) { case (s, e) =>
+      s + e._1.numBytes + e._2.numBytes
+    }
+  }
 }
 
 object CustomRangeVectorKey {
@@ -267,7 +280,7 @@ final case class RawDataRangeVector(key: RangeVectorKey,
                                     partition: ReadablePartition,
                                     chunkMethod: ChunkScanMethod,
                                     columnIDs: Array[Int],
-                                    chunksQueriedMetric: Counter) extends RangeVector {
+                                    chunksQueriedMetric: AtomicInteger) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
   def rows(): RangeVectorCursor = partition.timeRangeRows(chunkMethod, columnIDs)
 

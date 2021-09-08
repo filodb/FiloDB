@@ -23,6 +23,7 @@ class RangeVectorSpec  extends AnyFunSpec with Matchers {
       def sourceShards: Seq[Int] = Nil
       def partIds: Seq[Int] = Nil
       def schemaNames: Seq[String] = Nil
+      def keySize: Int = 0
     }
 
     override def outputRange: Option[RvRange] = None
