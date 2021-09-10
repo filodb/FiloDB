@@ -25,7 +25,7 @@ import filodb.query.QueryResponse
   case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatcher {
 
   val clusterName = InetAddress.getLocalHost().getHostName()
-  override def dispatch(plan: ExecPlan)(implicit sched: Scheduler): Task[QueryResponse] = {
+  override def dispatch(plan: RunTimePlanContainer)(implicit sched: Scheduler): Task[QueryResponse] = {
     // unsupported source since its does not apply in case of non-leaf plans
     val source = UnsupportedChunkSource()
 
@@ -35,8 +35,8 @@ import filodb.query.QueryResponse
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(Kamon.currentSpan(), false) {
       // translate implicit ExecutionContext to monix.Scheduler
-      val querySession = QuerySession(plan.queryContext, queryConfig)
-      plan.execute(source, querySession)
+      val querySession = QuerySession(plan.execPlan.queryContext, queryConfig)
+      plan.execPlan.execute(source, querySession)
     }
   }
 

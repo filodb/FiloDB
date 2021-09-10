@@ -318,7 +318,9 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
 
   override def getResult(querySession: QuerySession)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.fromTask(
-      execPlan.dispatcher.dispatch(execPlan).onErrorHandle { case ex: Throwable =>
+      execPlan.dispatcher.dispatch(RunTimePlanContainer(execPlan,
+        ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis - 1000))).
+        onErrorHandle { case ex: Throwable =>
         QueryError(execPlan.queryContext.queryId, ex)
       }.map {
         case QueryResult(_, _, result, isPartialResult, partialResultReason)  =>
@@ -381,7 +383,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // kamon uses thread-locals.
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
-      plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
+      plan.dispatcher.dispatch(RunTimePlanContainer(plan,
+        ClientParams(plan.queryContext.plannerParams.queryTimeoutMillis - 1000))).onErrorHandle { case ex: Throwable =>
         QueryError(queryContext.queryId, ex)
       }
     }
@@ -492,3 +495,6 @@ object IgnoreFixedVectorLenAndColumnNamesSchemaReducer {
     }
   }
 }
+
+case class ClientParams(timeout: Long)
+case class RunTimePlanContainer(execPlan: ExecPlan, clientParams: ClientParams)

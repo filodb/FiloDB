@@ -77,7 +77,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   }
 
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)
+    override def dispatch(plan: RunTimePlanContainer)
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
 
     override def clusterName: String = ???
