@@ -603,11 +603,11 @@ class TimeSeriesShard(val ref: DatasetRef,
   def ingest(data: SomeData): Long = ingest(data.records, data.offset)
 
   def recoverIndex(): Future[Unit] = {
-    startFlushingIndex()
     val indexBootstrapper = new IndexBootstrapper(colStore)
     indexBootstrapper.bootstrapIndexRaw(partKeyIndex, shardNum, ref)(bootstrapPartKey)
                      .executeOn(ingestSched) // to make sure bootstrapIndex task is run on ingestion thread
                      .map { count =>
+                        startFlushingIndex()
                        logger.info(s"Bootstrapped index for dataset=$ref shard=$shardNum with $count records")
                      }.runAsync(ingestSched)
   }
@@ -1719,27 +1719,23 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   def shutdown(): Unit = {
-    try {
-      logger.info(s"Shutting down dataset=$ref shard=$shardNum")
-      if (storeConfig.meteringEnabled) {
-        cardTracker.close()
-      }
-      evictedPartKeys.synchronized {
-        if (!evictedPartKeysDisposed) {
-          evictedPartKeysDisposed = true
-          evictedPartKeys.dispose()
-        }
-      }
-      reset() // Not really needed, but clear everything just to be consistent
-      partKeyIndex.closeIndex()
-      /* Don't explicitly free the memory just yet. These classes instead rely on a finalize
-         method to ensure that no threads are accessing the memory before it's freed.
-      blockStore.releaseBlocks()
-      */
-      headroomTask.cancel()
-      ingestSched.shutdown()
-    } catch { case e: Exception =>
-      logger.error("Exception when shutting down shard", e)
+    if (storeConfig.meteringEnabled) {
+      cardTracker.close()
     }
+    evictedPartKeys.synchronized {
+      if (!evictedPartKeysDisposed) {
+        evictedPartKeysDisposed = true
+        evictedPartKeys.dispose()
+      }
+    }
+    reset()   // Not really needed, but clear everything just to be consistent
+    partKeyIndex.closeIndex()
+    logger.info(s"Shutting down dataset=$ref shard=$shardNum")
+    /* Don't explcitly free the memory just yet. These classes instead rely on a finalize
+       method to ensure that no threads are accessing the memory before it's freed.
+    blockStore.releaseBlocks()
+    */
+    headroomTask.cancel()
+    ingestSched.shutdown()
   }
 }

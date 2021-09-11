@@ -397,7 +397,6 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
     memStore match {
       case ro: DownsampledTimeSeriesStore => ro.getShard(ref, shardNum)
                                             .foreach { shard =>
-                                              shard.shutdown()
                                               ro.removeShard(ref, shardNum, shard)
                                             }
 
