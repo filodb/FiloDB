@@ -3,7 +3,7 @@ package filodb.query
 import enumeratum.{Enum, EnumEntry}
 
 import filodb.core.{DatasetRef, NodeCommand, NodeResponse}
-import filodb.core.query.{RangeVector, ResultSchema}
+import filodb.core.query.{QueryStats, RangeVector, ResultSchema}
 
 trait QueryCommand extends NodeCommand with java.io.Serializable {
   def submitTime: Long
@@ -50,6 +50,7 @@ object QueryResultType extends Enum[QueryResultType] {
 final case class QueryResult(id: String,
                              resultSchema: ResultSchema,
                              result: Seq[RangeVector],
+                             queryStats: QueryStats = QueryStats(),
                              mayBePartial: Boolean = false,
                              partialResultReason: Option[String] = None) extends QueryResponse {
   def resultType: QueryResultType = {

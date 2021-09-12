@@ -76,13 +76,13 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
     s"WHERE partKey = ?"
   )
 
-  def writePartKey(pk: PartKeyRecord, diskTimeToLiveSeconds: Int): Future[Response] = {
+  def writePartKey(pk: PartKeyRecord, diskTimeToLiveSeconds: Long): Future[Response] = {
     if (diskTimeToLiveSeconds <= 0) {
       connector.execStmtWithRetries(writePartitionCqlNoTtl.bind(
         toBuffer(pk.partKey), pk.startTime: JLong, pk.endTime: JLong))
     } else {
       connector.execStmtWithRetries(writePartitionCql.bind(
-        toBuffer(pk.partKey), pk.startTime: JLong, pk.endTime: JLong, diskTimeToLiveSeconds: JInt))
+        toBuffer(pk.partKey), pk.startTime: JLong, pk.endTime: JLong, diskTimeToLiveSeconds.toInt: JInt))
     }
   }
 

@@ -79,7 +79,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                   chunkInfo: ChunkSetInfo,
                   chunks: Seq[ByteBuffer],
                   stats: ChunkSinkStats,
-                  diskTimeToLive: Int): Future[Response] = {
+                  diskTimeToLive: Long): Future[Response] = {
     var chunkBytes = 0L
     val chunkList = chunks.map { bytes =>
                       val finalBytes = compressChunk(bytes)
@@ -90,7 +90,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                                       .setLong(1, chunkInfo.id)
                                       .setBytes(2, toBuffer(ChunkSetInfo.toBytes(chunkInfo)))
                                       .setList(3, chunkList, classOf[ByteBuffer])
-                                      .setInt(4, diskTimeToLive)
+                                      .setInt(4, diskTimeToLive.toInt)
     stats.addChunkWriteStats(chunks.length, chunkBytes, chunkInfo.numRows)
     connector.execStmtWithRetries(insert.setConsistencyLevel(writeConsistencyLevel))
   }
@@ -102,7 +102,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
   def writeChunks(partKeyBytes: ByteBuffer,
                   row: Row,
                   stats: ChunkSinkStats,
-                  diskTimeToLiveSeconds: Int): Future[Response] = {
+                  diskTimeToLiveSeconds: Long): Future[Response] = {
 
     val info = row.getBytes(1)
     val chunks = row.getList(2, classOf[ByteBuffer])
@@ -116,7 +116,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
       row.getLong(0): java.lang.Long,      // chunkid
       info,
       chunks,
-      diskTimeToLiveSeconds: java.lang.Integer)
+      diskTimeToLiveSeconds.toInt: java.lang.Integer)
     )
   }
 

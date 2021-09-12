@@ -467,7 +467,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp.asInstanceOf[QueryError]
     result.t.getClass shouldEqual classOf[QueryTimeoutException]
-    result.t.getMessage shouldEqual "Query timeout in filodb.query.exec.MultiSchemaPartitionsExec after 180 seconds"
+    result.t.getMessage shouldEqual "Query timeout in step1-MultiSchemaPartitionsExec after 180 seconds"
   }
 
   it ("""should not return range vectors with !="" where column is not present""") {
