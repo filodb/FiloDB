@@ -11,7 +11,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 
 import filodb.core.QueryTimeoutException
-import filodb.core.query.ResultSchema
+import filodb.core.query.{QueryStats, ResultSchema}
 import filodb.query.Query.qLogger
 import filodb.query.QueryResponse
 import filodb.query.QueryResult
@@ -50,7 +50,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
         case e: AskTimeoutException if (plan.execPlan.queryContext.plannerParams.allowPartialResults)
            =>
             qLogger.warn(s"Swallowed AskTimeoutException since partial result was enabled: ${e.getMessage}")
-            QueryResult(plan.execPlan.queryContext.queryId, ResultSchema.empty, Nil, true,
+            QueryResult(plan.execPlan.queryContext.queryId, ResultSchema.empty, Nil, QueryStats(), true,
               Some("Result may be partial since query on some shards timed out"))
       }
       Task.fromFuture(fut)
