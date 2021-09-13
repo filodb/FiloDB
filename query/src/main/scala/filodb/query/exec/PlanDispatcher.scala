@@ -7,6 +7,7 @@ import akka.pattern.{AskTimeoutException, ask}
 import akka.util.Timeout
 import monix.eval.Task
 import monix.execution.Scheduler
+
 import filodb.core.QueryTimeoutException
 import filodb.core.store.ChunkSource
 import filodb.core.query.{QueryStats, ResultSchema}
