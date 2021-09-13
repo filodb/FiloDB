@@ -845,7 +845,6 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
 
     downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
-    downsampleTSStore.refreshIndexForTesting(batchDownsampler.rawDatasetRef)
 
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
     val colFiltersNaN = seriesTagsNaN.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
@@ -880,7 +879,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
 
     downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
-    downsampleTSStore.refreshIndexForTesting(batchDownsampler.rawDatasetRef)
+
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
 
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(counterName))
@@ -913,7 +912,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
 
     downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
-    downsampleTSStore.refreshIndexForTesting(batchDownsampler.rawDatasetRef)
+
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
 
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(counterName))
@@ -945,7 +944,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
 
     downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
-    downsampleTSStore.refreshIndexForTesting(batchDownsampler.rawDatasetRef)
+
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
 
       val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(untypedName))
@@ -972,7 +971,6 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     downsampleTSStore.setup(batchDownsampler.rawDatasetRef, settings.filodbSettings.schemas,
       0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
     downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
-    downsampleTSStore.refreshIndexForTesting(batchDownsampler.rawDatasetRef)
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(gaugeName))
     val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams = PlannerParams(sampleLimit = 1000)),
