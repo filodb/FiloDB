@@ -255,6 +255,16 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     }
   }
 
+  def shutdown(): Unit = {
+    try {
+      partKeyIndex.closeIndex();
+      houseKeepingFuture.cancel();
+      gaugeUpdateFuture.cancel();
+    } catch { case e: Exception =>
+      logger.error("Exception when shutting down downsample shard", e)
+    }
+  }
+
   def scanPartitions(lookup: PartLookupResult,
                      colIds: Seq[Types.ColumnId],
                      querySession: QuerySession): Observable[ReadablePartition] = {
