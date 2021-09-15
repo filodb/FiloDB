@@ -55,7 +55,7 @@ extends MemStore with StrictLogging {
   def checkReadyForQuery(ref: DatasetRef,
                          shard: Int,
                          querySession: QuerySession): Unit = {
-    if (getShardE(ref: DatasetRef, shard: Int).isReadyForQuery) {
+    if (!getShardE(ref: DatasetRef, shard: Int).isReadyForQuery) {
       if (!querySession.qContext.plannerParams.allowPartialResults) {
         throw new ServiceUnavailableException(s"Unable to answer query since shard $shard is still bootstrapping")
       }
