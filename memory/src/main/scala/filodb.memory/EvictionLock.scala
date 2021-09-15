@@ -67,9 +67,9 @@ class EvictionLock(trackQueriesHoldingEvictionLock: Boolean = false,
 
   def releaseExclusive(): Unit = reclaimLock.releaseExclusive()
 
-  def acquireSharedLock(holderId: String, promQL: String): Unit = {
+  def acquireSharedLock(timeoutMs: Long, holderId: String, promQL: String): Boolean = {
     if (trackQueriesHoldingEvictionLock) runningQueries.put(holderId, promQL)
-    reclaimLock.lock()
+    reclaimLock.tryAcquireSharedNanos(timeoutMs * 1000000)
   }
 
   def releaseSharedLock(holderId: String): Unit = {

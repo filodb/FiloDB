@@ -30,7 +30,7 @@ import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaSource, RocksDbCardinalityStore}
 import filodb.core.metadata.{Schema, Schemas}
-import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QuerySession}
+import filodb.core.query.{ColumnFilter, Filter, QuerySession}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.data.Shutdown
@@ -1532,12 +1532,6 @@ class TimeSeriesShard(val ref: DatasetRef,
   def lookupPartitions(partMethod: PartitionScanMethod,
                        chunkMethod: ChunkScanMethod,
                        querySession: QuerySession): PartLookupResult = {
-    querySession.lock = Some(evictionLock)
-    val promQl = querySession.qContext.origQueryParams match {
-      case p: PromQlQueryParams => p.promQl
-      case _ => "unknown"
-    }
-    evictionLock.acquireSharedLock(querySession.qContext.queryId, promQl)
     // any exceptions thrown here should be caught by a wrapped Task.
     // At the end, MultiSchemaPartitionsExec.execute releases the lock when the task is complete
     partMethod match {
