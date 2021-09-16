@@ -11,10 +11,9 @@ import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.PartLookupResult
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.Schemas
-import filodb.core.query.{QueryConfig, QuerySession, QueryStats}
+import filodb.core.query.{QueryConfig, QuerySession}
 import filodb.core.store._
 import filodb.query.QueryResponse
-
 
 /**
   * Dispatcher which will make a No-Op style call to ExecPlan#excecute().
@@ -35,7 +34,7 @@ import filodb.query.QueryResponse
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(Kamon.currentSpan(), false) {
       // translate implicit ExecutionContext to monix.Scheduler
-      val querySession = QuerySession(plan.queryContext, queryConfig, QueryStats())
+      val querySession = QuerySession(plan.queryContext, queryConfig)
       plan.execute(source, querySession)
     }
   }

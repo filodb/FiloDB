@@ -73,8 +73,8 @@ class EvictionLock(trackQueriesHoldingEvictionLock: Boolean = false,
   }
 
   def releaseSharedLock(holderId: String): Unit = {
-    if (trackQueriesHoldingEvictionLock) runningQueries.remove(holderId)
     reclaimLock.unlock()
+    if (trackQueriesHoldingEvictionLock) runningQueries.remove(holderId)
   }
 
   override def toString: String = s"debugInfo=$debugInfo lockState: ${reclaimLock} " +
