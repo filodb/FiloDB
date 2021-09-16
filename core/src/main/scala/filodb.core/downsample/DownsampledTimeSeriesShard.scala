@@ -20,7 +20,7 @@ import filodb.core.{DatasetRef, Types}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, QuerySession}
+import filodb.core.query.{ColumnFilter, Filter, QuerySession}
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -31,7 +31,6 @@ class DownsampledTimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val shardTotalRecoveryTime = Kamon.gauge("downsample-total-shard-recovery-time",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
   val partitionsQueried = Kamon.counter("downsample-partitions-queried").withTags(TagSet.from(tags))
-  val chunksQueried = Kamon.counter("downsample-chunks-queried").withTags(TagSet.from(tags))
   val queryTimeRangeMins = Kamon.histogram("query-time-range-minutes").withTags(TagSet.from(tags))
   val indexEntriesRefreshed = Kamon.counter("index-entries-refreshed").withTags(TagSet.from(tags))
   val indexEntriesPurged = Kamon.counter("index-entries-purged").withTags(TagSet.from(tags))
@@ -63,6 +62,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   private val indexDataset = downsampledDatasetRefs.last
   private val indexTtlMs = downsampleTtls.last.toMillis
+  private val clusterType = filodbConfig.getString("cluster-type")
 
   private val downsampleStoreConfig = StoreConfig(filodbConfig.getConfig("downsampler.downsample-store-config"))
 
@@ -114,12 +114,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60
 
-  def startFlushingIndex(): Unit =
-    partKeyIndex.startFlushThread(downsampleStoreConfig.partIndexFlushMinDelaySeconds,
-                                  downsampleStoreConfig.partIndexFlushMaxDelaySeconds)
-
   def recoverIndex(): Future[Unit] = {
-    startFlushingIndex()
     indexBootstrapper
       .bootstrapIndexDownsample(partKeyIndex, shardNum, indexDataset, indexTtlMs){ _ => createPartitionID() }
       .map { count =>
@@ -152,6 +147,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                                            rawStoreConfig.flushInterval).mapAsync { _ =>
       purgeExpiredIndexEntries()
       indexRefresh()
+    }.map { _ =>
+      partKeyIndex.refreshReadersBlocking()
     }.onErrorRestartUnlimited.completedL.runAsync(housekeepingSched)
   }
 
@@ -220,9 +217,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     next
   }
 
-  def refreshPartKeyIndexBlocking(): Unit = {
-    partKeyIndex.refreshReadersBlocking()
-  }
+  def refreshPartKeyIndexBlocking(): Unit = {}
 
   def lookupPartitions(partMethod: PartitionScanMethod,
                        chunkMethod: ChunkScanMethod,
@@ -244,8 +239,16 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
             RecordSchema.schemaID(pkRec.partKey, UnsafeUtils.arayOffset)
           }
           stats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
+          val metricShardKeys = schemas.part.options.shardKeyColumns
+          val metricGroupBy = clusterType +: metricShardKeys.map { col =>
+            filters.collectFirst {
+              case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
+            }.getOrElse("unknown")
+          }.toList
+          val chunksReadCounter = querySession.queryStats.getChunksScannedCounter(metricGroupBy)
+
           PartLookupResult(shardNum, chunkMethod, debox.Buffer.empty,
-            _schema, debox.Map.empty, debox.Buffer.empty, recs, stats.chunksQueried)
+            _schema, debox.Map.empty, debox.Buffer.empty, recs, chunksReadCounter)
         } else {
           throw new UnsupportedOperationException("Cannot have empty filters")
         }

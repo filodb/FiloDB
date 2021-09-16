@@ -206,84 +206,19 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
     downsampleLp.endMs shouldEqual rawStartForSubquery - 1.minute.toMillis
   }
 
-//  it("TODO should direct subquery with windowing to downsample planner and verify subquery lookback") {
-//    val start = now/1000 - 30.minutes.toSeconds
-//    val step = 1.minute.toSeconds
-//    val end = now/1000 - 2.minutes.toSeconds
-//    val logicalPlan = Parser.queryRangeToLogicalPlan("max_over_time(foo[3m:1m])",
-//      TimeStepParams(start, step, end))
-//      .asInstanceOf[PeriodicSeriesPlan]
-//    val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
-//    val exp = ep.asInstanceOf[MockExecPlan]
-//    exp.name shouldEqual "downsample"
-//  }
-
-//  it("TODO here we have raw plan start bigger than the actual end of the original plan") {
-//
-//    val start = now/1000 - 30.minutes.toSeconds
-//    val step = 1.minute.toSeconds
-//    val end = now/1000 - 2.minutes.toSeconds
-//    val logicalPlan = Parser.queryRangeToLogicalPlan("max_over_time(foo[3m:1m])",
-//      TimeStepParams(start, step, end))
-//      .asInstanceOf[PeriodicSeriesPlan]
-//
-//    val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
-//    val stitchExec = ep.asInstanceOf[StitchRvsExec]
-//    stitchExec.children.size shouldEqual 2
-//
-//    val rawEp = stitchExec.children.head.asInstanceOf[MockExecPlan]
-//    val downsampleEp = stitchExec.children.last.asInstanceOf[MockExecPlan]
-//
-//    rawEp.name shouldEqual "raw"
-//    downsampleEp.name shouldEqual "downsample"
-//    val rawLp = rawEp.lp.asInstanceOf[PeriodicSeriesPlan]
-//    val downsampleLp = downsampleEp.lp.asInstanceOf[PeriodicSeriesPlan]
-//
-//    // find first instant with range available within raw data
-//    // 8 minutes is a lookback here composed of 3 minutes of subquery and 5 minutues of staleness
-//    val rawStart = ((start*1000) to (end*1000) by (step*1000)).find { instant =>
-//      instant - 8.minutes.toMillis >= earliestRawTime
-//    }.get
-//
-//    rawLp.startMs shouldEqual rawStart
-//    rawLp.endMs shouldEqual logicalPlan.endMs
-//
-//    downsampleLp.startMs shouldEqual logicalPlan.startMs
-//    downsampleLp.endMs shouldEqual rawStart - 1.minute.toMillis
-//  }
-
-  it("should direct overlapping subquery with windowing to both raw & downsample planner and stitch") {
-
+  it("should direct subquery with windowing to downsample planner and verify subquery lookback") {
     val start = now/1000 - 30.minutes.toSeconds
     val step = 1.minute.toSeconds
-    val end = now/1000 - 1.minutes.toSeconds
+    val end = now/1000 - 2.minutes.toSeconds
     val logicalPlan = Parser.queryRangeToLogicalPlan("max_over_time(foo[3m:1m])",
       TimeStepParams(start, step, end))
       .asInstanceOf[PeriodicSeriesPlan]
-
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
-    val stitchExec = ep.asInstanceOf[StitchRvsExec]
-    stitchExec.children.size shouldEqual 2
-
-    val rawEp = stitchExec.children.head.asInstanceOf[MockExecPlan]
-    val downsampleEp = stitchExec.children.last.asInstanceOf[MockExecPlan]
-
-    rawEp.name shouldEqual "raw"
-    downsampleEp.name shouldEqual "downsample"
-    val rawLp = rawEp.lp.asInstanceOf[PeriodicSeriesPlan]
-    val downsampleLp = downsampleEp.lp.asInstanceOf[PeriodicSeriesPlan]
-
-    // find first instant with range available within raw data
-    // 8 minutes is a lookback here composed of 3 minutes of subquery and 5 minutues of staleness
-    val rawStart = ((start*1000) to (end*1000) by (step*1000)).find { instant =>
-      instant - 8.minutes.toMillis > earliestRawTime
-    }.get
-
-    rawLp.startMs shouldEqual rawStart
-    rawLp.endMs shouldEqual logicalPlan.endMs
-
+    val exp = ep.asInstanceOf[MockExecPlan]
+    exp.name shouldEqual "downsample"
+    val downsampleLp = exp.lp.asInstanceOf[PeriodicSeriesPlan]
     downsampleLp.startMs shouldEqual logicalPlan.startMs
-    downsampleLp.endMs shouldEqual rawStart - 1.minute.toMillis
+    downsampleLp.endMs shouldEqual latestDownsampleTime
   }
 
   def getStartForSubquery(startMs: Long, stepMs: Long) : Long = {

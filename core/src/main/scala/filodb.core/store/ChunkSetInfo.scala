@@ -1,11 +1,12 @@
 package filodb.core.store
 
 import java.nio.ByteBuffer
+import java.util.concurrent.atomic.AtomicInteger
 
 import com.googlecode.javaewah.EWAHCompressedBitmap
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
-import kamon.metric.Counter
+import kamon.Kamon
 
 import filodb.core.QueryTimeoutException
 import filodb.core.Types._
@@ -327,16 +328,24 @@ class ElementChunkInfoIterator(elIt: ElementIterator) extends ChunkInfoIterator 
   final def unlock(): Unit = elIt.unlock()
 }
 
+object CountingChunkInfoIterator {
+  val queriedChunks = Kamon.counter("chunks-queried").withoutTags()
+}
+
 class CountingChunkInfoIterator(base: ChunkInfoIterator,
-                                queriedChunksCounter: Counter) extends ChunkInfoIterator {
+                                queriedChunksStat: AtomicInteger) extends ChunkInfoIterator {
   override def close(): Unit = base.close()
   override def hasNext: Boolean = base.hasNext
   override def nextInfoReader: ChunkSetInfoReader = {
-    queriedChunksCounter.increment()
+    // Why two counters ?
+    // 1. query stats counter to meter usage by ws/ns. This will eventually be sent as part of query result.
+    queriedChunksStat.incrementAndGet()
+    // 2. kamon counter to track per instance. It is not broken down by shard/dataset. Doing that needs more memory
+    CountingChunkInfoIterator.queriedChunks.increment()
     base.nextInfoReader
   }
   override def nextInfo: ChunkSetInfo = {
-    queriedChunksCounter.increment()
+    queriedChunksStat.incrementAndGet()
     base.nextInfo
   }
   override def lock(): Unit = base.lock()

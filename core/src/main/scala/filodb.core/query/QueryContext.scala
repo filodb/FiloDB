@@ -1,7 +1,10 @@
 package filodb.core.query
 
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
+import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration._
 
 import filodb.core.{SpreadChange, SpreadProvider}
@@ -85,14 +88,62 @@ object QueryContext {
   * Placeholder for query related information. Typically passed along query execution path.
   */
 case class QuerySession(qContext: QueryContext,
-                        queryConfig: QueryConfig,
-                        var lock: Option[EvictionLock] = None,
-                        var resultCouldBePartial: Boolean = false,
-                        var partialResultsReason: Option[String] = None) {
+                        queryConfig: QueryConfig) {
+
+  val queryStats: QueryStats = QueryStats()
+  private var lock: Option[EvictionLock] = None
+  var resultCouldBePartial: Boolean = false
+  var partialResultsReason: Option[String] = None
+
+  def setLock(toSet: EvictionLock): Unit = {
+    // TODO we need to enable this check someday. I am not able to do now
+    // since unit tests widely reuse sessions for running multiple exec plans.
+//    if (lock.isDefined) throw new IllegalStateException(s"Assigning eviction lock to session two times $qContext")
+    lock = Some(toSet)
+  }
+
   def close(): Unit = {
     lock.foreach(_.releaseSharedLock(qContext.queryId))
     lock = None
   }
+}
+
+case class Stat() {
+  val partsScanned = new AtomicInteger
+  val chunksScanned = new AtomicInteger
+  val resultSize = new AtomicLong
+  override def toString: String = s"(partsScanned=$partsScanned, chunksScanned=$chunksScanned, resultSize=$resultSize)"
+  def add(s: Stat): Unit = {
+    partsScanned.addAndGet(s.partsScanned.get())
+    chunksScanned.addAndGet(s.chunksScanned.get())
+    resultSize.addAndGet(s.resultSize.get())
+  }
+}
+
+case class QueryStats() {
+  val stat = TrieMap[Seq[String], Stat]()
+
+  override def toString: String = stat.toString()
+
+  def add(s: QueryStats): Unit = {
+    s.stat.foreach(kv => stat.getOrElseUpdate(kv._1, Stat()).add(kv._2))
+  }
+
+  def getPartsScannedCounter(group: Seq[String] = Nil): AtomicInteger = {
+    val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
+    stat.getOrElseUpdate(theNs, Stat()).partsScanned
+  }
+
+  def getChunksScannedCounter(group: Seq[String] = Nil): AtomicInteger = {
+    val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
+    stat.getOrElseUpdate(theNs, Stat()).chunksScanned
+  }
+
+  def getResultSizeCounter(group: Seq[String] = Nil): AtomicLong = {
+    val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
+    stat.getOrElseUpdate(theNs, Stat()).resultSize
+  }
+
 }
 
 object QuerySession {

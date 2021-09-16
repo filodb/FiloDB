@@ -1,6 +1,7 @@
 package filodb.core.memstore
 
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.locks.StampedLock
 
 import scala.collection.mutable
@@ -16,7 +17,7 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import debox.{Buffer, Map => DMap}
 import kamon.Kamon
-import kamon.metric.{Counter, MeasurementUnit}
+import kamon.metric.MeasurementUnit
 import kamon.tag.TagSet
 import monix.eval.Task
 import monix.execution.{Scheduler, UncaughtExceptionReporter}
@@ -29,7 +30,7 @@ import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.memstore.ratelimit.{CardinalityRecord, CardinalityTracker, QuotaSource, RocksDbCardinalityStore}
 import filodb.core.metadata.{Schema, Schemas}
-import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QuerySession}
+import filodb.core.query.{ColumnFilter, Filter, QuerySession}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.data.Shutdown
@@ -44,7 +45,6 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val shardTotalRecoveryTime = Kamon.gauge("memstore-total-shard-recovery-time",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
   val chunksQueried = Kamon.counter("memstore-chunks-queried").withTags(TagSet.from(tags))
-  val chunksQueriedByShardKey = Kamon.counter("memstore-chunks-queried-by-shardkey")
   val tsCountBySchema = Kamon.gauge("memstore-timeseries-by-schema").withTags(TagSet.from(tags))
   val rowsIngested = Kamon.counter("memstore-rows-ingested").withTags(TagSet.from(tags))
   val partitionsCreated = Kamon.counter("memstore-partitions-created").withTags(TagSet.from(tags))
@@ -216,7 +216,7 @@ case class PartLookupResult(shard: Int,
                             partIdsMemTimeGap: debox.Map[Int, Long] = debox.Map.empty,
                             partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty,
                             pkRecords: Seq[PartKeyLuceneIndexRecord] = Seq.empty,
-                            queriedChunksCounter: Counter)
+                            queriedChunksCounter: AtomicInteger)
 
 final case class SchemaMismatch(expected: String, found: String) extends
 Exception(s"Multiple schemas found, please filter. Expected schema $expected, found schema $found")
@@ -262,8 +262,9 @@ class TimeSeriesShard(val ref: DatasetRef,
   @volatile var isReadyForQuery = false
 
   val shardStats = new TimeSeriesShardStats(ref, shardNum)
-  val shardKeyLevelIngestionMetricsEnabled = filodbConfig.getBoolean("shard-key-level-ingestion-metrics-enabled")
-  val shardKeyLevelQueryMetricsEnabled = filodbConfig.getBoolean("shard-key-level-query-metrics-enabled")
+  private val shardKeyLevelIngestionMetricsEnabled =
+    filodbConfig.getBoolean("shard-key-level-ingestion-metrics-enabled")
+  private val clusterType = filodbConfig.getString("cluster-type")
 
   val creationTime = System.currentTimeMillis()
 
@@ -308,6 +309,15 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val ensureTspHeadroomPercent = filodbConfig.getDouble("memstore.ensure-tsp-count-headroom-percent")
   private val ensureBlockHeadroomPercent = filodbConfig.getDouble("memstore.ensure-block-memory-headroom-percent")
   private val ensureNativeMemHeadroomPercent = filodbConfig.getDouble("memstore.ensure-native-memory-headroom-percent")
+
+  private val trackQueriesHoldingEvictionLock = filodbConfig.getBoolean("memstore.track-queries-holding-eviction-lock")
+  /**
+   * Lock that protects chunks and TSPs from being reclaimed from Memstore.
+   * This is needed to prevent races between ODP queries and reclaims and ensure that
+   * TSPs and chunks dont get evicted when queries are being served.
+   */
+  private[memstore] final val evictionLock = new EvictionLock(trackQueriesHoldingEvictionLock,
+    s"shard=$shardNum dataset=$ref")
 
   /**
    * Queue of partIds that are eligible for eviction since they have stopped ingesting.
@@ -378,13 +388,6 @@ class TimeSeriesShard(val ref: DatasetRef,
   // Use a StampedLock because it supports optimistic read locking. This means that no blocking
   // occurs in the common case, when there isn't any contention reading from partSet.
   private[memstore] final val partSetLock = new StampedLock
-
-  /**
-   * Lock that protects chunks and TSPs from being reclaimed from Memstore.
-   * This is needed to prevent races between ODP queries and reclaims and ensure that
-   * TSPs and chunks dont get evicted when queries are being served.
-   */
-  private[memstore] final val evictionLock = new EvictionLock(s"shard=$shardNum dataset=$ref")
 
   // The off-heap block store used for encoded chunks
   private val shardTags = Map("dataset" -> ref.dataset, "shard" -> shardNum.toString)
@@ -600,11 +603,11 @@ class TimeSeriesShard(val ref: DatasetRef,
   def ingest(data: SomeData): Long = ingest(data.records, data.offset)
 
   def recoverIndex(): Future[Unit] = {
-    startFlushingIndex()
     val indexBootstrapper = new IndexBootstrapper(colStore)
     indexBootstrapper.bootstrapIndexRaw(partKeyIndex, shardNum, ref)(bootstrapPartKey)
                      .executeOn(ingestSched) // to make sure bootstrapIndex task is run on ingestion thread
                      .map { count =>
+                        startFlushingIndex()
                        logger.info(s"Bootstrapped index for dataset=$ref shard=$shardNum with $count records")
                      }.runAsync(ingestSched)
   }
@@ -1409,7 +1412,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     if (numPartsToEvict > 0) {
       val partIdsToEvict = partitionsToEvict(numPartsToEvict)
       if (partIdsToEvict.isEmpty) {
-        logger.warn(s"dataset=$ref shard=$shardNum: No partitions to evict but we are still low on space. " +
+        logger.warn(s"dataset=$ref shard=$shardNum No partitions to evict but we are still low on space. " +
           s"DATA WILL BE DROPPED")
         return false
       }
@@ -1452,8 +1455,11 @@ class TimeSeriesShard(val ref: DatasetRef,
         if (!evictedPartKeysDisposed) evictedPartKeys.approximateElementCount() else 0
       }
       shardStats.evictedPkBloomFilterSize.update(elemCount)
-      logger.info(s"dataset=$ref shard=$shardNum: evicted $numPartsEvicted partitions, skipped $partsSkipped")
+      logger.info(s"Eviction complete on dataset=$ref shard=$shardNum " +
+        s" numPartsEvicted=$numPartsEvicted numPartsSkipped=$partsSkipped")
       shardStats.partitionsEvicted.increment(numPartsEvicted)
+    } else {
+      logger.error(s"Could not find any partition to evict when eviction is needed! Is the system overloaded?")
     }
     true
   }
@@ -1526,13 +1532,6 @@ class TimeSeriesShard(val ref: DatasetRef,
   def lookupPartitions(partMethod: PartitionScanMethod,
                        chunkMethod: ChunkScanMethod,
                        querySession: QuerySession): PartLookupResult = {
-    querySession.lock = Some(evictionLock)
-    val promQl = querySession.qContext.origQueryParams match {
-      case p: PromQlQueryParams => p.promQl
-      case _ => "unknown"
-    }
-    evictionLock.acquireSharedLock(querySession.qContext.queryId, promQl)
-    val metricShardKeys = schemas.part.options.shardKeyColumns.dropRight(1)
     // any exceptions thrown here should be caught by a wrapped Task.
     // At the end, MultiSchemaPartitionsExec.execute releases the lock when the task is complete
     partMethod match {
@@ -1540,26 +1539,25 @@ class TimeSeriesShard(val ref: DatasetRef,
         val partIds = debox.Buffer.empty[Int]
         getPartition(partition).foreach(p => partIds += p.partID)
         PartLookupResult(shardNum, chunkMethod, partIds, Some(RecordSchema.schemaID(partition)),
-          queriedChunksCounter = shardStats.chunksQueried)
+          queriedChunksCounter = querySession.queryStats.getChunksScannedCounter())
       case MultiPartitionScan(partKeys, _)   =>
         val partIds = debox.Buffer.empty[Int]
         partKeys.flatMap(getPartition).foreach(p => partIds += p.partID)
         PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID),
-          queriedChunksCounter = shardStats.chunksQueried)
+          queriedChunksCounter = querySession.queryStats.getChunksScannedCounter())
       case FilteredPartitionScan(_, filters) =>
-        val chunksQueriedMetric = if (shardKeyLevelQueryMetricsEnabled) {
-          val metricTags = metricShardKeys.map { col =>
-            filters.collectFirst {
-              case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => s"metric${col}tag" -> filtVal
-            }.getOrElse(col -> "unknown")
-          }.toMap
-          shardStats.chunksQueriedByShardKey.withTags(TagSet.from(metricTags))
-        } else shardStats.chunksQueried
+        val metricShardKeys = schemas.part.options.shardKeyColumns
+        val metricGroupBy = clusterType +: metricShardKeys.map { col =>
+          filters.collectFirst {
+            case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
+          }.getOrElse("unknown")
+        }.toList
+        val chunksReadCounter = querySession.queryStats.getChunksScannedCounter(metricGroupBy)
         // No matter if there are filters or not, need to run things through Lucene so we can discover potential
         // TSPartitions to read back from disk
         val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
         shardStats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
-
+        querySession.queryStats.getPartsScannedCounter(metricGroupBy).addAndGet(matches.length)
         Kamon.currentSpan().tag(s"num-partitions-from-index-$shardNum", matches.length)
 
         // first find out which partitions are being queried for data not in memory
@@ -1584,7 +1582,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         // now provide an iterator that additionally supplies the startTimes for
         // those partitions that may need to be paged
         PartLookupResult(shardNum, chunkMethod, matches, _schema, startTimes, partIdsNotInMem,
-          Nil, chunksQueriedMetric)
+          Nil, chunksReadCounter)
     }
   }
 
@@ -1640,7 +1638,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     val highestTimeoutMs = Math.max(Math.max(blockTimeoutMs, tspTimeoutMs), nativeMemTimeoutMs)
 
     // whether to force evict even if lock cannot be acquired, if situation is dire
-    val forceEvict = addPartitionsDisabled.get
+    // We force evict since we cannot slow down ingestion since alerting queries are at stake.
+    val forceEvict = addPartitionsDisabled.get || blockStoreCurrentFreePercent < 1d ||
+      tspCountFreePercent < 1d || nativeMemFreePercent < 1d
 
     // do only if one of blocks or TSPs need eviction or if addition of partitions disabled
     if (highestTimeoutMs > 0 || forceEvict) {
@@ -1654,8 +1654,8 @@ class TimeSeriesShard(val ref: DatasetRef,
       val jobDone = if (forceEvict || acquired) {
         if (!acquired) logger.error(s"Since addPartitionsDisabled is true, proceeding with reclaim " +
           s"even though eviction lock couldn't be acquired with final timeout of $timeoutMs ms. Trading " +
-          s"off possibly wrong query results (due to old inactive partitions that would be evicted " +
-          s"and skipped) in order to unblock ingestion and stop data loss. LockState: $evictionLock")
+          s"off possibly wrong query results for old timestamps (due to old inactive partitions that would" +
+          s" be evicted and skipped) in order to unblock ingestion and stop data loss. EvictionLock: $evictionLock")
         try {
           if (blockTimeoutMs > 0) {
             blockStore.ensureHeadroom(ensureBlockHeadroomPercent)
@@ -1724,9 +1724,9 @@ class TimeSeriesShard(val ref: DatasetRef,
           evictedPartKeys.dispose()
         }
       }
-      reset() // Not really needed, but clear everything just to be consistent
+      reset()   // Not really needed, but clear everything just to be consistent
       partKeyIndex.closeIndex()
-      /* Don't explicitly free the memory just yet. These classes instead rely on a finalize
+        /* Don't explicitly free the memory just yet. These classes instead rely on a finalize
          method to ensure that no threads are accessing the memory before it's freed.
       blockStore.releaseBlocks()
       */

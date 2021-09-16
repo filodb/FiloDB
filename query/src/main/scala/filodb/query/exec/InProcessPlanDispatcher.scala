@@ -15,7 +15,6 @@ import filodb.core.query.{QueryConfig, QuerySession}
 import filodb.core.store._
 import filodb.query.QueryResponse
 
-
 /**
   * Dispatcher which will make a No-Op style call to ExecPlan#excecute().
   * Goal is that Non-Leaf plans can be executed locally in JVM and make network
@@ -77,13 +76,16 @@ case class UnsupportedChunkSource() extends ChunkSource {
 
   override def isDownsampleStore: Boolean = false
 
-  override def isReadyForQuery(ref: DatasetRef, shard: Int): Boolean = true
-
   override def topKCardinality(ref: DatasetRef,
                                shards: Seq[Int],
                                shardKeyPrefix: scala.Seq[String],
                                k: Int): scala.Seq[CardinalityRecord] =
     throw new UnsupportedOperationException("This operation is not supported")
 
+  override def acquireSharedLock(ref: DatasetRef, shardNum: Int, querySession: QuerySession): Unit =
+    throw new UnsupportedOperationException("This operation is not supported")
+
+  override def checkReadyForQuery(ref: DatasetRef, shard: Int, querySession: QuerySession): Unit =
+    throw new UnsupportedOperationException("This operation is not supported")
 }
 
