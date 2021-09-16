@@ -80,6 +80,8 @@ final case class PartKeysExec(queryContext: QueryContext,
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
+    source.checkReadyForQuery(dataset, shard, querySession)
+    source.acquireSharedLock(dataset, shard, querySession)
     val rvs = source match {
       case memStore: MemStore =>
         val response = memStore.partKeysWithFilters(dataset, shard, filters,
@@ -111,13 +113,8 @@ final case class LabelValuesExec(queryContext: QueryContext,
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
-    if (!source.isReadyForQuery(dataset, shard)) {
-      if (!queryContext.plannerParams.allowPartialResults) {
-        throw new ServiceUnavailableException(s"Unable to answer query since shard $shard is still bootstrapping")
-      }
-      querySession.resultCouldBePartial = true
-      querySession.partialResultsReason = Some("Result may be partial since some shards are still bootstrapping")
-    }
+    source.checkReadyForQuery(dataset, shard, querySession)
+    source.acquireSharedLock(dataset, shard, querySession)
     val rvs = if (source.isInstanceOf[MemStore]) {
       val memStore = source.asInstanceOf[MemStore]
       val response = filters.isEmpty match {
