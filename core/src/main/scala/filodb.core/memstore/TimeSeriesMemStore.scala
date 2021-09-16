@@ -238,7 +238,6 @@ extends MemStore with StrictLogging {
                         shardNum: Int,
                         querySession: QuerySession): Unit = {
     val shard = datasets(ref).get(shardNum)
-    querySession.lock = Some(shard.evictionLock)
     val promQl = querySession.qContext.origQueryParams match {
       case p: PromQlQueryParams => p.promQl
       case _ => "unknown"
@@ -248,8 +247,11 @@ extends MemStore with StrictLogging {
     val remainingTime = querySession.qContext.plannerParams.queryTimeoutMillis - queryTimeElapsed
     if (remainingTime <= 0) throw QueryTimeoutException(queryTimeElapsed, "beforeAcquireSharedLock")
     if (!shard.evictionLock.acquireSharedLock(remainingTime, querySession.qContext.queryId, promQl)) {
-      throw QueryTimeoutException(queryTimeElapsed, "acquireSharedLockTimeout")
+      val queryTimeElapsed2 = System.currentTimeMillis() - querySession.qContext.submitTime
+      throw QueryTimeoutException(queryTimeElapsed2, "acquireSharedLockTimeout")
     }
+    // we acquired lock, so add to session so it will be released
+    querySession.setLock(shard.evictionLock)
   }
 
   def lookupPartitions(ref: DatasetRef,

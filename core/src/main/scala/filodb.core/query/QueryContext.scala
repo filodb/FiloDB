@@ -88,11 +88,20 @@ object QueryContext {
   * Placeholder for query related information. Typically passed along query execution path.
   */
 case class QuerySession(qContext: QueryContext,
-                        queryConfig: QueryConfig,
-                        queryStats: QueryStats = QueryStats(),
-                        var lock: Option[EvictionLock] = None,
-                        var resultCouldBePartial: Boolean = false,
-                        var partialResultsReason: Option[String] = None) {
+                        queryConfig: QueryConfig) {
+
+  val queryStats: QueryStats = QueryStats()
+  private var lock: Option[EvictionLock] = None
+  var resultCouldBePartial: Boolean = false
+  var partialResultsReason: Option[String] = None
+
+  def setLock(toSet: EvictionLock): Unit = {
+    // TODO we need to enable this check someday. I am not able to do now
+    // since unit tests widely reuse sessions for running multiple exec plans.
+//    if (lock.isDefined) throw new IllegalStateException(s"Assigning eviction lock to session two times $qContext")
+    lock = Some(toSet)
+  }
+
   def close(): Unit = {
     lock.foreach(_.releaseSharedLock(qContext.queryId))
     lock = None
@@ -138,5 +147,5 @@ case class QueryStats() {
 }
 
 object QuerySession {
-  def makeForTestingOnly(): QuerySession = QuerySession(QueryContext(), EmptyQueryConfig, QueryStats())
+  def makeForTestingOnly(): QuerySession = QuerySession(QueryContext(), EmptyQueryConfig)
 }
