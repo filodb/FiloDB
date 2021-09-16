@@ -240,7 +240,8 @@ case class TopLevelSubquery(
   innerPeriodicSeries: PeriodicSeriesPlan, // someExpression
   startMs: Long, //original start - 5m
   stepMs: Long,
-  endMs: Long
+  endMs: Long,
+  orginalLookbackMs: Long
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
 
@@ -528,6 +529,20 @@ object LogicalPlan {
      case lp: RawChunkMeta                => Seq(lp)
    }
   }
+
+  /**
+   * Returns true if there is a subquery with windowing in the logical plan
+   */
+  def hasSubqueryWithWindowing(logicalPlan: LogicalPlan) : Boolean = {
+    logicalPlan match {
+      case sqww: SubqueryWithWindowing => true
+      case lp: NonLeafLogicalPlan => lp.children.foldLeft(false)(
+        (acc: Boolean, lp: LogicalPlan) => acc || hasSubqueryWithWindowing(lp)
+      )
+      case _ => false
+    }
+  }
+
 
   def getColumnValues(logicalPlan: LogicalPlan, labelName: String): Set[String] = {
     getColumnValues(getColumnFilterGroup(logicalPlan), labelName)

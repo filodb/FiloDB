@@ -419,7 +419,9 @@ object CliMain extends FilodbClusterNode {
       case Some(intervalSecs) =>
         val fut = Observable.intervalAtFixedRate(intervalSecs.seconds).foreach { n =>
           client.logicalPlan2Query(ref, plan, qOpts) match {
-            case QueryResult(_, _, result, _, _) => result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
+            case QueryResult(_, _, result, stats, _, _) =>
+              result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
+              println(s"QueryStats: $stats")
             case err: QueryError                => throw new ClientException(err)
           }
         }.recover {
@@ -430,9 +432,11 @@ object CliMain extends FilodbClusterNode {
       case None =>
         try {
           client.logicalPlan2Query(ref, plan, qOpts) match {
-            case QueryResult(_, schema, result, _, _) => println(s"Output schema: $schema")
+            case QueryResult(_, schema, result, stats, _, _) =>
+                                                   println(s"Output schema: $schema")
                                                    println(s"Number of Range Vectors: ${result.size}")
                                                    result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
+                                                   println(s"QueryStats: $stats")
             case QueryError(_,ex)               => println(s"QueryError: ${ex.getClass.getSimpleName} ${ex.getMessage}")
           }
         } catch {

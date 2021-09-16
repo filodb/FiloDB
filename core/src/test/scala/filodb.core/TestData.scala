@@ -1,10 +1,11 @@
 package filodb.core
 
+import java.util.concurrent.atomic.AtomicInteger
+
 import scala.concurrent.duration._
 import scala.io.Source
 
 import com.typesafe.config.ConfigFactory
-import kamon.Kamon
 import monix.eval.Task
 import monix.reactive.Observable
 import org.joda.time.DateTime
@@ -14,7 +15,7 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{SomeData, TimeSeriesPartitionSpec, WriteBufferPool}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schema, Schemas}
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.query.{RangeVector, RangeVectorCursor, RangeVectorKey, RawDataRangeVector, RvRange, TransientRow}
+import filodb.core.query._
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.{vectors => bv, _}
@@ -416,7 +417,7 @@ object MachineMetricsData {
       false, Option.empty, false, 1.hour.toMillis) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histIngestBH, encode = true)
-    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3), Kamon.counter("dummy").withoutTags()))  // select timestamp and histogram columns only
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3), new AtomicInteger()))  // select timestamp and histogram columns only
   }
 
   private val histMaxBP = new WriteBufferPool(TestData.nativeMem, histMaxDS.schema.data, TestData.storeConf)
@@ -432,7 +433,7 @@ object MachineMetricsData {
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histMaxBH, encode = true)
     // Select timestamp, hist, max
-    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 4, 3), Kamon.counter("dummy").withoutTags()))
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 4, 3), new AtomicInteger()))
   }
 }
 

@@ -159,6 +159,25 @@ object LogicalPlanParser {
   def vectorToQuery(lp: VectorPlan): String = s"vector$OpeningRoundBracket${convertToQuery(lp.scalars)}" +
     ClosingRoundBracket
 
+  private def subqueryWithWindowingToQuery(sqww: SubqueryWithWindowing): String = {
+    val periodicSeriesQuery = convertToQuery(sqww.innerPeriodicSeries)
+    val prefix = sqww.functionId.entryName + OpeningRoundBracket
+    val sqClause =
+      s"${OpeningSquareBracket}${sqww.subqueryWindowMs/1000}s:${sqww.subqueryStepMs/1000}s$ClosingSquareBracket"
+    val suffix = s"$sqClause$ClosingRoundBracket"
+    if (sqww.functionArgs.isEmpty) s"$prefix$periodicSeriesQuery$suffix"
+    else {
+      s"$prefix${functionArgsToQuery(sqww.functionArgs.head)}$Comma$periodicSeriesQuery$suffix"
+    }
+  }
+
+  private def topLevelSubqueryToQuery(tlsq: TopLevelSubquery): String = {
+    val periodicSeriesQuery = convertToQuery(tlsq.innerPeriodicSeries)
+    val sqClause =
+      s"${OpeningSquareBracket}${(tlsq.orginalLookbackMs)/1000}s:${tlsq.stepMs/1000}s$ClosingSquareBracket"
+    s"${periodicSeriesQuery}${sqClause}"
+  }
+
   def convertToQuery(logicalPlan: LogicalPlan): String = {
     logicalPlan match {
       case lp: RawSeries                   => rawSeriesLikeToQuery(lp)
@@ -176,6 +195,8 @@ object LogicalPlanParser {
       case lp: ScalarTimeBasedPlan         => scalarTimeToQuery(lp)
       case lp: ScalarFixedDoublePlan       => lp.scalar.toString
       case lp: VectorPlan                  => vectorToQuery(lp)
+      case lp: SubqueryWithWindowing       => subqueryWithWindowingToQuery(lp)
+      case lp: TopLevelSubquery            => topLevelSubqueryToQuery(lp)
       case _                               => throw new UnsupportedOperationException(s"Logical plan to query not " +
         s"supported for ${logicalPlan}")
     }
