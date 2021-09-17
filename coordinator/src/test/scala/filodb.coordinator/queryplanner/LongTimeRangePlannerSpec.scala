@@ -11,10 +11,9 @@ import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{EmptyQueryConfig, PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.ChunkSource
-import filodb.prometheus.ast.WindowConstants
-import filodb.prometheus.ast.TimeStepParams
+import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
-import filodb.query.{LogicalPlan, PeriodicSeriesPlan, PeriodicSeriesWithWindowing}
+import filodb.query.{LogicalPlan, PeriodicSeriesPlan, PeriodicSeriesWithWindowing, SubqueryWithWindowing, TopLevelSubquery}
 import filodb.query.exec._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -88,7 +87,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
     ep.name shouldEqual "raw"
-    ep.lp shouldEqual logicalPlan
+    ep.lp shouldEqual logicalPlan.asInstanceOf[TopLevelSubquery].innerPeriodicSeries
   }
 
   it("should direct raw-cluster-only range function subqueries to raw planner") {
@@ -99,7 +98,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
     ep.name shouldEqual "raw"
-    ep.lp shouldEqual logicalPlan
+    ep.lp shouldEqual logicalPlan.asInstanceOf[SubqueryWithWindowing]
   }
 
   it("should direct downsample-only queries to downsample planner") {
@@ -117,7 +116,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
     ep.name shouldEqual "downsample"
-    ep.lp shouldEqual logicalPlan
+    ep.lp shouldEqual logicalPlan.asInstanceOf[TopLevelSubquery].innerPeriodicSeries
   }
 
   it("should directed downsample-only range function subqueries to downsample planner") {
@@ -126,7 +125,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
     ep.name shouldEqual "downsample"
-    ep.lp shouldEqual logicalPlan
+    ep.lp shouldEqual logicalPlan.asInstanceOf[SubqueryWithWindowing]
   }
 
   it("should direct overlapping instant queries correctly to raw or downsample clusters") {
@@ -206,84 +205,19 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
     downsampleLp.endMs shouldEqual rawStartForSubquery - 1.minute.toMillis
   }
 
-//  it("TODO should direct subquery with windowing to downsample planner and verify subquery lookback") {
-//    val start = now/1000 - 30.minutes.toSeconds
-//    val step = 1.minute.toSeconds
-//    val end = now/1000 - 2.minutes.toSeconds
-//    val logicalPlan = Parser.queryRangeToLogicalPlan("max_over_time(foo[3m:1m])",
-//      TimeStepParams(start, step, end))
-//      .asInstanceOf[PeriodicSeriesPlan]
-//    val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
-//    val exp = ep.asInstanceOf[MockExecPlan]
-//    exp.name shouldEqual "downsample"
-//  }
-
-//  it("TODO here we have raw plan start bigger than the actual end of the original plan") {
-//
-//    val start = now/1000 - 30.minutes.toSeconds
-//    val step = 1.minute.toSeconds
-//    val end = now/1000 - 2.minutes.toSeconds
-//    val logicalPlan = Parser.queryRangeToLogicalPlan("max_over_time(foo[3m:1m])",
-//      TimeStepParams(start, step, end))
-//      .asInstanceOf[PeriodicSeriesPlan]
-//
-//    val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
-//    val stitchExec = ep.asInstanceOf[StitchRvsExec]
-//    stitchExec.children.size shouldEqual 2
-//
-//    val rawEp = stitchExec.children.head.asInstanceOf[MockExecPlan]
-//    val downsampleEp = stitchExec.children.last.asInstanceOf[MockExecPlan]
-//
-//    rawEp.name shouldEqual "raw"
-//    downsampleEp.name shouldEqual "downsample"
-//    val rawLp = rawEp.lp.asInstanceOf[PeriodicSeriesPlan]
-//    val downsampleLp = downsampleEp.lp.asInstanceOf[PeriodicSeriesPlan]
-//
-//    // find first instant with range available within raw data
-//    // 8 minutes is a lookback here composed of 3 minutes of subquery and 5 minutues of staleness
-//    val rawStart = ((start*1000) to (end*1000) by (step*1000)).find { instant =>
-//      instant - 8.minutes.toMillis >= earliestRawTime
-//    }.get
-//
-//    rawLp.startMs shouldEqual rawStart
-//    rawLp.endMs shouldEqual logicalPlan.endMs
-//
-//    downsampleLp.startMs shouldEqual logicalPlan.startMs
-//    downsampleLp.endMs shouldEqual rawStart - 1.minute.toMillis
-//  }
-
-  it("should direct overlapping subquery with windowing to both raw & downsample planner and stitch") {
-
+  it("should direct subquery with windowing to downsample planner and verify subquery lookback") {
     val start = now/1000 - 30.minutes.toSeconds
     val step = 1.minute.toSeconds
-    val end = now/1000 - 1.minutes.toSeconds
+    val end = now/1000 - 20.minutes.toSeconds
     val logicalPlan = Parser.queryRangeToLogicalPlan("max_over_time(foo[3m:1m])",
       TimeStepParams(start, step, end))
       .asInstanceOf[PeriodicSeriesPlan]
-
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
-    val stitchExec = ep.asInstanceOf[StitchRvsExec]
-    stitchExec.children.size shouldEqual 2
-
-    val rawEp = stitchExec.children.head.asInstanceOf[MockExecPlan]
-    val downsampleEp = stitchExec.children.last.asInstanceOf[MockExecPlan]
-
-    rawEp.name shouldEqual "raw"
-    downsampleEp.name shouldEqual "downsample"
-    val rawLp = rawEp.lp.asInstanceOf[PeriodicSeriesPlan]
-    val downsampleLp = downsampleEp.lp.asInstanceOf[PeriodicSeriesPlan]
-
-    // find first instant with range available within raw data
-    // 8 minutes is a lookback here composed of 3 minutes of subquery and 5 minutues of staleness
-    val rawStart = ((start*1000) to (end*1000) by (step*1000)).find { instant =>
-      instant - 8.minutes.toMillis > earliestRawTime
-    }.get
-
-    rawLp.startMs shouldEqual rawStart
-    rawLp.endMs shouldEqual logicalPlan.endMs
-
+    val exp = ep.asInstanceOf[MockExecPlan]
+    exp.name shouldEqual "downsample"
+    val downsampleLp = exp.lp.asInstanceOf[PeriodicSeriesPlan]
     downsampleLp.startMs shouldEqual logicalPlan.startMs
-    downsampleLp.endMs shouldEqual rawStart - 1.minute.toMillis
+    downsampleLp.endMs shouldEqual logicalPlan.endMs
   }
 
   def getStartForSubquery(startMs: Long, stepMs: Long) : Long = {
@@ -341,12 +275,9 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
   it("should direct raw-cluster-only queries to raw planner for scalar vector queries") {
     val logicalPlan = Parser.queryRangeToLogicalPlan("scalar(vector(1)) * 10",
       TimeStepParams(now/1000 - 7.minutes.toSeconds, 1.minute.toSeconds, now/1000 - 1.minutes.toSeconds))
- println("logicalplan:" + logicalPlan)
-    val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
-    println(ep)
-   ep.name shouldEqual "raw"
-    println("ep.lp:" + ep.lp)
-   // ep.lp shouldEqual "ScalarFixedDoublePlan(1.0,RangeParams(1630371715,60,1630372075))"
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
+    ep.isInstanceOf[ScalarFixedDoubleExec] shouldEqual true
   }
 
   it("should direct overlapping offset queries to both raw & downsample planner and stitch") {
@@ -396,13 +327,9 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(PromQlQueryParams(query, start, step, end)))
     val binaryJoinExec = ep.asInstanceOf[BinaryJoinExec]
 
-    val lhs =  binaryJoinExec.lhs.head
-    lhs.children.head.asInstanceOf[MockExecPlan].name shouldEqual "raw"
-    lhs.children.last.asInstanceOf[MockExecPlan].name shouldEqual "downsample"
-
-    val rhs =  binaryJoinExec.rhs.head
-    rhs.children.head.asInstanceOf[MockExecPlan].name shouldEqual "raw"
-    rhs.children.last.asInstanceOf[MockExecPlan].name shouldEqual "downsample"
+    binaryJoinExec.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual true
+    binaryJoinExec.lhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
+    binaryJoinExec.rhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
   }
 
   it("should direct overlapping binary join offset queries with vector(0) " +
@@ -423,9 +350,9 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
       TimeStepParams(start, step, end))
       .asInstanceOf[PeriodicSeriesPlan]
 
-    val rawPlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = earliestRawTime,
+    val rawPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = earliestRawTime,
       queryConfig, "raw")
-    val downsamplePlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
+    val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
     val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
@@ -457,9 +384,9 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
       TimeStepParams(start, step, end))
       .asInstanceOf[PeriodicSeriesPlan]
 
-    val rawPlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = earliestRawTime,
+    val rawPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = earliestRawTime,
       queryConfig, "raw")
-    val downsamplePlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
+    val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
     val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
@@ -475,7 +402,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
     binaryJoinExec.rhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
   }
 
-  it("should direct abs binary join to raw cluster and use ActorPlanDispatcher") {
+  it("should direct binary join with abs to raw cluster and use ActorPlanDispatcher") {
 
     val start = now/1000 - 5.minutes.toSeconds
     val step = 1.minute.toSeconds
@@ -492,21 +419,18 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
       TimeStepParams(start, step, end))
       .asInstanceOf[PeriodicSeriesPlan]
 
-    println("logicalPlan:" + logicalPlan)
-
-    val rawPlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = earliestRawTime,
+    val rawPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = earliestRawTime,
       queryConfig, "raw")
-    val downsamplePlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
+    val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
     val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
-println("rv:" + ep.rangeVectorTransformers)
     ep.isInstanceOf[BinaryJoinExec] shouldEqual(true)
 
     val binaryJoinExec = ep.asInstanceOf[BinaryJoinExec]
-
+    binaryJoinExec.rangeVectorTransformers.head.isInstanceOf[InstantVectorFunctionMapper] shouldEqual true
     // Since LHS and RHS both belong to raw cluster, we use ActorPlanDispatcher
     ep.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual true
     binaryJoinExec.lhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)

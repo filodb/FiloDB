@@ -1,12 +1,14 @@
 package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration._
+
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
-import filodb.core.{DatasetRef, SpreadProvider}
+import filodb.core.SpreadProvider
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query._
@@ -35,12 +37,11 @@ object SingleClusterPlanner {
   * @param splitSizeMs time range for each split, if plan needed to be split
   */
 
-//cluster name
-class SingleClusterPlanner(dsRef: DatasetRef,
+class SingleClusterPlanner(val dataset: Dataset,
                            schema: Schemas,
                            shardMapperFunc: => ShardMapper,
                            earliestRetainedTimestampFn: => Long,
-                           config: QueryConfig,
+                           val queryConfig: QueryConfig,
                            clusterName: String,
                            spreadProvider: SpreadProvider = StaticSpreadProvider(),
                            timeSplitEnabled: Boolean = false,
@@ -48,8 +49,9 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                            splitSizeMs: => Long = 1.day.toMillis)
                            extends QueryPlanner with StrictLogging with PlannerMaterializer {
   override val schemas = schema
-  override def queryConfig: QueryConfig = config
+
   val shardColumns = dsOptions.shardKeyColumns.sorted
+  val dsRef = dataset.ref
 
   import SingleClusterPlanner._
 
@@ -472,29 +474,4 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
     PlanResult(metaExec, false)
   }
-
-  private def materializeScalarTimeBased(qContext: QueryContext,
-                                         lp: ScalarTimeBasedPlan): PlanResult = {
-    val scalarTimeBasedExec = TimeScalarGeneratorExec(qContext, dsRef, lp.rangeParams, lp.function)
-    PlanResult(Seq(scalarTimeBasedExec), false)
-  }
-
-  private def materializeScalarBinaryOperation(qContext: QueryContext,
-                                               lp: ScalarBinaryOperation): PlanResult = {
-    val lhs = if (lp.lhs.isRight) {
-      // Materialize as lhs is a logical plan
-      val lhsExec = walkLogicalPlanTree(lp.lhs.right.get, qContext)
-      Right(lhsExec.plans.map(_.asInstanceOf[ScalarBinaryOperationExec]).head)
-    } else Left(lp.lhs.left.get)
-
-    val rhs = if (lp.rhs.isRight) {
-      val rhsExec = walkLogicalPlanTree(lp.rhs.right.get, qContext)
-      Right(rhsExec.plans.map(_.asInstanceOf[ScalarBinaryOperationExec]).head)
-    } else Left(lp.rhs.left.get)
-
-    val scalarBinaryExec = ScalarBinaryOperationExec(qContext, dsRef, lp.rangeParams, lhs, rhs, lp.operator)
-    PlanResult(Seq(scalarBinaryExec), false)
-  }
-
-  override def dataset: Dataset = ???
 }

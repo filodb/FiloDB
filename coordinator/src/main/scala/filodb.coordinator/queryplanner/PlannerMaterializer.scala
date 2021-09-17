@@ -1,9 +1,11 @@
 package filodb.coordinator.queryplanner
 
 import java.util.concurrent.ThreadLocalRandom
+
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
-import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
+import filodb.core.query._
 import filodb.query._
 import filodb.query.exec._
 
@@ -17,9 +19,9 @@ case class PlanResult(plans: Seq[ExecPlan], needsStitch: Boolean = false)
 
 trait  PlannerMaterializer {
     def schemas: Schemas
-    def dsOptions: DatasetOptions = schemas.part.options
-  def dataset: Dataset
     def queryConfig: QueryConfig
+    def dataset: Dataset
+    def dsOptions: DatasetOptions = schemas.part.options
 
     def materializeVectorPlan(qContext: QueryContext,
                               lp: VectorPlan): PlanResult = {
@@ -243,6 +245,29 @@ trait  PlannerMaterializer {
     val innerExecPlan = walkLogicalPlanTree(sqww.innerPeriodicSeries, qContext)
     innerExecPlan.plans.foreach { p => p.addRangeVectorTransformer(rangeVectorTransformer)}
     innerExecPlan
+  }
+
+   def materializeScalarTimeBased(qContext: QueryContext,
+                                  lp: ScalarTimeBasedPlan): PlanResult = {
+    val scalarTimeBasedExec = TimeScalarGeneratorExec(qContext, dataset.ref, lp.rangeParams, lp.function)
+    PlanResult(Seq(scalarTimeBasedExec), false)
+  }
+
+   def materializeScalarBinaryOperation(qContext: QueryContext,
+                                               lp: ScalarBinaryOperation): PlanResult = {
+    val lhs = if (lp.lhs.isRight) {
+      // Materialize as lhs is a logical plan
+      val lhsExec = walkLogicalPlanTree(lp.lhs.right.get, qContext)
+      Right(lhsExec.plans.map(_.asInstanceOf[ScalarBinaryOperationExec]).head)
+    } else Left(lp.lhs.left.get)
+
+    val rhs = if (lp.rhs.isRight) {
+      val rhsExec = walkLogicalPlanTree(lp.rhs.right.get, qContext)
+      Right(rhsExec.plans.map(_.asInstanceOf[ScalarBinaryOperationExec]).head)
+    } else Left(lp.rhs.left.get)
+
+    val scalarBinaryExec = ScalarBinaryOperationExec(qContext, dataset.ref, lp.rangeParams, lhs, rhs, lp.operator)
+    PlanResult(Seq(scalarBinaryExec), false)
   }
 
 }

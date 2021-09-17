@@ -18,7 +18,7 @@ import net.ceedubs.ficus.readers.ValueReader
 import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
-import filodb.core.metadata.Schemas
+import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.{QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.CorruptVectorException
 import filodb.query._
@@ -27,10 +27,10 @@ import filodb.query.exec.ExecPlan
 object QueryActor {
   final case class ThrowException(dataset: DatasetRef)
 
-  def props(memStore: MemStore, dsRef: DatasetRef,
+  def props(memStore: MemStore, dataset: Dataset,
             schemas: Schemas, shardMapFunc: => ShardMapper,
             earliestRawTimestampFn: => Long): Props =
-    Props(new QueryActor(memStore, dsRef, schemas,
+    Props(new QueryActor(memStore, dataset, schemas,
                          shardMapFunc, earliestRawTimestampFn))
 }
 
@@ -41,7 +41,7 @@ object QueryActor {
  * so it is probably fine for there to be just one QueryActor per dataset.
  */
 final class QueryActor(memStore: MemStore,
-                       dsRef: DatasetRef,
+                       dataset: Dataset,
                        schemas: Schemas,
                        shardMapFunc: => ShardMapper,
                        earliestRawTimestampFn: => Long) extends BaseActor {
@@ -51,6 +51,7 @@ final class QueryActor(memStore: MemStore,
 
   val config = context.system.settings.config
   val dsOptions = schemas.part.options
+  val dsRef = dataset.ref
 
   var filodbSpreadMap = new collection.mutable.HashMap[collection.Map[String, String], Int]
   val applicationShardKeyNames = dsOptions.nonMetricShardColumns
@@ -71,7 +72,7 @@ final class QueryActor(memStore: MemStore,
 
   logger.info(s"Starting QueryActor and QueryEngine for ds=$dsRef schemas=$schemas")
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
-  val queryPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapFunc,
+  val queryPlanner = new SingleClusterPlanner(dataset, schemas, shardMapFunc,
                                               earliestRawTimestampFn, queryConfig, "raw",
                                               functionalSpreadProvider)
   val queryScheduler = createInstrumentedQueryScheduler()

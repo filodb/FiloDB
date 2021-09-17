@@ -34,7 +34,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
     .getConfig("filodb.query").withFallback(routingConfig)
   private val queryConfig = new QueryConfig(config)
 
-  val localPlanner = new SingleClusterPlanner(dataset.ref, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+  val localPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
     queryConfig, "raw")
 
   val startSeconds = 1000
