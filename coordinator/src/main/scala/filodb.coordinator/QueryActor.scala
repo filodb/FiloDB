@@ -19,7 +19,7 @@ import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{QueryConfig, QueryContext, QuerySession}
+import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryStats}
 import filodb.core.store.CorruptVectorException
 import filodb.query._
 import filodb.query.exec.ExecPlan
@@ -162,7 +162,7 @@ final class QueryActor(memStore: MemStore,
             logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error," +
               s" query was ${q.queryContext.origQueryParams}", ex)
             queryExecuteSpan.finish()
-            replyTo ! QueryError(q.queryContext.queryId, ex)
+            replyTo ! QueryError(q.queryContext.queryId, querySession.queryStats, ex)
           }(queryScheduler)
       }
     }
@@ -179,7 +179,7 @@ final class QueryActor(memStore: MemStore,
         case NonFatal(ex) =>
           if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
             logger.error(s"Exception while materializing logical plan", ex)
-          replyTo ! QueryError("unknown", ex)
+          replyTo ! QueryError("unknown", QueryStats(), ex)
       }
     }
   }
@@ -193,7 +193,7 @@ final class QueryActor(memStore: MemStore,
         case NonFatal(ex) =>
           if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
             logger.error(s"Exception while materializing logical plan", ex)
-          replyTo ! QueryError("unknown", ex)
+          replyTo ! QueryError("unknown", QueryStats(), ex)
       }
     }
   }
@@ -215,7 +215,7 @@ final class QueryActor(memStore: MemStore,
       val ret = memStore.topKCardinality(q.dataset, q.shards, q.shardKeyPrefix, q.k)
       sender ! ret
     } catch { case e: Exception =>
-      sender ! QueryError(s"Error Occurred", e)
+      sender ! QueryError(s"Error Occurred", QueryStats(), e)
     }
   }
 
@@ -223,8 +223,8 @@ final class QueryActor(memStore: MemStore,
     // timeout can occur here if there is a build up in actor mailbox queue and delayed delivery
     val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
     if (queryTimeElapsed >= queryContext.plannerParams.queryTimeoutMillis) {
-      replyTo ! QueryError(s"Query timeout, $queryTimeElapsed ms > ${queryContext.plannerParams.queryTimeoutMillis}",
-                           QueryTimeoutException(queryTimeElapsed, this.getClass.getName))
+      replyTo ! QueryError(queryContext.queryId, QueryStats(),
+        QueryTimeoutException(queryTimeElapsed, this.getClass.getName))
       false
     } else true
   }

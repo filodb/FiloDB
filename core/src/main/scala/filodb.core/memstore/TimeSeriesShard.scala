@@ -216,7 +216,7 @@ case class PartLookupResult(shard: Int,
                             partIdsMemTimeGap: debox.Map[Int, Long] = debox.Map.empty,
                             partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty,
                             pkRecords: Seq[PartKeyLuceneIndexRecord] = Seq.empty,
-                            queriedChunksCounter: AtomicInteger)
+                            dataBytesScannedCtr: AtomicInteger)
 
 final case class SchemaMismatch(expected: String, found: String) extends
 Exception(s"Multiple schemas found, please filter. Expected schema $expected, found schema $found")
@@ -1539,12 +1539,12 @@ class TimeSeriesShard(val ref: DatasetRef,
         val partIds = debox.Buffer.empty[Int]
         getPartition(partition).foreach(p => partIds += p.partID)
         PartLookupResult(shardNum, chunkMethod, partIds, Some(RecordSchema.schemaID(partition)),
-          queriedChunksCounter = querySession.queryStats.getChunksScannedCounter())
+          dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter())
       case MultiPartitionScan(partKeys, _)   =>
         val partIds = debox.Buffer.empty[Int]
         partKeys.flatMap(getPartition).foreach(p => partIds += p.partID)
         PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID),
-          queriedChunksCounter = querySession.queryStats.getChunksScannedCounter())
+          dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter())
       case FilteredPartitionScan(_, filters) =>
         val metricShardKeys = schemas.part.options.shardKeyColumns
         val metricGroupBy = clusterType +: metricShardKeys.map { col =>
@@ -1552,7 +1552,7 @@ class TimeSeriesShard(val ref: DatasetRef,
             case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
           }.getOrElse("unknown")
         }.toList
-        val chunksReadCounter = querySession.queryStats.getChunksScannedCounter(metricGroupBy)
+        val chunksReadCounter = querySession.queryStats.getDataBytesScannedCounter(metricGroupBy)
         // No matter if there are filters or not, need to run things through Lucene so we can discover potential
         // TSPartitions to read back from disk
         val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)

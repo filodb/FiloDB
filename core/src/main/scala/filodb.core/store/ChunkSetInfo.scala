@@ -333,19 +333,27 @@ object CountingChunkInfoIterator {
 }
 
 class CountingChunkInfoIterator(base: ChunkInfoIterator,
-                                queriedChunksStat: AtomicInteger) extends ChunkInfoIterator {
+                                columnIDs: Array[Int],
+                                queriedSamplesStat: AtomicInteger) extends ChunkInfoIterator {
   override def close(): Unit = base.close()
   override def hasNext: Boolean = base.hasNext
   override def nextInfoReader: ChunkSetInfoReader = {
+    val reader = base.nextInfoReader
+    var bytesRead = 0
+    columnIDs.foreach { c =>
+      bytesRead += BinaryVector.totalBytes(reader.vectorAccessor(c), reader.vectorAddress(c))
+    }
+
     // Why two counters ?
     // 1. query stats counter to meter usage by ws/ns. This will eventually be sent as part of query result.
-    queriedChunksStat.incrementAndGet()
+    queriedSamplesStat.addAndGet(bytesRead)
+
     // 2. kamon counter to track per instance. It is not broken down by shard/dataset. Doing that needs more memory
     CountingChunkInfoIterator.queriedChunks.increment()
-    base.nextInfoReader
+    reader
   }
   override def nextInfo: ChunkSetInfo = {
-    queriedChunksStat.incrementAndGet()
+    queriedSamplesStat.incrementAndGet()
     base.nextInfo
   }
   override def lock(): Unit = base.lock()
