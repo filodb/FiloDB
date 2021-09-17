@@ -4,13 +4,16 @@ import java.io.OutputStream
 import java.math.BigInteger
 import java.sql.Timestamp
 import java.util
+
 import scala.concurrent.duration._
 import scala.util.Try
+
 import com.opencsv.CSVWriter
 import monix.reactive.Observable
 import org.rogach.scallop.ScallopConf
 import org.rogach.scallop.exceptions.ScallopException
 import org.scalactic._
+
 import filodb.coordinator._
 import filodb.coordinator.client._
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider

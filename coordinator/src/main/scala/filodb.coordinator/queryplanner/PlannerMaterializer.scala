@@ -290,61 +290,8 @@ trait  PlannerMaterializer {
     // subqueries separately
     walkLogicalPlanTree(tlsq.innerPeriodicSeries, qContext)
   }
-//  def materializeTopLevelSubquery(qContext: QueryContext, tlsq: TopLevelSubquery): PlanResult = {
-//    // This physical plan will try to execute only one range query instead of a number of individual subqueries.
-//    // If ranges of each of the subqueries have overlap, retrieving the total range
-//    // is optimal, if there is no overlap and even worse significant gap between the individual subqueries, retrieving
-//    // the entire range might be suboptimal, this still might be a better option than issuing and concatenating numerous
-//    // subqueries separately
-//    walkLogicalPlanTree(tlsq.innerPeriodicSeries, qContext)
-//  }
-//  // scalastyle:on cyclomatic.complexity
-//
-//  /**
-//   * Example:
-//   * min_over_time(foo{job="bar"}[3m:1m])
-//   *
-//   * outerStart = S
-//   * outerEnd = E
-//   * outerStep = 90s
-//   *
-//   * Resulting Exec Plan (hand edited and simplified to make it easier to read):
-//   * E~LocalPartitionDistConcatExec()
-//   * -T~PeriodicSamplesMapper(start=S, step=90s, end=E, window=3m, functionId=MinOverTime)
-//   * --T~PeriodicSamplesMapper(start=((S-3m)/1m)*1m+1m, step=1m, end=(E/1m)*1m, window=None, functionId=None)
-//   * ---E~MultiSchemaPartitionsExec
-//   */
-//  def materializeSubqueryWithWindowing(qContext: QueryContext, sqww: SubqueryWithWindowing): PlanResult = {
-//    // This physical plan will try to execute only one range query instead of a number of individual subqueries.
-//    // If ranges of each of the subqueries have overlap, retrieving the total range
-//    // is optimal, if there is no overlap and even worse significant gap between the individual subqueries, retrieving
-//    // the entire range might be suboptimal, this still might be a better option than issuing and concatenating numerous
-//    // subqueries separately
-//    val rangeFn = InternalRangeFunction.lpToInternalFunc(sqww.functionId)
-//    var innerPeriodicSeriesPlan = sqww.innerPeriodicSeries
-//    val paramsExec = materializeFunctionArgs(sqww.functionArgs, qContext)
-//    val window = Some(sqww.subqueryWindowMs)
-//    val rangeVectorTransformer =
-//      PeriodicSamplesMapper(
-//        sqww.startMs, sqww.stepMs, sqww.endMs,
-//        window,
-//        Some(rangeFn),
-//        qContext,
-//        false,
-//        paramsExec,
-//        sqww.offsetMs,
-//        false,
-//        true
-//      )
-//
-//    // Here the inner periodic series already has start/end/step populated
-//    // in Function's toSeriesPlan(), Functions.scala subqqueryArgument() method.
-//    val innerExecPlan = walkLogicalPlanTree(sqww.innerPeriodicSeries, qContext)
-//    innerExecPlan.plans.foreach { p => p.addRangeVectorTransformer(rangeVectorTransformer)}
-//    innerExecPlan
-//  }
 
-   def materializeScalarTimeBased(qContext: QueryContext,
+  def materializeScalarTimeBased(qContext: QueryContext,
                                   lp: ScalarTimeBasedPlan): PlanResult = {
     val scalarTimeBasedExec = TimeScalarGeneratorExec(qContext, dataset.ref, lp.rangeParams, lp.function)
     PlanResult(Seq(scalarTimeBasedExec), false)
