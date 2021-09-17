@@ -7,6 +7,7 @@ import com.googlecode.javaewah.EWAHCompressedBitmap
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
 
 import filodb.core.QueryTimeoutException
 import filodb.core.Types._
@@ -329,12 +330,12 @@ class ElementChunkInfoIterator(elIt: ElementIterator) extends ChunkInfoIterator 
 }
 
 object CountingChunkInfoIterator {
-  val queriedChunks = Kamon.counter("chunks-queried").withoutTags()
+  val dataBytesScannedCtr = Kamon.counter("data-scanned-by-queries", MeasurementUnit.information.bytes).withoutTags()
 }
 
 class CountingChunkInfoIterator(base: ChunkInfoIterator,
                                 columnIDs: Array[Int],
-                                queriedSamplesStat: AtomicInteger) extends ChunkInfoIterator {
+                                dataBytesScannedCtr: AtomicInteger) extends ChunkInfoIterator {
   override def close(): Unit = base.close()
   override def hasNext: Boolean = base.hasNext
   override def nextInfoReader: ChunkSetInfoReader = {
@@ -346,14 +347,14 @@ class CountingChunkInfoIterator(base: ChunkInfoIterator,
 
     // Why two counters ?
     // 1. query stats counter to meter usage by ws/ns. This will eventually be sent as part of query result.
-    queriedSamplesStat.addAndGet(bytesRead)
+    dataBytesScannedCtr.addAndGet(bytesRead)
 
     // 2. kamon counter to track per instance. It is not broken down by shard/dataset. Doing that needs more memory
-    CountingChunkInfoIterator.queriedChunks.increment()
+    CountingChunkInfoIterator.dataBytesScannedCtr.increment(bytesRead)
     reader
   }
   override def nextInfo: ChunkSetInfo = {
-    queriedSamplesStat.incrementAndGet()
+    dataBytesScannedCtr.incrementAndGet()
     base.nextInfo
   }
   override def lock(): Unit = base.lock()
