@@ -4,23 +4,20 @@ import java.io.OutputStream
 import java.math.BigInteger
 import java.sql.Timestamp
 import java.util
-
 import scala.concurrent.duration._
 import scala.util.Try
-
 import com.opencsv.CSVWriter
 import monix.reactive.Observable
 import org.rogach.scallop.ScallopConf
 import org.rogach.scallop.exceptions.ScallopException
 import org.scalactic._
-
 import filodb.coordinator._
 import filodb.coordinator.client._
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
-import filodb.core.metadata.{Column, Schemas}
+import filodb.core.metadata.{Column, Dataset, Schemas}
 import filodb.core.query._
 import filodb.core.store.ChunkSetInfoOnHeap
 import filodb.memory.MemFactory
@@ -262,7 +259,8 @@ object CliMain extends FilodbClusterNode {
       case Some(mapper) =>
         def mapperRef = mapper
         val queryConfig = new QueryConfig (config.getConfig ("query") )
-        val planner = new SingleClusterPlanner(dsRef, Schemas.global,
+        val dataset = new Dataset(dsRef.dataset, Schemas.global.schemas.get(args.schema()).get)
+        val planner = new SingleClusterPlanner(dataset, Schemas.global,
           mapperRef, earliestRetainedTimestampFn = 0, queryConfig, "raw",
           StaticSpreadProvider(SpreadChange(0, args.spread())))
         println(FindShardFormatStr.format("Shards", "Query"))

@@ -80,9 +80,9 @@ class HistogramQueryBenchmark {
   shardMapper.updateFromEvent(IngestionStarted(histDataset.ref, 0, coordinator))
 
   // Query configuration
-  val hEngine = new SingleClusterPlanner(histDataset.ref, histSchemas, shardMapper, 0,
+  val hEngine = new SingleClusterPlanner(histDataset, histSchemas, shardMapper, 0,
     queryConfig, "raw")
-  val pEngine = new SingleClusterPlanner(promDataset.ref, promSchemas, shardMapper, 0,
+  val pEngine = new SingleClusterPlanner(promDataset, promSchemas, shardMapper, 0,
     queryConfig, "raw")
   val startTime = 100000L + 100*1000  // 100 samples in.  Look back 30 samples, which normally would be 5min
 
