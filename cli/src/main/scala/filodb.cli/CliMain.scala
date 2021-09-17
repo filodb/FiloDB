@@ -437,7 +437,9 @@ object CliMain extends FilodbClusterNode {
                                                    println(s"Number of Range Vectors: ${result.size}")
                                                    result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
                                                    println(s"QueryStats: $stats")
-            case QueryError(_, _, ex)               => println(s"QueryError: ${ex.getClass.getSimpleName} ${ex.getMessage}")
+            case QueryError(_, stats, ex)  =>
+                                                   println(s"QueryError: ${ex.getClass.getSimpleName} ${ex.getMessage}")
+                                                   println(s"QueryStats: $stats")
           }
         } catch {
           case e: ClientException =>  println(s"ClientException: ${e.getMessage}")
