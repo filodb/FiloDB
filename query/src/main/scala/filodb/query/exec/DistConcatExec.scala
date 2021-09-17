@@ -19,7 +19,7 @@ trait DistConcatExec extends NonLeafExecPlan {
                         querySession: QuerySession): Observable[RangeVector] = {
     childResponses.flatMap {
       case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
-      case (QueryError(_, ex), _)         => throw ex
+      case (QueryError(_, _, ex), _)         => throw ex
     }
   }
 }

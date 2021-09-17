@@ -283,7 +283,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
   }
 
   it ("should serialize and deserialize QueryError") {
-    val err = QueryError("xdf", new IllegalStateException("Some message"))
+    val err = QueryError("xdf", QueryStats(), new IllegalStateException("Some message"))
     val deser1 = roundTrip(err).asInstanceOf[QueryError]
     val deser2 = roundTrip(deser1).asInstanceOf[QueryError]
     deser2.id shouldEqual err.id

@@ -31,7 +31,8 @@ case class MetadataRemoteExec(queryEndpoint: String,
       httpTimeoutMs, queryContext.submitTime, getUrlParams(), queryContext.traceInfo)
       .map { response =>
         response.unsafeBody match {
-          case Left(error) => QueryError(queryContext.queryId, error.error)
+          case Left(error) =>    // FIXME need to extract statistics from query error, aggregate them, send upstream
+                                 QueryError(queryContext.queryId, QueryStats(), error.error)
           case Right(successResponse) => toQueryResponse(successResponse, queryContext.queryId, execPlan2Span)
         }
       }

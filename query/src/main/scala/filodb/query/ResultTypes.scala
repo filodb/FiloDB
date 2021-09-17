@@ -14,7 +14,9 @@ sealed trait QueryResponse extends NodeResponse with java.io.Serializable {
   def id: String
 }
 
-final case class QueryError(id: String, t: Throwable) extends QueryResponse with filodb.core.ErrorResponse {
+final case class QueryError(id: String,
+                            queryStats: QueryStats,
+                            t: Throwable) extends QueryResponse with filodb.core.ErrorResponse {
   override def toString: String = s"QueryError id=$id ${t.getClass.getName} ${t.getMessage}\n" +
     t.getStackTrace.map(_.toString).mkString("\n")
 }
