@@ -236,6 +236,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       case _                               => throw new BadQueryException("Invalid logical plan")
     }
   }
+  // scalastyle:on cyclomatic.complexity
 
   private def materializeBinaryJoin(qContext: QueryContext,
                                     lp: BinaryJoin): PlanResult = {

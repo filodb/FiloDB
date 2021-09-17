@@ -1,11 +1,13 @@
 package filodb.core.downsample
 
-import com.typesafe.config.ConfigFactory
-import kamon.Kamon
-import org.scalatest.BeforeAndAfterAll
+import java.util.concurrent.atomic.AtomicInteger
 
-import filodb.core.{MachineMetricsData => MMD}
-import filodb.core.TestData
+import com.typesafe.config.ConfigFactory
+import org.scalatest.BeforeAndAfterAll
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
+
+import filodb.core.{TestData, MachineMetricsData => MMD}
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer, StringifyMapItemConsumer}
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, TimeSeriesShardStats, WriteBufferPool}
 import filodb.core.metadata._
@@ -13,10 +15,7 @@ import filodb.core.metadata.Column.ColumnType._
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store.AllChunkScan
 import filodb.memory._
-import filodb.memory.format.{vectors => bv}
-import filodb.memory.format.{TupleRowReader, ZeroCopyUTF8String}
-import org.scalatest.funspec.AnyFunSpec
-import org.scalatest.matchers.should.Matchers
+import filodb.memory.format.{TupleRowReader, ZeroCopyUTF8String, vectors => bv}
 
 // scalastyle:off null
 class ShardDownsamplerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
@@ -79,7 +78,7 @@ class ShardDownsamplerSpec extends AnyFunSpec with Matchers with BeforeAndAfterA
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(ingestBlockHolder, encode = true)
 //    part.encodeAndReleaseBuffers(ingestBlockHolder)
-    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), Kamon.counter("dummy").withoutTags())
+    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicInteger())
   }
 
   val downsampleOps = new ShardDownsampler(promDataset.name, 0, promSchema, downsampleSchema,

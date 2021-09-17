@@ -53,12 +53,20 @@ import filodb.query.exec._
     else if (endWithOffsetMs < earliestRawTime) { // full time range in downsampled cluster
       logger.info("materializing against downsample cluster:: {}", qContext.origQueryParams)
       downsampleClusterPlanner.materialize(periodicSeriesPlan, qContext)
-    } else if (startWithOffsetMs - lookbackMs >= earliestRawTime) // full time range in raw cluster
+    } else if (startWithOffsetMs - lookbackMs >= earliestRawTime) { // full time range in raw cluster
       rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
-    // the below looks like a bug, probably should be "<=", check case in LongTimeRangePlannerSpec
-    // "TODO here we have raw plan start bigger than the actual end of top plan"
-    // in the last "else" firstInstantInRaw can end up to be bigger than lastDownsampleInstant
-    else if (endWithOffsetMs - lookbackMs < earliestRawTime) { // raw/downsample overlapping query with long lookback
+      // "(endWithOffsetMs - lookbackMs) < earliestRawTime" check is erroneous, we claim that we have
+      // a long lookback only if the last lookback window overlaps with earliestRawTime, however, we
+      // should check for ANY interval overalapping earliestRawTime. We
+      // can happen with ANY lookback interval, not just the last one.
+    } else if (
+      endWithOffsetMs - lookbackMs < earliestRawTime || //TODO lookbacks can overlap in the middle intervals too
+      LogicalPlan.hasSubqueryWithWindowing(periodicSeriesPlan)
+    ) {
+      // For subqueries and long lookback queries, we keep things simple by routing to
+      // downsample cluster since dealing with lookback windows across raw/downsample
+      // clusters is quite complex and is not in scope now. We omit recent instants for which downsample
+      // cluster may not have complete data
       val lastDownsampleSampleTime = latestDownsampleTimestampFn
       val downsampleLp = if (endWithOffsetMs < lastDownsampleSampleTime) {
         periodicSeriesPlan

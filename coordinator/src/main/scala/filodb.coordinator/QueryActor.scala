@@ -127,7 +127,7 @@ final class QueryActor(memStore: MemStore,
       Kamon.runWithSpan(queryExecuteSpan, false) {
         queryExecuteSpan.tag("query", q.getClass.getSimpleName)
         queryExecuteSpan.tag("query-id", q.queryContext.queryId)
-        val querySession = QuerySession(q.queryContext, queryConfig)
+        val querySession = QuerySession(q.queryContext, queryConfig, catchMultipleLockSetErrors = true)
         queryExecuteSpan.mark("query-actor-received-execute-start")
         q.execute(memStore, querySession)(queryScheduler)
           .foreach { res =>
@@ -135,7 +135,7 @@ final class QueryActor(memStore: MemStore,
             querySession.close()
             replyTo ! res
             res match {
-              case QueryResult(_, _, vectors, _, _) => resultVectors.record(vectors.length)
+              case QueryResult(_, _, vectors, _, _, _) => resultVectors.record(vectors.length)
               case e: QueryError =>
                 queryErrors.increment()
                 queryExecuteSpan.fail(e.t.getMessage)
