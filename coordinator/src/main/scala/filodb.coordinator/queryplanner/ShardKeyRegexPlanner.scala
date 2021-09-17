@@ -24,7 +24,7 @@ case class ShardKeyMatcher(columnFilters: Seq[ColumnFilter], query: String)
   * ColumnFilter(ns, Equals(App2))
   */
 
-class ShardKeyRegexPlanner(dataset1: Dataset,
+class ShardKeyRegexPlanner(dataset: Dataset,
                            queryPlanner: QueryPlanner,
                            shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]],
                            config: QueryConfig)

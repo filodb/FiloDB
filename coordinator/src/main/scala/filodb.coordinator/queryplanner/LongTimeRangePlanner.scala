@@ -33,8 +33,8 @@ import filodb.query.exec._
                              latestDownsampleTimestampFn: => Long,
                              stitchDispatcher: => PlanDispatcher,
                              val queryConfig: QueryConfig,
-                             val dataset: Dataset
-                            ) extends QueryPlanner with PlannerMaterializer with StrictLogging {
+                             val dataset: Dataset) extends QueryPlanner
+                             with PlannerMaterializer with StrictLogging {
 
   val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
   override def schemas: Schemas = Schemas(dataset.schema)
@@ -173,8 +173,4 @@ import filodb.query.exec._
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     walkLogicalPlanTree(logicalPlan, qContext).plans.head
   }
-
- // override def dataset = dataset
-
-  //override def queryConfig = queryConfig
 }
