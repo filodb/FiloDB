@@ -86,6 +86,9 @@ object QueryContext {
 
 /**
   * Placeholder for query related information. Typically passed along query execution path.
+  *
+  * IMPORTANT: The param catchMultipleLockSetErrors should be false
+  * only in unit test code for ease of use.
   */
 case class QuerySession(qContext: QueryContext,
                         queryConfig: QueryConfig,
