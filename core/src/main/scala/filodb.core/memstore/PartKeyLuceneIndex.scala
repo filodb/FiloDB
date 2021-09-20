@@ -529,11 +529,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   def labelNamesFromFilters(columnFilters: Seq[ColumnFilter],
                           startTime: Long,
-                          endTime: Long,
-                          limit: Int): Seq[Int] = {
-    val partIdsOrderedByEndTime = new TopKPartIdsCollector(limit)
-    searchFromFilters(columnFilters, startTime, endTime, partIdsOrderedByEndTime)
-    partIdsOrderedByEndTime.topKPartIDsBitmap().toArray
+                          endTime: Long): Int = {
+    val partIdCollector = new SinglePartIdCollector
+    searchFromFilters(columnFilters, startTime, endTime, partIdCollector)
+    partIdCollector.singleResult
   }
 
   def partKeyRecordsFromFilters(columnFilters: Seq[ColumnFilter],
@@ -656,6 +655,8 @@ class SinglePartIdCollector extends SimpleCollector {
   override def collect(doc: Int): Unit = {
     if (partIdDv.advanceExact(doc)) {
       singleResult = partIdDv.longValue().toInt
+      // terminate further iteration by throwing this exception
+      throw new CollectionTerminatedException
     } else {
       throw new IllegalStateException("This shouldn't happen since every document should have a partKeyDv")
     }

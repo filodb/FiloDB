@@ -65,10 +65,23 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
 final case class LabelValuesDistConcatExec(queryContext: QueryContext,
                                            dispatcher: PlanDispatcher,
                                            children: Seq[ExecPlan]) extends MetadataDistConcatExec
+
+
 final case class LabelNamesDistConcatExec(queryContext: QueryContext,
                                            dispatcher: PlanDispatcher,
                                            children: Seq[ExecPlan]) extends DistConcatExec {
-  addRangeVectorTransformer(LimitFunctionMapper(1))
+  /**
+   * Pick first non empty result from child.
+   */
+  override protected def compose(childResponses: Observable[(QueryResponse, Int)],
+                        firstSchema: Task[ResultSchema],
+                        querySession: QuerySession): Observable[RangeVector] = {
+    qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
+    childResponses.map {
+      case (QueryResult(_, _, result, _, _, _), _) => result
+      case (QueryError(_, ex), _)         => throw ex
+    }.filter(s => s.head.numRows.getOrElse(1) > 0).headF.map(_.head)
+  }
 }
 
 final case class PartKeysExec(queryContext: QueryContext,
@@ -168,7 +181,7 @@ final case class LabelNamesExec(queryContext: QueryContext,
     }
     val rvs = if (source.isInstanceOf[MemStore]) {
       val memStore = source.asInstanceOf[MemStore]
-      val response = memStore.labelNames(dataset, shard, filters, endMs, startMs, 1)
+      val response = memStore.labelNames(dataset, shard, filters, endMs, startMs)
 
       Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
         NoCloseCursor(StringArrayRowReader(response)), None))

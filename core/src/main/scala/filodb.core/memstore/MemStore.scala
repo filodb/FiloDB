@@ -172,7 +172,7 @@ trait MemStore extends ChunkSource {
    * @param limit the number of top items to return
    */
   def labelNames(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
-                 end: Long, start: Long, limit: Int): Seq[String]
+                 end: Long, start: Long): Seq[String]
 
   /**
     * Returns the values of a given label-names for the matching Column Filters

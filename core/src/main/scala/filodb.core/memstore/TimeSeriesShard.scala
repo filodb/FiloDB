@@ -720,21 +720,21 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   def labelNames(filter: Seq[ColumnFilter],
                              endTime: Long,
-                             startTime: Long,
-                             limit: Int): Seq[String] =
-    labelNamesFromPartKeys(partKeyIndex.labelNamesFromFilters(filter, startTime, endTime, limit))
+                             startTime: Long): Seq[String] =
+    labelNamesFromPartKeys(partKeyIndex.labelNamesFromFilters(filter, startTime, endTime))
 
   /**
    * Iterator for traversal of partIds, value for the given label will be extracted from the ParitionKey.
    * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
    */
-  private def labelNamesFromPartKeys(partIds: Seq[Int]): Seq[String] = {
+  private def labelNamesFromPartKeys(partId: Int): Seq[String] = {
     val results = new mutable.HashSet[String]
-    for(partId <- partIds) {
+    if (PartKeyLuceneIndex.NOT_FOUND == partId) Seq.empty
+    else {
       val partKeyWithTimes = partKeyFromPartId(partId)
       results ++= schemas.part.binSchema.colNames(partKeyWithTimes.base, partKeyWithTimes.offset)
+      results.toSeq
     }
-    results.toSeq
   }
 
   /**

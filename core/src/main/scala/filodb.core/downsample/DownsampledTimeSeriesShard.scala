@@ -100,9 +100,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   def labelNames(filter: Seq[ColumnFilter],
                  endTime: Long,
-                 startTime: Long,
-                 limit: Int): Seq[String] =
-    labelNamesFromPartKeys(partKeyIndex.labelNamesFromFilters(filter, startTime, endTime, limit))
+                 startTime: Long): Seq[String] =
+    labelNamesFromPartKeys(partKeyIndex.labelNamesFromFilters(filter, startTime, endTime))
 
   def partKeysWithFilters(filter: Seq[ColumnFilter],
                           fetchFirstLastSampleTimes: Boolean,
@@ -343,13 +342,14 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     new PagedReadablePartition(schemas(schemaId), shardNum, -1, part, minResolutionMs, colIds)
   }
 
-  private def labelNamesFromPartKeys(partIds: Seq[Int]): Seq[String] = {
+  private def labelNamesFromPartKeys(partId: Int): Seq[String] = {
     val results = new mutable.HashSet[String]
-    for(partId <- partIds) {
+    if (PartKeyLuceneIndex.NOT_FOUND == partId) Seq.empty
+    else {
       val partKey = partKeyFromPartId(partId)
       results ++ schemas.part.binSchema.colNames(partKey, UnsafeUtils.arayOffset)
+      results.toSeq
     }
-    results.toSeq
   }
 
   /**
