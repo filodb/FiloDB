@@ -29,7 +29,7 @@ class ChangesFunctionSpec extends RawDataWindowingSpec {
     toEmit.value shouldEqual 4
   }
 
-  it("should return 0 on empty range") {
+  it("should return NaN on empty range") {
     val gaugeSamples = Seq(
       8082100L->Double.NaN,
       8132570L->Double.NaN,
