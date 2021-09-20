@@ -79,7 +79,7 @@ final case class LabelNamesDistConcatExec(queryContext: QueryContext,
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     childResponses.map {
       case (QueryResult(_, _, result, _, _, _), _) => result
-      case (QueryError(_, ex), _)         => throw ex
+      case (QueryError(_, _, ex), _)         => throw ex
     }.filter(s => s.head.numRows.getOrElse(1) > 0).headF.map(_.head)
   }
 }
@@ -169,13 +169,8 @@ final case class LabelNamesExec(queryContext: QueryContext,
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
-    if (!source.isReadyForQuery(dataset, shard)) {
-      if (!queryContext.plannerParams.allowPartialResults) {
-        throw new ServiceUnavailableException(s"Unable to answer query since shard $shard is still bootstrapping")
-      }
-      querySession.resultCouldBePartial = true
-      querySession.partialResultsReason = Some("Result may be partial since some shards are still bootstrapping")
-    }
+    source.checkReadyForQuery(dataset, shard, querySession)
+    source.acquireSharedLock(dataset, shard, querySession)
     val rvs = if (source.isInstanceOf[MemStore]) {
       val memStore = source.asInstanceOf[MemStore]
       val response = memStore.labelNames(dataset, shard, filters, endMs, startMs)
