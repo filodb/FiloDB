@@ -42,7 +42,7 @@ class ChangesFunctionSpec extends RawDataWindowingSpec {
     val endTs =   8163070L
     val toEmit = new TransientRow
     ChangesOverTimeFunction.apply(startTs,endTs, window, toEmit, queryConfig)
-    toEmit.value shouldEqual 0
+    toEmit.value.isNaN shouldEqual true
   }
 
   it("should return 0 when no changes") {
