@@ -158,20 +158,22 @@ object ChangesOverTimeFunction extends RangeFunction {
     var lastValue = Double.NaN
     var changes = Double.NaN
     if (window.size > 0) lastValue = window.head.getDouble(1)
+    if (!lastValue.isNaN) {
+      changes = 0
+    }
     var i = 1;
     while (i < window.size) {
       val curValue = window.apply(i).getDouble(1)
       if (!curValue.isNaN && !lastValue.isNaN) {
         if (curValue != lastValue) {
-          if (changes.isNaN) {
-            changes = 0
-          } else {
             changes = changes + 1
-          }
-         }
+        }
       }
       if (!curValue.isNaN) {
         lastValue = curValue
+        if (changes.isNaN) {
+          changes = 0
+        }
       }
       i = i + 1
     }
