@@ -86,13 +86,25 @@ object QueryContext {
 
 /**
   * Placeholder for query related information. Typically passed along query execution path.
+  *
+  * IMPORTANT: The param catchMultipleLockSetErrors should be false
+  * only in unit test code for ease of use.
   */
 case class QuerySession(qContext: QueryContext,
                         queryConfig: QueryConfig,
-                        queryStats: QueryStats = QueryStats(),
-                        var lock: Option[EvictionLock] = None,
-                        var resultCouldBePartial: Boolean = false,
-                        var partialResultsReason: Option[String] = None) {
+                        catchMultipleLockSetErrors: Boolean = false) {
+
+  val queryStats: QueryStats = QueryStats()
+  private var lock: Option[EvictionLock] = None
+  var resultCouldBePartial: Boolean = false
+  var partialResultsReason: Option[String] = None
+
+  def setLock(toSet: EvictionLock): Unit = {
+    if (catchMultipleLockSetErrors && lock.isDefined)
+      throw new IllegalStateException(s"Assigning eviction lock to session two times $qContext")
+    lock = Some(toSet)
+  }
+
   def close(): Unit = {
     lock.foreach(_.releaseSharedLock(qContext.queryId))
     lock = None
@@ -101,12 +113,13 @@ case class QuerySession(qContext: QueryContext,
 
 case class Stat() {
   val partsScanned = new AtomicInteger
-  val chunksScanned = new AtomicInteger
+  val dataBytesScanned = new AtomicInteger
   val resultSize = new AtomicLong
-  override def toString: String = s"(partsScanned=$partsScanned, chunksScanned=$chunksScanned, resultSize=$resultSize)"
+  override def toString: String = s"(partsScanned=$partsScanned, " +
+    s"dataBytesScanned=$dataBytesScanned, resultSize=$resultSize)"
   def add(s: Stat): Unit = {
     partsScanned.addAndGet(s.partsScanned.get())
-    chunksScanned.addAndGet(s.chunksScanned.get())
+    dataBytesScanned.addAndGet(s.dataBytesScanned.get())
     resultSize.addAndGet(s.resultSize.get())
   }
 }
@@ -125,9 +138,9 @@ case class QueryStats() {
     stat.getOrElseUpdate(theNs, Stat()).partsScanned
   }
 
-  def getChunksScannedCounter(group: Seq[String] = Nil): AtomicInteger = {
+  def getDataBytesScannedCounter(group: Seq[String] = Nil): AtomicInteger = {
     val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
-    stat.getOrElseUpdate(theNs, Stat()).chunksScanned
+    stat.getOrElseUpdate(theNs, Stat()).dataBytesScanned
   }
 
   def getResultSizeCounter(group: Seq[String] = Nil): AtomicLong = {
@@ -138,5 +151,5 @@ case class QueryStats() {
 }
 
 object QuerySession {
-  def makeForTestingOnly(): QuerySession = QuerySession(QueryContext(), EmptyQueryConfig, QueryStats())
+  def makeForTestingOnly(): QuerySession = QuerySession(QueryContext(), EmptyQueryConfig)
 }

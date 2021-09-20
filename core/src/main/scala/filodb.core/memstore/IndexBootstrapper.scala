@@ -41,6 +41,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
       }
       .countL
       .map { count =>
+        index.refreshReadersBlocking()
         recoverIndexLatency.update(System.currentTimeMillis() - start)
         count
       }
@@ -72,6 +73,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
       }
       .countL
       .map { count =>
+        index.refreshReadersBlocking()
         recoverIndexLatency.update(System.currentTimeMillis() - start)
         count
       }
@@ -113,6 +115,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
      }
      .countL
      .map { count =>
+       index.refreshReadersBlocking()
        recoverIndexLatency.update(System.currentTimeMillis() - start)
        count
      }

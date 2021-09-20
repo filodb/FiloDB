@@ -21,7 +21,7 @@ object Dependencies {
   val ficusVersion      = "1.3.4"
   val kamonBundleVersion = "2.2.2"
   val monixKafkaVersion = "0.15"
-  val sparkVersion      = "2.4.4"
+  val sparkVersion      = "2.4.8"
   val sttpVersion       = "1.3.3"
 
   /* Dependencies shared */

@@ -11,11 +11,11 @@ import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
-import filodb.core.{DatasetRef, Response, Types}
+import filodb.core.{DatasetRef, QueryTimeoutException, Response, Types}
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore.ratelimit.{CardinalityRecord, ConfigQuotaSource}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, QuerySession}
+import filodb.core.query.{ColumnFilter, PromQlQueryParams, QuerySession, ServiceUnavailableException}
 import filodb.core.store._
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
@@ -52,8 +52,16 @@ extends MemStore with StrictLogging {
 
   def isDownsampleStore: Boolean = false
 
-  override def isReadyForQuery(ref: DatasetRef, shard: Int): Boolean = {
-    getShardE(ref: DatasetRef, shard: Int).isReadyForQuery
+  def checkReadyForQuery(ref: DatasetRef,
+                         shard: Int,
+                         querySession: QuerySession): Unit = {
+    if (!getShardE(ref: DatasetRef, shard: Int).isReadyForQuery) {
+      if (!querySession.qContext.plannerParams.allowPartialResults) {
+        throw new ServiceUnavailableException(s"Unable to answer query since shard $shard is still bootstrapping")
+      }
+      querySession.resultCouldBePartial = true
+      querySession.partialResultsReason = Some("Result may be partial since some shards are still bootstrapping")
+    }
   }
 
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
@@ -228,6 +236,26 @@ extends MemStore with StrictLogging {
         s"this node. Was it was recently reassigned to another node? Prolonged occurrence indicates an issue.")
     }
     shard.scanPartitions(iter, colIds, querySession)
+  }
+
+  def acquireSharedLock(ref: DatasetRef,
+                        shardNum: Int,
+                        querySession: QuerySession): Unit = {
+    val shard = datasets(ref).get(shardNum)
+    val promQl = querySession.qContext.origQueryParams match {
+      case p: PromQlQueryParams => p.promQl
+      case _ => "unknown"
+    }
+
+    val queryTimeElapsed = System.currentTimeMillis() - querySession.qContext.submitTime
+    val remainingTime = querySession.qContext.plannerParams.queryTimeoutMillis - queryTimeElapsed
+    if (remainingTime <= 0) throw QueryTimeoutException(queryTimeElapsed, "beforeAcquireSharedLock")
+    if (!shard.evictionLock.acquireSharedLock(remainingTime, querySession.qContext.queryId, promQl)) {
+      val queryTimeElapsed2 = System.currentTimeMillis() - querySession.qContext.submitTime
+      throw QueryTimeoutException(queryTimeElapsed2, "acquireSharedLockTimeout")
+    }
+    // we acquired lock, so add to session so it will be released
+    querySession.setLock(shard.evictionLock)
   }
 
   def lookupPartitions(ref: DatasetRef,

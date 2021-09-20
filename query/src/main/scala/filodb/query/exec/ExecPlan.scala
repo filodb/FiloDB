@@ -9,7 +9,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, QueryTimeoutException}
 import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.query._
@@ -104,8 +104,17 @@ trait ExecPlan extends QueryCommand {
     // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
     // we don't want these to happen in a single thread.
 
+    def checkTimeout(timeoutAt: String): Unit = {
+      val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
+      if (queryTimeElapsed >= queryContext.plannerParams.queryTimeoutMillis) {
+          throw QueryTimeoutException(queryTimeElapsed, timeoutAt)
+      }
+    }
+
     // Step 1: initiate doExecute: make result schema and set up the async monix pipeline to create RVs
     lazy val step1: Task[ExecResult] = Task {
+      // avoid any work when plan has waited in executor queue for long
+      checkTimeout(s"step1-${this.getClass.getSimpleName}")
       span.mark(s"execute-step1-start-${getClass.getSimpleName}")
       FiloSchedulers.assertThreadName(QuerySchedName)
       // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
@@ -125,6 +134,8 @@ trait ExecPlan extends QueryCommand {
 
     // Step 2: Run connect monix pipeline to transformers, materialize the result
     def step2(res: ExecResult): Task[QueryResponse] = res.schema.map { resSchema =>
+      // avoid any work when plan has waited in executor queue for long
+      checkTimeout(s"step2-${this.getClass.getSimpleName}")
       Kamon.histogram("query-execute-time-elapsed-step2-start", MeasurementUnit.time.milliseconds)
         .withTag("plan", getClass.getSimpleName)
         .record(Math.max(0, System.currentTimeMillis - startExecute))
@@ -198,7 +209,7 @@ trait ExecPlan extends QueryCommand {
           }
       }
       resultTask.onErrorHandle { case ex: Throwable =>
-        QueryError(queryContext.queryId, ex)
+        QueryError(queryContext.queryId, querySession.queryStats, ex)
       }
     }.flatten
 
@@ -206,7 +217,7 @@ trait ExecPlan extends QueryCommand {
                     qResult <- step2(res) }
               yield { qResult }
     qresp.onErrorRecover { case NonFatal(ex) =>
-      QueryError(queryContext.queryId, ex)
+      QueryError(queryContext.queryId, querySession.queryStats, ex)
     }
   }
 
@@ -314,10 +325,11 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
   override def getResult(querySession: QuerySession)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.fromTask(
       execPlan.dispatcher.dispatch(execPlan).onErrorHandle { case ex: Throwable =>
-        QueryError(execPlan.queryContext.queryId, ex)
+        QueryError(execPlan.queryContext.queryId, querySession.queryStats, ex)
       }.map {
         case QueryResult(_, _, result, qStats, isPartialResult, partialResultReason)  =>
-                        // Result is empty because of NaN so create ScalarFixedDouble with NaN
+                      querySession.queryStats.add(qStats)
+                      // Result is empty because of NaN so create ScalarFixedDouble with NaN
                       if (isPartialResult) {
                         querySession.resultCouldBePartial = true
                         querySession.partialResultsReason = partialResultReason
@@ -331,7 +343,9 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
                             case s: ScalarVaryingDouble => s
                           }
                         }
-        case QueryError(_, ex)          =>  throw ex
+        case QueryError(_, qStats, ex)          =>
+                      querySession.queryStats.add(qStats)
+                      throw ex
       })
   }
 
@@ -369,7 +383,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
   // Use-cases include splitting longer range query into multiple smaller range queries.
   def parallelChildTasks: Boolean = true
 
-  private def dispatchRemotePlan(plan: ExecPlan, span: kamon.trace.Span)
+  private def dispatchRemotePlan(plan: ExecPlan, qSession: QuerySession, span: kamon.trace.Span)
                                 (implicit sched: Scheduler) = {
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since
@@ -377,7 +391,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
-        QueryError(queryContext.queryId, ex)
+        QueryError(queryContext.queryId, qSession.queryStats, ex)
       }
     }
   }
@@ -406,7 +420,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
     val childTasks = Observable.fromIterable(children.zipWithIndex)
                                .mapAsync(parallelism) { case (plan, i) =>
-                                 val task = dispatchRemotePlan(plan, span).map((_, i))
+                                 val task = dispatchRemotePlan(plan, querySession, span).map((_, i))
                                  span.mark(s"child-plan-$i-dispatched-${plan.getClass.getSimpleName}")
                                  task
                                }
@@ -427,6 +441,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
           if (res.resultSchema != ResultSchema.empty) sch = reduceSchemas(sch, res)
           (res, i.toInt)
         case (e: QueryError, _) =>
+          querySession.queryStats.add(e.queryStats)
           throw e.t
       }
       .filter(_._1.resultSchema != ResultSchema.empty)

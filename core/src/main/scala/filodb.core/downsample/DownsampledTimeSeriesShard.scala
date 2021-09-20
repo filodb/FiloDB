@@ -119,12 +119,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60
 
-  def startFlushingIndex(): Unit =
-    partKeyIndex.startFlushThread(downsampleStoreConfig.partIndexFlushMinDelaySeconds,
-                                  downsampleStoreConfig.partIndexFlushMaxDelaySeconds)
-
   def recoverIndex(): Future[Unit] = {
-    startFlushingIndex()
     indexBootstrapper
       .bootstrapIndexDownsample(partKeyIndex, shardNum, indexDataset, indexTtlMs){ _ => createPartitionID() }
       .map { count =>
@@ -157,6 +152,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                                            rawStoreConfig.flushInterval).mapAsync { _ =>
       purgeExpiredIndexEntries()
       indexRefresh()
+    }.map { _ =>
+      partKeyIndex.refreshReadersBlocking()
     }.onErrorRestartUnlimited.completedL.runAsync(housekeepingSched)
   }
 
@@ -225,9 +222,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     next
   }
 
-  def refreshPartKeyIndexBlocking(): Unit = {
-    partKeyIndex.refreshReadersBlocking()
-  }
+  def refreshPartKeyIndexBlocking(): Unit = {}
 
   def lookupPartitions(partMethod: PartitionScanMethod,
                        chunkMethod: ChunkScanMethod,
@@ -255,7 +250,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
               case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
             }.getOrElse("unknown")
           }.toList
-          val chunksReadCounter = querySession.queryStats.getChunksScannedCounter(metricGroupBy)
+          val chunksReadCounter = querySession.queryStats.getDataBytesScannedCounter(metricGroupBy)
 
           PartLookupResult(shardNum, chunkMethod, debox.Buffer.empty,
             _schema, debox.Map.empty, debox.Buffer.empty, recs, chunksReadCounter)

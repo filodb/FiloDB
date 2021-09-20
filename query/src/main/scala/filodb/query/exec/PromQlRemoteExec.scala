@@ -53,17 +53,19 @@ case class PromQlRemoteExec(queryEndpoint: String,
       .map { response =>
         // Error response from remote partition is a nested json present in response.body
         // as response status code is not 2xx
+        // FIXME need to extract statistics from query error response, aggregate them, send upstream
         if (response.body.isLeft) {
           parser.decode[RemoteErrorResponse](response.body.left.get) match {
-              case Right(errorResponse) => QueryError(queryContext.queryId,
+              case Right(errorResponse) =>
+                QueryError(queryContext.queryId, QueryStats(),
                 RemoteQueryFailureException(response.code.toInt, errorResponse.status, errorResponse.errorType,
                   errorResponse.error))
-              case Left(ex)             => QueryError(queryContext.queryId, ex)
+              case Left(ex)             => QueryError(queryContext.queryId, QueryStats(), ex)
             }
         }
         else {
           response.unsafeBody match {
-            case Left(error)            => QueryError(queryContext.queryId, error.error)
+            case Left(error)            => QueryError(queryContext.queryId, QueryStats(), error.error)
             case Right(successResponse) => toQueryResponse(successResponse, queryContext.queryId, execPlan2Span)
           }
         }
@@ -84,6 +86,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
         val samples = response.data.result.head.values.getOrElse(Seq(response.data.result.head.value.get))
         if (samples.isEmpty) {
           logger.debug("PromQlRemoteExec generating empty QueryResult as samples is empty")
+          // FIXME need to extract statistics from query result response, aggregate them, send upstream
           QueryResult(id, ResultSchema.empty, Seq.empty, QueryStats(),
             if (response.partial.isDefined) response.partial.get else false, response.message)
         } else {
@@ -107,8 +110,8 @@ case class PromQlRemoteExec(queryEndpoint: String,
         if (response.partial.isDefined) response.partial.get else false, response.message)
     } else {
       aggregateResponse.aggregateSampl.head match {
-        case AvgSampl(timestamp, value, count)           => genAvgQueryResult(response, id)
-        case StdValSampl(timestamp, stddev, mean, count) => genStdValQueryResult(response, id)
+        case _: AvgSampl    => genAvgQueryResult(response, id)
+        case _: StdValSampl => genStdValQueryResult(response, id)
       }
     }
   }
