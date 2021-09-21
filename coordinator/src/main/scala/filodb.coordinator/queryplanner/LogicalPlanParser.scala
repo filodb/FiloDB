@@ -58,8 +58,7 @@ object LogicalPlanParser {
   }
 
   private def periodicSeriesToQuery(periodicSeries: PeriodicSeries): String = {
-    s"${rawSeriesLikeToQuery(periodicSeries.rawSeries)}${periodicSeries.offsetMs.map(o => Space + Offset + Space +
-      (o / 1000).toString + "s" ).getOrElse("")}"
+    s"${rawSeriesLikeToQuery(periodicSeries.rawSeries)}"
   }
 
   private def aggregateToQuery(lp: Aggregate): String = {
