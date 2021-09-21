@@ -8,7 +8,9 @@ import filodb.prometheus.parse.Parser
 class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
 
   private def parseAndAssertResult(query: String)(expectedResult: String = query) = {
+    println("query:" + query)
     val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+    println("lp:" + lp)
     val res = LogicalPlanParser.convertToQuery(lp)
     res shouldEqual expectedResult
   }
@@ -65,6 +67,8 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     parseAndAssertResult("""quantile_over_time(0.5,test{_ws_="demo",_ns_=~"App.*",instance="Inst-1"}[5m:1m])""")("""quantile_over_time(0.5,test{_ws_="demo",_ns_=~"App.*",instance="Inst-1"}[300s:60s])""")
     parseAndAssertResult("""foo{_ws_="demo",_ns_="App.*"}[5m:1m]""")("""foo{_ws_="demo",_ns_="App.*"}[300s:60s]""")
     parseAndAssertResult("""max_over_time(avg_over_time(test{_ws_="demo",_ns_=~"App.*",instance="Inst-1"}[5m:1m])[3m:1m])""")("""max_over_time(avg_over_time(test{_ws_="demo",_ns_=~"App.*",instance="Inst-1"}[300s:60s])[180s:60s])""")
+    parseAndAssertResult("""test{_ws_="demo",_ns_="App1",instance="Inst-1"}[600s]""")("""test{_ws_="demo",_ns_="App1",instance="Inst-1"}[600s]""")
+    parseAndAssertResult("""test{_ws_="demo",_ns_="App1",instance="Inst-1"}[600s] offset 1000s""")("""test{_ws_="demo",_ns_="App1",instance="Inst-1"}[600s] offset 1000s""")
   }
 
   it("should generate query from LogicalPlan having offset") {
