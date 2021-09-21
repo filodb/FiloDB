@@ -1,8 +1,9 @@
 package filodb.query.exec
 
-import monix.reactive.Observable
 import scala.collection.Iterator
 import scala.collection.mutable.ListBuffer
+
+import monix.reactive.Observable
 import spire.syntax.cfor._
 
 import filodb.core.metadata.Column.ColumnType
@@ -11,8 +12,7 @@ import filodb.core.query._
 import filodb.core.query.Filter.Equals
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.memory.format.vectors.{HistogramBuckets, HistogramWithBuckets}
-import filodb.query._
-import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, SortFunctionId}
+import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, SortFunctionId, _}
 import filodb.query.InstantFunctionId.HistogramQuantile
 import filodb.query.MiscellaneousFunctionId.{LabelJoin, LabelReplace}
 import filodb.query.ScalarFunctionId.Scalar
@@ -333,6 +333,19 @@ final case class VectorFunctionMapper() extends RangeVectorTransformer {
         override def outputRange: Option[RvRange] = rv.outputRange
       }
     }
+  }
+  override def funcParams: Seq[FuncArgs] = Nil
+}
+
+final case class LimitFunctionMapper(limitToApply: Int) extends RangeVectorTransformer {
+  protected[exec] def args: String = s"limitToApply=$limitToApply"
+
+  def apply(source: Observable[RangeVector],
+            querySession: QuerySession,
+            limit: Int,
+            sourceSchema: ResultSchema,
+            paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
+    source.filter(s => s.numRows.getOrElse(1) > 0).take(limitToApply)
   }
   override def funcParams: Seq[FuncArgs] = Nil
 }

@@ -48,11 +48,13 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: ScalarTimeBasedPlan         => TimeRange(lp.rangeParams.startSecs, lp.rangeParams.endSecs)
       case lp: VectorPlan                  => getTimeFromLogicalPlan(lp.scalars)
       case lp: ApplyAbsentFunction         => getTimeFromLogicalPlan(lp.vectors)
+      case lp: ApplyLimitFunction          => getTimeFromLogicalPlan(lp.vectors)
       case lp: RawSeries                   => lp.rangeSelector match {
                                                 case i: IntervalSelector => TimeRange(i.from, i.to)
                                                 case _ => throw new BadQueryException(s"Invalid logical plan")
                                               }
       case lp: LabelValues                 => TimeRange(lp.startMs, lp.endMs)
+      case lp: LabelNames                  => TimeRange(lp.startMs, lp.endMs)
       case lp: SeriesKeysByFilters         => TimeRange(lp.startMs, lp.endMs)
       case lp: ApplyInstantFunctionRaw     => getTimeFromLogicalPlan(lp.vectors)
       case lp: ScalarBinaryOperation       => TimeRange(lp.rangeParams.startSecs * 1000, lp.rangeParams.endSecs * 1000)
@@ -76,6 +78,7 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: PeriodicSeriesPlan  => copyWithUpdatedTimeRange(lp, timeRange)
       case lp: RawSeriesLikePlan   => copyNonPeriodicWithUpdatedTimeRange(lp, timeRange)
       case lp: LabelValues         => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: LabelNames          => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
       case lp: SeriesKeysByFilters => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
     }
   }
@@ -109,6 +112,7 @@ object LogicalPlanUtils extends StrictLogging {
 
       case lp: ApplySortFunction           => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
       case lp: ApplyAbsentFunction         => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
+      case lp: ApplyLimitFunction          => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
       case lp: ScalarVaryingDoublePlan     => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
       case lp: RawChunkMeta                => lp.rangeSelector match {
                                               case is: IntervalSelector  => lp.copy(rangeSelector = is.copy(
@@ -311,8 +315,10 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: ScalarTimeBasedPlan         => None
       case lp: VectorPlan                  => getPeriodicSeriesPlan(lp.scalars)
       case lp: ApplyAbsentFunction         => getPeriodicSeriesPlan(lp.vectors)
+      case lp: ApplyLimitFunction          => getPeriodicSeriesPlan(lp.vectors)
       case lp: RawSeries                   => None
       case lp: LabelValues                 => None
+      case lp: LabelNames                 => None
       case lp: SeriesKeysByFilters         => None
       case lp: ApplyInstantFunctionRaw     => getPeriodicSeriesPlan(lp.vectors)
       case lp: ScalarBinaryOperation       =>  if (lp.lhs.isRight) getPeriodicSeriesPlan(lp.lhs.right.get)

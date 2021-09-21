@@ -17,7 +17,7 @@ import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, Time
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
 import filodb.query.{exec, _}
-import filodb.query.InstantFunctionId.{HistogramBucket}
+import filodb.query.InstantFunctionId.HistogramBucket
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
 import filodb.query.exec.InternalRangeFunction.Last
 
@@ -133,6 +133,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
         val targetActor = PlannerUtil.pickDispatcher(many)
         many.head match {
           case lve: LabelValuesExec => LabelValuesDistConcatExec(qContext, targetActor, many)
+          case lne: LabelNamesExec => LabelNamesDistConcatExec(qContext, targetActor, many)
           case ske: PartKeysExec => PartKeysDistConcatExec(qContext, targetActor, many)
           case ep: ExecPlan =>
             val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, many)
@@ -210,7 +211,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   // scalastyle:off cyclomatic.complexity
   def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                   qContext: QueryContext): PlanResult = {
-    logicalPlan match {
+     logicalPlan match {
       case lp: RawSeries                   => materializeRawSeries(qContext, lp)
       case lp: RawChunkMeta                => materializeRawChunkMeta(qContext, lp)
       case lp: PeriodicSeries              => materializePeriodicSeries(qContext, lp)
@@ -221,6 +222,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       case lp: BinaryJoin                  => materializeBinaryJoin(qContext, lp)
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp)
       case lp: LabelValues                 => materializeLabelValues(qContext, lp)
+      case lp: LabelNames                  => materializeLabelNames(qContext, lp)
       case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(qContext, lp)
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplySortFunction           => materializeApplySortFunction(qContext, lp)
@@ -229,6 +231,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       case lp: VectorPlan                  => materializeVectorPlan(qContext, lp)
       case lp: ScalarFixedDoublePlan       => materializeFixedScalar(qContext, lp)
       case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
+      case lp: ApplyLimitFunction          => materializeLimitFunction(qContext, lp)
       case lp: ScalarBinaryOperation       => materializeScalarBinaryOperation(qContext, lp)
       case lp: SubqueryWithWindowing       => materializeSubqueryWithWindowing(qContext, lp)
       case lp: TopLevelSubquery            => materializeTopLevelSubquery(qContext, lp)
@@ -545,6 +548,18 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       exec.LabelValuesExec(qContext, dispatcher, dsRef, shard, renamedFilters, labelNames, lp.startMs, lp.endMs)
+    }
+    PlanResult(metaExec, false)
+  }
+
+  private def materializeLabelNames(qContext: QueryContext,
+                                     lp: LabelNames): PlanResult = {
+    val renamedFilters = renameMetricFilter(lp.filters)
+    val shardsToHit = shardsFromFilters(renamedFilters, qContext)
+
+    val metaExec = shardsToHit.map { shard =>
+      val dispatcher = dispatcherForShard(shard)
+      exec.LabelNamesExec(qContext, dispatcher, dsRef, shard, renamedFilters, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec, false)
   }

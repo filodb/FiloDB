@@ -693,6 +693,24 @@ class TimeSeriesShard(val ref: DatasetRef,
   def labelValues(labelName: String, topK: Int): Seq[TermInfo] = partKeyIndex.indexValues(labelName, topK)
 
   /**
+   * This method is to apply column filters and fetch matching time series partitions.
+   *
+   * @param filter column filter
+   * @param labelNames labels to return in the response
+   * @param endTime end time
+   * @param startTime start time
+   * @param limit series limit
+   * @return returns an iterator of map of label key value pairs of each matching time series
+   */
+  def labelValuesWithFilters(filter: Seq[ColumnFilter],
+                             labelNames: Seq[String],
+                             endTime: Long,
+                             startTime: Long,
+                             limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
+    LabelValueResultIterator(partKeyIndex.partIdsFromFilters(filter, startTime, endTime), labelNames, limit)
+  }
+
+  /**
     * This method is to apply column filters and fetch matching time series partitions.
     *
     * @param filter column filter
@@ -702,12 +720,23 @@ class TimeSeriesShard(val ref: DatasetRef,
     * @param limit series limit
     * @return returns an iterator of map of label key value pairs of each matching time series
     */
-  def labelValuesWithFilters(filter: Seq[ColumnFilter],
-                             labelNames: Seq[String],
+  def labelNames(filter: Seq[ColumnFilter],
                              endTime: Long,
-                             startTime: Long,
-                             limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
-    LabelValueResultIterator(partKeyIndex.partIdsFromFilters(filter, startTime, endTime), labelNames, limit)
+                             startTime: Long): Seq[String] =
+    labelNamesFromPartKeys(partKeyIndex.labelNamesFromFilters(filter, startTime, endTime))
+
+  /**
+   * Iterator for traversal of partIds, value for the given label will be extracted from the ParitionKey.
+   * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
+   */
+  private def labelNamesFromPartKeys(partId: Int): Seq[String] = {
+    val results = new mutable.HashSet[String]
+    if (PartKeyLuceneIndex.NOT_FOUND == partId) Seq.empty
+    else {
+      val partKeyWithTimes = partKeyFromPartId(partId)
+      results ++= schemas.part.binSchema.colNames(partKeyWithTimes.base, partKeyWithTimes.offset)
+      results.toSeq
+    }
   }
 
   /**

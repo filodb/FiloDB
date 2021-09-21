@@ -43,6 +43,8 @@ final case class HistSampl(timestamp: Long, buckets: Map[String, Double]) extend
 
 final case class MetadataSampl(values: Map[String, String]) extends DataSampl
 
+final case class LabelSampl(values: Seq[String]) extends DataSampl
+
 final case class AvgSampl(timestamp: Long, value: Double, count: Long) extends AggregateSampl
 
 final case class StdValSampl(timestamp: Long, stddev: Double, mean: Double, count: Long) extends AggregateSampl
