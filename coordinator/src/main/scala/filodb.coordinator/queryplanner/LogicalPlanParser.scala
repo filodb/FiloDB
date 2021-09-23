@@ -46,19 +46,20 @@ object LogicalPlanParser {
       map(f => f._1 + f._2 + f._3).mkString(Comma)}$ClosingCurlyBraces" + window + offsetString
   }
 
-  private def rawSeriesLikeToQuery(lp: RawSeriesLikePlan, addWindow: Boolean = false): String = {
+  private def rawSeriesLikeToQuery(lp: RawSeriesLikePlan, addWindow: Boolean): String = {
     lp match {
       case r: RawSeries               => filtersToQuery(getFiltersFromRawSeries(r), r.columns, r.lookbackMs,
                                          r.offsetMs, addWindow)
       case a: ApplyInstantFunctionRaw => val filters = getFiltersFromRawSeries(a.vectors)
         val bucketFilter = ("_bucket_", "=", s"$Quotes${functionArgsToQuery(a.functionArgs.head)}$Quotes")
         filtersToQuery(filters :+ bucketFilter, a.vectors.columns, a.vectors.lookbackMs, a.vectors.offsetMs, addWindow)
-      case _            => throw new UnsupportedOperationException(s"$lp can't be converted to Query")
+      case _                          => throw new UnsupportedOperationException(s"$lp can't be converted to Query")
     }
   }
 
   private def periodicSeriesToQuery(periodicSeries: PeriodicSeries): String = {
-    s"${rawSeriesLikeToQuery(periodicSeries.rawSeries)}"
+    // Queries like sum(foo) should not have window even though stale lookback is present
+    s"${rawSeriesLikeToQuery(periodicSeries.rawSeries, false)}"
   }
 
   private def aggregateToQuery(lp: Aggregate): String = {
@@ -187,7 +188,7 @@ object LogicalPlanParser {
 
   def convertToQuery(logicalPlan: LogicalPlan): String = {
     logicalPlan match {
-      case lp: RawSeries                   => rawSeriesLikeToQuery(lp)
+      case lp: RawSeries                   => rawSeriesLikeToQuery(lp, true)
       case lp: PeriodicSeries              => periodicSeriesToQuery(lp)
       case lp: Aggregate                   => aggregateToQuery(lp)
       case lp: ApplyAbsentFunction         => absentFnToQuery(lp)
