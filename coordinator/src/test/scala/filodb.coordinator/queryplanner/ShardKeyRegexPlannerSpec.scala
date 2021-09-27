@@ -36,7 +36,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   for {i <- 0 until 32} localMapper.registerNode(Seq(i), node)
 
 
-  val localPlanner = new SingleClusterPlanner(dsRef, schemas, localMapper, earliestRetainedTimestampFn = 0,
+  val localPlanner = new SingleClusterPlanner(dataset, schemas, localMapper, earliestRetainedTimestampFn = 0,
     queryConfig, "raw")
 
   it("should generate Exec plan for simple query") {

@@ -1,6 +1,6 @@
 package filodb.coordinator.queryplanner
 
-import filodb.core.metadata.{Dataset, Schemas}
+import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
 import filodb.query._
 import filodb.query.exec._
@@ -24,15 +24,14 @@ case class ShardKeyMatcher(columnFilters: Seq[ColumnFilter], query: String)
   * ColumnFilter(ns, Equals(App2))
   */
 
-class ShardKeyRegexPlanner(dataset: Dataset,
+class ShardKeyRegexPlanner(val dataset: Dataset,
                            queryPlanner: QueryPlanner,
                            shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]],
-                           queryConfig: QueryConfig)
-  extends QueryPlanner with PlannerMaterializer {
-  val datasetMetricColumn = dataset.options.metricColumn
-  val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
+                           config: QueryConfig)
+  extends QueryPlanner with PlannerHelper {
 
-  override val schemas = Schemas(dataset.schema)
+  override def queryConfig: QueryConfig = config
+  val datasetMetricColumn = dataset.options.metricColumn
 
   /**
    * Returns true when regex has single matching value

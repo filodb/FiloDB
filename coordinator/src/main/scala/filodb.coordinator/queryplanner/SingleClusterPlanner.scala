@@ -8,9 +8,9 @@ import kamon.Kamon
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
-import filodb.core.{DatasetRef, SpreadProvider}
+import filodb.core.SpreadProvider
 import filodb.core.binaryrecord2.RecordBuilder
-import filodb.core.metadata.Schemas
+import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
@@ -37,20 +37,19 @@ object SingleClusterPlanner {
   * @param splitSizeMs time range for each split, if plan needed to be split
   */
 
-//cluster name
-class SingleClusterPlanner(dsRef: DatasetRef,
-                           schema: Schemas,
+class SingleClusterPlanner(val dataset: Dataset,
+                           val schema: Schemas,
                            shardMapperFunc: => ShardMapper,
                            earliestRetainedTimestampFn: => Long,
-                           queryConfig: QueryConfig,
+                           val queryConfig: QueryConfig,
                            clusterName: String,
                            spreadProvider: SpreadProvider = StaticSpreadProvider(),
                            timeSplitEnabled: Boolean = false,
                            minTimeRangeForSplitMs: => Long = 1.day.toMillis,
                            splitSizeMs: => Long = 1.day.toMillis)
-                           extends QueryPlanner with StrictLogging with PlannerMaterializer {
-  override val schemas = schema
+                           extends QueryPlanner with StrictLogging with PlannerHelper {
   val shardColumns = dsOptions.shardKeyColumns.sorted
+  val dsRef = dataset.ref
 
   import SingleClusterPlanner._
 
@@ -240,107 +239,8 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   }
   // scalastyle:on cyclomatic.complexity
 
-  /**
-   * Example:
-   * min_over_time(foo{job="bar"}[3m:1m])
-   *
-   * outerStart = S
-   * outerEnd = E
-   * outerStep = 90s
-   *
-   * Resulting Exec Plan (hand edited and simplified to make it easier to read):
-   * E~LocalPartitionDistConcatExec()
-   * -T~PeriodicSamplesMapper(start=S, step=90s, end=E, window=3m, functionId=MinOverTime)
-   * --T~PeriodicSamplesMapper(start=((S-3m)/1m)*1m+1m, step=1m, end=(E/1m)*1m, window=None, functionId=None)
-   * ---E~MultiSchemaPartitionsExec
-   */
-  private def materializeSubqueryWithWindowing(qContext: QueryContext, sqww: SubqueryWithWindowing): PlanResult = {
-    // This physical plan will try to execute only one range query instead of a number of individual subqueries.
-    // If ranges of each of the subqueries have overlap, retrieving the total range
-    // is optimal, if there is no overlap and even worse significant gap between the individual subqueries, retrieving
-    // the entire range might be suboptimal, this still might be a better option than issuing and concatenating numerous
-    // subqueries separately
-    var innerPlan = sqww.innerPeriodicSeries
-    val window = Some(sqww.subqueryWindowMs)
-    // Here the inner periodic series already has start/end/step populated
-    // in Function's toSeriesPlan(), Functions.scala subqqueryArgument() method.
-    val innerExecPlan = walkLogicalPlanTree(sqww.innerPeriodicSeries, qContext)
-    if (sqww.functionId != RangeFunctionId.AbsentOverTime) {
-      val rangeFn = InternalRangeFunction.lpToInternalFunc(sqww.functionId)
-      val paramsExec = materializeFunctionArgs(sqww.functionArgs, qContext)
-      val rangeVectorTransformer =
-        PeriodicSamplesMapper(
-          sqww.startMs, sqww.stepMs, sqww.endMs,
-          window,
-          Some(rangeFn),
-          qContext,
-          false,
-          paramsExec,
-          sqww.offsetMs,
-          false,
-          true
-        )
-      innerExecPlan.plans.foreach { p => p.addRangeVectorTransformer(rangeVectorTransformer)}
-      innerExecPlan
-    } else {
-      createAbsentOverTimePlan(innerExecPlan, innerPlan, qContext, window, sqww.offsetMs, sqww)
-    }
-  }
-
-  private def createAbsentOverTimePlan(
-    innerExecPlan: PlanResult,
-    innerPlan: PeriodicSeriesPlan,
-    qContext: QueryContext,
-    window: Option[Long],
-    offsetMs : Option[Long],
-    sqww: SubqueryWithWindowing
-  ) : PlanResult = {
-    // absent over time is essentially sum(last(series)) sent through AbsentFunctionMapper
-    innerExecPlan.plans.foreach(
-      _.addRangeVectorTransformer(PeriodicSamplesMapper(
-        sqww.startMs, sqww.stepMs, sqww.endMs,
-        window,
-        Some(InternalRangeFunction.lpToInternalFunc(RangeFunctionId.Last)),
-        qContext,
-        false,
-        Seq(),
-        offsetMs,
-        false
-      ))
-    )
-    val aggregate = Aggregate(AggregationOperator.Sum, innerPlan, Nil, Seq("job"))
-    val aggregatePlanResult = PlanResult(
-      Seq(
-        addAggregator(
-          aggregate,
-          qContext.copy(plannerParams = qContext.plannerParams.copy(skipAggregatePresent = true)),
-          innerExecPlan,
-          Seq.empty
-        )
-      )
-    )
-    addAbsentFunctionMapper(
-      aggregatePlanResult,
-      Seq(),
-      RangeParams(
-        sqww.startMs / 1000, sqww.stepMs / 1000, sqww.endMs / 1000
-      ),
-      qContext
-    )
-    aggregatePlanResult
-  }
-
-  private def materializeTopLevelSubquery(qContext: QueryContext, tlsq: TopLevelSubquery): PlanResult = {
-    // This physical plan will try to execute only one range query instead of a number of individual subqueries.
-    // If ranges of each of the subqueries have overlap, retrieving the total range
-    // is optimal, if there is no overlap and even worse significant gap between the individual subqueries, retrieving
-    // the entire range might be suboptimal, this still might be a better option than issuing and concatenating numerous
-    // subqueries separately
-    walkLogicalPlanTree(tlsq.innerPeriodicSeries, qContext)
-  }
-
-  private def materializeBinaryJoin(qContext: QueryContext,
-                                    lp: BinaryJoin): PlanResult = {
+  override def materializeBinaryJoin(qContext: QueryContext,
+                                     lp: BinaryJoin): PlanResult = {
     val lhs = walkLogicalPlanTree(lp.lhs, qContext)
     val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext,
       PlannerUtil.pickDispatcher(lhs.plans), lhs.plans))
@@ -369,13 +269,6 @@ class SingleClusterPlanner(dsRef: DatasetRef,
         LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
         LogicalPlanUtils.renameLabels(lp.include, dsOptions.metricColumn), dsOptions.metricColumn))
     PlanResult(joined, false)
-  }
-
-  private def materializeAggregate(qContext: QueryContext,
-                                   lp: Aggregate): PlanResult = {
-    val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, qContext)
-    val reducer = addAggregator(lp, qContext, toReduceLevel1, queryConfig.addExtraOnByKeysTimeRanges)
-    PlanResult(Seq(reducer), false) // since we have aggregated, no stitching
   }
 
   private def materializePeriodicSeriesWithWindowing(qContext: QueryContext,
@@ -595,34 +488,4 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
     PlanResult(metaExec, false)
   }
-
-  private def materializeScalarTimeBased(qContext: QueryContext,
-                                         lp: ScalarTimeBasedPlan): PlanResult = {
-    val scalarTimeBasedExec = TimeScalarGeneratorExec(qContext, dsRef, lp.rangeParams, lp.function)
-    PlanResult(Seq(scalarTimeBasedExec), false)
-  }
-
-  private def materializeFixedScalar(qContext: QueryContext,
-                                     lp: ScalarFixedDoublePlan): PlanResult = {
-    val scalarFixedDoubleExec = ScalarFixedDoubleExec(qContext, dsRef, lp.timeStepParams, lp.scalar)
-    PlanResult(Seq(scalarFixedDoubleExec), false)
-  }
-
-  private def materializeScalarBinaryOperation(qContext: QueryContext,
-                                               lp: ScalarBinaryOperation): PlanResult = {
-    val lhs = if (lp.lhs.isRight) {
-      // Materialize as lhs is a logical plan
-      val lhsExec = walkLogicalPlanTree(lp.lhs.right.get, qContext)
-      Right(lhsExec.plans.map(_.asInstanceOf[ScalarBinaryOperationExec]).head)
-    } else Left(lp.lhs.left.get)
-
-    val rhs = if (lp.rhs.isRight) {
-      val rhsExec = walkLogicalPlanTree(lp.rhs.right.get, qContext)
-      Right(rhsExec.plans.map(_.asInstanceOf[ScalarBinaryOperationExec]).head)
-    } else Left(lp.rhs.left.get)
-
-    val scalarBinaryExec = ScalarBinaryOperationExec(qContext, dsRef, lp.rangeParams, lhs, rhs, lp.operator)
-    PlanResult(Seq(scalarBinaryExec), false)
-  }
-
 }
