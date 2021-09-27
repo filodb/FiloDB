@@ -5,3 +5,5 @@ sealed trait ScalarExpression extends Expression {
 }
 
 case class Scalar(toScalar: Double) extends ScalarExpression
+
+case class Limit(limit: Double)

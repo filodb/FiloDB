@@ -98,6 +98,11 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     LabelValueResultIterator(partKeyIndex.partIdsFromFilters(filter, startTime, endTime), labelNames, limit)
   }
 
+  def labelNames(filter: Seq[ColumnFilter],
+                 endTime: Long,
+                 startTime: Long): Seq[String] =
+    labelNamesFromPartKeys(partKeyIndex.labelNamesFromFilters(filter, startTime, endTime))
+
   def partKeysWithFilters(filter: Seq[ColumnFilter],
                           fetchFirstLastSampleTimes: Boolean,
                           endTime: Long,
@@ -245,7 +250,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
               case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
             }.getOrElse("unknown")
           }.toList
-          val chunksReadCounter = querySession.queryStats.getChunksScannedCounter(metricGroupBy)
+          val chunksReadCounter = querySession.queryStats.getDataBytesScannedCounter(metricGroupBy)
 
           PartLookupResult(shardNum, chunkMethod, debox.Buffer.empty,
             _schema, debox.Map.empty, debox.Buffer.empty, recs, chunksReadCounter)
@@ -330,6 +335,16 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     }
     // FIXME It'd be nice to pass in the correct partId here instead of -1
     new PagedReadablePartition(schemas(schemaId), shardNum, -1, part, minResolutionMs, colIds)
+  }
+
+  private def labelNamesFromPartKeys(partId: Int): Seq[String] = {
+    val results = new mutable.HashSet[String]
+    if (PartKeyLuceneIndex.NOT_FOUND == partId) Seq.empty
+    else {
+      val partKey = partKeyFromPartId(partId)
+      results ++ schemas.part.binSchema.colNames(partKey, UnsafeUtils.arayOffset)
+      results.toSeq
+    }
   }
 
   /**

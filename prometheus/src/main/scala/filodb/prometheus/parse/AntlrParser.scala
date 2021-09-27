@@ -3,14 +3,12 @@ package filodb.prometheus.parse
 
 import scala.collection.JavaConverters._
 
-import org.antlr.v4.runtime.{BailErrorStrategy, BaseErrorListener, CharStreams, CommonTokenStream, RecognitionException, Recognizer}
+import com.typesafe.scalalogging.StrictLogging
+import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.misc.ParseCancellationException
 import org.antlr.v4.runtime.tree.{ParseTree, TerminalNode}
 
-import com.typesafe.scalalogging.StrictLogging
-
-import filodb.prometheus.antlr.{PromQLLexer, PromQLParser, PromQLBaseVisitor}
-
+import filodb.prometheus.antlr.{PromQLBaseVisitor, PromQLLexer, PromQLParser}
 import filodb.prometheus.ast._
 
 /**
@@ -68,6 +66,7 @@ object AntlrParser extends StrictLogging {
       }
     } catch {
       case e: ParseCancellationException => {}
+      case exc: Throwable => exc.printStackTrace
     }
 
     var msg = "Cannot parse [" + query + "]"
@@ -98,7 +97,8 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
     } else {
       Some(build[Duration](ctx.offset))
     }
-    SubqueryExpression(lhs.asInstanceOf[PeriodicSeries], sqcl, offset)
+    val limit: Option[Scalar] = None
+    SubqueryExpression(lhs.asInstanceOf[PeriodicSeries], sqcl, offset, limit.map(_.toScalar.toInt))
   }
 
   override def visitSubquery(ctx: PromQLParser.SubqueryContext): SubqueryClause = {
@@ -198,6 +198,8 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
       Some(build[Duration](ctx.offset))
     }
 
+    val limit: Option[Scalar] = None
+
     if (ctx.window == null) {
       InstantExpression(metricName, labelSelection, offset)
     } else {
@@ -212,6 +214,13 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
 
   override def visitOffset(ctx: PromQLParser.OffsetContext): Duration = {
     parseDuration(ctx.DURATION)
+  }
+
+  override def visitLimitOperation(ctx: PromQLParser.LimitOperationContext) = {
+    val name = ctx.limit().LIMIT().getSymbol().getText()
+    val limit = Scalar(java.lang.Double.parseDouble(ctx.limit().NUMBER().getSymbol().getText()))
+    val params = Seq(limit) :+ build[Expression](ctx.vectorExpression())
+    Function(name, params)
   }
 
   override def visitLabelMatcher(ctx: PromQLParser.LabelMatcherContext): LabelMatch = {

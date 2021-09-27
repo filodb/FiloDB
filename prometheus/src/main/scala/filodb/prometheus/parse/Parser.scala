@@ -5,7 +5,7 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.core.GlobalConfig
 import filodb.core.query.{ColumnFilter, Filter, QueryConfig}
 import filodb.prometheus.ast._
-import filodb.query.{LabelValues, LogicalPlan}
+import filodb.query.{LabelNames, LabelValues, LogicalPlan}
 
 /**
   * Parser routes requests to LegacyParser or AntlrParser.
@@ -122,6 +122,26 @@ object Parser extends StrictLogging {
         LabelValues(labelNames, columnFilters, timeParams.start * 1000, timeParams.end * 1000)
       case _ =>
         LabelValues(labelNames, Seq.empty, timeParams.start * 1000, timeParams.end * 1000)
+    }
+  }
+
+  // Only called by tests.
+  def labelNamesQueryToLogicalPlan(filterQuery: Option[String],
+                                    timeParams: TimeRangeParams): LogicalPlan = {
+    filterQuery match {
+      case Some(filter) =>
+        val columnFilters = parseLabelValueFilter(filter).map { l =>
+          l.labelMatchOp match {
+            case EqualMatch => ColumnFilter(l.label, Filter.Equals(l.value))
+            case NotRegexMatch => ColumnFilter(l.label, Filter.NotEqualsRegex(l.value))
+            case RegexMatch => ColumnFilter(l.label, Filter.EqualsRegex(l.value))
+            case NotEqual(false) => ColumnFilter(l.label, Filter.NotEquals(l.value))
+            case other: Any => throw new IllegalArgumentException(s"Unknown match operator $other")
+          }
+        }
+        LabelNames(columnFilters, timeParams.start * 1000, timeParams.end * 1000)
+      case _ =>
+        LabelNames(Seq.empty, timeParams.start * 1000, timeParams.end * 1000)
     }
   }
 

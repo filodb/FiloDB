@@ -29,7 +29,7 @@ class ChangesFunctionSpec extends RawDataWindowingSpec {
     toEmit.value shouldEqual 4
   }
 
-  it("should return 0 on empty range") {
+  it("should return NaN on empty range") {
     val gaugeSamples = Seq(
       8082100L->Double.NaN,
       8132570L->Double.NaN,
@@ -42,7 +42,7 @@ class ChangesFunctionSpec extends RawDataWindowingSpec {
     val endTs =   8163070L
     val toEmit = new TransientRow
     ChangesOverTimeFunction.apply(startTs,endTs, window, toEmit, queryConfig)
-    toEmit.value shouldEqual 0
+    toEmit.value.isNaN shouldEqual true
   }
 
   it("should return 0 when no changes") {

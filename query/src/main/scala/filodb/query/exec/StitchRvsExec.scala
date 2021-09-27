@@ -77,7 +77,7 @@ final case class StitchRvsExec(queryContext: QueryContext,
     qLogger.debug(s"StitchRvsExec: Stitching results:")
     val stitched = childResponses.map {
       case (QueryResult(_, _, result, _, _, _), _) => result
-      case (QueryError(_, ex), _)         => throw ex
+      case (QueryError(_, _, ex), _)         => throw ex
     }.toListL.map(_.flatten).map { srvs =>
       val groups = srvs.groupBy(_.key.labelValues)
       groups.mapValues { toMerge =>

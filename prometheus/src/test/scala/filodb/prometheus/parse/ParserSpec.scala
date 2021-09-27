@@ -10,6 +10,11 @@ import org.scalatest.matchers.should.Matchers
 // scalastyle:off
 class ParserSpec extends AnyFunSpec with Matchers {
 
+  it("test") {
+    antlrParseSuccessfully("http_requests_total{job=\"prometheus\", method=\"GET\"} limit 10")
+    parseSuccessfully("http_requests_total{job=\"prometheus\", method=\"GET\"} limit 1")
+  }
+
   it("metadata matcher query") {
     parseSuccessfully("http_requests_total{job=\"prometheus\", method=\"GET\"}")
     parseSuccessfully("http_requests_total{job=\"prometheus\", method=\"GET\"}")
@@ -112,6 +117,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("a - on(b) ignoring(c) d")
 
     parseSuccessfully("foo * bar")
+    parseSuccessfully("foo * bar limit 1")
+    parseSuccessfully("(foo * bar) limit 1")
     parseSuccessfully("foo == 1")
     parseSuccessfully("foo == bool 1")
     parseSuccessfully("foo > bool bar")
@@ -159,6 +166,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
 
     parseSuccessfully("foo")
     parseSuccessfully("foo offset 5m")
+    parseSuccessfully("foo limit 1")
     parseSuccessfully("foo:bar{a=\"bc\"}")
     parseSuccessfully("foo{NaN='bc'}")
     parseSuccessfully("foo{a=\"b\", foo!=\"bar\", test=~\"test\", bar!~\"baz\"}")
@@ -183,6 +191,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("foo{__name__=\"bar\"}")
 
     parseSuccessfully("test{a=\"b\"}[5y] OFFSET 3d")
+    parseSuccessfully("test{a=\"b\"}[5y] LIMIT 3")
+    parseSuccessfully("test{a=\"b\"}[5y] OFFSET 3d LIMIT 3")
     parseSuccessfully("test[5s]")
     parseSuccessfully("test[5m]")
     parseSuccessfully("test[5h] OFFSET 5m")
@@ -193,13 +203,16 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("foo[0m]")
     parseError("foo[5m30s]")
     parseError("foo[5m] OFFSET 1h30m")
+    parseError("foo[5m] LIMIT 1m")
     parseError("foo[\"5m\"]")
     parseError("foo[]")
     parseError("foo[1]")
     parseError("some_metric[5m] OFFSET 1")
     parseError("some_metric[5m] OFFSET 1mm")
     parseError("some_metric[5m] OFFSET")
+    parseError("some_metric[5m] LIMIT")
     parseError("some_metric OFFSET 1m[5m]")
+    parseError("some_metric LIMIT 1m[5m]")
     parseError("(foo + bar)[5m]")
 
     parseSuccessfully("sum by (foo)(some_metric)")
@@ -268,6 +281,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("minn{job=\"SNRT-App-0\"}[1m] ")
     parseSuccessfully("count0{job=\"SNRT-App-0\"}[1m] ")
     parseSuccessfully("offset1{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("limit1{job=\"SNRT-App-0\"}[1m] ")
     parseSuccessfully("by1{job=\"SNRT-App-0\"}[1m] ")
     parseSuccessfully("with2{job=\"SNRT-App-0\"}[1m] ")
     parseSuccessfully("without3{job=\"SNRT-App-0\"}[1m] ")
@@ -395,7 +409,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("stdvar_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
 
     //  SumOverTime
-    parseSuccessfully("sum_over_time(some_metric[5m])")
+    parseSuccessfully("sum_over_time(some_metric[5m]) limit 10")
     parseError("sum_over_time(some_metric)") // reason : Expected range-vector
     parseError("sum_over_time(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
     parseError("sum_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
@@ -421,6 +435,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSubquery("min_over_time( rate(http_requests_total[5m])[30m:1m] )")
     parseSubquery("max_over_time( deriv( rate(distance_covered_meters_total[1m])[5m:1m] )[10m:] )")
     parseSubquery("max_over_time((time() - max(foo) < 1000)[5m:10s] offset 5m)")
+    parseSubquery("max_over_time((time() - max(foo) < 1000)[5m:10s]) limit 5")
+    parseSubquery("max_over_time((time() - max(foo) < 1000)[5m:10s] offset 5m) limit 2")
     parseSubquery("avg_over_time(rate(demo_cpu_usage_seconds_total[1m])[2m:10s])")
 
     parseSubquery("foo[5m:1m]")
@@ -447,8 +463,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
   // becomes the default parser
   it("parse subquery using antl"){
     parseWithAntlr(
-      "min_over_time( rate(http_requests_total[5m])[30m:1m] offset 1m)",
-      "SubqueryWithWindowing(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524854160000,1524855900000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524854160000,60000,1524855900000,300000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(http_requests_total)))),1524855988000,0,1524855988000,MinOverTime,List(),1800000,60000,Some(60000))"
+      "min_over_time(rate(http_requests_total[5m])[30m:1m] offset 1m) limit 10",
+      "ApplyLimitFunction(SubqueryWithWindowing(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524854160000,1524855900000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524854160000,60000,1524855900000,300000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(http_requests_total)))),1524855988000,0,1524855988000,MinOverTime,List(),1800000,60000,Some(60000)),List(),RangeParams(1524855988,1000,1524855988),10)"
     )
     parseWithAntlr(
       "(heap_usage + heap_usage)[5m:1m]",
@@ -659,6 +675,9 @@ class ParserSpec extends AnyFunSpec with Matchers {
       info(s"Parsing with Antlr Parser$q")
       val lp = Parser.queryToLogicalPlan(q, qts, step, Antlr)
       if (lp.isInstanceOf[BinaryJoin]) printBinaryJoin(lp)
+      //if(lp.toString != e) {
+        //println("\""+q.replaceAll("\"","\\\\\"")+"\" -> \""+lp.toString+"\",")
+      //}
       lp.toString shouldEqual (e)
     }
   }
@@ -752,7 +771,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
 
   private def antlrParseSuccessfully(query: String) = {
     val result = AntlrParser.parseQuery(query)
-    //info(String.valueOf(result))
+    info(String.valueOf(result))
   }
 
   private def parseError(query: String) = {

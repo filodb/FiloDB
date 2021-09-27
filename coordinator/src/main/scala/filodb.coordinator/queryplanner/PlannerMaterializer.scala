@@ -118,14 +118,14 @@ trait  PlannerHelper {
       }
     }
 
-   def addAbsentFunctionMapper(vectors: PlanResult,
+    def addAbsentFunctionMapper(vectors: PlanResult,
                                columnFilters: Seq[ColumnFilter],
                                rangeParams: RangeParams,
                                queryContext: QueryContext): PlanResult = {
       vectors.plans.foreach(_.addRangeVectorTransformer(AbsentFunctionMapper(columnFilters, rangeParams,
         dsOptions.metricColumn )))
       vectors
-  }
+    }
 
    def addAggregator(lp: Aggregate, qContext: QueryContext, toReduceLevel: PlanResult,
                      extraOnByKeysTimeRanges: Seq[Seq[Long]]):
@@ -180,7 +180,21 @@ trait  PlannerHelper {
       qContext.plannerParams.copy(skipAggregatePresent = true)), vectors, Seq.empty))) // No need for present for sum
     addAbsentFunctionMapper(aggregatePlanResult, lp.columnFilters,
       RangeParams(lp.startMs / 1000, lp.stepMs / 1000, lp.endMs / 1000), qContext)
+  }
+
+  def materializeLimitFunction(qContext: QueryContext,
+                                lp: ApplyLimitFunction): PlanResult = {
+    val vectors = walkLogicalPlanTree(lp.vectors, qContext)
+    if (vectors.plans.length > 1) {
+      val targetActor = PlannerUtil.pickDispatcher(vectors.plans)
+      val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, vectors.plans)
+      topPlan.addRangeVectorTransformer(LimitFunctionMapper(lp.limit))
+      PlanResult(Seq(topPlan), vectors.needsStitch)
+    } else {
+      vectors.plans.foreach(_.addRangeVectorTransformer(LimitFunctionMapper(lp.limit)))
+      vectors
     }
+  }
 
    def materializeAggregate(qContext: QueryContext,
                                    lp: Aggregate): PlanResult = {
@@ -242,7 +256,7 @@ trait  PlannerHelper {
     }
   }
 
-  private def createAbsentOverTimePlan( innerExecPlan: PlanResult,
+   def createAbsentOverTimePlan( innerExecPlan: PlanResult,
                                         innerPlan: PeriodicSeriesPlan,
                                         qContext: QueryContext,
                                         window: Option[Long],
@@ -370,6 +384,17 @@ object PlannerUtil extends StrictLogging {
     val filters = lp.filters.map{ f => s"""${f.column}${f.filter.operatorString}$quote${f.filter.valuesStrings.
       head}$quote"""}.mkString(",")
     Map("filter" -> filters, "labels" -> lp.labelNames.mkString(","))
+  }
+
+  /**
+   * Returns URL params for label values which is used to create Metadata remote exec plan
+   */
+  def getLabelNamesUrlParams(lp: LabelNames, queryParams: PromQlQueryParams): Map[String, String] = {
+    val quote = if (queryParams.remoteQueryPath.get.contains("""/v2/labels/""")) """"""" else ""
+    // Filter value should be enclosed in quotes for label values v2 endpoint
+    val filters = lp.filters.map{ f => s"""${f.column}${f.filter.operatorString}$quote${f.filter.valuesStrings.
+      head}$quote"""}.mkString(",")
+    Map("filter" -> filters)
   }
 
   /**

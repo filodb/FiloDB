@@ -130,6 +130,8 @@ import filodb.query.exec._
       case lp: ScalarBinaryOperation       => materializeScalarBinaryOperation(qContext, lp)
       case lp: SubqueryWithWindowing       => materializePeriodicSeriesPlan(qContext, lp)
       case lp: TopLevelSubquery            => materializeTopLevelSubquery(qContext, lp)
+      case lp: ApplyLimitFunction          => rawClusterMaterialize(qContext, lp)
+      case lp: LabelNames                  => rawClusterMaterialize(qContext, lp)
     }
     // scalastyle:on cyclomatic.complexity
   }

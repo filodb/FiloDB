@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.DatasetRef
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.query.{LabelValues, LogicalPlan, SeriesKeysByFilters}
+import filodb.query.{LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters}
 import filodb.query.exec._
 
 /**
@@ -41,6 +41,8 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
                           queryContext: QueryContext)= {
     rootLogicalPlan match {
         case lp: LabelValues         => LabelValuesDistConcatExec(queryContext, inProcessPlanDispatcher,
+                                        execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
+        case lp: LabelNames          => LabelNamesDistConcatExec(queryContext, inProcessPlanDispatcher,
                                         execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
         case lp: SeriesKeysByFilters => PartKeysDistConcatExec(queryContext, inProcessPlanDispatcher,
                                         execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
@@ -83,6 +85,9 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           rootLogicalPlan match {
             case lp: LabelValues         => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                             PlannerUtil.getLabelValuesUrlParams(lp, queryParams), newQueryContext,
+                                            inProcessPlanDispatcher, dsRef, remoteExecHttpClient)
+            case lp: LabelNames         => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
+                                            PlannerUtil.getLabelNamesUrlParams(lp, queryParams), newQueryContext,
                                             inProcessPlanDispatcher, dsRef, remoteExecHttpClient)
             case lp: SeriesKeysByFilters => val urlParams = Map("match[]" -> queryParams.promQl)
                                             MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,

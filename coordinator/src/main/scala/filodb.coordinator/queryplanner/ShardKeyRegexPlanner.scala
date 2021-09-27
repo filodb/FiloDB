@@ -78,6 +78,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       case lp: Aggregate                   => materializeAggregate(lp, qContext)
       case lp: BinaryJoin                  => materializeBinaryJoin(lp, qContext)
       case lp: LabelValues                 => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
+      case lp: LabelNames                  => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
       case lp: SeriesKeysByFilters         => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
       case _                               => materializeOthers(logicalPlan, qContext)
     }
