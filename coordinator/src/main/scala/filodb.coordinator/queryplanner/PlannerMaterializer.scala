@@ -18,9 +18,9 @@ import filodb.query.exec._
 case class PlanResult(plans: Seq[ExecPlan], needsStitch: Boolean = false)
 
 trait  PlannerHelper {
-    def schemas: Schemas
     def queryConfig: QueryConfig
     def dataset: Dataset
+    def schemas: Schemas = Schemas(dataset.schema)
     def dsOptions: DatasetOptions = schemas.part.options
     val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
     private val datasetMetricColumn = dsOptions.metricColumn

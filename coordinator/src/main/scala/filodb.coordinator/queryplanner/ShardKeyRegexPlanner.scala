@@ -1,6 +1,6 @@
 package filodb.coordinator.queryplanner
 
-import filodb.core.metadata.{Dataset, Schemas}
+import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
 import filodb.query._
 import filodb.query.exec._
@@ -32,8 +32,6 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
 
   override def queryConfig: QueryConfig = config
   val datasetMetricColumn = dataset.options.metricColumn
-
-  override val schemas = Schemas(dataset.schema)
 
   /**
    * Returns true when regex has single matching value
