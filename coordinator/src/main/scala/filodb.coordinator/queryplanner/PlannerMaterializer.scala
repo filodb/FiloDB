@@ -17,11 +17,13 @@ import filodb.query.exec._
   */
 case class PlanResult(plans: Seq[ExecPlan], needsStitch: Boolean = false)
 
-trait  PlannerMaterializer {
+trait  PlannerHelper {
     def schemas: Schemas
     def queryConfig: QueryConfig
     def dataset: Dataset
     def dsOptions: DatasetOptions = schemas.part.options
+    val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
+    private val datasetMetricColumn = dsOptions.metricColumn
 
     def materializeVectorPlan(qContext: QueryContext,
                               lp: VectorPlan): PlanResult = {
@@ -298,7 +300,7 @@ trait  PlannerMaterializer {
   }
 
    def materializeScalarBinaryOperation(qContext: QueryContext,
-                                               lp: ScalarBinaryOperation): PlanResult = {
+                                        lp: ScalarBinaryOperation): PlanResult = {
     val lhs = if (lp.lhs.isRight) {
       // Materialize as lhs is a logical plan
       val lhsExec = walkLogicalPlanTree(lp.lhs.right.get, qContext)
@@ -312,6 +314,47 @@ trait  PlannerMaterializer {
 
     val scalarBinaryExec = ScalarBinaryOperationExec(qContext, dataset.ref, lp.rangeParams, lhs, rhs, lp.operator)
     PlanResult(Seq(scalarBinaryExec), false)
+  }
+
+  def materializeBinaryJoin(qContext: QueryContext, logicalPlan: BinaryJoin): PlanResult = {
+
+    val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
+    val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
+
+    val lhs = walkLogicalPlanTree(logicalPlan.lhs, lhsQueryContext)
+    val rhs = walkLogicalPlanTree(logicalPlan.rhs, rhsQueryContext)
+
+    val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
+
+    val dispatcher = if (!lhs.plans.head.dispatcher.isLocalCall && !rhs.plans.head.dispatcher.isLocalCall) {
+      val lhsCluster = lhs.plans.head.dispatcher.clusterName
+      val rhsCluster = rhs.plans.head.dispatcher.clusterName
+      if (rhsCluster.equals(lhsCluster)) PlannerUtil.pickDispatcher(lhs.plans ++ rhs.plans)
+      else inProcessPlanDispatcher
+    } else inProcessPlanDispatcher
+
+    val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext,
+      dispatcher, lhs.plans))
+    else lhs.plans
+
+    val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext,
+      dispatcher, rhs.plans))
+    else rhs.plans
+
+    val execPlan =
+      if (logicalPlan.operator.isInstanceOf[SetOperator])
+        SetOperatorExec(qContext, dispatcher, stitchedLhs, stitchedRhs, logicalPlan.operator,
+          LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
+      else
+        BinaryJoinExec(qContext, dispatcher, stitchedLhs, stitchedRhs, logicalPlan.operator,
+          logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), logicalPlan.include,
+          datasetMetricColumn)
+
+    PlanResult(Seq(execPlan), false)
   }
 
 }

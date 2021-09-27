@@ -13,7 +13,7 @@ import filodb.core.query.{EmptyQueryConfig, PromQlQueryParams, QueryConfig, Quer
 import filodb.core.store.ChunkSource
 import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
-import filodb.query.{LogicalPlan, PeriodicSeriesPlan, PeriodicSeriesWithWindowing, SubqueryWithWindowing, TopLevelSubquery}
+import filodb.query.{BinaryOperator, LogicalPlan, PeriodicSeriesPlan, PeriodicSeriesWithWindowing, SubqueryWithWindowing, TopLevelSubquery}
 import filodb.query.exec._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -57,8 +57,8 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
   val datasetMetricColumn = dataset.options.metricColumn
 
   val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
-                                                 earliestRawTime, latestDownsampleTime, disp,
-                                                 queryConfig, dataset)
+    earliestRawTime, latestDownsampleTime, disp,
+    queryConfig, dataset)
   implicit val system = ActorSystem()
   val node = TestProbe().ref
 
@@ -103,7 +103,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
 
   it("should direct downsample-only queries to downsample planner") {
     val logicalPlan = Parser.queryRangeToLogicalPlan("rate(foo[2m])",
-      TimeStepParams(now/1000 - 20.minutes.toSeconds, 1.minute.toSeconds, now/1000 - 15.minutes.toSeconds))
+      TimeStepParams(now / 1000 - 20.minutes.toSeconds, 1.minute.toSeconds, now / 1000 - 15.minutes.toSeconds))
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
     ep.name shouldEqual "downsample"
@@ -144,8 +144,8 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
     val step = 1.minute.toSeconds
     val end = now/1000 - 2.minutes.toSeconds
     val logicalPlan = Parser.queryRangeToLogicalPlan("rate(foo[2m])",
-                                                     TimeStepParams(start, step, end))
-                                                    .asInstanceOf[PeriodicSeriesPlan]
+      TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan]
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
     val stitchExec = ep.asInstanceOf[StitchRvsExec]
@@ -161,7 +161,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
 
     // find first instant with range available within raw data
     // 2 minutes is a lookback here, so, we make sure that raw cluster has enough data for lookback
-    val rawStart = ((start*1000) to (end*1000) by (step*1000)).find { instant =>
+    val rawStart = ((start * 1000) to (end * 1000) by (step * 1000)).find { instant =>
       instant - 2.minutes.toMillis > earliestRawTime
     }.get
 
@@ -206,9 +206,9 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
   }
 
   it("should direct subquery with windowing to downsample planner and verify subquery lookback") {
-    val start = now/1000 - 30.minutes.toSeconds
+    val start = now / 1000 - 30.minutes.toSeconds
     val step = 1.minute.toSeconds
-    val end = now/1000 - 20.minutes.toSeconds
+    val end = now / 1000 - 20.minutes.toSeconds
     val logicalPlan = Parser.queryRangeToLogicalPlan("max_over_time(foo[3m:1m])",
       TimeStepParams(start, step, end))
       .asInstanceOf[PeriodicSeriesPlan]
@@ -328,8 +328,8 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
     val binaryJoinExec = ep.asInstanceOf[BinaryJoinExec]
 
     binaryJoinExec.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual true
-    binaryJoinExec.lhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
-    binaryJoinExec.rhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
+    binaryJoinExec.lhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
+    binaryJoinExec.rhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
   }
 
   it("should direct overlapping binary join offset queries with vector(0) " +
@@ -359,12 +359,12 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
 
-    ep.isInstanceOf[BinaryJoinExec] shouldEqual(true)
+    ep.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     val binaryJoinExec = ep.asInstanceOf[BinaryJoinExec]
 
     binaryJoinExec.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual true
-    binaryJoinExec.lhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
-    binaryJoinExec.rhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
+    binaryJoinExec.lhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
+    binaryJoinExec.rhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
   }
 
   it("should direct binary join to raw cluster and use ActorPlanDispatcher") {
@@ -379,7 +379,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
     val earliestDownSampleTime = now - downsampleRetention.toMillis
     val latestDownsampleTime = now - 12.hours.toMillis
 
-    val query ="""sum(rate(foo{job = "app"}[5m])) - sum(rate(foo{job = "app"}[5m] offset 2d))"""
+    val query = """sum(rate(foo{job = "app"}[5m])) - sum(rate(foo{job = "app"}[5m] offset 2d))"""
     val logicalPlan = Parser.queryRangeToLogicalPlan(query,
       TimeStepParams(start, step, end))
       .asInstanceOf[PeriodicSeriesPlan]
@@ -393,28 +393,28 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
 
-    ep.isInstanceOf[BinaryJoinExec] shouldEqual(true)
+    ep.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     val binaryJoinExec = ep.asInstanceOf[BinaryJoinExec]
 
     // Since LHS and RHS both belong to raw cluster, we use ActorPlanDispatcher
     ep.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual true
-    binaryJoinExec.lhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
-    binaryJoinExec.rhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
+    binaryJoinExec.lhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
+    binaryJoinExec.rhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
   }
 
   it("should direct binary join with abs to raw cluster and use ActorPlanDispatcher") {
 
-    val start = now/1000 - 5.minutes.toSeconds
+    val start = now / 1000 - 5.minutes.toSeconds
     val step = 1.minute.toSeconds
-    val end = now/1000 - 2.minutes.toSeconds
+    val end = now / 1000 - 2.minutes.toSeconds
 
     val rawRetention = 10090.minutes
-    val downsampleRetention= 183.days
+    val downsampleRetention = 183.days
     val earliestRawTime = now - rawRetention.toMillis
     val earliestDownSampleTime = now - downsampleRetention.toMillis
     val latestDownsampleTime = now - 12.hours.toMillis
 
-    val query ="""abs(sum(rate(foo{job = "app"}[5m])) - sum(rate(foo{job = "app"}[5m] offset 8d)))"""
+    val query = """abs(sum(rate(foo{job = "app"}[5m])) - sum(rate(foo{job = "app"}[5m] offset 8d)))"""
     val logicalPlan = Parser.queryRangeToLogicalPlan(query,
       TimeStepParams(start, step, end))
       .asInstanceOf[PeriodicSeriesPlan]
@@ -427,13 +427,109 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
-    ep.isInstanceOf[BinaryJoinExec] shouldEqual(true)
+    ep.isInstanceOf[BinaryJoinExec] shouldEqual (true)
 
     val binaryJoinExec = ep.asInstanceOf[BinaryJoinExec]
     binaryJoinExec.rangeVectorTransformers.head.isInstanceOf[InstantVectorFunctionMapper] shouldEqual true
     // Since LHS and RHS both belong to raw cluster, we use ActorPlanDispatcher
     ep.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual true
-    binaryJoinExec.lhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
-    binaryJoinExec.rhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
+    binaryJoinExec.lhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
+    binaryJoinExec.rhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
+  }
+
+  it("should run multiple binary join") {
+
+    val start = now / 1000 - 5.minutes.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now / 1000 - 2.minutes.toSeconds
+
+    val rawRetention = 10090.minutes
+    val downsampleRetention = 183.days
+    val earliestRawTime = now - rawRetention.toMillis
+    val earliestDownSampleTime = now - downsampleRetention.toMillis
+    val latestDownsampleTime = now - 12.hours.toMillis
+
+    val query = """abs(sum(rate(foo{job = "app"}[5m])) - sum(rate(foo{job = "app"}[5m] offset 8d) ) * sum(rate(foo{job = "app"}[5m] offset 8d)))"""
+    val logicalPlan = Parser.queryRangeToLogicalPlan(query,
+      TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan]
+
+    val rawPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = earliestRawTime,
+      queryConfig, "raw")
+    val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
+      earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+      earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
+    ep.asInstanceOf[BinaryJoinExec].binaryOp shouldEqual BinaryOperator.SUB
+    ep.asInstanceOf[BinaryJoinExec].rhs.head.asInstanceOf[BinaryJoinExec].binaryOp shouldEqual BinaryOperator.MUL
+    ep.asInstanceOf[BinaryJoinExec].lhs.head.dispatcher.clusterName shouldEqual "raw"
+    ep.asInstanceOf[BinaryJoinExec].rhs.head.dispatcher.clusterName shouldEqual "downsample"
+  }
+
+  it("should run multiple binary join across raw & downsample cluster") {
+    val start = now / 1000 - 5.minutes.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now / 1000 - 2.minutes.toSeconds
+
+    val rawRetention = 10090.minutes
+    val downsampleRetention = 183.days
+    val earliestRawTime = now - rawRetention.toMillis
+    val earliestDownSampleTime = now - downsampleRetention.toMillis
+    val latestDownsampleTime = now - 12.hours.toMillis
+
+    val query = """abs(sum(rate(foo{job = "app"}[5m] offset 8d)) - sum(rate(foo{job = "app"}[5m] ) ) * sum(rate(foo{job = "app"}[5m] offset 8d)))"""
+    val logicalPlan = Parser.queryRangeToLogicalPlan(query,
+      TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan]
+
+    val rawPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = earliestRawTime,
+      queryConfig, "raw")
+    val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
+      earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+      earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
+
+    ep.asInstanceOf[BinaryJoinExec].binaryOp shouldEqual BinaryOperator.SUB
+    ep.asInstanceOf[BinaryJoinExec].rhs.head.asInstanceOf[BinaryJoinExec].binaryOp shouldEqual BinaryOperator.MUL
+
+    ep.asInstanceOf[BinaryJoinExec].dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual(true)
+
+    ep.asInstanceOf[BinaryJoinExec].rhs.head.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual(true)
+  }
+
+  it("should run binary join with scalar operation") {
+
+    val start = now / 1000 - 5.minutes.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now / 1000 - 2.minutes.toSeconds
+
+    val rawRetention = 10090.minutes
+    val downsampleRetention = 183.days
+    val earliestRawTime = now - rawRetention.toMillis
+    val earliestDownSampleTime = now - downsampleRetention.toMillis
+    val latestDownsampleTime = now - 12.hours.toMillis
+
+    val query = """scalar(sum(rate(foo{job = "app"}[5m])) - sum(rate(foo{job = "app"}[5m] offset 8d))) > 5"""
+    val logicalPlan = Parser.queryRangeToLogicalPlan(query,
+      TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan]
+
+    val rawPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn =
+      earliestRawTime, queryConfig, "raw")
+    val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
+      earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+      earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
+    ep.asInstanceOf[BinaryJoinExec].dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual true
+    ep.rangeVectorTransformers(0).isInstanceOf[ScalarFunctionMapper] shouldEqual true
+    ep.rangeVectorTransformers(1).isInstanceOf[ScalarOperationMapper] shouldEqual true
+     ep.rangeVectorTransformers(1).asInstanceOf[ScalarOperationMapper].funcParams.head.
+       isInstanceOf[StaticFuncArgs] shouldEqual(true)
+
   }
 }

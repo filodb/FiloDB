@@ -28,11 +28,10 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
                            queryPlanner: QueryPlanner,
                            shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]],
                            config: QueryConfig)
-  extends QueryPlanner with PlannerMaterializer {
+  extends QueryPlanner with PlannerHelper {
 
   override def queryConfig: QueryConfig = config
   val datasetMetricColumn = dataset.options.metricColumn
-  val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
 
   override val schemas = Schemas(dataset.schema)
 

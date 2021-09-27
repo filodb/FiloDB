@@ -38,7 +38,7 @@ object SingleClusterPlanner {
   */
 
 class SingleClusterPlanner(val dataset: Dataset,
-                           schema: Schemas,
+                           val schemas: Schemas,
                            shardMapperFunc: => ShardMapper,
                            earliestRetainedTimestampFn: => Long,
                            val queryConfig: QueryConfig,
@@ -47,9 +47,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                            timeSplitEnabled: Boolean = false,
                            minTimeRangeForSplitMs: => Long = 1.day.toMillis,
                            splitSizeMs: => Long = 1.day.toMillis)
-                           extends QueryPlanner with StrictLogging with PlannerMaterializer {
-  override val schemas = schema
-
+                           extends QueryPlanner with StrictLogging with PlannerHelper {
   val shardColumns = dsOptions.shardKeyColumns.sorted
   val dsRef = dataset.ref
 
@@ -238,8 +236,8 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
   // scalastyle:on cyclomatic.complexity
 
-  private def materializeBinaryJoin(qContext: QueryContext,
-                                    lp: BinaryJoin): PlanResult = {
+  override def materializeBinaryJoin(qContext: QueryContext,
+                                     lp: BinaryJoin): PlanResult = {
     val lhs = walkLogicalPlanTree(lp.lhs, qContext)
     val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext,
       PlannerUtil.pickDispatcher(lhs.plans), lhs.plans))
