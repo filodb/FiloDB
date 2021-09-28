@@ -5,7 +5,8 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.Dataset
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.query.{BinaryJoin, LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters, SetOperator, TopLevelSubquery}
+import filodb.query.{BinaryJoin, LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters, SetOperator}
+import filodb.query.TopLevelSubquery
 import filodb.query.exec._
 
 case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange)
