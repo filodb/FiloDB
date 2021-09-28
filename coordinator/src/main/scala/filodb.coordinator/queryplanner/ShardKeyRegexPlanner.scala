@@ -1,7 +1,7 @@
 package filodb.coordinator.queryplanner
 
 import filodb.core.metadata.Dataset
-import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
+import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.query._
 import filodb.query.exec._
 
@@ -73,7 +73,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       case lp: ScalarVaryingDoublePlan     => materializeScalarPlan(qContext, lp)
       case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
       case lp: VectorPlan                  => materializeVectorPlan(qContext, lp)
-      case lp: Aggregate                   => materializeAggregate(lp, qContext)
+      case lp: Aggregate                   => materializeAggregate(qContext, lp)
       case lp: BinaryJoin                  => materializeBinaryJoin(lp, qContext)
       case lp: LabelValues                 => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
       case lp: LabelNames                  => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
@@ -126,6 +126,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
      PlanResult(Seq(execPlan))
   }
 
+  /*
   /***
     * For aggregate queries like sum(test{_ws_ = "demo", _ns_ =~ "App.*"})
     * It will be broken down to sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
@@ -148,7 +149,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     }
     PlanResult(Seq(exec))
   }
-
+*/
   /***
     * For non aggregate & non binary join queries like test{_ws_ = "demo", _ns_ =~ "App.*"}
     * It will be broken down to test{_ws_ = "demo", _ns_ = "App-1"}, test{_ws_ = "demo", _ns_ = "App-2"} etc
