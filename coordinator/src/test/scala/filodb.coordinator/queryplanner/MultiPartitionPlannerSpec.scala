@@ -184,13 +184,16 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
         List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(
+      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
+    )
+    val query = """test{job = "app"}[100m:10m]"""
     val lp = Parser.queryRangeToLogicalPlan(
-      "test{job = \"app\"}[100m:10m]",
+      query,
       TimeStepParams(endSeconds, step, endSeconds)
     )
 
-    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", endSeconds, step, endSeconds)
+    val promQlQueryParams = PromQlQueryParams(query, endSeconds, step, endSeconds)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
       PlannerParams(processMultiPartition = true)))
@@ -237,13 +240,16 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
         List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
     }
 
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(
+      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
+    )
+    val query = """test{job = "app"}[100m:10m]"""
     val lp = Parser.queryRangeToLogicalPlan(
-      "test{job = \"app\"}[100m:10m]",
+      query,
       TimeStepParams(endSeconds, step, endSeconds)
     )
 
-    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", endSeconds, step, endSeconds)
+    val promQlQueryParams = PromQlQueryParams(query, endSeconds, step, endSeconds)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
       PlannerParams(processMultiPartition = true)))
