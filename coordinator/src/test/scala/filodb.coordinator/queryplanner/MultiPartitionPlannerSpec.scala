@@ -175,6 +175,111 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
 
   }
 
+  it ("should not generate PromQlExec plan when partitions are local for TopLevelSubquery") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+
+      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+    }
+
+    val engine = new MultiPartitionPlanner(
+      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
+    )
+    val query = """test{job = "app"}[100m:10m]"""
+    val lp = Parser.queryRangeToLogicalPlan(
+      query,
+      TimeStepParams(endSeconds, step, endSeconds)
+    )
+
+    val promQlQueryParams = PromQlQueryParams(query, endSeconds, step, endSeconds)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.printTree()
+
+    execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
+    execPlan.children.length shouldEqual 2
+    execPlan.children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
+    execPlan.children.head.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+
+    val distConcatPlan = execPlan.asInstanceOf[LocalPartitionDistConcatExec]
+
+    val localExec1 = distConcatPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
+    val queryParams1 = localExec1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    queryParams1.startSecs shouldEqual endSeconds
+    queryParams1.endSecs shouldEqual endSeconds
+    queryParams1.stepSecs shouldEqual step
+    val samplesMapper1 = localExec1.rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
+    samplesMapper1.startMs shouldEqual 4200000
+    samplesMapper1.endMs shouldEqual 9600000
+    samplesMapper1.stepMs shouldEqual 10*60*1000
+
+    val localExec2 = distConcatPlan.children(1).asInstanceOf[MultiSchemaPartitionsExec]
+    val queryParams2 = localExec2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    queryParams2.startSecs shouldEqual endSeconds
+    queryParams2.endSecs shouldEqual endSeconds
+    queryParams2.stepSecs shouldEqual step
+    val samplesMapper2 = localExec2.rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
+    samplesMapper2.startMs shouldEqual 4200000
+    samplesMapper2.endMs shouldEqual 9600000
+    samplesMapper2.stepMs shouldEqual 10*60*1000
+  }
+
+  it ("should generate both PromQlExec and MultiSchemaPartitionsExec for TopLevelSubquery") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        List(
+          PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)),
+          PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs, timeRange.endMs))
+        )
+
+      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+    }
+
+    val engine = new MultiPartitionPlanner(
+      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
+    )
+    val query = """test{job = "app"}[100m:10m]"""
+    val lp = Parser.queryRangeToLogicalPlan(
+      query,
+      TimeStepParams(endSeconds, step, endSeconds)
+    )
+
+    val promQlQueryParams = PromQlQueryParams(query, endSeconds, step, endSeconds)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    println(execPlan.printTree())
+
+    execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
+    execPlan.children.length shouldEqual 2
+    execPlan.children(0).isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
+    execPlan.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual true
+
+    val distConcatPlan = execPlan.children(0).asInstanceOf[LocalPartitionDistConcatExec]
+
+    val localExec = distConcatPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
+    val localQueryParams = localExec.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    localQueryParams.startSecs shouldEqual endSeconds
+    localQueryParams.endSecs shouldEqual endSeconds
+    localQueryParams.stepSecs shouldEqual step
+    val localSamplesMapper = localExec.rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
+    localSamplesMapper.startMs shouldEqual 4200000
+    localSamplesMapper.endMs shouldEqual 9600000
+    localSamplesMapper.stepMs shouldEqual 10*60*1000
+
+    val remoteExec = execPlan.children(1).asInstanceOf[PromQlRemoteExec]
+    val remoteQueryParams = remoteExec.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    remoteQueryParams.startSecs shouldEqual endSeconds
+    remoteQueryParams.endSecs shouldEqual endSeconds
+    remoteQueryParams.stepSecs shouldEqual step
+  }
+
   it ("one partition should work for SubqueryWithWindowing") {
 
     def onePartition(timeRange: TimeRange): List[PartitionAssignment] = List(
