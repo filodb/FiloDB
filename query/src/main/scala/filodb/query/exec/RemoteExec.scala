@@ -91,12 +91,12 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
  */
 trait RemoteExecHttpClient extends StrictLogging {
 
-  def httpGet(applicationId: String, httpEndpoint: String,
+  def httpGet(httpEndpoint: String,
               httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any], traceInfo: Map[String, String])
              (implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]]
 
-  def httpMetadataGet(applicationId: String, httpEndpoint: String,
+  def httpMetadataGet(httpEndpoint: String,
                       httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any],
                       traceInfo: Map[String, String])
                      (implicit scheduler: Scheduler):
@@ -116,7 +116,7 @@ class RemoteHttpClient private(asyncHttpClientConfig: AsyncHttpClientConfig) ext
 
   ShutdownHookThread(shutdown())
 
-  def httpGet(applicationId: String, httpEndpoint: String,
+  def httpGet(httpEndpoint: String,
               httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any], traceInfo: Map[String, String])
              (implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
@@ -125,7 +125,6 @@ class RemoteHttpClient private(asyncHttpClientConfig: AsyncHttpClientConfig) ext
     val url = uri"$httpEndpoint?$urlParams"
     logger.debug("promQlExec url={}  traceInfo={}", url, traceInfo)
     sttp
-      .header(HeaderNames.UserAgent, applicationId)
       .headers(traceInfo)
       .get(url)
       .readTimeout(readTimeout)
@@ -133,7 +132,7 @@ class RemoteHttpClient private(asyncHttpClientConfig: AsyncHttpClientConfig) ext
       .send()
   }
 
-  def httpMetadataGet(applicationId: String, httpEndpoint: String,
+  def httpMetadataGet(httpEndpoint: String,
                       httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any],
                       traceInfo: Map[String, String])
                      (implicit scheduler: Scheduler):
@@ -143,7 +142,6 @@ class RemoteHttpClient private(asyncHttpClientConfig: AsyncHttpClientConfig) ext
     val url = uri"$httpEndpoint?$urlParams"
     logger.debug("promMetadataExec url={} traceInfo={}", url, traceInfo)
     sttp
-      .header(HeaderNames.UserAgent, applicationId)
       .headers(traceInfo)
       .get(url)
       .readTimeout(readTimeout)
