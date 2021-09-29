@@ -641,8 +641,6 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val lp = Parser.queryRangeToLogicalPlan("""absent_over_time(http_requests_total{job = "app"}[10m])""", t)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    println("final plan:")
-    println(execPlan.printTree())
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
     execPlan.rangeVectorTransformers.head.isInstanceOf[AbsentFunctionMapper] shouldEqual true
     execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)

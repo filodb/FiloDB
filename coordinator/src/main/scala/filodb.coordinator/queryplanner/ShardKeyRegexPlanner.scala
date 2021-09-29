@@ -199,7 +199,6 @@ class ShardKeyRegexPlanner(dataset: Dataset,
       // Add sum to aggregate all child responses
       // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
 
-
       addAbsentFunctionMapper(aggregatePlanResult, logicalPlan.columnFilters,
         RangeParams(logicalPlan.startMs / 1000, logicalPlan.stepMs / 1000,
           logicalPlan.endMs / 1000), queryContext)
