@@ -1,10 +1,10 @@
 package filodb.coordinator.queryplanner
 
-import filodb.core.metadata.{Dataset, Schemas}
+import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
-import filodb.query.exec.InternalRangeFunction.Last
 import filodb.query._
 import filodb.query.exec._
+import filodb.query.exec.InternalRangeFunction.Last
 
 /**
  * Holder for the shard key regex matcher results.
@@ -25,15 +25,14 @@ case class ShardKeyMatcher(columnFilters: Seq[ColumnFilter], query: String)
   * ColumnFilter(ns, Equals(App2))
   */
 
-class ShardKeyRegexPlanner(dataset: Dataset,
+class ShardKeyRegexPlanner(val dataset: Dataset,
                            queryPlanner: QueryPlanner,
                            shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]],
-                           queryConfig: QueryConfig)
-  extends QueryPlanner with PlannerMaterializer {
-  val datasetMetricColumn = dataset.options.metricColumn
-  val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
+                           config: QueryConfig)
+  extends QueryPlanner with PlannerHelper {
 
-  override val schemas = Schemas(dataset.schema)
+  override def queryConfig: QueryConfig = config
+  val datasetMetricColumn = dataset.options.metricColumn
 
   /**
    * Returns true when regex has single matching value
@@ -82,7 +81,7 @@ class ShardKeyRegexPlanner(dataset: Dataset,
       case lp: SeriesKeysByFilters         => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
       case lp: PeriodicSeriesWithWindowing => if (lp.function == RangeFunctionId.AbsentOverTime)
                                               materializeAbsentOverTime(lp, qContext)
-                                             else materializeOthers(logicalPlan, qContext)
+                                              else materializeOthers(logicalPlan, qContext)
       case _                               => materializeOthers(logicalPlan, qContext)
     }
   }
@@ -186,13 +185,10 @@ class ShardKeyRegexPlanner(dataset: Dataset,
             logicalPlan.stepMs, logicalPlan.endMs, Some(logicalPlan.window), Some(Last), queryContext,
             logicalPlan.stepMultipleNotationUsed,
             paramsExec, logicalPlan.offsetMs, logicalPlan.series.isRaw))))
-
-
           PlanResult(e.children)
         } else
          PlanResult(Seq(e))
       }
-
 
     val aggregatePlanResult = PlanResult (Seq(addAggregator(aggregate, queryContext.copy(plannerParams =
       queryContext.plannerParams.copy(skipAggregatePresent = true)), vectors, Seq.empty)))

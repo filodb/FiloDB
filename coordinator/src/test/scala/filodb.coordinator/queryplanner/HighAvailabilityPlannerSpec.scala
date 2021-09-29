@@ -52,7 +52,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
 
   private val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000)
 
-  val localPlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
+  val localPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
     "raw")
 
   it("should not generate PromQlExec plan when local overlapping failure is smaller") {

@@ -52,7 +52,7 @@ object FindMyShards extends StrictLogging {
     val config = ConfigFactory.load ("application_test.conf")
     val queryConfig = new QueryConfig (config.getConfig ("filodb.query") )
 
-    new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+    new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
       queryConfig, "raw", StaticSpreadProvider(SpreadChange(0, spread)))
 
   }

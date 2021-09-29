@@ -6,6 +6,7 @@ import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.Dataset
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.query.{BinaryJoin, LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters, SetOperator}
+import filodb.query.TopLevelSubquery
 import filodb.query.exec._
 
 case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange)
@@ -39,10 +40,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
     if(!tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
       (tsdbQueryParams.isInstanceOf[PromQlQueryParams]
-        && !qContext.plannerParams.processMultiPartition)) // Query was part of routing
+        && !qContext.plannerParams.processMultiPartition)) { // Query was part of routing
       localPartitionPlanner.materialize(logicalPlan, qContext)
-
-    else logicalPlan match {
+    }  else if (LogicalPlan.hasSubqueryWithWindowing(logicalPlan) || logicalPlan.isInstanceOf[TopLevelSubquery]) {
+      materializeSubqery(logicalPlan, qContext)
+    } else logicalPlan match {
       case lp: BinaryJoin          => materializeBinaryJoin(lp, qContext)
       case lp: LabelValues         => materializeLabelValues(lp, qContext)
       case lp: LabelNames          => materializeLabelNames(lp, qContext)
@@ -95,6 +97,27 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       logger.warn(s"No partitions found for routing keys: $routingKeys")
 
     (partitions, lookBackMs, offsetMs, routingKeys)
+  }
+
+  /**
+   *
+   * @param logicalPlan Logical plan
+   * @param queryParams PromQlQueryParams having query details
+   * @return Returns PartitionAssignment and routing keys
+   */
+  private def partitionUtilSubquery(logicalPlan: LogicalPlan, queryParams: PromQlQueryParams) = {
+    val routingKeys = getRoutingKeys(logicalPlan)
+    val lastPoint = TimeRange(queryParams.endSecs * 1000, queryParams.endSecs * 1000)
+    val partitions =
+      if (routingKeys.isEmpty) {
+        List.empty
+      } else {
+        val routingKeyMap = routingKeys.map(x => (x._1, x._2.head)).toMap
+        partitionLocationProvider.getPartitions(routingKeyMap, lastPoint).sortBy(_.timeRange.startMs)
+      }
+    if (partitions.isEmpty && !routingKeys.isEmpty)
+      logger.warn(s"No partitions found for routing keys: $routingKeys")
+    (partitions, routingKeys)
   }
   /**
     * @param queryParams PromQlQueryParams having query details
@@ -160,6 +183,49 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       if (execPlans.size == 1) execPlans.head
       else StitchRvsExec(qContext, inProcessPlanDispatcher,
         execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
+      // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
+      // Sort to move RemoteExec in end as it does not have schema
+    }
+  }
+
+
+  /**
+   * Materialize queries having subqueries in them.
+   * Here, we don't stitch across partitions and we assume for a given
+   * set of routingKeys we will have only ONE partition. We do not try to find multiple
+   * partitions that cover our time range or find one that has the best overlap, we just
+   * choose one partition that has the end of our interval.
+   */
+  def materializeSubqery(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+
+    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val (partitions, routingKeys) = partitionUtilSubquery(logicalPlan, queryParams)
+    if (partitions.isEmpty || routingKeys.forall(_._2.isEmpty)) {
+      localPartitionPlanner.materialize(logicalPlan, qContext)
+    } else {
+      val execPlans = partitions.zipWithIndex.map { case (p, i) =>
+        val startMs = queryParams.startSecs * 1000
+        val endMs = queryParams.endSecs * 1000
+        logger.debug(s"partitionInfo=$p; updated startMs=$startMs, endMs=$endMs")
+        if (p.partitionName.equals(localPartitionName))
+          localPartitionPlanner.materialize(logicalPlan, qContext)
+        else {
+          val httpEndpoint = p.endPoint + queryParams.remoteQueryPath.getOrElse("")
+          PromQlRemoteExec(
+            httpEndpoint, remoteHttpTimeoutMs, generateRemoteExecParams(qContext, startMs, endMs),
+            inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient
+          )
+        }
+      }
+      if (execPlans.size == 1) {
+        execPlans.head
+      } else {
+        StitchRvsExec(
+          qContext,
+          inProcessPlanDispatcher,
+          execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec])
+        )
+      }
       // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
       // Sort to move RemoteExec in end as it does not have schema
     }

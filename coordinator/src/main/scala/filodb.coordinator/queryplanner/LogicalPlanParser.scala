@@ -3,10 +3,11 @@ package filodb.coordinator.queryplanner
 import org.apache.commons.text.StringEscapeUtils
 
 import filodb.prometheus.ast.Vectors.PromMetricLabel
+import filodb.prometheus.ast.WindowConstants
 import filodb.query._
 import filodb.query.AggregationOperator.CountValues
 import filodb.query.InstantFunctionId.{ClampMax, ClampMin}
-import filodb.query.RangeFunctionId.QuantileOverTime
+import filodb.query.RangeFunctionId.{QuantileOverTime, Timestamp}
 
 object QueryConstants {
   val Quotes = "\""
@@ -27,30 +28,38 @@ object LogicalPlanParser {
   private def getFiltersFromRawSeries(lp: RawSeries)= lp.filters.map(f => (f.column, f.filter.operatorString,
     Quotes + StringEscapeUtils.escapeJava(f.filter.valuesStrings.head.toString) + Quotes))
 
-  private def filtersToQuery(filters: Seq[(String, String, String)], columns: Seq[String]): String = {
+  private def filtersToQuery(filters: Seq[(String, String, String)], columns: Seq[String],
+                             lookback: Option[Long], offset: Option[Long], addWindow: Boolean): String = {
     val columnString = if (columns.isEmpty) "" else s"::${columns.head}"
     // Get metric name from filters and remove quotes from start and end
     val name = s"${filters.find(x => x._1.equals(PromMetricLabel)).head._3.
       replaceAll("^\"|\"$", "")}$columnString"
+    val window = if (lookback.isDefined) {
+      // Window should not be added for queries like sum(foo) even though they have lookback
+      if (lookback.get.equals(WindowConstants.staleDataLookbackMillis) && !addWindow) ""
+      else s"$OpeningSquareBracket${lookback.get / 1000}s$ClosingSquareBracket"
+    } else ""
+    val offsetString = offset.map(o => s"$Space$Offset$Space${(o / 1000).toString}s").getOrElse("")
     // When only metric name is present
-    if (filters.size == 1) name
+    if (filters.size == 1) name + window + offsetString
     else s"$name$OpeningCurlyBraces${filters.filterNot(x => x._1.equals(PromMetricLabel)).
-      map(f => f._1 + f._2 + f._3).mkString(Comma)}$ClosingCurlyBraces"
+      map(f => f._1 + f._2 + f._3).mkString(Comma)}$ClosingCurlyBraces" + window + offsetString
   }
 
-  private def rawSeriesLikeToQuery(lp: RawSeriesLikePlan): String = {
+  private def rawSeriesLikeToQuery(lp: RawSeriesLikePlan, addWindow: Boolean): String = {
     lp match {
-      case r: RawSeries               => filtersToQuery(getFiltersFromRawSeries(r), r.columns)
+      case r: RawSeries               => filtersToQuery(getFiltersFromRawSeries(r), r.columns, r.lookbackMs,
+                                         r.offsetMs, addWindow)
       case a: ApplyInstantFunctionRaw => val filters = getFiltersFromRawSeries(a.vectors)
         val bucketFilter = ("_bucket_", "=", s"$Quotes${functionArgsToQuery(a.functionArgs.head)}$Quotes")
-        filtersToQuery(filters :+ bucketFilter, a.vectors.columns)
-      case _            => throw new UnsupportedOperationException(s"$lp can't be converted to Query")
+        filtersToQuery(filters :+ bucketFilter, a.vectors.columns, a.vectors.lookbackMs, a.vectors.offsetMs, addWindow)
+      case _                          => throw new UnsupportedOperationException(s"$lp can't be converted to Query")
     }
   }
 
   private def periodicSeriesToQuery(periodicSeries: PeriodicSeries): String = {
-    s"${rawSeriesLikeToQuery(periodicSeries.rawSeries)}${periodicSeries.offsetMs.map(o => Space + Offset + Space +
-      (o / 1000).toString + "s" ).getOrElse("")}"
+    // Queries like sum(foo) should not have window even though stale lookback is present
+    s"${rawSeriesLikeToQuery(periodicSeries.rawSeries, false)}"
   }
 
   private def aggregateToQuery(lp: Aggregate): String = {
@@ -106,17 +115,16 @@ object LogicalPlanParser {
   }
 
   private def periodicSeriesWithWindowingToQuery(lp: PeriodicSeriesWithWindowing): String = {
-    val rawSeries = rawSeriesLikeToQuery(lp.series)
-    val rawSeriesQueryWithWindow = if (lp.window == 0) rawSeries else s"${rawSeries}$OpeningSquareBracket" +
-      s"${lp.window/1000}s$ClosingSquareBracket${lp.offsetMs.map(o => s"$Space$Offset$Space${(o / 1000).toString}s")
-        .getOrElse("")}"
+    // Except Timestamp function all functions have window
+    val addWindow = if (lp.function.equals(Timestamp)) false else true
+    val rawSeries = rawSeriesLikeToQuery(lp.series, addWindow)
     val prefix = lp.function.entryName + OpeningRoundBracket
-    if (lp.functionArgs.isEmpty) s"$prefix$rawSeriesQueryWithWindow$ClosingRoundBracket"
+    if (lp.functionArgs.isEmpty) s"$prefix$rawSeries$ClosingRoundBracket"
     else {
       if (lp.function.equals(QuantileOverTime))
-        s"$prefix${functionArgsToQuery(lp.functionArgs.head)}$Comma$rawSeriesQueryWithWindow$ClosingRoundBracket"
+        s"$prefix${functionArgsToQuery(lp.functionArgs.head)}$Comma$rawSeries$ClosingRoundBracket"
       else
-        s"$prefix$rawSeriesQueryWithWindow$Comma${lp.functionArgs.map(functionArgsToQuery(_)).mkString(Comma)}" +
+        s"$prefix$rawSeries$Comma${lp.functionArgs.map(functionArgsToQuery(_)).mkString(Comma)}" +
           s"$ClosingRoundBracket"
     }
   }
@@ -180,7 +188,7 @@ object LogicalPlanParser {
 
   def convertToQuery(logicalPlan: LogicalPlan): String = {
     logicalPlan match {
-      case lp: RawSeries                   => rawSeriesLikeToQuery(lp)
+      case lp: RawSeries                   => rawSeriesLikeToQuery(lp, true)
       case lp: PeriodicSeries              => periodicSeriesToQuery(lp)
       case lp: Aggregate                   => aggregateToQuery(lp)
       case lp: ApplyAbsentFunction         => absentFnToQuery(lp)
