@@ -74,7 +74,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
       case lp: VectorPlan                  => materializeVectorPlan(qContext, lp)
       case lp: Aggregate                   => materializeAggregate(qContext, lp)
-      case lp: BinaryJoin                  => materializeBinaryJoin(lp, qContext)
+      case lp: BinaryJoin                  => materializeBinaryJoin(qContext, lp)
       case lp: LabelValues                 => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
       case lp: LabelNames                  => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
       case lp: SeriesKeysByFilters         => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
@@ -99,57 +99,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       }
   }
 
-  /**
-    * For binary join queries like test1{_ws_ = "demo", _ns_ =~ "App.*"} + test2{_ws_ = "demo", _ns_ =~ "App.*"})
-    * LHS and RHS could be across multiple partitions
-    */
-  private def materializeBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): PlanResult = {
-    val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
-      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
-    val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
-      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
 
-    val lhsExec = materialize(logicalPlan.lhs, lhsQueryContext)
-    val rhsExec = materialize(logicalPlan.rhs, rhsQueryContext)
-
-    val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
-
-    val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
-         SetOperatorExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-          LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
-          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
-      else
-         BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-          logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
-          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
-          LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn)
-     PlanResult(Seq(execPlan))
-  }
-
-  /*
-  /***
-    * For aggregate queries like sum(test{_ws_ = "demo", _ns_ =~ "App.*"})
-    * It will be broken down to sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
-    * Sub query could be across multiple partitions so aggregate using MultiPartitionReduceAggregateExec
-    * */
-  private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext): PlanResult = {
-    val execPlans = generateExecWithoutRegex(aggregate,
-      LogicalPlan.getNonMetricShardKeyFilters(aggregate, dataset.options.nonMetricShardColumns).head, queryContext)
-    val exec = if (execPlans.size == 1) execPlans.head
-    else {
-      if (aggregate.operator.equals(AggregationOperator.TopK) || aggregate.operator.equals(AggregationOperator.BottomK)
-        || aggregate.operator.equals(AggregationOperator.CountValues))
-         throw new UnsupportedOperationException(s"Shard Key regex not supported for ${aggregate.operator}")
-      val reducer = MultiPartitionReduceAggregateExec(queryContext, inProcessPlanDispatcher,
-        execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
-      val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-      reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
-        RangeParams(promQlQueryParams.startSecs, promQlQueryParams.stepSecs, promQlQueryParams.endSecs)))
-      reducer
-    }
-    PlanResult(Seq(exec))
-  }
-*/
   /***
     * For non aggregate & non binary join queries like test{_ws_ = "demo", _ns_ =~ "App.*"}
     * It will be broken down to test{_ws_ = "demo", _ns_ = "App-1"}, test{_ws_ = "demo", _ns_ = "App-2"} etc
