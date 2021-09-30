@@ -42,6 +42,8 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
 
   val timeseriesCount = Kamon.gauge("memstore-timeseries-count")
+  val activeTimeseriesCount = Kamon.gauge("memstore-active-timeseries-count")
+
   val shardTotalRecoveryTime = Kamon.gauge("memstore-total-shard-recovery-time",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
   val chunksQueried = Kamon.counter("memstore-chunks-queried").withTags(TagSet.from(tags))
@@ -689,6 +691,18 @@ class TimeSeriesShard(val ref: DatasetRef,
     shardStats.tsCountBySchema.withTag("schema", schema.name).increment(times)
   }
 
+  private def captureActiveTimeseriesCount(schema: Schema, shardKey: Seq[String], times: Double) = {
+    // Assuming that the last element in the shardKeyColumn is always a metric name, we are making sure the
+    // shardKeyColumn.length is > 1 and dropping the last element in shardKeyColumn.
+    if (shardKeyLevelIngestionMetricsEnabled &&
+      schema.options.shardKeyColumns.length > 1 &&
+      shardKey.length == schema.options.shardKeyColumns.length) {
+      val tagSetMap = (schema.options.shardKeyColumns.map(c => s"metric${c}tag") zip shardKey).dropRight(1).toMap
+      shardStats.activeTimeseriesCount.withTags(TagSet.from(tagSetMap)).increment(times)
+    }
+  }
+
+
   def indexNames(limit: Int): Seq[String] = partKeyIndex.indexNames(limit)
 
   def labelValues(labelName: String, topK: Int): Seq[TermInfo] = partKeyIndex.indexValues(labelName, topK)
@@ -1255,12 +1269,12 @@ class TimeSeriesShard(val ref: DatasetRef,
     if (newPart != OutOfMemPartition) {
       val partId = newPart.partID
       val startTime = schema.ingestionSchema.getLong(recordBase, recordOff, 0)
+      val shardKey = schema.partKeySchema.colValues(newPart.partKeyBase, newPart.partKeyOffset,
+        schema.options.shardKeyColumns)
       if (previousPartId == CREATE_NEW_PARTID) {
         // add new lucene entry if this partKey was never seen before
         // causes endTime to be set to Long.MaxValue
         partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
-        val shardKey = schema.partKeySchema.colValues(newPart.partKeyBase, newPart.partKeyOffset,
-          schema.options.shardKeyColumns)
         captureTimeseriesCount(schema, shardKey, 1)
         if (storeConfig.meteringEnabled) {
           cardTracker.incrementCount(shardKey)
@@ -1274,6 +1288,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         activelyIngesting += partId
         newPart.ingesting = true
       }
+      captureActiveTimeseriesCount(schema, shardKey, 1)
       val stamp = partSetLock.writeLock()
       try {
         partSet.add(newPart)
