@@ -678,6 +678,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
       //if(lp.toString != e) {
         //println("\""+q.replaceAll("\"","\\\\\"")+"\" -> \""+lp.toString+"\",")
       //}
+      
       lp.toString shouldEqual (e)
     }
   }
