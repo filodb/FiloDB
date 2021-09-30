@@ -38,9 +38,11 @@ trait  PlannerHelper {
     def materializeFunctionArgs(functionParams: Seq[FunctionArgsPlan],
                                 qContext: QueryContext): Seq[FuncArgs] = functionParams map {
         case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
-        case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(materialize(s, qContext), RangeParams(s.startMs, s.stepMs, s.endMs))
+        case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(materialize(s, qContext),
+                                           RangeParams(s.startMs, s.stepMs, s.endMs))
         case t: ScalarTimeBasedPlan     => TimeFuncArgs(t.rangeParams)
-        case s: ScalarBinaryOperation   => ExecPlanFuncArgs(materialize(s, qContext), RangeParams(s.startMs, s.stepMs, s.endMs))
+        case s: ScalarBinaryOperation   => ExecPlanFuncArgs(materialize(s, qContext),
+                                           RangeParams(s.startMs, s.stepMs, s.endMs))
     }
 
 
