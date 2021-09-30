@@ -245,7 +245,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           }
           stats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
           val metricShardKeys = schemas.part.options.shardKeyColumns
-          val metricGroupBy = clusterType +: metricShardKeys.map { col =>
+          val metricGroupBy = clusterType +: rawDatasetRef.toString +: metricShardKeys.map { col =>
             filters.collectFirst {
               case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
             }.getOrElse("unknown")

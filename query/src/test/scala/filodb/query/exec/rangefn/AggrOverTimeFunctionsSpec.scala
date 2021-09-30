@@ -1,6 +1,6 @@
 package filodb.query.exec.rangefn
 
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
@@ -162,7 +162,7 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(ingestBlockHolder, encode = true)
     // part.encodeAndReleaseBuffers(ingestBlockHolder)
-    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicInteger())
+    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicLong())
   }
 
   def timeValueRvDownsample(tuples: Seq[(Long, Double, Double, Double, Double, Double)],
@@ -176,7 +176,7 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(ingestBlockHolder2, encode = true)
     // part.encodeAndReleaseBuffers(ingestBlockHolder)
-    RawDataRangeVector(null, part, AllChunkScan, colIds, new AtomicInteger())
+    RawDataRangeVector(null, part, AllChunkScan, colIds, new AtomicLong())
   }
 
   def timeValueRV(data: Seq[Double], startTS: Long = defaultStartTS): RawDataRangeVector = {
