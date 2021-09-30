@@ -132,7 +132,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it("should generate Exec plan for Aggregate query") {
-    val lp = Parser.queryToLogicalPlan("sum(test{_ws_ = \"demo\", _ns_ =~ \"App.*\", instance = \"Inst-1\" })",
+    val lp = Parser.queryToLogicalPlan("""sum(test{_ws_ = "demo", _ns_ =~ "App.*", instance = "Inst-1" })""",
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
@@ -157,14 +157,14 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it("should generate Exec plan for Scalar Binary Operation") {
-    val lp = Parser.queryToLogicalPlan("1 + test{_ws_ = \"demo\", " +
-      "_ns_ =~ \"App.*\", instance = \"Inst-1\" }", 1000, 1000)
+    val lp = Parser.queryToLogicalPlan("""1 + test{_ws_ = "demo", _ns_ =~ "App.*", instance = "Inst-1"}""",
+      1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = PromQlQueryParams("1 + test{_ws_ = \"demo\"," +
-      " _ns_ =~ \"App.*\", instance = \"Inst-1\" }", 100, 1, 1000)))
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = PromQlQueryParams(
+    """1 + test{_ws_ = \"demo\",_ns_ =~ \"App.*\", instance = \"Inst-1\" }""", 100, 1, 1000)))
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual(true)
     execPlan.rangeVectorTransformers(0).isInstanceOf[ScalarOperationMapper] shouldEqual true
     execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
@@ -182,8 +182,8 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it("should generate Exec plan for Binary join without regex") {
-    val lp = Parser.queryToLogicalPlan("test1{_ws_ = \"demo\", _ns_ = \"App\"} + " +
-      "test2{_ws_ = \"demo\", _ns_ = \"App\"}", 1000, 1000)
+    val lp = Parser.queryToLogicalPlan("""test1{_ws_ = "demo", _ns_ = "App"} + test2{_ws_ = "demo", _ns_ = "App"}""",
+      1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
@@ -196,7 +196,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it ("should generate Exec plan for Metadata query") {
-    val lp = Parser.metadataQueryToLogicalPlan("http_requests_total{job=\"prometheus\", method=\"GET\"}",
+    val lp = Parser.metadataQueryToLogicalPlan("""http_requests_total{job="prometheus", method="GET"}""",
       TimeStepParams(1000, 1000, 3000))
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
@@ -207,7 +207,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it("should generate Exec plan for histogram quantile for Aggregate query") {
-    val lp = Parser.queryToLogicalPlan("histogram_quantile(0.2, sum(test{_ws_ = \"demo\", _ns_ =~ \"App.*\"}))",
+    val lp = Parser.queryToLogicalPlan("""histogram_quantile(0.2, sum(test{_ws_ = "demo", _ns_ =~ "App.*"}))""",
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
@@ -235,9 +235,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     // Child plans should have only sum query in PromQlQueryParams
     execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      "sum(test{_ws_=\"demo\",_ns_=\"App-1\"})"
+      """sum(test{_ws_="demo",_ns_="App-1"})"""
     execPlan.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      "sum(test{_ws_=\"demo\",_ns_=\"App-2\"})"
+      """sum(test{_ws_="demo",_ns_="App-2"})"""
   }
 
   it("should generate Exec plan for exp for Aggregate query") {
@@ -269,9 +269,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     // Child plans should have only sum query in PromQlQueryParams
     execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      "sum(test{_ws_=\"demo\",_ns_=\"App-1\"})"
+      """sum(test{_ws_="demo",_ns_="App-1"})"""
     execPlan.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      "sum(test{_ws_=\"demo\",_ns_=\"App-2\"})"
+      """sum(test{_ws_="demo",_ns_="App-2"})"""
   }
 
   it("should generate local Exec plan for query without regex") {
@@ -295,7 +295,6 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       ColumnFilter("_ns_", Equals("App-2"))))}
     val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    // val execPlan = engine.walkLogicalPlanTree(lp, QueryContext(origQueryParams = promQlQueryParams)).plans.head
     execPlan.isInstanceOf[TimeScalarGeneratorExec] shouldEqual(true)
     execPlan.rangeVectorTransformers.head.isInstanceOf[ScalarOperationMapper] shouldEqual true
     execPlan.rangeVectorTransformers.head.asInstanceOf[ScalarOperationMapper].funcParams.head.
@@ -311,9 +310,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     // Child plans should have only inner query in PromQlQueryParams
     multiPartitionExec.children(1).children.head.queryContext.origQueryParams
-      .asInstanceOf[PromQlQueryParams].promQl shouldEqual "test{_ws_=\"demo\",_ns_=\"App-1\"}"
+      .asInstanceOf[PromQlQueryParams].promQl shouldEqual """test{_ws_="demo",_ns_="App-1"}"""
     multiPartitionExec.children(0).children.head.queryContext.origQueryParams
-      .asInstanceOf[PromQlQueryParams].promQl shouldEqual "test{_ws_=\"demo\",_ns_=\"App-2\"}"
+      .asInstanceOf[PromQlQueryParams].promQl shouldEqual """test{_ws_="demo",_ns_="App-2"}"""
   }
 
   it ("should generate Exec plan for Metadata Label values query") {
@@ -332,8 +331,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it("should generate Exec plan for Binary join with regex") {
-    val lp = Parser.queryToLogicalPlan("test1{_ws_ = \"demo\", _ns_ =~ \"App.*\"} + " +
-      "test2{_ws_ = \"demo\", _ns_ =~ \"App.*\"}", 1000, 1000)
+    val lp = Parser.queryToLogicalPlan(
+      """test1{_ws_ = "demo", _ns_ =~ "App.*"} +
+        |test2{_ws_ = "demo", _ns_ =~ "App.*"}""".stripMargin, 1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-2"))))}
@@ -360,8 +360,8 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   it("should generate Exec plan for Binary join of subqueries with regex") {
     val lp = Parser.queryToLogicalPlan(
-      """avg_over_time(test{_ws_ = "demo", _ns_ =~ "App.*", instance = "Inst-1" }[5m:1m]) + """ +
-        """avg_over_time(test{_ws_ = "demo", _ns_ =~ "App.*", instance = "Inst-1" }[5m:1m])""",
+      """avg_over_time(test{_ws_ = "demo", _ns_ =~ "App.*", instance = "Inst-1" }[5m:1m]) +
+        |avg_over_time(test{_ws_ = "demo", _ns_ =~ "App.*", instance = "Inst-1" }[5m:1m])""".stripMargin,
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => { Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
       ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
@@ -386,8 +386,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it("should generate Exec plan for Binary join with regex only on one side") {
-    val lp = Parser.queryToLogicalPlan("test1{_ws_ = \"demo\", _ns_ = \"App-0\"} + " +
-      "test2{_ws_ = \"demo\", _ns_ =~ \"App.*\"}", 1000, 1000)
+    val lp = Parser.queryToLogicalPlan(
+      """test1{_ws_ = "demo", _ns_ = "App-0"} +
+        | test2{_ws_ = "demo", _ns_ =~ "App.*"}""".stripMargin, 1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
         ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
@@ -419,7 +420,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
   }
-  /*
+
     it("should throw UnsupportedOperationException for topk query with multiple matching values for regex") {
       val lp = Parser.queryToLogicalPlan(s"""topk(2, test{_ws_ = "demo", _ns_ =~ "App.*"})""",
         1000, 1000)
@@ -434,10 +435,10 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
       } should have message "Shard Key regex not supported for TopK"
     }
-   */
+
 
   it("should generate Exec plan for histogram quantile for Aggregate query having single matching regex value") {
-    val lp = Parser.queryToLogicalPlan("histogram_quantile(0.2, sum(test{_ws_ = \"demo\", _ns_ =~ \"App-1\"}))",
+    val lp = Parser.queryToLogicalPlan("""histogram_quantile(0.2, sum(test{_ws_ = "demo", _ns_ =~ "App-1"}))""",
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
@@ -462,8 +463,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it("should generate Exec plan for Binary join with single regex match") {
-    val lp = Parser.queryToLogicalPlan("test1{_ws_ = \"demo\", _ns_ =~ \"App\"} + " +
-      "test2{_ws_ = \"demo\", _ns_ =~ \"App\"}", 1000, 1000)
+    val lp = Parser.queryToLogicalPlan(
+      """test1{_ws_ = "demo", _ns_ =~ "App"} +
+        | test2{_ws_ = "demo", _ns_ =~ "App"}""".stripMargin, 1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
         ColumnFilter("_ns_", Equals("App"))))
@@ -476,8 +478,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it("should preserve brackets in Binary join with regex query") {
-    val lp = Parser.queryToLogicalPlan("sum(test1{_ws_ = \"demo\", _ns_ =~ \"App\"}) / " +
-      "(sum(test2{_ws_ = \"demo\", _ns_ =~ \"App\"})+sum(test3{_ws_ = \"demo\", _ns_ =~ \"App\"}))", 1000, 1000)
+    val lp = Parser.queryToLogicalPlan(
+      """sum(test1{_ws_ = "demo", _ns_ =~ "App"}) /
+        |(sum(test2{_ws_ = "demo", _ns_ =~ "App"})+sum(test3{_ws_ = "demo", _ns_ =~ "App"}))""".stripMargin, 1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
         ColumnFilter("_ns_", Equals("App"))))
@@ -491,7 +494,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   it("should handle push down aggregation to right level case 1") {
     // Case 1 of Push down tests  when regex resolves to two different namespaces
-    val lp = Parser.queryToLogicalPlan("sum(count by(foo)(test1{_ws_ = \"demo\", _ns_ =~ \"App-.*\"}))",
+    val lp = Parser.queryToLogicalPlan("""sum(count by(foo)(test1{_ws_ = "demo", _ns_ =~ "App-.*"}))""",
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
@@ -512,8 +515,8 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case plan1::plan2::Nil =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
-          Set("count(test1{_ws_=\"demo\",_ns_=\"App2\"}) by (foo)",
-            "count(test1{_ws_=\"demo\",_ns_=\"App1\"}) by (foo)")
+          Set("""count(test1{_ws_="demo",_ns_="App2"}) by (foo)""",
+            """count(test1{_ws_="demo",_ns_="App1"}) by (foo)""")
         plan1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
       case _ => fail("Expected two children")
     }
@@ -522,7 +525,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   it("should handle push down aggregation to right level case 2") {
     // Case 2 of Push down tests  when regex resolves to only one namespace
-    val lp = Parser.queryToLogicalPlan("sum(count by(foo)(test1{_ws_ = \"demo\", _ns_ =~ \"App-.*\"}))",
+    val lp = Parser.queryToLogicalPlan("""sum(count by(foo)(test1{_ws_ = "demo", _ns_ =~ "App-.*"}))""",
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
@@ -535,7 +538,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
     execPlan.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual true
     execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      "sum(count(test1{_ws_=\"demo\",_ns_=\"App1\"}) by (foo))"
+      """sum(count(test1{_ws_="demo",_ns_="App1"}) by (foo))"""
   }
 
   it("should handle multiple binary joins appropriately, case 1") {
@@ -543,9 +546,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     // Case 1: Binary join uses metrics from same partition, entire plan should be materialized by
     // the queryPlanner and nothing in ShardKeyPlanner
 
-    val lp = Parser.queryToLogicalPlan("test1{_ws_ = \"demo\", _ns_ = \"App-1\"}" +
-      " + test2{_ws_ = \"demo\", _ns_ = \"App-1\"}",
-      1000, 1000)
+    val lp = Parser.queryToLogicalPlan(
+      """test1{_ws_ = "demo", _ns_ = "App-1"}
+        |+ test2{_ws_ = "demo", _ns_ = "App-1"}""".stripMargin, 1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
         ColumnFilter("_ns_", Equals("App1")))
@@ -553,13 +556,13 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     }
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(
-      origQueryParams = PromQlQueryParams("test1{_ws_=\"demo\",_ns_=\"App-1\"} + test2{_ws_=\"demo\",_ns_=\"App-1\"}",
+      origQueryParams = PromQlQueryParams("""test1{_ws_="demo",_ns_="App-1"} + test2{_ws_="demo",_ns_="App-1"}""",
         100, 1, 1000)))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     // Since the dispatcher is ActorDispatcher, its materialized by the underlying queryPlanner
     execPlan.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual (true)
     execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      ("test1{_ws_=\"demo\",_ns_=\"App-1\"} + test2{_ws_=\"demo\",_ns_=\"App-1\"}")
+      ("""test1{_ws_="demo",_ns_="App-1"} + test2{_ws_="demo",_ns_="App-1"}""")
   }
 
 
@@ -567,8 +570,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     // LHS of the Binary Join is on one partition, RHS is another binary join that has data on same partition
 
-    val lp = Parser.queryToLogicalPlan("test1{_ws_ = \"demo\", _ns_ = \"App-1\"}" +
-      " + (test2{_ws_ = \"demo\", _ns_ = \"App-2\"} * test3{_ws_ = \"demo\", _ns_ = \"App-2\"})",
+    val lp = Parser.queryToLogicalPlan(
+      """test1{_ws_ = "demo", _ns_ = "App-1"} +
+        | (test2{_ws_ = "demo", _ns_ = "App-2"} * test3{_ws_ = "demo", _ns_ = "App-2"})""".stripMargin,
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => Seq(shardColumnFilters)
 
@@ -590,7 +594,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   it("should handle multi partition multi level binary join appropriately with instant fn") {
 
-    val lp = Parser.queryToLogicalPlan("ln(test1{_ws_ = \"demo\", _ns_ =~ \"App-1\"})", 1000, 1000)
+    val lp = Parser.queryToLogicalPlan("""ln(test1{_ws_ = "demo", _ns_ =~ "App-1"})""", 1000, 1000)
 
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
@@ -602,7 +606,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     }
 
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
-    val execPlan = engine.walkLogicalPlanTree(lp, QueryContext(origQueryParams = promQlQueryParams)).plans.head
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual (true)
     // Since we get data from multiple partitions, the dispatcher will be in process
     execPlan.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual (true)
@@ -610,8 +614,8 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case plan1::plan2::Nil =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
-          Set("test1{_ws_=\"demo\",_ns_=\"App1\"}",
-            "test1{_ws_=\"demo\",_ns_=\"App2\"}")
+          Set("""test1{_ws_="demo",_ns_="App1"}""",
+            """test1{_ws_="demo",_ns_="App2"}""")
         plan1.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
       case _ => fail("Expected two children")
     }
@@ -626,7 +630,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   it("should handle simple instant function applied to single partition raw series with regex") {
     // Given the raw series is multi partition, the Final operation is done in process for query service
-    val lp = Parser.queryToLogicalPlan("ln(test1{_ws_ = \"demo\", _ns_ =~ \"App-*\"})",
+    val lp = Parser.queryToLogicalPlan("""ln(test1{_ws_ = "demo", _ns_ =~ "App-*"})""",
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
@@ -649,21 +653,21 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case plan1::plan2::Nil =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
-          Set("test1{_ws_=\"demo\",_ns_=\"App-1\"}",
-            "test1{_ws_=\"demo\",_ns_=\"App-2\"}")
+          Set("""test1{_ws_="demo",_ns_="App-1"}""",
+            """test1{_ws_="demo",_ns_="App-2"}""")
         plan1.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
       case _ => fail("Expected two children")
     }
   }
 
   it("should handle simple instant function applied to single partition raw series w/o regex") {
-    val lp = Parser.queryToLogicalPlan("ln(test1{_ws_ = \"demo\", _ns_ = \"App-1\"})",
+    val lp = Parser.queryToLogicalPlan("""ln(test1{_ws_ = "demo", _ns_ = "App-1"})""",
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => Seq(shardColumnFilters)
 
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams =
-      PromQlQueryParams("ln(test1{_ws_=\"demo\",_ns_=\"App-1\"})", 100, 1, 1000)))
+      PromQlQueryParams("""ln(test1{_ws_="demo",_ns_="App-1"})""", 100, 1, 1000)))
     execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
     // Since the dispatcher is ActorDispatcher, its materialized by the underlying queryPlanner
     execPlan.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual (true)
@@ -674,17 +678,17 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       }
     }) shouldEqual true
     execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      ("ln(test1{_ws_=\"demo\",_ns_=\"App-1\"})")
+      ("""ln(test1{_ws_="demo",_ns_="App-1"})""")
   }
 
   it("should handle simple instant function applied to single partition raw series w/o regex and sum") {
-    val lp = Parser.queryToLogicalPlan("sum(ln(test1{_ws_ = \"demo\", _ns_ = \"App-1\"}))",
+    val lp = Parser.queryToLogicalPlan("""sum(ln(test1{_ws_ = "demo", _ns_ = "App-1"}))""",
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => Seq(shardColumnFilters)
 
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams =
-      PromQlQueryParams("sum(ln(test1{_ws_=\"demo\",_ns_=\"App-1\"}))", 100, 1, 1000)))
+      PromQlQueryParams("""sum(ln(test1{_ws_="demo",_ns_="App-1"}))""", 100, 1, 1000)))
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
     // Since the dispatcher is ActorDispatcher, its materialized by the underlying queryPlanner
     execPlan.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual (true)
@@ -694,12 +698,13 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case _ => fail("Expected to see an InstantVectorFunctionMapper")
     }
     execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      ("sum(ln(test1{_ws_=\"demo\",_ns_=\"App-1\"}))")
+      ("""sum(ln(test1{_ws_="demo",_ns_="App-1"}))""")
   }
 
   it("should generate the appropriate plan with label_join") {
-    val lp = Parser.queryToLogicalPlan("label_join(foo{_ws_=\"Demo\", _ns_ =~ \"App*\"}" +
-      ", \"foo\", " + "\",\", \"instance\", \"job\")",
+    val lp = Parser.queryToLogicalPlan(
+      """label_join(foo{_ws_="Demo", _ns_ =~ "App*"},
+        |"foo", ",", "instance", "job")""".stripMargin,
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
@@ -729,15 +734,14 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case plan1::plan2::Nil =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
-          Set("foo{_ws_=\"demo\",_ns_=\"App-2\"}",
-            "foo{_ws_=\"demo\",_ns_=\"App-1\"}")
+          Set("""foo{_ws_="demo",_ns_="App-2"}""",
+            """foo{_ws_="demo",_ns_="App-1"}""")
         plan1.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
       case _ => fail("Expected two children")
     }
   }
   it("should generate the appropriate plan with sort") {
-    val lp = Parser.queryToLogicalPlan("sort(foo{_ws_=\"Demo\", _ns_ =~ \"App*\"}" +
-      ", \"foo\", " + "\",\", \"instance\", \"job\")",
+    val lp = Parser.queryToLogicalPlan("""sort(foo{_ws_="Demo", _ns_ =~ "App*"}, "foo", ",", "instance", "job")""",
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
@@ -767,8 +771,8 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case plan1::plan2::Nil =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
-          Set("foo{_ws_=\"demo\",_ns_=\"App-2\"}",
-            "foo{_ws_=\"demo\",_ns_=\"App-1\"}")
+          Set("""foo{_ws_="demo",_ns_="App-2"}""",
+            """foo{_ws_="demo",_ns_="App-1"}""")
         plan1.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
       case _ => fail("Expected two children")
     }
@@ -776,8 +780,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
 
   it("should push down absent function appropriately to individual partitions") {
-    val lp = Parser.queryToLogicalPlan("sum(absent(foo{_ws_=\"Demo\", _ns_ =~ \"App*\"}" +
-      ", \"foo\", " + "\",\", \"instance\", \"job\"))",
+    val lp = Parser.queryToLogicalPlan("""sum(absent(foo{_ws_="Demo",_ns_ =~ "App*"}, "foo", "," ,"instance","job"))""",
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
@@ -790,7 +793,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
     // val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    val execPlan = engine.walkLogicalPlanTree(lp, QueryContext(origQueryParams = promQlQueryParams)).plans.head
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[MultiPartitionReduceAggregateExec] shouldEqual (true)
     execPlan.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual (true)
@@ -811,16 +814,15 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case plan1::plan2::Nil =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
-          Set("sum(absent(foo{_ws_=\"demo\",_ns_=\"App-2\"}))",
-            "sum(absent(foo{_ws_=\"demo\",_ns_=\"App-1\"}))")
+          Set("""sum(absent(foo{_ws_="demo",_ns_="App-2"}))""",
+            """sum(absent(foo{_ws_="demo",_ns_="App-1"}))""")
       case _ => fail("Expected two children")
     }
   }
 
 
   it("should execute absent in-process") {
-    val lp = Parser.queryToLogicalPlan("absent(foo{_ws_=\"Demo\", _ns_ =~ \"App*\"}" +
-      ", \"foo\", " + "\",\", \"instance\", \"job\")",
+    val lp = Parser.queryToLogicalPlan("""absent(foo{_ws_="Demo", _ns_ =~ "App*"}, "foo", ",", "instance", "job")""",
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
@@ -833,7 +835,6 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    // val execPlan = engine.walkLogicalPlanTree(lp, QueryContext(origQueryParams = promQlQueryParams)).plans.head
 
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
     execPlan.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual (true)
@@ -855,16 +856,15 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case plan1::plan2::Nil =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
-          Set("foo{_ws_=\"demo\",_ns_=\"App-2\"}",
-            "foo{_ws_=\"demo\",_ns_=\"App-1\"}")
+          Set("""foo{_ws_="demo",_ns_="App-2"}""",
+            """foo{_ws_="demo",_ns_="App-1"}""")
       case _ => fail("Expected two children")
     }
   }
 
 
   it("should execute absent function using wrapped planner") {
-    val lp = Parser.queryToLogicalPlan("absent(foo{_ws_=\"Demo\", _ns_ =~ \"App-1\"}" +
-      ", \"foo\", " + "\",\", \"instance\", \"job\")",
+    val lp = Parser.queryToLogicalPlan("""absent(foo{_ws_="Demo", _ns_ =~ "App-1"}, "foo", ",", "instance", "job")""",
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
@@ -873,7 +873,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams =
-      PromQlQueryParams("absent(foo{_ws_=\"Demo\", _ns_ =~ \"App-1\"} , \"foo\", \",\", \"instance\", \"job\")",
+      PromQlQueryParams("""absent(foo{_ws_="Demo", _ns_ =~ "App-1"} , "foo", "," "instance", "job")""",
         100, 1, 1000)))
 
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
@@ -886,13 +886,13 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it("should materialize vector appropriately for single partition") {
-    val lp = Parser.queryToLogicalPlan("vector(scalar(sum(foo{_ws_=\"demo\", _ns_ = \"App-1\"})))",
+    val lp = Parser.queryToLogicalPlan("""vector(scalar(sum(foo{_ws_="demo", _ns_ = "App-1"})))""",
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => Seq(shardColumnFilters)
 
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams =
-      PromQlQueryParams("vector(scalar(sum(foo{_ws_=\"demo\",_ns_=\"App-1\"})))", 100, 1, 1000)))
+      PromQlQueryParams("""vector(scalar(sum(foo{_ws_="demo",_ns_="App-1"})))""", 100, 1, 1000)))
 
     // Aggregate operation will be materialized on the wrapped planner, everything else in process
 
@@ -906,11 +906,11 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case _ => fail("Expected to see an ScalarFunctionMapper")
     }
     execPlan.children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      "vector(scalar(sum(foo{_ws_=\"demo\",_ns_=\"App-1\"})))"
+      """vector(scalar(sum(foo{_ws_="demo",_ns_="App-1"})))"""
   }
 
   it("should materialize vector appropriately for multi partition") {
-    val lp = Parser.queryToLogicalPlan("vector(scalar(sum(foo{_ws_=\"demo\", _ns_ =~ \"App*\"})))",
+    val lp = Parser.queryToLogicalPlan("""vector(scalar(sum(foo{_ws_="demo", _ns_ =~ "App*"})))""",
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
@@ -939,8 +939,8 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case plan1::plan2::Nil =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
-          Set("sum(foo{_ws_=\"demo\",_ns_=\"App-1\"})",
-            "sum(foo{_ws_=\"demo\",_ns_=\"App-2\"})")
+          Set("""sum(foo{_ws_="demo",_ns_="App-1"})""",
+            """sum(foo{_ws_="demo",_ns_="App-2"})""")
       case _ => fail("Expected two children")
     }
   }

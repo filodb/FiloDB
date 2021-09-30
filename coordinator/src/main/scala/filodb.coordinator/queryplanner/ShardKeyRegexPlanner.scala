@@ -126,19 +126,20 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     PlanResult(Seq(execPlan))
   }
 
-  private def hasChildAggregate(lp: LogicalPlan): Boolean = lp match {
-    case _: Aggregate => true
-    case nonLeaf: NonLeafLogicalPlan => nonLeaf.children.exists(hasChildAggregate(_))
-    case _ => false
-  }
-
   /***
    * For aggregate queries like sum(test{_ws_ = "demo", _ns_ =~ "App.*"})
    * It will be broken down to sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
    * Sub query could be across multiple partitions so aggregate using MultiPartitionReduceAggregateExec
    * */
   private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext): PlanResult = {
-    val plan = if (hasChildAggregate(aggregate.vectors)) {
+    // Pushing down aggregates to run on individual partitions is most efficient, however, if we have multiple
+    // nested aggregation we should be pushing down the lowest aggregate for correctness. Consider the following query
+    // count(sum by(foo)(test1{_ws_ = "demo", _ns_ =~ "App-.*"})), doing a count of the counts received from individual
+    // partitions may not give the correct answer, we should push down the sum to multiple partitions, perform a reduce
+    // locally and then run count on the results. The following implementation checks for descendant aggregates, if
+    // there are any, the provided aggregation needs to be done using inProcess, else we can materialize the aggregate
+    // using the wrapped planner
+    val plan = if (LogicalPlanUtils.hasDescendantAggregate(aggregate.vectors)) {
         val childPlan = materialize(aggregate.vectors, queryContext)
         val reducer = LocalPartitionReduceAggregateExec(queryContext, inProcessPlanDispatcher,
           Seq(childPlan), aggregate.operator, aggregate.params)
@@ -151,17 +152,22 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
         LogicalPlan.getNonMetricShardKeyFilters(aggregate, dataset.options.nonMetricShardColumns).head, queryContext)
       val exec = if (execPlans.size == 1) execPlans.head
       else {
-        val reducer = MultiPartitionReduceAggregateExec(queryContext, inProcessPlanDispatcher,
-          execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
-        val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-        reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
-          RangeParams(promQlQueryParams.startSecs, promQlQueryParams.stepSecs, promQlQueryParams.endSecs)))
-        reducer
+        if (aggregate.operator.equals(AggregationOperator.TopK)
+          || aggregate.operator.equals(AggregationOperator.BottomK)
+          || aggregate.operator.equals(AggregationOperator.CountValues))
+              throw new UnsupportedOperationException(s"Shard Key regex not supported for ${aggregate.operator}")
+        else {
+          val reducer = MultiPartitionReduceAggregateExec(queryContext, inProcessPlanDispatcher,
+            execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
+          val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+          reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
+            RangeParams(promQlQueryParams.startSecs, promQlQueryParams.stepSecs, promQlQueryParams.endSecs)))
+          reducer
+        }
       }
       exec
     }
     PlanResult(Seq(plan))
-
   }
 
   /***
