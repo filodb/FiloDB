@@ -245,7 +245,8 @@ case class TopLevelSubquery(
   startMs: Long, //original start - 5m
   stepMs: Long,
   endMs: Long,
-  orginalLookbackMs: Long
+  orginalLookbackMs: Long,
+  originalOffsetMs: Option[Long]
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
 
