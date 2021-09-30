@@ -1,7 +1,7 @@
 package filodb.coordinator.queryplanner
 
 import filodb.core.metadata.Dataset
-import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
 import filodb.query._
 import filodb.query.exec._
 
@@ -14,15 +14,15 @@ import filodb.query.exec._
 case class ShardKeyMatcher(columnFilters: Seq[ColumnFilter], query: String)
 
 /**
-  * Responsible for query planning for queries having regex in shard column
-  *
-  * @param dataset         dataset
-  * @param queryPlanner    multiPartition query planner
-  * @param shardKeyMatcher used to get values for regex shard keys. Each inner sequence corresponds to matching regex
-  * value. For example: Seq(ColumnFilter(ws, Equals(demo)), ColumnFilter(ns, EqualsRegex(App*)) returns
-  * Seq(Seq(ColumnFilter(ws, Equals(demo)), ColumnFilter(ns, Equals(App1))), Seq(ColumnFilter(ws, Equals(demo)),
-  * ColumnFilter(ns, Equals(App2))
-  */
+ * Responsible for query planning for queries having regex in shard column
+ *
+ * @param dataset         dataset
+ * @param queryPlanner    multiPartition query planner
+ * @param shardKeyMatcher used to get values for regex shard keys. Each inner sequence corresponds to matching regex
+ * value. For example: Seq(ColumnFilter(ws, Equals(demo)), ColumnFilter(ns, EqualsRegex(App*)) returns
+ * Seq(Seq(ColumnFilter(ws, Equals(demo)), ColumnFilter(ns, Equals(App1))), Seq(ColumnFilter(ws, Equals(demo)),
+ * ColumnFilter(ns, Equals(App2))
+ */
 
 class ShardKeyRegexPlanner(val dataset: Dataset,
                            queryPlanner: QueryPlanner,
@@ -45,12 +45,12 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   }
 
   /**
-    * Converts a logical plan to execution plan.
-    *
-    * @param logicalPlan Logical plan after converting PromQL -> AST -> LogicalPlan
-    * @param qContext    holder for additional query parameters
-    * @return materialized Execution Plan which can be dispatched
-    */
+   * Converts a logical plan to execution plan.
+   *
+   * @param logicalPlan Logical plan after converting PromQL -> AST -> LogicalPlan
+   * @param qContext    holder for additional query parameters
+   * @return materialized Execution Plan which can be dispatched
+   */
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     val nonMetricShardKeyFilters =
       LogicalPlan.getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
@@ -62,8 +62,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     } else walkLogicalPlanTree(logicalPlan, qContext).plans.head
   }
 
-   def walkLogicalPlanTree(logicalPlan: LogicalPlan,
-                           qContext: QueryContext): PlanResult = {
+  def walkLogicalPlanTree(logicalPlan: LogicalPlan,
+                          qContext: QueryContext): PlanResult = {
     logicalPlan match {
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplyInstantFunction        => materializeApplyInstantFunction(qContext, lp)
@@ -73,8 +73,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       case lp: ScalarVaryingDoublePlan     => materializeScalarPlan(qContext, lp)
       case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
       case lp: VectorPlan                  => materializeVectorPlan(qContext, lp)
-      case lp: Aggregate                   => materializeAggregate(qContext, lp)
-      case lp: BinaryJoin                  => materializeBinaryJoin(qContext, lp)
+      case lp: Aggregate                   => materializeAggregate(lp, qContext)
+      case lp: BinaryJoin                  => materializeBinaryJoin(lp, qContext)
       case lp: LabelValues                 => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
       case lp: LabelNames                  => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
       case lp: SeriesKeysByFilters         => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
@@ -88,23 +88,87 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     val shardKeyMatches = shardKeyMatcher(nonMetricShardKeyFilters)
     val skipAggregatePresentValue = if (shardKeyMatches.length == 1) false else true
     shardKeyMatches.map { result =>
-        val newLogicalPlan = logicalPlan.replaceFilters(result)
-        // Querycontext should just have the part of query which has regex
-        // For example for exp(sum(test{_ws_ = "demo", _ns_ =~ "App.*"})), sub queries should be
-        // sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
-        val newQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
-        val newQueryContext = qContext.copy(origQueryParams = newQueryParams, plannerParams = qContext.plannerParams.
-          copy(skipAggregatePresent = skipAggregatePresentValue))
-        queryPlanner.materialize(logicalPlan.replaceFilters(result), newQueryContext)
-      }
+      val newLogicalPlan = logicalPlan.replaceFilters(result)
+      // Querycontext should just have the part of query which has regex
+      // For example for exp(sum(test{_ws_ = "demo", _ns_ =~ "App.*"})), sub queries should be
+      // sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
+      val newQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
+      val newQueryContext = qContext.copy(origQueryParams = newQueryParams, plannerParams = qContext.plannerParams.
+        copy(skipAggregatePresent = skipAggregatePresentValue))
+      queryPlanner.materialize(logicalPlan.replaceFilters(result), newQueryContext)
+    }
   }
 
+  /**
+   * For binary join queries like test1{_ws_ = "demo", _ns_ =~ "App.*"} + test2{_ws_ = "demo", _ns_ =~ "App.*"})
+   * LHS and RHS could be across multiple partitions
+   */
+  private def materializeBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): PlanResult = {
+    val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
+    val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
+
+    val lhsExec = materialize(logicalPlan.lhs, lhsQueryContext)
+    val rhsExec = materialize(logicalPlan.rhs, rhsQueryContext)
+
+    val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
+
+    val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
+      SetOperatorExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+        LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
+        LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
+    else
+      BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+        logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
+        LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
+        LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn)
+    PlanResult(Seq(execPlan))
+  }
+
+  private def hasChildAggregate(lp: LogicalPlan): Boolean = lp match {
+    case _: Aggregate => true
+    case nonLeaf: NonLeafLogicalPlan => nonLeaf.children.exists(hasChildAggregate(_))
+    case _ => false
+  }
 
   /***
-    * For non aggregate & non binary join queries like test{_ws_ = "demo", _ns_ =~ "App.*"}
-    * It will be broken down to test{_ws_ = "demo", _ns_ = "App-1"}, test{_ws_ = "demo", _ns_ = "App-2"} etc
-    * Sub query could be across multiple partitions so concatenate using MultiPartitionDistConcatExec
-    * */
+   * For aggregate queries like sum(test{_ws_ = "demo", _ns_ =~ "App.*"})
+   * It will be broken down to sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
+   * Sub query could be across multiple partitions so aggregate using MultiPartitionReduceAggregateExec
+   * */
+  private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext): PlanResult = {
+    val plan = if (hasChildAggregate(aggregate.vectors)) {
+        val childPlan = materialize(aggregate.vectors, queryContext)
+        val reducer = LocalPartitionReduceAggregateExec(queryContext, inProcessPlanDispatcher,
+          Seq(childPlan), aggregate.operator, aggregate.params)
+        val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+        reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
+          RangeParams(promQlQueryParams.startSecs, promQlQueryParams.stepSecs, promQlQueryParams.endSecs)))
+        reducer
+    } else {
+      val execPlans = generateExecWithoutRegex(aggregate,
+        LogicalPlan.getNonMetricShardKeyFilters(aggregate, dataset.options.nonMetricShardColumns).head, queryContext)
+      val exec = if (execPlans.size == 1) execPlans.head
+      else {
+        val reducer = MultiPartitionReduceAggregateExec(queryContext, inProcessPlanDispatcher,
+          execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
+        val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+        reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
+          RangeParams(promQlQueryParams.startSecs, promQlQueryParams.stepSecs, promQlQueryParams.endSecs)))
+        reducer
+      }
+      exec
+    }
+    PlanResult(Seq(plan))
+
+  }
+
+  /***
+   * For non aggregate & non binary join queries like test{_ws_ = "demo", _ns_ =~ "App.*"}
+   * It will be broken down to test{_ws_ = "demo", _ns_ = "App-1"}, test{_ws_ = "demo", _ns_ = "App-2"} etc
+   * Sub query could be across multiple partitions so concatenate using MultiPartitionDistConcatExec
+   * */
   private def materializeOthers(logicalPlan: LogicalPlan, queryContext: QueryContext): PlanResult = {
     val nonMetricShardKeyFilters =
       LogicalPlan.getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)

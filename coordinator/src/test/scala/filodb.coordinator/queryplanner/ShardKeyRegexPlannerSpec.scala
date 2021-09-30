@@ -10,11 +10,11 @@ import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
 import filodb.prometheus.ast.TimeStepParams
-import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, SortFunctionId}
-import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.query.{SortFunctionId, InstantFunctionId, BinaryOperator, MiscellaneousFunctionId}
+import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext, PlannerParams, ColumnFilter}
 import filodb.core.query.Filter.Equals
 import filodb.prometheus.parse.Parser
-import filodb.query.InstantFunctionId.{Exp, HistogramQuantile}
+import filodb.query.InstantFunctionId.{HistogramQuantile, Exp, Ln}
 import filodb.query.exec._
 import filodb.query.AggregationOperator._
 
@@ -576,20 +576,15 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
-    val (lhs, rhs) = (execPlan.children.head, execPlan.children.tail.head)
+    val inJoin = execPlan.asInstanceOf[BinaryJoinExec]
+    val (lhs, rhs) = (inJoin.lhs.head, inJoin.rhs.head)
     execPlan.asInstanceOf[BinaryJoinExec].binaryOp shouldEqual BinaryOperator.ADD
-    execPlan.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual true
-    lhs.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
+    execPlan.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual true
+    lhs.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
     lhs.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual true
     rhs.isInstanceOf[BinaryJoinExec] shouldEqual true
+    rhs.asInstanceOf[BinaryJoinExec].binaryOp shouldEqual BinaryOperator.MUL
     rhs.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual true
-
-    lhs.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      ("test1{_ws_=\"demo\",_ns_=\"App-1\"}")
-
-    rhs.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      ("(test2{_ws_=\"demo\",_ns_=\"App-2\"} * test3{_ws_=\"demo\",_ns_=\"App-2\"})")
-
   }
 
 
@@ -672,10 +667,12 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
     // Since the dispatcher is ActorDispatcher, its materialized by the underlying queryPlanner
     execPlan.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual (true)
-    execPlan.rangeVectorTransformers.size shouldEqual 1
-    execPlan.rangeVectorTransformers.head.isInstanceOf[InstantVectorFunctionMapper] shouldEqual true
-    execPlan.rangeVectorTransformers.head.asInstanceOf[InstantVectorFunctionMapper].function shouldEqual
-      InstantFunctionId.Ln
+    execPlan.children.forall( child => {
+      child.rangeVectorTransformers.find(_.isInstanceOf[InstantVectorFunctionMapper]) match {
+        case Some(InstantVectorFunctionMapper(Ln, Nil)) => true
+        case _ => false
+      }
+    }) shouldEqual true
     execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
       ("ln(test1{_ws_=\"demo\",_ns_=\"App-1\"})")
   }
@@ -866,7 +863,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
 
   it("should execute absent function using wrapped planner") {
-    val lp = Parser.queryToLogicalPlan("absent(foo{_ws_=\"Demo\", _ns_ = \"App-1\"}" +
+    val lp = Parser.queryToLogicalPlan("absent(foo{_ws_=\"Demo\", _ns_ =~ \"App-1\"}" +
       ", \"foo\", " + "\",\", \"instance\", \"job\")",
       1000, 1000)
     val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
@@ -876,26 +873,16 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams =
-      PromQlQueryParams("absent(foo{_ws_=\"Demo\", _ns_ = \"App-1\"} , \"foo\", \",\", \"instance\", \"job\")",
+      PromQlQueryParams("absent(foo{_ws_=\"Demo\", _ns_ =~ \"App-1\"} , \"foo\", \",\", \"instance\", \"job\")",
         100, 1, 1000)))
 
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
     execPlan.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual (true)
     execPlan.asInstanceOf[ReduceAggregateExec].aggrOp shouldEqual Sum
-    execPlan.children.size shouldEqual 1
     execPlan.rangeVectorTransformers.find(_.isInstanceOf[AbsentFunctionMapper]) match {
       case Some(x: AbsentFunctionMapper) =>
       case _ => fail("Expected to see an AggregatePresenter")
     }
-    execPlan.children.foreach( x => {
-      x.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
-      x.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual (true)
-      x.rangeVectorTransformers.size shouldEqual 1
-      x.rangeVectorTransformers.head.asInstanceOf[AggregateMapReduce].aggrOp shouldEqual Sum
-
-    })
-    execPlan.children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl  shouldEqual
-      "absent(foo{_ws_=\"Demo\", _ns_ = \"App-1\"} , \"foo\", \",\", \"instance\", \"job\")"
   }
 
   it("should materialize vector appropriately for single partition") {
