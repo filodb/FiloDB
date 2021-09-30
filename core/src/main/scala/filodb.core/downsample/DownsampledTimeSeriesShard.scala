@@ -63,6 +63,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   private val indexDataset = downsampledDatasetRefs.last
   private val indexTtlMs = downsampleTtls.last.toMillis
   private val clusterType = filodbConfig.getString("cluster-type")
+  private val deploymentPartitionName = filodbConfig.getString("deployment-partition-name")
 
   private val downsampleStoreConfig = StoreConfig(filodbConfig.getConfig("downsampler.downsample-store-config"))
 
@@ -245,7 +246,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           }
           stats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
           val metricShardKeys = schemas.part.options.shardKeyColumns
-          val metricGroupBy = clusterType +: rawDatasetRef.toString +: metricShardKeys.map { col =>
+          val metricGroupBy = deploymentPartitionName +: clusterType +: metricShardKeys.map { col =>
             filters.collectFirst {
               case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
             }.getOrElse("unknown")

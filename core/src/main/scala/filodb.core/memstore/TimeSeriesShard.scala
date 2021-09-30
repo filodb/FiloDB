@@ -265,6 +265,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val shardKeyLevelIngestionMetricsEnabled =
     filodbConfig.getBoolean("shard-key-level-ingestion-metrics-enabled")
   private val clusterType = filodbConfig.getString("cluster-type")
+  private val deploymentPartitionName = filodbConfig.getString("deployment-partition-name")
 
   val creationTime = System.currentTimeMillis()
 
@@ -1576,7 +1577,7 @@ class TimeSeriesShard(val ref: DatasetRef,
           dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter())
       case FilteredPartitionScan(_, filters) =>
         val metricShardKeys = schemas.part.options.shardKeyColumns
-        val metricGroupBy = clusterType +: ref.toString +: metricShardKeys.map { col =>
+        val metricGroupBy = deploymentPartitionName +: clusterType +: metricShardKeys.map { col =>
           filters.collectFirst {
             case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
           }.getOrElse("unknown")
