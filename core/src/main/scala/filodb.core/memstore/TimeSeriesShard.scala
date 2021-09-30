@@ -1576,7 +1576,7 @@ class TimeSeriesShard(val ref: DatasetRef,
           dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter())
       case FilteredPartitionScan(_, filters) =>
         val metricShardKeys = schemas.part.options.shardKeyColumns
-        val metricGroupBy = clusterType +: metricShardKeys.map { col =>
+        val metricGroupBy = clusterType +: ref.toString +: metricShardKeys.map { col =>
           filters.collectFirst {
             case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
           }.getOrElse("unknown")
@@ -1586,7 +1586,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         // TSPartitions to read back from disk
         val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
         shardStats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
-        querySession.queryStats.getPartsScannedCounter(metricGroupBy).addAndGet(matches.length)
+        querySession.queryStats.getTimeSeriesScannedCounter(metricGroupBy).addAndGet(matches.length)
         Kamon.currentSpan().tag(s"num-partitions-from-index-$shardNum", matches.length)
 
         // first find out which partitions are being queried for data not in memory

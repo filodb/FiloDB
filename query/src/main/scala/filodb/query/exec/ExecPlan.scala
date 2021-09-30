@@ -199,7 +199,7 @@ trait ExecPlan extends QueryCommand {
             val numKeyBytes = r.foldLeft(0)(_ + _.key.keySize)
             val resultSize = numDataBytes + numKeyBytes
             SerializedRangeVector.queryResultBytes.record(resultSize)
-            querySession.queryStats.getResultSizeCounter(Nil).addAndGet(resultSize)
+            querySession.queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
             span.mark(s"resultBytes=$resultSize")
             span.mark(s"resultSamples=$numResultSamples")
             span.mark(s"numSrv=${r.size}")

@@ -1,7 +1,6 @@
 package filodb.core.query
 
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 import scala.collection.concurrent.TrieMap
@@ -112,19 +111,20 @@ case class QuerySession(qContext: QueryContext,
 }
 
 case class Stat() {
-  val partsScanned = new AtomicInteger
+  val timeSeriesScanned = new AtomicLong
   val dataBytesScanned = new AtomicLong
-  val resultSize = new AtomicLong
-  override def toString: String = s"(partsScanned=$partsScanned, " +
-    s"dataBytesScanned=$dataBytesScanned, resultSize=$resultSize)"
+  val resultBytes = new AtomicLong
+  override def toString: String = s"(timeSeriesScanned=$timeSeriesScanned, " +
+    s"dataBytesScanned=$dataBytesScanned, resultBytes=$resultBytes)"
   def add(s: Stat): Unit = {
-    partsScanned.addAndGet(s.partsScanned.get())
+    timeSeriesScanned.addAndGet(s.timeSeriesScanned.get())
     dataBytesScanned.addAndGet(s.dataBytesScanned.get())
-    resultSize.addAndGet(s.resultSize.get())
+    resultBytes.addAndGet(s.resultBytes.get())
   }
 }
 
 case class QueryStats() {
+
   val stat = TrieMap[Seq[String], Stat]()
 
   override def toString: String = stat.toString()
@@ -133,19 +133,37 @@ case class QueryStats() {
     s.stat.foreach(kv => stat.getOrElseUpdate(kv._1, Stat()).add(kv._2))
   }
 
-  def getPartsScannedCounter(group: Seq[String] = Nil): AtomicInteger = {
+  /**
+   * Counter for number of time series scanned by query
+   * @param group typically a tuple of (clusterType, dataset, WS, NS, metricName),
+   *              and if tuple is not available, pass Nil. If Nil is passed,
+   *              then head group is used if it exists.
+   */
+  def getTimeSeriesScannedCounter(group: Seq[String] = Nil): AtomicLong = {
     val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
-    stat.getOrElseUpdate(theNs, Stat()).partsScanned
+    stat.getOrElseUpdate(theNs, Stat()).timeSeriesScanned
   }
 
+  /**
+   * Counter for amount of raw ingested (compressed) data scanned by query
+   * @param group typically a tuple of (clusterType, dataset, WS, NS, metricName),
+   *              and if tuple is not available, pass Nil. If Nil is passed,
+   *              then head group is used if it exists.
+   */
   def getDataBytesScannedCounter(group: Seq[String] = Nil): AtomicLong = {
     val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
     stat.getOrElseUpdate(theNs, Stat()).dataBytesScanned
   }
 
-  def getResultSizeCounter(group: Seq[String] = Nil): AtomicLong = {
+  /**
+   * Counter for size of the materialized query result
+   * @param group typically a tuple of (clusterType, dataset, WS, NS, metricName),
+   *              and if tuple is not available, pass Nil. If Nil is passed,
+   *              then head group is used if it exists.
+   */
+  def getResultBytesCounter(group: Seq[String] = Nil): AtomicLong = {
     val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
-    stat.getOrElseUpdate(theNs, Stat()).resultSize
+    stat.getOrElseUpdate(theNs, Stat()).resultBytes
   }
 
 }
