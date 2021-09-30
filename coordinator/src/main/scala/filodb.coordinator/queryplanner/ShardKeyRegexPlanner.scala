@@ -109,6 +109,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
 
+    // FIXME, Optimize and push the lhs and rhs to wrapped planner if they belong to same partition
+
     val lhsExec = materialize(logicalPlan.lhs, lhsQueryContext)
     val rhsExec = materialize(logicalPlan.rhs, rhsQueryContext)
 
