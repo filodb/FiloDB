@@ -33,23 +33,19 @@ trait  PlannerHelper {
     }
 
     def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan
+
+
     def materializeFunctionArgs(functionParams: Seq[FunctionArgsPlan],
-                                qContext: QueryContext): Seq[FuncArgs] = {
-      if (functionParams.isEmpty) {
-        Nil
-      } else {
-        functionParams.map { param =>
-          param match {
-            case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
-            case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(materialize(s, qContext),
-                                               RangeParams(s.startMs, s.stepMs, s.endMs))
-            case  t: ScalarTimeBasedPlan    => TimeFuncArgs(t.rangeParams)
-            case s: ScalarBinaryOperation   => ExecPlanFuncArgs(materialize(s, qContext),
-                                               RangeParams(s.startMs, s.stepMs, s.endMs))
-          }
-        }
-      }
+                                qContext: QueryContext): Seq[FuncArgs] = functionParams map {
+        case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
+        case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(materialize(s, qContext),
+                                           RangeParams(s.startMs, s.stepMs, s.endMs))
+        case t: ScalarTimeBasedPlan     => TimeFuncArgs(t.rangeParams)
+        case s: ScalarBinaryOperation   => ExecPlanFuncArgs(materialize(s, qContext),
+                                           RangeParams(s.startMs, s.stepMs, s.endMs))
     }
+
+
 
     def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                             qContext: QueryContext): PlanResult
