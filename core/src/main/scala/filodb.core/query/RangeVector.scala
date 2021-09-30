@@ -1,7 +1,7 @@
 package filodb.core.query
 
 import java.time.{LocalDateTime, YearMonth, ZoneOffset}
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 import scala.collection.Iterator
 
@@ -280,7 +280,7 @@ final case class RawDataRangeVector(key: RangeVectorKey,
                                     partition: ReadablePartition,
                                     chunkMethod: ChunkScanMethod,
                                     columnIDs: Array[Int],
-                                    dataBytesScannedCtr: AtomicInteger) extends RangeVector {
+                                    dataBytesScannedCtr: AtomicLong) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
   def rows(): RangeVectorCursor = partition.timeRangeRows(chunkMethod, columnIDs)
 

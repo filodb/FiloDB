@@ -1,7 +1,7 @@
 package filodb.core.memstore
 
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.StampedLock
 
 import scala.collection.mutable
@@ -216,7 +216,7 @@ case class PartLookupResult(shard: Int,
                             partIdsMemTimeGap: debox.Map[Int, Long] = debox.Map.empty,
                             partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty,
                             pkRecords: Seq[PartKeyLuceneIndexRecord] = Seq.empty,
-                            dataBytesScannedCtr: AtomicInteger)
+                            dataBytesScannedCtr: AtomicLong)
 
 final case class SchemaMismatch(expected: String, found: String) extends
 Exception(s"Multiple schemas found, please filter. Expected schema $expected, found schema $found")

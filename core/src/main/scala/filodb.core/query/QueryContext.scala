@@ -113,7 +113,7 @@ case class QuerySession(qContext: QueryContext,
 
 case class Stat() {
   val partsScanned = new AtomicInteger
-  val dataBytesScanned = new AtomicInteger
+  val dataBytesScanned = new AtomicLong
   val resultSize = new AtomicLong
   override def toString: String = s"(partsScanned=$partsScanned, " +
     s"dataBytesScanned=$dataBytesScanned, resultSize=$resultSize)"
@@ -138,7 +138,7 @@ case class QueryStats() {
     stat.getOrElseUpdate(theNs, Stat()).partsScanned
   }
 
-  def getDataBytesScannedCounter(group: Seq[String] = Nil): AtomicInteger = {
+  def getDataBytesScannedCounter(group: Seq[String] = Nil): AtomicLong = {
     val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
     stat.getOrElseUpdate(theNs, Stat()).dataBytesScanned
   }
