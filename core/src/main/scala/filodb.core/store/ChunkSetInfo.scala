@@ -1,7 +1,7 @@
 package filodb.core.store
 
 import java.nio.ByteBuffer
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 import com.googlecode.javaewah.EWAHCompressedBitmap
 import com.typesafe.scalalogging.StrictLogging
@@ -335,7 +335,7 @@ object CountingChunkInfoIterator {
 
 class CountingChunkInfoIterator(base: ChunkInfoIterator,
                                 columnIDs: Array[Int],
-                                dataBytesScannedCtr: AtomicInteger) extends ChunkInfoIterator {
+                                dataBytesScannedCtr: AtomicLong) extends ChunkInfoIterator {
   override def close(): Unit = base.close()
   override def hasNext: Boolean = base.hasNext
   override def nextInfoReader: ChunkSetInfoReader = {

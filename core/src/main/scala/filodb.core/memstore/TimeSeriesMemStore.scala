@@ -202,6 +202,10 @@ extends MemStore with StrictLogging {
   def labelValues(dataset: DatasetRef, shard: Int, labelName: String, topK: Int = 100): Seq[TermInfo] =
     getShard(dataset, shard).map(_.labelValues(labelName, topK)).getOrElse(Nil)
 
+  def labelNames(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                 end: Long, start: Long): Seq[String] =
+    getShard(dataset, shard).map(_.labelNames(filters, end, start)).getOrElse(Seq.empty)
+
   def labelValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
                              labelNames: Seq[String], end: Long,
                              start: Long, limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]

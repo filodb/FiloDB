@@ -26,6 +26,7 @@ sealed trait LogicalPlan {
       case p: PeriodicSeriesPlan  => p.replacePeriodicSeriesFilters(filters)
       case r: RawSeriesLikePlan   => r.replaceRawSeriesFilters(filters)
       case l: LabelValues         => l.copy(filters = filters)
+      case n: LabelNames          => n.copy(filters = filters)
       case s: SeriesKeysByFilters => s.copy(filters = filters)
     }
   }
@@ -106,6 +107,9 @@ case class LabelValues(labelNames: Seq[String],
                        filters: Seq[ColumnFilter],
                        startMs: Long,
                        endMs: Long) extends MetadataQueryPlan
+case class LabelNames(filters: Seq[ColumnFilter],
+                      startMs: Long,
+                      endMs: Long) extends MetadataQueryPlan
 
 case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
                                fetchFirstLastSampleTimes: Boolean,
@@ -241,7 +245,8 @@ case class TopLevelSubquery(
   startMs: Long, //original start - 5m
   stepMs: Long,
   endMs: Long,
-  orginalLookbackMs: Long
+  orginalLookbackMs: Long,
+  originalOffsetMs: Option[Long]
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
 
@@ -507,6 +512,21 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
     vectors.replacePeriodicSeriesFilters(filters))
 }
 
+/**
+ * Apply Limit Function to a collection of RangeVectors
+ */
+case class ApplyLimitFunction(vectors: PeriodicSeriesPlan,
+                               columnFilters: Seq[ColumnFilter],
+                               rangeParams: RangeParams,
+                               limit: Int) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(vectors)
+  override def startMs: Long = vectors.startMs
+  override def stepMs: Long = vectors.stepMs
+  override def endMs: Long = vectors.endMs
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
+    vectors.replacePeriodicSeriesFilters(filters))
+}
+
 object LogicalPlan {
   /**
     * Get leaf Logical Plans
@@ -569,6 +589,7 @@ object LogicalPlan {
     LogicalPlan.findLeafLogicalPlans(logicalPlan) map { lp =>
       lp match {
         case lp: LabelValues           => lp.filters toSet
+        case lp: LabelNames            => lp.filters toSet
         case lp: RawSeries             => lp.filters toSet
         case lp: RawChunkMeta          => lp.filters toSet
         case lp: SeriesKeysByFilters   => lp.filters toSet
@@ -589,6 +610,7 @@ object LogicalPlan {
       l match {
         case lp: RawSeries    => lp.filters
         case lp: LabelValues  => lp.filters
+        case lp: LabelNames  => lp.filters
         case _                => Seq.empty
       }
     }

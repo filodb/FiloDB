@@ -42,7 +42,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
   private val splitSizeMs = 10000
 
   // Splitting timewindow is enabled with threshold at 20secs with splitsize as 10sec
-  private val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+  private val engine = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
     queryConfig, "raw")
 
   /*
@@ -388,7 +388,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       " should bound queries until retention period and drop instants outside retention period") {
     val nowSeconds = System.currentTimeMillis() / 1000
     val plannerParams2 = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = 1.day.toMillis, splitSizeMs = 1.day.toMillis)
-    val planner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
+    val planner = new SingleClusterPlanner(dataset, schemas, mapperRef,
        earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis, queryConfig, "raw")
 
     // Case 1: no offset or window
@@ -464,7 +464,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       "with lookback == retention correctly") {
     val nowSeconds = System.currentTimeMillis() / 1000
     val plannerParams2 = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = 1.day.toMillis, splitSizeMs = 1.day.toMillis)
-    val planner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
+    val planner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis, queryConfig, "raw")
 
     val logicalPlan = Parser.queryRangeToLogicalPlan("""sum(rate(foo{job="bar"}[3d]))""",
@@ -486,7 +486,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     periodicSeries.endMs shouldEqual 10000000
     periodicSeries.stepMs shouldEqual 1000000
 
-    val engine2 = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
+    val engine2 = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
       "raw")
     val plannerParams2 = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = 5000000, splitSizeMs = 2000000)
 
@@ -528,7 +528,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     periodicSeries.stepMs shouldEqual 1000000
 
     val plannerParams2 = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = 5000000, splitSizeMs = 2000000)
-    val engine2 = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
+    val engine2 = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
       "raw")
 
     val parentExecPlan = engine2.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams = plannerParams2))
@@ -565,7 +565,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     val schemas = Schemas(dataset.schema)
     val plannerParams2 = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = 200000, splitSizeMs = 100000)
 
-    val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
+    val engine = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
       "raw")
 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan("""sum(foo{_ns_="bar", _ws_="test"}) by (__name__)""",
@@ -609,7 +609,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
     val schemas = Schemas(dataset.schema)
     val plannerParams2 = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = 200000, splitSizeMs = 100000)
 
-    val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
+    val engine = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
       "raw")
 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan(
@@ -647,7 +647,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       "rate(http_requests_total{job = \"app\"}[5m])", t)
     val plannerParams2 = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = 5000000, splitSizeMs = 2000000)
 
-    val engine2 = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
+    val engine2 = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
       "raw")
 
     val periodicSeriesPlan = lp.asInstanceOf[BinaryJoin]

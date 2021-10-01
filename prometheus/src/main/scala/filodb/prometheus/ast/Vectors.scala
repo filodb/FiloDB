@@ -89,7 +89,7 @@ case class VectorMatch(matching: Option[JoinMatching],
 }
 
 case class SubqueryExpression(
-    subquery: PeriodicSeries, sqcl: SubqueryClause, offset: Option[Duration]
+    subquery: PeriodicSeries, sqcl: SubqueryClause, offset: Option[Duration], limit: Option[Int]
 ) extends Expression with PeriodicSeries {
 
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
@@ -122,7 +122,8 @@ case class SubqueryExpression(
       startS * 1000,
       stepToUseMs,
       endS * 1000,
-      sqcl.window.millis(1L)
+      sqcl.window.millis(1L),
+      offset.map(duration => duration.millis(1L))
     )
 
   }
@@ -261,7 +262,8 @@ case class RangeExpression(metricName: Option[String],
     // multiply by 1000 to convert unix timestamp in seconds to millis
     val rs = RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq,
       Some(window.millis(timeParams.step * 1000)),
-      offset.map(_.millis(timeParams.step * 1000)))
+      offset.map(_.millis(timeParams.step * 1000))
+    )
     bucketOpt.map { bOpt =>
       // It's a fixed value, the range params don't matter at all
       val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
