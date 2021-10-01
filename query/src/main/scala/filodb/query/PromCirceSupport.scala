@@ -12,6 +12,7 @@ object PromCirceSupport {
     case s @ Sampl(t, v)     => Json.fromValues(Seq(t.asJson, v.toString.asJson))
     case h @ HistSampl(t, b) => Json.fromValues(Seq(t.asJson, b.asJson))
     case m @ MetadataSampl(v) => Json.fromValues(Seq(v.asJson))
+    case l @ LabelSampl(v) => Json.fromValues(Seq(v.asJson))
   }
 
   implicit val decodeAvgSample: Decoder[AvgSampl] = new Decoder[AvgSampl] {

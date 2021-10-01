@@ -1,6 +1,6 @@
 package filodb.core
 
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 import scala.concurrent.duration._
 import scala.io.Source
@@ -417,7 +417,7 @@ object MachineMetricsData {
       false, Option.empty, false, 1.hour.toMillis) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histIngestBH, encode = true)
-    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3), new AtomicInteger()))  // select timestamp and histogram columns only
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3), new AtomicLong))  // select timestamp and histogram columns only
   }
 
   private val histMaxBP = new WriteBufferPool(TestData.nativeMem, histMaxDS.schema.data, TestData.storeConf)
@@ -433,7 +433,7 @@ object MachineMetricsData {
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histMaxBH, encode = true)
     // Select timestamp, hist, max
-    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 4, 3), new AtomicInteger()))
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 4, 3), new AtomicLong))
   }
 }
 

@@ -63,6 +63,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   private val indexDataset = downsampledDatasetRefs.last
   private val indexTtlMs = downsampleTtls.last.toMillis
   private val clusterType = filodbConfig.getString("cluster-type")
+  private val deploymentPartitionName = filodbConfig.getString("deployment-partition-name")
 
   private val downsampleStoreConfig = StoreConfig(filodbConfig.getConfig("downsampler.downsample-store-config"))
 
@@ -97,6 +98,11 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                              limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
     LabelValueResultIterator(partKeyIndex.partIdsFromFilters(filter, startTime, endTime), labelNames, limit)
   }
+
+  def labelNames(filter: Seq[ColumnFilter],
+                 endTime: Long,
+                 startTime: Long): Seq[String] =
+    labelNamesFromPartKeys(partKeyIndex.labelNamesFromFilters(filter, startTime, endTime))
 
   def partKeysWithFilters(filter: Seq[ColumnFilter],
                           fetchFirstLastSampleTimes: Boolean,
@@ -240,7 +246,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           }
           stats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
           val metricShardKeys = schemas.part.options.shardKeyColumns
-          val metricGroupBy = clusterType +: metricShardKeys.map { col =>
+          val metricGroupBy = deploymentPartitionName +: clusterType +: metricShardKeys.map { col =>
             filters.collectFirst {
               case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
             }.getOrElse("unknown")
@@ -330,6 +336,16 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     }
     // FIXME It'd be nice to pass in the correct partId here instead of -1
     new PagedReadablePartition(schemas(schemaId), shardNum, -1, part, minResolutionMs, colIds)
+  }
+
+  private def labelNamesFromPartKeys(partId: Int): Seq[String] = {
+    val results = new mutable.HashSet[String]
+    if (PartKeyLuceneIndex.NOT_FOUND == partId) Seq.empty
+    else {
+      val partKey = partKeyFromPartId(partId)
+      results ++ schemas.part.binSchema.colNames(partKey, UnsafeUtils.arayOffset)
+      results.toSeq
+    }
   }
 
   /**

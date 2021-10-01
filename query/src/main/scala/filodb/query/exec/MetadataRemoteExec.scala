@@ -27,8 +27,8 @@ case class MetadataRemoteExec(queryEndpoint: String,
 
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                               (implicit sched: Scheduler): Future[QueryResponse] = {
-    remoteExecHttpClient.httpMetadataGet(queryContext.plannerParams.applicationId, queryEndpoint,
-      httpTimeoutMs, queryContext.submitTime, getUrlParams(), queryContext.traceInfo)
+    remoteExecHttpClient.httpMetadataGet(queryEndpoint, httpTimeoutMs,
+      queryContext.submitTime, getUrlParams(), queryContext.traceInfo)
       .map { response =>
         response.unsafeBody match {
           case Left(error) =>    // FIXME need to extract statistics from query error, aggregate them, send upstream

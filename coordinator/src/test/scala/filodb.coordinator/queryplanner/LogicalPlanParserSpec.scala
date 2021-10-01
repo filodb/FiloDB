@@ -65,6 +65,9 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     parseAndAssertResult("""quantile_over_time(0.5,test{_ws_="demo",_ns_=~"App.*",instance="Inst-1"}[5m:1m])""")("""quantile_over_time(0.5,test{_ws_="demo",_ns_=~"App.*",instance="Inst-1"}[300s:60s])""")
     parseAndAssertResult("""foo{_ws_="demo",_ns_="App.*"}[5m:1m]""")("""foo{_ws_="demo",_ns_="App.*"}[300s:60s]""")
     parseAndAssertResult("""max_over_time(avg_over_time(test{_ws_="demo",_ns_=~"App.*",instance="Inst-1"}[5m:1m])[3m:1m])""")("""max_over_time(avg_over_time(test{_ws_="demo",_ns_=~"App.*",instance="Inst-1"}[300s:60s])[180s:60s])""")
+    parseAndAssertResult("""test{_ws_="demo",_ns_="App1",instance="Inst-1"}[600s]""")("""test{_ws_="demo",_ns_="App1",instance="Inst-1"}[600s]""")
+    parseAndAssertResult("""test{_ws_="demo",_ns_="App1",instance="Inst-1"}[600s] offset 1000s""")("""test{_ws_="demo",_ns_="App1",instance="Inst-1"}[600s] offset 1000s""")
+    parseAndAssertResult("""foo[5m:1m]""")("""foo[300s:60s]""")
   }
 
   it("should generate query from LogicalPlan having offset") {
@@ -73,6 +76,22 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val res = LogicalPlanParser.convertToQuery(lp)
     // Converted query has time in seconds
     res shouldEqual("http_requests_total{job=\"app\"} offset 300s")
+  }
+
+  it("should generate query from SubqueryWithWindowing having offset") {
+    val query = """sum_over_time(http_requests_total{job="app"}[5m:1m] offset 5m)"""
+    val lp = Parser.queryToLogicalPlan(query, 1000, 1000, Parser.Antlr)
+    val res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual("""sum_over_time(http_requests_total{job="app"}[300s:60s] offset 300s)""")
+  }
+
+  it("should generate query from TopLevelSubquery having offset") {
+    val query = """http_requests_total{job="app"}[5m:1m] offset 5m"""
+    val lp = Parser.queryToLogicalPlan(query, 1000, 1000, Parser.Antlr)
+    val res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual("""http_requests_total{job="app"}[300s:60s] offset 300s""")
   }
 
   it("should generate query from LogicalPlan having escape characters") {

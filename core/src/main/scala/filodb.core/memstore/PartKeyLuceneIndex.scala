@@ -88,6 +88,11 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     .withTag("dataset", ref.dataset)
     .withTag("shard", shardNum)
 
+  val queryIndexTopNLookupLatency = Kamon.histogram("index-top-n-lookup-latency",
+    MeasurementUnit.time.milliseconds)
+    .withTag("dataset", ref.dataset)
+    .withTag("shard", shardNum)
+
   val partIdFromPartKeyLookupLatency = Kamon.histogram("index-ingestion-partId-lookup-latency",
     MeasurementUnit.time.milliseconds)
     .withTag("dataset", ref.dataset)
@@ -522,6 +527,14 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     collector.result
   }
 
+  def labelNamesFromFilters(columnFilters: Seq[ColumnFilter],
+                          startTime: Long,
+                          endTime: Long): Int = {
+    val partIdCollector = new SinglePartIdCollector
+    searchFromFilters(columnFilters, startTime, endTime, partIdCollector)
+    partIdCollector.singleResult
+  }
+
   def partKeyRecordsFromFilters(columnFilters: Seq[ColumnFilter],
                                 startTime: Long,
                                 endTime: Long): Seq[PartKeyLuceneIndexRecord] = {
@@ -642,6 +655,8 @@ class SinglePartIdCollector extends SimpleCollector {
   override def collect(doc: Int): Unit = {
     if (partIdDv.advanceExact(doc)) {
       singleResult = partIdDv.longValue().toInt
+      // terminate further iteration by throwing this exception
+      throw new CollectionTerminatedException
     } else {
       throw new IllegalStateException("This shouldn't happen since every document should have a partKeyDv")
     }

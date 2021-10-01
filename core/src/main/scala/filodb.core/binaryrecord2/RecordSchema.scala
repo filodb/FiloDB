@@ -283,6 +283,24 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
     result
   }
 
+  def colNames(base: Any, offset: Long): Seq[String] = {
+    import Column.ColumnType._
+    val result = new collection.mutable.ArrayBuffer[String]
+    columnTypes.zipWithIndex.foreach {
+      case (IntColumn, i)    => result += colNames(i)
+      case (LongColumn, i)   => result += colNames(i)
+      case (DoubleColumn, i) => result += colNames(i)
+      case (StringColumn, i) => result += colNames(i)
+      case (TimestampColumn, i) => result += colNames(i)
+      case (MapColumn, i)    => val consumer = new MapItemKeysConsumer
+                                consumeMapItems(base, offset, i, consumer)
+                                result ++= consumer.keys
+      case (BinaryRecordColumn, i) => ???
+      case (HistogramColumn, i) => result += colNames(i)
+    }
+    result
+  }
+
   def colValues(base: Any, offset: Long, cols: Seq[String]): Seq[String] = {
     import Column.ColumnType._
     val res = collection.mutable.ArrayBuffer.fill[String](cols.size)(UnsafeUtils.ZeroPointer.asInstanceOf[String])
@@ -304,7 +322,6 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
       case _ => // column not selected
     }
     res
-
   }
 
   /**
@@ -449,6 +466,16 @@ class SelectColsMapItemConsumer(cols: Seq[String], buf: ArrayBuffer[String]) ext
   def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
     val key = UTF8StringShort.toString(keyBase, keyOffset)
     if (cols.contains(key)) buf(cols.indexOf(key)) = UTF8StringMedium.toString(valueBase, valueOffset)
+  }
+}
+
+/**
+ * A MapItemConsumer which collects keys of a Map column
+ */
+class MapItemKeysConsumer extends MapItemConsumer {
+  val keys = new collection.mutable.ArrayBuffer[String]
+  def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+    keys += UTF8StringShort.toString(keyBase, keyOffset)
   }
 }
 
