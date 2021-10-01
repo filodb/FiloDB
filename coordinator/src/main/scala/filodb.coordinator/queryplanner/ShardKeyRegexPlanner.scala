@@ -143,12 +143,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     // using the wrapped planner
     val plan = if (LogicalPlanUtils.hasDescendantAggregate(aggregate.vectors)) {
         val childPlan = materialize(aggregate.vectors, queryContext)
-        val reducer = LocalPartitionReduceAggregateExec(queryContext, inProcessPlanDispatcher,
-          Seq(childPlan), aggregate.operator, aggregate.params)
-        val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-        reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
-          RangeParams(promQlQueryParams.startSecs, promQlQueryParams.stepSecs, promQlQueryParams.endSecs)))
-        reducer
+        addAggregator(aggregate, queryContext, PlanResult(Seq(childPlan)), Seq.empty)
     } else {
       val execPlans = generateExecWithoutRegex(aggregate,
         LogicalPlan.getNonMetricShardKeyFilters(aggregate, dataset.options.nonMetricShardColumns).head, queryContext)
