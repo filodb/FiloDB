@@ -511,6 +511,10 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val mpExec = execPlan.children.head
     mpExec.isInstanceOf[MultiPartitionReduceAggregateExec] shouldEqual true
     mpExec.asInstanceOf[MultiPartitionReduceAggregateExec].aggrOp shouldEqual Count
+    mpExec.rangeVectorTransformers.find(_.isInstanceOf[AggregateMapReduce]) match {
+      case Some(AggregateMapReduce(op, _, _, _, _)) => op shouldEqual Sum
+      case _ => fail("Expected AggregateMapReduce for the sum operation")
+    }
     mpExec.children match {
       case plan1::plan2::Nil =>
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::

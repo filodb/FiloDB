@@ -143,6 +143,10 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     // using the wrapped planner
     val plan = if (LogicalPlanUtils.hasDescendantAggregate(aggregate.vectors)) {
         val childPlan = materialize(aggregate.vectors, queryContext)
+        // We are here because we have descendent aggregate, if that was multi-partition, the dispatcher will
+        // be InProcessPlanDispatcher and adding the current aggregate using addAggregate will use the same dispatcher
+        // If the underlying plan however is not multi partition, adding the aggregator using addAggregator will
+        // use the same dispatcher
         addAggregator(aggregate, queryContext, PlanResult(Seq(childPlan)), Seq.empty)
     } else {
       val execPlans = generateExecWithoutRegex(aggregate,
