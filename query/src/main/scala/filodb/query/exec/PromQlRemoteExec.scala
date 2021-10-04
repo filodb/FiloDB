@@ -53,11 +53,10 @@ case class PromQlRemoteExec(queryEndpoint: String,
       .map { response =>
         // Error response from remote partition is a nested json present in response.body
         // as response status code is not 2xx
-        // FIXME need to extract statistics from query error response, aggregate them, send upstream
         if (response.body.isLeft) {
-          parser.decode[RemoteErrorResponse](response.body.left.get) match {
+          parser.decode[ErrorResponse](response.body.left.get) match {
               case Right(errorResponse) =>
-                QueryError(queryContext.queryId, QueryStats(),
+                QueryError(queryContext.queryId, readQueryStats(errorResponse.queryStats),
                 RemoteQueryFailureException(response.code.toInt, errorResponse.status, errorResponse.errorType,
                   errorResponse.error))
               case Left(ex)             => QueryError(queryContext.queryId, QueryStats(), ex)
@@ -78,7 +77,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
   def toQueryResponse(response: SuccessResponse, id: String, parentSpan: kamon.trace.Span): QueryResponse = {
     val queryResponse = if (response.data.result.isEmpty) {
       logger.debug("PromQlRemoteExec generating empty QueryResult as result is empty")
-      QueryResult(id, ResultSchema.empty, Seq.empty, QueryStats(),
+      QueryResult(id, ResultSchema.empty, Seq.empty, readQueryStats(response.queryStats),
         if (response.partial.isDefined) response.partial.get else false, response.message)
     } else {
       if (response.data.result.head.aggregateResponse.isDefined) genAggregateResult(response, id)
@@ -86,8 +85,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
         val samples = response.data.result.head.values.getOrElse(Seq(response.data.result.head.value.get))
         if (samples.isEmpty) {
           logger.debug("PromQlRemoteExec generating empty QueryResult as samples is empty")
-          // FIXME need to extract statistics from query result response, aggregate them, send upstream
-          QueryResult(id, ResultSchema.empty, Seq.empty, QueryStats(),
+          QueryResult(id, ResultSchema.empty, Seq.empty, readQueryStats(response.queryStats),
             if (response.partial.isDefined) response.partial.get else false, response.message)
         } else {
           samples.head match {
@@ -105,8 +103,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
     val aggregateResponse = response.data.result.head.aggregateResponse.get
     if (aggregateResponse.aggregateSampl.isEmpty) {
-      // FIXME need to send and parse query stats in remote calls
-      QueryResult(id, ResultSchema.empty, Seq.empty, QueryStats(),
+      QueryResult(id, ResultSchema.empty, Seq.empty, readQueryStats(response.queryStats),
         if (response.partial.isDefined) response.partial.get else false, response.message)
     } else {
       aggregateResponse.aggregateSampl.head match {
@@ -143,8 +140,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
         queryWithPlanName(queryContext))
       // TODO: Handle stitching with verbose flag
     }
-    // FIXME need to send and parse query stats in remote calls
-    QueryResult(id, resultSchema.get("default").get, rangeVectors, QueryStats(),
+    QueryResult(id, resultSchema.get("default").get, rangeVectors, readQueryStats(response.queryStats),
       if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 
@@ -183,8 +179,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
       SerializedRangeVector(rv, builder, recordSchema.get("histogram").get, queryContext.origQueryParams.toString)
       // TODO: Handle stitching with verbose flag
     }
-    // FIXME need to send and parse query stats in remote calls
-    QueryResult(id, resultSchema.get("histogram").get, rangeVectors, QueryStats(),
+    QueryResult(id, resultSchema.get("histogram").get, rangeVectors, readQueryStats(response.queryStats),
       if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 
@@ -215,8 +210,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
     }
 
     // TODO: Handle stitching with verbose flag
-    // FIXME need to send and parse query stats in remote calls
-    QueryResult(id, resultSchema.get(Avg.entryName).get, rangeVectors, QueryStats(),
+    QueryResult(id, resultSchema.get(Avg.entryName).get, rangeVectors, readQueryStats(response.queryStats),
       if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 
@@ -248,8 +242,17 @@ case class PromQlRemoteExec(queryEndpoint: String,
     }
 
     // TODO: Handle stitching with verbose flag
-    // FIXME need to send and parse query stats in remote calls
-    QueryResult(id, resultSchema.get("stdval").get, rangeVectors, QueryStats(),
+    QueryResult(id, resultSchema.get("stdval").get, rangeVectors, readQueryStats(response.queryStats),
       if (response.partial.isDefined) response.partial.get else false, response.message)
+  }
+
+  def readQueryStats(queryStatsResponse: Option[Seq[QueryStatistics]]): QueryStats = {
+    val queryStats = QueryStats()
+    if (queryStatsResponse.isDefined && queryStatsResponse.get.nonEmpty) queryStatsResponse.get.foreach { stat =>
+      queryStats.getTimeSeriesScannedCounter(stat.group).addAndGet(stat.timeSeriesScanned)
+      queryStats.getDataBytesScannedCounter(stat.group).addAndGet(stat.dataBytesScanned)
+      queryStats.getResultBytesCounter(stat.group).addAndGet(stat.resultBytes)
+    }
+    queryStats
   }
 }

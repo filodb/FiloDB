@@ -88,7 +88,7 @@ object PrometheusModel {
                   else
                     qr.result.map(toPromResult(_, verbose, qr.resultType))
     SuccessResponse(Data(toPromResultType(qr.resultType), results.filter(r => r.values.nonEmpty || r.value.isDefined)),
-                    "success", Some(qr.mayBePartial), qr.partialResultReason)
+                    "success", Some(qr.mayBePartial), qr.partialResultReason, Some(toQueryStatistics(qr.queryStats)))
   }
 
   def toPromExplainPlanResponse(ex: ExecPlan): ExplainPlanResponse = {
@@ -202,7 +202,12 @@ object PrometheusModel {
   }
 
   def toPromErrorResponse(qe: filodb.query.QueryError): ErrorResponse = {
-    ErrorResponse(qe.t.getClass.getSimpleName, qe.t.getMessage)
+    ErrorResponse(qe.t.getClass.getSimpleName, qe.t.getMessage, "error", Some(toQueryStatistics(qe.queryStats)))
   }
+
+  def toQueryStatistics(qs: QueryStats): Seq[QueryStatistics] = qs.stat.map(stat =>
+    QueryStatistics(stat._1, stat._2.timeSeriesScanned.get(),
+      stat._2.dataBytesScanned.get(), stat._2.resultBytes.get())
+  ).toSeq
 
 }
