@@ -20,10 +20,9 @@ case class PlanResult(plans: Seq[ExecPlan], needsStitch: Boolean = false)
 trait  PlannerHelper {
     def queryConfig: QueryConfig
     def dataset: Dataset
-    val schemas: Schemas = Schemas(dataset.schema)
-    val dsOptions: DatasetOptions
+    def schemas: Schemas
+    def dsOptions: DatasetOptions
     val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
-  
     def materializeVectorPlan(qContext: QueryContext,
                               lp: VectorPlan): PlanResult = {
       val vectors = walkLogicalPlanTree(lp.scalars, qContext)

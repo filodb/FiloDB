@@ -38,7 +38,7 @@ object SingleClusterPlanner {
   */
 
 class SingleClusterPlanner(val dataset: Dataset,
-                           schemas: Schemas,
+                           val schemas: Schemas,
                            shardMapperFunc: => ShardMapper,
                            earliestRetainedTimestampFn: => Long,
                            val queryConfig: QueryConfig,
