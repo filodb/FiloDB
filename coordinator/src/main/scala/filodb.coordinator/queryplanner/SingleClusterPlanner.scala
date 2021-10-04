@@ -10,7 +10,7 @@ import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.SpreadProvider
 import filodb.core.binaryrecord2.RecordBuilder
-import filodb.core.metadata.{Dataset, Schemas}
+import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
@@ -38,7 +38,7 @@ object SingleClusterPlanner {
   */
 
 class SingleClusterPlanner(val dataset: Dataset,
-                           val schema: Schemas,
+                           val schemas: Schemas,
                            shardMapperFunc: => ShardMapper,
                            earliestRetainedTimestampFn: => Long,
                            val queryConfig: QueryConfig,
@@ -48,6 +48,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                            minTimeRangeForSplitMs: => Long = 1.day.toMillis,
                            splitSizeMs: => Long = 1.day.toMillis)
                            extends QueryPlanner with StrictLogging with PlannerHelper {
+  override val dsOptions: DatasetOptions = schemas.part.options
   val shardColumns = dsOptions.shardKeyColumns.sorted
   val dsRef = dataset.ref
 
