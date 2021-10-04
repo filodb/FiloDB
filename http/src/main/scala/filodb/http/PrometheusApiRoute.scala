@@ -116,7 +116,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
             qr.find(!_.isInstanceOf[filodb.query.QueryResult]) match {
               case Some(qe: QueryError) => complete(toPromErrorResponse(qe))
               case Some(UnknownDataset) => complete(Codes.NotFound ->
-                                           ErrorResponse("badQuery", s"Dataset $dataset is not registered"))
+                                           ErrorResponse("badQuery",
+                                             s"Dataset $dataset is not registered", "error", None))
               case Some(a: Any)      => throw new IllegalStateException(s"Got $a as query response")
               case None              => val promQrs = qr.asInstanceOf[Seq[filodb.query.QueryResult]].map { r =>
                                           convertHistToPromResult(r, schemas.part)
@@ -152,7 +153,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
       case qr: QueryError => complete(toPromErrorResponse(qr))
       case qr: ExecPlan => complete(toPromExplainPlanResponse(qr))
       case UnknownDataset => complete(Codes.NotFound ->
-        ErrorResponse("badQuery", s"Dataset $dataset is not registered"))
+        ErrorResponse("badQuery", s"Dataset $dataset is not registered", "error", None))
     }
   }
 }

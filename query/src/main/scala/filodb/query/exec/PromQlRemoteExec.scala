@@ -53,9 +53,8 @@ case class PromQlRemoteExec(queryEndpoint: String,
       .map { response =>
         // Error response from remote partition is a nested json present in response.body
         // as response status code is not 2xx
-        // FIXME need to extract statistics from query error response, aggregate them, send upstream
         if (response.body.isLeft) {
-          parser.decode[RemoteErrorResponse](response.body.left.get) match {
+          parser.decode[ErrorResponse](response.body.left.get) match {
               case Right(errorResponse) =>
                 QueryError(queryContext.queryId, readQueryStats(errorResponse.queryStats),
                 RemoteQueryFailureException(response.code.toInt, errorResponse.status, errorResponse.errorType,
@@ -104,7 +103,6 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
     val aggregateResponse = response.data.result.head.aggregateResponse.get
     if (aggregateResponse.aggregateSampl.isEmpty) {
-      // FIXME need to send and parse query stats in remote calls
       QueryResult(id, ResultSchema.empty, Seq.empty, readQueryStats(response.queryStats),
         if (response.partial.isDefined) response.partial.get else false, response.message)
     } else {
@@ -248,15 +246,13 @@ case class PromQlRemoteExec(queryEndpoint: String,
       if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 
-  def readQueryStats(queryStatsResponse: Option[Seq[RemoteQueryStats]]): QueryStats = {
+  def readQueryStats(queryStatsResponse: Option[Seq[QueryStatistics]]): QueryStats = {
     val queryStats = QueryStats()
-    if (queryStatsResponse.isDefined && queryStatsResponse.get.nonEmpty) {
-      queryStatsResponse.get.foreach(stat => {
-        queryStats.getTimeSeriesScannedCounter(stat.group).addAndGet(stat.timeSeriesScanned)
-        queryStats.getDataBytesScannedCounter(stat.group).addAndGet(stat.dataBytesScanned)
-        queryStats.getResultBytesCounter(stat.group).addAndGet(stat.resultBytes)
-      })
-    }
+    if (queryStatsResponse.isDefined && queryStatsResponse.get.nonEmpty) queryStatsResponse.get.foreach(stat => {
+      queryStats.getTimeSeriesScannedCounter(stat.group).addAndGet(stat.timeSeriesScanned)
+      queryStats.getDataBytesScannedCounter(stat.group).addAndGet(stat.dataBytesScanned)
+      queryStats.getResultBytesCounter(stat.group).addAndGet(stat.resultBytes)
+    })
     queryStats
   }
 }
