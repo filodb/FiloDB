@@ -48,7 +48,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
     import PromCirceSupport._
     import io.circe.parser
-    remoteExecHttpClient.httpGet(queryEndpoint, requestTimeoutMs,
+    remoteExecHttpClient.httpPost(queryEndpoint, requestTimeoutMs,
       queryContext.submitTime, getUrlParams(), queryContext.traceInfo)
       .map { response =>
         // Error response from remote partition is a nested json present in response.body
