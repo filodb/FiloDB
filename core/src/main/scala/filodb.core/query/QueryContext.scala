@@ -136,7 +136,7 @@ case class QueryStats() {
   def clear(): Unit = {
     stat.clear()
   }
-  
+
   /**
    * Counter for number of time series scanned by query
    * @param group typically a tuple of (clusterType, dataset, WS, NS, metricName),
