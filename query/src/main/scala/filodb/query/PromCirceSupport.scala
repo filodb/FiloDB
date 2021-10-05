@@ -74,14 +74,28 @@ object PromCirceSupport {
     }
   }
 
-  implicit val decodeRemoteErrorResponse: Decoder[RemoteErrorResponse] = new Decoder[RemoteErrorResponse] {
-    final def apply(c: HCursor): Decoder.Result[RemoteErrorResponse] = {
+  implicit val decodeQueryStatistics: Decoder[QueryStatistics] = new Decoder[QueryStatistics] {
+    final def apply(c: HCursor): Decoder.Result[QueryStatistics] = {
+      for {
+        group    <- c.downField("group").as[Seq[String]]
+        timeSeriesScanned <- c.downField("timeSeriesScanned").as[Long]
+        dataBytesScanned     <- c.downField("dataBytesScanned").as[Long]
+        resultBytes     <- c.downField("resultBytes").as[Long]
+      } yield {
+        QueryStatistics(group, timeSeriesScanned, dataBytesScanned, resultBytes)
+      }
+    }
+  }
+
+  implicit val decodeErrorResponse: Decoder[ErrorResponse] = new Decoder[ErrorResponse] {
+    final def apply(c: HCursor): Decoder.Result[ErrorResponse] = {
       for {
         status    <- c.downField("status").as[String]
         errorType <- c.downField("errorType").as[String]
         error     <- c.downField("error").as[String]
+        queryStats <- c.downField("queryStats").as[Option[Seq[QueryStatistics]]]
       } yield {
-        RemoteErrorResponse(status, errorType, error)
+        ErrorResponse(status, errorType, error, queryStats)
       }
     }
   }

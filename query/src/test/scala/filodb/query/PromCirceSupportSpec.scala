@@ -162,7 +162,7 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
      }
   }
 
-  it("should parse remote error response") {
+  it("should parse remote error response without queryStats") {
     val input = """[{
                   |  "status" : "error",
                   |  "data" : null,
@@ -170,9 +170,43 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
                   |  "error" : "Shard: 2 is not available"
                   |}]""".stripMargin
 
-    parser.decode[List[RemoteErrorResponse]](input) match {
-      case Right(errorResponse) => errorResponse.head shouldEqual(RemoteErrorResponse("error",
-                                   "query_materialization_failed", "Shard: 2 is not available"))
+    parser.decode[List[ErrorResponse]](input) match {
+      case Right(errorResponse) => errorResponse.head shouldEqual(ErrorResponse("error",
+        "query_materialization_failed", "Shard: 2 is not available", None))
+      case Left(ex)             => throw ex
+    }
+  }
+
+  it("should parse remote error response with queryStats") {
+    val input = """[{
+                  |  "status" : "error",
+                  |  "data" : null,
+                  |  "errorType" : "query_materialization_failed",
+                  |  "error" : "Shard: 2 is not available",
+                  |  "queryStats": [
+                  |        {
+                  |            "group": [
+                  |                "local",
+                  |                "raw",
+                  |                "ws1",
+                  |                "ns1",
+                  |                "metric1"
+                  |            ],
+                  |            "timeSeriesScanned": 24,
+                  |            "dataBytesScanned": 38784,
+                  |            "resultBytes": 15492
+                  |        }
+                  |    ]
+                  |}]""".stripMargin
+    val qs = QueryStatistics(Seq("local", "raw", "ws1", "ns1", "metric1"), 24, 38784, 15492)
+    parser.decode[List[ErrorResponse]](input) match {
+      case Right(errorResponse) =>
+        errorResponse.head.errorType shouldEqual "error"
+        errorResponse.head.error shouldEqual "query_materialization_failed"
+        errorResponse.head.status shouldEqual "Shard: 2 is not available"
+        errorResponse.head.queryStats.isDefined shouldEqual true
+        errorResponse.head.queryStats.get.size shouldEqual 1
+        errorResponse.head.queryStats.get.head shouldBe qs
       case Left(ex)             => throw ex
     }
   }

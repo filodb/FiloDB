@@ -14,7 +14,7 @@ import filodb.query._
 
 case class MetadataRemoteExec(queryEndpoint: String,
                               requestTimeoutMs: Long,
-                              urlParams: Map[String, Any],
+                              urlParams: Map[String, String],
                               queryContext: QueryContext,
                               dispatcher: PlanDispatcher,
                               dataset: DatasetRef,
@@ -27,7 +27,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
 
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                               (implicit sched: Scheduler): Future[QueryResponse] = {
-    remoteExecHttpClient.httpMetadataGet(queryEndpoint, httpTimeoutMs,
+    remoteExecHttpClient.httpMetadataPost(queryEndpoint, httpTimeoutMs,
       queryContext.submitTime, getUrlParams(), queryContext.traceInfo)
       .map { response =>
         response.unsafeBody match {

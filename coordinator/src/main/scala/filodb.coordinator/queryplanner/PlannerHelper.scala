@@ -20,11 +20,9 @@ case class PlanResult(plans: Seq[ExecPlan], needsStitch: Boolean = false)
 trait  PlannerHelper {
     def queryConfig: QueryConfig
     def dataset: Dataset
-    def schemas: Schemas = Schemas(dataset.schema)
-    def dsOptions: DatasetOptions = schemas.part.options
+    def schemas: Schemas
+    def dsOptions: DatasetOptions
     val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
-    private val datasetMetricColumn = dsOptions.metricColumn
-
     def materializeVectorPlan(qContext: QueryContext,
                               lp: VectorPlan): PlanResult = {
       val vectors = walkLogicalPlanTree(lp.scalars, qContext)
@@ -356,13 +354,13 @@ trait  PlannerHelper {
     val execPlan =
       if (logicalPlan.operator.isInstanceOf[SetOperator])
         SetOperatorExec(qContext, dispatcher, stitchedLhs, stitchedRhs, logicalPlan.operator,
-          LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
-          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
+          LogicalPlanUtils.renameLabels(onKeysReal, dsOptions.metricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, dsOptions.metricColumn), dsOptions.metricColumn)
       else
         BinaryJoinExec(qContext, dispatcher, stitchedLhs, stitchedRhs, logicalPlan.operator,
-          logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
-          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), logicalPlan.include,
-          datasetMetricColumn)
+          logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, dsOptions.metricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, dsOptions.metricColumn), logicalPlan.include,
+          dsOptions.metricColumn)
 
     PlanResult(Seq(execPlan), false)
   }
