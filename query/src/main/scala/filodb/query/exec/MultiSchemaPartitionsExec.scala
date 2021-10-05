@@ -41,8 +41,8 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   @transient // dont serialize the SelectRawPartitionsExec plan created for plan execution
   var finalPlan: SelectRawPartitionsExec = _
 
-  // Remove _columnName from metricColumn and generate PartLookupResult
-  private def removeColumnAndGenerateLookupResult(filters: Seq[ColumnFilter], metricName: String, columnName: String,
+  // Remove _columnName suffix from metricName and generate PartLookupResult
+  private def removeSuffixAndGenerateLookupResult(filters: Seq[ColumnFilter], metricName: String, columnName: String,
                                                   source: ChunkSource,
                                                   querySession: QuerySession) = {
     // Assume metric name has only equal filter
@@ -50,6 +50,8 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
       ColumnFilter(metricColumn, Equals(metricName.stripSuffix(s"_$columnName")))
 
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filterWithoutColumn)
+    // clear stats since previous call to lookupPartitions set the stat with metric name that has suffix
+    querySession.queryStats.clear()
     val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
     (lookupRes, Some(columnName))
   }
@@ -63,25 +65,22 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
     val metricName = filters.find(_.column == metricColumn).map(_.filter.valuesStrings.head.toString)
     var newColName = colName
 
-  /*
-   * Remove _sum & _count suffix. _bucket & le are removed in SingleClusterPlanner
-   * Metric name can have _sum & _count as suffix. So we remove the suffix only when partition lookup does not
-   * return any results
-   */
-   if (lookupRes.firstSchemaId.isEmpty && querySession.queryConfig.translatePromToFilodbHistogram && colName.isEmpty) {
+    /*
+     * As part of Histogram query compatibility with Prometheus format histograms, we
+     * remove _sum & _count suffix from metric name here. _bucket & le are already removed in SingleClusterPlanner.
+     * We remove the suffix only when partition lookup does not return any results
+     */
+    if (lookupRes.firstSchemaId.isEmpty && querySession.queryConfig.translatePromToFilodbHistogram &&
+        colName.isEmpty && metricName.isDefined) {
+      val res = if (metricName.get.endsWith("_sum"))
+        removeSuffixAndGenerateLookupResult(filters, metricName.get, "sum", source, querySession)
+      else if (metricName.get.endsWith("_count"))
+        removeSuffixAndGenerateLookupResult(filters, metricName.get, "count", source, querySession)
+      else (lookupRes, newColName)
 
-     if (metricName.isDefined) {
-       val res = if (metricName.get.endsWith("_sum"))
-                  removeColumnAndGenerateLookupResult(filters, metricName.get, "sum", source, querySession)
-                 else if (metricName.get.endsWith("_count"))
-                  removeColumnAndGenerateLookupResult(filters, metricName.get, "count", source,
-                    querySession)
-                 else (lookupRes, newColName)
-
-       lookupRes = res._1
-       newColName = res._2
-     }
-   }
+      lookupRes = res._1
+      newColName = res._2
+    }
 
     Kamon.currentSpan().mark("lookup-partitions-done")
 
