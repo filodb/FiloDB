@@ -4,17 +4,20 @@ sealed trait PromQueryResponse {
   def status: String
 }
 
-final case class RemoteErrorResponse(status: String, errorType: String, error: String) extends PromQueryResponse
-
-final case class ErrorResponse(errorType: String, error: String, status: String = "error") extends PromQueryResponse
+final case class ErrorResponse(errorType: String, error: String, status: String = "error",
+                               queryStats: Option[Seq[QueryStatistics]]) extends PromQueryResponse
 
 final case class SuccessResponse(data: Data, status: String = "success",
                                  partial: Option[Boolean] = None,
-                                 message: Option[String] = None) extends PromQueryResponse
+                                 message: Option[String] = None,
+                                 queryStats: Option[Seq[QueryStatistics]]) extends PromQueryResponse
 
 final case class ExplainPlanResponse(debugInfo: Seq[String], status: String = "success",
                                      partial: Option[Boolean]= None,
                                      message: Option[String]= None) extends PromQueryResponse
+
+final case class QueryStatistics(group: Seq[String], timeSeriesScanned: Long,
+                                 dataBytesScanned: Long, resultBytes: Long)
 
 final case class Data(resultType: String, result: Seq[Result])
 

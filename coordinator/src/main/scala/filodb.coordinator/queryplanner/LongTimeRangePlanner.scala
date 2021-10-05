@@ -3,7 +3,7 @@ package filodb.coordinator.queryplanner
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
-import filodb.core.metadata.{Dataset, Schemas}
+import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{QueryConfig, QueryContext}
 import filodb.query._
 import filodb.query.exec._
@@ -35,8 +35,8 @@ import filodb.query.exec._
                              val queryConfig: QueryConfig,
                              val dataset: Dataset) extends QueryPlanner
                              with PlannerHelper with StrictLogging {
-
-  override def schemas: Schemas = Schemas(dataset.schema)
+  override val schemas: Schemas = Schemas(dataset.schema)
+  override val dsOptions: DatasetOptions = schemas.part.options
 
   // scalastyle:off method.length
   private def materializePeriodicSeriesPlan(qContext: QueryContext, periodicSeriesPlan: PeriodicSeriesPlan) = {
