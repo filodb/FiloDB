@@ -5,14 +5,17 @@ import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
 import filodb.core.query.Filter.Equals
-import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.LogicalPlan
+import filodb.query.BinaryOperator.{ADD, LAND}
+import filodb.query.InstantFunctionId.Ln
+import filodb.query.{LogicalPlan, SeriesKeysByFilters}
 import filodb.query.exec._
 
 class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
@@ -806,5 +809,175 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
     execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
     val config = execPlan.dispatcher.asInstanceOf[InProcessPlanDispatcher].queryConfig
     config.fastReduceMaxWindows shouldEqual(queryConfig.fastReduceMaxWindows)
+  }
+
+  private def getPlannerForMetadataQueryTests = {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] =
+      List(PartitionAssignment("remote", "remote-url",
+        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
+        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+
+      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    (startSeconds, endSeconds, engine)
+  }
+
+
+  it("should materialize SeriesKeysByFilters query correctly") {
+    val (startSeconds: Int, endSeconds: Int, engine: MultiPartitionPlanner) = getPlannerForMetadataQueryTests
+    val lv = SeriesKeysByFilters(ColumnFilter("_ns_", Equals("ns"))::ColumnFilter("_ws_", Equals("ws"))::Nil, true,
+      startSeconds * 1000 , endSeconds * 1000)
+    val promQl = """test{job = "app"}"""
+    val promQlQueryParams = PromQlQueryParams(promQl, startSeconds, step, endSeconds)
+    val execPlan = engine.materialize(lv, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[PartKeysDistConcatExec] shouldEqual true
+    execPlan.children.size shouldEqual 2
+    val expectedUrlParams = Map("match[]" -> promQl)
+    execPlan.children(1).asInstanceOf[MetadataRemoteExec].urlParams shouldEqual(expectedUrlParams)
+    execPlan.children(1).asInstanceOf[MetadataRemoteExec].queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      endSecs shouldEqual(localPartitionStart - 1)
+    execPlan.children(0).asInstanceOf[PartKeysDistConcatExec]
+      .children(0).asInstanceOf[PartKeysExec].start shouldEqual (localPartitionStart * 1000)
+    execPlan.children(0).asInstanceOf[PartKeysDistConcatExec]
+      .children(0).asInstanceOf[PartKeysExec].end shouldEqual (endSeconds * 1000)
+  }
+
+  it("should materialize LabelNames query correctly") {
+    val (startSeconds: Int, endSeconds: Int, engine: MultiPartitionPlanner) = getPlannerForMetadataQueryTests
+
+    val lv = Parser.labelNamesQueryToLogicalPlan(Some("""__name__="some-metric", job="app""""), TimeStepParams(startSeconds, step, endSeconds))
+
+    val promQlQueryParams = PromQlQueryParams("""test{job = "app"}""", startSeconds, step, endSeconds, Some("/api/v2/labels/name"))
+    val execPlan = engine.materialize(lv, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[LabelNamesDistConcatExec] shouldEqual true
+    execPlan.children.size shouldEqual 2
+
+    val expectedUrlParams = Map("filter" -> """__name__="some-metric",job="app"""")
+    execPlan.children(1).asInstanceOf[MetadataRemoteExec].urlParams shouldEqual(expectedUrlParams)
+    execPlan.children(1).asInstanceOf[MetadataRemoteExec].queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+      endSecs shouldEqual(localPartitionStart - 1)
+    execPlan.children(0).asInstanceOf[LabelNamesDistConcatExec]
+      .children(0).asInstanceOf[LabelNamesExec].startMs shouldEqual (localPartitionStart * 1000)
+    execPlan.children(0).asInstanceOf[LabelNamesDistConcatExec]
+      .children(0).asInstanceOf[LabelNamesExec].endMs shouldEqual (endSeconds * 1000)
+  }
+
+  it ("should generate correct plan for multipartition BinaryJoin with instant function") {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
+      TimeRange(timeRange.startMs, timeRange.endMs)))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        if (routingKey.equals(Map("job" -> "app1"))) List(
+          PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs,
+            timeRange.endMs)))
+        else List(
+          PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,
+            timeRange.endMs)))
+      }
+
+      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("""ln(test1{job = "app1"} + test2{job = "app2"})""",
+      TimeStepParams(1000, 100, 10000))
+
+    val promQlQueryParams = PromQlQueryParams("""ln(test1{job = "app1"} + test2{job = "app2"})""", 1000, 100, 10000)
+
+//    Sample plan generated for an instant function applied to a Multi Partition Binary Join
+
+//    T~InstantVectorFunctionMapper(function=Ln)
+//    -E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@43f03c23)
+//    --E~PromQlRemoteExec(PromQlQueryParams(test1{job="app1"},1000,100,10000,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@43f03c23)
+//    --E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1986332149],raw)
+//      ---T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+//    ----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=13, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1986332149],raw)
+//      ---T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+//    ----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=29, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1986332149],raw)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
+    execPlan.asInstanceOf[BinaryJoinExec].binaryOp shouldBe ADD
+    execPlan.asInstanceOf[BinaryJoinExec].lhs.head.isInstanceOf[PromQlRemoteExec] shouldEqual(true)
+    execPlan.asInstanceOf[BinaryJoinExec].rhs.head.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual(true)
+
+    execPlan.asInstanceOf[BinaryJoinExec].lhs.head.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf
+      [PromQlQueryParams].promQl shouldEqual("""test1{job="app1"}""")
+
+    execPlan.asInstanceOf[BinaryJoinExec].rhs.head.asInstanceOf[LocalPartitionDistConcatExec].children.head.
+      asInstanceOf[MultiSchemaPartitionsExec].filters.contains(ColumnFilter("job", Equals("app2"))) shouldEqual(true)
+
+    execPlan.rangeVectorTransformers.nonEmpty shouldBe true
+    execPlan.rangeVectorTransformers.head shouldBe InstantVectorFunctionMapper(Ln, Nil)
+
+  }
+
+  it ("should generate correct plan for multipartition set operation with absent function") {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
+      TimeRange(timeRange.startMs, timeRange.endMs)))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        if (routingKey.equals(Map("job" -> "app1"))) List(
+          PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs,
+            timeRange.endMs)))
+        else List(
+          PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,
+            timeRange.endMs)))
+      }
+
+      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("""absent(test1{job = "app1"} and test2{job = "app2"})""",
+      TimeStepParams(1000, 100, 10000))
+
+    val promQlQueryParams = PromQlQueryParams("""absent(test1{job = "app1"} and test2{job = "app2"})""", 1000, 100, 10000)
+
+    //    Sample plan generated for an instant function applied to a Multi Partition Set Operation with Absent
+
+//    T~AbsentFunctionMapper(columnFilter=List() rangeParams=RangeParams(1000,100,10000) metricColumn=__name__)
+//    -E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@6048e26a)
+//    --T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+//    ---E~SetOperatorExec(binaryOp=LAND, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@6048e26a)
+//    ----E~PromQlRemoteExec(PromQlQueryParams(test1{job="app1"},1000,100,10000,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@6048e26a)
+//    ----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-529259697],raw)
+//      -----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+//    ------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=13, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-529259697],raw)
+//      -----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+//    ------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=29, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-529259697],raw)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+    execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
+    execPlan.rangeVectorTransformers.nonEmpty shouldBe true
+    execPlan.rangeVectorTransformers.head shouldBe AbsentFunctionMapper(Nil, RangeParams(1000, 100, 10000), "__name__")
+    val childPlan = execPlan.children.head
+    childPlan.isInstanceOf[SetOperatorExec] shouldEqual (true)
+    childPlan.asInstanceOf[SetOperatorExec].lhs.head.isInstanceOf[PromQlRemoteExec] shouldEqual(true)
+    childPlan.asInstanceOf[SetOperatorExec].rhs.head.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual(true)
+    childPlan.asInstanceOf[SetOperatorExec].binaryOp shouldBe LAND
+
+    childPlan.asInstanceOf[SetOperatorExec].lhs.head.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams.asInstanceOf
+      [PromQlQueryParams].promQl shouldEqual("""test1{job="app1"}""")
+
+    childPlan.asInstanceOf[SetOperatorExec].rhs.head.asInstanceOf[LocalPartitionDistConcatExec].children.head.
+      asInstanceOf[MultiSchemaPartitionsExec].filters.contains(ColumnFilter("job", Equals("app2"))) shouldEqual(true)
   }
 }
