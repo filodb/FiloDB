@@ -34,7 +34,7 @@ object SplitLocalPartitionDistConcatExecSpec {
   }
 
   val dsRef = DatasetRef("raw-metrics")
-  val dummyPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, dsRef, 0, Nil, AllChunkScan)
+  val dummyPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, dsRef, 0, Nil, AllChunkScan, "_metric_")
 
   val builder = new RecordBuilder(MemFactory.onHeapFactory)
 }
@@ -109,12 +109,12 @@ class SplitLocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers wit
     val dispacher = DummyDispatcher(memStore, querySession)
 
     val execPlan1 = MultiSchemaPartitionsExec(QueryContext(), dispacher,
-      dsRef, 0, filters, AllChunkScan)
+      dsRef, 0, filters, AllChunkScan, "_metric_")
     execPlan1.addRangeVectorTransformer(new PeriodicSamplesMapper(start1, step, end1, Some(reportingInterval * 100),
       Some(InternalRangeFunction.SumOverTime), QueryContext()))
 
     val execPlan2 = MultiSchemaPartitionsExec(QueryContext(), dispacher,
-      dsRef, 0, filters, AllChunkScan)
+      dsRef, 0, filters, AllChunkScan, "_metric_")
     execPlan2.addRangeVectorTransformer(new PeriodicSamplesMapper(start2, step, end2, Some(reportingInterval * 100),
       Some(InternalRangeFunction.SumOverTime), QueryContext()))
 

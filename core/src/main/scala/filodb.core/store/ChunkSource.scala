@@ -71,7 +71,6 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
     */
   def isDownsampleStore: Boolean
 
-  def isReadyForQuery(datasetRef: DatasetRef, shard: Int): Boolean
 
   /**
    * Scans and returns data in partitions according to the method.  The partitions are ready to be queried.
@@ -109,6 +108,28 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
    * Returns the schemas registered for a given dataset.
    */
   def schemas(ref: DatasetRef): Option[Schemas]
+
+  /**
+   * Acquire shared lock to shard(s) for given dataset/partMethod.
+   * Acquired lock is placed in querySession. It is the job of the client to release the lock.
+   *
+   * @throws QueryTimeoutException if shared lock was not acquired within timeoutMs
+   */
+  def acquireSharedLock(ref: DatasetRef,
+                        shardNum: Int,
+                        querySession: QuerySession): Unit
+
+  /**
+   * Check if shard is ready for query.
+   *
+   * If not and if partial results allowed, it allows query to continue
+   * by marking the session for partial results.
+   *
+   * If not and if partial results are not allowed, ServiceUnavailableException is thrown
+   */
+  def checkReadyForQuery(ref: DatasetRef,
+                         shard: Int,
+                         querySession: QuerySession): Unit
 
   /**
    * Looks up TSPartitions from filters.
@@ -167,7 +188,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
       val key = PartitionRangeVectorKey(Left(partition),
                                         schema.partKeySchema, partCols, partition.shard,
                                         subgroup, partition.partID, schema.name)
-      RawDataRangeVector(key, partition, lookupRes.chunkMethod, ids, lookupRes.queriedChunksCounter)
+      RawDataRangeVector(key, partition, lookupRes.chunkMethod, ids, lookupRes.dataBytesScannedCtr)
     }
   }
 

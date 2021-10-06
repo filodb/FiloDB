@@ -6,7 +6,7 @@ import monix.execution.Scheduler
 import filodb.core.DatasetRef
 import filodb.core.memstore.TimeSeriesShard
 import filodb.core.metadata.Column
-import filodb.core.query.{ServiceUnavailableException, _}
+import filodb.core.query._
 import filodb.core.store._
 
 object SelectChunkInfosExec {
@@ -42,13 +42,8 @@ final case class SelectChunkInfosExec(queryContext: QueryContext,
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
-    if (!source.isReadyForQuery(dataset, shard)) {
-      if (!queryContext.plannerParams.allowPartialResults) {
-        throw new ServiceUnavailableException(s"Unable to answer query since shard $shard is still bootstrapping")
-      }
-      querySession.resultCouldBePartial = true
-      querySession.partialResultsReason = Some("Result may be partial since some shards are still bootstrapping")
-    }
+    source.checkReadyForQuery(dataset, shard, querySession)
+    source.acquireSharedLock(dataset, shard, querySession)
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
 

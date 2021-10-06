@@ -1,6 +1,7 @@
 package filodb.prometheus.parse
 
 import filodb.prometheus.ast.{PeriodicSeries, SimpleSeries, TimeStepParams}
+import filodb.prometheus.parse.Parser.{Antlr, Shadow}
 import filodb.query.{BinaryJoin, LogicalPlan}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -8,6 +9,11 @@ import org.scalatest.matchers.should.Matchers
 //noinspection ScalaStyle
 // scalastyle:off
 class ParserSpec extends AnyFunSpec with Matchers {
+
+  it("test") {
+    antlrParseSuccessfully("http_requests_total{job=\"prometheus\", method=\"GET\"} limit 10")
+    parseSuccessfully("http_requests_total{job=\"prometheus\", method=\"GET\"} limit 1")
+  }
 
   it("metadata matcher query") {
     parseSuccessfully("http_requests_total{job=\"prometheus\", method=\"GET\"}")
@@ -39,6 +45,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
   }
 
   it("parse basic scalar expressions") {
+    parseSuccessfully("-5")
+    parseSuccessfully("+5")
     parseSuccessfully("1")
     //    parse("+Inf")
     //    parse("-Inf")
@@ -109,6 +117,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("a - on(b) ignoring(c) d")
 
     parseSuccessfully("foo * bar")
+    parseSuccessfully("foo * bar limit 1")
+    parseSuccessfully("(foo * bar) limit 1")
     parseSuccessfully("foo == 1")
     parseSuccessfully("foo == bool 1")
     parseSuccessfully("foo > bool bar")
@@ -156,6 +166,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
 
     parseSuccessfully("foo")
     parseSuccessfully("foo offset 5m")
+    parseSuccessfully("foo limit 1")
     parseSuccessfully("foo:bar{a=\"bc\"}")
     parseSuccessfully("foo{NaN='bc'}")
     parseSuccessfully("foo{a=\"b\", foo!=\"bar\", test=~\"test\", bar!~\"baz\"}")
@@ -180,6 +191,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("foo{__name__=\"bar\"}")
 
     parseSuccessfully("test{a=\"b\"}[5y] OFFSET 3d")
+    parseSuccessfully("test{a=\"b\"}[5y] LIMIT 3")
+    parseSuccessfully("test{a=\"b\"}[5y] OFFSET 3d LIMIT 3")
     parseSuccessfully("test[5s]")
     parseSuccessfully("test[5m]")
     parseSuccessfully("test[5h] OFFSET 5m")
@@ -190,13 +203,16 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("foo[0m]")
     parseError("foo[5m30s]")
     parseError("foo[5m] OFFSET 1h30m")
+    parseError("foo[5m] LIMIT 1m")
     parseError("foo[\"5m\"]")
     parseError("foo[]")
     parseError("foo[1]")
     parseError("some_metric[5m] OFFSET 1")
     parseError("some_metric[5m] OFFSET 1mm")
     parseError("some_metric[5m] OFFSET")
+    parseError("some_metric[5m] LIMIT")
     parseError("some_metric OFFSET 1m[5m]")
+    parseError("some_metric LIMIT 1m[5m]")
     parseError("(foo + bar)[5m]")
 
     parseSuccessfully("sum by (foo)(some_metric)")
@@ -265,6 +281,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("minn{job=\"SNRT-App-0\"}[1m] ")
     parseSuccessfully("count0{job=\"SNRT-App-0\"}[1m] ")
     parseSuccessfully("offset1{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("limit1{job=\"SNRT-App-0\"}[1m] ")
     parseSuccessfully("by1{job=\"SNRT-App-0\"}[1m] ")
     parseSuccessfully("with2{job=\"SNRT-App-0\"}[1m] ")
     parseSuccessfully("without3{job=\"SNRT-App-0\"}[1m] ")
@@ -392,7 +409,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("stdvar_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
 
     //  SumOverTime
-    parseSuccessfully("sum_over_time(some_metric[5m])")
+    parseSuccessfully("sum_over_time(some_metric[5m]) limit 10")
     parseError("sum_over_time(some_metric)") // reason : Expected range-vector
     parseError("sum_over_time(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
     parseError("sum_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
@@ -418,6 +435,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSubquery("min_over_time( rate(http_requests_total[5m])[30m:1m] )")
     parseSubquery("max_over_time( deriv( rate(distance_covered_meters_total[1m])[5m:1m] )[10m:] )")
     parseSubquery("max_over_time((time() - max(foo) < 1000)[5m:10s] offset 5m)")
+    parseSubquery("max_over_time((time() - max(foo) < 1000)[5m:10s]) limit 5")
+    parseSubquery("max_over_time((time() - max(foo) < 1000)[5m:10s] offset 5m) limit 2")
     parseSubquery("avg_over_time(rate(demo_cpu_usage_seconds_total[1m])[2m:10s])")
 
     parseSubquery("foo[5m:1m]")
@@ -444,21 +463,21 @@ class ParserSpec extends AnyFunSpec with Matchers {
   // becomes the default parser
   it("parse subquery using antl"){
     parseWithAntlr(
-      "min_over_time( rate(http_requests_total[5m])[30m:1m] offset 1m)",
-      "SubqueryWithWindowing(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524854160000,1524855900000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524854160000,60000,1524855900000,300000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(http_requests_total)))),1524855988000,0,1524855988000,MinOverTime,List(),1800000,60000,Some(60000))"
+      "min_over_time(rate(http_requests_total[5m])[30m:1m] offset 1m) limit 10",
+      "ApplyLimitFunction(SubqueryWithWindowing(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524854160000,1524855900000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524854160000,60000,1524855900000,300000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(http_requests_total)))),1524855988000,0,1524855988000,MinOverTime,List(),1800000,60000,Some(60000)),List(),RangeParams(1524855988,1000,1524855988),10)"
     )
     parseWithAntlr(
       "(heap_usage + heap_usage)[5m:1m]",
-      "TopLevelSubquery(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),List(),List(),List()),1524855988000,1000000,1524855988000,300000,60000)"
+      "TopLevelSubquery(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),List(),List(),List()),1524855720000,60000,1524855960000,300000,None)"
     )
     parseWithAntlr(
       "heap_usage[10m:1m] offset 30s",
-      "TopLevelSubquery(PeriodicSeries(RawSeries(IntervalSelector(1524855360000,1524855900000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855360000,60000,1524855900000,None),1524855988000,1000000,1524855988000,600000,60000)"
+      "TopLevelSubquery(PeriodicSeries(RawSeries(IntervalSelector(1524855360000,1524855900000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855360000,60000,1524855900000,None),1524855360000,60000,1524855900000,600000,Some(30000))"
     )
 
     parseWithAntlr(
       "sum_over_time(heap_usage[10m:1m] offset 3m)[2m:1m] offset 1m",
-      "TopLevelSubquery(SubqueryWithWindowing(PeriodicSeries(RawSeries(IntervalSelector(1524855060000,1524855720000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855060000,60000,1524855720000,None),1524855840000,60000,1524855900000,SumOverTime,List(),600000,60000,Some(180000)),1524855988000,1000000,1524855988000,120000,60000)"
+      "TopLevelSubquery(SubqueryWithWindowing(PeriodicSeries(RawSeries(IntervalSelector(1524855060000,1524855720000),List(ColumnFilter(__name__,Equals(heap_usage))),List(),Some(300000),None),1524855060000,60000,1524855720000,None),1524855840000,60000,1524855900000,SumOverTime,List(),600000,60000,Some(180000)),1524855840000,60000,1524855900000,120000,Some(60000))"
     )
     parseWithAntlr(
       "sum_over_time(heap_usage[3m:1m] offset 3m)",
@@ -629,22 +648,50 @@ class ParserSpec extends AnyFunSpec with Matchers {
       "sum((some_metric))" -> "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(some_metric))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List())",
       "sum((foo + foo))" -> "Aggregate(Sum,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),List(),List(),List())",
       "(sum(foo1) + sum(foo2))/(sum(foo3) + sum(foo4))" -> "BinaryJoin(BinaryJoin(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo1))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),ADD,OneToOne,Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo2))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),List(),List(),List()),DIV,OneToOne,BinaryJoin(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo3))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),ADD,OneToOne,Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo4))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List()),List(),List(),List()),List(),List(),List())",
-      "foo[5m:1m]" -> "TopLevelSubquery(PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),1524855988000,1000000,1524855988000,300000,60000)",
-      "deriv(rate(distance_covered_meters_total[1m])[5m:1m])[6m:3m]" -> "TopLevelSubquery(SubqueryWithWindowing(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855480000,1524855960000),List(ColumnFilter(__name__,Equals(distance_covered_meters_total))),List(),Some(60000),None),1524855480000,60000,1524855960000,60000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(distance_covered_meters_total)))),1524855780000,180000,1524855960000,Deriv,List(),300000,60000,None),1524855988000,1000000,1524855988000,360000,180000)",
+      "foo[5m:1m]" -> "TopLevelSubquery(PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),1524855720000,60000,1524855960000,300000,None)",
+      "deriv(rate(distance_covered_meters_total[1m])[5m:1m])[6m:3m]" -> "TopLevelSubquery(SubqueryWithWindowing(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855480000,1524855960000),List(ColumnFilter(__name__,Equals(distance_covered_meters_total))),List(),Some(60000),None),1524855480000,60000,1524855960000,60000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(distance_covered_meters_total)))),1524855780000,180000,1524855960000,Deriv,List(),300000,60000,None),1524855780000,180000,1524855960000,360000,None)",
       "max_over_time(rate(foo[5m])[5m:1m])" -> "SubqueryWithWindowing(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855720000,60000,1524855960000,300000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(foo)))),1524855988000,0,1524855988000,MaxOverTime,List(),300000,60000,None)",
       "max_over_time(sum(foo)[5m:1m])" -> "SubqueryWithWindowing(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),List(),List(),List()),1524855988000,0,1524855988000,MaxOverTime,List(),300000,60000,None)",
-      "sum(foo)[5m:1m]" -> "TopLevelSubquery(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),List(),List(),List()),1524855988000,1000000,1524855988000,300000,60000)",
-      "avg_over_time(max_over_time(rate(foo[5m])[5m:1m])[10m:2m])" -> "SubqueryWithWindowing(SubqueryWithWindowing(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855180000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855180000,60000,1524855960000,300000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(foo)))),1524855480000,120000,1524855960000,MaxOverTime,List(),300000,60000,None),1524855988000,0,1524855988000,AvgOverTime,List(),600000,120000,None)"
+      "sum(foo)[5m:1m]" -> "TopLevelSubquery(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855720000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855720000,60000,1524855960000,None),List(),List(),List()),1524855720000,60000,1524855960000,300000,None)",
+      "avg_over_time(max_over_time(rate(foo[5m])[5m:1m])[10m:2m])" -> "SubqueryWithWindowing(SubqueryWithWindowing(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855180000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855180000,60000,1524855960000,300000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(foo)))),1524855480000,120000,1524855960000,MaxOverTime,List(),300000,60000,None),1524855988000,0,1524855988000,AvgOverTime,List(),600000,120000,None)",
+      "1-1" -> "ScalarBinaryOperation(SUB,Left(1.0),Left(1.0),RangeParams(1524855988,1000,1524855988))",
+      "rate(___http_requests_total{job=\"api-server\"}[10m])" -> "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(___http_requests_total))),List(),Some(600000),None),1524855988000,1000000,1524855988000,600000,Rate,false,List(),None,List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(___http_requests_total))))",
+      "(http_requests_total{job=\"api-server\"}==1)+4 " -> "ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(4.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(EQL,ScalarFixedDoublePlan(1.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),false),false)"
     )
 
     val qts: Long = 1524855988L
     val step = 1000
+
+    // Parsing with Legacy Parser
     queryToLpString.foreach { case (q, e) =>
-      info(s"Parsing $q")
-      val lp = Parser.queryToLogicalPlan(q, qts, step)
+      info(s"Parsing with Legacy parser $q")
+      val lp = Parser.queryToLogicalPlan(q, qts, step, Shadow)
       if (lp.isInstanceOf[BinaryJoin]) printBinaryJoin(lp)
       lp.toString shouldEqual (e)
     }
+
+    // Parsing with Antlr
+    queryToLpString.foreach { case (q, e) =>
+      info(s"Parsing with Antlr Parser$q")
+      val lp = Parser.queryToLogicalPlan(q, qts, step, Antlr)
+      if (lp.isInstanceOf[BinaryJoin]) printBinaryJoin(lp)
+      //if(lp.toString != e) {
+        //println("\""+q.replaceAll("\"","\\\\\"")+"\" -> \""+lp.toString+"\",")
+      //}
+      
+      lp.toString shouldEqual (e)
+    }
+  }
+
+  it("should find subqueryWithWindowing") {
+    var lp = Parser.queryToLogicalPlan("foo[5m:1m]", 100000, 1000)
+    LogicalPlan.hasSubqueryWithWindowing(lp) shouldEqual false
+    lp = Parser.queryToLogicalPlan("avg_over_time(foo[5m:1m])", 100000, 1000)
+    LogicalPlan.hasSubqueryWithWindowing(lp) shouldEqual true
+    lp = Parser.queryToLogicalPlan("avg_over_time(foo[5m])", 100000, 1000)
+    LogicalPlan.hasSubqueryWithWindowing(lp) shouldEqual false
+    lp = Parser.queryToLogicalPlan("avg_over_time(avg_over_time(foo[5m])[5m:1m]) + avg_over_time(avg_over_time(foo[5m])[5m:1m])", 100000, 1000)
+    LogicalPlan.hasSubqueryWithWindowing(lp) shouldEqual true
   }
 
   it("should error instant queries without step when step multiple notation is used") {
@@ -713,7 +760,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
       case r: SimpleSeries   => r.toSeriesPlan(defaultQueryParams, isRoot = true)
       case _ => throw new UnsupportedOperationException()
     }
-    lp.toString shouldEqual (expectedLp)
+    val planString = lp.toString
+    planString shouldEqual (expectedLp)
   }
 
   private def parseSubqueryError(query: String) = {
@@ -724,7 +772,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
 
   private def antlrParseSuccessfully(query: String) = {
     val result = AntlrParser.parseQuery(query)
-    //info(String.valueOf(result))
+    info(String.valueOf(result))
   }
 
   private def parseError(query: String) = {

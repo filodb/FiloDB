@@ -49,6 +49,7 @@ object RangeFunctionId extends Enum[RangeFunctionId] {
   val values = findValues
 
   case object Last extends RangeFunctionId("last",Seq(RangeVectorParam()))
+  case object LastOverTime extends RangeFunctionId("last_over_time",Seq(RangeVectorParam()))
   case object AvgOverTime extends RangeFunctionId("avg_over_time", Seq(RangeVectorParam()))
   case object Changes extends RangeFunctionId("changes", Seq(RangeVectorParam()))
   case object CountOverTime extends RangeFunctionId("count_over_time", Seq(RangeVectorParam()))
@@ -211,4 +212,12 @@ object AbsentFunctionId extends Enum[AbsentFunctionId] {
   val values = findValues
 
   case object Absent extends AbsentFunctionId("absent")
+}
+
+sealed abstract class LimitFunctionId(override val entryName: String) extends EnumEntry
+
+object LimitFunctionId extends Enum[LimitFunctionId] {
+  val values = findValues
+
+  case object Limit extends LimitFunctionId("limit")
 }

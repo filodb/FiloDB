@@ -278,6 +278,33 @@ final case class UTF8MapIteratorRowReader(records: Iterator[Map[ZeroCopyUTF8Stri
   }
 }
 
+final case class StringArrayRowReader(records: Seq[String]) extends Iterator[RowReader] {
+  var currVal: String = _
+  val iter = records.iterator
+
+  private val rowReader = new RowReader {
+    def notNull(columnNo: Int): Boolean = true
+    def getBoolean(columnNo: Int): Boolean = ???
+    def getInt(columnNo: Int): Int = ???
+    def getLong(columnNo: Int): Long = ???
+    def getDouble(columnNo: Int): Double = ???
+    def getFloat(columnNo: Int): Float = ???
+    def getString(columnNo: Int): String = currVal
+    def getAny(columnNo: Int): Any = currVal
+
+    def getBlobBase(columnNo: Int): Any = ???
+    def getBlobOffset(columnNo: Int): Long = ???
+    def getBlobNumBytes(columnNo: Int): Int = ???
+  }
+
+  override def hasNext: Boolean = iter.hasNext
+
+  override def next(): RowReader = {
+    currVal = iter.next()
+    rowReader
+  }
+}
+
 final case class SchemaSeqRowReader(sequence: Seq[Any],
                                     extractors: Array[TypedFieldExtractor[_]]) extends SchemaRowReader {
   def notNull(columnNo: Int): Boolean = true

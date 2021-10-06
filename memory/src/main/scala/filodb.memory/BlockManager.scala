@@ -231,7 +231,8 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         // the lock isn't held. If the lock state is broken, then ingestion is really stuck
         // and the node must be restarted. Queries should always release the lock.
         logger.error(s"Lock for BlockManager.tryReclaimWhenAllocating timed out; proceeding to " +
-          s"force-eviction to avoid blocking ingestion. Lock state: $reclaimLock")
+          s"force-eviction to avoid blocking ingestion. Lock state: $reclaimLock " +
+          s"Eviction Lock: ${reclaimLock.toString}")
       } else {
         logger.debug("Lock for BlockManager.tryReclaimWhenAllocating acquired")
       }

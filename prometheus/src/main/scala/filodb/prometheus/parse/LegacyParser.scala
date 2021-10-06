@@ -276,7 +276,8 @@ trait SelectorParser extends OperatorParser with UnitParser with BaseParser {
   lazy val rangeVectorSelector: PackratParser[RangeExpression] =
     metricNameIdentifier ~ labelSelection.? ~ simpleLookback ~ offset.? ^^ {
       case metricName ~ ls ~ simpleLookback ~ opt =>
-        RangeExpression(Some(metricName.str), ls.getOrElse(Seq.empty), simpleLookback.duration, opt.map(_.duration))
+        RangeExpression(Some(metricName.str), ls.getOrElse(Seq.empty), simpleLookback.duration,
+          opt.map(_.duration))
     }
 
   lazy val rangeVectorSelector2: PackratParser[RangeExpression] =
@@ -305,6 +306,7 @@ trait AggregatesParser extends OperatorParser with BaseParser {
   protected val BOTTOMK = Keyword("BOTTOMK")
   protected val TOPK = Keyword("TOPK")
   protected val QUANTILE = Keyword("QUANTILE")
+  protected val LIMIT = Keyword("LIMIT")
 
   protected val SUM_OVER_TIME = Keyword("SUM_OVER_TIME")
   protected val AVG_OVER_TIME = Keyword("AVG_OVER_TIME")
@@ -315,6 +317,10 @@ trait AggregatesParser extends OperatorParser with BaseParser {
   protected val COUNT_OVER_TIME = Keyword("COUNT_OVER_TIME")
   protected val QUANTILE_OVER_TIME = Keyword("QUANTILE_OVER_TIME")
   protected val ABSENT_OVER_TIME= Keyword("ABSENT_OVER_TIME")
+
+  lazy val limit: PackratParser[Scalar] = LIMIT ~ decimalNumber ^^ {
+    case ignore ~ n => Scalar(n.toDouble)
+  }
 
   lazy val aggregateOperator: PackratParser[String] =
     SUM | AVG | MIN | MAX | STD_DEV | STD_VAR | COUNT_VALUES | COUNT | BOTTOMK | TOPK | QUANTILE
@@ -356,6 +362,7 @@ trait ExpressionParser extends AggregatesParser with SelectorParser with Numeric
 
     "(" ~ expression ~ ")" ^^ {
       case "(" ~ ep ~ ")" => PrecedenceExpression(ep)
+      case _ => ???
     }
   }
 
@@ -386,8 +393,16 @@ trait ExpressionParser extends AggregatesParser with SelectorParser with Numeric
       )
     }
 
+  lazy val limitExpression: PackratParser[Expression] =
+    expression ~ limit.? ^^ {
+      case exp ~ None => exp
+      case exp ~ Some(param) => Function(
+        "limit", param +: Seq(exp)
+      )
+    }
+
   lazy val expression: PackratParser[Expression] =
-    binaryExpression | subqueryExpression | aggregateExpression2 | aggregateExpression1 |
+     binaryExpression | subqueryExpression | aggregateExpression2 | aggregateExpression1 | limitExpression |
     function | unaryExpression | vector | numericalExpression | simpleSeries | precedenceExpression
 
   // Generally most expressions can be subqueries except for those that return range vectors,
@@ -397,7 +412,7 @@ trait ExpressionParser extends AggregatesParser with SelectorParser with Numeric
 
   lazy val subqueryExpression: PackratParser[SubqueryExpression] =
     subqueryableExpression ~ subqueryClause ^^ {
-      case sqe ~ sqc => SubqueryExpression( sqe, sqc, None) //we do not support offset in the legacy parser
+      case sqe ~ sqc => SubqueryExpression( sqe, sqc, None, None) //we do not support offset in the legacy parser
     }
 }
 
