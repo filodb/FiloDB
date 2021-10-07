@@ -122,7 +122,8 @@ case class SubqueryExpression(
       startS * 1000,
       stepToUseMs,
       endS * 1000,
-      sqcl.window.millis(1L)
+      sqcl.window.millis(1L),
+      offset.map(duration => duration.millis(1L))
     )
 
   }

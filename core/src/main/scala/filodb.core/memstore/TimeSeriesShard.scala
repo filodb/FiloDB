@@ -1,7 +1,7 @@
 package filodb.core.memstore
 
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.StampedLock
 
 import scala.collection.mutable
@@ -216,7 +216,7 @@ case class PartLookupResult(shard: Int,
                             partIdsMemTimeGap: debox.Map[Int, Long] = debox.Map.empty,
                             partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty,
                             pkRecords: Seq[PartKeyLuceneIndexRecord] = Seq.empty,
-                            dataBytesScannedCtr: AtomicInteger)
+                            dataBytesScannedCtr: AtomicLong)
 
 final case class SchemaMismatch(expected: String, found: String) extends
 Exception(s"Multiple schemas found, please filter. Expected schema $expected, found schema $found")
@@ -265,6 +265,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val shardKeyLevelIngestionMetricsEnabled =
     filodbConfig.getBoolean("shard-key-level-ingestion-metrics-enabled")
   private val clusterType = filodbConfig.getString("cluster-type")
+  private val deploymentPartitionName = filodbConfig.getString("deployment-partition-name")
 
   val creationTime = System.currentTimeMillis()
 
@@ -1576,7 +1577,7 @@ class TimeSeriesShard(val ref: DatasetRef,
           dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter())
       case FilteredPartitionScan(_, filters) =>
         val metricShardKeys = schemas.part.options.shardKeyColumns
-        val metricGroupBy = clusterType +: metricShardKeys.map { col =>
+        val metricGroupBy = deploymentPartitionName +: clusterType +: metricShardKeys.map { col =>
           filters.collectFirst {
             case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
           }.getOrElse("unknown")
@@ -1586,7 +1587,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         // TSPartitions to read back from disk
         val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
         shardStats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
-        querySession.queryStats.getPartsScannedCounter(metricGroupBy).addAndGet(matches.length)
+        querySession.queryStats.getTimeSeriesScannedCounter(metricGroupBy).addAndGet(matches.length)
         Kamon.currentSpan().tag(s"num-partitions-from-index-$shardNum", matches.length)
 
         // first find out which partitions are being queried for data not in memory

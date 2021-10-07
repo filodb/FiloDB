@@ -30,7 +30,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
 
   def requestTimeoutMs: Long
 
-  def urlParams: Map[String, Any]
+  def urlParams: Map[String, String]
 
   def promQlQueryParams: PromQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
 
@@ -66,20 +66,20 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
   def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                      (implicit sched: Scheduler): Future[QueryResponse]
 
-  def getUrlParams(): Map[String, Any] = {
+  def getUrlParams(): Map[String, String] = {
     var finalUrlParams = urlParams ++
-      Map("start" -> promQlQueryParams.startSecs,
-        "end" -> promQlQueryParams.endSecs,
-        "time" -> promQlQueryParams.endSecs,
-        "step" -> promQlQueryParams.stepSecs,
-        "allowPartialResults" -> queryContext.plannerParams.allowPartialResults,
-        "processFailure" -> queryContext.plannerParams.processFailure,
-        "processMultiPartition" -> queryContext.plannerParams.processMultiPartition,
+      Map("start" -> promQlQueryParams.startSecs.toString,
+        "end" -> promQlQueryParams.endSecs.toString,
+        "time" -> promQlQueryParams.endSecs.toString,
+        "step" -> promQlQueryParams.stepSecs.toString,
+        "allowPartialResults" -> queryContext.plannerParams.allowPartialResults.toString,
+        "processFailure" -> queryContext.plannerParams.processFailure.toString,
+        "processMultiPartition" -> queryContext.plannerParams.processMultiPartition.toString,
         "histogramMap" -> "true",
-        "skipAggregatePresent" -> queryContext.plannerParams.skipAggregatePresent,
-        "verbose" -> promQlQueryParams.verbose)
-    if (queryContext.plannerParams.spread.isDefined) finalUrlParams = finalUrlParams + ("spread" -> queryContext.
-      plannerParams.spread.get)
+        "skipAggregatePresent" -> queryContext.plannerParams.skipAggregatePresent.toString,
+        "verbose" -> promQlQueryParams.verbose.toString)
+    if (queryContext.plannerParams.spread.isDefined)
+      finalUrlParams = finalUrlParams + ("spread" -> queryContext.plannerParams.spread.get.toString)
     logger.debug("URLParams for RemoteExec:" + finalUrlParams)
     finalUrlParams
   }
@@ -91,13 +91,13 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
  */
 trait RemoteExecHttpClient extends StrictLogging {
 
-  def httpGet(httpEndpoint: String,
-              httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any], traceInfo: Map[String, String])
+  def httpPost(httpEndpoint: String,
+              httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, String], traceInfo: Map[String, String])
              (implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]]
 
-  def httpMetadataGet(httpEndpoint: String,
-                      httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any],
+  def httpMetadataPost(httpEndpoint: String,
+                      httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, String],
                       traceInfo: Map[String, String])
                      (implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], MetadataSuccessResponse]]]
@@ -116,34 +116,36 @@ class RemoteHttpClient private(asyncHttpClientConfig: AsyncHttpClientConfig) ext
 
   ShutdownHookThread(shutdown())
 
-  def httpGet(httpEndpoint: String,
-              httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any], traceInfo: Map[String, String])
+  def httpPost(httpEndpoint: String,
+              httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, String], traceInfo: Map[String, String])
              (implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
     val queryTimeElapsed = System.currentTimeMillis() - submitTime
     val readTimeout = FiniteDuration(httpTimeoutMs - queryTimeElapsed, TimeUnit.MILLISECONDS)
-    val url = uri"$httpEndpoint?$urlParams"
+    val url = uri"$httpEndpoint"
     logger.debug("promQlExec url={}  traceInfo={}", url, traceInfo)
     sttp
       .headers(traceInfo)
-      .get(url)
+      .body(urlParams)
+      .post(url)
       .readTimeout(readTimeout)
       .response(asJson[SuccessResponse])
       .send()
   }
 
-  def httpMetadataGet(httpEndpoint: String,
-                      httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any],
+  def httpMetadataPost(httpEndpoint: String,
+                      httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, String],
                       traceInfo: Map[String, String])
                      (implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], MetadataSuccessResponse]]] = {
     val queryTimeElapsed = System.currentTimeMillis() - submitTime
     val readTimeout = FiniteDuration(httpTimeoutMs - queryTimeElapsed, TimeUnit.MILLISECONDS)
-    val url = uri"$httpEndpoint?$urlParams"
+    val url = uri"$httpEndpoint"
     logger.debug("promMetadataExec url={} traceInfo={}", url, traceInfo)
     sttp
       .headers(traceInfo)
-      .get(url)
+      .body(urlParams)
+      .post(url)
       .readTimeout(readTimeout)
       .response(asJson[MetadataSuccessResponse])
       .send()

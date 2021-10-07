@@ -78,6 +78,22 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     res shouldEqual("http_requests_total{job=\"app\"} offset 300s")
   }
 
+  it("should generate query from SubqueryWithWindowing having offset") {
+    val query = """sum_over_time(http_requests_total{job="app"}[5m:1m] offset 5m)"""
+    val lp = Parser.queryToLogicalPlan(query, 1000, 1000, Parser.Antlr)
+    val res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual("""sum_over_time(http_requests_total{job="app"}[300s:60s] offset 300s)""")
+  }
+
+  it("should generate query from TopLevelSubquery having offset") {
+    val query = """http_requests_total{job="app"}[5m:1m] offset 5m"""
+    val lp = Parser.queryToLogicalPlan(query, 1000, 1000, Parser.Antlr)
+    val res = LogicalPlanParser.convertToQuery(lp)
+    // Converted query has time in seconds
+    res shouldEqual("""http_requests_total{job="app"}[300s:60s] offset 300s""")
+  }
+
   it("should generate query from LogicalPlan having escape characters") {
     val query = """sum(rate(my_counter{_ws_="demo",_ns_=~".+",app_identity=~".+\\.test\\.identity",status=~"5.."}[60s]))"""
     val lp = Parser.queryToLogicalPlan(query, 1000, 1000)

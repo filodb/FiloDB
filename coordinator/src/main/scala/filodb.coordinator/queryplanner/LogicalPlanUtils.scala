@@ -27,6 +27,16 @@ object LogicalPlanUtils extends StrictLogging {
   }
 
   /**
+   * Given a LogicalPlan check if any descendent of plan is an aggregate operation
+   * @param lp the LogicalPlan instance
+   * @return true if a descendent is an aggregate else false
+   */
+  def hasDescendantAggregate(lp: LogicalPlan): Boolean = lp match {
+    case _: Aggregate                 => true
+    case nonLeaf: NonLeafLogicalPlan  => nonLeaf.children.exists(hasDescendantAggregate(_))
+    case _                            => false
+  }
+  /**
     * Retrieve start and end time from LogicalPlan
     */
   // scalastyle:off cyclomatic.complexity

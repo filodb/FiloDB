@@ -172,7 +172,8 @@ object LogicalPlanParser {
     val prefix = sqww.functionId.entryName + OpeningRoundBracket
     val sqClause =
       s"${OpeningSquareBracket}${sqww.subqueryWindowMs/1000}s:${sqww.subqueryStepMs/1000}s$ClosingSquareBracket"
-    val suffix = s"$sqClause$ClosingRoundBracket"
+    val offset = sqww.offsetMs.fold("")(offsetMs => s" offset ${offsetMs/1000}s")
+    val suffix = s"$sqClause$offset$ClosingRoundBracket"
     if (sqww.functionArgs.isEmpty) s"$prefix$periodicSeriesQuery$suffix"
     else {
       s"$prefix${functionArgsToQuery(sqww.functionArgs.head)}$Comma$periodicSeriesQuery$suffix"
@@ -181,9 +182,10 @@ object LogicalPlanParser {
 
   private def topLevelSubqueryToQuery(tlsq: TopLevelSubquery): String = {
     val periodicSeriesQuery = convertToQuery(tlsq.innerPeriodicSeries)
+    val offset = tlsq.originalOffsetMs.fold("")(offsetMs => s" offset ${offsetMs/1000}s")
     val sqClause =
       s"${OpeningSquareBracket}${(tlsq.orginalLookbackMs)/1000}s:${tlsq.stepMs/1000}s$ClosingSquareBracket"
-    s"${periodicSeriesQuery}${sqClause}"
+    s"${periodicSeriesQuery}${sqClause}${offset}"
   }
 
   def convertToQuery(logicalPlan: LogicalPlan): String = {
