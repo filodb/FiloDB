@@ -256,6 +256,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("round(some_metric)")
     parseSuccessfully("round(some_metric, 5)")
     parseSuccessfully("log2(some_metric, 5)")
+    parseSuccessfully("sgn(some_metric)")
+
 
     //        parseError(  "floor()")
     //        parseError(  "floor(some_metric, other_metric)")
@@ -446,15 +448,18 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSubquery("sum(foo)[5m:1m]")
     parseSubquery("log2(foo)[5m:1m]")
     parseSubquery("log2(foo)[5m:]")
+    parseSubquery("sgn(foo)[5m:]")
     parseSubquery("(foo + bar)[5m:1m]")
     parseSubquery("sum_over_time((foo + bar)[5m:1m])")
     parseSubquery("avg_over_time(max_over_time(rate(foo[5m])[5m:1m])[10m:2m])")
     parseSubquery("sum(rate(foo[5m])[5m:1m])")
     parseSubquery("log2(rate(foo[5m])[5m:1m])")
+    parseSubquery("sgn(rate(foo[5m])[5m:1m])")
 
     parseSubqueryError("log2(foo)[5m][5m:1m]")
     parseSubqueryError("sum(foo)[5m]")
     parseSubqueryError("log2(foo)[5m:1m][5m:1m]")
+    parseSubqueryError("sgn(foo)[5m:1m][5m:1m]")
   }
 
   // TODO
