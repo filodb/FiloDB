@@ -4,6 +4,7 @@ import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
 import filodb.query._
 import filodb.query.exec._
+import filodb.query.exec.InternalRangeFunction.Last
 
 /**
  * Holder for the shard key regex matcher results.
@@ -80,6 +81,9 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       case lp: LabelValues                 => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
       case lp: LabelNames                  => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
       case lp: SeriesKeysByFilters         => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
+      case lp: PeriodicSeriesWithWindowing => if (lp.function == RangeFunctionId.AbsentOverTime)
+                                              materializeAbsentOverTime(lp, qContext)
+                                              else materializeOthers(logicalPlan, qContext)
       case _                               => materializeOthers(logicalPlan, qContext)
     }
   }
@@ -190,4 +194,35 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     }
     PlanResult(Seq(exec))
   }
+
+  private def materializeAbsentOverTime(logicalPlan: PeriodicSeriesWithWindowing, queryContext: QueryContext):
+  PlanResult = {
+    val vectors = walkLogicalPlanTree(logicalPlan.series, queryContext)
+    val paramsExec = materializeFunctionArgs(logicalPlan.functionArgs, queryContext)
+    // For queries which don't have RawSeries filters like metadata and fixed scalar queries
+    val aggregate = Aggregate(AggregationOperator.Sum, logicalPlan, Nil, Seq("job"))
+      vectors.plans.
+        map {
+        e => if (!e.isInstanceOf[PromQlRemoteExec]) {
+          e.children.foreach(c => c.children.foreach(_.addRangeVectorTransformer(
+            PeriodicSamplesMapper(logicalPlan.startMs,
+            logicalPlan.stepMs, logicalPlan.endMs, Some(logicalPlan.window), Some(Last), queryContext,
+            logicalPlan.stepMultipleNotationUsed,
+            paramsExec, logicalPlan.offsetMs, logicalPlan.series.isRaw))))
+          PlanResult(e.children)
+        } else
+         PlanResult(Seq(e))
+      }
+
+    val aggregatePlanResult = PlanResult (Seq(addAggregator(aggregate, queryContext.copy(plannerParams =
+      queryContext.plannerParams.copy(skipAggregatePresent = true)), vectors, Seq.empty)))
+      // Add sum to aggregate all child responses
+      // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
+
+      addAbsentFunctionMapper(aggregatePlanResult, logicalPlan.columnFilters,
+        RangeParams(logicalPlan.startMs / 1000, logicalPlan.stepMs / 1000,
+          logicalPlan.endMs / 1000), queryContext)
+      aggregatePlanResult
+    }
+
 }
