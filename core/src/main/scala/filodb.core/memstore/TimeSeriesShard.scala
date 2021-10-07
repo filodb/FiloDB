@@ -670,7 +670,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
     shardStats.indexRecoveryNumRecordsProcessed.increment()
     if (schema != Schemas.UnknownSchema) {
-      captureActiveTimeseriesCount(schema, shardKey)
+      captureActiveTimeseriesCount(schema, shardKey, 1)
       captureTimeseriesCount(schema, shardKey, 1)
       if (storeConfig.meteringEnabled) {
         cardTracker.incrementCount(shardKey)
@@ -691,14 +691,14 @@ class TimeSeriesShard(val ref: DatasetRef,
     shardStats.tsCountBySchema.withTag("schema", schema.name).increment(times)
   }
 
-  private def captureActiveTimeseriesCount(schema: Schema, shardKey: Seq[String]) = {
+  private def captureActiveTimeseriesCount(schema: Schema, shardKey: Seq[String], delta: Int) = {
     // Assuming that the last element in the shardKeyColumn is always a metric name, we are making sure the
     // shardKeyColumn.length is > 1 and dropping the last element in shardKeyColumn.
     if (shardKeyLevelIngestionMetricsEnabled &&
       schema.options.shardKeyColumns.length > 1 &&
       shardKey.length == schema.options.shardKeyColumns.length) {
       val tagSetMap = (schema.options.shardKeyColumns.map(c => s"metric${c}tag") zip shardKey).dropRight(1).toMap
-      shardStats.activeTimeseriesCount.withTags(TagSet.from(tagSetMap)).update(activelyIngesting.size)
+      shardStats.activeTimeseriesCount.withTags(TagSet.from(tagSetMap)).increment(delta)
     }
   }
 
@@ -1172,7 +1172,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       }
     }
     val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset, p.schema.options.shardKeyColumns)
-    captureActiveTimeseriesCount(p.schema, shardKey)
+    captureActiveTimeseriesCount(p.schema, shardKey, -1)
   }
 
   protected[memstore] def markPartAsNotIngesting(p: TimeSeriesPartition, odp: Boolean): Unit = {
@@ -1288,7 +1288,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         activelyIngesting += partId
         newPart.ingesting = true
       }
-      captureActiveTimeseriesCount(schema, shardKey)
+      captureActiveTimeseriesCount(schema, shardKey, 1)
       val stamp = partSetLock.writeLock()
       try {
         partSet.add(newPart)
@@ -1338,7 +1338,7 @@ class TimeSeriesShard(val ref: DatasetRef,
           }
           val shardKey = tsp.schema.partKeySchema.colValues(tsp.partKeyBase, tsp.partKeyOffset,
                                                             tsp.schema.options.shardKeyColumns)
-          captureActiveTimeseriesCount(tsp.schema, shardKey)
+          captureActiveTimeseriesCount(tsp.schema, shardKey, 1)
         }
       }
     } catch {
