@@ -42,9 +42,10 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
 
   val timeseriesCount = Kamon.gauge("memstore-timeseries-count")
+  val activeTimeseriesCount = Kamon.gauge("memstore-active-timeseries-count")
+
   val shardTotalRecoveryTime = Kamon.gauge("memstore-total-shard-recovery-time",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
-  val chunksQueried = Kamon.counter("memstore-chunks-queried").withTags(TagSet.from(tags))
   val tsCountBySchema = Kamon.gauge("memstore-timeseries-by-schema").withTags(TagSet.from(tags))
   val rowsIngested = Kamon.counter("memstore-rows-ingested").withTags(TagSet.from(tags))
   val partitionsCreated = Kamon.counter("memstore-partitions-created").withTags(TagSet.from(tags))
@@ -666,9 +667,10 @@ class TimeSeriesShard(val ref: DatasetRef,
       if (pk.endTime == Long.MaxValue) activelyIngesting += partId
       else activelyIngesting -= partId
     }
+    val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
     shardStats.indexRecoveryNumRecordsProcessed.increment()
     if (schema != Schemas.UnknownSchema) {
-      val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
+      captureActiveTimeseriesCount(schema, shardKey, 1)
       captureTimeseriesCount(schema, shardKey, 1)
       if (storeConfig.meteringEnabled) {
         cardTracker.incrementCount(shardKey)
@@ -688,6 +690,18 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
     shardStats.tsCountBySchema.withTag("schema", schema.name).increment(times)
   }
+
+  private def captureActiveTimeseriesCount(schema: Schema, shardKey: Seq[String], delta: Int) = {
+    // Assuming that the last element in the shardKeyColumn is always a metric name, we are making sure the
+    // shardKeyColumn.length is > 1 and dropping the last element in shardKeyColumn.
+    if (shardKeyLevelIngestionMetricsEnabled &&
+      schema.options.shardKeyColumns.length > 1 &&
+      shardKey.length == schema.options.shardKeyColumns.length) {
+      val tagSetMap = (schema.options.shardKeyColumns.map(c => s"metric${c}tag") zip shardKey).dropRight(1).toMap
+      shardStats.activeTimeseriesCount.withTags(TagSet.from(tagSetMap)).increment(delta)
+    }
+  }
+
 
   def indexNames(limit: Int): Seq[String] = partKeyIndex.indexNames(limit)
 
@@ -715,10 +729,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     * This method is to apply column filters and fetch matching time series partitions.
     *
     * @param filter column filter
-    * @param labelNames labels to return in the response
     * @param endTime end time
     * @param startTime start time
-    * @param limit series limit
     * @return returns an iterator of map of label key value pairs of each matching time series
     */
   def labelNames(filter: Seq[ColumnFilter],
@@ -1159,6 +1171,8 @@ class TimeSeriesShard(val ref: DatasetRef,
         markPartAsNotIngesting(p, odp = false)
       }
     }
+    val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset, p.schema.options.shardKeyColumns)
+    captureActiveTimeseriesCount(p.schema, shardKey, -1)
   }
 
   protected[memstore] def markPartAsNotIngesting(p: TimeSeriesPartition, odp: Boolean): Unit = {
@@ -1255,12 +1269,12 @@ class TimeSeriesShard(val ref: DatasetRef,
     if (newPart != OutOfMemPartition) {
       val partId = newPart.partID
       val startTime = schema.ingestionSchema.getLong(recordBase, recordOff, 0)
+      val shardKey = schema.partKeySchema.colValues(newPart.partKeyBase, newPart.partKeyOffset,
+        schema.options.shardKeyColumns)
       if (previousPartId == CREATE_NEW_PARTID) {
         // add new lucene entry if this partKey was never seen before
         // causes endTime to be set to Long.MaxValue
         partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
-        val shardKey = schema.partKeySchema.colValues(newPart.partKeyBase, newPart.partKeyOffset,
-          schema.options.shardKeyColumns)
         captureTimeseriesCount(schema, shardKey, 1)
         if (storeConfig.meteringEnabled) {
           cardTracker.incrementCount(shardKey)
@@ -1274,6 +1288,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         activelyIngesting += partId
         newPart.ingesting = true
       }
+      captureActiveTimeseriesCount(schema, shardKey, 1)
       val stamp = partSetLock.writeLock()
       try {
         partSet.add(newPart)
@@ -1321,6 +1336,9 @@ class TimeSeriesShard(val ref: DatasetRef,
               tsp.ingesting = true
             }
           }
+          val shardKey = tsp.schema.partKeySchema.colValues(tsp.partKeyBase, tsp.partKeyOffset,
+                                                            tsp.schema.options.shardKeyColumns)
+          captureActiveTimeseriesCount(tsp.schema, shardKey, 1)
         }
       }
     } catch {
