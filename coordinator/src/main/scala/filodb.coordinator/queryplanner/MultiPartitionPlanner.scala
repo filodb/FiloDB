@@ -16,6 +16,23 @@ trait PartitionLocationProvider {
   def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment]
 }
 
+/**
+ * The MultiPartitionPlanner  is responsible for planning queries that span one or more deployment partitions.
+ * Data for each shard-key (ws/ns) combination can be ingested into a different partition. The partitionLocationProvider
+ * param provides the locality mapping of fully specified ws/ns to a single partition. Note that this planner DOES NOT
+ * handle regex in ws/ns labels in the queries as that is handled by [[ShardKeyRegexPlanner]]. Planners are
+ * Hierarchical and [[ShardKeyRegexPlanner]] wraps MultiPartitionPlanner, thus all regex on namespace (_ns_) in the
+ * queries are already replaced with equals when the materialize of this class is invoked.
+ *
+ * @param partitionLocationProvider The implementation is responsible to get the partition assignments based on the
+ *                                  shard keys and an additional time dimension to handle assignments of partitions
+ * @param localPartitionPlanner     The planner instance to use of the data is available locally
+ * @param localPartitionName        Unique name for the local partition
+ * @param dataset                   The dataset instance, see [[Dataset]] documentation for more details
+ * @param queryConfig               Configuration for the query planner
+ * @param remoteExecHttpClient      If the partition is not local, a remote call is made to the correct partition to
+ *                                  query and retrieve the data.
+ */
 class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider,
                             localPartitionPlanner: QueryPlanner,
                             localPartitionName: String,
@@ -64,7 +81,21 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     case lp: ScalarFixedDoublePlan       => super.materializeFixedScalar(qContext, lp)
     case lp: ApplyAbsentFunction         => super.materializeAbsentFunction(qContext, lp)
     case lp: ScalarBinaryOperation       => super.materializeScalarBinaryOperation(qContext, lp)
-    case _                               => materializeSimpleQuery(logicalPlan, qContext)
+    case lp: ApplyLimitFunction          => super.materializeLimitFunction(qContext, lp)
+
+    // Imp: At the moment, these two cases for subquery will not get executed, materialize is already
+    // Checking if the plan is a TopLevelSubQuery or any of the descendant is a SubqueryWithWindowing and
+    // will invoke materializeSubquery, currently these placeholders are added to make compiler happy as LogicalPlan
+    // is a sealed trait. Ideally, everything, including subqueries need to be walked and materialized by the
+    // Planner. Once we identify the test cases for subqueries that need to walk the tree, remove this block of
+    // comment, remove the special handling from materialize method and fix the next case handling SubqueryWithWindowing
+    // and TopLevelSubquery
+    case _: SubqueryWithWindowing |
+         _: TopLevelSubquery             => PlanResult(materializeSubquery(logicalPlan, qContext)::Nil)
+    case _: PeriodicSeries |
+         _: PeriodicSeriesWithWindowing |
+         _: RawChunkMeta |
+         _: RawSeries                    => materializePeriodicAndRawSeries(logicalPlan, qContext)
   }
 
 
@@ -161,7 +192,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   /**
     * Materialize all queries except Binary Join and Metadata
     */
-  def materializeSimpleQuery(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
+  def materializePeriodicAndRawSeries(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
 
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val (partitions, lookBackMs, offsetMs, routingKeys) = partitionUtilNonBinaryJoin(logicalPlan, queryParams)
