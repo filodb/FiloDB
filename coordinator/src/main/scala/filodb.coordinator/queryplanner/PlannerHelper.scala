@@ -373,7 +373,10 @@ object PlannerUtil extends StrictLogging {
    * Returns URL params for label values which is used to create Metadata remote exec plan
    */
    def getLabelValuesUrlParams(lp: LabelValues, queryParams: PromQlQueryParams): Map[String, String] = {
-    val quote = if (queryParams.remoteQueryPath.get.contains("""/v2/label/""")) """"""" else ""
+     val quote = queryParams.remoteQueryPath match {
+       case Some(s) if s.contains("""/v2/label/""") => """""""
+       case _ => ""
+     }
     // Filter value should be enclosed in quotes for label values v2 endpoint
     val filters = lp.filters.map{ f => s"""${f.column}${f.filter.operatorString}$quote${f.filter.valuesStrings.
       head}$quote"""}.mkString(",")
@@ -384,7 +387,10 @@ object PlannerUtil extends StrictLogging {
    * Returns URL params for label values which is used to create Metadata remote exec plan
    */
   def getLabelNamesUrlParams(lp: LabelNames, queryParams: PromQlQueryParams): Map[String, String] = {
-    val quote = if (queryParams.remoteQueryPath.get.contains("""/v2/labels/""")) """"""" else ""
+    val quote = queryParams.remoteQueryPath match {
+      case Some(s) if s.contains("""/v2/labels/""") => """""""
+      case _ => ""
+    }
     // Filter value should be enclosed in quotes for label values v2 endpoint
     val filters = lp.filters.map{ f => s"""${f.column}${f.filter.operatorString}$quote${f.filter.valuesStrings.
       head}$quote"""}.mkString(",")
