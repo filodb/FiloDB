@@ -224,6 +224,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("stdvar by (foo)(some_metric)")
     parseSuccessfully("sum by ()(some_metric)")
     parseSuccessfully("topk(5, some_metric)")
+    parseSuccessfully("group(some_metric)")
+    parseSuccessfully("group by(foo)(some_metric)")
     parseSuccessfully("count_values(\"value\",some_metric)")
     parseSuccessfully("sum without(and, by, avg, count, alert, annotations)(some_metric)")
     parseSuccessfully("sum:some_metric:dataset:1m{_ws_=\"some_workspace\", _ns_=\"some_namespace\"}")
@@ -446,6 +448,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSubquery("max_over_time(rate(foo[5m])[5m:1m])")
     parseSubquery("max_over_time(sum(foo)[5m:1m])")
     parseSubquery("sum(foo)[5m:1m]")
+    parseSubquery("group(foo)[5m:1m]")
     parseSubquery("log2(foo)[5m:1m]")
     parseSubquery("log2(foo)[5m:]")
     parseSubquery("sgn(foo)[5m:]")
@@ -522,6 +525,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
         "Aggregate(Stdvar,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List())",
       "stddev(http_requests_total)" ->
         "Aggregate(Stddev,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List())",
+      "group(http_requests_total)" ->
+        "Aggregate(Group,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List())",
       "irate(http_requests_total{job=\"api-server\"}[5m])" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,300000,Irate,false,List(),None,List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))))",
       "idelta(http_requests_total{job=\"api-server\"}[5m])" ->

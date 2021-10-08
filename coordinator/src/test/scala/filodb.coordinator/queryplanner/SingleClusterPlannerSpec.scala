@@ -750,4 +750,39 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       }
     }
   }
+
+  it("should generate correct execPlan for simple aggregate queries") {
+    // ensures:
+    //   (1) the execPlan tree has a LocalPartitionReduceAggregateExec root, and
+    //   (2) the tree has a max depth 1 where all children are MultiSchemaPartitionsExec nodes, and
+    //   (3) the final RangeVectorTransformer at each child is an AggregateMapReduce, and
+    //   (4) the AggregateMapReduce has the appropriate InstantFunctionId
+    val queryIdPairs = Seq(
+      ("""avg(metric{job="app"})""", AggregationOperator.Avg),
+      ("""count(metric{job="app"})""", AggregationOperator.Count),
+      ("""group(metric{job="app"})""", AggregationOperator.Group),
+      ("""sum(metric{job="app"})""", AggregationOperator.Sum),
+      ("""min(metric{job="app"})""", AggregationOperator.Min),
+      ("""max(metric{job="app"})""", AggregationOperator.Max),
+      ("""stddev(metric{job="app"})""", AggregationOperator.Stddev),
+      ("""stdvar(metric{job="app"})""", AggregationOperator.Stdvar),
+      ("""topk(1, metric{job="app"})""", AggregationOperator.TopK),
+      ("""bottomk(1, metric{job="app"})""", AggregationOperator.BottomK),
+      ("""count_values(1, metric{job="app"})""", AggregationOperator.CountValues),
+      ("""quantile(0.9, metric{job="app"})""", AggregationOperator.Quantile)
+    )
+    for ((query, funcId) <- queryIdPairs) {
+      val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+      execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
+      execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].aggrOp shouldEqual funcId
+      for (child <- execPlan.children) {
+        child.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
+        child.children.size shouldEqual 0
+        val lastTransformer = child.asInstanceOf[MultiSchemaPartitionsExec].rangeVectorTransformers.last
+        lastTransformer.isInstanceOf[AggregateMapReduce] shouldEqual true
+        lastTransformer.asInstanceOf[AggregateMapReduce].aggrOp shouldEqual funcId
+      }
+    }
+  }
 }

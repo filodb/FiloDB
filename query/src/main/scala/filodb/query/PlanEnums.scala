@@ -94,6 +94,7 @@ object AggregationOperator extends Enum[AggregationOperator] {
 
   case object Avg extends AggregationOperator("avg")
   case object Count extends AggregationOperator("count")
+  case object Group extends AggregationOperator("group")
   case object Sum extends AggregationOperator("sum")
   case object Min extends AggregationOperator("min")
   case object Max extends AggregationOperator("max")
