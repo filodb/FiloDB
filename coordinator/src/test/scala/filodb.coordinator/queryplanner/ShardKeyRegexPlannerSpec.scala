@@ -15,7 +15,6 @@ import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext, PlannerP
 import filodb.core.query.Filter.Equals
 import filodb.prometheus.parse.Parser
 import filodb.query.InstantFunctionId.{HistogramQuantile, Exp, Ln}
-import filodb.query.exec.InternalRangeFunction.Last
 import filodb.query.exec._
 import filodb.query.AggregationOperator._
 
@@ -493,71 +492,6 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       ("""(sum(test1{_ws_="demo",_ns_="App"}) / (sum(test2{_ws_="demo",_ns_="App"}) + sum(test3{_ws_="demo",_ns_="App"})))""")
   }
 
-  it("should generate execplan for absent") {
-    val lp = Parser.queryToLogicalPlan("""absent(test1{_ws_="demo",_ns_=~"App.*"})""", 1000, 1000)
-    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
-      Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
-        ColumnFilter("_ns_", Equals("App-1"))),
-        Seq(ColumnFilter("_ws_", Equals("demo")),
-          ColumnFilter("_ns_", Equals("App-2"))))
-    }
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-
-    execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
-
-    execPlan.rangeVectorTransformers.head.isInstanceOf[AbsentFunctionMapper] shouldEqual true
-    execPlan.children.head.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual true
-    execPlan.children.head.children.head.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
-    execPlan.children.head.children.head.children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    execPlan.children.head.children.head.children.head.rangeVectorTransformers.head.
-      isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-  }
-
-  it("should generate execplan for absent_ over_time") {
-    val lp = Parser.queryToLogicalPlan("""absent_over_time(test1{_ws_="demo",_ns_=~"App.*"}[10m])""", 1000, 1000)
-    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
-      Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
-        ColumnFilter("_ns_", Equals("App-1"))),
-        Seq(ColumnFilter("_ws_", Equals("demo")),
-          ColumnFilter("_ns_", Equals("App-2"))))
-    }
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
-
-    execPlan.rangeVectorTransformers.head.isInstanceOf[AbsentFunctionMapper] shouldEqual true
-    execPlan.children.head.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual true
-    execPlan.children.head.children.head.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
-    execPlan.children.head.children.head.children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    execPlan.children.head.children.head.children.head.rangeVectorTransformers.head.
-      isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-    val rvt = execPlan.children.head.children.head.children.head.rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
-    rvt.window.get shouldEqual (10 * 60 * 1000)
-    rvt.functionId.get.toString shouldEqual (Last.toString)
-  }
-
-  it("should generate Exec plan for instant query") {
-    val lp = Parser.queryToLogicalPlan("test{_ws_ = \"demo\", _ns_ =~ \"App.*\", instance = \"Inst-1\" } [10m]", 1000, 1000)
-    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
-      Seq(Seq(ColumnFilter("_ws_", Equals("demo")),
-        ColumnFilter("_ns_", Equals("App-1"))), Seq(ColumnFilter("_ws_", Equals("demo")),
-        ColumnFilter("_ns_", Equals("App-2"))))
-    }
-    val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    execPlan.isInstanceOf[MultiPartitionDistConcatExec] shouldEqual (true)
-    execPlan.children(0).children.head.isInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.children(1).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-1"))) shouldEqual (true)
-    execPlan.children(0).children.head.asInstanceOf[MultiSchemaPartitionsExec].filters.
-      contains(ColumnFilter("_ns_", Equals("App-2"))) shouldEqual (true)
-    execPlan.children(0).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      ("test{instance=\"Inst-1\",_ws_=\"demo\",_ns_=\"App-2\"}[600s]")
-    execPlan.children(1).children.head.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl shouldEqual
-      ("test{instance=\"Inst-1\",_ws_=\"demo\",_ns_=\"App-1\"}[600s]")
-   }
-
   it("should handle push down aggregation to right level case 1") {
     // Case 1 of Push down tests  when regex resolves to two different namespaces
     val lp = Parser.queryToLogicalPlan("""sum(count by(foo)(test1{_ws_ = "demo", _ns_ =~ "App-.*"}))""",
@@ -570,7 +504,6 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         )
       )
     }
-
     val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
@@ -592,6 +525,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case _ => fail("Expected two children")
     }
   }
+
 
   it("should handle push down aggregation to right level case 2") {
     // Case 2 of Push down tests  when regex resolves to only one namespace
@@ -635,6 +569,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       ("""test1{_ws_="demo",_ns_="App-1"} + test2{_ws_="demo",_ns_="App-1"}""")
   }
 
+
   it("should handle multi partition multi level binary join appropriately") {
 
     // LHS of the Binary Join is on one partition, RHS is another binary join that has data on same partition
@@ -659,6 +594,7 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     rhs.asInstanceOf[BinaryJoinExec].binaryOp shouldEqual BinaryOperator.MUL
     rhs.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldEqual true
   }
+
 
   it("should handle multi partition multi level binary join appropriately with instant fn") {
 
