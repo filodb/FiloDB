@@ -625,6 +625,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     assertThreadName(IngestSchedName)
     val schemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
     val schema = schemas(schemaId)
+    val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
     val partId = if (pk.endTime == Long.MaxValue) {
       // this is an actively ingesting partition
       val group = partKeyGroup(schemas.part.binSchema, pk.partKey, UnsafeUtils.arayOffset, numGroups)
@@ -639,6 +640,7 @@ class TimeSeriesShard(val ref: DatasetRef,
           -1
         } else {
           val stamp = partSetLock.writeLock()
+          captureActiveTimeseriesCount(schema, shardKey, 1)
           try {
             partSet.add(part) // createNewPartition doesn't add part to partSet
             part.ingesting = true
@@ -667,10 +669,8 @@ class TimeSeriesShard(val ref: DatasetRef,
       if (pk.endTime == Long.MaxValue) activelyIngesting += partId
       else activelyIngesting -= partId
     }
-    val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
     shardStats.indexRecoveryNumRecordsProcessed.increment()
     if (schema != Schemas.UnknownSchema) {
-      captureActiveTimeseriesCount(schema, shardKey, 1)
       captureTimeseriesCount(schema, shardKey, 1)
       if (storeConfig.meteringEnabled) {
         cardTracker.incrementCount(shardKey)
@@ -1169,10 +1169,11 @@ class TimeSeriesShard(val ref: DatasetRef,
         dirtyParts += p.partID
         activelyIngesting -= p.partID
         markPartAsNotIngesting(p, odp = false)
+        val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
+                                                        p.schema.options.shardKeyColumns)
+        captureActiveTimeseriesCount(p.schema, shardKey, -1)
       }
     }
-    val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset, p.schema.options.shardKeyColumns)
-    captureActiveTimeseriesCount(p.schema, shardKey, -1)
   }
 
   protected[memstore] def markPartAsNotIngesting(p: TimeSeriesPartition, odp: Boolean): Unit = {
@@ -1328,13 +1329,11 @@ class TimeSeriesShard(val ref: DatasetRef,
         if (!tsp.ingesting) {
           // DO NOT use activelyIngesting to check above condition since it is slow and is called for every sample
           activelyIngesting.synchronized {
-            if (!tsp.ingesting) {
-              // time series was inactive and has just started re-ingesting
-              updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
-              dirtyPartitionsForIndexFlush += part.partID
-              activelyIngesting += part.partID
-              tsp.ingesting = true
-            }
+            // time series was inactive and has just started re-ingesting
+            updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
+            dirtyPartitionsForIndexFlush += part.partID
+            activelyIngesting += part.partID
+            tsp.ingesting = true
           }
           val shardKey = tsp.schema.partKeySchema.colValues(tsp.partKeyBase, tsp.partKeyOffset,
                                                             tsp.schema.options.shardKeyColumns)
