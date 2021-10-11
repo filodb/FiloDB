@@ -20,7 +20,7 @@ trait PartitionLocationProvider {
  * The MultiPartitionPlanner  is responsible for planning queries that span one or more deployment partitions.
  * Data for each shard-key (ws/ns) combination can be ingested into a different partition. The partitionLocationProvider
  * param provides the locality mapping of fully specified ws/ns to a single partition. Note that this planner DOES NOT
- * handle regex in ws/ns labels in the queries as that is handled by ShardKeyRegexPlanner. Planners are
+ * handle regex in ws/ns labels in the queries as that is handled by ShardKeyRegexPlanner. Planners  are
  * Hierarchical and ShardKeyRegexPlanner wraps MultiPartitionPlanner, thus all regex on namespace (_ns_) in the
  * queries are already replaced with equals when the materialize of this class is invoked.
  *
