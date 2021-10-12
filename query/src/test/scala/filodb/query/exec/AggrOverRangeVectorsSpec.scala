@@ -697,6 +697,39 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
   }
 
+  it("group should aggregate correctly when grouping is applied") {
+    val samples: Array[RangeVector] = Array(
+      toRv(Seq((1000L, 1.5d), (2000L, 5.6d)), CustomRangeVectorKey(Map("a".utf8 -> "1".utf8, "b".utf8 -> "1".utf8))),
+      toRv(Seq((1000L, 2.4d), (2000L, 4.4d)), CustomRangeVectorKey(Map("a".utf8 -> "2".utf8, "b".utf8 -> "2".utf8))),
+      toRv(Seq((1000L, 3.2d), (2000L, 5.4d)), CustomRangeVectorKey(Map("a".utf8 -> "3".utf8, "b".utf8 -> "2".utf8)))
+    )
+
+    // i.e. "without(a)"
+    def grouping(rv: RangeVector): RangeVectorKey =
+      CustomRangeVectorKey(Map("b".utf8 -> rv.key.labelValues("b".utf8)))
+
+    // map "b" label value to expected sequence of aggregate values
+    val expected = Map(
+      "1".utf8 -> Seq(1.0d, 1.0d),
+      "2".utf8 -> Seq(1.0d, 1.0d)
+    )
+
+    val agg = RowAggregator(AggregationOperator.Group, Nil, tvSchema)
+    val resultObsLeaf = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), grouping)
+    val resultObs = RangeVectorAggregator.mapReduce(agg, true, resultObsLeaf, rv=>rv.key)
+    val result = resultObs.toListL.runAsync.futureValue
+
+    // should have one grouping for each "b" label value ("1" and "2")
+    result.size shouldEqual 2
+
+    // step through each grouping and check values against expected
+    for (groupIter <- result) {
+      groupIter.key.labelValues.size shouldEqual 1
+      val label = groupIter.key.labelValues.toSeq(0)._2
+      compareIter(groupIter.rows.map(_.getDouble(1)), expected(label).iterator)
+    }
+  }
+
 
   @tailrec
   final private def compareIter(it1: Iterator[Double], it2: Iterator[Double]) : Unit = {
