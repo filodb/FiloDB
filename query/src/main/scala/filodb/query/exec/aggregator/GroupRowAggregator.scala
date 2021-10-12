@@ -12,8 +12,9 @@ import filodb.memory.format.RowReader
 object GroupRowAggregator extends RowAggregator {
   class GroupHolder(var timestamp: Long = 0L) extends AggregateHolder {
     val row = new TransientRow()
-    def toRowReader: MutableRowReader = { row.setValues(timestamp, 1d); row }
-    def resetToZero(): Unit = {}
+    var groupVal = Double.NaN  // set to 1d if any row has value != Double.NaN
+    def toRowReader: MutableRowReader = { row.setValues(timestamp, groupVal); row }
+    def resetToZero(): Unit = {groupVal = Double.NaN}
   }
   type AggHolderType = GroupHolder
   def zero: GroupHolder = new GroupHolder
@@ -21,7 +22,10 @@ object GroupRowAggregator extends RowAggregator {
   def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = item
   def reduceAggregate(acc: GroupHolder, aggRes: RowReader): GroupHolder = {
     acc.timestamp = aggRes.getLong(0)
-    return acc
+    if (!aggRes.getDouble(1).isNaN) {
+      acc.groupVal = 1d
+    }
+    acc
   }
   def present(aggRangeVector: RangeVector, limit: Int, rangeParams: RangeParams): Seq[RangeVector] = Seq(aggRangeVector)
   def reductionSchema(source: ResultSchema): ResultSchema = source
