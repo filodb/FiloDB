@@ -543,7 +543,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         if (ingestOffset < groupWatermark(group)) {
           shardStats.rowsSkipped.increment()
           try {
-            // Needed to update index with new partitions added during recovery with correct startTime.
+            // Need to add partition to update index with new partitions added during recovery with correct startTime.
             // This is important to do since the group designated for dirty part key persistence can
             // lag behind group the partition belongs to. Hence during recovery, we skip
             // ingesting the sample, but create the partition and mark it as dirty.
@@ -640,7 +640,7 @@ class TimeSeriesShard(val ref: DatasetRef,
           -1
         } else {
           val stamp = partSetLock.writeLock()
-          captureActiveTimeseriesCount(schema, shardKey, 1)
+          captureActiveTimeseriesCount(schema, shardKey, 1, part.partID, "bootstrapPartKey")
           try {
             partSet.add(part) // createNewPartition doesn't add part to partSet
             part.ingesting = true
@@ -691,7 +691,30 @@ class TimeSeriesShard(val ref: DatasetRef,
     shardStats.tsCountBySchema.withTag("schema", schema.name).increment(times)
   }
 
-  private def captureActiveTimeseriesCount(schema: Schema, shardKey: Seq[String], delta: Int) = {
+  /**
+   * Important to understand call hierarchy for this method to avoid double/missed counting.
+   *
+   * Increment when
+   *  1. At bootstrap time, when creating new TSP object for a time series whose endTime == Long.MaxValue
+   *     (captureActiveTimeseriesCount <- bootstrapPartKey <- recoverIndex)
+   *
+   *  2. At kafka recovery time, when creating new TSP object without ingesting data
+   *     (captureActiveTimeseriesCount <- addPartitionForIngestion <-
+   *                   getOrAddPartitionForIngestion <- IngestConsumer.onNext)
+   *
+   *  3. At regular ingestion time, when creating new TSP object for a non-existent time series
+   *     (captureActiveTimeseriesCount <- addPartitionForIngestion <-
+   *                   getOrAddPartitionForIngestion <- getOrAddPartitionAndIngest <- IngestConsumer.onNext)
+   *
+   *  4. At ingestion time, updating TSP object for an existing time series since it started re-ingesting
+   *        (captureActiveTimeseriesCount <- getOrAddPartitionAndIngest <- IngestConsumer.onNext)
+   *
+   * Decrement when:
+   *  1. Time series stops ingesting (captureActiveTimeseriesCount <- updateIndexWithEndTime <- doFlushSteps)
+   */
+  private def captureActiveTimeseriesCount(schema: Schema, shardKey: Seq[String],
+                                           delta: Int, partId: Int, reason: String) = {
+    logger.debug(s"captureActiveTimeseriesCount shard=$shardNum partId=$partId  delta=$delta reason=$reason")
     // Assuming that the last element in the shardKeyColumn is always a metric name, we are making sure the
     // shardKeyColumn.length is > 1 and dropping the last element in shardKeyColumn.
     if (shardKeyLevelIngestionMetricsEnabled &&
@@ -1171,7 +1194,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         markPartAsNotIngesting(p, odp = false)
         val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
                                                         p.schema.options.shardKeyColumns)
-        captureActiveTimeseriesCount(p.schema, shardKey, -1)
+        captureActiveTimeseriesCount(p.schema, shardKey, -1, p.partID, "updateIndexWithEndTime")
       }
     }
   }
@@ -1216,7 +1239,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private[memstore] val addPartitionsDisabled = AtomicBoolean(false)
 
   // scalastyle:off null
-  private[filodb] def getOrAddPartitionForIngestion(recordBase: Any, recordOff: Long,
+  private def getOrAddPartitionForIngestion(recordBase: Any, recordOff: Long,
                                                     group: Int, schema: Schema) = {
     var part = partSet.getWithIngestBR(recordBase, recordOff, schema)
     if (part == null) {
@@ -1289,7 +1312,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         activelyIngesting += partId
         newPart.ingesting = true
       }
-      captureActiveTimeseriesCount(schema, shardKey, 1)
+      captureActiveTimeseriesCount(schema, shardKey, 1, partId, "addPartitionForIngestion")
       val stamp = partSetLock.writeLock()
       try {
         partSet.add(newPart)
@@ -1324,20 +1347,25 @@ class TimeSeriesShard(val ref: DatasetRef,
         brRowReader.recordOffset = recordOff
         tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.checkoutForOverflow(group),
           storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, acceptDuplicateSamples, maxChunkTime)
-        // Below is coded to work concurrently with logic in updateIndexWithEndTime
-        // where we try to de-activate an active time series
+        // time series was inactive and has just started re-ingesting
         if (!tsp.ingesting) {
           // DO NOT use activelyIngesting to check above condition since it is slow and is called for every sample
           activelyIngesting.synchronized {
-            // time series was inactive and has just started re-ingesting
-            updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
-            dirtyPartitionsForIndexFlush += part.partID
-            activelyIngesting += part.partID
-            tsp.ingesting = true
+            if (!tsp.ingesting) {
+              // This is coded to work concurrently with logic in updateIndexWithEndTime
+              // where we try to de-activate an active time series.
+              // Checking ts.ingesting second time needed since the time series may have ended
+              // ingestion in updateIndexWithEndTime during the wait time of lock acquisition.
+              // DO NOT remove the second tsp.ingesting check without understanding this fully.
+              updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
+              dirtyPartitionsForIndexFlush += part.partID
+              activelyIngesting += part.partID
+              tsp.ingesting = true
+              val shardKey = tsp.schema.partKeySchema.colValues(tsp.partKeyBase, tsp.partKeyOffset,
+                tsp.schema.options.shardKeyColumns)
+              captureActiveTimeseriesCount(tsp.schema, shardKey, 1, tsp.partID, "getOrAddPartitionAndIngest")
+            }
           }
-          val shardKey = tsp.schema.partKeySchema.colValues(tsp.partKeyBase, tsp.partKeyOffset,
-                                                            tsp.schema.options.shardKeyColumns)
-          captureActiveTimeseriesCount(tsp.schema, shardKey, 1)
         }
       }
     } catch {
