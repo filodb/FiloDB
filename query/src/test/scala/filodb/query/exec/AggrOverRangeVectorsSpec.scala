@@ -146,6 +146,17 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     compareIter(result9(0).rows.map(_.getDouble(1)), readyToAggr9.map { v =>
       stddev(v.map(_.getDouble(1)))
     }.iterator)
+
+    // Group
+    val agg10 = RowAggregator(AggregationOperator.Group, Nil, tvSchema)
+    val resultObs10a = RangeVectorAggregator.mapReduce(agg10, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs10 = RangeVectorAggregator.mapReduce(agg10, true, resultObs10a, rv=>rv.key)
+    val result10 = resultObs10.toListL.runAsync.futureValue
+    result10.size shouldEqual 1
+    result10(0).key shouldEqual noKey
+
+    val readyToAggr10 = samples.toList.map(_.rows.toList).transpose
+    compareIter(result10(0).rows.map(_.getDouble(1)), readyToAggr10.map { v => 1d }.iterator)
   }
 
   private def stdvar(items: List[Double]): Double = {
@@ -282,6 +293,15 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result9.size shouldEqual 1
     result9(0).key shouldEqual noKey
     compareIter(result9(0).rows.map(_.getDouble(1)), Seq(1.25d, 0.52493385826745d).iterator)
+
+    // Group
+    val agg10 = RowAggregator(AggregationOperator.Group, Nil, tvSchema)
+    val resultObs10a = RangeVectorAggregator.mapReduce(agg10, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs10 = RangeVectorAggregator.mapReduce(agg10, true, resultObs10a, rv=>rv.key)
+    val result10 = resultObs10.toListL.runAsync.futureValue
+    result10.size shouldEqual 1
+    result10(0).key shouldEqual noKey
+    compareIter(result10(0).rows.map(_.getDouble(1)), Seq(1d, 1d).iterator)
   }
 
   it ("should be able to serialize to and deserialize t-digest from SerializedRangeVector") {
@@ -468,6 +488,15 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result9.size shouldEqual 1
     result9(0).key shouldEqual noKey
     compareIter(result9(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 0.52493385826745d).iterator)
+
+    // Group
+    val agg10 = RowAggregator(AggregationOperator.Group, Nil, tvSchema)
+    val resultObs10a = RangeVectorAggregator.mapReduce(agg10, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs10 = RangeVectorAggregator.mapReduce(agg10, true, resultObs10a, rv=>rv.key)
+    val result10 = resultObs10.toListL.runAsync.futureValue
+    result10.size shouldEqual 1
+    result10(0).key shouldEqual noKey
+    compareIter(result10(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 1d).iterator)
   }
 
   it("topK should not have any trailing value ") {
