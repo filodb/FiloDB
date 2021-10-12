@@ -14,7 +14,7 @@ object GroupRowAggregator extends RowAggregator {
     val row = new TransientRow()
     var groupVal = Double.NaN  // set to 1d if any row has value != Double.NaN
     def toRowReader: MutableRowReader = { row.setValues(timestamp, groupVal); row }
-    def resetToZero(): Unit = {groupVal = Double.NaN}
+    def resetToZero(): Unit = { groupVal = Double.NaN }
   }
   type AggHolderType = GroupHolder
   def zero: GroupHolder = new GroupHolder
