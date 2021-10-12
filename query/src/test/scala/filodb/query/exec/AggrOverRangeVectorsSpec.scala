@@ -10,6 +10,7 @@ import filodb.core.{MachineMetricsData => MMD}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.ZeroCopyUTF8String._
+// import filodb.query
 import filodb.query.AggregationOperator
 import filodb.query.exec.aggregator.RowAggregator
 import filodb.query.exec.rangefn.RawDataWindowingSpec
@@ -697,7 +698,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
   }
 
-  it("group should aggregate correctly when grouping is applied") {
+  it("should aggregate correctly when grouping is applied") {
     val samples: Array[RangeVector] = Array(
       toRv(Seq((1000L, 1.5d), (2000L, 5.6d)), CustomRangeVectorKey(Map("a".utf8 -> "1".utf8, "b".utf8 -> "1".utf8))),
       toRv(Seq((1000L, 2.4d), (2000L, 4.4d)), CustomRangeVectorKey(Map("a".utf8 -> "2".utf8, "b".utf8 -> "2".utf8))),
@@ -709,24 +710,57 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
       CustomRangeVectorKey(Map("b".utf8 -> rv.key.labelValues("b".utf8)))
 
     // map "b" label value to expected sequence of aggregate values
-    val expected = Map(
-      "1".utf8 -> Seq(1.0d, 1.0d),
-      "2".utf8 -> Seq(1.0d, 1.0d)
+    val opToExpected = Map(
+      AggregationOperator.Avg -> Map(
+        "1".utf8 -> Seq(1.5d, 5.6d),
+        "2".utf8 -> Seq(2.8d, 4.9d)
+      ),
+      AggregationOperator.Count-> Map(
+        "1".utf8 -> Seq(1.0d, 1.0d),
+        "2".utf8 -> Seq(2d, 2d)
+      ),
+      AggregationOperator.Group -> Map(
+        "1".utf8 -> Seq(1.0d, 1.0d),
+        "2".utf8 -> Seq(1.0d, 1.0d)
+      ),
+      AggregationOperator.Max -> Map(
+        "1".utf8 -> Seq(1.5d, 5.6d),
+        "2".utf8 -> Seq(3.2d, 5.4d)
+      ),
+      AggregationOperator.Min -> Map(
+        "1".utf8 -> Seq(1.5d, 5.6d),
+        "2".utf8 -> Seq(2.4d, 4.4d)
+      ),
+      AggregationOperator.Stddev -> Map(
+        "1".utf8 -> Seq(0d, 0d),
+        "2".utf8 -> Seq(0.4d, 0.5d)
+      ),
+      AggregationOperator.Stdvar -> Map(
+        "1".utf8 -> Seq(0d, 0d),
+        "2".utf8 -> Seq(0.16d, 0.25d)
+      ),
+      AggregationOperator.Sum -> Map(
+        "1".utf8 -> Seq(1.5d, 5.6d),
+        "2".utf8 -> Seq(5.6d, 9.8d)
+      )
+      // TODO: include TopK, BottomK, CountValues, Quantile
     )
 
-    val agg = RowAggregator(AggregationOperator.Group, Nil, tvSchema)
-    val resultObsLeaf = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), grouping)
-    val resultObs = RangeVectorAggregator.mapReduce(agg, true, resultObsLeaf, rv=>rv.key)
-    val result = resultObs.toListL.runAsync.futureValue
+    for ((aggOp, expected) <- opToExpected) {
+      val agg = RowAggregator(aggOp, Nil, tvSchema)
+      val resultObsLeaf = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), grouping)
+      val resultObs = RangeVectorAggregator.mapReduce(agg, true, resultObsLeaf, rv=>rv.key)
+      val result = resultObs.toListL.runAsync.futureValue
 
-    // should have one grouping for each "b" label value ("1" and "2")
-    result.size shouldEqual 2
+      // should have one grouping for each "b" label value ("1" and "2")
+      result.size shouldEqual 2
 
-    // step through each grouping and check values against expected
-    for (groupIter <- result) {
-      groupIter.key.labelValues.size shouldEqual 1
-      val label = groupIter.key.labelValues.toSeq(0)._2
-      compareIter(groupIter.rows.map(_.getDouble(1)), expected(label).iterator)
+      // step through each grouping and check values against expected
+      for (groupIter <- result) {
+        groupIter.key.labelValues.size shouldEqual 1
+        val label = groupIter.key.labelValues.toSeq(0)._2
+        compareIter(groupIter.rows.map(_.getDouble(1)), expected(label).iterator)
+      }
     }
   }
 
