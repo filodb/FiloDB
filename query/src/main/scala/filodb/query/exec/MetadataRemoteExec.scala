@@ -14,7 +14,7 @@ import filodb.query._
 
 case class MetadataRemoteExec(queryEndpoint: String,
                               requestTimeoutMs: Long,
-                              urlParams: Map[String, Any],
+                              urlParams: Map[String, String],
                               queryContext: QueryContext,
                               dispatcher: PlanDispatcher,
                               dataset: DatasetRef,
@@ -27,11 +27,12 @@ case class MetadataRemoteExec(queryEndpoint: String,
 
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                               (implicit sched: Scheduler): Future[QueryResponse] = {
-    remoteExecHttpClient.httpMetadataGet(queryContext.plannerParams.applicationId, queryEndpoint,
-      httpTimeoutMs, queryContext.submitTime, getUrlParams(), queryContext.traceInfo)
+    remoteExecHttpClient.httpMetadataPost(queryEndpoint, httpTimeoutMs,
+      queryContext.submitTime, getUrlParams(), queryContext.traceInfo)
       .map { response =>
         response.unsafeBody match {
-          case Left(error) => QueryError(queryContext.queryId, error.error)
+          case Left(error) =>    // FIXME need to extract statistics from query error, aggregate them, send upstream
+                                 QueryError(queryContext.queryId, QueryStats(), error.error)
           case Right(successResponse) => toQueryResponse(successResponse, queryContext.queryId, execPlan2Span)
         }
       }
@@ -47,7 +48,8 @@ case class MetadataRemoteExec(queryEndpoint: String,
     val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, recordSchema,
                         queryWithPlanName(queryContext)))
 
-    QueryResult(id, resultSchema, srvSeq,
+    // FIXME need to send and parse query stats in remote calls
+    QueryResult(id, resultSchema, srvSeq, QueryStats(),
       if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 }

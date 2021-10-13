@@ -21,6 +21,7 @@ vectorExpression
     | vectorExpression andUnlessOp grouping? vectorExpression          #binaryOperation
     | vectorExpression orOp grouping? vectorExpression                 #binaryOperation
     | vectorExpression subquery offset?                                #subqueryOperation
+    | vectorExpression limit                                           #limitOperation
     | vector                                                           #vectorOperation
     ;
 
@@ -53,6 +54,8 @@ instantSelector
 window: '[' DURATION ']';
 
 offset: OFFSET DURATION;
+
+limit: LIMIT NUMBER;
 
 subquery: '[' DURATION ':' DURATION? ']';
 
@@ -89,6 +92,7 @@ metricKeyword
     | BY
     | WITHOUT
     | OFFSET
+    | LIMIT
     | AGGREGATION_OP
     ;
 
@@ -107,6 +111,7 @@ labelKeyword
     | GROUP_LEFT
     | GROUP_RIGHT
     | OFFSET
+    | LIMIT
     | BOOL
     | AGGREGATION_OP
     ;
@@ -116,7 +121,7 @@ literal: NUMBER | STRING;
 
 // Number format is non-standard.
 // It doesn't support hex, NaN, Inf, and it doesn't require a digit after the decimal point.
-NUMBER: [-+] ? (
+NUMBER: (
       [0-9]* '.'? [0-9]+ ([eE][-+]?[0-9]+)?
     | [0-9]+ '.'
     | '0' [xX] [0-9a-fA-F]+
@@ -155,6 +160,7 @@ IGNORING:    I G N O R I N G;
 GROUP_LEFT:  G R O U P '_' L E F T;
 GROUP_RIGHT: G R O U P '_' R I G H T;
 OFFSET:      O F F S E T;
+LIMIT:       L I M I T;
 BOOL:        B O O L;
 
 // See section below: "Magic for case-insensitive matching."
@@ -180,7 +186,7 @@ DURATION: NUMBER ('s' | 'm' | 'h' | 'd' | 'w' | 'y' | 'i');
 IDENTIFIER: [a-zA-Z_] [a-zA-Z0-9_]*;
 
 // Used for metric names.
-IDENTIFIER_EXTENDED: [_:]? [a-zA-Z] [a-zA-Z0-9_:\-.]*;
+IDENTIFIER_EXTENDED: [_:]* [a-zA-Z] [a-zA-Z0-9_:\-.]*;
 
 // Magic for case-insensitive matching.
 fragment A : [aA]; // match either an 'a' or 'A'

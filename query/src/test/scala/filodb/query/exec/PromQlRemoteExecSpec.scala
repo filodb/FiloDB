@@ -35,7 +35,7 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val exec = PromQlRemoteExec("", 60000, queryContext, dummyDispatcher, timeseriesDataset.ref, RemoteHttpClient.defaultClient)
     val result = query.Result (Map("instance" -> "inst1"), Some(Seq(Sampl(1000, 1), Sampl(2000, 2), Sampl(3000, 3))),
       None)
-    val res = exec.toQueryResponse(SuccessResponse(Data("vector", Seq(result))), "id", Kamon.currentSpan())
+    val res = exec.toQueryResponse(SuccessResponse(Data("vector", Seq(result)), queryStats = None), "id", Kamon.currentSpan())
     res.isInstanceOf[QueryResult] shouldEqual true
     val queryResult = res.asInstanceOf[QueryResult]
     queryResult.result(0).numRows.get shouldEqual(3)
@@ -47,7 +47,7 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val expectedResult = List((1000000, 1.0))
     val exec = PromQlRemoteExec("", 60000, queryContext, dummyDispatcher, timeseriesDataset.ref, RemoteHttpClient.defaultClient)
     val result = query.Result (Map("instance" -> "inst1"), None, Some(Sampl(1000, 1)))
-    val res = exec.toQueryResponse(SuccessResponse(Data("vector", Seq(result))), "id", Kamon.currentSpan())
+    val res = exec.toQueryResponse(SuccessResponse(Data("vector", Seq(result)), queryStats = None), "id", Kamon.currentSpan())
     res.isInstanceOf[QueryResult] shouldEqual true
     val queryResult = res.asInstanceOf[QueryResult]
     queryResult.result(0).numRows.get shouldEqual(1)
@@ -85,7 +85,7 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
   it ("should convert histogram to QueryResponse ") {
     val exec = PromQlRemoteExec("", 60000, queryContext, dummyDispatcher, timeseriesDataset.ref, RemoteHttpClient.defaultClient)
     val result = query.Result (Map("instance" -> "inst1"), None, Some(HistSampl(1000, Map("1" -> 2, "+Inf" -> 3))))
-    val res = exec.toQueryResponse(SuccessResponse(Data("vector", Seq(result))), "id", Kamon.currentSpan())
+    val res = exec.toQueryResponse(SuccessResponse(Data("vector", Seq(result)), queryStats = None), "id", Kamon.currentSpan())
     res.isInstanceOf[QueryResult] shouldEqual true
     val queryResult = res.asInstanceOf[QueryResult]
     queryResult.result(0).numRows.get shouldEqual(1)

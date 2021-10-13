@@ -68,7 +68,7 @@ case class TimeScalarGeneratorExec(queryContext: QueryContext,
           (transf.apply(acc._1, querySession, queryContext.plannerParams.sampleLimit, acc._2,
             paramRangeVector), transf.schema(acc._2))
         }._1.toListL.map({
-          QueryResult(queryContext.queryId, resultSchema, _, querySession.resultCouldBePartial,
+          QueryResult(queryContext.queryId, resultSchema, _, QueryStats(), querySession.resultCouldBePartial,
             querySession.partialResultsReason)
         })
       }.flatten

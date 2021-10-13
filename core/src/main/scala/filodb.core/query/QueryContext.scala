@@ -1,7 +1,9 @@
 package filodb.core.query
 
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 
+import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration._
 
 import filodb.core.{SpreadChange, SpreadProvider}
@@ -83,16 +85,91 @@ object QueryContext {
 
 /**
   * Placeholder for query related information. Typically passed along query execution path.
+  *
+  * IMPORTANT: The param catchMultipleLockSetErrors should be false
+  * only in unit test code for ease of use.
   */
 case class QuerySession(qContext: QueryContext,
                         queryConfig: QueryConfig,
-                        var lock: Option[EvictionLock] = None,
-                        var resultCouldBePartial: Boolean = false,
-                        var partialResultsReason: Option[String] = None) {
+                        catchMultipleLockSetErrors: Boolean = false) {
+
+  val queryStats: QueryStats = QueryStats()
+  private var lock: Option[EvictionLock] = None
+  var resultCouldBePartial: Boolean = false
+  var partialResultsReason: Option[String] = None
+
+  def setLock(toSet: EvictionLock): Unit = {
+    if (catchMultipleLockSetErrors && lock.isDefined)
+      throw new IllegalStateException(s"Assigning eviction lock to session two times $qContext")
+    lock = Some(toSet)
+  }
+
   def close(): Unit = {
     lock.foreach(_.releaseSharedLock(qContext.queryId))
     lock = None
   }
+}
+
+case class Stat() {
+  val timeSeriesScanned = new AtomicLong
+  val dataBytesScanned = new AtomicLong
+  val resultBytes = new AtomicLong
+  override def toString: String = s"(timeSeriesScanned=$timeSeriesScanned, " +
+    s"dataBytesScanned=$dataBytesScanned, resultBytes=$resultBytes)"
+  def add(s: Stat): Unit = {
+    timeSeriesScanned.addAndGet(s.timeSeriesScanned.get())
+    dataBytesScanned.addAndGet(s.dataBytesScanned.get())
+    resultBytes.addAndGet(s.resultBytes.get())
+  }
+}
+
+case class QueryStats() {
+
+  val stat = TrieMap[Seq[String], Stat]()
+
+  override def toString: String = stat.toString()
+
+  def add(s: QueryStats): Unit = {
+    s.stat.foreach(kv => stat.getOrElseUpdate(kv._1, Stat()).add(kv._2))
+  }
+
+  def clear(): Unit = {
+    stat.clear()
+  }
+
+  /**
+   * Counter for number of time series scanned by query
+   * @param group typically a tuple of (clusterType, dataset, WS, NS, metricName),
+   *              and if tuple is not available, pass Nil. If Nil is passed,
+   *              then head group is used if it exists.
+   */
+  def getTimeSeriesScannedCounter(group: Seq[String] = Nil): AtomicLong = {
+    val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
+    stat.getOrElseUpdate(theNs, Stat()).timeSeriesScanned
+  }
+
+  /**
+   * Counter for amount of raw ingested (compressed) data scanned by query
+   * @param group typically a tuple of (clusterType, dataset, WS, NS, metricName),
+   *              and if tuple is not available, pass Nil. If Nil is passed,
+   *              then head group is used if it exists.
+   */
+  def getDataBytesScannedCounter(group: Seq[String] = Nil): AtomicLong = {
+    val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
+    stat.getOrElseUpdate(theNs, Stat()).dataBytesScanned
+  }
+
+  /**
+   * Counter for size of the materialized query result
+   * @param group typically a tuple of (clusterType, dataset, WS, NS, metricName),
+   *              and if tuple is not available, pass Nil. If Nil is passed,
+   *              then head group is used if it exists.
+   */
+  def getResultBytesCounter(group: Seq[String] = Nil): AtomicLong = {
+    val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
+    stat.getOrElseUpdate(theNs, Stat()).resultBytes
+  }
+
 }
 
 object QuerySession {

@@ -14,7 +14,8 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
     MiscellaneousFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
     ScalarFunctionId.withNameInsensitiveOption(name.toLowerCase).isEmpty &&
     SortFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
-    AbsentFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty) {
+    AbsentFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
+    LimitFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty) {
 
     throw new IllegalArgumentException(s"Invalid function name [$name]")
   }
@@ -150,13 +151,14 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
     val scalarFunctionIdOpt = ScalarFunctionId.withNameInsensitiveOption(name)
     val sortFunctionIdOpt = SortFunctionId.withNameInsensitiveOption(name)
     val absentFunctionIdOpt = AbsentFunctionId.withNameInsensitiveOption(name)
-    // Get parameters other than  series like label names. Parameters can be quoted so remove special characters
-    val stringParam = allParams.filter(!_.equals(seriesParam)).collect {
-      case e: InstantExpression => e.realMetricName.replaceAll("^\"|\"$", "")
-      case s: StringLiteral => s.str
-    }
+    val limitFunctionIdOpt = LimitFunctionId.withNameInsensitiveOption(name)
 
     if (miscellaneousFunctionIdOpt.isDefined) {
+      // Get parameters other than  series like label names. Parameters can be quoted so remove special characters
+      val stringParam = allParams.filter(!_.equals(seriesParam)).collect {
+        case e: InstantExpression => e.realMetricName.replaceAll("^\"|\"$", "")
+        case s: StringLiteral => s.str
+      }
       val miscellaneousFunctionId = miscellaneousFunctionIdOpt.get
       val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)
       ApplyMiscellaneousFunction(periodicSeriesPlan, miscellaneousFunctionId, stringParam)
@@ -173,6 +175,13 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
       val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)
       ApplyAbsentFunction(periodicSeriesPlan, columnFilter, RangeParams(timeParams.start, timeParams.step,
         timeParams.end))
+    } else if (limitFunctionIdOpt.isDefined) {
+      val limit = allParams(0).asInstanceOf[Scalar].toScalar.toInt
+      val columnFilter = if (seriesParam.isInstanceOf[InstantExpression])
+        seriesParam.asInstanceOf[InstantExpression].columnFilters else Seq.empty[ColumnFilter]
+      val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)
+      ApplyLimitFunction(periodicSeriesPlan, columnFilter, RangeParams(timeParams.start, timeParams.step,
+        timeParams.end), limit)
     } else {
       val rangeFunctionId = RangeFunctionId.withNameInsensitiveOption(name).get
       if (rangeFunctionId == Timestamp) {

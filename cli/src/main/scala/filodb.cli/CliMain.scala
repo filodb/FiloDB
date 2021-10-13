@@ -3,12 +3,12 @@ package filodb.cli
 import java.io.OutputStream
 import java.math.BigInteger
 import java.sql.Timestamp
+import java.util
 
 import scala.concurrent.duration._
 import scala.util.Try
 
 import com.opencsv.CSVWriter
-import java.util
 import monix.reactive.Observable
 import org.rogach.scallop.ScallopConf
 import org.rogach.scallop.exceptions.ScallopException
@@ -17,9 +17,10 @@ import org.scalactic._
 import filodb.coordinator._
 import filodb.coordinator.client._
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
+import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
-import filodb.core.metadata.{Column, Schemas}
+import filodb.core.metadata.{Column, Dataset, Schemas}
 import filodb.core.query._
 import filodb.core.store.ChunkSetInfoOnHeap
 import filodb.memory.MemFactory
@@ -27,6 +28,7 @@ import filodb.memory.format.{BinaryVector, Classes, MemoryReader, PrimitiveVecto
 import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
 import filodb.query._
+import filodb.query.LogicalPlan.getRawSeriesFilters
 
 // scalastyle:off
 class Arguments(args: Seq[String]) extends ScallopConf(args) {
@@ -66,6 +68,7 @@ class Arguments(args: Seq[String]) extends ScallopConf(args) {
   val spread = opt[Int]()
   val k = opt[Int]()
   val shardkeyprefix = opt[List[String]](default = Some(List()))
+  val queries = opt[List[String]](default = Some(List()))
 
   verify()
 
@@ -103,8 +106,10 @@ object CliMain extends FilodbClusterNode {
     println("  --host <hostname/IP> [--port ...] --command setup --filename <configFile> | --configpath <path>")
     println("  --host <hostname/IP> [--port ...] --command list")
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
-    println("  --host <hostname/IP> [--port ...] --command labelvalues --labelName <lable-names> --labelfilter <label-filter> --dataset <dataset>")
+    println("  --host <hostname/IP> [--port ...] --command labelvalues --labelnames <lable-names> --labelfilter <label-filter> --dataset <dataset>")
+    println("  --host <hostname/IP> [--port ...] --command labels --labelfilter <label-filter> -dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command topkcard --dataset prometheus --k 2 --shardkeyprefix demo App-0")
+    println("  --host <hostname/IP> [--port ...] --command findqueryshards --queries <query> --spread <spread>")
     println("""  --command promFilterToPartKeyBR --promql "myMetricName{_ws_='myWs',_ns_='myNs'}" --schema prom-counter""")
     println("""  --command partKeyBrAsString --hexpk 0x2C0000000F1712000000200000004B8B36940C006D794D65747269634E616D650E00C104006D794E73C004006D795773""")
     println("""  --command decodeChunkInfo --hexchunkinfo 0x12e8253a267ea2db060000005046fc896e0100005046fc896e010000""")
@@ -192,6 +197,10 @@ object CliMain extends FilodbClusterNode {
 
         case Some("validateSchemas") => validateSchemas()
 
+        case Some("findqueryshards") =>
+          require(args.queries.isDefined && args.queries().nonEmpty && args.spread.isDefined, "--queries and --spread must be defined")
+          findQueryShards(args)
+
         case Some("promFilterToPartKeyBR") =>
           require(args.promql.isDefined && args.schema.isDefined, "--promql and --schema must be defined")
           promFilterToPartKeyBr(args.promql(), args.schema())
@@ -216,12 +225,20 @@ object CliMain extends FilodbClusterNode {
           parseTimeSeriesMetadataQuery(remote, args.matcher(), args.dataset(),
             getQueryRange(args), true, options)
 
-        case Some("labelValues") =>
+        case Some("labelvalues") =>
           require(args.host.isDefined && args.dataset.isDefined && args.labelnames.isDefined, "--host, --dataset and --labelName must be defined")
           val remote = Client.standaloneClient(system, args.host(), args.port())
           val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
             timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
           parseLabelValuesQuery(remote, args.labelnames(), args.labelfilter(), args.dataset(),
+            getQueryRange(args), options)
+
+        case Some("labels") =>
+          require(args.host.isDefined && args.dataset.isDefined && args.labelfilter.isDefined, "--host, --dataset and --labelfilter must be defined")
+          val remote = Client.standaloneClient(system, args.host(), args.port())
+          val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
+            timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
+          parseLabelsQuery(remote, args.labelfilter(), args.dataset(),
             getQueryRange(args), options)
 
         case x: Any =>
@@ -244,6 +261,28 @@ object CliMain extends FilodbClusterNode {
       // No need to shutdown, just exit.  This ensures things like C* client are not started by accident and
       // ensures a much quicker exit, which is important for CLI.
       sys.exit(exitCode)
+    }
+  }
+
+  private def findQueryShards(args: Arguments) = {
+    val (client, dsRef) = getClientAndRef(args)
+    val FindShardFormatStr = "%5s\t\t%s"
+    client.getShardMapper(dsRef) match {
+      case Some(mapper) =>
+        def mapperRef = mapper
+        val queryConfig = new QueryConfig (config.getConfig ("query") )
+        val dataset = new Dataset(dsRef.dataset, Schemas.global.schemas.get(args.schema()).get)
+        val planner = new SingleClusterPlanner(dataset, Schemas.global,
+          mapperRef, earliestRetainedTimestampFn = 0, queryConfig, "raw",
+          StaticSpreadProvider(SpreadChange(0, args.spread())))
+        println(FindShardFormatStr.format("Shards", "Query"))
+        args.queries().foreach(query => {
+          val lp = Parser.queryToLogicalPlan(query, 100, 1)
+          val shardRange = planner.shardsFromFilters(planner.renameMetricFilter(getRawSeriesFilters(lp).head), QueryContext())
+          println(FindShardFormatStr.format(shardRange.mkString(","), query))
+        })
+      case _ =>
+        println(s"Unable to obtain shard list for dataset $dsRef, has it been setup yet?")
     }
   }
 
@@ -302,6 +341,15 @@ object CliMain extends FilodbClusterNode {
     // TODO support all filters
     val filters = constraints.map { case (k, v) => ColumnFilter(k, Filter.Equals(v)) }.toSeq
     val logicalPlan = LabelValues(labelNames, filters, timeParams.start * 1000, timeParams.end * 1000)
+    executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
+  }
+
+  def parseLabelsQuery(client: LocalClient, constraints: Map[String, String], dataset: String,
+                            timeParams: TimeRangeParams,
+                            options: QOptions): Unit = {
+    // TODO support all filters
+    val filters = constraints.map { case (k, v) => ColumnFilter(k, Filter.Equals(v)) }.toSeq
+    val logicalPlan = LabelNames(filters, timeParams.start * 1000, timeParams.end * 1000)
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 
@@ -390,7 +438,9 @@ object CliMain extends FilodbClusterNode {
       case Some(intervalSecs) =>
         val fut = Observable.intervalAtFixedRate(intervalSecs.seconds).foreach { n =>
           client.logicalPlan2Query(ref, plan, qOpts) match {
-            case QueryResult(_, _, result, _, _) => result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
+            case QueryResult(_, _, result, stats, _, _) =>
+              result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
+              println(s"QueryStats: $stats")
             case err: QueryError                => throw new ClientException(err)
           }
         }.recover {
@@ -401,10 +451,14 @@ object CliMain extends FilodbClusterNode {
       case None =>
         try {
           client.logicalPlan2Query(ref, plan, qOpts) match {
-            case QueryResult(_, schema, result, _, _) => println(s"Output schema: $schema")
+            case QueryResult(_, schema, result, stats, _, _) =>
+                                                   println(s"Output schema: $schema")
                                                    println(s"Number of Range Vectors: ${result.size}")
                                                    result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
-            case QueryError(_,ex)               => println(s"QueryError: ${ex.getClass.getSimpleName} ${ex.getMessage}")
+                                                   println(s"QueryStats: $stats")
+            case QueryError(_, stats, ex)  =>
+                                                   println(s"QueryError: ${ex.getClass.getSimpleName} ${ex.getMessage}")
+                                                   println(s"QueryStats: $stats")
           }
         } catch {
           case e: ClientException =>  println(s"ClientException: ${e.getMessage}")

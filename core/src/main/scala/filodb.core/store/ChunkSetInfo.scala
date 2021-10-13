@@ -1,11 +1,13 @@
 package filodb.core.store
 
 import java.nio.ByteBuffer
+import java.util.concurrent.atomic.AtomicLong
 
 import com.googlecode.javaewah.EWAHCompressedBitmap
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
-import kamon.metric.Counter
+import kamon.Kamon
+import kamon.metric.MeasurementUnit
 
 import filodb.core.QueryTimeoutException
 import filodb.core.Types._
@@ -327,16 +329,32 @@ class ElementChunkInfoIterator(elIt: ElementIterator) extends ChunkInfoIterator 
   final def unlock(): Unit = elIt.unlock()
 }
 
+object CountingChunkInfoIterator {
+  val dataBytesScannedCtr = Kamon.counter("data-scanned-by-queries", MeasurementUnit.information.bytes).withoutTags()
+}
+
 class CountingChunkInfoIterator(base: ChunkInfoIterator,
-                                queriedChunksCounter: Counter) extends ChunkInfoIterator {
+                                columnIDs: Array[Int],
+                                dataBytesScannedCtr: AtomicLong) extends ChunkInfoIterator {
   override def close(): Unit = base.close()
   override def hasNext: Boolean = base.hasNext
   override def nextInfoReader: ChunkSetInfoReader = {
-    queriedChunksCounter.increment()
-    base.nextInfoReader
+    val reader = base.nextInfoReader
+    var bytesRead = 0
+    columnIDs.foreach { c =>
+      bytesRead += BinaryVector.totalBytes(reader.vectorAccessor(c), reader.vectorAddress(c))
+    }
+
+    // Why two counters ?
+    // 1. query stats counter to meter usage by ws/ns. This will eventually be sent as part of query result.
+    dataBytesScannedCtr.addAndGet(bytesRead)
+
+    // 2. kamon counter to track per instance. It is not broken down by shard/dataset. Doing that needs more memory
+    CountingChunkInfoIterator.dataBytesScannedCtr.increment(bytesRead)
+    reader
   }
   override def nextInfo: ChunkSetInfo = {
-    queriedChunksCounter.increment()
+    dataBytesScannedCtr.incrementAndGet()
     base.nextInfo
   }
   override def lock(): Unit = base.lock()

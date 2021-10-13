@@ -6,13 +6,13 @@ import io.circe.syntax._
 import filodb.query.AggregationOperator.Avg
 
 object PromCirceSupport {
-  import cats.syntax.either._
   // necessary to encode sample in promql response as an array with long and double value as string
   // Specific encoders for *Sampl types
   implicit val encodeSampl: Encoder[DataSampl] = Encoder.instance {
     case s @ Sampl(t, v)     => Json.fromValues(Seq(t.asJson, v.toString.asJson))
     case h @ HistSampl(t, b) => Json.fromValues(Seq(t.asJson, b.asJson))
     case m @ MetadataSampl(v) => Json.fromValues(Seq(v.asJson))
+    case l @ LabelSampl(v) => Json.fromValues(Seq(v.asJson))
   }
 
   implicit val decodeAvgSample: Decoder[AvgSampl] = new Decoder[AvgSampl] {
@@ -74,14 +74,28 @@ object PromCirceSupport {
     }
   }
 
-  implicit val decodeRemoteErrorResponse: Decoder[RemoteErrorResponse] = new Decoder[RemoteErrorResponse] {
-    final def apply(c: HCursor): Decoder.Result[RemoteErrorResponse] = {
+  implicit val decodeQueryStatistics: Decoder[QueryStatistics] = new Decoder[QueryStatistics] {
+    final def apply(c: HCursor): Decoder.Result[QueryStatistics] = {
+      for {
+        group    <- c.downField("group").as[Seq[String]]
+        timeSeriesScanned <- c.downField("timeSeriesScanned").as[Long]
+        dataBytesScanned     <- c.downField("dataBytesScanned").as[Long]
+        resultBytes     <- c.downField("resultBytes").as[Long]
+      } yield {
+        QueryStatistics(group, timeSeriesScanned, dataBytesScanned, resultBytes)
+      }
+    }
+  }
+
+  implicit val decodeErrorResponse: Decoder[ErrorResponse] = new Decoder[ErrorResponse] {
+    final def apply(c: HCursor): Decoder.Result[ErrorResponse] = {
       for {
         status    <- c.downField("status").as[String]
         errorType <- c.downField("errorType").as[String]
         error     <- c.downField("error").as[String]
+        queryStats <- c.downField("queryStats").as[Option[Seq[QueryStatistics]]]
       } yield {
-        RemoteErrorResponse(status, errorType, error)
+        ErrorResponse(status, errorType, error, queryStats)
       }
     }
   }
