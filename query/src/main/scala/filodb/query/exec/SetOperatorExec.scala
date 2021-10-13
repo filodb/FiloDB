@@ -55,8 +55,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
                               querySession: QuerySession): Observable[RangeVector] = {
     val span = Kamon.currentSpan()
     val taskOfResults = childResponses.map {
-      case (QueryResult(_, schema, result, _, _), i) => (schema, result, i)
-      case (QueryError(_, ex), _)              => throw ex
+      case (QueryResult(_, schema, result, _, _, _), i) => (schema, result, i)
+      case (QueryError(_, _, ex), _)              => throw ex
     }.toListL.map { resp =>
       span.mark("binary-join-child-results-available")
       Kamon.histogram("query-execute-time-elapsed-step1-child-results-available",
@@ -271,9 +271,9 @@ final case class SetOperatorExec(queryContext: QueryContext,
     */
   override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema = {
     resp match {
-      case QueryResult(_, schema, _, _, _) if rs == ResultSchema.empty =>
+      case QueryResult(_, schema, _, _, _, _) if rs == ResultSchema.empty =>
         schema     /// First schema, take as is
-      case QueryResult(_, schema, _, _, _) =>
+      case QueryResult(_, schema, _, _, _, _) =>
         if (!rs.hasSameColumnsAs(schema)) throw SchemaMismatch(rs.toString, schema.toString)
         else rs
     }

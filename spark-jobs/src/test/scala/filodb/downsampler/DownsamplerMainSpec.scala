@@ -1,6 +1,22 @@
 package filodb.downsampler
 
+import java.io.File
+import java.time.Instant
+import java.util.concurrent.atomic.AtomicLong
+
+import scala.concurrent.Await
+import scala.concurrent.duration._
+
 import com.typesafe.config.{ConfigException, ConfigFactory}
+import monix.execution.Scheduler
+import monix.reactive.Observable
+import org.apache.spark.{SparkConf, SparkException}
+import org.scalatest.BeforeAndAfterAll
+import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.{Millis, Seconds, Span}
+
 import filodb.cardbuster.CardinalityBuster
 import filodb.core.GlobalScheduler._
 import filodb.core.MachineMetricsData
@@ -18,21 +34,7 @@ import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.memory.format.vectors.{CustomBuckets, DoubleVector, LongHistogram}
 import filodb.query.{QueryError, QueryResult}
-import filodb.query.exec.{InProcessPlanDispatcher, InternalRangeFunction, MultiSchemaPartitionsExec, PeriodicSamplesMapper}
-import kamon.Kamon
-import monix.execution.Scheduler
-import monix.reactive.Observable
-import org.apache.spark.{SparkConf, SparkException}
-import org.scalatest.BeforeAndAfterAll
-import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.funspec.AnyFunSpec
-import org.scalatest.matchers.should.Matchers
-import org.scalatest.time.{Millis, Seconds, Span}
-
-import java.io.File
-import java.time.Instant
-import scala.concurrent.Await
-import scala.concurrent.duration._
+import filodb.query.exec._
 
 /**
   * Spec tests downsampling round trip.
@@ -473,7 +475,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     downsampledPart1.partKeyBytes shouldEqual dsGaugePartKeyBytes
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3, 4, 5),
-      Kamon.counter("dummy").withoutTags())
+      new AtomicLong())
 
     val downsampledData1 = rv1.rows.map { r =>
       (r.getLong(0), r.getDouble(1), r.getDouble(2), r.getDouble(3), r.getDouble(4), r.getDouble(5))
@@ -510,7 +512,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     downsampledPart1.partKeyBytes shouldEqual dsGaugeLowFreqPartKeyBytes
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3, 4, 5),
-      Kamon.counter("dummy").withoutTags())
+      new AtomicLong())
 
     val downsampledData1 = rv1.rows.map { r =>
       (r.getLong(0), r.getDouble(1), r.getDouble(2), r.getDouble(3), r.getDouble(4), r.getDouble(5))
@@ -541,7 +543,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(1), ctrChunkInfo.vectorAddress(1)) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1),
-      Kamon.counter("dummy").withoutTags())
+      new AtomicLong())
 
     val downsampledData1 = rv1.rows.map { r =>
       (r.getLong(0), r.getDouble(1))
@@ -584,7 +586,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(2), ctrChunkInfo.vectorAddress(2)) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
-      Kamon.counter("dummy").withoutTags())
+      new AtomicLong())
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
     val downsampledData1 = rv1.rows.map { r =>
@@ -633,7 +635,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
-      Kamon.counter("dummy").withoutTags())
+      new AtomicLong())
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
     val downsampledData1 = rv1.rows.map { r =>
@@ -683,7 +685,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     downsampledPart2.partKeyBytes shouldEqual dsGaugePartKeyBytes
 
     val rv2 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart2, AllChunkScan, Array(0, 1, 2, 3, 4, 5),
-      Kamon.counter("dummy").withoutTags())
+      new AtomicLong())
 
     val downsampledData2 = rv2.rows.map { r =>
       (r.getLong(0), r.getDouble(1), r.getDouble(2), r.getDouble(3), r.getDouble(4), r.getDouble(5))
@@ -710,7 +712,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     downsampledPart1.partKeyBytes shouldEqual counterPartKeyBytes
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1),
-      Kamon.counter("dummy").withoutTags())
+      new AtomicLong())
 
     val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
     PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(1), ctrChunkInfo.vectorAddress(1)) shouldEqual true
@@ -757,7 +759,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
-      Kamon.counter("dummy").withoutTags())
+      new AtomicLong())
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
     val downsampledData1 = rv1.rows.map { r =>
@@ -800,7 +802,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     PrimitiveVectorReader.dropped(acc, addr) shouldEqual true
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3),
-      Kamon.counter("dummy").withoutTags())
+      new AtomicLong())
 
     val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
     val downsampledData1 = rv1.rows.map { r =>
@@ -851,7 +853,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       val colFltrs = if (metricName == histNameNaN) colFiltersNaN else colFilters
       val queryFilters = colFltrs :+ ColumnFilter("_metric_", Equals(metricName))
       val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams = PlannerParams(sampleLimit = 1000)),
-        InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters, TimeRangeChunkScan(74372801000L, 74373042000L))
+        InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters,
+        TimeRangeChunkScan(74372801000L, 74373042000L), "_metric_")
 
       val querySession = QuerySession(QueryContext(), queryConfig)
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
@@ -862,6 +865,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       res.result.size shouldEqual 1
       res.result.foreach(_.rows.nonEmpty shouldEqual true)
     }
+
+    downsampleTSStore.shutdown()
 
   }
 
@@ -880,7 +885,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(counterName))
     val qc = QueryContext(plannerParams = PlannerParams(sampleLimit = 1000))
     val exec = MultiSchemaPartitionsExec(qc,
-      InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
+      InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters,
+      AllChunkScan, "_metric_")
     exec.addRangeVectorTransformer(PeriodicSamplesMapper(74373042000L, 10, 74373042000L,Some(310000),
       Some(InternalRangeFunction.Rate), qc))
 
@@ -892,6 +898,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     res.result.size shouldEqual 1
     res.result.foreach(_.rows.nonEmpty shouldEqual true)
+    downsampleTSStore.shutdown()
+
 
   }
 
@@ -910,7 +918,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(counterName))
     val qc = QueryContext(plannerParams = PlannerParams(sampleLimit = 1000))
     val exec = MultiSchemaPartitionsExec(qc,
-      InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
+      InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters,
+      AllChunkScan, "_metric_")
     exec.addRangeVectorTransformer(PeriodicSamplesMapper(74373042000L, 10, 74373042000L,Some(290000),
       Some(InternalRangeFunction.Rate), qc))
 
@@ -922,6 +931,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     // exception thrown because lookback is < downsample data resolution of 5m
     res.t.isInstanceOf[IllegalArgumentException] shouldEqual true
+    downsampleTSStore.shutdown()
+
   }
 
   it("should bring up DownsampledTimeSeriesShard and NOT be able to read untyped data using SelectRawPartitionsExec") {
@@ -939,7 +950,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(untypedName))
       val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams
         = PlannerParams(sampleLimit = 1000)), InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0,
-        queryFilters, AllChunkScan)
+        queryFilters, AllChunkScan, "_metric_")
 
       val querySession = QuerySession(QueryContext(), queryConfig)
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
@@ -948,6 +959,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       queryScheduler.shutdown()
 
       res.result.size shouldEqual 0
+    downsampleTSStore.shutdown()
+
   }
 
   it("should bring up DownsampledTimeSeriesShard and be able to read specific columns " +
@@ -962,7 +975,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(gaugeName))
     val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams = PlannerParams(sampleLimit = 1000)),
       InProcessPlanDispatcher(EmptyQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan,
-      colName = Option("sum"))
+      "_metric_", colName = Option("sum"))
     val querySession = QuerySession(QueryContext(), queryConfig)
     val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
     val res = exec.execute(downsampleTSStore, querySession)(queryScheduler)
@@ -971,6 +984,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     res.result.size shouldEqual 1
     res.result.head.rows.map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual
       List((74372982000L, 88.0), (74373042000L, 24.0))
+    downsampleTSStore.shutdown()
+
   }
 
   it ("should fail when cardinality buster is not configured with any delete filters") {

@@ -48,22 +48,23 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
     import PromCirceSupport._
     import io.circe.parser
-    remoteExecHttpClient.httpGet(queryContext.plannerParams.applicationId, queryEndpoint,
-      requestTimeoutMs, queryContext.submitTime, getUrlParams(), queryContext.traceInfo)
+    remoteExecHttpClient.httpPost(queryEndpoint, requestTimeoutMs,
+      queryContext.submitTime, getUrlParams(), queryContext.traceInfo)
       .map { response =>
         // Error response from remote partition is a nested json present in response.body
         // as response status code is not 2xx
         if (response.body.isLeft) {
-          parser.decode[RemoteErrorResponse](response.body.left.get) match {
-              case Right(errorResponse) => QueryError(queryContext.queryId,
+          parser.decode[ErrorResponse](response.body.left.get) match {
+              case Right(errorResponse) =>
+                QueryError(queryContext.queryId, readQueryStats(errorResponse.queryStats),
                 RemoteQueryFailureException(response.code.toInt, errorResponse.status, errorResponse.errorType,
                   errorResponse.error))
-              case Left(ex)             => QueryError(queryContext.queryId, ex)
+              case Left(ex)             => QueryError(queryContext.queryId, QueryStats(), ex)
             }
         }
         else {
           response.unsafeBody match {
-            case Left(error)            => QueryError(queryContext.queryId, error.error)
+            case Left(error)            => QueryError(queryContext.queryId, QueryStats(), error.error)
             case Right(successResponse) => toQueryResponse(successResponse, queryContext.queryId, execPlan2Span)
           }
         }
@@ -76,7 +77,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
   def toQueryResponse(response: SuccessResponse, id: String, parentSpan: kamon.trace.Span): QueryResponse = {
     val queryResponse = if (response.data.result.isEmpty) {
       logger.debug("PromQlRemoteExec generating empty QueryResult as result is empty")
-      QueryResult(id, ResultSchema.empty, Seq.empty,
+      QueryResult(id, ResultSchema.empty, Seq.empty, readQueryStats(response.queryStats),
         if (response.partial.isDefined) response.partial.get else false, response.message)
     } else {
       if (response.data.result.head.aggregateResponse.isDefined) genAggregateResult(response, id)
@@ -84,7 +85,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
         val samples = response.data.result.head.values.getOrElse(Seq(response.data.result.head.value.get))
         if (samples.isEmpty) {
           logger.debug("PromQlRemoteExec generating empty QueryResult as samples is empty")
-          QueryResult(id, ResultSchema.empty, Seq.empty,
+          QueryResult(id, ResultSchema.empty, Seq.empty, readQueryStats(response.queryStats),
             if (response.partial.isDefined) response.partial.get else false, response.message)
         } else {
           samples.head match {
@@ -102,12 +103,12 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
     val aggregateResponse = response.data.result.head.aggregateResponse.get
     if (aggregateResponse.aggregateSampl.isEmpty) {
-      QueryResult(id, ResultSchema.empty, Seq.empty,
+      QueryResult(id, ResultSchema.empty, Seq.empty, readQueryStats(response.queryStats),
         if (response.partial.isDefined) response.partial.get else false, response.message)
     } else {
       aggregateResponse.aggregateSampl.head match {
-        case AvgSampl(timestamp, value, count)           => genAvgQueryResult(response, id)
-        case StdValSampl(timestamp, stddev, mean, count) => genStdValQueryResult(response, id)
+        case _: AvgSampl    => genAvgQueryResult(response, id)
+        case _: StdValSampl => genStdValQueryResult(response, id)
       }
     }
   }
@@ -139,7 +140,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
         queryWithPlanName(queryContext))
       // TODO: Handle stitching with verbose flag
     }
-    QueryResult(id, resultSchema.get("default").get, rangeVectors,
+    QueryResult(id, resultSchema.get("default").get, rangeVectors, readQueryStats(response.queryStats),
       if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 
@@ -178,7 +179,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
       SerializedRangeVector(rv, builder, recordSchema.get("histogram").get, queryContext.origQueryParams.toString)
       // TODO: Handle stitching with verbose flag
     }
-    QueryResult(id, resultSchema.get("histogram").get, rangeVectors,
+    QueryResult(id, resultSchema.get("histogram").get, rangeVectors, readQueryStats(response.queryStats),
       if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 
@@ -209,7 +210,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
     }
 
     // TODO: Handle stitching with verbose flag
-    QueryResult(id, resultSchema.get(Avg.entryName).get, rangeVectors,
+    QueryResult(id, resultSchema.get(Avg.entryName).get, rangeVectors, readQueryStats(response.queryStats),
       if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 
@@ -241,7 +242,17 @@ case class PromQlRemoteExec(queryEndpoint: String,
     }
 
     // TODO: Handle stitching with verbose flag
-    QueryResult(id, resultSchema.get("stdval").get, rangeVectors,
+    QueryResult(id, resultSchema.get("stdval").get, rangeVectors, readQueryStats(response.queryStats),
       if (response.partial.isDefined) response.partial.get else false, response.message)
+  }
+
+  def readQueryStats(queryStatsResponse: Option[Seq[QueryStatistics]]): QueryStats = {
+    val queryStats = QueryStats()
+    if (queryStatsResponse.isDefined && queryStatsResponse.get.nonEmpty) queryStatsResponse.get.foreach { stat =>
+      queryStats.getTimeSeriesScannedCounter(stat.group).addAndGet(stat.timeSeriesScanned)
+      queryStats.getDataBytesScannedCounter(stat.group).addAndGet(stat.dataBytesScanned)
+      queryStats.getResultBytesCounter(stat.group).addAndGet(stat.resultBytes)
+    }
+    queryStats
   }
 }

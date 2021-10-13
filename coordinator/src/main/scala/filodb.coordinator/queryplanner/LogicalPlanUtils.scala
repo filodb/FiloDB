@@ -6,6 +6,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils.{getLookBackMillis, getTimeFromLogicalPlan}
 import filodb.core.query.{QueryContext, RangeParams}
+import filodb.prometheus.ast.SubqueryUtils
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
 import filodb.query._
@@ -25,6 +26,16 @@ object LogicalPlanUtils extends StrictLogging {
     }
   }
 
+  /**
+   * Given a LogicalPlan check if any descendent of plan is an aggregate operation
+   * @param lp the LogicalPlan instance
+   * @return true if a descendent is an aggregate else false
+   */
+  def hasDescendantAggregate(lp: LogicalPlan): Boolean = lp match {
+    case _: Aggregate                 => true
+    case nonLeaf: NonLeafLogicalPlan  => nonLeaf.children.exists(hasDescendantAggregate(_))
+    case _                            => false
+  }
   /**
     * Retrieve start and end time from LogicalPlan
     */
@@ -47,11 +58,13 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: ScalarTimeBasedPlan         => TimeRange(lp.rangeParams.startSecs, lp.rangeParams.endSecs)
       case lp: VectorPlan                  => getTimeFromLogicalPlan(lp.scalars)
       case lp: ApplyAbsentFunction         => getTimeFromLogicalPlan(lp.vectors)
+      case lp: ApplyLimitFunction          => getTimeFromLogicalPlan(lp.vectors)
       case lp: RawSeries                   => lp.rangeSelector match {
                                                 case i: IntervalSelector => TimeRange(i.from, i.to)
                                                 case _ => throw new BadQueryException(s"Invalid logical plan")
                                               }
       case lp: LabelValues                 => TimeRange(lp.startMs, lp.endMs)
+      case lp: LabelNames                  => TimeRange(lp.startMs, lp.endMs)
       case lp: SeriesKeysByFilters         => TimeRange(lp.startMs, lp.endMs)
       case lp: ApplyInstantFunctionRaw     => getTimeFromLogicalPlan(lp.vectors)
       case lp: ScalarBinaryOperation       => TimeRange(lp.rangeParams.startSecs * 1000, lp.rangeParams.endSecs * 1000)
@@ -75,6 +88,7 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: PeriodicSeriesPlan  => copyWithUpdatedTimeRange(lp, timeRange)
       case lp: RawSeriesLikePlan   => copyNonPeriodicWithUpdatedTimeRange(lp, timeRange)
       case lp: LabelValues         => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: LabelNames          => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
       case lp: SeriesKeysByFilters => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
     }
   }
@@ -108,6 +122,7 @@ object LogicalPlanUtils extends StrictLogging {
 
       case lp: ApplySortFunction           => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
       case lp: ApplyAbsentFunction         => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
+      case lp: ApplyLimitFunction          => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
       case lp: ScalarVaryingDoublePlan     => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
       case lp: RawChunkMeta                => lp.rangeSelector match {
                                               case is: IntervalSelector  => lp.copy(rangeSelector = is.copy(
@@ -133,10 +148,35 @@ object LogicalPlanUtils extends StrictLogging {
                                               lp.copy(lhs = updatedLhs, rhs = updatedRhs, rangeParams =
                                                 RangeParams(timeRange.startMs / 1000, lp.rangeParams.stepSecs,
                                                   timeRange.endMs / 1000))
-      case sq: SubqueryWithWindowing       => ??? // TODO needed for Long Time Range Planner
-      case tlsq: TopLevelSubquery          => ??? // TODO needed for Long Time Range Planner
+      case sq: SubqueryWithWindowing       => copySubqueryWithWindowingWithUpdatedTimeRange(timeRange, sq)
+      case tlsq: TopLevelSubquery          => copyTopLevelSubqueryWithUpdatedTimeRange(timeRange, tlsq)
     }
   }
+
+  private def copyTopLevelSubqueryWithUpdatedTimeRange(
+    timeRange: TimeRange, topLevelSubquery: TopLevelSubquery
+  ): TopLevelSubquery = {
+    val newInner = copyWithUpdatedTimeRange(topLevelSubquery.innerPeriodicSeries, timeRange)
+    topLevelSubquery.copy(innerPeriodicSeries = newInner, startMs = timeRange.startMs, endMs = timeRange.endMs)
+  }
+
+  def copySubqueryWithWindowingWithUpdatedTimeRange(
+    timeRange: TimeRange, sqww: SubqueryWithWindowing
+  ) : PeriodicSeriesPlan = {
+    val offsetMs = sqww.offsetMs match {
+      case None => 0
+      case Some(ofMs) => ofMs
+    }
+    val preciseStartForInnerMs = timeRange.startMs - sqww.subqueryWindowMs - offsetMs
+    val startForInnerMs = SubqueryUtils.getStartForFastSubquery(preciseStartForInnerMs, sqww.subqueryStepMs)
+    val preciseEndForInnerMs = timeRange.endMs - offsetMs
+    val endForInnerMs = SubqueryUtils.getEndForFastSubquery(preciseEndForInnerMs, sqww.subqueryStepMs)
+    val innerTimeRange = TimeRange(startForInnerMs, endForInnerMs)
+    val updatedInner = copyWithUpdatedTimeRange(sqww.innerPeriodicSeries, innerTimeRange)
+    sqww.copy(innerPeriodicSeries = updatedInner, startMs = timeRange.startMs, endMs = timeRange.endMs)
+
+  }
+
 
   /**
     * Used to change rangeSelector of RawSeriesLikePlan
@@ -185,16 +225,25 @@ object LogicalPlanUtils extends StrictLogging {
   }
 
   def getLookBackMillis(logicalPlan: LogicalPlan): Seq[Long] = {
-    val staleDataLookbackMillis = WindowConstants.staleDataLookbackMillis
-    val leaf = LogicalPlan.findLeafLogicalPlans(logicalPlan)
-    if (leaf.isEmpty) Seq(0L) else {
-      leaf.map { l =>
-        l match {
-          case lp: RawSeries => lp.lookbackMs.getOrElse(staleDataLookbackMillis)
-          case _             => 0
+    logicalPlan match {
+      case sww: SubqueryWithWindowing => Seq(sww.subqueryWindowMs + getLookBackMillis(sww.innerPeriodicSeries).max)
+      case _ => {
+        val staleDataLookbackMillis = WindowConstants.staleDataLookbackMillis
+        val leaf = LogicalPlan.findLeafLogicalPlans(logicalPlan)
+        val valToReturn = {
+          if (leaf.isEmpty) Seq(0L) else {
+            leaf.map { l =>
+              l match {
+                case lp: RawSeries => lp.lookbackMs.getOrElse(staleDataLookbackMillis)
+                case _             => 0
+              }
+            }
+          }
         }
+        valToReturn
       }
     }
+
   }
 
   def getMetricName(logicalPlan: LogicalPlan, datasetMetricColumn: String): Set[String] = {
@@ -276,8 +325,10 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: ScalarTimeBasedPlan         => None
       case lp: VectorPlan                  => getPeriodicSeriesPlan(lp.scalars)
       case lp: ApplyAbsentFunction         => getPeriodicSeriesPlan(lp.vectors)
+      case lp: ApplyLimitFunction          => getPeriodicSeriesPlan(lp.vectors)
       case lp: RawSeries                   => None
       case lp: LabelValues                 => None
+      case lp: LabelNames                 => None
       case lp: SeriesKeysByFilters         => None
       case lp: ApplyInstantFunctionRaw     => getPeriodicSeriesPlan(lp.vectors)
       case lp: ScalarBinaryOperation       =>  if (lp.lhs.isRight) getPeriodicSeriesPlan(lp.lhs.right.get)

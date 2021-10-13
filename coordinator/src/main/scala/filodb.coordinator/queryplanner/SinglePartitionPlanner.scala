@@ -1,7 +1,7 @@
 package filodb.coordinator.queryplanner
 
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.query.{BinaryJoin, LabelValues, LogicalPlan, SeriesKeysByFilters, SetOperator}
+import filodb.query.{BinaryJoin, LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters, SetOperator}
 import filodb.query.exec._
 
 /**
@@ -24,6 +24,7 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
     logicalPlan match {
       case lp: BinaryJoin          => materializeBinaryJoin(lp, qContext)
       case lp: LabelValues         => materializeLabelValues(lp, qContext)
+      case lp: LabelNames          => materializeLabelNames(lp, qContext)
       case lp: SeriesKeysByFilters => materializeSeriesKeysFilters(lp, qContext)
       case _                       => materializeSimpleQuery(logicalPlan, qContext)
 
@@ -101,6 +102,12 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
     val execPlans = planners.values.toList.distinct.map(_.materialize(logicalPlan, qContext))
     if (execPlans.size == 1) execPlans.head
     else LabelValuesDistConcatExec(qContext, inProcessPlanDispatcher, execPlans)
+  }
+
+  private def materializeLabelNames(logicalPlan: LogicalPlan, qContext: QueryContext) = {
+    val execPlans = planners.values.toList.distinct.map(_.materialize(logicalPlan, qContext))
+    if (execPlans.size == 1) execPlans.head
+    else LabelNamesDistConcatExec(qContext, inProcessPlanDispatcher, execPlans)
   }
 
   private def materializeSeriesKeysFilters(logicalPlan: LogicalPlan, qContext: QueryContext) = {

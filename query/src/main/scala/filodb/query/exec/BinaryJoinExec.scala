@@ -67,13 +67,13 @@ final case class BinaryJoinExec(queryContext: QueryContext,
                               querySession: QuerySession): Observable[RangeVector] = {
     val span = Kamon.currentSpan()
     val taskOfResults = childResponses.map {
-      case (QueryResult(_, _, result, _, _), _)
+      case (QueryResult(_, _, result, _, _, _), _)
         if (result.size  > queryContext.plannerParams.joinQueryCardLimit && cardinality == Cardinality.OneToOne) =>
         throw new BadQueryException(s"The join in this query has input cardinality of ${result.size} which" +
           s" is more than limit of ${queryContext.plannerParams.joinQueryCardLimit}." +
           s" Try applying more filters or reduce time range.")
-      case (QueryResult(_, _, result, _, _), i) => (result, i)
-      case (QueryError(_, ex), _)         => throw ex
+      case (QueryResult(_, _, result, _, _, _), i) => (result, i)
+      case (QueryError(_, _, ex), _)         => throw ex
     }.toListL.map { resp =>
       span.mark("binary-join-child-results-available")
       Kamon.histogram("query-execute-time-elapsed-step1-child-results-available",
@@ -199,9 +199,9 @@ final case class BinaryJoinExec(queryContext: QueryContext,
     */
   override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema = {
     resp match {
-      case QueryResult(_, schema, _, _, _) if rs == ResultSchema.empty =>
+      case QueryResult(_, schema, _, _, _, _) if rs == ResultSchema.empty =>
         schema     /// First schema, take as is
-      case QueryResult(_, schema, _, _, _) =>
+      case QueryResult(_, schema, _, _, _, _) =>
         if (!rs.hasSameColumnsAs(schema)) throw SchemaMismatch(rs.toString, schema.toString)
         else rs
     }

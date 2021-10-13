@@ -5,7 +5,7 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.core.GlobalConfig
 import filodb.core.query.{ColumnFilter, Filter, QueryConfig}
 import filodb.prometheus.ast._
-import filodb.query.{LabelValues, LogicalPlan}
+import filodb.query.{LabelNames, LabelValues, LogicalPlan}
 
 /**
   * Parser routes requests to LegacyParser or AntlrParser.
@@ -48,8 +48,8 @@ object Parser extends StrictLogging {
   }
 
   // TODO: Once fully switched to AntlrParser, get rid of the special precedence methods.
-  private def parseQueryWithPrecedence(query: String): Expression = {
-    mode match {
+  private def parseQueryWithPrecedence(query: String, modeParam: Mode = mode): Expression = {
+    modeParam match {
       case Antlr => AntlrParser.parseQuery(query)
       case Legacy => LegacyParser.parseQueryWithPrecedence(query)
       case Shadow => {
@@ -125,15 +125,36 @@ object Parser extends StrictLogging {
     }
   }
 
-  def queryToLogicalPlan(query: String, queryTimestamp: Long, step: Long): LogicalPlan = {
+  // Only called by tests.
+  def labelNamesQueryToLogicalPlan(filterQuery: Option[String],
+                                    timeParams: TimeRangeParams): LogicalPlan = {
+    filterQuery match {
+      case Some(filter) =>
+        val columnFilters = parseLabelValueFilter(filter).map { l =>
+          l.labelMatchOp match {
+            case EqualMatch => ColumnFilter(l.label, Filter.Equals(l.value))
+            case NotRegexMatch => ColumnFilter(l.label, Filter.NotEqualsRegex(l.value))
+            case RegexMatch => ColumnFilter(l.label, Filter.EqualsRegex(l.value))
+            case NotEqual(false) => ColumnFilter(l.label, Filter.NotEquals(l.value))
+            case other: Any => throw new IllegalArgumentException(s"Unknown match operator $other")
+          }
+        }
+        LabelNames(columnFilters, timeParams.start * 1000, timeParams.end * 1000)
+      case _ =>
+        LabelNames(Seq.empty, timeParams.start * 1000, timeParams.end * 1000)
+    }
+  }
+
+  def queryToLogicalPlan(query: String, queryTimestamp: Long, step: Long, mode: Mode = Shadow): LogicalPlan = {
     // Remember step matters here in instant query, when lookback is provided in step factor
     // notation as in [5i]
     val defaultQueryParams = TimeStepParams(queryTimestamp, step, queryTimestamp)
-    queryRangeToLogicalPlan(query, defaultQueryParams)
+    queryRangeToLogicalPlan(query, defaultQueryParams, mode)
   }
 
-  def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
-    parseQueryWithPrecedence(query) match {
+  def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams, mode: Mode = Shadow): LogicalPlan = {
+    val ex = parseQueryWithPrecedence(query, mode)
+    ex match {
       case p: PeriodicSeries => p.toSeriesPlan(timeParams)
       case r: SimpleSeries   => r.toSeriesPlan(timeParams, isRoot = true)
       case _ => throw new UnsupportedOperationException()

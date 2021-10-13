@@ -3,9 +3,10 @@ package filodb.prometheus.query
 import remote.RemoteStorage._
 
 import filodb.core.GlobalConfig
+import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
-import filodb.core.query.{ColumnFilter, ColumnInfo, Filter, RangeVector, RangeVectorKey}
+import filodb.core.query.{Result => _, _}
 import filodb.query.{QueryResult => FiloQueryResult, _}
 import filodb.query.AggregationOperator.Avg
 import filodb.query.exec.{ExecPlan, HistToPromSeriesMapper}
@@ -79,13 +80,15 @@ object PrometheusModel {
   }
 
   def toPromSuccessResponse(qr: FiloQueryResult, verbose: Boolean): SuccessResponse = {
-    val results = if (qr.resultSchema.columns.nonEmpty &&
+    val results = if (qr.resultSchema.columns.nonEmpty && qr.resultSchema.columns.length > 1 &&
                       qr.resultSchema.columns(1).colType == ColumnType.HistogramColumn)
                     qr.result.map(toHistResult(_, verbose, qr.resultType))
+                  else if (qr.resultSchema.columns.length == 1)
+                    qr.result.map(toMetadataResult(_, verbose, qr.resultType))
                   else
                     qr.result.map(toPromResult(_, verbose, qr.resultType))
     SuccessResponse(Data(toPromResultType(qr.resultType), results.filter(r => r.values.nonEmpty || r.value.isDefined)),
-                    "success", Some(qr.mayBePartial), qr.partialResultReason)
+                    "success", Some(qr.mayBePartial), qr.partialResultReason, Some(toQueryStatistics(qr.queryStats)))
   }
 
   def toPromExplainPlanResponse(ex: ExecPlan): ExplainPlanResponse = {
@@ -98,6 +101,17 @@ object PrometheusModel {
       case QueryResultType.InstantVector => "vector"
       case QueryResultType.Scalar => "scalar"
     }
+  }
+
+  def toMetadataResult(srv: RangeVector, verbose: Boolean, typ: QueryResultType): Result = {
+    val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
+      (if (verbose) makeVerboseLabels(srv.key)
+      else Map.empty)
+    val values = srv.rows.map(row => {
+      val br = row.asInstanceOf[BinaryRecordRowReader]
+      br.schema.colValues(br.recordBase, br.recordOffset, br.schema.colNames).head
+    })
+    Result(tags, Option(Seq(LabelSampl(values.toSeq))), None)
   }
 
   /**
@@ -188,7 +202,12 @@ object PrometheusModel {
   }
 
   def toPromErrorResponse(qe: filodb.query.QueryError): ErrorResponse = {
-    ErrorResponse(qe.t.getClass.getSimpleName, qe.t.getMessage)
+    ErrorResponse(qe.t.getClass.getSimpleName, qe.t.getMessage, "error", Some(toQueryStatistics(qe.queryStats)))
   }
+
+  def toQueryStatistics(qs: QueryStats): Seq[QueryStatistics] = qs.stat.map(stat =>
+    QueryStatistics(stat._1, stat._2.timeSeriesScanned.get(),
+      stat._2.dataBytesScanned.get(), stat._2.resultBytes.get())
+  ).toSeq
 
 }

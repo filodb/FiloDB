@@ -15,7 +15,7 @@ import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.memstore._
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, QuerySession}
+import filodb.core.query.{ColumnFilter, QuerySession, ServiceUnavailableException}
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
@@ -32,8 +32,16 @@ extends MemStore with StrictLogging {
 
   override def isDownsampleStore: Boolean = true
 
-  def isReadyForQuery(ref: DatasetRef, shard: Int): Boolean = {
-    getShardE(ref: DatasetRef, shard: Int).isReadyForQuery
+  def checkReadyForQuery(ref: DatasetRef,
+                         shard: Int,
+                         querySession: QuerySession): Unit = {
+    if (!getShardE(ref: DatasetRef, shard: Int).isReadyForQuery) {
+      if (!querySession.qContext.plannerParams.allowPartialResults) {
+        throw new ServiceUnavailableException(s"Unable to answer query since shard $shard is still bootstrapping")
+      }
+      querySession.resultCouldBePartial = true
+      querySession.partialResultsReason = Some("Result may be partial since some shards are still bootstrapping")
+    }
   }
 
   override def metastore: MetaStore = ??? // Not needed
@@ -86,6 +94,10 @@ extends MemStore with StrictLogging {
     = getShard(dataset, shard)
         .map(_.labelValuesWithFilters(filters, labelNames, end, start, limit)).getOrElse(Iterator.empty)
 
+  def labelNames(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                 end: Long, start: Long): Seq[String] =
+    getShard(dataset, shard).map(_.labelNames(filters, end, start)).getOrElse(Seq.empty)
+
   def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
                           fetchFirstLastSampleTimes: Boolean, end: Long, start: Long,
                           limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] =
@@ -103,6 +115,12 @@ extends MemStore with StrictLogging {
         s"this node. Was it was recently reassigned to another node? Prolonged occurrence indicates an issue.")
     }
     shard.lookupPartitions(partMethod, chunkMethod, querySession)
+  }
+
+  def acquireSharedLock(ref: DatasetRef,
+                        shardNum: Int,
+                        querySession: QuerySession): Unit = {
+    // no op
   }
 
   def scanPartitions(ref: DatasetRef,
@@ -140,6 +158,9 @@ extends MemStore with StrictLogging {
   }
 
   def shutdown(): Unit = {
+    datasets.valuesIterator.foreach { d =>
+      d.values().asScala.foreach(_.shutdown())
+    }
     reset()
   }
 

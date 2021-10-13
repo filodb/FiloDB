@@ -3,18 +3,20 @@ package filodb.query
 import enumeratum.{Enum, EnumEntry}
 
 import filodb.core.{DatasetRef, NodeCommand, NodeResponse}
-import filodb.core.query.{RangeVector, ResultSchema}
+import filodb.core.query.{QueryStats, RangeVector, ResultSchema}
 
 trait QueryCommand extends NodeCommand with java.io.Serializable {
   def submitTime: Long
   def dataset: DatasetRef
 }
 
-trait QueryResponse extends NodeResponse with java.io.Serializable {
+sealed trait QueryResponse extends NodeResponse with java.io.Serializable {
   def id: String
 }
 
-final case class QueryError(id: String, t: Throwable) extends QueryResponse with filodb.core.ErrorResponse {
+final case class QueryError(id: String,
+                            queryStats: QueryStats,
+                            t: Throwable) extends QueryResponse with filodb.core.ErrorResponse {
   override def toString: String = s"QueryError id=$id ${t.getClass.getName} ${t.getMessage}\n" +
     t.getStackTrace.map(_.toString).mkString("\n")
 }
@@ -50,6 +52,7 @@ object QueryResultType extends Enum[QueryResultType] {
 final case class QueryResult(id: String,
                              resultSchema: ResultSchema,
                              result: Seq[RangeVector],
+                             queryStats: QueryStats = QueryStats(),
                              mayBePartial: Boolean = false,
                              partialResultReason: Option[String] = None) extends QueryResponse {
   def resultType: QueryResultType = {

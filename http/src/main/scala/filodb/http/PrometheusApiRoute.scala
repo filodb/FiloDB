@@ -33,6 +33,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
   import filodb.prometheus.query.PrometheusModel._
 
   val schemas = settings.filoSettings.schemas
+  val ONE_DAY_IN_SECS = 86400L
 
   val route = pathPrefix( "promql" / Segment) { dataset =>
     // Path: /promql/<datasetName>/api/v1/query_range
@@ -41,8 +42,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // [Range Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#range-queries)
     path( "api" / "v1" / "query_range") {
       get {
-        parameter('query.as[String], 'start.as[Double], 'end.as[Double], 'histogramMap.as[Boolean].?,
-                  'step.as[Int], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?)
+        parameter(('query.as[String], 'start.as[Double], 'end.as[Double], 'histogramMap.as[Boolean].?,
+          'step.as[Int], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?))
         { (query, start, end, histMap, step, explainOnly, verbose, spread) =>
           val logicalPlan = Parser.queryRangeToLogicalPlan(query, TimeStepParams(start.toLong, step, end.toLong))
 
@@ -58,14 +59,33 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // [Instant Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#instant-queries)
     path( "api" / "v1" / "query") {
       get {
-        parameter('query.as[String], 'time.as[Double], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?,
-          'spread.as[Int].?, 'histogramMap.as[Boolean].?, 'step.as[Double].?)
+        parameter(('query.as[String], 'time.as[Double], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?,
+          'spread.as[Int].?, 'histogramMap.as[Boolean].?, 'step.as[Double].?))
         { (query, time, explainOnly, verbose, spread, histMap, step) =>
           val stepLong = step.map(_.toLong).getOrElse(0L)
           val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong, stepLong)
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
             verbose.getOrElse(false), spread, PromQlQueryParams(query, time.toLong, stepLong, time.toLong),
             histMap.getOrElse(false))
+        }
+      }
+    } ~
+    // Path: /promql/<datasetName>/api/v1/labels
+    // This endpoint returns a list of label names
+    // For more details, see Prometheus HTTP API Documentation
+    // [Label names](https://prometheus.io/docs/prometheus/latest/querying/api/#getting-label-names)
+    path( "api" / "v1" / "labels") {
+      get {
+        parameter(('filter.as[String], 'start.as[Double].?, 'end.as[Double].?,
+          'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?))
+        { (filter, start, end, explainOnly, verbose, spread) =>
+          val currentTimeInSecs = System.currentTimeMillis()/1000
+          val startLong = start.map(_.toLong).getOrElse(currentTimeInSecs - ONE_DAY_IN_SECS)
+          val endLong = end.map(_.toLong).getOrElse(currentTimeInSecs)
+          val logicalPlan = Parser.labelNamesQueryToLogicalPlan(Option(filter), TimeStepParams(startLong, 0L, endLong))
+          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
+            verbose.getOrElse(false), spread, PromQlQueryParams(filter, startLong, 0L, endLong),
+            false)
         }
       }
     } ~
@@ -96,7 +116,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
             qr.find(!_.isInstanceOf[filodb.query.QueryResult]) match {
               case Some(qe: QueryError) => complete(toPromErrorResponse(qe))
               case Some(UnknownDataset) => complete(Codes.NotFound ->
-                                           ErrorResponse("badQuery", s"Dataset $dataset is not registered"))
+                                           ErrorResponse("badQuery",
+                                             s"Dataset $dataset is not registered", "error", None))
               case Some(a: Any)      => throw new IllegalStateException(s"Got $a as query response")
               case None              => val promQrs = qr.asInstanceOf[Seq[filodb.query.QueryResult]].map { r =>
                                           convertHistToPromResult(r, schemas.part)
@@ -125,12 +146,14 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
       LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryContext(tsdbQueryParams, spreadProvider))
     }
     onSuccess(asyncAsk(nodeCoord, command, settings.queryAskTimeout)) {
-      case qr: QueryResult => val translated = if (histMap) qr else convertHistToPromResult(qr, schemas.part)
+      case qr: QueryResult => val translated = if (histMap || logicalPlan.isInstanceOf[MetadataQueryPlan])
+                                                qr
+                                               else convertHistToPromResult(qr, schemas.part)
                               complete(toPromSuccessResponse(translated, verbose))
       case qr: QueryError => complete(toPromErrorResponse(qr))
       case qr: ExecPlan => complete(toPromExplainPlanResponse(qr))
       case UnknownDataset => complete(Codes.NotFound ->
-        ErrorResponse("badQuery", s"Dataset $dataset is not registered"))
+        ErrorResponse("badQuery", s"Dataset $dataset is not registered", "error", None))
     }
   }
 }
