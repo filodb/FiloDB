@@ -21,6 +21,7 @@ object InstantFunctionId extends Enum[InstantFunctionId] {
   case object Log10 extends InstantFunctionId("log10")
   case object Log2 extends InstantFunctionId("log2")
   case object Round extends InstantFunctionId("round")
+  case object Sgn extends InstantFunctionId("sgn")
   case object Sqrt extends InstantFunctionId("sqrt")
   case object DaysInMonth extends InstantFunctionId("days_in_month")
   case object DayOfMonth extends InstantFunctionId("day_of_month")

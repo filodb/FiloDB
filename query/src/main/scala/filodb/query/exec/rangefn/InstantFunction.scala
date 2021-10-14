@@ -76,6 +76,7 @@ object InstantFunction {
     * @param function to be invoked
     * @return the function
     */
+  //scalastyle:off cyclomatic.complexity
   def double(function: InstantFunctionId): DoubleInstantFunction = {
     function match {
       case Abs                => AbsImpl()
@@ -88,6 +89,7 @@ object InstantFunction {
       case Log10              => Log10Impl()
       case Log2               => Log2Impl()
       case Round              => RoundImpl()
+      case Sgn                => SgnImpl()
       case Sqrt               => SqrtImpl()
       case Month              => MonthImpl()
       case Year               => YearImpl()
@@ -99,6 +101,7 @@ object InstantFunction {
       case _                  => throw new UnsupportedOperationException(s"$function not supported.")
     }
   }
+  //scalastyle:on cyclomatic.complexity
 
   /**
    * Returns the HistogramInstantFunction given the function ID and parameters
@@ -227,6 +230,19 @@ final case class RoundImpl() extends DoubleInstantFunction {
       value
     else
       scala.math.floor(value * toNearestInverse + 0.5) / toNearestInverse
+  }
+}
+
+/**
+ * sgn(v instant-vector) for all elements v[i] in v, returns:
+ *   -1 iff v[i] <  0;
+ *    0 iff v[i] == 0;
+ *    1 iff v[i] >  0
+ */
+final case class SgnImpl() extends EmptyParamsInstantFunction {
+  override def apply(value: Double, scalarParams: Seq[Double] = Nil): Double = {
+    require(scalarParams.isEmpty, "No additional parameters required for the instant function.")
+    scala.math.signum(value)
   }
 }
 

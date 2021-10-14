@@ -706,4 +706,48 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
       head.equals("my_hist") shouldEqual true
   }
+
+  it("should generate correct execPlan for instant vector functions") {
+    // ensures:
+    //   (1) the execPlan tree has a LocalPartitionDistConcatExec root, and
+    //   (2) the tree has a max depth 1 where all children are MultiSchemaPartitionsExec nodes, and
+    //   (3) the final RangeVectorTransformer at each child is an InstantVectorFunctionMapper, and
+    //   (4) the InstantVectorFunctionMapper has the appropriate InstantFunctionId
+    val queryIdPairs = Seq(
+      ("""abs(metric{job="app"})""", InstantFunctionId.Abs),
+      ("""ceil(metric{job="app"})""", InstantFunctionId.Ceil),
+      ("""clamp_max(metric{job="app"}, 1)""", InstantFunctionId.ClampMax),
+      ("""clamp_min(metric{job="app"}, 1)""", InstantFunctionId.ClampMin),
+      ("""exp(metric{job="app"})""", InstantFunctionId.Exp),
+      ("""floor(metric{job="app"})""", InstantFunctionId.Floor),
+      ("""histogram_quantile(0.9, metric{job="app"})""", InstantFunctionId.HistogramQuantile),
+      ("""histogram_max_quantile(0.9, metric{job="app"})""", InstantFunctionId.HistogramMaxQuantile),
+      ("""histogram_bucket(0.1, metric{job="app"})""", InstantFunctionId.HistogramBucket),
+      ("""ln(metric{job="app"})""", InstantFunctionId.Ln),
+      ("""log10(metric{job="app"})""", InstantFunctionId.Log10),
+      ("""log2(metric{job="app"})""", InstantFunctionId.Log2),
+      ("""round(metric{job="app"})""", InstantFunctionId.Round),
+      ("""sgn(metric{job="app"})""", InstantFunctionId.Sgn),
+      ("""sqrt(metric{job="app"})""", InstantFunctionId.Sqrt),
+      ("""days_in_month(metric{job="app"})""", InstantFunctionId.DaysInMonth),
+      ("""day_of_month(metric{job="app"})""", InstantFunctionId.DayOfMonth),
+      ("""day_of_week(metric{job="app"})""", InstantFunctionId.DayOfWeek),
+      ("""hour(metric{job="app"})""", InstantFunctionId.Hour),
+      ("""minute(metric{job="app"})""", InstantFunctionId.Minute),
+      ("""month(metric{job="app"})""", InstantFunctionId.Month),
+      ("""year(metric{job="app"})""", InstantFunctionId.Year)
+    )
+    for ((query, funcId) <- queryIdPairs) {
+      val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+      execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
+      for (child <- execPlan.children) {
+        child.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
+        child.children.size shouldEqual 0
+        val finalTransformer = child.asInstanceOf[MultiSchemaPartitionsExec].rangeVectorTransformers.last
+        finalTransformer.isInstanceOf[InstantVectorFunctionMapper] shouldEqual true
+        finalTransformer.asInstanceOf[InstantVectorFunctionMapper].function shouldEqual funcId
+      }
+    }
+  }
 }

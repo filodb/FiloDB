@@ -105,6 +105,8 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
           new TransientRow(2L, 4.5d),
           new TransientRow(2L, 0d),
           new TransientRow(2L, -2.1d),
+          new TransientRow(2L, -0.1d),
+          new TransientRow(2L, 0.3d),
           new TransientRow(2L, 5.9d),
           new TransientRow(2L, Double.NaN),
           new TransientRow(2L, 3.3d)).iterator
@@ -145,6 +147,9 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
     // Exp
     val expected11 = samples.map(_.rows.map(v => scala.math.exp(v.getDouble(1))))
     applyFunctionAndAssertResult(samples, expected11, InstantFunctionId.Exp)
+    // Sgn
+    val expected12 = samples.map(_.rows.map(v => scala.math.signum(v.getDouble(1))))
+    applyFunctionAndAssertResult(samples, expected12, InstantFunctionId.Sgn)
     // Round
     testRoundFunction(samples)
   }
@@ -187,6 +192,15 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
       resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)).toList)
     } should have message "requirement failed: Cannot use ClampMin without providing a lower limit of min."
 
+    // sgn
+    the[IllegalArgumentException] thrownBy {
+      val instantVectorFnMapper5 = exec.InstantVectorFunctionMapper(InstantFunctionId.Sgn,
+        Seq(StaticFuncArgs(1, rangeParams)))
+      val resultObs = instantVectorFnMapper5(Observable.fromIterable(sampleBase), querySession, 1000, resultSchema, Nil)
+      resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)).toList)
+    } should have message "requirement failed: No additional parameters required for the instant function."
+
+    // sqrt
     the[IllegalArgumentException] thrownBy {
       val instantVectorFnMapper5 = exec.InstantVectorFunctionMapper(InstantFunctionId.Sqrt,
         Seq(StaticFuncArgs(1, rangeParams)))
@@ -194,6 +208,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
       resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)).toList)
     } should have message "requirement failed: No additional parameters required for the instant function."
 
+    // round
     the[IllegalArgumentException] thrownBy {
       val instantVectorFnMapper5 = exec.InstantVectorFunctionMapper(InstantFunctionId.Round,
         Seq(StaticFuncArgs(1, rangeParams), StaticFuncArgs(2, rangeParams)))
