@@ -233,6 +233,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp)
       case lp: LabelValues                 => materializeLabelValues(qContext, lp)
       case lp: LabelNames                  => materializeLabelNames(qContext, lp)
+      case lp: LabelCardinalities          => materializeLabelCardinalities(qContext, lp)
       case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(qContext, lp)
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplySortFunction           => materializeApplySortFunction(qContext, lp)
@@ -497,6 +498,19 @@ class SingleClusterPlanner(val dataset: Dataset,
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       exec.LabelCardinalityExec(qContext, dispatcher, dsRef, shard, renamedFilters, lp.startMs, lp.endMs)
+    }
+    PlanResult(metaExec, false)
+  }
+
+  // NOTE(a_theimer): Step 2: prep the ExecPlan leaves
+  // TODO(a_theimer): make sure correct
+  private def materializeLabelCardinalities(qContext: QueryContext,
+                                            lp: LabelCardinalities): PlanResult = {
+    val renamedFilters = renameMetricFilter(lp.filters)
+    val shardsToHit = shardsFromFilters(renamedFilters, qContext)
+    val metaExec = shardsToHit.map { shard =>
+      val dispatcher = dispatcherForShard(shard)
+      exec.LabelCardExec(qContext, dispatcher, dsRef, shard, renamedFilters, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec, false)
   }

@@ -64,6 +64,19 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
                                         dispatcher: PlanDispatcher,
                                         children: Seq[ExecPlan]) extends MetadataDistConcatExec
 
+// NOTE(a_theimer): step 3? merge the leaves?
+// TODO(a_theimer): need something like this in place of LocalPartitionDistConcatExec?
+//final case class LabelCardMergeExec(queryContext: QueryContext,
+//                                    dispatcher: PlanDispatcher,
+//                                    children: Seq[ExecPlan]) extends NonLeafExecPlan {
+//  override protected def args: String = ""
+//  override protected def compose(childResponses: Observable[(QueryResponse, Int)],
+//                                 firstSchema: Task[ResultSchema],
+//                                 querySession: QuerySession): Observable[RangeVector] = {
+//
+//  }
+//}
+
 final case class LabelValuesDistConcatExec(queryContext: QueryContext,
                                            dispatcher: PlanDispatcher,
                                            children: Seq[ExecPlan]) extends MetadataDistConcatExec
@@ -251,8 +264,6 @@ final case class LabelValuesExec(queryContext: QueryContext,
     s" startMs=$startMs, endMs=$endMs"
 }
 
-
-
 final case class LabelCardinalityExec(queryContext: QueryContext,
                                  dispatcher: PlanDispatcher,
                                  dataset: DatasetRef,
@@ -281,16 +292,57 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
         partKeysMap.foreach { rv =>
           rv.foreach {
             case (labelName, labelValue) =>
-                  metadataResult.getOrElseUpdate(labelName.toString, new CpcSketch(logK)).update(labelValue.toString)
-            }
+              metadataResult.getOrElseUpdate(labelName.toString, new CpcSketch(logK)).update(labelValue.toString)
+          }
         }
         val sketchMapIterator = (metadataResult.map{
           case (label, cpcSketch) => (ZeroCopyUTF8String(label), ZeroCopyUTF8String(cpcSketch.toByteArray))
         }.toMap :: Nil).toIterator
         Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-            UTF8MapIteratorRowReader(sketchMapIterator), None))
+          UTF8MapIteratorRowReader(sketchMapIterator), None))
       case _ => Observable.empty
     }
+    val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
+    ExecResult(rvs, Task.eval(sch))
+  }
+
+  def args: String = s"shard=$shard, filters=$filters, limit=${queryContext.plannerParams.sampleLimit}," +
+    s" startMs=$startMs, endMs=$endMs"
+}
+
+final case class LabelCardExec(queryContext: QueryContext,
+                               dispatcher: PlanDispatcher,
+                               dataset: DatasetRef,
+                               shard: Int,
+                               filters: Seq[ColumnFilter],
+                               startMs: Long,
+                               endMs: Long) extends LeafExecPlan {
+
+  override def enforceLimit: Boolean = false
+
+  // TODO(a_theimer): probably not setup correctly
+  private def responseToObservable(resp: Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]])
+              : Observable[IteratorBackedRangeVector] = {
+    Observable.now(IteratorBackedRangeVector(
+      new CustomRangeVectorKey(Map.empty), UTF8MapIteratorRowReader(resp), None))
+  }
+
+  // NOTE(a_theimer): Step 2a
+  def doExecute(source: ChunkSource,
+                querySession: QuerySession)
+               (implicit sched: Scheduler): ExecResult = {
+    source.checkReadyForQuery(dataset, shard, querySession)
+    source.acquireSharedLock(dataset, shard, querySession)
+    val fetchFirstLastSampleTimes = false
+    val rvs = source match {
+      case memStore: MemStore =>
+        val response = memStore.partKeysWithFilters(dataset, shard, filters,
+          fetchFirstLastSampleTimes, endMs, startMs, queryContext.plannerParams.sampleLimit)
+        responseToObservable(response)
+      case other =>
+        Observable.empty
+    }
+    // TODO(a_theimer): fix result schema
     val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
     ExecResult(rvs, Task.eval(sch))
   }
@@ -330,3 +382,27 @@ final case class LabelNamesExec(queryContext: QueryContext,
   def args: String = s"shard=$shard, filters=$filters, limit=5," +
     s" startMs=$startMs, endMs=$endMs"
 }
+
+// NOTE(a_theimer): step 4: convert from label->sketch map to simple output
+// TODO(a_theimer): probably need this eventually
+//final case class CardinalityPresenter(aggrOp: AggregationOperator,
+//                                      aggrParams: Seq[Any],
+//                                      rangeParams: RangeParams,
+//                                      funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
+//
+//  protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams, rangeParams=$rangeParams"
+//
+//  def apply(source: Observable[RangeVector],
+//            querySession: QuerySession,
+//            limit: Int,
+//            sourceSchema: ResultSchema,
+//            paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
+//    val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
+//    RangeVectorAggregator.present(aggregator, source, limit, rangeParams)
+//  }
+//
+//  override def schema(source: ResultSchema): ResultSchema = {
+//    val aggregator = RowAggregator(aggrOp, aggrParams, source)
+//    aggregator.presentationSchema(source)
+//  }
+//}

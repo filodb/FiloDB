@@ -108,6 +108,28 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     result shouldEqual jobQueryResult1
   }
 
+  // TODO(a_theimer): delete this
+  it ("should work") {
+    import ZeroCopyUTF8String._
+    val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
+                       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    val execPlan = LabelCardExec(QueryContext(), dummyDispatcher,
+      timeseriesDataset.ref, 0, filters, now-5000, now)
+    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    resp.asInstanceOf[QueryResult].result.foreach(
+      _.rows().foreach(
+        r => println(r.getString(0))))
+//    val result = (resp: @unchecked) match {
+//      case QueryResult(id, _, response, _, _, _) => {
+//        val rv = response(0)
+//        rv.rows.size shouldEqual 1
+//        val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
+//        rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
+//      }
+//    }
+//    result shouldEqual jobQueryResult1
+  }
+
   it ("should not return any rows for wrong column filters") {
     import ZeroCopyUTF8String._
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total1".utf8)),
