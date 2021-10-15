@@ -251,6 +251,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
               case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
             }.getOrElse("unknown")
           }.toList
+          querySession.queryStats.getTimeSeriesScannedCounter(metricGroupBy).addAndGet(recs.length)
           val chunksReadCounter = querySession.queryStats.getDataBytesScannedCounter(metricGroupBy)
 
           PartLookupResult(shardNum, chunkMethod, debox.Buffer.empty,
