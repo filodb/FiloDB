@@ -226,6 +226,11 @@ object SchemaMismatch {
   def apply(expected: Schema, found: Schema): SchemaMismatch = SchemaMismatch(expected.name, found.name)
 }
 
+case class TimeSeriesShardInfo(shardNum: Int,
+                               stats: TimeSeriesShardStats,
+                               bufferPools: debox.Map[Int, WriteBufferPool],
+                               nativeMemoryManager: NativeMemoryManager)
+
 // scalastyle:off number.of.methods
 // scalastyle:off file.size.limit
 /**
@@ -410,6 +415,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
     DMap(pools.toSeq: _*)
   }
+
+  private val shardInfo = TimeSeriesShardInfo(shardNum, shardStats, bufferPools, bufferMemoryManager)
 
   private final val partitionGroups = Array.fill(numGroups)(new EWAHCompressedBitmap)
 
@@ -1409,14 +1416,11 @@ class TimeSeriesShard(val ref: DatasetRef,
       // that min-write-buffers-free setting is large enough to accommodate the below use cases ALWAYS
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, bufferMemoryManager)
       val partId = if (usePartId == CREATE_NEW_PARTID) createPartitionID() else usePartId
-      val pool = bufferPools(schema.schemaHash)
       val newPart = if (shouldTrace(partKeyAddr)) {
         logger.debug(s"Adding tracing TSPartition dataset=$ref shard=$shardNum group=$group partId=$partId")
-        new TracingTimeSeriesPartition(
-          partId, ref, schema, partKeyAddr, shardNum, pool, shardStats, bufferMemoryManager, initMapSize)
+        new TracingTimeSeriesPartition(partId, ref, schema, partKeyAddr, shardInfo, initMapSize)
       } else {
-        new TimeSeriesPartition(
-          partId, schema, partKeyAddr, shardNum, pool, shardStats, bufferMemoryManager, initMapSize)
+        new TimeSeriesPartition(partId, schema, partKeyAddr, shardInfo, initMapSize)
       }
       partitions.put(partId, newPart)
       shardStats.partitionsCreated.increment()

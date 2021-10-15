@@ -3,6 +3,7 @@ package filodb.repair
 import java.io.File
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+
 import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
 import monix.reactive.Observable
 import org.apache.spark.SparkConf
@@ -11,15 +12,15 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
+
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.GlobalConfig
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.downsample.OffHeapMemory
-import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesShardStats}
+import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesShardInfo, TimeSeriesShardStats}
 import filodb.core.metadata.{Dataset, Schema, Schemas}
 import filodb.core.store.{PartKeyRecord, StoreConfig}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -148,9 +149,8 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
                     seriesTags: Map[ZeroCopyUTF8String, ZeroCopyUTF8String]): TimeSeriesPartition = {
       val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
       val partKey = partBuilder.partKeyFromObjects(schema, gaugeName, seriesTags)
-      val part = new TimeSeriesPartition(0, schema, partKey,
-        0, offheapMem.bufferPools(schema.schemaHash), shardStats,
-        offheapMem.nativeMemoryManager, 1)
+      val shardInfo = TimeSeriesShardInfo(0, shardStats, offheapMem.bufferPools, offheapMem.nativeMemoryManager)
+      val part = new TimeSeriesPartition(0, schema, partKey, shardInfo, 1)
       part
     }
 
