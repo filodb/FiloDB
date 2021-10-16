@@ -1,7 +1,6 @@
 package filodb.coordinator.queryplanner
 
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
@@ -387,6 +386,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     case lv: LabelValues          => lv.copy(startMs = startMs, endMs = endMs)
     case ln: LabelNames           => ln.copy(startMs = startMs, endMs = endMs)
     case lc: LabelCardinality     => lc.copy(startMs = startMs, endMs = endMs)
+    case lc: LabelCardinalities   => lc.copy(startMs = startMs, endMs = endMs)
   }
 
   def materializeMetadataQueryPlan(lp: MetadataQueryPlan, qContext: QueryContext): PlanResult = {
@@ -407,8 +407,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           val params: Map[String, String] = lp match {
             case _: SeriesKeysByFilters |
                  _: LabelNames |
-                 _: LabelCardinality          => Map("match[]" -> queryParams.promQl)
-            case lv: LabelValues              => PlannerUtil.getLabelValuesUrlParams(lv, queryParams)
+                 _: LabelCardinality    => Map("match[]" -> queryParams.promQl)
+            case _: LabelCardinalities  => throw new RuntimeException("TODO(a_theimer)")
+            case lv: LabelValues        => PlannerUtil.getLabelValuesUrlParams(lv, queryParams)
           }
           createMetadataRemoteExec(qContext, p, params)
         }
@@ -423,6 +424,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
         case _: LabelCardinality => LabelCardinalityReduceExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
+        case _: LabelCardinalities => throw new RuntimeException("TODO(a_theimer)")
       }
     }
     PlanResult(execPlan::Nil)
