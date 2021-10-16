@@ -144,6 +144,7 @@ class SingleClusterPlanner(val dataset: Dataset,
             reduceExec.addRangeVectorTransformer(new LabelCardinalityPresenter())
             reduceExec
           }
+          case _: LabelCardExec => LabelCardMergeExec(qContext, targetActor, many)
           case ske: PartKeysExec => PartKeysDistConcatExec(qContext, targetActor, many)
           case ep: ExecPlan =>
             val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, many)

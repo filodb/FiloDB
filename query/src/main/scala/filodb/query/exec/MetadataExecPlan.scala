@@ -64,18 +64,21 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
                                         dispatcher: PlanDispatcher,
                                         children: Seq[ExecPlan]) extends MetadataDistConcatExec
 
-// NOTE(a_theimer): step 3? merge the leaves?
-// TODO(a_theimer): need something like this in place of LocalPartitionDistConcatExec?
-//final case class LabelCardMergeExec(queryContext: QueryContext,
-//                                    dispatcher: PlanDispatcher,
-//                                    children: Seq[ExecPlan]) extends NonLeafExecPlan {
-//  override protected def args: String = ""
-//  override protected def compose(childResponses: Observable[(QueryResponse, Int)],
-//                                 firstSchema: Task[ResultSchema],
-//                                 querySession: QuerySession): Observable[RangeVector] = {
-//
-//  }
-//}
+// NOTE(a_theimer): step 3: merge the leaves
+final case class LabelCardMergeExec(queryContext: QueryContext,
+                                    dispatcher: PlanDispatcher,
+                                    children: Seq[ExecPlan]) extends NonLeafExecPlan {
+  override protected def args: String = ""
+  override protected def compose(childResponses: Observable[(QueryResponse, Int)],
+                                 firstSchema: Task[ResultSchema],
+                                 querySession: QuerySession): Observable[RangeVector] = {
+    // TODO(a_theimer): make this work
+    // scalastyle:off
+    println("---- LABEL MERGE CONCAT EXEC RETURNS EMPTY OBSERVABLE ----")
+    // scalastype:on
+    return Observable.empty
+  }
+}
 
 final case class LabelValuesDistConcatExec(queryContext: QueryContext,
                                            dispatcher: PlanDispatcher,
