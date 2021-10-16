@@ -341,6 +341,14 @@ object LogicalPlanUtils extends StrictLogging {
     }
   }
 
+  def hasBinaryJoin(lp: LogicalPlan): Boolean = {
+   lp match {
+     case b: BinaryJoin => true
+     case n: NonLeafLogicalPlan => n.children.exists(hasBinaryJoin(_))
+     case _ => false
+   }
+  }
+
 }
 
 /**

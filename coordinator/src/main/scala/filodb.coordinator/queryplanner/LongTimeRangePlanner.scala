@@ -137,6 +137,15 @@ import filodb.query.exec._
   }
 
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
-    walkLogicalPlanTree(logicalPlan, qContext).plans.head
+
+    if (!LogicalPlanUtils.hasBinaryJoin(logicalPlan)) {
+      logicalPlan match {
+        case p: PeriodicSeriesPlan => materializePeriodicSeriesPlan(qContext, p)
+          // add cases
+        case _                     => rawClusterMaterialize(qContext, logicalPlan)
+      }
+    }.plans.head else {
+      walkLogicalPlanTree(logicalPlan, qContext).plans.head
+    }
   }
 }
