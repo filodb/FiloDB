@@ -1,9 +1,13 @@
 package filodb.query.exec
 
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
+
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
+
+import scala.collection.mutable
 
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
@@ -17,6 +21,24 @@ import filodb.memory.format.{StringArrayRowReader, UnsafeUtils, UTF8MapIteratorR
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
+
+// TODO(a_theimer): probably doesn't work right
+case object SerializeUtils {
+  def serialize(obj: Any) : ZeroCopyUTF8String = {
+    val outStream = new ObjectOutputStream(new ByteArrayOutputStream)
+    outStream.writeObject(obj)
+    val res = outStream.toString.utf8
+    outStream.close()
+    res
+  }
+  def deSerialize[T](str: ZeroCopyUTF8String): T = {
+    val bis = new ByteArrayInputStream(str.bytes)
+    val ois = new ObjectInputStream(bis)
+    val res = ois.readObject().asInstanceOf[T]
+    ois.close()
+    res
+  }
+}
 
 trait MetadataDistConcatExec extends NonLeafExecPlan {
 
@@ -64,6 +86,7 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
                                         dispatcher: PlanDispatcher,
                                         children: Seq[ExecPlan]) extends MetadataDistConcatExec
 
+// TODO(a_theimer): fix this
 // NOTE(a_theimer): step 3: merge the leaves
 final case class LabelCardMergeExec(queryContext: QueryContext,
                                     dispatcher: PlanDispatcher,
@@ -73,10 +96,12 @@ final case class LabelCardMergeExec(queryContext: QueryContext,
                                  firstSchema: Task[ResultSchema],
                                  querySession: QuerySession): Observable[RangeVector] = {
     // TODO(a_theimer): make this work
-    // scalastyle:off
-    println("---- LABEL MERGE CONCAT EXEC RETURNS EMPTY OBSERVABLE ----")
-    // scalastype:on
-    return Observable.empty
+    childResponses.map {
+      case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
+      case (QueryError(_, _, ex), _)         => throw ex
+    }.flatten
+     //.flatMap(rvs => Observable.fromIterable(rvs))
+     //.flatMap(rv => Observable.fromIterable(rv.rows().toList))
   }
 }
 
@@ -323,11 +348,29 @@ final case class LabelCardExec(queryContext: QueryContext,
 
   override def enforceLimit: Boolean = false
 
-  // TODO(a_theimer): probably not setup correctly
-  private def responseToObservable(resp: Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]])
+  private def memStoreResponseToObservable(resp: Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]])
               : Observable[IteratorBackedRangeVector] = {
+    // TODO(a_theimer): replace with sketch
+    // TODO(a_theimer): don't do this real-time
+
+    // map each label to its set of values
+    val valueSets = new mutable.HashMap[ZeroCopyUTF8String, mutable.HashSet[ZeroCopyUTF8String]]
+    for (pkey <- resp) {
+      for ((label, value) <- pkey) {
+        valueSets.getOrElseUpdate(label, new mutable.HashSet[ZeroCopyUTF8String]).add(value)
+      }
+    }
+
+    // encode each set as a utf8 string
+    val encodedSets = new mutable.HashMap[ZeroCopyUTF8String, ZeroCopyUTF8String]
+    for ((label, valSet) <- valueSets) {
+      encodedSets.put(label, SerializeUtils.serialize(valSet))
+    }
+
+    // TODO(a_theimer): just use sequential reader?
     Observable.now(IteratorBackedRangeVector(
-      new CustomRangeVectorKey(Map.empty), UTF8MapIteratorRowReader(resp), None))
+      new CustomRangeVectorKey(Map.empty),
+        UTF8MapIteratorRowReader(encodedSets.map(pair => Map(pair._1-> pair._2)).iterator), None))
   }
 
   // NOTE(a_theimer): Step 2a
@@ -341,12 +384,11 @@ final case class LabelCardExec(queryContext: QueryContext,
       case memStore: MemStore =>
         val response = memStore.partKeysWithFilters(dataset, shard, filters,
           fetchFirstLastSampleTimes, endMs, startMs, queryContext.plannerParams.sampleLimit)
-        responseToObservable(response)
+        memStoreResponseToObservable(response)
       case other =>
         Observable.empty
     }
-    // TODO(a_theimer): fix result schema
-    val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
+    val sch = ResultSchema(Seq(ColumnInfo("Cardinalities", ColumnType.MapColumn)), 1)
     ExecResult(rvs, Task.eval(sch))
   }
 
