@@ -32,7 +32,10 @@ class CountLabelCardinalityAggregator extends RowAggregator {
 
   override def newRowToMapInto: MutableRowReader = new LabelCardinalityCountTransientRow()
 
-  override def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = ???
+  override def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = {
+    println(item)
+    item
+  }
 
   override def reduceAggregate(acc: CountLabelCardinalityHolder, aggRes: RowReader): CountLabelCardinalityHolder = ???
 
