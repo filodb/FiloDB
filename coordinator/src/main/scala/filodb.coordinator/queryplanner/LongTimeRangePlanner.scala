@@ -108,7 +108,19 @@ import filodb.query.exec._
 
   // scalastyle:off cyclomatic.complexity
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
-    logicalPlan match {
+
+    if (!LogicalPlanUtils.hasBinaryJoin(logicalPlan)) {
+      logicalPlan match {
+        case p: PeriodicSeriesPlan => materializePeriodicSeriesPlan(qContext, p)
+        case _: LabelValues |
+             _: ApplyLimitFunction |
+             _: SeriesKeysByFilters |
+             _: ApplyInstantFunctionRaw |
+             _: RawSeries |
+             _: LabelNames => rawClusterMaterialize(qContext, logicalPlan)
+      }
+    }
+    else logicalPlan match {
       case lp: RawSeries                   => rawClusterMaterialize(qContext, lp)
       case lp: RawChunkMeta                => rawClusterMaterialize(qContext, lp)
       case lp: PeriodicSeries              => materializePeriodicSeriesPlan(qContext, lp)
@@ -137,15 +149,6 @@ import filodb.query.exec._
   }
 
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
-
-    if (!LogicalPlanUtils.hasBinaryJoin(logicalPlan)) {
-      logicalPlan match {
-        case p: PeriodicSeriesPlan => materializePeriodicSeriesPlan(qContext, p)
-          // add cases
-        case _                     => rawClusterMaterialize(qContext, logicalPlan)
-      }
-    }.plans.head else {
-      walkLogicalPlanTree(logicalPlan, qContext).plans.head
-    }
+    walkLogicalPlanTree(logicalPlan, qContext).plans.head
   }
 }
