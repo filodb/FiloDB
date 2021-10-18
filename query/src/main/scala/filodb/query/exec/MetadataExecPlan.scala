@@ -84,6 +84,37 @@ final case class LabelNamesDistConcatExec(queryContext: QueryContext,
   }
 }
 
+final case class LabelCardinalityDistConcatExec(queryContext: QueryContext,
+                                          dispatcher: PlanDispatcher,
+                                          children: Seq[ExecPlan]) extends DistConcatExec {
+
+  override protected def compose(childResponses: Observable[(QueryResponse, Int)],
+                                 firstSchema: Task[ResultSchema],
+                                 querySession: QuerySession): Observable[RangeVector] = {
+      qLogger.debug(s"LabelCardinalityDistConcatExec: Concatenating results")
+      val taskOfResults = childResponses.map {
+        case (QueryResult(_, _, result, _, _, _), _) => result
+        case (QueryError(_, _, ex), _)         => throw ex
+      }.toListL.map { resp =>
+        var metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+        resp.foreach { rv =>
+          metadataResult ++= rv.head.rows.map { rowReader =>
+            val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
+            rv.head match {
+              case srv: SerializedRangeVector =>
+                srv.schema.toStringPairs (binaryRowReader.recordBase, binaryRowReader.recordOffset)
+                  .map (pair => pair._1.utf8 -> pair._2.utf8).toMap
+              case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
+            }
+          }
+        }
+        IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
+          new UTF8MapIteratorRowReader(metadataResult.toIterator), None)
+      }
+      Observable.fromTask(taskOfResults)
+  }
+}
+
 final case class PartKeysExec(queryContext: QueryContext,
                               dispatcher: PlanDispatcher,
                               dataset: DatasetRef,
@@ -153,6 +184,41 @@ final case class LabelValuesExec(queryContext: QueryContext,
   }
 
   def args: String = s"shard=$shard, filters=$filters, col=$columns, limit=${queryContext.plannerParams.sampleLimit}," +
+    s" startMs=$startMs, endMs=$endMs"
+}
+
+
+
+final case class LabelCardinalityExec(queryContext: QueryContext,
+                                 dispatcher: PlanDispatcher,
+                                 dataset: DatasetRef,
+                                 shard: Int,
+                                 filters: Seq[ColumnFilter],
+                                 startMs: Long,
+                                 endMs: Long) extends LeafExecPlan {
+
+  override def enforceLimit: Boolean = false
+
+  def doExecute(source: ChunkSource,
+                querySession: QuerySession)
+               (implicit sched: Scheduler): ExecResult = {
+    source.checkReadyForQuery(dataset, shard, querySession)
+    source.acquireSharedLock(dataset, shard, querySession)
+    val rvs = source match {
+      case ms: MemStore =>
+        // TODO: Do we need to check for presence of all three, _ws_, _ns_ and _metric_?
+        // TODO: What should be the limit?
+        val response = ms.partKeysWithFilters(dataset, shard, filters, fetchFirstLastSampleTimes = true, startMs, endMs,
+          limit= 1000000)
+        Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
+          new UTF8MapIteratorRowReader(response), None))
+      case _ => Observable.empty
+    }
+    val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
+    ExecResult(rvs, Task.eval(sch))
+  }
+
+  def args: String = s"shard=$shard, filters=$filters, limit=${queryContext.plannerParams.sampleLimit}," +
     s" startMs=$startMs, endMs=$endMs"
 }
 

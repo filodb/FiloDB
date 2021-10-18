@@ -330,6 +330,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     case sk: SeriesKeysByFilters  => sk.copy(startMs = startMs, endMs = endMs)
     case lv: LabelValues          => lv.copy(startMs = startMs, endMs = endMs)
     case ln: LabelNames           => ln.copy(startMs = startMs, endMs = endMs)
+    case lc: LabelCardinality     => lc.copy(startMs = startMs, endMs = endMs)
   }
 
   def materializeMetadataQueryPlan(lp: MetadataQueryPlan, qContext: QueryContext): PlanResult = {
@@ -348,9 +349,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             copy(lp, startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
         else {
           val params: Map[String, String] = lp match {
-            case _: SeriesKeysByFilters => Map("match[]" -> queryParams.promQl)
-            case lv: LabelValues        => PlannerUtil.getLabelValuesUrlParams(lv, queryParams)
-            case _: LabelNames         => Map("match[]" -> queryParams.promQl)
+            case _: SeriesKeysByFilters |
+                 _: LabelNames |
+                 _: LabelCardinality          => Map("match[]" -> queryParams.promQl)
+            case lv: LabelValues              => PlannerUtil.getLabelValuesUrlParams(lv, queryParams)
           }
           createMetadataRemoteExec(qContext, p, params)
         }
@@ -362,6 +364,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         case _: LabelValues => LabelValuesDistConcatExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
         case _: LabelNames => LabelNamesDistConcatExec(qContext, inProcessPlanDispatcher,
+          execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
+        case _: LabelCardinality => LabelCardinalityDistConcatExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
       }
     }

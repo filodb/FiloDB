@@ -134,6 +134,7 @@ class SingleClusterPlanner(val dataset: Dataset,
         many.head match {
           case lve: LabelValuesExec => LabelValuesDistConcatExec(qContext, targetActor, many)
           case lne: LabelNamesExec => LabelNamesDistConcatExec(qContext, targetActor, many)
+          case lne: LabelCardinalityExec => LabelCardinalityDistConcatExec(qContext, targetActor, many)
           case ske: PartKeysExec => PartKeysDistConcatExec(qContext, targetActor, many)
           case ep: ExecPlan =>
             val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, many)
@@ -235,7 +236,8 @@ class SingleClusterPlanner(val dataset: Dataset,
       case lp: ScalarBinaryOperation       => materializeScalarBinaryOperation(qContext, lp)
       case lp: SubqueryWithWindowing       => materializeSubqueryWithWindowing(qContext, lp)
       case lp: TopLevelSubquery            => materializeTopLevelSubquery(qContext, lp)
-      case _                               => throw new BadQueryException("Invalid logical plan")
+      case lp: LabelCardinality            => materializeLabelCardinality(qContext, lp)
+      //case _                               => throw new BadQueryException("Invalid logical plan")
     }
   }
   // scalastyle:on cyclomatic.complexity
@@ -474,6 +476,18 @@ class SingleClusterPlanner(val dataset: Dataset,
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       exec.LabelNamesExec(qContext, dispatcher, dsRef, shard, renamedFilters, lp.startMs, lp.endMs)
+    }
+    PlanResult(metaExec, false)
+  }
+
+  private def materializeLabelCardinality(qContext: QueryContext,
+                                    lp: LabelCardinality): PlanResult = {
+    val renamedFilters = renameMetricFilter(lp.filters)
+    val shardsToHit = shardsFromFilters(renamedFilters, qContext)
+
+    val metaExec = shardsToHit.map { shard =>
+      val dispatcher = dispatcherForShard(shard)
+      exec.LabelCardinalityExec(qContext, dispatcher, dsRef, shard, renamedFilters, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec, false)
   }
