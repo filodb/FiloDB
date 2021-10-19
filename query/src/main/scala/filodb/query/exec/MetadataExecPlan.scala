@@ -3,15 +3,17 @@ package filodb.query.exec
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
+import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
 
 import filodb.core.DatasetRef
-import filodb.core.binaryrecord2.BinaryRecordRowReader
+import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
 import filodb.core.memstore.MemStore
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.store.ChunkSource
-import filodb.memory.format.{StringArrayRowReader, UTF8MapIteratorRowReader, ZeroCopyUTF8String}
+import filodb.memory.{UTF8StringMedium, UTF8StringShort}
+import filodb.memory.format.{StringArrayRowReader, UnsafeUtils, UTF8MapIteratorRowReader, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
@@ -88,6 +90,30 @@ final case class LabelCardinalityDistConcatExec(queryContext: QueryContext,
                                           dispatcher: PlanDispatcher,
                                           children: Seq[ExecPlan]) extends DistConcatExec {
 
+  import scala.collection.mutable.{Map => MutableMap}
+
+  private def mapConsumer(sketchMap: MutableMap[ZeroCopyUTF8String, CpcSketch]) = new MapItemConsumer {
+    def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+      val key = new ZeroCopyUTF8String(keyBase, keyOffset + 1,
+        UTF8StringShort.numBytes(keyBase, keyOffset))
+
+
+      val numBytes = UTF8StringMedium.numBytes(valueBase, valueOffset)
+      val sketchBytes = ZeroCopyUTF8String(
+        valueBase.asInstanceOf[Array[Byte]], valueOffset.toInt + 2 - UnsafeUtils.arayOffset, numBytes).bytes
+      val newSketch = sketchMap.get(key) match {
+        case Some(existing: CpcSketch) =>
+          val union = new CpcUnion(12)
+          union.update(existing)
+          union.update(CpcSketch.heapify(sketchBytes))
+          union.getResult
+        // TODO: Again, hardcoding, this needs to be configurable
+        case None => CpcSketch.heapify(sketchBytes)
+      }
+      sketchMap += (key -> newSketch)
+    }
+  }
+
   override protected def compose(childResponses: Observable[(QueryResponse, Int)],
                                  firstSchema: Task[ResultSchema],
                                  querySession: QuerySession): Observable[RangeVector] = {
@@ -96,20 +122,26 @@ final case class LabelCardinalityDistConcatExec(queryContext: QueryContext,
         case (QueryResult(_, _, result, _, _, _), _) => result
         case (QueryError(_, _, ex), _)         => throw ex
       }.toListL.map { resp =>
-        var metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+        val metadataResult = scala.collection.mutable.Map.empty[ZeroCopyUTF8String, CpcSketch]
         resp.foreach { rv =>
-          metadataResult ++= rv.head.rows.map { rowReader =>
+          rv.head.rows.foreach { rowReader =>
             val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
             rv.head match {
               case srv: SerializedRangeVector =>
-                srv.schema.toStringPairs (binaryRowReader.recordBase, binaryRowReader.recordOffset)
-                  .map (pair => pair._1.utf8 -> pair._2.utf8).toMap
+                srv.schema.consumeMapItems(
+                  binaryRowReader.recordBase,
+                  binaryRowReader.recordOffset,
+                  0,
+                  mapConsumer(metadataResult))
               case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
             }
           }
         }
+        val iterator = (metadataResult.map{
+          case (label, cpcSketch) => (label, ZeroCopyUTF8String(Math.round(cpcSketch.getEstimate).toInt.toString))
+        }.toMap :: Nil).toIterator
         IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-          new UTF8MapIteratorRowReader(metadataResult.toIterator), None)
+          new UTF8MapIteratorRowReader(iterator), None)
       }
       Observable.fromTask(taskOfResults)
   }
@@ -208,10 +240,25 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
       case ms: MemStore =>
         // TODO: Do we need to check for presence of all three, _ws_, _ns_ and _metric_?
         // TODO: What should be the limit?
+        // TODO: Sketch can be configured, in config along with the log value to use.
         val response = ms.partKeysWithFilters(dataset, shard, filters, fetchFirstLastSampleTimes = true, startMs, endMs,
           limit= 1000000)
+
+        val metadataResult = scala.collection.mutable.Map.empty[String, CpcSketch]
+        response.foreach { rv =>
+          rv.foreach {
+            case (labelName, labelValue) =>
+                  val jLabelName = labelName.toString
+                  val sketch = metadataResult.getOrElse(jLabelName, new CpcSketch(12))
+                  sketch.update(labelValue.toString)
+                  metadataResult += (jLabelName -> sketch)
+            }
+        }
+        val iterator = (metadataResult.map{
+          case (label, cpcSketch) => (ZeroCopyUTF8String(label), ZeroCopyUTF8String(cpcSketch.toByteArray))
+        }.toMap :: Nil).toIterator
         Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-          new UTF8MapIteratorRowReader(response), None))
+            new UTF8MapIteratorRowReader(iterator), None))
       case _ => Observable.empty
     }
     val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
