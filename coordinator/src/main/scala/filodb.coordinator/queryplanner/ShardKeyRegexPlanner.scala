@@ -67,9 +67,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
 
   def isMetadataQuery(logicalPlan: LogicalPlan): Boolean = {
     logicalPlan match {
-      case _: LabelValues |
-           _: LabelNames |
-           _: SeriesKeysByFilters => true
+      case _: MetadataQueryPlan => true
       case _ => false
     }
   }
