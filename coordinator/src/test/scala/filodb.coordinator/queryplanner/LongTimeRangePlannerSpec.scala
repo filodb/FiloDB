@@ -727,6 +727,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
+    //TODO Optimization - Push BinaryJoinExec to raw and downsample respectively and do stitch later
 
     /* T~AggregatePresenter(aggrOp=Count, aggrParams=List(), rangeParams=RangeParams(1633932035,60,1634623115))
   -E~LocalPartitionReduceAggregateExec(aggrOp=Count, aggrParams=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@2e86807a)
