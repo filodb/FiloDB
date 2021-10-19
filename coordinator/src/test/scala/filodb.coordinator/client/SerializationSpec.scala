@@ -19,6 +19,7 @@ import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryResult => QueryResult2, _}
 import filodb.query.exec.PartKeysDistConcatExec
+import filodb.query.exec.PartKeysExec
 
 object SerializationSpecConfig extends ActorSpecConfig {
   override val defaultConfig = """
@@ -266,7 +267,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       qParams)
     val execPlan1 = engine.materialize(logicalPlan1, QueryContext(Some(
       new StaticSpreadProvider(SpreadChange(0, 0))), 100))
-    val partKeysExec = execPlan1.asInstanceOf[PartKeysDistConcatExec]
+    val partKeysExec = execPlan1.asInstanceOf[PartKeysExec]
     roundTrip(partKeysExec) shouldEqual partKeysExec
 
     // without shardcolumns in filters
