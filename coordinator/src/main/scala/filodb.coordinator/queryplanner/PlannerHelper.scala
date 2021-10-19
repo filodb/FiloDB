@@ -384,20 +384,6 @@ object PlannerUtil extends StrictLogging {
   }
 
   /**
-   * Returns URL params for label values which is used to create Metadata remote exec plan
-   */
-  def getLabelNamesUrlParams(lp: LabelNames, queryParams: PromQlQueryParams): Map[String, String] = {
-    val quote = queryParams.remoteQueryPath match {
-      case Some(s) if s.contains("""/v2/labels/""") => """""""
-      case _ => ""
-    }
-    // Filter value should be enclosed in quotes for label values v2 endpoint
-    val filters = lp.filters.map{ f => s"""${f.column}${f.filter.operatorString}$quote${f.filter.valuesStrings.
-      head}$quote"""}.mkString(",")
-    Map("filter" -> filters)
-  }
-
-  /**
    * Picks one dispatcher randomly from child exec plans passed in as parameter
    */
   def pickDispatcher(children: Seq[ExecPlan]): PlanDispatcher = {
