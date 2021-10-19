@@ -854,16 +854,17 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
   it("should materialize LabelNames query correctly") {
     val (startSeconds: Int, endSeconds: Int, engine: MultiPartitionPlanner) = getPlannerForMetadataQueryTests
 
-    val lv = Parser.labelNamesQueryToLogicalPlan(Some("""__name__="some-metric", job="app""""), TimeStepParams(startSeconds, step, endSeconds))
+    val promQl = """test{job = "app"}"""
+    val lv = Parser.labelNamesQueryToLogicalPlan(promQl, TimeStepParams(startSeconds, step, endSeconds))
 
-    val promQlQueryParams = PromQlQueryParams("""test{job = "app"}""", startSeconds, step, endSeconds, Some("/api/v2/labels/name"))
+    val promQlQueryParams = PromQlQueryParams(promQl, startSeconds, step, endSeconds, Some("/api/v2/labels/name"))
     val execPlan = engine.materialize(lv, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
       PlannerParams(processMultiPartition = true)))
 
     execPlan.isInstanceOf[LabelNamesDistConcatExec] shouldEqual true
     execPlan.children.size shouldEqual 2
 
-    val expectedUrlParams = Map("filter" -> """__name__="some-metric",job="app"""")
+    val expectedUrlParams = Map("match[]" -> promQl)
     execPlan.children(1).asInstanceOf[MetadataRemoteExec].urlParams shouldEqual(expectedUrlParams)
     execPlan.children(1).asInstanceOf[MetadataRemoteExec].queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       endSecs shouldEqual(localPartitionStart - 1)

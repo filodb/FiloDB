@@ -350,7 +350,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           val params: Map[String, String] = lp match {
             case _: SeriesKeysByFilters => Map("match[]" -> queryParams.promQl)
             case lv: LabelValues        => PlannerUtil.getLabelValuesUrlParams(lv, queryParams)
-            case ln: LabelNames         => PlannerUtil.getLabelNamesUrlParams(ln, queryParams)
+            case _: LabelNames         => Map("match[]" -> queryParams.promQl)
           }
           createMetadataRemoteExec(qContext, p, params)
         }
