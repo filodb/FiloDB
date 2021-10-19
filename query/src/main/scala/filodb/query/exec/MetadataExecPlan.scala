@@ -68,6 +68,30 @@ final case class LabelValuesDistConcatExec(queryContext: QueryContext,
                                            dispatcher: PlanDispatcher,
                                            children: Seq[ExecPlan]) extends MetadataDistConcatExec
 
+final class LabelCardinalityPresenter(val funcParams: Seq[FuncArgs]  = Nil) extends RangeVectorTransformer {
+
+  override def apply(source: Observable[RangeVector],
+                     querySession: QuerySession,
+                     limit: Int,
+                     sourceSchema: ResultSchema,
+                     paramsResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
+
+    source.map(rv => {
+          val x = rv.rows().toList.head
+          // TODO: We expect only one column to be a map, p[attern matching does not work, is there better way?
+          val sketchMap = x.getAny(columnNo = 0).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+          val iterator = (sketchMap.map {
+            case (labelName, sketch) =>
+              (labelName,
+                ZeroCopyUTF8String(Math.round(CpcSketch.heapify(sketch.bytes).getEstimate).toInt.toString))
+          } :: Nil).toIterator
+          IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
+              new UTF8MapIteratorRowReader(iterator), None)
+      })
+  }
+
+  override protected[exec] def args: String = s"LabelCardinalityPresenter"
+}
 
 final case class LabelNamesDistConcatExec(queryContext: QueryContext,
                                            dispatcher: PlanDispatcher,
@@ -103,11 +127,12 @@ final case class LabelCardinalityDistConcatExec(queryContext: QueryContext,
         valueBase.asInstanceOf[Array[Byte]], valueOffset.toInt + 2 - UnsafeUtils.arayOffset, numBytes).bytes
       val newSketch = sketchMap.get(key) match {
         case Some(existing: CpcSketch) =>
+          // TODO: Again, hardcoding, lgK need this needs to be configurable
           val union = new CpcUnion(12)
           union.update(existing)
           union.update(CpcSketch.heapify(sketchBytes))
           union.getResult
-        // TODO: Again, hardcoding, this needs to be configurable
+
         case None => CpcSketch.heapify(sketchBytes)
       }
       sketchMap += (key -> newSketch)
@@ -138,7 +163,7 @@ final case class LabelCardinalityDistConcatExec(queryContext: QueryContext,
           }
         }
         val iterator = (metadataResult.map{
-          case (label, cpcSketch) => (label, ZeroCopyUTF8String(Math.round(cpcSketch.getEstimate).toInt.toString))
+          case (label, cpcSketch) => (label, ZeroCopyUTF8String(cpcSketch.toByteArray))
         }.toMap :: Nil).toIterator
         IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
           new UTF8MapIteratorRowReader(iterator), None)
