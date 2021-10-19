@@ -76,15 +76,15 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // [Label names](https://prometheus.io/docs/prometheus/latest/querying/api/#getting-label-names)
     path( "api" / "v1" / "labels") {
       get {
-        parameter(('filter.as[String], 'start.as[Double].?, 'end.as[Double].?,
+        parameter(("match[]".as[String], 'start.as[Double].?, 'end.as[Double].?,
           'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?))
-        { (filter, start, end, explainOnly, verbose, spread) =>
+        { (query, start, end, explainOnly, verbose, spread) =>
           val currentTimeInSecs = System.currentTimeMillis()/1000
           val startLong = start.map(_.toLong).getOrElse(currentTimeInSecs - ONE_DAY_IN_SECS)
           val endLong = end.map(_.toLong).getOrElse(currentTimeInSecs)
-          val logicalPlan = Parser.labelNamesQueryToLogicalPlan(Option(filter), TimeStepParams(startLong, 0L, endLong))
+          val logicalPlan = Parser.labelNamesQueryToLogicalPlan(query, TimeStepParams(startLong, 0L, endLong))
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
-            verbose.getOrElse(false), spread, PromQlQueryParams(filter, startLong, 0L, endLong),
+            verbose.getOrElse(false), spread, PromQlQueryParams(query, startLong, 0L, endLong),
             false)
         }
       }
