@@ -251,7 +251,7 @@ final class TopBottomKAggTransientRow(val k: Int) extends MutableRowReader {
   def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
 }
 
-abstract class GenericBlobBasedRow() extends MutableRowReader {
+final class CountValuesTransientRow() extends MutableRowReader {
   var timestamp: Long = _
   var blobBase: Array[Byte] = _
   var blobLength: Int = _
@@ -305,19 +305,6 @@ abstract class GenericBlobBasedRow() extends MutableRowReader {
     if (columnNo == 1) new ZeroCopyUTF8String(blobBase, UnsafeUtils.arayOffset, blobLength)
     else throw new IllegalArgumentException()
   }
-}
-
-final class CountValuesTransientRow() extends GenericBlobBasedRow
-
-final class LabelCardinalityCountTransientRow() extends GenericBlobBasedRow
-
-object LabelCardinalityMapSerDeser {
-
-  def serializedSize(map: debox.Map[String, Array[Byte]]): Int = ???
-
-  def serialize(map: debox.Map[String, Array[Byte]], serializedMap: Array[Byte]): Unit = ???
-
-  def deserialize(serializedMap: Array[Byte]): debox.Map[String, Array[Byte]] = ???
 }
 
 object CountValuesSerDeser {
