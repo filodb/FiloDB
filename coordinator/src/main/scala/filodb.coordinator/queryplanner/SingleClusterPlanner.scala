@@ -433,7 +433,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       lp.labelNames.updated(metricLabelIndex, dsOptions.metricColumn) else lp.labelNames
 
     val renamedFilters = renameMetricFilter(lp.filters)
-    val shardsToHit = if (shardColumns.toSet.subsetOf(renamedFilters.map(_.column).toSet)) {
+    val shardsToHit = if (canGetShardsFromFilters(renamedFilters, qContext)) {
       shardsFromFilters(renamedFilters, qContext)
     } else {
       mdNoShardKeyFilterRequests.increment()
@@ -446,10 +446,30 @@ class SingleClusterPlanner(val dataset: Dataset,
     PlanResult(metaExec, false)
   }
 
+  // allow metadataQueries to get list of shards from shardKeyFilters only if all shardCols have Equals filter
+  private def canGetShardsFromFilters(renamedFilters: Seq[ColumnFilter],
+                                      qContext: QueryContext): Boolean = {
+    if (qContext.plannerParams.shardOverrides.isEmpty && shardColumns.nonEmpty) {
+      shardColumns.toSet.subsetOf(renamedFilters.map(_.column).toSet) &&
+        shardColumns.forall { shardCol =>
+          // So to compute the shard hash we need shardCol == value filter (exact equals) for each shardColumn
+          renamedFilters.find(f => f.column == shardCol) match {
+            case Some(ColumnFilter(_, Filter.Equals(_: String))) => true
+            case _ => false
+          }
+        }
+    } else false
+  }
+
   private def materializeLabelNames(qContext: QueryContext,
-                                     lp: LabelNames): PlanResult = {
+                                    lp: LabelNames): PlanResult = {
     val renamedFilters = renameMetricFilter(lp.filters)
-    val shardsToHit = shardsFromFilters(renamedFilters, qContext)
+    val shardsToHit = if (canGetShardsFromFilters(renamedFilters, qContext)) {
+      shardsFromFilters(renamedFilters, qContext)
+    } else {
+      mdNoShardKeyFilterRequests.increment()
+      shardMapperFunc.assignedShards
+    }
 
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
@@ -462,9 +482,8 @@ class SingleClusterPlanner(val dataset: Dataset,
                                              lp: SeriesKeysByFilters): PlanResult = {
     // NOTE: _type_ filter support currently isn't there in series keys queries
     val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))
-    val filterCols = lp.filters.map(_.column).toSet
-    val shardsToHit = if (shardColumns.toSet.subsetOf(filterCols)) {
-      shardsFromFilters(lp.filters, qContext)
+    val shardsToHit = if (canGetShardsFromFilters(renamedFilters, qContext)) {
+      shardsFromFilters(renamedFilters, qContext)
     } else {
       mdNoShardKeyFilterRequests.increment()
       shardMapperFunc.assignedShards

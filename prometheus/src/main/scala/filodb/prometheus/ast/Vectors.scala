@@ -235,6 +235,10 @@ case class InstantExpression(metricName: Option[String],
     SeriesKeysByFilters(columnFilters, fetchFirstLastSampleTimes, timeParams.start * 1000, timeParams.end * 1000)
   }
 
+  def toLabelNamesPlan(timeParams: TimeRangeParams): LabelNames = {
+    LabelNames(columnFilters, timeParams.start * 1000, timeParams.end * 1000)
+  }
+
   def toRawSeriesPlan(timeParams: TimeRangeParams, offsetMs: Option[Long] = None): RawSeries = {
     RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
       offsetMs)
