@@ -464,7 +464,7 @@ class SingleClusterPlanner(val dataset: Dataset,
   private def materializeLabelNames(qContext: QueryContext,
                                     lp: LabelNames): PlanResult = {
     val renamedFilters = renameMetricFilter(lp.filters)
-    val shardsToHit = if (shardColumns.toSet.subsetOf(renamedFilters.map(_.column).toSet)) {
+    val shardsToHit = if (canGetShardsFromFilters(renamedFilters, qContext)) {
       shardsFromFilters(renamedFilters, qContext)
     } else {
       mdNoShardKeyFilterRequests.increment()
