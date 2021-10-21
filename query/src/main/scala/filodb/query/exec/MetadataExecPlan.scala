@@ -264,10 +264,10 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
     val rvs = source match {
       case ms: MemStore =>
         // TODO: Do we need to check for presence of all three, _ws_, _ns_ and _metric_?
-        // TODO: What should be the limit?
+        // TODO: What should be the limit, where to configure?
         // TODO: Sketch can be configured, in config along with the log value to use.
-        val response = ms.partKeysWithFilters(dataset, shard, filters, fetchFirstLastSampleTimes = true, startMs, endMs,
-          limit= 1000000)
+        val response = ms.partKeysWithFilters(dataset, shard, filters, fetchFirstLastSampleTimes = false,
+          startMs, endMs, limit= 1000000)
 
         val metadataResult = scala.collection.mutable.Map.empty[String, CpcSketch]
         response.foreach { rv =>
