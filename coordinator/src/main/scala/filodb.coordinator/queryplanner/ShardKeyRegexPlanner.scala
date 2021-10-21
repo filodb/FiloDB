@@ -56,12 +56,20 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     val nonMetricShardKeyFilters =
       LogicalPlan.getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
-    if (LogicalPlan.hasShardKeyEqualsOnly(logicalPlan, dataset.options.nonMetricShardColumns)) {
+    if (isMetadataQuery(logicalPlan)
+      || LogicalPlan.hasShardKeyEqualsOnly(logicalPlan, dataset.options.nonMetricShardColumns)) {
       queryPlanner.materialize(logicalPlan, qContext)
     } else if (hasSingleShardKeyMatch(nonMetricShardKeyFilters)) {
       // For queries like topk(2, test{_ws_ = "demo", _ns_ =~ "App-1"}) which have just one matching value
       generateExecWithoutRegex(logicalPlan, nonMetricShardKeyFilters.head, qContext).head
     } else walkLogicalPlanTree(logicalPlan, qContext).plans.head
+  }
+
+  def isMetadataQuery(logicalPlan: LogicalPlan): Boolean = {
+    logicalPlan match {
+      case _: MetadataQueryPlan => true
+      case _ => false
+    }
   }
 
   def walkLogicalPlanTree(logicalPlan: LogicalPlan,
@@ -77,9 +85,6 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       case lp: VectorPlan                  => materializeVectorPlan(qContext, lp)
       case lp: Aggregate                   => materializeAggregate(lp, qContext)
       case lp: BinaryJoin                  => materializeBinaryJoin(lp, qContext)
-      case lp: LabelValues                 => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
-      case lp: LabelNames                  => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
-      case lp: SeriesKeysByFilters         => PlanResult(Seq(queryPlanner.materialize(lp, qContext)))
       case _                               => materializeOthers(logicalPlan, qContext)
     }
   }

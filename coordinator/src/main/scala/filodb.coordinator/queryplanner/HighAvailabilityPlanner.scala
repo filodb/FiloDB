@@ -87,7 +87,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
                                             PlannerUtil.getLabelValuesUrlParams(lp, queryParams), newQueryContext,
                                             inProcessPlanDispatcher, dsRef, remoteExecHttpClient)
             case lp: LabelNames         => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                            PlannerUtil.getLabelNamesUrlParams(lp, queryParams), newQueryContext,
+                                            Map("match[]" -> queryParams.promQl), newQueryContext,
                                             inProcessPlanDispatcher, dsRef, remoteExecHttpClient)
             case lp: SeriesKeysByFilters => val urlParams = Map("match[]" -> queryParams.promQl)
                                             MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
