@@ -99,6 +99,15 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers {
 
   private val queryParams = PromQlQueryParams("notUsedQuery", 100, 1, 1000)
 
+  def validatePlan(plan: ExecPlan, expected: String): Unit = {
+    val planString = plan.printTree()
+      .replaceAll("testProbe-.*\\]", "testActor]")
+      .replaceAll("InProcessPlanDispatcher.*\\)", "InProcessPlanDispatcher")
+    val expectedString = expected.replaceAll("testProbe-.*\\]", "testActor]")
+      .replaceAll("InProcessPlanDispatcher.*\\)", "InProcessPlanDispatcher")
+    planString shouldEqual expectedString
+  }
+
   it("should generate plan for one namespace query across raw/downsample") {
     val lp = Parser.queryRangeToLogicalPlan(
       """sum(foo{_ws_ = "demo", _ns_ = "localNs", instance = "Inst-1" })""",
@@ -124,7 +133,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers {
         |----T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634172830000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633913030000,1634172830000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1314561820],downsample)""".stripMargin
 
-    validatedPlan(execPlan, expected)
+    validatePlan(execPlan, expected)
   }
 
   it("should generate plan for one recording rule query") {
@@ -143,7 +152,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers {
         |---T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633913030000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(foo:1m))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1054960625],recordingRules)""".stripMargin
 
-    validatedPlan(execPlan, expected)
+    validatePlan(execPlan, expected)
   }
 
   it("should generate plan for single partition query that does not live in local partition") {
@@ -162,7 +171,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers {
     // FIXME: shouldn't this be a simple route to remote partition since there is only one child?
     //  Why further reduction/present?
 
-    validatedPlan(execPlan, expected)
+    validatePlan(execPlan, expected)
   }
 
   it("should generate plan for recording rule query spanning multiple partitions") {
@@ -193,7 +202,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers {
     // FIXME: shouldn't the LHS be a simple route to remote partition since there is only one child?
     //  Why further reduction/present?
 
-    validatedPlan(execPlan, expected)
+    validatePlan(execPlan, expected)
   }
 
   it("should generate plan for raw query spanning multiple partitions, and push down aggregations") {
@@ -232,7 +241,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers {
 
     // FIXME: This plan is wrongly doing a LocalPartitionDistConcatExec
 
-    validatedPlan(execPlan, expected)
+    validatePlan(execPlan, expected)
   }
 
   it("should generate plan for raw query spanning multiple partitions with namespace regex, and push down aggregations") {
@@ -264,19 +273,9 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers {
         |------T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634172830000, window=None, functionId=None, rawSource=true, offsetMs=None)
         |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633913030000,1634172830000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1756982367],downsample)""".stripMargin
 
-    println(execPlan.printTree())
     // FIXME: This plan is wrongly doing a LocalPartitionDistConcatExec
 
-    validatedPlan(execPlan, expected)
+    validatePlan(execPlan, expected)
   }
 
-
-  def validatedPlan(plan: ExecPlan, expected: String): Unit = {
-    val planString = plan.printTree()
-                         .replaceAll("testProbe-.*\\]", "testActor]")
-                         .replaceAll("InProcessPlanDispatcher.*\\)", "InProcessPlanDispatcher")
-    val expectedString = expected.replaceAll("testProbe-.*\\]", "testActor]")
-                                 .replaceAll("InProcessPlanDispatcher.*\\)", "InProcessPlanDispatcher")
-    planString shouldEqual expectedString
-  }
 }
