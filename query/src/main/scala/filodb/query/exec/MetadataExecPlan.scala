@@ -15,7 +15,8 @@ import filodb.core.query._
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.store.ChunkSource
 import filodb.memory.{UTF8StringMedium, UTF8StringShort}
-import filodb.memory.format.{StringArrayRowReader, UnsafeUtils, UTF8MapIteratorRowReader, ZeroCopyUTF8String}
+import filodb.memory.format.{RowReader, SeqRowReader, StringArrayRowReader, UnsafeUtils,
+                             UTF8MapIteratorRowReader, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
@@ -76,8 +77,13 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
                                          children: Seq[ExecPlan],
                                          k: Int) extends NonLeafExecPlan {
   override protected def args: String = ""
+
+  override protected def forceSchema: Option[ResultSchema] = Option(ResultSchema(
+    Seq(ColumnInfo("Metric", ColumnType.StringColumn),
+        ColumnInfo("Cardinality", ColumnType.LongColumn)), 1))
+
   //scalastyle:off
-  def sketchFold(acc: ItemsSketch[ZeroCopyUTF8String], rv: RangeVector):
+  private def sketchFold(acc: ItemsSketch[ZeroCopyUTF8String], rv: RangeVector):
             ItemsSketch[ZeroCopyUTF8String] = {
     rv.rows().foreach{ r =>
       val map = r.getAny(0)
@@ -94,7 +100,7 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
     acc
   }
 
-  def pqueueFold(acc: mutable.PriorityQueue[(ZeroCopyUTF8String, Long)],
+  private def pqueueFold(acc: mutable.PriorityQueue[(ZeroCopyUTF8String, Long)],
                  tup: (ZeroCopyUTF8String, Long)): mutable.PriorityQueue[(ZeroCopyUTF8String, Long)] = {
     if (acc.size < k) {
       acc.enqueue(tup)
@@ -106,7 +112,8 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
     acc
   }
 
-  def ordering : Ordering[(ZeroCopyUTF8String, Long)] = Ordering.by(pair => -pair._2)
+  // TODO(a_theimer): toss this in a companion object?
+  private def ordering : Ordering[(ZeroCopyUTF8String, Long)] = Ordering.by(pair => -pair._2)
 
   //scalastyle:on
   override protected def compose(childResponses: Observable[(QueryResponse, Int)],
@@ -114,6 +121,8 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
                                  querySession: QuerySession): Observable[RangeVector] = {
     import monix.execution.Scheduler.Implicits.global
     //scalastyle:off
+
+    // TODO(a_theimer): don't actually .runAsync now?
     val fut = childResponses.map {
       case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
       case (QueryError(_, _, ex), _)         => throw ex
@@ -122,21 +131,27 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
     // TODO(a_theimer): not forever?
     Await.result(fut, Duration.Inf)
 
+    // TODO(a_theimer): this feels super unsafe
     val rangeVecs = fut.value.get.get
+
+    // TODO(a_theimer): should any of this execute now?
     val sketchUnion = rangeVecs.foldLeft(new ItemsSketch[ZeroCopyUTF8String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE))(sketchFold)
     val topkHeap = sketchUnion.getFrequentItems(ErrorType.NO_FALSE_NEGATIVES)
                         .map(row => (row.getItem, row.getEstimate))
                         .foldLeft(mutable.PriorityQueue[(ZeroCopyUTF8String, Long)]()(ordering))(pqueueFold)
 
-    // TODO(a_theimer): slow
-    val res = new mutable.HashMap[ZeroCopyUTF8String, ZeroCopyUTF8String]
-    while (topkHeap.nonEmpty) {
+    // TODO(a_theimer): this also probably shouldn't execute now
+    // TODO(a_theimer): more idiomatic functional-programming way to do this?
+    val arrSize = math.min(k, topkHeap.size)
+    val rows = new mutable.ArraySeq[RowReader](arrSize)
+    for (i <- 0 until arrSize) {
       val heapMin = topkHeap.dequeue()
-      res.update(heapMin._1, heapMin._2.toString.utf8)
+      rows(i) = SeqRowReader(Seq(heapMin._1, heapMin._2))
     }
 
     val it = IteratorBackedRangeVector(CustomRangeVectorKey(Map.empty),
-      UTF8MapIteratorRowReader(Seq(res.toMap).iterator), None)
+                                       new NoCloseCursor(rows.reverseIterator),
+                                       None)
     Observable.now(it)
   }
 }
