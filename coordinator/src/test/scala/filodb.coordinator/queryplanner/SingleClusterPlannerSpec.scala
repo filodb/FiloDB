@@ -812,10 +812,10 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   // TODO(a_theimer): delete this
   // TODO(a_theimer): LocalPartitionDistConcatExec still used
   it ("should run") {
-    val filters = Seq(ColumnFilter("__name__", Filter.Equals("http_requests_total")),
-                  ColumnFilter("job", Filter.Equals("app")))
-    val logicalPlan = LabelCardinalities(filters, 0, 1000)
-    val execPlan = engine.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
+//    val filters = Seq(ColumnFilter("__name__", Filter.Equals("http_requests_total")),
+//                  ColumnFilter("job", Filter.Equals("app")))
+//    val logicalPlan = MetricCardinalitiesTopK(filters, 0, 1000)
+//    val execPlan = engine.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
 //    execPlan.isInstanceOf[SetOperatorExec] shouldEqual true
 //    execPlan.children.foreach { l1 =>
 //      // Now there should be single level of reduce because we have 2 shards

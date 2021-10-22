@@ -1,17 +1,16 @@
 package filodb.query.exec
 
+//scalastyle:off
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
-
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
 
 import scala.collection.mutable
-
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
-import filodb.core.memstore.MemStore
+import filodb.core.memstore.{MemStore, TimeSeriesMemStore}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.query.NoCloseCursor.NoCloseCursor
@@ -21,24 +20,30 @@ import filodb.memory.format.{StringArrayRowReader, UnsafeUtils, UTF8MapIteratorR
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
+//import org.apache.datasketches.ArrayOfItemsSerDe
+import org.apache.datasketches.memory.Memory
+// import org.apache.datasketches.ArrayOfItemsSerDe
+// import org.apache.datasketches.memory.Memory
+import org.apache.datasketches.frequencies.{ErrorType, ItemsSketch}
+
+import scala.concurrent.Await
+import scala.concurrent.duration.Duration
 
 // TODO(a_theimer): probably doesn't work right
 case object SerializeUtils {
-  def serialize(obj: Any) : ZeroCopyUTF8String = {
-    val outStream = new ObjectOutputStream(new ByteArrayOutputStream)
-    outStream.writeObject(obj)
-    val res = outStream.toString.utf8
-    outStream.close()
-    res
+  def serialize(obj: Any) : Array[Byte] = {
+    val byte_os = new ByteArrayOutputStream()
+    val obj_os = new ObjectOutputStream(byte_os)
+    obj_os.writeObject(obj)
+    byte_os.toByteArray
   }
-  def deSerialize[T](str: ZeroCopyUTF8String): T = {
-    val bis = new ByteArrayInputStream(str.bytes)
+  def deSerialize(bytes: Array[Byte]): AnyRef = {
+    val bis = new ByteArrayInputStream(bytes)
     val ois = new ObjectInputStream(bis)
-    val res = ois.readObject().asInstanceOf[T]
-    ois.close()
-    res
+    ois.readObject()
   }
 }
+
 
 trait MetadataDistConcatExec extends NonLeafExecPlan {
 
@@ -88,20 +93,61 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
 
 // TODO(a_theimer): fix this
 // NOTE(a_theimer): step 3: merge the leaves
-final case class LabelCardMergeExec(queryContext: QueryContext,
-                                    dispatcher: PlanDispatcher,
-                                    children: Seq[ExecPlan]) extends NonLeafExecPlan {
+final case class MetricCardTopkMergeExec(queryContext: QueryContext,
+                                         dispatcher: PlanDispatcher,
+                                         children: Seq[ExecPlan]) extends NonLeafExecPlan {
   override protected def args: String = ""
+  //scalastyle:off
+  def fold(acc: ItemsSketch[ZeroCopyUTF8String], rv: RangeVector):
+            ItemsSketch[ZeroCopyUTF8String] = {
+    println(rv.getClass)
+    rv.rows().foreach{ r =>
+      println(r.getClass)
+      println(r.getAny(0).getClass)
+      val map = r.getAny(0)
+      println("PRE")
+      val mapcast = map.asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+      println("POST")
+      mapcast.foreach { pair =>
+        println("HELLO")
+        println(pair.getClass)
+        println(pair)
+        println(pair._2.getClass)
+        println(pair._2)
+        println("AAA")
+        val sketchSer = pair._2.asInstanceOf[String].getBytes
+        println("BBB")
+        val sketch = ItemsSketch.getInstance(Memory.wrap(sketchSer), new ZeroCopyUtf8SerDe)
+        println("CCC")
+        acc.merge(sketch)
+        println("DDD")
+      }
+    }
+    acc
+  }
+  //scalastyle:on
   override protected def compose(childResponses: Observable[(QueryResponse, Int)],
                                  firstSchema: Task[ResultSchema],
                                  querySession: QuerySession): Observable[RangeVector] = {
+    import monix.execution.Scheduler.Implicits.global
     // TODO(a_theimer): make this work
-    childResponses.map {
+    //scalastyle:off
+    val fut = childResponses.map {
       case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
       case (QueryError(_, _, ex), _)         => throw ex
-    }.flatten
-     //.flatMap(rvs => Observable.fromIterable(rvs))
-     //.flatMap(rv => Observable.fromIterable(rv.rows().toList))
+    }.flatten.toListL.runAsync
+    println("A")
+    Await.result(fut, Duration.Inf)
+    println("B")
+
+    import org.apache.datasketches.frequencies.ItemsSketch
+    val tri = fut.value.get.get
+    val union = tri.foldLeft(new ItemsSketch[ZeroCopyUTF8String](16))(fold)  // TODO(a_theimer)
+    val res = union.getFrequentItems(1, ErrorType.NO_FALSE_NEGATIVES).map(row => row.getItem).map(str => (str, union.getEstimate(str).toString.utf8)).toMap
+    println("C")
+    val it = IteratorBackedRangeVector(CustomRangeVectorKey(Map.empty),
+      UTF8MapIteratorRowReader(Seq(res).iterator), None)
+    Observable.now(it)
   }
 }
 
@@ -338,39 +384,59 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
     s" startMs=$startMs, endMs=$endMs"
 }
 
-final case class LabelCardExec(queryContext: QueryContext,
-                               dispatcher: PlanDispatcher,
-                               dataset: DatasetRef,
-                               shard: Int,
-                               filters: Seq[ColumnFilter],
-                               startMs: Long,
-                               endMs: Long) extends LeafExecPlan {
-
+final case class MetricCardTopkExec(queryContext: QueryContext,
+                                    dispatcher: PlanDispatcher,
+                                    dataset: DatasetRef,
+                                    shard: Int,
+                                    shardKeyPrefix: Seq[String],
+                                    startMs: Long,
+                                    endMs: Long) extends LeafExecPlan {
+  //scalastyle:off
   override def enforceLimit: Boolean = false
 
-  private def memStoreResponseToObservable(resp: Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]])
+  private def memStoreResponseToObservable(resp:  Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]])
               : Observable[IteratorBackedRangeVector] = {
+
     // TODO(a_theimer): replace with sketch
-    // TODO(a_theimer): don't do this real-time
+    // TODO(a_theimer): don't do this real-time?
 
-    // map each label to its set of values
-    val valueSets = new mutable.HashMap[ZeroCopyUTF8String, mutable.HashSet[ZeroCopyUTF8String]]
-    for (pkey <- resp) {
-      for ((label, value) <- pkey) {
-        valueSets.getOrElseUpdate(label, new mutable.HashSet[ZeroCopyUTF8String]).add(value)
-      }
-    }
+    val METRIC_KEY = "_metric_".utf8
 
-    // encode each set as a utf8 string
-    val encodedSets = new mutable.HashMap[ZeroCopyUTF8String, ZeroCopyUTF8String]
-    for ((label, valSet) <- valueSets) {
-      encodedSets.put(label, SerializeUtils.serialize(valSet))
-    }
+    //scalastyle:off
+
+    import org.apache.datasketches.frequencies.ItemsSketch
+
+    // TODO(a_theimer): Also keep sketch for this?
+    // keep track of keys we've seen.
+    val partKeySeen = new mutable.HashSet[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+    resp.foreach(pkey => partKeySeen.add(pkey))
+
+    val sketch = new ItemsSketch[ZeroCopyUTF8String](16)  // TODO(a_theimer)
+    partKeySeen.foreach(pkey => sketch.update(pkey(METRIC_KEY)))
+
+
+
+    val encodedMap = Map("temp".utf8 -> ZeroCopyUTF8String(sketch.toByteArray(new ZeroCopyUtf8SerDe)))
+
+//    // map metric to its set of partKeys
+//    val partKeySets = new mutable.HashMap[ZeroCopyUTF8String, mutable.HashSet[ZeroCopyUTF8String]]
+//    for (pkey <- resp) {
+//      val serKey = ZeroCopyUTF8String(SerializeUtils.serialize(pkey))
+//      partKeySets.getOrElseUpdate(pkey(METRIC_KEY),
+//                      new mutable.HashSet[ZeroCopyUTF8String])
+//                 .add(serKey)
+//    }
+//
+//    // encode each set as a utf8 string
+//    val encodedSets = new mutable.HashMap[ZeroCopyUTF8String, ZeroCopyUTF8String]
+//    for ((label, pkeySet) <- partKeySets) {
+//      encodedSets.put(label, ZeroCopyUTF8String(SerializeUtils.serialize(pkeySet.toSet)))
+//    }
 
     // TODO(a_theimer): just use sequential reader?
     Observable.now(IteratorBackedRangeVector(
       new CustomRangeVectorKey(Map.empty),
-        UTF8MapIteratorRowReader(encodedSets.map(pair => Map(pair._1-> pair._2)).iterator), None))
+        UTF8MapIteratorRowReader(Seq(encodedMap).iterator), None))
   }
 
   // NOTE(a_theimer): Step 2a
@@ -381,18 +447,29 @@ final case class LabelCardExec(queryContext: QueryContext,
     source.acquireSharedLock(dataset, shard, querySession)
     val fetchFirstLastSampleTimes = false
     val rvs = source match {
-      case memStore: MemStore =>
-        val response = memStore.partKeysWithFilters(dataset, shard, filters,
-          fetchFirstLastSampleTimes, endMs, startMs, queryContext.plannerParams.sampleLimit)
-        memStoreResponseToObservable(response)
+      case tsMemStore: TimeSeriesMemStore =>
+        // TODO(a_theimer): async this?
+        val cardResponse = tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix, 2)  // TODO(a_theimer): k
+        println(cardResponse)
+        val partKeyResponse = cardResponse.flatMap { card =>
+          val filters = Seq(
+            ColumnFilter("_ws_", Filter.Equals(shardKeyPrefix(0))),
+            ColumnFilter("_ns_", Filter.Equals(shardKeyPrefix(1))),
+            ColumnFilter("_metric_", Filter.Equals(card.childName))
+          )
+          tsMemStore.partKeysWithFilters(dataset, shard, filters,
+            fetchFirstLastSampleTimes, endMs, startMs, queryContext.plannerParams.sampleLimit)
+        }.iterator
+        memStoreResponseToObservable(partKeyResponse)
       case other =>
         Observable.empty
     }
-    val sch = ResultSchema(Seq(ColumnInfo("Cardinalities", ColumnType.MapColumn)), 1)
+    val sch = ResultSchema(Seq(ColumnInfo("MetricCardTopK", ColumnType.MapColumn)), 1)
     ExecResult(rvs, Task.eval(sch))
   }
 
-  def args: String = s"shard=$shard, filters=$filters, limit=${queryContext.plannerParams.sampleLimit}," +
+  // TODO(a_theimer): filters
+  def args: String = s"shard=$shard, filters=$shardKeyPrefix, limit=${queryContext.plannerParams.sampleLimit}," +
     s" startMs=$startMs, endMs=$endMs"
 }
 

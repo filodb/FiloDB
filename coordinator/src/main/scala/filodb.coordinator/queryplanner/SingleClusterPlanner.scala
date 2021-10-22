@@ -144,7 +144,7 @@ class SingleClusterPlanner(val dataset: Dataset,
             reduceExec.addRangeVectorTransformer(new LabelCardinalityPresenter())
             reduceExec
           }
-          case _: LabelCardExec => LabelCardMergeExec(qContext, targetActor, many)
+          case lce: MetricCardTopkExec => MetricCardTopkMergeExec(qContext, targetActor, many)
           case ske: PartKeysExec => PartKeysDistConcatExec(qContext, targetActor, many)
           case ep: ExecPlan =>
             val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, many)
@@ -234,7 +234,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp)
       case lp: LabelValues                 => materializeLabelValues(qContext, lp)
       case lp: LabelNames                  => materializeLabelNames(qContext, lp)
-      case lp: LabelCardinalities          => materializeLabelCardinalities(qContext, lp)
+      case lp: MetricCardinalitiesTopK          => materializeLabelCardinalities(qContext, lp)
       case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(qContext, lp)
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplySortFunction           => materializeApplySortFunction(qContext, lp)
@@ -506,12 +506,10 @@ class SingleClusterPlanner(val dataset: Dataset,
   // NOTE(a_theimer): Step 2: prep the ExecPlan leaves
   // TODO(a_theimer): make sure correct
   private def materializeLabelCardinalities(qContext: QueryContext,
-                                            lp: LabelCardinalities): PlanResult = {
-    val renamedFilters = renameMetricFilter(lp.filters)
-    val shardsToHit = shardsFromFilters(renamedFilters, qContext)
-    val metaExec = shardsToHit.map { shard =>
+                                            lp: MetricCardinalitiesTopK): PlanResult = {
+    val metaExec = shardMapperFunc.assignedShards.map{ shard =>
       val dispatcher = dispatcherForShard(shard)
-      exec.LabelCardExec(qContext, dispatcher, dsRef, shard, renamedFilters, lp.startMs, lp.endMs)
+      exec.MetricCardTopkExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec, false)
   }

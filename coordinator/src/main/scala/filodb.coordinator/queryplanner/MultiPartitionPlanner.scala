@@ -386,7 +386,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     case lv: LabelValues          => lv.copy(startMs = startMs, endMs = endMs)
     case ln: LabelNames           => ln.copy(startMs = startMs, endMs = endMs)
     case lc: LabelCardinality     => lc.copy(startMs = startMs, endMs = endMs)
-    case lc: LabelCardinalities   => lc.copy(startMs = startMs, endMs = endMs)
+    case lc: MetricCardinalitiesTopK   => lc.copy(startMs = startMs, endMs = endMs)
   }
 
   def materializeMetadataQueryPlan(lp: MetadataQueryPlan, qContext: QueryContext): PlanResult = {
@@ -408,8 +408,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             case _: SeriesKeysByFilters |
                  _: LabelNames |
                  _: LabelCardinality    => Map("match[]" -> queryParams.promQl)
-            case _: LabelCardinalities  => throw new RuntimeException("TODO(a_theimer)")
             case lv: LabelValues        => PlannerUtil.getLabelValuesUrlParams(lv, queryParams)
+            case ln: LabelNames         => PlannerUtil.getLabelNamesUrlParams(ln, queryParams)
+            case lc: MetricCardinalitiesTopK => throw new RuntimeException("TODO(a_theimer)")
           }
           createMetadataRemoteExec(qContext, p, params)
         }
@@ -424,7 +425,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
         case _: LabelCardinality => LabelCardinalityReduceExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
-        case _: LabelCardinalities => throw new RuntimeException("TODO(a_theimer)")
+        case _: MetricCardinalitiesTopK => throw new RuntimeException("TODO(a_theimer)")
       }
     }
     PlanResult(execPlan::Nil)

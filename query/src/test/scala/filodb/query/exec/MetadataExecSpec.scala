@@ -108,17 +108,28 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     result shouldEqual jobQueryResult1
   }
 
+  // scalastyle:off
   // TODO(a_theimer): delete this
   it ("should work") {
-    import ZeroCopyUTF8String._
-    val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
-                       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
-    val execPlan = LabelCardExec(QueryContext(), dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, now-5000, now)
+    //import ZeroCopyUTF8String._
+    val execPlan = MetricCardTopkExec(QueryContext(), dummyDispatcher,
+      timeseriesDataset.ref, 0, Seq("demo", "App-0"), now-5000, now)
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    // println(resp.asInstanceOf[QueryError].toString)
+    //println(resp.getClass)
     resp.asInstanceOf[QueryResult].result.foreach(
-      _.rows().foreach(
-        r => println(r.getString(0))))
+      _.rows().foreach { r =>
+        println("HERE")
+        val foo = r.getAny(0)
+        val mmm = foo.asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+        val f = 1 + 1
+        println(foo.toString)
+//        val key = mmm.toList(0)._1
+//        println(key.toString)
+//        val bytes = str.toString.utf8.bytes
+//        val obj = SerializeUtils.deSerialize(bytes).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+//        println(obj)
+      })
 //    val result = (resp: @unchecked) match {
 //      case QueryResult(id, _, response, _, _, _) => {
 //        val rv = response(0)
