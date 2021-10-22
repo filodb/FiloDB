@@ -1,12 +1,15 @@
 package filodb.query.exec
 
-//scalastyle:off
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
-
+import org.apache.datasketches.frequencies.{ErrorType, ItemsSketch}
+import org.apache.datasketches.memory.Memory
 import scala.collection.mutable
+import scala.concurrent.Await
+import scala.concurrent.duration.Duration
+
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
 import filodb.core.memstore.{MemStore, TimeSeriesMemStore}
@@ -20,11 +23,6 @@ import filodb.memory.format.{RowReader, SeqRowReader, StringArrayRowReader, Unsa
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
-import org.apache.datasketches.memory.Memory
-import org.apache.datasketches.frequencies.{ErrorType, ItemsSketch}
-
-import scala.concurrent.Await
-import scala.concurrent.duration.Duration
 
 trait MetadataDistConcatExec extends NonLeafExecPlan {
 
@@ -82,7 +80,6 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
     Seq(ColumnInfo("Metric", ColumnType.StringColumn),
         ColumnInfo("Cardinality", ColumnType.LongColumn)), 1))
 
-  //scalastyle:off
   private def sketchFold(acc: ItemsSketch[ZeroCopyUTF8String], rv: RangeVector):
             ItemsSketch[ZeroCopyUTF8String] = {
     rv.rows().foreach{ r =>
@@ -115,12 +112,10 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
   // TODO(a_theimer): toss this in a companion object?
   private def ordering : Ordering[(ZeroCopyUTF8String, Long)] = Ordering.by(pair => -pair._2)
 
-  //scalastyle:on
   override protected def compose(childResponses: Observable[(QueryResponse, Int)],
                                  firstSchema: Task[ResultSchema],
                                  querySession: QuerySession): Observable[RangeVector] = {
     import monix.execution.Scheduler.Implicits.global
-    //scalastyle:off
 
     // TODO(a_theimer): don't actually .runAsync now?
     val fut = childResponses.map {
@@ -402,17 +397,14 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
                                     k: Int,
                                     startMs: Long,
                                     endMs: Long) extends LeafExecPlan {
-  //scalastyle:off
   override def enforceLimit: Boolean = false
 
-  private def memStoreResponseToObservable(resp:  Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]])
+  private def memStoreResponseToObservable(resp: Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]])
               : Observable[IteratorBackedRangeVector] = {
 
     // TODO(a_theimer): don't do this real-time?
 
     val METRIC_KEY = "_metric_".utf8
-
-    //scalastyle:off
 
     // TODO(a_theimer): this can be removed if MemStore.partKeysWithFilters returns only unique partKeys
     // keep track of keys we've seen.
