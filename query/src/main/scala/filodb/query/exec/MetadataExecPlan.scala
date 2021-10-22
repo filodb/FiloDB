@@ -267,7 +267,7 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
         // TODO: What should be the limit, where to configure?
         // TODO: Sketch can be configured, in config along with the log value to use.
         val response = ms.partKeysWithFilters(dataset, shard, filters, fetchFirstLastSampleTimes = false,
-          startMs, endMs, limit= 1000000)
+          endMs, startMs, limit= 1000000)
 
         val metadataResult = scala.collection.mutable.Map.empty[String, CpcSketch]
         response.foreach { rv =>
