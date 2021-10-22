@@ -410,7 +410,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                  _: LabelCardinality    => Map("match[]" -> queryParams.promQl)
             case lv: LabelValues        => PlannerUtil.getLabelValuesUrlParams(lv, queryParams)
             case ln: LabelNames         => PlannerUtil.getLabelNamesUrlParams(ln, queryParams)
-            case lc: MetricCardinalitiesTopK => throw new RuntimeException("TODO(a_theimer)")
+            case lc: MetricCardinalitiesTopK => ???  // TODO(a_theimer)
           }
           createMetadataRemoteExec(qContext, p, params)
         }
@@ -425,7 +425,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
         case _: LabelCardinality => LabelCardinalityReduceExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
-        case _: MetricCardinalitiesTopK => throw new RuntimeException("TODO(a_theimer)")
+        case _: MetricCardinalitiesTopK => ???  // TODO(a_theimer)
       }
     }
     PlanResult(execPlan::Nil)

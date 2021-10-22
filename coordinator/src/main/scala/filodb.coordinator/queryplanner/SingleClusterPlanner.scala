@@ -503,8 +503,6 @@ class SingleClusterPlanner(val dataset: Dataset,
     PlanResult(metaExec, false)
   }
 
-  // NOTE(a_theimer): Step 2: prep the ExecPlan leaves
-  // TODO(a_theimer): make sure correct
   private def materializeLabelCardinalities(qContext: QueryContext,
                                             lp: MetricCardinalitiesTopK): PlanResult = {
     val metaExec = shardMapperFunc.assignedShards.map{ shard =>
