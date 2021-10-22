@@ -109,7 +109,7 @@ object CliMain extends FilodbClusterNode {
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labelvalues --labelnames <lable-names> --labelfilter <label-filter> --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labels --labelfilter <label-filter> -dataset <dataset>")
-    println("  --host <hostname/IP> [--port ...] --command metrictopk --labelfilter <label-filter> -dataset <dataset>")
+    println("  --host <hostname/IP> [--port ...] --command metrictopk --k <k> --labelfilter <label-filter> --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command topkcard --dataset prometheus --k 2 --shardkeyprefix demo App-0")
     println("  --host <hostname/IP> [--port ...] --command labelcardinality --labelfilter <label-filter> --dataset prometheus")
     println("  --host <hostname/IP> [--port ...] --command findqueryshards --queries <query> --spread <spread>")
@@ -259,7 +259,7 @@ object CliMain extends FilodbClusterNode {
           val remote = Client.standaloneClient(system, args.host(), args.port())
           val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
             timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
-          parseMetricCardTopkQuery(remote, args.labelfilter(), args.dataset(),
+          parseMetricCardTopkQuery(remote, args.k(), args.labelfilter(), args.dataset(),
             getQueryRange(args), options)
 
         case x: Any =>
@@ -382,11 +382,14 @@ object CliMain extends FilodbClusterNode {
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 
-  def parseMetricCardTopkQuery(client: LocalClient, constraints: Map[String, String], dataset: String,
+  def parseMetricCardTopkQuery(client: LocalClient,
+                               k: Int,
+                               constraints: Map[String, String],
+                               dataset: String,
                                timeParams: TimeRangeParams,
                                options: QOptions): Unit = {
     val shardKeyPrefix = Seq(constraints("_ws_"), constraints("_ns_"))
-    val logicalPlan = MetricCardinalitiesTopK(shardKeyPrefix, timeParams.start * 1000, timeParams.end * 1000)
+    val logicalPlan = MetricCardinalitiesTopK(shardKeyPrefix, k, timeParams.start * 1000, timeParams.end * 1000)
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 

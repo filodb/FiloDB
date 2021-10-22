@@ -71,13 +71,13 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
                                         dispatcher: PlanDispatcher,
                                         children: Seq[ExecPlan]) extends MetadataDistConcatExec
 
-// NOTE(a_theimer): step 3: merge the leaves
 final case class MetricCardTopkMergeExec(queryContext: QueryContext,
                                          dispatcher: PlanDispatcher,
-                                         children: Seq[ExecPlan]) extends NonLeafExecPlan {
+                                         children: Seq[ExecPlan],
+                                         k: Int) extends NonLeafExecPlan {
   override protected def args: String = ""
   //scalastyle:off
-  def fold(acc: ItemsSketch[ZeroCopyUTF8String], rv: RangeVector):
+  def sketchFold(acc: ItemsSketch[ZeroCopyUTF8String], rv: RangeVector):
             ItemsSketch[ZeroCopyUTF8String] = {
     rv.rows().foreach{ r =>
       val map = r.getAny(0)
@@ -91,12 +91,26 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
     }
     acc
   }
+
+  def pqueueFold(acc: mutable.PriorityQueue[(ZeroCopyUTF8String, Long)],
+                 tup: (ZeroCopyUTF8String, Long)): mutable.PriorityQueue[(ZeroCopyUTF8String, Long)] = {
+    if (acc.size < k) {
+      acc.enqueue(tup)
+    } else if (acc.head._2 < tup._2) {
+      // min count in the heap is less than the current count
+      acc.dequeue()
+      acc.enqueue(tup)
+    }
+    acc
+  }
+
+  def ordering : Ordering[(ZeroCopyUTF8String, Long)] = Ordering.by(pair => -pair._2)
+
   //scalastyle:on
   override protected def compose(childResponses: Observable[(QueryResponse, Int)],
                                  firstSchema: Task[ResultSchema],
                                  querySession: QuerySession): Observable[RangeVector] = {
     import monix.execution.Scheduler.Implicits.global
-
     //scalastyle:off
     val fut = childResponses.map {
       case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
@@ -106,13 +120,22 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
     // TODO(a_theimer): not forever?
     Await.result(fut, Duration.Inf)
 
-    // TODO(a_theimer): rename
+    // TODO(a_theimer): rename most of this
     val tri = fut.value.get.get
-    val union = tri.foldLeft(new ItemsSketch[ZeroCopyUTF8String](16))(fold)  // TODO(a_theimer)
-    val res = union.getFrequentItems(1, ErrorType.NO_FALSE_NEGATIVES).map(row => row.getItem).map(str => (str, union.getEstimate(str).toString.utf8)).toMap
+    val union = tri.foldLeft(new ItemsSketch[ZeroCopyUTF8String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE))(sketchFold)
+    val topkHeap = union.getFrequentItems(ErrorType.NO_FALSE_NEGATIVES)
+                        .map(row => (row.getItem, row.getEstimate))
+                        .foldLeft(mutable.PriorityQueue[(ZeroCopyUTF8String, Long)]()(ordering))(pqueueFold)
+
+    // TODO(a_theimer): slow
+    val res = new mutable.HashMap[ZeroCopyUTF8String, ZeroCopyUTF8String]
+    while (topkHeap.nonEmpty) {
+      val heapMin = topkHeap.dequeue()
+      res.update(heapMin._1, heapMin._2.toString.utf8)
+    }
 
     val it = IteratorBackedRangeVector(CustomRangeVectorKey(Map.empty),
-      UTF8MapIteratorRowReader(Seq(res).iterator), None)
+      UTF8MapIteratorRowReader(Seq(res.toMap).iterator), None)
     Observable.now(it)
   }
 }
@@ -326,7 +349,7 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
         // TODO: We don't need to allocate intermediate Map and create an Iterator of Map, instead we can get raw byte
         //  sequences and operate directly with it to create the final data structures we need
         val partKeysMap = ms.partKeysWithFilters(dataset, shard, filters, fetchFirstLastSampleTimes = false,
-          endMs, startMs, limit= 1000000)
+          endMs, startMs, limit = 1000000)
 
         val metadataResult = scala.collection.mutable.Map.empty[String, CpcSketch]
         partKeysMap.foreach { rv =>
@@ -335,7 +358,7 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
               metadataResult.getOrElseUpdate(labelName.toString, new CpcSketch(logK)).update(labelValue.toString)
           }
         }
-        val sketchMapIterator = (metadataResult.map{
+        val sketchMapIterator = (metadataResult.map {
           case (label, cpcSketch) => (ZeroCopyUTF8String(label), ZeroCopyUTF8String(cpcSketch.toByteArray))
         }.toMap :: Nil).toIterator
         Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
@@ -350,11 +373,17 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
     s" startMs=$startMs, endMs=$endMs"
 }
 
+final case object MetricCardTopkExec {
+  // TODO(a_theimer): unsure what to set this to; also should be client-defined
+  val MAX_ITEMSKETCH_MAP_SIZE = 16;
+}
+
 final case class MetricCardTopkExec(queryContext: QueryContext,
                                     dispatcher: PlanDispatcher,
                                     dataset: DatasetRef,
                                     shard: Int,
                                     shardKeyPrefix: Seq[String],
+                                    k: Int,  // TODO(a_theimer): USE!!!!
                                     startMs: Long,
                                     endMs: Long) extends LeafExecPlan {
   //scalastyle:off
@@ -369,36 +398,36 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
 
     //scalastyle:off
 
-    import org.apache.datasketches.frequencies.ItemsSketch
-
     // TODO(a_theimer): Also keep sketch for this?
     // keep track of keys we've seen.
     val partKeySeen = new mutable.HashSet[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
     resp.foreach(pkey => partKeySeen.add(pkey))
 
-    val sketch = new ItemsSketch[ZeroCopyUTF8String](16)  // TODO(a_theimer)
+    val sketch = new ItemsSketch[ZeroCopyUTF8String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE)
     partKeySeen.foreach(pkey => sketch.update(pkey(METRIC_KEY)))
 
     val encodedMap = Map("temp".utf8 -> ZeroCopyUTF8String(sketch.toByteArray(new ZeroCopyUtf8SerDe)))
 
-    // TODO(a_theimer): just use sequential reader?
+    // TODO(a_theimer): just use single-value reader?
     Observable.now(IteratorBackedRangeVector(
       new CustomRangeVectorKey(Map.empty),
         UTF8MapIteratorRowReader(Seq(encodedMap).iterator), None))
   }
 
-  // NOTE(a_theimer): Step 2a
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
+    // TODO(a_theimer): async most of the below?
+
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
     val fetchFirstLastSampleTimes = false
     val rvs = source match {
       case tsMemStore: TimeSeriesMemStore =>
-        // TODO(a_theimer): async this?
-        val cardResponse = tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix, 2)  // TODO(a_theimer): k
-        println(cardResponse)
+        // find out which metrics have the top k cardinalities
+        val cardResponse = tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix, k)
+
+        // get all the partKeys for each metric
         val partKeyResponse = cardResponse.flatMap { card =>
           val filters = Seq(
             ColumnFilter("_ws_", Filter.Equals(shardKeyPrefix(0))),
@@ -408,7 +437,11 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
           tsMemStore.partKeysWithFilters(dataset, shard, filters,
             fetchFirstLastSampleTimes, endMs, startMs, queryContext.plannerParams.sampleLimit)
         }.iterator
+
+        // Build the count-min sketch.
+        // For each unique partKey, increment the _metric_'s counters in the sketch.
         memStoreResponseToObservable(partKeyResponse)
+
       case other =>
         Observable.empty
     }
@@ -416,7 +449,7 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
     ExecResult(rvs, Task.eval(sch))
   }
 
-  // TODO(a_theimer): filters
+  // TODO(a_theimer): just replaced filters string with $shardKeyPrefix
   def args: String = s"shard=$shard, filters=$shardKeyPrefix, limit=${queryContext.plannerParams.sampleLimit}," +
     s" startMs=$startMs, endMs=$endMs"
 }

@@ -23,12 +23,12 @@ sealed trait LogicalPlan {
     */
   def replaceFilters(filters: Seq[ColumnFilter]): LogicalPlan = {
     this match {
-      case p: PeriodicSeriesPlan  => p.replacePeriodicSeriesFilters(filters)
-      case r: RawSeriesLikePlan   => r.replaceRawSeriesFilters(filters)
-      case l: LabelValues         => l.copy(filters = filters)
-      case n: LabelNames          => n.copy(filters = filters)
-      case n: LabelCardinality    => n.copy(filters = filters)
-      case s: SeriesKeysByFilters => s.copy(filters = filters)
+      case n: LabelCardinality         => n.copy(filters = filters)
+      case p: PeriodicSeriesPlan       => p.replacePeriodicSeriesFilters(filters)
+      case r: RawSeriesLikePlan        => r.replaceRawSeriesFilters(filters)
+      case l: LabelValues              => l.copy(filters = filters)
+      case n: LabelNames               => n.copy(filters = filters)
+      case s: SeriesKeysByFilters      => s.copy(filters = filters)
       case c: MetricCardinalitiesTopK  => c.copy()  // TODO(a_theimer): correct?
     }
   }
@@ -125,9 +125,9 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
                                startMs: Long,
                                endMs: Long) extends MetadataQueryPlan
 
-// NOTE(a_theimer): Step 1: define the LogicalPlan
-// TODO(a_theimer): change if necessary
+// TODO(a_theimer): remove start/end?
 case class MetricCardinalitiesTopK(shardKeyPrefix: Seq[String],
+                                   k: Int,
                                    startMs: Long,
                                    endMs: Long) extends MetadataQueryPlan
 
