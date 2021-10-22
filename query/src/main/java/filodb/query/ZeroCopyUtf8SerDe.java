@@ -6,6 +6,7 @@ import org.apache.datasketches.Util;
 import org.apache.datasketches.memory.Memory;
 import org.apache.datasketches.memory.WritableMemory;
 
+// TODO(a_theimer): rename to something more conventional
 /**
  * Serializer/Deserializer for sketches with ZeroCopyUTF8String data.
  *

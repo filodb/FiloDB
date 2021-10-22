@@ -710,7 +710,6 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       head.equals("my_hist") shouldEqual true
   }
 
-<<<<<<< HEAD
   it("should generate correct execPlan for instant vector functions") {
     // ensures:
     //   (1) the execPlan tree has a LocalPartitionDistConcatExec root, and
@@ -807,25 +806,5 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     |--E~LabelCardinalityExec(shard=19, filters=List(ColumnFilter(job,Equals(job)), ColumnFilter(__name__,Equals(metric))), limit=1000000, startMs=0, endMs=1634920729000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)"""
 .stripMargin
     validatePlan(execPlan, expected)
-  }
-
-  // TODO(a_theimer): delete this
-  // TODO(a_theimer): LocalPartitionDistConcatExec still used
-  it ("should run") {
-//    val filters = Seq(ColumnFilter("__name__", Filter.Equals("http_requests_total")),
-//                  ColumnFilter("job", Filter.Equals("app")))
-//    val logicalPlan = MetricCardinalitiesTopK(filters, 0, 1000)
-//    val execPlan = engine.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
-//    execPlan.isInstanceOf[SetOperatorExec] shouldEqual true
-//    execPlan.children.foreach { l1 =>
-//      // Now there should be single level of reduce because we have 2 shards
-//      l1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
-//      l1.children.foreach { l2 =>
-//        l2.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-//        l2.rangeVectorTransformers.size shouldEqual 2
-//        l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-//        l2.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
-//      }
-//    }
   }
 }
