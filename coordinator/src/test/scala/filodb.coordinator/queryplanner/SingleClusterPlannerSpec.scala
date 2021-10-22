@@ -1,6 +1,7 @@
 package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration._
+
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
@@ -19,6 +20,8 @@ import filodb.query.exec.InternalRangeFunction.Last
 import filodb.query.exec._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
+import filodb.core.query.Filter.Equals
 
 class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
@@ -784,5 +787,35 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         lastTransformer.asInstanceOf[AggregateMapReduce].aggrOp shouldEqual funcId
       }
     }
+  }
+
+  it("should materialize LabelCardinalityPlan") {
+    val filters = Seq(
+      ColumnFilter("job", Equals("job")),
+      ColumnFilter("__name__", Equals("metric"))
+    )
+    val lp = LabelCardinality(filters, 0 * 1000, 1634920729000L)
+
+    val queryContext = QueryContext(origQueryParams = promQlQueryParams)
+    val execPlan = engine.materialize(lp, queryContext)
+    execPlan.isInstanceOf[LabelCardinalityDistConcatExec] shouldBe true
+    val List(child1:LabelCardinalityExec , child2: LabelCardinalityExec, _*) = execPlan.children.toList
+    child1.shard shouldEqual 3
+    child2.shard shouldEqual 19
+    (child1 :: child2 ::Nil).foreach(child => {
+      child.filters shouldEqual filters
+      child.startMs shouldEqual 0
+      child.endMs shouldEqual 1634920729000L
+      child.dataset shouldEqual dataset.ref
+      child.rangeVectorTransformers.isEmpty shouldBe true
+      child.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldBe true
+    })
+    execPlan.rangeVectorTransformers.size shouldBe 1
+    execPlan.rangeVectorTransformers.head.isInstanceOf[LabelCardinalityPresenter] shouldBe true
+//    T~LabelCardinalityPresenter(LabelCardinalityPresenter)
+//    -E~LabelCardinalityDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
+//      --E~LabelCardinalityExec(shard=3, filters=List(ColumnFilter(job,Equals(job)), ColumnFilter(__name__,Equals(metric))), limit=1000000, startMs=0, endMs=1634920729) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
+//      --E~LabelCardinalityExec(shard=19, filters=List(ColumnFilter(job,Equals(job)), ColumnFilter(__name__,Equals(metric))), limit=1000000, startMs=0, endMs=1634920729) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
+
   }
 }

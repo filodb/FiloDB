@@ -117,6 +117,7 @@ import filodb.query.exec._
              _: SeriesKeysByFilters |
              _: ApplyInstantFunctionRaw |
              _: RawSeries |
+             _: LabelCardinality |
              _: LabelNames => rawClusterMaterialize(qContext, logicalPlan)
       }
     }
