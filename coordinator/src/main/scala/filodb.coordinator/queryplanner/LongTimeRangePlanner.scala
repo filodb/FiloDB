@@ -111,13 +111,14 @@ import filodb.query.exec._
 
     if (!LogicalPlanUtils.hasBinaryJoin(logicalPlan)) {
       logicalPlan match {
-        case p: PeriodicSeriesPlan => materializePeriodicSeriesPlan(qContext, p)
+        case p: PeriodicSeriesPlan         => materializePeriodicSeriesPlan(qContext, p)
         case _: LabelValues |
              _: ApplyLimitFunction |
              _: SeriesKeysByFilters |
              _: ApplyInstantFunctionRaw |
              _: RawSeries |
-             _: LabelNames => rawClusterMaterialize(qContext, logicalPlan)
+             _: LabelNames |
+             _: LabelCardinality           => rawClusterMaterialize(qContext, logicalPlan)
       }
     }
     else logicalPlan match {
