@@ -385,38 +385,20 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
-    val METRIC_KEY = "_metric_".utf8
-
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
-
-    val fetchFirstLastSampleTimes = false
     val rvs = source match {
       case tsMemStore: TimeSeriesMemStore =>
-        val taskOfResults = Observable.fromIterable(tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix, k))
-          // get all the partKeys with top-k cardinality
-          .flatMap { card =>
-            val filters = Seq(
-              ColumnFilter("_ws_", Filter.Equals(shardKeyPrefix(0))),
-              ColumnFilter("_ns_", Filter.Equals(shardKeyPrefix(1))),
-              ColumnFilter("_metric_", Filter.Equals(card.childName))
-            )
-            Observable.fromIterator(tsMemStore.partKeysWithFilters(dataset, shard, filters,
-              fetchFirstLastSampleTimes, endMs, startMs, queryContext.plannerParams.sampleLimit))
-          }
-          // ensure only unique partKeys are considered  // TODO(a_theimer): remove this?
-          .foldLeftL(
-            new mutable.HashSet[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]])((set, pkey) => {set.add(pkey); set})
-          .map{ set =>
-            // include each into an ItemSketch
-            val sketch = new ItemsSketch[ZeroCopyUTF8String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE)
-            set.foreach(pkey => sketch.update(pkey(METRIC_KEY)))
-            // serialize the sketch; pack it into a RangeVector
-            val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ArrayOfZeroCopyUTF8StringSerDe))
-            val it = Seq(SingleValueRowReader(serSketch)).iterator
-            IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
-          }
-        Observable.fromTask(taskOfResults)
+        Observable.eval {
+          val topkCards = tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix, k)
+          // include each into an ItemSketch
+          val sketch = new ItemsSketch[ZeroCopyUTF8String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE)
+          topkCards.foreach(card => sketch.update(card.childName.utf8, card.timeSeriesCount.toLong))
+          // serialize the sketch; pack it into a RangeVector
+          val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ArrayOfZeroCopyUTF8StringSerDe))
+          val it = Seq(SingleValueRowReader(serSketch)).iterator
+          IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
+        }
       case other =>
         Observable.empty
     }
