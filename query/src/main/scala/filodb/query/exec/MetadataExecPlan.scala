@@ -383,56 +383,41 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
                                     endMs: Long) extends LeafExecPlan {
   override def enforceLimit: Boolean = false
 
-  private def partKeysToRvObservable(resp: Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]])
-              : Observable[IteratorBackedRangeVector] = {
-
-    val METRIC_KEY = "_metric_".utf8
-
-    // TODO(a_theimer): this can be removed if MemStore.partKeysWithFilters returns only unique partKeys
-    // keep track of keys we've seen.
-    val partKeySeen = new mutable.HashSet[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
-    resp.foreach(pkey => partKeySeen.add(pkey))
-
-    // TODO(a_theimer): don't do any this real-time?
-
-    val sketch = new ItemsSketch[ZeroCopyUTF8String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE)
-    partKeySeen.foreach(pkey => sketch.update(pkey(METRIC_KEY)))
-
-    val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ZeroCopyUtf8SerDe))
-
-    val it = Seq(SingleValueRowReader(serSketch)).iterator
-    Observable.now(IteratorBackedRangeVector(
-      new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None))
-  }
-
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
-    // TODO(a_theimer): async most of the below?
+    val METRIC_KEY = "_metric_".utf8
 
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
+
     val fetchFirstLastSampleTimes = false
     val rvs = source match {
       case tsMemStore: TimeSeriesMemStore =>
-        // find out which metrics have the top k cardinalities
-        val cardResponse = tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix, k)
-
-        // get all the partKeys for each metric
-        val partKeyResponse = cardResponse.flatMap { card =>
-          val filters = Seq(
-            ColumnFilter("_ws_", Filter.Equals(shardKeyPrefix(0))),
-            ColumnFilter("_ns_", Filter.Equals(shardKeyPrefix(1))),
-            ColumnFilter("_metric_", Filter.Equals(card.childName))
-          )
-          tsMemStore.partKeysWithFilters(dataset, shard, filters,
-            fetchFirstLastSampleTimes, endMs, startMs, queryContext.plannerParams.sampleLimit)
-        }.iterator
-
-        // Build the count-min sketch.
-        // For each unique partKey, increment the _metric_'s counters in the sketch.
-        partKeysToRvObservable(partKeyResponse)
-
+        val taskOfResults = Observable.fromIterable(tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix, k))
+          // get all the partKeys with top-k cardinality
+          .flatMap { card =>
+            val filters = Seq(
+              ColumnFilter("_ws_", Filter.Equals(shardKeyPrefix(0))),
+              ColumnFilter("_ns_", Filter.Equals(shardKeyPrefix(1))),
+              ColumnFilter("_metric_", Filter.Equals(card.childName))
+            )
+            Observable.fromIterator(tsMemStore.partKeysWithFilters(dataset, shard, filters,
+              fetchFirstLastSampleTimes, endMs, startMs, queryContext.plannerParams.sampleLimit))
+          }
+          // ensure only unique partKeys are considered  // TODO(a_theimer): remove this?
+          .foldLeftL(
+            new mutable.HashSet[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]])((set, pkey) => {set.add(pkey); set})
+          .map{ set =>
+            // include each into an ItemSketch
+            val sketch = new ItemsSketch[ZeroCopyUTF8String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE)
+            set.foreach(pkey => sketch.update(pkey(METRIC_KEY)))
+            // serialize the sketch; pack it into a RangeVector
+            val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ZeroCopyUtf8SerDe))
+            val it = Seq(SingleValueRowReader(serSketch)).iterator
+            IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
+          }
+        Observable.fromTask(taskOfResults)
       case other =>
         Observable.empty
     }
