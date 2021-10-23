@@ -88,20 +88,8 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
     acc
   }
 
-  private def pqueueFold(acc: mutable.PriorityQueue[(ZeroCopyUTF8String, Long)],
-                 tup: (ZeroCopyUTF8String, Long)): mutable.PriorityQueue[(ZeroCopyUTF8String, Long)] = {
-    if (acc.size < k) {
-      acc.enqueue(tup)
-    } else if (acc.head._2 < tup._2) {
-      // min count in the heap is less than the current count
-      acc.dequeue()
-      acc.enqueue(tup)
-    }
-    acc
-  }
-
   // TODO(a_theimer): toss this in a companion object?
-  private def ordering : Ordering[(ZeroCopyUTF8String, Long)] = Ordering.by(pair => -pair._2)
+  private def ordering : Ordering[ItemsSketch.Row[ZeroCopyUTF8String]] = Ordering.by(row => -row.getEstimate)
 
   override protected def compose(childResponses: Observable[(QueryResponse, Int)],
                                  firstSchema: Task[ResultSchema],
@@ -110,25 +98,38 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
       case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
       case (QueryError(_, _, ex), _)         => throw ex
     }.flatten
-      // merge all of the sketches
-      .foldLeftF(new ItemsSketch[ZeroCopyUTF8String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE))(sketchFold)
-      // collect the most frequent rows from the union
-      .flatMap(sketch => Observable.fromIterable(sketch.getFrequentItems(ErrorType.NO_FALSE_NEGATIVES)))
-      // prepare each row for use in a priority queue  // TODO(a_theimer): just use the rows themselves
-      .map(row => (row.getItem, row.getEstimate))
-      // build a pqueue of maximum size k
-      .foldLeftL(mutable.PriorityQueue[(ZeroCopyUTF8String, Long)]()(ordering))(pqueueFold)
-      // store each pqueue element into an iterable container
-      .map{ topkHeap =>
-        // TODO(a_theimer): more idiomatic functional-programming way to do this?
-        val arrSize = math.min(k, topkHeap.size)
-        val rows = new mutable.ArraySeq[RowReader](arrSize)
-        for (i <- 0 until arrSize) {
-          val heapMin = topkHeap.dequeue()
-          rows(i) = SeqRowReader(Seq(heapMin._1, heapMin._2))
+      // collect the union of the sketches
+      .foldLeftL(new ItemsSketch[ZeroCopyUTF8String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE))(sketchFold)
+      .map{ sketch =>
+        // TODO(a_theimer): explain "most frequent" ambiguity
+        // collect the most frequent rows from the union
+        val freqRows = sketch.getFrequentItems(ErrorType.NO_FALSE_NEGATIVES)
+
+        // TODO(a_theimer): more idiomatic functional-programming ways to do all below?
+
+        // find the topk with a pqueue
+        val topkPqueue = mutable.PriorityQueue[ItemsSketch.Row[ZeroCopyUTF8String]]()(ordering)
+        freqRows.foreach { row =>
+          if (topkPqueue.size < k) {
+            topkPqueue.enqueue(row)
+          } else if (topkPqueue.head.getEstimate < row.getEstimate) {
+            // min count in the heap is less than the current count
+            topkPqueue.dequeue()
+            topkPqueue.enqueue(row)
+          }
         }
+
+        // Convert the topk to match the schema, then store them in-order in an array.
+        // Use the array's iterator as the backend of a RangeVector.
+        val resSize = math.min(k, topkPqueue.size)
+        val topkRows = new mutable.ArraySeq[RowReader](resSize)
+        for (i <- 0 until resSize) {
+          val heapMin = topkPqueue.dequeue()
+          topkRows(i) = SeqRowReader(Seq(heapMin.getItem, heapMin.getEstimate))
+        }
+
         IteratorBackedRangeVector(CustomRangeVectorKey(Map.empty),
-          new NoCloseCursor(rows.reverseIterator),
+          new NoCloseCursor(topkRows.reverseIterator),
           None)
       }
     Observable.fromTask(taskOfResults)
