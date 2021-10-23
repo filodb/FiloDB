@@ -6,7 +6,6 @@ import org.apache.datasketches.Util;
 import org.apache.datasketches.memory.Memory;
 import org.apache.datasketches.memory.WritableMemory;
 
-// TODO(a_theimer): rename to something more conventional
 /**
  * Serializer/Deserializer for sketches with ZeroCopyUTF8String data.
  *
@@ -15,7 +14,7 @@ import org.apache.datasketches.memory.WritableMemory;
  * Note to future developers: use of the ZeroCopyUTF8String constructor
  *      directly will silently fail. Always use ZeroCopyUTF8String::apply.
  */
-public class ZeroCopyUtf8SerDe extends ArrayOfItemsSerDe<ZeroCopyUTF8String> {
+public class ArrayOfZeroCopyUTF8StringSerDe extends ArrayOfItemsSerDe<ZeroCopyUTF8String> {
 
     @Override
     public byte[] serializeToByteArray(final ZeroCopyUTF8String[] items) {

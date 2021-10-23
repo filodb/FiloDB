@@ -68,6 +68,10 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
                                         dispatcher: PlanDispatcher,
                                         children: Seq[ExecPlan]) extends MetadataDistConcatExec
 
+final case object MetricCardTopkMergeExec {
+  protected val ordering : Ordering[ItemsSketch.Row[ZeroCopyUTF8String]] = Ordering.by(row => -row.getEstimate)
+}
+
 final case class MetricCardTopkMergeExec(queryContext: QueryContext,
                                          dispatcher: PlanDispatcher,
                                          children: Seq[ExecPlan],
@@ -82,14 +86,11 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
             ItemsSketch[ZeroCopyUTF8String] = {
     rv.rows().foreach{ r =>
       val sketchSer = r.getString(0).getBytes
-      val sketch = ItemsSketch.getInstance(Memory.wrap(sketchSer), new ZeroCopyUtf8SerDe)
+      val sketch = ItemsSketch.getInstance(Memory.wrap(sketchSer), new ArrayOfZeroCopyUTF8StringSerDe)
       acc.merge(sketch)
     }
     acc
   }
-
-  // TODO(a_theimer): toss this in a companion object?
-  private def ordering : Ordering[ItemsSketch.Row[ZeroCopyUTF8String]] = Ordering.by(row => -row.getEstimate)
 
   override protected def compose(childResponses: Observable[(QueryResponse, Int)],
                                  firstSchema: Task[ResultSchema],
@@ -101,14 +102,11 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
       // collect the union of the sketches
       .foldLeftL(new ItemsSketch[ZeroCopyUTF8String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE))(sketchFold)
       .map{ sketch =>
-        // TODO(a_theimer): explain "most frequent" ambiguity
-        // collect the most frequent rows from the union
+        // Collect all rows from the union with frequency estimate upper bounds above a default threshold.
         val freqRows = sketch.getFrequentItems(ErrorType.NO_FALSE_NEGATIVES)
 
-        // TODO(a_theimer): more idiomatic functional-programming ways to do all below?
-
         // find the topk with a pqueue
-        val topkPqueue = mutable.PriorityQueue[ItemsSketch.Row[ZeroCopyUTF8String]]()(ordering)
+        val topkPqueue = mutable.PriorityQueue[ItemsSketch.Row[ZeroCopyUTF8String]]()(MetricCardTopkMergeExec.ordering)
         freqRows.foreach { row =>
           if (topkPqueue.size < k) {
             topkPqueue.enqueue(row)
@@ -414,7 +412,7 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
             val sketch = new ItemsSketch[ZeroCopyUTF8String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE)
             set.foreach(pkey => sketch.update(pkey(METRIC_KEY)))
             // serialize the sketch; pack it into a RangeVector
-            val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ZeroCopyUtf8SerDe))
+            val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ArrayOfZeroCopyUTF8StringSerDe))
             val it = Seq(SingleValueRowReader(serSketch)).iterator
             IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
           }
@@ -426,9 +424,8 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
     ExecResult(rvs, Task.eval(sch))
   }
 
-  // TODO(a_theimer): just replaced filters string with $shardKeyPrefix
-  def args: String = s"shard=$shard, filters=$shardKeyPrefix, limit=${queryContext.plannerParams.sampleLimit}," +
-    s" startMs=$startMs, endMs=$endMs"
+  def args: String = s"shard=$shard, shardKeyPrefix=$shardKeyPrefix, k=$k, " +
+    s"limit=${queryContext.plannerParams.sampleLimit}, startMs=$startMs, endMs=$endMs"
 }
 
 final case class LabelNamesExec(queryContext: QueryContext,

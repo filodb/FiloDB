@@ -103,13 +103,13 @@ object CliMain extends FilodbClusterNode {
     println("\nStandalone client commands:")
     println("  --host <hostname/IP> [--port ...] --command indexnames --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command indexvalues --indexname <index> --dataset <dataset> --shards SS")
-    println("  --host <hostname/IP> [--port ...]  --dataset <dataset> --promql <query> --start <start> --step <step> --end <end>")
+    println("  --host <hostname/IP> [--port ...] --dataset <dataset> --promql <query> --start <start> --step <step> --end <end>")
     println("  --host <hostname/IP> [--port ...] --command setup --filename <configFile> | --configpath <path>")
     println("  --host <hostname/IP> [--port ...] --command list")
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labelvalues --labelnames <lable-names> --labelfilter <label-filter> --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labels --labelfilter <label-filter> -dataset <dataset>")
-    println("  --host <hostname/IP> [--port ...] --command metrictopk --k <k> --labelfilter <label-filter> --dataset <dataset>")  // TODO(a_theimer): change to topkmetriccard for consistency
+    println("  --host <hostname/IP> [--port ...] --command metrictopkcard --k <k> --labelfilter <label-filter> --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command topkcard --dataset prometheus --k 2 --shardkeyprefix demo App-0")
     println("  --host <hostname/IP> [--port ...] --command labelcardinality --labelfilter <label-filter> --dataset prometheus")
     println("  --host <hostname/IP> [--port ...] --command findqueryshards --queries <query> --spread <spread>")
@@ -254,12 +254,12 @@ object CliMain extends FilodbClusterNode {
           parseLabelCardinalityQuery(remote, args.labelfilter(), args.dataset(),
             getQueryRange(args), options)
 
-        case Some("metrictopk") =>
+        case Some("metrictopkcard") =>
           require(args.host.isDefined && args.dataset.isDefined && args.labelfilter.isDefined, "--host, --dataset and --labelfilter must be defined")
           val remote = Client.standaloneClient(system, args.host(), args.port())
           val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
             timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
-          parseMetricCardTopkQuery(remote, args.k(), args.labelfilter(), args.dataset(),
+          parseMetricTopkCardQuery(remote, args.k(), args.labelfilter(), args.dataset(),
             getQueryRange(args), options)
 
         case x: Any =>
@@ -382,7 +382,7 @@ object CliMain extends FilodbClusterNode {
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 
-  def parseMetricCardTopkQuery(client: LocalClient,
+  def parseMetricTopkCardQuery(client: LocalClient,
                                k: Int,
                                constraints: Map[String, String],
                                dataset: String,

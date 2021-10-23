@@ -431,7 +431,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
         case _: LabelCardinality => LabelCardinalityReduceExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
-        case _: MetricCardinalitiesTopK => ???  // TODO(a_theimer)
+        case mc: MetricCardinalitiesTopK => MetricCardTopkMergeExec(qContext, inProcessPlanDispatcher,
+          execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]), mc.k)
       }
     }
     PlanResult(execPlan::Nil)

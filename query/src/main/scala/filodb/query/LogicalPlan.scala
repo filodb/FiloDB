@@ -29,7 +29,7 @@ sealed trait LogicalPlan {
       case l: LabelValues              => l.copy(filters = filters)
       case n: LabelNames               => n.copy(filters = filters)
       case s: SeriesKeysByFilters      => s.copy(filters = filters)
-      case c: MetricCardinalitiesTopK  => c.copy()  // TODO(a_theimer): correct?
+      case c: MetricCardinalitiesTopK  => c.copy(/* no filters; only shardKeyPrefix */)
     }
   }
 }
