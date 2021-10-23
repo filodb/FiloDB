@@ -7,8 +7,6 @@ import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
 import org.apache.datasketches.frequencies.{ErrorType, ItemsSketch}
 import org.apache.datasketches.memory.Memory
 import scala.collection.mutable
-import scala.concurrent.Await
-import scala.concurrent.duration.Duration
 
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
@@ -108,40 +106,32 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
   override protected def compose(childResponses: Observable[(QueryResponse, Int)],
                                  firstSchema: Task[ResultSchema],
                                  querySession: QuerySession): Observable[RangeVector] = {
-    import monix.execution.Scheduler.Implicits.global
-
-    // TODO(a_theimer): don't actually .runAsync now?
-    val fut = childResponses.map {
+    val taskOfResults = childResponses.map {
       case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
       case (QueryError(_, _, ex), _)         => throw ex
-    }.flatten.toListL.runAsync
-
-    // TODO(a_theimer): not forever?
-    Await.result(fut, Duration.Inf)
-
-    // TODO(a_theimer): this feels super unsafe
-    val rangeVecs = fut.value.get.get
-
-    // TODO(a_theimer): should any of this execute now?
-    val accInit = new ItemsSketch[ZeroCopyUTF8String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE)
-    val sketchUnion = rangeVecs.foldLeft(accInit)(sketchFold)
-    val topkHeap = sketchUnion.getFrequentItems(ErrorType.NO_FALSE_NEGATIVES)
-                        .map(row => (row.getItem, row.getEstimate))
-                        .foldLeft(mutable.PriorityQueue[(ZeroCopyUTF8String, Long)]()(ordering))(pqueueFold)
-
-    // TODO(a_theimer): this also probably shouldn't execute now
-    // TODO(a_theimer): more idiomatic functional-programming way to do this?
-    val arrSize = math.min(k, topkHeap.size)
-    val rows = new mutable.ArraySeq[RowReader](arrSize)
-    for (i <- 0 until arrSize) {
-      val heapMin = topkHeap.dequeue()
-      rows(i) = SeqRowReader(Seq(heapMin._1, heapMin._2))
-    }
-
-    val it = IteratorBackedRangeVector(CustomRangeVectorKey(Map.empty),
-                                       new NoCloseCursor(rows.reverseIterator),
-                                       None)
-    Observable.now(it)
+    }.flatten
+      // merge all of the sketches
+      .foldLeftF(new ItemsSketch[ZeroCopyUTF8String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE))(sketchFold)
+      // collect the most frequent rows from the union
+      .flatMap(sketch => Observable.fromIterable(sketch.getFrequentItems(ErrorType.NO_FALSE_NEGATIVES)))
+      // prepare each row for use in a priority queue  // TODO(a_theimer): just use the rows themselves
+      .map(row => (row.getItem, row.getEstimate))
+      // build a pqueue of maximum size k
+      .foldLeftL(mutable.PriorityQueue[(ZeroCopyUTF8String, Long)]()(ordering))(pqueueFold)
+      // store each pqueue element into an iterable container
+      .map{ topkHeap =>
+        // TODO(a_theimer): more idiomatic functional-programming way to do this?
+        val arrSize = math.min(k, topkHeap.size)
+        val rows = new mutable.ArraySeq[RowReader](arrSize)
+        for (i <- 0 until arrSize) {
+          val heapMin = topkHeap.dequeue()
+          rows(i) = SeqRowReader(Seq(heapMin._1, heapMin._2))
+        }
+        IteratorBackedRangeVector(CustomRangeVectorKey(Map.empty),
+          new NoCloseCursor(rows.reverseIterator),
+          None)
+      }
+    Observable.fromTask(taskOfResults)
   }
 }
 
