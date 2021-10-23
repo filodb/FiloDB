@@ -13,6 +13,9 @@ import filodb.memory.format.UnsafeUtils
 import filodb.memory.format.vectors.NativeVectorTest
 
 class ChunkMapTest extends NativeVectorTest with ScalaFutures {
+
+  val nmm = memFactory
+
   def makeElementWithID(id: Long): NativePointer = {
     val newElem = memFactory.allocateOffheap(16)
     UnsafeUtils.setLong(newElem, id)
@@ -27,7 +30,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should be empty when first starting") {
-    val map = new ChunkMap(memFactory, 8)
+    val map = new ChunkMap(8) {
+      def memFactory = nmm
+    }
     map.chunkmapSize shouldEqual 0
     map.chunkmapContains(5L) shouldEqual false
     intercept[IndexOutOfBoundsException] { map.chunkmapDoGetFirst }
@@ -39,7 +44,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should insert and read back properly in various places") {
-    val map = new ChunkMap(memFactory, 8)
+    val map = new ChunkMap(8) {
+      def memFactory = nmm
+    }
     val elems = makeElems((0 to 11).map(_.toLong))
 
     // when empty
@@ -100,7 +107,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
 
   it("should replace existing elements in various places") {
     // pre-populate with elements 2 to 10
-    val map = new ChunkMap(memFactory, 8)
+    val map = new ChunkMap(8) {
+      def memFactory = nmm
+    }
     val elems = makeElems((2 to 10).map(_.toLong))
     elems.foreach { elem =>
       map.chunkmapDoPut(elem)
@@ -132,7 +141,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
 
   it("should putIfAbsent only if item doesn't already exist") {
     // pre-populate with elements 2 to 10
-    val map = new ChunkMap(memFactory, 8)
+    val map = new ChunkMap(8) {
+      def memFactory = nmm
+    }
     val elems = makeElems((2 to 10).map(_.toLong))
     map.chunkmapSize shouldEqual 0
 
@@ -163,7 +174,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should not be able to put NULL elements") {
-    val map = new ChunkMap(memFactory, 8)
+    val map = new ChunkMap(8) {
+      def memFactory = nmm
+    }
     intercept[IllegalArgumentException] {
       map.chunkmapDoPut(0)
     }
@@ -172,7 +185,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
 
   it("should insert, delete, and reinsert") {
     // insert 1 item, then delete it, test map is truly empty
-    val map = new ChunkMap(memFactory, 8)
+    val map = new ChunkMap(8) {
+      def memFactory = nmm
+    }
     map.chunkmapDoPut(makeElementWithID(1))
     map.chunkmapSize shouldEqual 1
     map.chunkmapDoRemove(1L)
@@ -210,7 +225,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should remove floor") {
-    val map = new ChunkMap(memFactory, 12)
+    val map = new ChunkMap(12) {
+      def memFactory = nmm
+    }
     val elems = makeElems((0 to 30 by 3).map(_.toLong))
     elems.foreach { elem =>
       map.chunkmapDoPut(elem)
@@ -247,7 +264,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
 
   it("should handle concurrent inserts in various places") {
     // Let's have 1 thread inserting at head, and another one inserting in middle
-    val map = new ChunkMap(memFactory, 32)
+    val map = new ChunkMap(32) {
+      def memFactory = nmm
+    }
     val headElems = makeElems((100 to 199).map(_.toLong))
     val midElems = makeElems((0 to 99).map(_.toLong))
 
@@ -274,7 +293,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
   it("should handle concurrent inserts and ensure slice/iterations return sane data") {
     // 1 thread inserts random elem.  Another allocates random strings in the buffer, just to
     // increase chances of reading random crap
-    val map = new ChunkMap(memFactory, 32)
+    val map = new ChunkMap(32) {
+      def memFactory = nmm
+    }
     val elems = makeElems((0 to 99).map(_.toLong)).toSeq
 
     val insertThread = Future {
@@ -310,7 +331,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
 
   it("should handle concurrent inserts and deletes in various places") {
     // First insert 0 to 99 single threaded
-    val map = new ChunkMap(memFactory, 32)
+    val map = new ChunkMap(32) {
+      def memFactory = nmm
+    }
     val elems = makeElems((0 to 99).map(_.toLong))
     elems.foreach { elem =>
       map.chunkmapWithExclusive(map.chunkmapDoPut(elem))
@@ -346,7 +369,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should slice correctly") {
-    val map = new ChunkMap(memFactory, 32)
+    val map = new ChunkMap(32) {
+      def memFactory = nmm
+    }
     val elems = makeElems((0 to 30 by 3).map(_.toLong))
     elems.foreach { elem =>
       map.chunkmapDoPut(elem)
@@ -374,7 +399,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should sliceToEnd correctly") {
-    val map = new ChunkMap(memFactory, 32)
+    val map = new ChunkMap(32) {
+      def memFactory = nmm
+    }
     val elems = makeElems((0 to 30 by 3).map(_.toLong))
     elems.foreach { elem =>
       map.chunkmapDoPut(elem)
@@ -392,7 +419,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should behave gracefully once map is freed") {
-    val map = new ChunkMap(memFactory, 32)
+    val map = new ChunkMap(32) {
+      def memFactory = nmm
+    }
     val elems = makeElems((0 to 30 by 3).map(_.toLong))
     elems.foreach { elem =>
       map.chunkmapDoPut(elem)
@@ -420,7 +449,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     // elements, which do end up getting tested with these parameters.
 
     val rnd = new java.util.Random(8675309)
-    val map = new ChunkMap(memFactory, 4)
+    val map = new ChunkMap(4) {
+      def memFactory = nmm
+    }
     val set = new HashSet[Long]()
 
     var size = 0
@@ -451,7 +482,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should support uncontended locking behavior") {
-    val map = new ChunkMap(memFactory, 32)
+    val map = new ChunkMap(32) {
+      def memFactory = nmm
+    }
 
     map.chunkmapAcquireExclusive()
     map.chunkmapReleaseExclusive()
@@ -477,7 +510,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should support exclusive lock") {
-    val map = new ChunkMap(memFactory, 32)
+    val map = new ChunkMap(32) {
+      def memFactory = nmm
+    }
 
     map.chunkmapAcquireExclusive()
 
@@ -513,7 +548,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should block exclusive lock when shared lock is held") {
-    val map = new ChunkMap(memFactory, 32)
+    val map = new ChunkMap(32) {
+      def memFactory = nmm
+    }
 
     map.chunkmapAcquireShared()
     map.chunkmapAcquireShared()
@@ -559,7 +596,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should block shared lock when exclusive lock is held") {
-    val map = new ChunkMap(memFactory, 32)
+    val map = new ChunkMap(32) {
+      def memFactory = nmm
+    }
 
     map.chunkmapAcquireExclusive()
 
@@ -605,7 +644,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should delay shared lock when exclusive lock is waiting") {
-    val map = new ChunkMap(memFactory, 32)
+    val map = new ChunkMap(32) {
+      def memFactory = nmm
+    }
 
     map.chunkmapAcquireShared()
 
@@ -660,7 +701,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should release all shared locks held by the current thread") {
-    val map = new ChunkMap(memFactory, 32)
+    val map = new ChunkMap(32) {
+      def memFactory = nmm
+    }
 
     map.chunkmapAcquireShared()
     map.chunkmapAcquireShared()
@@ -697,7 +740,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should release all shared locks held for only the current thread") {
-    val map = new ChunkMap(memFactory, 32)
+    val map = new ChunkMap(32) {
+      def memFactory = nmm
+    }
 
     map.chunkmapAcquireShared()
     map.chunkmapAcquireShared()
@@ -752,7 +797,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should support reentrant shared lock when exclusive lock is requested") {
-    val map = new ChunkMap(memFactory, 32)
+    val map = new ChunkMap(32) {
+      def memFactory = nmm
+    }
 
     map.chunkmapAcquireShared()
 
@@ -795,7 +842,9 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     val mm = new NativeMemoryManager(200)
 
     // Tiny initial capacity.
-    val map = new ChunkMap(mm, 1)
+    val map = new ChunkMap(1) {
+      def memFactory = mm
+    }
 
     val elems = makeElems((0 to 19).map(_.toLong))
     elems.foreach { elem =>

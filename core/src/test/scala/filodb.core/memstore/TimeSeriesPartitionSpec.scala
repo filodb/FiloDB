@@ -31,15 +31,17 @@ object TimeSeriesPartitionSpec {
   def makePart(partNo: Int, dataset: Dataset,
                partKey: NativePointer = defaultPartKey,
                bufferPool: WriteBufferPool = myBufferPool): TimeSeriesPartition = {
-    new TimeSeriesPartition(partNo, dataset.schema, partKey, 0, bufferPool,
-          new TimeSeriesShardStats(dataset.ref, 0), memFactory, 40)
+    val bufferPools = debox.Map(dataset.schema.schemaHash -> bufferPool)
+    val shardInfo = TimeSeriesShardInfo(0, new TimeSeriesShardStats(dataset.ref, 0), bufferPools, memFactory)
+    new TimeSeriesPartition(partNo, dataset.schema, partKey, shardInfo, 40)
   }
 
   def tracingPart(partNo: Int, dataset: Dataset,
                partKey: NativePointer = defaultPartKey,
                bufferPool: WriteBufferPool = myBufferPool): TimeSeriesPartition = {
-    new TracingTimeSeriesPartition(partNo, dataset.ref, dataset.schema, partKey, 0, bufferPool,
-          new TimeSeriesShardStats(dataset.ref, 0), memFactory, 40)
+    val bufferPools = debox.Map(dataset.schema.schemaHash -> bufferPool)
+    val shardInfo = TimeSeriesShardInfo(0, new TimeSeriesShardStats(dataset.ref, 0), bufferPools, memFactory)
+    new TracingTimeSeriesPartition(partNo, dataset.ref, dataset.schema, partKey, shardInfo, 40)
   }
 }
 

@@ -206,9 +206,9 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
       case Some(downsampleSchema) =>
         val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0, rawPart, 1)
         DownsamplerContext.dsLogger.debug(s"Downsampling partition ${rawReadablePart.stringPartition}")
-        val bufferPool = offHeapMem.bufferPools(rawPartSchema.downsample.get.schemaHash)
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
         val periodMarker = downsamplePeriodMarkersByRawSchemaId(rawSchemaId)
+        val shardInfo = TimeSeriesShardInfo(-1, shardStats, offHeapMem.bufferPools, offHeapMem.nativeMemoryManager)
 
         val (_, partKeyPtr, _) = BinaryRegionLarge.allocateAndCopy(rawReadablePart.partKeyBase,
                                                    rawReadablePart.partKeyOffset,
@@ -220,11 +220,9 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
         val downsampledParts = settings.downsampleResolutions.zip(settings.downsampledDatasetRefs).map {
           case (res, ref) =>
             val part = if (shouldTrace)
-              new TracingTimeSeriesPartition(0, ref, downsampleSchema, partKeyPtr,
-                0, bufferPool, shardStats, offHeapMem.nativeMemoryManager, 1)
+              new TracingTimeSeriesPartition(0, ref, downsampleSchema, partKeyPtr, shardInfo, 1)
             else
-              new TimeSeriesPartition(0, downsampleSchema, partKeyPtr,
-                                      0, bufferPool, shardStats, offHeapMem.nativeMemoryManager, 1)
+              new TimeSeriesPartition(0, downsampleSchema, partKeyPtr, shardInfo, 1)
             res -> part
         }.toMap
 
