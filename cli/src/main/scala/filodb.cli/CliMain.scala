@@ -389,7 +389,7 @@ object CliMain extends FilodbClusterNode {
                                timeParams: TimeRangeParams,
                                options: QOptions): Unit = {
     val shardKeyPrefix = Seq(constraints("_ws_"), constraints("_ns_"))
-    val logicalPlan = MetricCardinalitiesTopK(shardKeyPrefix, k, timeParams.start * 1000, timeParams.end * 1000)
+    val logicalPlan = MetricCardinalitiesTopK(shardKeyPrefix, k)
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 

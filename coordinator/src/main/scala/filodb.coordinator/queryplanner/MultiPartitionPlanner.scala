@@ -382,17 +382,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   }
 
   private def copy(lp: MetadataQueryPlan, startMs: Long, endMs: Long): MetadataQueryPlan = lp match {
-<<<<<<< HEAD
-    case sk: SeriesKeysByFilters  => sk.copy(startMs = startMs, endMs = endMs)
-    case lv: LabelValues          => lv.copy(startMs = startMs, endMs = endMs)
-    case ln: LabelNames           => ln.copy(startMs = startMs, endMs = endMs)
-    case lc: LabelCardinality     => lc.copy(startMs = startMs, endMs = endMs)
-=======
     case sk: SeriesKeysByFilters       => sk.copy(startMs = startMs, endMs = endMs)
     case lv: LabelValues               => lv.copy(startMs = startMs, endMs = endMs)
     case ln: LabelNames                => ln.copy(startMs = startMs, endMs = endMs)
->>>>>>> 095c0dc9 (add k functionality, some cleanup)
-    case lc: MetricCardinalitiesTopK   => lc.copy(startMs = startMs, endMs = endMs)
+    case lc: LabelCardinality          => lc.copy(startMs = startMs, endMs = endMs)
+    case lc: MetricCardinalitiesTopK   => lc.copy()
   }
 
   def materializeMetadataQueryPlan(lp: MetadataQueryPlan, qContext: QueryContext): PlanResult = {

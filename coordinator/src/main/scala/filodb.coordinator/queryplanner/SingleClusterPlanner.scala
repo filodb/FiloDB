@@ -507,8 +507,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                                             lp: MetricCardinalitiesTopK): PlanResult = {
     val metaExec = shardMapperFunc.assignedShards.map{ shard =>
       val dispatcher = dispatcherForShard(shard)
-      exec.MetricCardTopkExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix,
-                              lp.k, lp.startMs, lp.endMs)
+      exec.MetricCardTopkExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.k)
     }
     PlanResult(metaExec, false)
   }

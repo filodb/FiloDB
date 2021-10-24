@@ -29,7 +29,7 @@ sealed trait LogicalPlan {
       case l: LabelValues              => l.copy(filters = filters)
       case n: LabelNames               => n.copy(filters = filters)
       case s: SeriesKeysByFilters      => s.copy(filters = filters)
-      case c: MetricCardinalitiesTopK  => c.copy(/* no filters; only shardKeyPrefix */)
+      case c: MetricCardinalitiesTopK  => c.copy()
     }
   }
 }
@@ -125,11 +125,7 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
                                startMs: Long,
                                endMs: Long) extends MetadataQueryPlan
 
-// TODO(a_theimer): remove start/end?
-case class MetricCardinalitiesTopK(shardKeyPrefix: Seq[String],
-                                   k: Int,
-                                   startMs: Long,
-                                   endMs: Long) extends MetadataQueryPlan
+case class MetricCardinalitiesTopK(shardKeyPrefix: Seq[String], k: Int) extends MetadataQueryPlan
 
 /**
  * Concrete logical plan to query for chunk metadata from raw time series in a given range

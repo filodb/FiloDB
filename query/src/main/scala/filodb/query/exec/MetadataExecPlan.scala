@@ -377,9 +377,7 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
                                     dataset: DatasetRef,
                                     shard: Int,
                                     shardKeyPrefix: Seq[String],
-                                    k: Int,
-                                    startMs: Long,
-                                    endMs: Long) extends LeafExecPlan {
+                                    k: Int) extends LeafExecPlan {
   override def enforceLimit: Boolean = false
 
   def doExecute(source: ChunkSource,
@@ -407,7 +405,7 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
   }
 
   def args: String = s"shard=$shard, shardKeyPrefix=$shardKeyPrefix, k=$k, " +
-    s"limit=${queryContext.plannerParams.sampleLimit}, startMs=$startMs, endMs=$endMs"
+    s"limit=${queryContext.plannerParams.sampleLimit}"
 }
 
 final case class LabelNamesExec(queryContext: QueryContext,
