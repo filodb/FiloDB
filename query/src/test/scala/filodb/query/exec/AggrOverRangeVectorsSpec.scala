@@ -146,6 +146,17 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     compareIter(result9(0).rows.map(_.getDouble(1)), readyToAggr9.map { v =>
       stddev(v.map(_.getDouble(1)))
     }.iterator)
+
+    // Group
+    val agg10 = RowAggregator(AggregationOperator.Group, Nil, tvSchema)
+    val resultObs10a = RangeVectorAggregator.mapReduce(agg10, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs10 = RangeVectorAggregator.mapReduce(agg10, true, resultObs10a, rv=>rv.key)
+    val result10 = resultObs10.toListL.runAsync.futureValue
+    result10.size shouldEqual 1
+    result10(0).key shouldEqual noKey
+
+    val readyToAggr10 = samples.toList.map(_.rows.toList).transpose
+    compareIter(result10(0).rows.map(_.getDouble(1)), readyToAggr10.map { v => 1d }.iterator)
   }
 
   private def stdvar(items: List[Double]): Double = {
@@ -282,6 +293,15 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result9.size shouldEqual 1
     result9(0).key shouldEqual noKey
     compareIter(result9(0).rows.map(_.getDouble(1)), Seq(1.25d, 0.52493385826745d).iterator)
+
+    // Group
+    val agg10 = RowAggregator(AggregationOperator.Group, Nil, tvSchema)
+    val resultObs10a = RangeVectorAggregator.mapReduce(agg10, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs10 = RangeVectorAggregator.mapReduce(agg10, true, resultObs10a, rv=>rv.key)
+    val result10 = resultObs10.toListL.runAsync.futureValue
+    result10.size shouldEqual 1
+    result10(0).key shouldEqual noKey
+    compareIter(result10(0).rows.map(_.getDouble(1)), Seq(1d, 1d).iterator)
   }
 
   it ("should be able to serialize to and deserialize t-digest from SerializedRangeVector") {
@@ -468,6 +488,15 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result9.size shouldEqual 1
     result9(0).key shouldEqual noKey
     compareIter(result9(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 0.52493385826745d).iterator)
+
+    // Group
+    val agg10 = RowAggregator(AggregationOperator.Group, Nil, tvSchema)
+    val resultObs10a = RangeVectorAggregator.mapReduce(agg10, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs10 = RangeVectorAggregator.mapReduce(agg10, true, resultObs10a, rv=>rv.key)
+    val result10 = resultObs10.toListL.runAsync.futureValue
+    result10.size shouldEqual 1
+    result10(0).key shouldEqual noKey
+    compareIter(result10(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 1d).iterator)
   }
 
   it("topK should not have any trailing value ") {
@@ -668,6 +697,124 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
   }
 
+  it("should aggregate correctly when grouping is applied") {
+    val samples: Array[RangeVector] = Array(
+      toRv(Seq((1000L, 1.5d), (2000L, 5.6d)), CustomRangeVectorKey(Map("a".utf8 -> "1".utf8, "b".utf8 -> "1".utf8))),
+      toRv(Seq((1000L, 2.4d), (2000L, 4.4d)), CustomRangeVectorKey(Map("a".utf8 -> "2".utf8, "b".utf8 -> "2".utf8))),
+      toRv(Seq((1000L, 3.2d), (2000L, 5.4d)), CustomRangeVectorKey(Map("a".utf8 -> "3".utf8, "b".utf8 -> "2".utf8)))
+    )
+
+    // i.e. "without(a)"
+    def grouping(rv: RangeVector): RangeVectorKey =
+      CustomRangeVectorKey(Map("b".utf8 -> rv.key.labelValues("b".utf8)))
+
+    val noPresent = (agg: RowAggregator, rv: Observable[RangeVector]) => rv
+
+    val withPresent = (agg: RowAggregator, rv: Observable[RangeVector]) => {
+      RangeVectorAggregator.present(agg, rv, 1000, RangeParams(0, 1, 0))
+    }
+
+    // Tuples of (op, params, presenterFunc, bValExpected).
+    // bValExpected maps "b" label value to expected sequence of aggregate values.
+    val testTuples = Seq(
+      (AggregationOperator.Avg,
+        Seq(),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(1.5d, 5.6d),
+          "2".utf8 -> Seq(2.8d, 4.9d))),
+      (AggregationOperator.BottomK,
+        Seq(1d),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(1.5d, 5.6d),
+          "2".utf8 -> Seq(2.4d, 4.4d))),
+      (AggregationOperator.Count,
+        Seq(),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(1.0d, 1.0d),
+          "2".utf8 -> Seq(2d, 2d))),
+      (AggregationOperator.CountValues,
+        Seq("b"),  // just for consistency's sake
+        withPresent,
+        Map(
+          "5.4".utf8 -> Seq(1d),
+          "4.4".utf8 -> Seq(1d),
+          "5.6".utf8 -> Seq(1d),
+          "1.5".utf8 -> Seq(1d),
+          "2.4".utf8 -> Seq(1d),
+          "3.2".utf8 -> Seq(1d))),
+      (AggregationOperator.Group,
+        Seq(),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(1.0d, 1.0d),
+          "2".utf8 -> Seq(1.0d, 1.0d))),
+      (AggregationOperator.Max,
+        Seq(),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(1.5d, 5.6d),
+          "2".utf8 -> Seq(3.2d, 5.4d))),
+      (AggregationOperator.Min,
+        Seq(),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(1.5d, 5.6d),
+          "2".utf8 -> Seq(2.4d, 4.4d))),
+      (AggregationOperator.Quantile,
+        Seq(0.9d),
+        withPresent,
+        Map(
+          "1".utf8 -> Seq(1.5d, 5.6d),
+          "2".utf8 -> Seq(3.120000106096268d, 5.300000095367432d))),
+      (AggregationOperator.Stddev,
+        Seq(),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(0d, 0d),
+          "2".utf8 -> Seq(0.4d, 0.5d))),
+      (AggregationOperator.Stdvar,
+        Seq(),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(0d, 0d),
+          "2".utf8 -> Seq(0.16d, 0.25))),
+      (AggregationOperator.Sum,
+        Seq(),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(1.5d, 5.6d),
+          "2".utf8 -> Seq(5.6d, 9.8d))),
+      (AggregationOperator.TopK,
+        Seq(1d),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(1.5d, 5.6d),
+          "2".utf8 -> Seq(3.2d, 5.4d))),
+    )
+
+    for ((aggOp, params, presenterFunc, bValExpected) <- testTuples) {
+      val agg = RowAggregator(aggOp, params, tvSchema)
+      val resultObsLeaf = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), grouping)
+      val resultObs = RangeVectorAggregator.mapReduce(agg, true, resultObsLeaf, rv=>rv.key)
+      val resultObsPresent = presenterFunc(agg, resultObs)
+      val result = resultObsPresent.toListL.runAsync.futureValue
+
+      // should have one grouping for each "b" label value
+      result.size shouldEqual bValExpected.size
+
+      // step through each group's RangeVector and check values against expected
+      for (rv <- result) {
+        // each key should just map "b" to its value
+        rv.key.labelValues.size shouldEqual 1
+        val bVal = rv.key.labelValues("b".utf8)
+        bValExpected.contains(bVal) shouldEqual true
+        compareIter(rv.rows.map(_.getDouble(1)), bValExpected(bVal).iterator)
+      }
+    }
+  }
 
   @tailrec
   final private def compareIter(it1: Iterator[Double], it2: Iterator[Double]) : Unit = {
