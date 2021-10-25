@@ -10,7 +10,6 @@ import filodb.core.{MachineMetricsData => MMD}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.ZeroCopyUTF8String._
-// import filodb.query
 import filodb.query.AggregationOperator
 import filodb.query.exec.aggregator.RowAggregator
 import filodb.query.exec.rangefn.RawDataWindowingSpec
@@ -709,61 +708,113 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     def grouping(rv: RangeVector): RangeVectorKey =
       CustomRangeVectorKey(Map("b".utf8 -> rv.key.labelValues("b".utf8)))
 
-    // map "b" label value to expected sequence of aggregate values
-    val opToExpected = Map(
-      AggregationOperator.Avg -> Map(
-        "1".utf8 -> Seq(1.5d, 5.6d),
-        "2".utf8 -> Seq(2.8d, 4.9d)
-      ),
-      AggregationOperator.Count-> Map(
-        "1".utf8 -> Seq(1.0d, 1.0d),
-        "2".utf8 -> Seq(2d, 2d)
-      ),
-      AggregationOperator.Group -> Map(
-        "1".utf8 -> Seq(1.0d, 1.0d),
-        "2".utf8 -> Seq(1.0d, 1.0d)
-      ),
-      AggregationOperator.Max -> Map(
-        "1".utf8 -> Seq(1.5d, 5.6d),
-        "2".utf8 -> Seq(3.2d, 5.4d)
-      ),
-      AggregationOperator.Min -> Map(
-        "1".utf8 -> Seq(1.5d, 5.6d),
-        "2".utf8 -> Seq(2.4d, 4.4d)
-      ),
-      AggregationOperator.Stddev -> Map(
-        "1".utf8 -> Seq(0d, 0d),
-        "2".utf8 -> Seq(0.4d, 0.5d)
-      ),
-      AggregationOperator.Stdvar -> Map(
-        "1".utf8 -> Seq(0d, 0d),
-        "2".utf8 -> Seq(0.16d, 0.25d)
-      ),
-      AggregationOperator.Sum -> Map(
-        "1".utf8 -> Seq(1.5d, 5.6d),
-        "2".utf8 -> Seq(5.6d, 9.8d)
-      )
-      // TODO: include TopK, BottomK, CountValues, Quantile
+    val noPresent = (agg: RowAggregator, rv: Observable[RangeVector]) => rv
+
+    val withPresent = (agg: RowAggregator, rv: Observable[RangeVector]) => {
+      RangeVectorAggregator.present(agg, rv, 1000, RangeParams(0, 1, 0))
+    }
+
+    // Tuples of (op, params, presenterFunc, bValExpected).
+    // bValExpected maps "b" label value to expected sequence of aggregate values.
+    val testTuples = Seq(
+      (AggregationOperator.Avg,
+        Seq(),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(1.5d, 5.6d),
+          "2".utf8 -> Seq(2.8d, 4.9d))),
+      (AggregationOperator.BottomK,
+        Seq(1d),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(1.5d, 5.6d),
+          "2".utf8 -> Seq(2.4d, 4.4d))),
+      (AggregationOperator.Count,
+        Seq(),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(1.0d, 1.0d),
+          "2".utf8 -> Seq(2d, 2d))),
+      (AggregationOperator.CountValues,
+        Seq("b"),  // just for consistency's sake
+        withPresent,
+        Map(
+          "5.4".utf8 -> Seq(1d),
+          "4.4".utf8 -> Seq(1d),
+          "5.6".utf8 -> Seq(1d),
+          "1.5".utf8 -> Seq(1d),
+          "2.4".utf8 -> Seq(1d),
+          "3.2".utf8 -> Seq(1d))),
+      (AggregationOperator.Group,
+        Seq(),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(1.0d, 1.0d),
+          "2".utf8 -> Seq(1.0d, 1.0d))),
+      (AggregationOperator.Max,
+        Seq(),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(1.5d, 5.6d),
+          "2".utf8 -> Seq(3.2d, 5.4d))),
+      (AggregationOperator.Min,
+        Seq(),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(1.5d, 5.6d),
+          "2".utf8 -> Seq(2.4d, 4.4d))),
+      (AggregationOperator.Quantile,
+        Seq(0.9d),
+        withPresent,
+        Map(
+          "1".utf8 -> Seq(1.5d, 5.6d),
+          "2".utf8 -> Seq(3.120000106096268d, 5.300000095367432d))),
+      (AggregationOperator.Stddev,
+        Seq(),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(0d, 0d),
+          "2".utf8 -> Seq(0.4d, 0.5d))),
+      (AggregationOperator.Stdvar,
+        Seq(),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(0d, 0d),
+          "2".utf8 -> Seq(0.16d, 0.25))),
+      (AggregationOperator.Sum,
+        Seq(),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(1.5d, 5.6d),
+          "2".utf8 -> Seq(5.6d, 9.8d))),
+      (AggregationOperator.TopK,
+        Seq(1d),
+        noPresent,
+        Map(
+          "1".utf8 -> Seq(1.5d, 5.6d),
+          "2".utf8 -> Seq(3.2d, 5.4d))),
     )
 
-    for ((aggOp, expected) <- opToExpected) {
-      val agg = RowAggregator(aggOp, Nil, tvSchema)
+    for ((aggOp, params, presenterFunc, bValExpected) <- testTuples) {
+      val agg = RowAggregator(aggOp, params, tvSchema)
       val resultObsLeaf = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), grouping)
       val resultObs = RangeVectorAggregator.mapReduce(agg, true, resultObsLeaf, rv=>rv.key)
-      val result = resultObs.toListL.runAsync.futureValue
+      val resultObsPresent = presenterFunc(agg, resultObs)
+      val result = resultObsPresent.toListL.runAsync.futureValue
 
-      // should have one grouping for each "b" label value ("1" and "2")
-      result.size shouldEqual 2
+      // should have one grouping for each "b" label value
+      result.size shouldEqual bValExpected.size
 
-      // step through each grouping and check values against expected
-      for (groupIter <- result) {
-        groupIter.key.labelValues.size shouldEqual 1
-        val label = groupIter.key.labelValues.toSeq(0)._2
-        compareIter(groupIter.rows.map(_.getDouble(1)), expected(label).iterator)
+      // step through each group's RangeVector and check values against expected
+      for (rv <- result) {
+        // each key should just map "b" to its value
+        rv.key.labelValues.size shouldEqual 1
+        val bVal = rv.key.labelValues("b".utf8)
+        bValExpected.contains(bVal) shouldEqual true
+        compareIter(rv.rows.map(_.getDouble(1)), bValExpected(bVal).iterator)
       }
     }
   }
-
 
   @tailrec
   final private def compareIter(it1: Iterator[Double], it2: Iterator[Double]) : Unit = {
