@@ -293,7 +293,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         store.readRawPartitions(downsampledDataset,
                                 downsampleStoreConfig.maxChunkTime.toMillis,
                                 SinglePartitionScan(partRec.partKey, shardNum),
-                                lookup.chunkMethod)
+                                TimeRangeChunkScan(partRec.startTime, partRec.endTime))
           .map { pd =>
             val part = makePagedPartition(pd, lookup.firstSchemaId.get, resolutionMs, colIds)
             stats.partitionsQueried.increment()
