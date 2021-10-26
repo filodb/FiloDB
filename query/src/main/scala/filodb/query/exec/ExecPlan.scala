@@ -379,11 +379,6 @@ abstract class NonLeafExecPlan extends ExecPlan {
 
   final def submitTime: Long = children.head.queryContext.submitTime
 
-  /**
-    * If non-empty, doExec will return an ExecResult with this schema.
-    */
-  protected def forceSchema: Option[ResultSchema] = Option.empty
-
   // flag to override child task execution behavior. If it is false, child tasks get executed sequentially.
   // Use-cases include splitting longer range query into multiple smaller range queries.
   def parallelChildTasks: Boolean = true
@@ -429,8 +424,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
                                  span.mark(s"child-plan-$i-dispatched-${plan.getClass.getSimpleName}")
                                  task
                                }
-    // If forceSchema is non-empty, then its value is returned as the Task.
-    // Otherwise, the first valid schema is returned as the Task.  If all results are empty, then
+    // The first valid schema is returned as the Task.  If all results are empty, then
     // return an empty schema.  Validate that the other schemas are the same.  Skip over empty schemas.
     var sch = ResultSchema.empty
     val processedTasks = childTasks
@@ -453,8 +447,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
       .cache // cache caches results so that multiple subscribers can process
 
     val outputSchema =
-      if (forceSchema.nonEmpty) Task.eval(forceSchema.get)
-      else processedTasks.collect { // collect schema of first result that is nonEmpty
+      processedTasks.collect { // collect schema of first result that is nonEmpty
         case (QueryResult(_, schema, _, qStats, _, _), _) if schema.columns.nonEmpty => schema
       }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
 
