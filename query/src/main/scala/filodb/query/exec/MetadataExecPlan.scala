@@ -68,10 +68,6 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
                                         dispatcher: PlanDispatcher,
                                         children: Seq[ExecPlan]) extends MetadataDistConcatExec
 
-final case object MetricCardTopkMergeExec {
-  protected val ordering : Ordering[ItemsSketch.Row[ZeroCopyUTF8String]] = Ordering.by(row => -row.getEstimate)
-}
-
 final case class MetricCardTopkMergeExec(queryContext: QueryContext,
                                          dispatcher: PlanDispatcher,
                                          children: Seq[ExecPlan],
@@ -106,6 +102,10 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
   }
 }
 
+final case object MetricCardTopkPresenter {
+  protected val ordering : Ordering[ItemsSketch.Row[ZeroCopyUTF8String]] = Ordering.by(row => -row.getEstimate)
+}
+
 final case class MetricCardTopkPresenter(k: Int) extends RangeVectorTransformer {
   override def funcParams: Seq[FuncArgs] = Nil
 
@@ -116,15 +116,16 @@ final case class MetricCardTopkPresenter(k: Int) extends RangeVectorTransformer 
             limit: Int,
             sourceSchema: ResultSchema, paramsResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     source.map { rv =>
-      // deseerialize the sketch
-      val sketchSer = rv.rows().next().getString(0).getBytes
+      // deserialize the sketch
+      // TODO(a_theimer): explain / need this elsewhere?
+      val sketchSer = rv.rows.next.getAny(0).asInstanceOf[ZeroCopyUTF8String].bytes
       ItemsSketch.getInstance(Memory.wrap(sketchSer), new ArrayOfZeroCopyUTF8StringSerDe)
     }.map{ sketch =>
       // Collect all rows from the union with frequency estimate upper bounds above a default threshold.
       val freqRows = sketch.getFrequentItems(ErrorType.NO_FALSE_NEGATIVES)
 
       // find the topk with a pqueue
-      val topkPqueue = mutable.PriorityQueue[ItemsSketch.Row[ZeroCopyUTF8String]]()(MetricCardTopkMergeExec.ordering)
+      val topkPqueue = mutable.PriorityQueue[ItemsSketch.Row[ZeroCopyUTF8String]]()(MetricCardTopkPresenter.ordering)
       freqRows.foreach { row =>
         if (topkPqueue.size < k) {
           topkPqueue.enqueue(row)

@@ -144,7 +144,11 @@ class SingleClusterPlanner(val dataset: Dataset,
             reduceExec.addRangeVectorTransformer(new LabelCardinalityPresenter())
             reduceExec
           }
-          case lce: MetricCardTopkExec => MetricCardTopkMergeExec(qContext, targetActor, many, lce.k)
+          case lce: MetricCardTopkExec => {
+            val merge = MetricCardTopkMergeExec(qContext, targetActor, many, lce.k)
+            merge.addRangeVectorTransformer(MetricCardTopkPresenter(lce.k))
+            merge
+          }
           case ske: PartKeysExec => PartKeysDistConcatExec(qContext, targetActor, many)
           case ep: ExecPlan =>
             val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, many)

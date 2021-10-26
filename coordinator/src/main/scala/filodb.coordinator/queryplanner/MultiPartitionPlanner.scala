@@ -423,10 +423,19 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
         case _: LabelNames => LabelNamesDistConcatExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
+<<<<<<< HEAD
         case _: LabelCardinality => LabelCardinalityReduceExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
         case mc: MetricCardinalitiesTopK => MetricCardTopkMergeExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]), mc.k)
+=======
+        case mc: MetricCardinalitiesTopK => {
+          val merge = MetricCardTopkMergeExec(qContext, inProcessPlanDispatcher,
+            execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]), mc.k)
+          merge.addRangeVectorTransformer(MetricCardTopkPresenter(mc.k))
+          merge
+        }
+>>>>>>> 67884f16 (use new MetricCardTopkPresenter)
       }
     }
     PlanResult(execPlan::Nil)
