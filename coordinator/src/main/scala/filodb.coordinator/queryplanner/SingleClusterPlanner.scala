@@ -234,7 +234,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp)
       case lp: LabelValues                 => materializeLabelValues(qContext, lp)
       case lp: LabelNames                  => materializeLabelNames(qContext, lp)
-      case lp: MetricCardinalitiesTopK     => materializeLabelCardinalities(qContext, lp)
+      case lp: MetricCardinalitiesTopK     => materializeMetricCardinalitiesTopK(qContext, lp)
       case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(qContext, lp)
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplySortFunction           => materializeApplySortFunction(qContext, lp)
@@ -503,8 +503,8 @@ class SingleClusterPlanner(val dataset: Dataset,
     PlanResult(metaExec, false)
   }
 
-  private def materializeLabelCardinalities(qContext: QueryContext,
-                                            lp: MetricCardinalitiesTopK): PlanResult = {
+  private def materializeMetricCardinalitiesTopK(qContext: QueryContext,
+                                                 lp: MetricCardinalitiesTopK): PlanResult = {
     val metaExec = shardMapperFunc.assignedShards.map{ shard =>
       val dispatcher = dispatcherForShard(shard)
       exec.MetricCardTopkExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.k)
