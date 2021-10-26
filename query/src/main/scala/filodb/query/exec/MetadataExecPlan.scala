@@ -78,10 +78,6 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
                                          k: Int) extends NonLeafExecPlan {
   override protected def args: String = ""
 
-  override protected def forceSchema: Option[ResultSchema] = Option(ResultSchema(
-    Seq(ColumnInfo("Metric", ColumnType.StringColumn),
-        ColumnInfo("Cardinality", ColumnType.LongColumn)), 1))
-
   private def sketchFold(acc: ItemsSketch[ZeroCopyUTF8String], rv: RangeVector):
             ItemsSketch[ZeroCopyUTF8String] = {
     rv.rows().foreach{ r =>
@@ -99,39 +95,64 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
       case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
       case (QueryError(_, _, ex), _)         => throw ex
     }.flatten
-      // collect the union of the sketches
+      // fold all child sketches into a single sketch
       .foldLeftL(new ItemsSketch[ZeroCopyUTF8String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE))(sketchFold)
       .map{ sketch =>
-        // Collect all rows from the union with frequency estimate upper bounds above a default threshold.
-        val freqRows = sketch.getFrequentItems(ErrorType.NO_FALSE_NEGATIVES)
-
-        // find the topk with a pqueue
-        val topkPqueue = mutable.PriorityQueue[ItemsSketch.Row[ZeroCopyUTF8String]]()(MetricCardTopkMergeExec.ordering)
-        freqRows.foreach { row =>
-          if (topkPqueue.size < k) {
-            topkPqueue.enqueue(row)
-          } else if (topkPqueue.head.getEstimate < row.getEstimate) {
-            // min count in the heap is less than the current count
-            topkPqueue.dequeue()
-            topkPqueue.enqueue(row)
-          }
-        }
-
-        // Convert the topk to match the schema, then store them in-order in an array.
-        // Use the array's iterator as the backend of a RangeVector.
-        val resSize = math.min(k, topkPqueue.size)
-        val topkRows = new mutable.ArraySeq[RowReader](resSize)
-        for (i <- 0 until resSize) {
-          val heapMin = topkPqueue.dequeue()
-          topkRows(i) = SeqRowReader(Seq(heapMin.getItem, heapMin.getEstimate))
-        }
-
-        IteratorBackedRangeVector(CustomRangeVectorKey(Map.empty),
-          new NoCloseCursor(topkRows.reverseIterator),
-          None)
+        val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ArrayOfZeroCopyUTF8StringSerDe))
+        val it = Seq(SingleValueRowReader(serSketch)).iterator
+        IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
       }
     Observable.fromTask(taskOfResults)
   }
+}
+
+final case class MetricCardTopkPresenter(k: Int) extends RangeVectorTransformer {
+  override def funcParams: Seq[FuncArgs] = Nil
+
+  override protected[exec] def args: String = ""
+
+  def apply(source: Observable[RangeVector],
+            querySession: QuerySession,
+            limit: Int,
+            sourceSchema: ResultSchema, paramsResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
+    source.map { rv =>
+      // deseerialize the sketch
+      val sketchSer = rv.rows().next().getString(0).getBytes
+      ItemsSketch.getInstance(Memory.wrap(sketchSer), new ArrayOfZeroCopyUTF8StringSerDe)
+    }.map{ sketch =>
+      // Collect all rows from the union with frequency estimate upper bounds above a default threshold.
+      val freqRows = sketch.getFrequentItems(ErrorType.NO_FALSE_NEGATIVES)
+
+      // find the topk with a pqueue
+      val topkPqueue = mutable.PriorityQueue[ItemsSketch.Row[ZeroCopyUTF8String]]()(MetricCardTopkMergeExec.ordering)
+      freqRows.foreach { row =>
+        if (topkPqueue.size < k) {
+          topkPqueue.enqueue(row)
+        } else if (topkPqueue.head.getEstimate < row.getEstimate) {
+          // min count in the heap is less than the current count
+          topkPqueue.dequeue()
+          topkPqueue.enqueue(row)
+        }
+      }
+
+      // Convert the topk to match the schema, then store them in-order in an array.
+      // Use the array's iterator as the backend of a RangeVector.
+      val resSize = math.min(k, topkPqueue.size)
+      val topkRows = new mutable.ArraySeq[RowReader](resSize)
+      for (i <- 0 until resSize) {
+        val heapMin = topkPqueue.dequeue()
+        topkRows(i) = SeqRowReader(Seq(heapMin.getItem, heapMin.getEstimate))
+      }
+
+      IteratorBackedRangeVector(CustomRangeVectorKey(Map.empty),
+        new NoCloseCursor(topkRows.reverseIterator),
+        None)
+    }
+  }
+
+  override def schema(source: ResultSchema): ResultSchema = ResultSchema(
+    Seq(ColumnInfo("Metric", ColumnType.StringColumn),
+        ColumnInfo("Cardinality", ColumnType.LongColumn)), 1)
 }
 
 final case class LabelValuesDistConcatExec(queryContext: QueryContext,
