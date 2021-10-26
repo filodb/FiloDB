@@ -68,6 +68,9 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
                                         dispatcher: PlanDispatcher,
                                         children: Seq[ExecPlan]) extends MetadataDistConcatExec
 
+/**
+  * Aggregates output from MetricCardTopkExec.
+  */
 final case class MetricCardTopkMergeExec(queryContext: QueryContext,
                                          dispatcher: PlanDispatcher,
                                          children: Seq[ExecPlan],
@@ -102,10 +105,10 @@ final case class MetricCardTopkMergeExec(queryContext: QueryContext,
   }
 }
 
-final case object MetricCardTopkPresenter {
-  protected val ordering : Ordering[ItemsSketch.Row[ZeroCopyUTF8String]] = Ordering.by(row => -row.getEstimate)
-}
-
+/**
+  * Deserializes the ItemsSketch, selects the top-k metrics,
+ *  and packages them into a 2-columned range vector.
+  */
 final case class MetricCardTopkPresenter(k: Int) extends RangeVectorTransformer {
   override def funcParams: Seq[FuncArgs] = Nil
 
@@ -116,8 +119,8 @@ final case class MetricCardTopkPresenter(k: Int) extends RangeVectorTransformer 
             limit: Int,
             sourceSchema: ResultSchema, paramsResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     source.map { rv =>
-      // deserialize the sketch
-      // TODO(a_theimer): explain / need this elsewhere?
+      // Deserialize the sketch.
+      // Note: getString() throws a ClassCastException.
       val sketchSer = rv.rows.next.getAny(0).asInstanceOf[ZeroCopyUTF8String].bytes
       ItemsSketch.getInstance(Memory.wrap(sketchSer), new ArrayOfZeroCopyUTF8StringSerDe)
     }.map{ sketch =>
@@ -125,7 +128,8 @@ final case class MetricCardTopkPresenter(k: Int) extends RangeVectorTransformer 
       val freqRows = sketch.getFrequentItems(ErrorType.NO_FALSE_NEGATIVES)
 
       // find the topk with a pqueue
-      val topkPqueue = mutable.PriorityQueue[ItemsSketch.Row[ZeroCopyUTF8String]]()(MetricCardTopkPresenter.ordering)
+      val topkPqueue =
+        mutable.PriorityQueue[ItemsSketch.Row[ZeroCopyUTF8String]]()(Ordering.by(row => -row.getEstimate))
       freqRows.foreach { row =>
         if (topkPqueue.size < k) {
           topkPqueue.enqueue(row)
@@ -390,10 +394,13 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
 }
 
 final case object MetricCardTopkExec {
-  // TODO(a_theimer): unsure what to set this to; also should be client-defined
+  // TODO(a_theimer): unsure what to set this to; also should be client-defined?
   val MAX_ITEMSKETCH_MAP_SIZE = 16;
 }
 
+/**
+  * Retrieves the top-k metrics from a specific shard.
+  */
 final case class MetricCardTopkExec(queryContext: QueryContext,
                                     dispatcher: PlanDispatcher,
                                     dataset: DatasetRef,

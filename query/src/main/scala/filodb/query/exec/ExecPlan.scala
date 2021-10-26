@@ -424,8 +424,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
                                  span.mark(s"child-plan-$i-dispatched-${plan.getClass.getSimpleName}")
                                  task
                                }
-    // The first valid schema is returned as the Task.  If all results are empty, then
-    // return an empty schema.  Validate that the other schemas are the same.  Skip over empty schemas.
+
+    // The first valid schema is returned as the Task.  If all results are empty, then return
+    // an empty schema.  Validate that the other schemas are the same.  Skip over empty schemas.
     var sch = ResultSchema.empty
     val processedTasks = childTasks
       .doOnStart(_ => span.mark("first-child-result-received"))
@@ -446,11 +447,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
       .filter(_._1.resultSchema != ResultSchema.empty)
       .cache // cache caches results so that multiple subscribers can process
 
-    val outputSchema =
-      processedTasks.collect { // collect schema of first result that is nonEmpty
-        case (QueryResult(_, schema, _, qStats, _, _), _) if schema.columns.nonEmpty => schema
-      }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
-
+    val outputSchema = processedTasks.collect { // collect schema of first result that is nonEmpty
+      case (QueryResult(_, schema, _, qStats, _, _), _) if schema.columns.nonEmpty => schema
+    }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
       // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {
         val outputRvs = compose(processedTasks, outputSchema, querySession)
