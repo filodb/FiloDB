@@ -275,13 +275,10 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   def scanPartitions(lookup: PartLookupResult,
                      colIds: Seq[Types.ColumnId],
                      querySession: QuerySession): Observable[ReadablePartition] = {
-
     // Step 1: Choose the downsample level depending on the range requested
     val (resolutionMs, downsampledDataset) = chooseDownsampleResolution(lookup.chunkMethod)
     logger.debug(s"Chose resolution $downsampledDataset for chunk method ${lookup.chunkMethod}")
-
     capDataScannedPerShardCheck(lookup, resolutionMs)
-
     // Step 2: Query Cassandra table for that downsample level using downsampleColStore
     // Create a ReadablePartition objects that contain the time series data. This can be either a
     // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
