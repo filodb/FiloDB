@@ -430,7 +430,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]), mc.k)
 =======
         case mc: MetricCardinalitiesTopK => {
-          val merge = MetricCardTopkMergeExec(qContext, inProcessPlanDispatcher,
+          val merge = MetricCardTopkReduceExec(qContext, inProcessPlanDispatcher,
             execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]), mc.k)
           merge.addRangeVectorTransformer(MetricCardTopkPresenter(mc.k))
           merge

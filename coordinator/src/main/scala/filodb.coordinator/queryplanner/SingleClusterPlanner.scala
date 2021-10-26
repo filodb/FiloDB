@@ -145,7 +145,7 @@ class SingleClusterPlanner(val dataset: Dataset,
             reduceExec
           }
           case lce: MetricCardTopkExec => {
-            val merge = MetricCardTopkMergeExec(qContext, targetActor, many, lce.k)
+            val merge = MetricCardTopkReduceExec(qContext, targetActor, many, lce.k)
             merge.addRangeVectorTransformer(MetricCardTopkPresenter(lce.k))
             merge
           }

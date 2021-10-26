@@ -71,10 +71,10 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
 /**
   * Aggregates output from MetricCardTopkExec.
   */
-final case class MetricCardTopkMergeExec(queryContext: QueryContext,
-                                         dispatcher: PlanDispatcher,
-                                         children: Seq[ExecPlan],
-                                         k: Int) extends NonLeafExecPlan {
+final case class MetricCardTopkReduceExec(queryContext: QueryContext,
+                                          dispatcher: PlanDispatcher,
+                                          children: Seq[ExecPlan],
+                                          k: Int) extends NonLeafExecPlan {
   override protected def args: String = ""
 
   private def sketchFold(acc: ItemsSketch[ZeroCopyUTF8String], rv: RangeVector):
@@ -394,8 +394,8 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
 }
 
 final case object MetricCardTopkExec {
-  // TODO(a_theimer): unsure what to set this to; also should be client-defined?
-  val MAX_ITEMSKETCH_MAP_SIZE = 16;
+  // TODO: tune this
+  val MAX_ITEMSKETCH_MAP_SIZE = 128;
 }
 
 /**

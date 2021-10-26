@@ -9,12 +9,13 @@ import org.apache.datasketches.memory.WritableMemory;
 /**
  * Serializer/Deserializer for sketches with ZeroCopyUTF8String data.
  *
- * (Basically copied from ArrayOfStringsSerDe source code.)
- *
- * Note to future developers: use of the ZeroCopyUTF8String constructor
- *      directly will silently fail. Always use ZeroCopyUTF8String::apply.
+ * (This code is copied nearly verbatim from the
+ *     DataSketches ArrayOfStringsSerDe source code.)
  */
 public class ArrayOfZeroCopyUTF8StringSerDe extends ArrayOfItemsSerDe<ZeroCopyUTF8String> {
+
+    /* Note to future developers: use of the ZeroCopyUTF8String constructor
+       directly will silently fail. Always use ZeroCopyUTF8String::apply.   */
 
     @Override
     public byte[] serializeToByteArray(final ZeroCopyUTF8String[] items) {
