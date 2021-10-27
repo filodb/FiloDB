@@ -4,7 +4,7 @@ sealed trait PromQueryResponse {
   def status: String
 }
 
-final case class ErrorResponse(errorType: String, error: String = "unknown", status: String = "error",
+final case class ErrorResponse(errorType: String, error: String, status: String = "error",
                                queryStats: Option[Seq[QueryStatistics]]) extends PromQueryResponse
 
 final case class SuccessResponse(data: Data, status: String = "success",
