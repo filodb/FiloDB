@@ -9,12 +9,7 @@ sealed trait ShardAction extends Serializable
 
 /** Sent once to newly-subscribed subscribers to initialize their local ShardMapper. */
 final case class CurrentShardSnapshot(ref: DatasetRef,
-                                      map: ShardMapper) extends ShardAction with Response {
-  def summary(): String = {
-    s"CurrentShardSnapshot Summary: dataset=$ref numAssignedShards=${map.numAssignedShards} " +
-      s"numAssignedCoords=${map.numAssignedCoords}"
-  }
-}
+                                      map: ShardMapper) extends ShardAction with Response
 
 /**
   * Full state of all shards, sent to all ingestion actors. They react by starting/stopping
