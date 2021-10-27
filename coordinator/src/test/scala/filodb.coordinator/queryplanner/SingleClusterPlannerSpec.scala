@@ -798,20 +798,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     val queryContext = QueryContext(origQueryParams = promQlQueryParams)
     val execPlan = engine.materialize(lp, queryContext)
-    execPlan.isInstanceOf[LabelCardinalityReduceExec] shouldBe true
-    val List(child1:LabelCardinalityExec , child2: LabelCardinalityExec, _*) = execPlan.children.toList
-    child1.shard shouldEqual 3
-    child2.shard shouldEqual 19
-    (child1 :: child2 ::Nil).foreach(child => {
-      child.filters shouldEqual filters
-      child.startMs shouldEqual 0
-      child.endMs shouldEqual 1634920729000L
-      child.dataset shouldEqual dataset.ref
-      child.rangeVectorTransformers.isEmpty shouldBe true
-      child.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldBe true
-    })
-    execPlan.rangeVectorTransformers.size shouldBe 1
-    execPlan.rangeVectorTransformers.head.isInstanceOf[LabelCardinalityPresenter] shouldBe true
+
     val expected =
     """T~LabelCardinalityPresenter(LabelCardinalityPresenter)
     |-E~LabelCardinalityReduceExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
