@@ -365,7 +365,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
         case _: LabelNames => LabelNamesDistConcatExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
-        case _: LabelCardinality => LabelCardinalityDistConcatExec(qContext, inProcessPlanDispatcher,
+        case _: LabelCardinality => LabelCardinalityReduceExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
       }
     }

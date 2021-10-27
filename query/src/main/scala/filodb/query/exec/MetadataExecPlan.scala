@@ -78,15 +78,13 @@ final class LabelCardinalityPresenter(val funcParams: Seq[FuncArgs]  = Nil) exte
 
     source.map(rv => {
           val x = rv.rows().toList.head
-          // TODO: We expect only one column to be a map, p[attern matching does not work, is there better way?
+          // TODO: We expect only one column to be a map, pattern matching does not work, is there better way?
           val sketchMap = x.getAny(columnNo = 0).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
-          val iterator = (sketchMap.map {
-            case (labelName, sketch) =>
-              (labelName,
-                ZeroCopyUTF8String(Math.round(CpcSketch.heapify(sketch.bytes).getEstimate).toInt.toString))
-          } :: Nil).toIterator
+          val sketchMapIterator = (sketchMap.mapValues {
+            sketch => ZeroCopyUTF8String(Math.round(CpcSketch.heapify(sketch.bytes).getEstimate).toInt.toString)}
+            :: Nil).toIterator
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-              new UTF8MapIteratorRowReader(iterator), None)
+              new UTF8MapIteratorRowReader(sketchMapIterator), None)
       })
   }
 
@@ -110,9 +108,9 @@ final case class LabelNamesDistConcatExec(queryContext: QueryContext,
   }
 }
 
-final case class LabelCardinalityDistConcatExec(queryContext: QueryContext,
-                                          dispatcher: PlanDispatcher,
-                                          children: Seq[ExecPlan]) extends DistConcatExec {
+final case class LabelCardinalityReduceExec(queryContext: QueryContext,
+                                            dispatcher: PlanDispatcher,
+                                            children: Seq[ExecPlan]) extends DistConcatExec {
 
   import scala.collection.mutable.{Map => MutableMap}
 
@@ -265,25 +263,23 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
       case ms: MemStore =>
         // TODO: Do we need to check for presence of all three, _ws_, _ns_ and _metric_?
         // TODO: What should be the limit, where to configure?
-        // TODO: Sketch can be configured, in config along with the log value to use.
-        val response = ms.partKeysWithFilters(dataset, shard, filters, fetchFirstLastSampleTimes = false,
+        // TODO: We don't need to allocate intermediate Map and create an Iterator of Map, instead we can get raw byte
+        //  sequences and operate directly with it to create the final data structures we need
+        val partKeysMap = ms.partKeysWithFilters(dataset, shard, filters, fetchFirstLastSampleTimes = false,
           endMs, startMs, limit= 1000000)
 
         val metadataResult = scala.collection.mutable.Map.empty[String, CpcSketch]
-        response.foreach { rv =>
+        partKeysMap.foreach { rv =>
           rv.foreach {
             case (labelName, labelValue) =>
-                  val jLabelName = labelName.toString
-                  val sketch = metadataResult.getOrElse(jLabelName, new CpcSketch(12))
-                  sketch.update(labelValue.toString)
-                  metadataResult += (jLabelName -> sketch)
+                  metadataResult.getOrElseUpdate(labelName.toString, new CpcSketch(12)).update(labelValue.toString)
             }
         }
-        val iterator = (metadataResult.map{
+        val sketchMapIterator = (metadataResult.map{
           case (label, cpcSketch) => (ZeroCopyUTF8String(label), ZeroCopyUTF8String(cpcSketch.toByteArray))
         }.toMap :: Nil).toIterator
         Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-            new UTF8MapIteratorRowReader(iterator), None))
+            new UTF8MapIteratorRowReader(sketchMapIterator), None))
       case _ => Observable.empty
     }
     val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)

@@ -212,7 +212,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val leafExecPlan = LabelCardinalityExec(qContext, dummyDispatcher,
       timeseriesDataset.ref, 0, filters, now-5000, now)
 
-    val execPlan = LabelCardinalityDistConcatExec(qContext, dummyDispatcher, leafExecPlan :: Nil)
+    val execPlan = LabelCardinalityReduceExec(qContext, dummyDispatcher, leafExecPlan :: Nil)
     execPlan.addRangeVectorTransformer(new LabelCardinalityPresenter())
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
