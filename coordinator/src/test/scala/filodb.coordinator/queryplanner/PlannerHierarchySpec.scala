@@ -16,10 +16,11 @@ import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.prometheus.parse.Parser.Antlr
+import filodb.query.PlanValidationSpec
 import filodb.query.exec._
 
 // scalastyle:off line.size.limit
-class PlannerHierarchySpec extends AnyFunSpec with Matchers {
+class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationSpec {
   private implicit val system = ActorSystem()
   private val node = TestProbe().ref
 
@@ -99,14 +100,6 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers {
 
   private val queryParams = PromQlQueryParams("notUsedQuery", 100, 1, 1000)
 
-  def validatePlan(plan: ExecPlan, expected: String): Unit = {
-    val planString = plan.printTree()
-      .replaceAll("testProbe-.*\\]", "testActor]")
-      .replaceAll("InProcessPlanDispatcher.*\\)", "InProcessPlanDispatcher")
-    val expectedString = expected.replaceAll("testProbe-.*\\]", "testActor]")
-      .replaceAll("InProcessPlanDispatcher.*\\)", "InProcessPlanDispatcher")
-    planString shouldEqual expectedString
-  }
 
   it("should generate plan for one namespace query across raw/downsample") {
     val lp = Parser.queryRangeToLogicalPlan(
