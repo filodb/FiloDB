@@ -763,7 +763,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     val queryContext = QueryContext(origQueryParams = promQlQueryParams)
     val execPlan = engine.materialize(lp, queryContext)
-    execPlan.isInstanceOf[LabelCardinalityDistConcatExec] shouldBe true
+    execPlan.isInstanceOf[LabelCardinalityReduceExec] shouldBe true
     val List(child1:LabelCardinalityExec , child2: LabelCardinalityExec, _*) = execPlan.children.toList
     child1.shard shouldEqual 3
     child2.shard shouldEqual 19

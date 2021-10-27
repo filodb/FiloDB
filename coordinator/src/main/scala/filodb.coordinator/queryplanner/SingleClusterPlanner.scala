@@ -132,17 +132,17 @@ class SingleClusterPlanner(val dataset: Dataset,
       case PlanResult(many, stitch) =>
         val targetActor = PlannerUtil.pickDispatcher(many)
         many.head match {
-          case lve: LabelValuesExec => LabelValuesDistConcatExec(qContext, targetActor, many)
-          case lne: LabelNamesExec => LabelNamesDistConcatExec(qContext, targetActor, many)
-          case lne: LabelCardinalityExec => {
-            val distConcat = LabelCardinalityDistConcatExec(qContext, targetActor, many)
+          case _: LabelValuesExec => LabelValuesDistConcatExec(qContext, targetActor, many)
+          case _: LabelNamesExec => LabelNamesDistConcatExec(qContext, targetActor, many)
+          case _: LabelCardinalityExec => {
+            val reduceExec = LabelCardinalityReduceExec(qContext, targetActor, many)
             // Presenter here is added separately which use the bytes representing the sketch to get an estimate
             // of cardinality. The presenter is kept separate from DistConcatExec to enable multi partition queries
             // later if needed. The DistConcatExec's from multiple partitions can still return the map of label names
             // and bytes and they can be merged to create a new sketch. Only the top level exec needs to then add the
             // presenter to display the final mapping of label name and the count based on the sketch bytes.
-            distConcat.addRangeVectorTransformer(new LabelCardinalityPresenter())
-            distConcat
+            reduceExec.addRangeVectorTransformer(new LabelCardinalityPresenter())
+            reduceExec
           }
           case ske: PartKeysExec => PartKeysDistConcatExec(qContext, targetActor, many)
           case ep: ExecPlan =>
