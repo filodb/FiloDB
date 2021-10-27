@@ -23,7 +23,7 @@ import org.scalatest.matchers.should.Matchers
 
 import filodb.core.query.Filter.Equals
 
-class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures {
+class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures with PlanValidationSpec {
 
   implicit val system = ActorSystem()
   private val node = TestProbe().ref
@@ -777,10 +777,13 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     })
     execPlan.rangeVectorTransformers.size shouldBe 1
     execPlan.rangeVectorTransformers.head.isInstanceOf[LabelCardinalityPresenter] shouldBe true
-//    T~LabelCardinalityPresenter(LabelCardinalityPresenter)
-//    -E~LabelCardinalityDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
-//      --E~LabelCardinalityExec(shard=3, filters=List(ColumnFilter(job,Equals(job)), ColumnFilter(__name__,Equals(metric))), limit=1000000, startMs=0, endMs=1634920729) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
-//      --E~LabelCardinalityExec(shard=19, filters=List(ColumnFilter(job,Equals(job)), ColumnFilter(__name__,Equals(metric))), limit=1000000, startMs=0, endMs=1634920729) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
+    val expected =
+    """T~LabelCardinalityPresenter(LabelCardinalityPresenter)
+    |-E~LabelCardinalityReduceExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
+    |--E~LabelCardinalityExec(shard=3, filters=List(ColumnFilter(job,Equals(job)), ColumnFilter(__name__,Equals(metric))), limit=1000000, startMs=0, endMs=1634920729000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
+    |--E~LabelCardinalityExec(shard=19, filters=List(ColumnFilter(job,Equals(job)), ColumnFilter(__name__,Equals(metric))), limit=1000000, startMs=0, endMs=1634920729000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)"""
+.stripMargin
+    validatePlan(execPlan, expected)
 
   }
 }

@@ -77,7 +77,7 @@ final class LabelCardinalityPresenter(val funcParams: Seq[FuncArgs]  = Nil) exte
                      paramsResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
 
     source.map(rv => {
-          val x = rv.rows().toList.head
+          val x = rv.rows().next()
           // TODO: We expect only one column to be a map, pattern matching does not work, is there better way?
           val sketchMap = x.getAny(columnNo = 0).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
           val sketchMapIterator = (sketchMap.mapValues {
