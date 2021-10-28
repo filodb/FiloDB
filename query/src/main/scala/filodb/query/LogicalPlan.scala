@@ -111,9 +111,9 @@ case class LabelValues(labelNames: Seq[String],
 
 
 case class LabelCardinality( filters: Seq[ColumnFilter],
-                             clusterType: String  = "raw",
                              startMs: Long,
-                             endMs: Long) extends MetadataQueryPlan
+                             endMs: Long,
+                             clusterType: String  = "raw") extends MetadataQueryPlan
 
 case class LabelNames(filters: Seq[ColumnFilter],
                       startMs: Long,
