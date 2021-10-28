@@ -409,12 +409,79 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
                                     k: Int) extends LeafExecPlan {
   override def enforceLimit: Boolean = false
 
+  class PrefixIterator(prefix: Seq[String], tsMemStore: TimeSeriesMemStore) extends Iterator[Seq[String]]{
+    val queues = new Array[mutable.Queue[String]](2)
+    val curr = new mutable.ArrayBuffer[String](2)
+
+    initQueues()
+    reloadEmptyQueues()
+
+    private def initQueues(): Unit = {
+      for (i <- 0 until queues.size) {
+        queues(i) = new mutable.Queue[String]
+      }
+      // place each existing prefix keyword into appropriate queue
+      for (i <- 0 until prefix.size) {
+        queues(i).enqueue(prefix(i))
+      }
+    }
+
+    private def dequeueNextOutdated(): Unit = {
+      for (queue <- queues.reverseIterator) {
+        queue.dequeue()
+        if (queue.nonEmpty) {
+          return
+        }
+      }
+    }
+
+    private def iFirstEmptyGet() : Int = {
+      var iFirstEmpty = 0
+      while (iFirstEmpty < queues.size && queues(iFirstEmpty).nonEmpty) {
+        iFirstEmpty = iFirstEmpty + 1
+      }
+      iFirstEmpty
+    }
+
+    private def reloadEmptyQueues(): Unit = {
+      val iFirstEmpty = iFirstEmptyGet()
+
+      // build the prefix
+      curr.reduceToSize(0)
+      for (i <- 0 until iFirstEmpty) {
+        curr.append(queues(i).front)
+      }
+
+      for (ife <- iFirstEmpty until queues.size) {
+        tsMemStore.topKCardinality(dataset, Seq(shard), curr, k).foreach{ card =>
+          queues(ife).enqueue(card.childName)
+        }
+        curr.append(queues(ife).front)
+      }
+    }
+
+    private def prepNext(): Unit = {
+      for (i <- 0 until queues.size) {
+        curr(i) = queues(i).front
+      }
+    }
+
+    override def hasNext: Boolean = queues.head.nonEmpty
+
+    override def next(): Seq[String] = {
+      reloadEmptyQueues()
+      prepNext()
+      dequeueNextOutdated()
+      curr
+    }
+  }
+
   def expandShardKeyPrefix(tsMemStore: TimeSeriesMemStore, prefix: Seq[String]): Seq[Seq[String]] = {
     // dummy implementation for now
     var expansionsRem = 2 - prefix.size
     var expanded = Seq(prefix)
     for (_ <- 0 until expansionsRem) {
-      var nextExpanded = new mutable.ArrayBuffer[Seq[String]]
+      val nextExpanded = new mutable.ArrayBuffer[Seq[String]]
       for (pref <- expanded) {
         tsMemStore.topKCardinality(dataset, Seq(shard), pref, k).foreach{ card =>
           nextExpanded.append(pref ++ Seq(card.childName))
@@ -433,7 +500,8 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
     val rvs = source match {
       case tsMemStore: TimeSeriesMemStore =>
         Observable.eval {
-          val topkCards = expandShardKeyPrefix(tsMemStore, shardKeyPrefix).flatMap{ pref =>
+          val prefixIter = new PrefixIterator(shardKeyPrefix, tsMemStore)
+          val topkCards = prefixIter.flatMap{ pref =>
             tsMemStore.topKCardinality(dataset, Seq(shard), pref, k)
           }
           // include each into an ItemSketch
