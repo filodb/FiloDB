@@ -1,7 +1,6 @@
 package filodb.query.exec
 
 import scala.collection.mutable
-
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -9,7 +8,6 @@ import org.apache.datasketches.ArrayOfStringsSerDe
 import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
 import org.apache.datasketches.frequencies.{ErrorType, ItemsSketch}
 import org.apache.datasketches.memory.Memory
-
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
 import filodb.core.memstore.{MemStore, TimeSeriesMemStore}
@@ -18,8 +16,8 @@ import filodb.core.query._
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.store.ChunkSource
 import filodb.memory.{UTF8StringMedium, UTF8StringShort}
-import filodb.memory.format.{RowReader, SeqRowReader, StringArrayRowReader, UnsafeUtils,
-                             UTF8MapIteratorRowReader, ZeroCopyUTF8String}
+import filodb.memory.format.{RowReader, SeqRowReader, SingleValueRowReader, StringArrayRowReader,
+                             UnsafeUtils, UTF8MapIteratorRowReader, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
@@ -411,6 +409,22 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
                                     k: Int) extends LeafExecPlan {
   override def enforceLimit: Boolean = false
 
+  def expandShardKeyPrefix(tsMemStore: TimeSeriesMemStore, prefix: Seq[String]): Seq[Seq[String]] = {
+    // dummy implementation for now
+    var expansionsRem = 2 - prefix.size
+    var expanded = Seq(prefix)
+    for (_ <- 0 until expansionsRem) {
+      var nextExpanded = new mutable.ArrayBuffer[Seq[String]]
+      for (pref <- expanded) {
+        tsMemStore.topKCardinality(dataset, Seq(shard), pref, k).foreach{ card =>
+          nextExpanded.append(pref ++ Seq(card.childName))
+        }
+      }
+      expanded = nextExpanded
+    }
+    expanded
+  }
+
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
@@ -419,7 +433,9 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
     val rvs = source match {
       case tsMemStore: TimeSeriesMemStore =>
         Observable.eval {
-          val topkCards = tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix, k)
+          val topkCards = expandShardKeyPrefix(tsMemStore, shardKeyPrefix).flatMap{ pref =>
+            tsMemStore.topKCardinality(dataset, Seq(shard), pref, k)
+          }
           // include each into an ItemSketch
           val sketch = new ItemsSketch[String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE)
           topkCards.foreach(card => sketch.update(card.childName, card.timeSeriesCount.toLong))
