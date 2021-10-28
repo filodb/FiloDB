@@ -386,7 +386,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     case lv: LabelValues               => lv.copy(startMs = startMs, endMs = endMs)
     case ln: LabelNames                => ln.copy(startMs = startMs, endMs = endMs)
     case lc: LabelCardinality          => lc.copy(startMs = startMs, endMs = endMs)
-    case lc: MetricCardinalitiesTopK   => lc.copy()
   }
 
   def materializeMetadataQueryPlan(lp: MetadataQueryPlan, qContext: QueryContext): PlanResult = {
@@ -410,7 +409,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                  _: LabelCardinality    => Map("match[]" -> queryParams.promQl)
             case lv: LabelValues        => PlannerUtil.getLabelValuesUrlParams(lv, queryParams)
             case ln: LabelNames         => PlannerUtil.getLabelNamesUrlParams(ln, queryParams)
-            case lc: MetricCardinalitiesTopK => ???  // TODO(a_theimer)
           }
           createMetadataRemoteExec(qContext, p, params)
         }
@@ -423,20 +421,30 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
         case _: LabelNames => LabelNamesDistConcatExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
-<<<<<<< HEAD
         case _: LabelCardinality => LabelCardinalityReduceExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
-        case mc: MetricCardinalitiesTopK => MetricCardTopkMergeExec(qContext, inProcessPlanDispatcher,
-          execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]), mc.k)
-=======
-        case mc: MetricCardinalitiesTopK => {
-          val merge = MetricCardTopkReduceExec(qContext, inProcessPlanDispatcher,
-            execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]), mc.k)
-          merge.addRangeVectorTransformer(MetricCardTopkPresenter(mc.k))
-          merge
-        }
->>>>>>> 67884f16 (use new MetricCardTopkPresenter)
       }
+    }
+    PlanResult(execPlan::Nil)
+  }
+
+  private def materializeMetricCardinalitiesTopK(qContext: QueryContext, lp: MetricCardinalitiesTopK) : PlanResult = {
+    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val partitions = partitionLocationProvider.getAuthorizedPartitions(
+      TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
+    val execPlan = if (partitions.isEmpty) {
+      logger.warn(s"No partitions found for ${queryParams.startSecs}, ${queryParams.endSecs}")
+      localPartitionPlanner.materialize(lp, qContext)
+    } else {
+      val leafPlans = partitions.map { p =>
+        logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
+        if (p.partitionName.equals(localPartitionName))
+          localPartitionPlanner.materialize(lp.copy(), qContext)
+        else ??? // TODO: handle remote
+      }.toSeq
+      val reducer = MetricCardTopkReduceExec(qContext, inProcessPlanDispatcher, leafPlans, lp.k)
+      reducer.addRangeVectorTransformer(MetricCardTopkPresenter(lp.k))
+      reducer
     }
     PlanResult(execPlan::Nil)
   }

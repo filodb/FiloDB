@@ -125,7 +125,7 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
                                startMs: Long,
                                endMs: Long) extends MetadataQueryPlan
 
-case class MetricCardinalitiesTopK(shardKeyPrefix: Seq[String], k: Int) extends MetadataQueryPlan
+case class MetricCardinalitiesTopK(shardKeyPrefix: Seq[String], k: Int) extends LogicalPlan
 
 /**
  * Concrete logical plan to query for chunk metadata from raw time series in a given range
@@ -549,6 +549,7 @@ object LogicalPlan {
      // Find leaf logical plans for all children and concatenate results
      case lp: NonLeafLogicalPlan          => lp.children.flatMap(findLeafLogicalPlans)
      case lp: MetadataQueryPlan           => Seq(lp)
+     case lp: MetricCardinalitiesTopK     => Seq(lp)
      case lp: ScalarBinaryOperation       => val lhsLeafs = if (lp.lhs.isRight) findLeafLogicalPlans(lp.lhs.right.get)
                                                              else Nil
                                              val rhsLeafs = if (lp.rhs.isRight) findLeafLogicalPlans(lp.rhs.right.get)
