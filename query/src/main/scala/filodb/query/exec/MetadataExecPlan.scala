@@ -1,12 +1,14 @@
 package filodb.query.exec
 
+import scala.collection.mutable
+
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
+import org.apache.datasketches.ArrayOfStringsSerDe
 import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
 import org.apache.datasketches.frequencies.{ErrorType, ItemsSketch}
 import org.apache.datasketches.memory.Memory
-import scala.collection.mutable
 
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
@@ -77,11 +79,11 @@ final case class MetricCardTopkReduceExec(queryContext: QueryContext,
                                           k: Int) extends NonLeafExecPlan {
   override protected def args: String = ""
 
-  private def sketchFold(acc: ItemsSketch[ZeroCopyUTF8String], rv: RangeVector):
-            ItemsSketch[ZeroCopyUTF8String] = {
+  private def sketchFold(acc: ItemsSketch[String], rv: RangeVector):
+            ItemsSketch[String] = {
     rv.rows().foreach{ r =>
       val sketchSer = r.getString(0).getBytes
-      val sketch = ItemsSketch.getInstance(Memory.wrap(sketchSer), new ArrayOfZeroCopyUTF8StringSerDe)
+      val sketch = ItemsSketch.getInstance(Memory.wrap(sketchSer), new ArrayOfStringsSerDe)
       acc.merge(sketch)
     }
     acc
@@ -95,9 +97,9 @@ final case class MetricCardTopkReduceExec(queryContext: QueryContext,
       case (QueryError(_, _, ex), _)         => throw ex
     }.flatten
       // fold all child sketches into a single sketch
-      .foldLeftL(new ItemsSketch[ZeroCopyUTF8String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE))(sketchFold)
+      .foldLeftL(new ItemsSketch[String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE))(sketchFold)
       .map{ sketch =>
-        val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ArrayOfZeroCopyUTF8StringSerDe))
+        val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ArrayOfStringsSerDe))
         val it = Seq(SingleValueRowReader(serSketch)).iterator
         IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
       }
@@ -122,14 +124,14 @@ final case class MetricCardTopkPresenter(k: Int) extends RangeVectorTransformer 
       // Deserialize the sketch.
       // Note: getString() throws a ClassCastException.
       val sketchSer = rv.rows.next.getAny(0).asInstanceOf[ZeroCopyUTF8String].bytes
-      ItemsSketch.getInstance(Memory.wrap(sketchSer), new ArrayOfZeroCopyUTF8StringSerDe)
+      ItemsSketch.getInstance(Memory.wrap(sketchSer), new ArrayOfStringsSerDe)
     }.map{ sketch =>
       // Collect all rows from the union with frequency estimate upper bounds above a default threshold.
       val freqRows = sketch.getFrequentItems(ErrorType.NO_FALSE_NEGATIVES)
 
       // find the topk with a pqueue
       val topkPqueue =
-        mutable.PriorityQueue[ItemsSketch.Row[ZeroCopyUTF8String]]()(Ordering.by(row => -row.getEstimate))
+        mutable.PriorityQueue[ItemsSketch.Row[String]]()(Ordering.by(row => -row.getEstimate))
       freqRows.foreach { row =>
         if (topkPqueue.size < k) {
           topkPqueue.enqueue(row)
@@ -419,10 +421,10 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
         Observable.eval {
           val topkCards = tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix, k)
           // include each into an ItemSketch
-          val sketch = new ItemsSketch[ZeroCopyUTF8String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE)
-          topkCards.foreach(card => sketch.update(card.childName.utf8, card.timeSeriesCount.toLong))
+          val sketch = new ItemsSketch[String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE)
+          topkCards.foreach(card => sketch.update(card.childName, card.timeSeriesCount.toLong))
           // serialize the sketch; pack it into a RangeVector
-          val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ArrayOfZeroCopyUTF8StringSerDe))
+          val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ArrayOfStringsSerDe))
           val it = Seq(SingleValueRowReader(serSketch)).iterator
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
         }
