@@ -23,6 +23,8 @@ import filodb.query._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
+import scala.collection.mutable
+
 class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
 
   import ZeroCopyUTF8String._
@@ -36,22 +38,6 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
 
-  val partKeyLabelValues = Seq(
-    ("http_req_total", Map("instance"->"someHost:8787", "job"->"myCoolService",
-                           "unicode_tag" -> "uni\u03C0tag", "_ws_" -> "demo", "_ns_" -> "App-0")),
-    ("http_resp_time", Map("instance"->"someHost:8787", "job"->"myCoolService",
-                           "unicode_tag" -> "uni\u03BCtag", "_ws_" -> "demo", "_ns_" -> "App-0"))
-  )
-
-  val addlLabels = Map("_type_" -> "prom-counter")
-  val expectedLabelValues = partKeyLabelValues.map { case (metric, tags) =>
-    tags + ("_metric_" -> metric) ++ addlLabels
-  }
-
-  val jobQueryResult1 = ArrayBuffer(("job", "myCoolService"), ("unicode_tag", "uni\u03C0tag"))
-  val jobQueryResult2 = ArrayBuffer(("job", "myCoolService"), ("unicode_tag", "uni\u03BCtag"))
-
-  val partTagsUTF8s = partKeyLabelValues.map { case (m, t) => (m, t.map { case (k, v) => (k.utf8, v.utf8) }) }
   val now = System.currentTimeMillis()
   val numRawSamples = 1000
   val reportingInterval = 10000
@@ -60,20 +46,50 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     (now - n * reportingInterval, n.toDouble)
   }
 
-  // NOTE: due to max-chunk-size in storeConf = 100, this will make (numRawSamples / 100) chunks
-  // Be sure to reset the builder; it is in an Object so static and shared amongst tests
-  builder.reset()
-  partTagsUTF8s.map { case (metric, partTagsUTF8) =>
-    tuples.map { t => SeqRowReader(Seq(t._1, t._2, metric, partTagsUTF8)) }
-      .foreach(builder.addFromReader(_, Schemas.promCounter))
+  val shardPartKeyLabelValues = Seq(
+    Seq(  // shard 0
+      ("http_req_total", Map("instance"->"someHost:8787", "job"->"myCoolService",
+                             "unicode_tag" -> "uni\u03C0tag", "_ws_" -> "demo", "_ns_" -> "App-0")),
+      ("http_foo_total", Map("instance"->"someHost:8787", "job"->"myCoolService",
+                             "unicode_tag" -> "uni\u03BCtag", "_ws_" -> "demo", "_ns_" -> "App-0"))
+    ),
+    Seq (  // shard 1
+      ("http_req_total", Map("instance"->"someHost:9090", "job"->"myCoolService",
+                             "unicode_tag" -> "uni\u03C0tag", "_ws_" -> "demo", "_ns_" -> "App-0")),
+      ("http_bar_total", Map("instance"->"someHost:8787", "job"->"myCoolService",
+                             "unicode_tag" -> "uni\u03C0tag", "_ws_" -> "demo", "_ns_" -> "App-0"))
+    )
+  )
+
+  val addlLabels = Map("_type_" -> "prom-counter")
+  val expectedLabelValues = shardPartKeyLabelValues.flatMap { shardSeq =>
+    shardSeq.map(pair => pair._2 + ("_metric_" -> pair._1) ++ addlLabels)
   }
-  val container = builder.allContainers.head
+
+  val jobQueryResult1 = ArrayBuffer(("job", "myCoolService"), ("unicode_tag", "uni\u03C0tag"))
+  val jobQueryResult2 = ArrayBuffer(("job", "myCoolService"), ("unicode_tag", "uni\u03BCtag"))
 
   implicit val execTimeout = 5.seconds
 
+  def initShard(memStore: TimeSeriesMemStore,
+                partKeyLabelValues: Seq[Tuple2[String, Map[String, String]]],
+                ishard: Int): Unit = {
+    val partTagsUTF8s = partKeyLabelValues.map{case (m, t) => (m,  t.map { case (k, v) => (k.utf8, v.utf8)})}
+    // NOTE: due to max-chunk-size in storeConf = 100, this will make (numRawSamples / 100) chunks
+    // Be sure to reset the builder; it is in an Object so static and shared amongst tests
+    builder.reset()
+    partTagsUTF8s.map { case (metric, partTagsUTF8) =>
+      tuples.map { t => SeqRowReader(Seq(t._1, t._2, metric, partTagsUTF8)) }
+        .foreach(builder.addFromReader(_, Schemas.promCounter))
+    }
+    memStore.setup(timeseriesDatasetMultipleShardKeys.ref, Schemas(Schemas.promCounter), ishard, TestData.storeConf)
+    memStore.ingest(timeseriesDatasetMultipleShardKeys.ref, ishard, SomeData(builder.allContainers.head, 0))
+  }
+
   override def beforeAll(): Unit = {
-    memStore.setup(timeseriesDatasetMultipleShardKeys.ref, Schemas(Schemas.promCounter), 0, TestData.storeConf)
-    memStore.ingest(timeseriesDatasetMultipleShardKeys.ref, 0, SomeData(container, 0))
+    for (ishard <- 0 until shardPartKeyLabelValues.size) {
+      initShard(memStore, shardPartKeyLabelValues(ishard), ishard)
+    }
     memStore.refreshIndexForTesting(timeseriesDatasetMultipleShardKeys.ref)
   }
 
@@ -128,10 +144,23 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
   it("should read the label names/values from timeseriesindex matching the columnfilters") {
     import ZeroCopyUTF8String._
-    val filters = Seq(ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    val dispatcher = new PlanDispatcher {
+      override def isLocalCall: Boolean = ???
+      override def clusterName: String = ???
+      override def dispatch(plan: ExecPlan)
+                           (implicit sched: Scheduler): Task[QueryResponse] = {
+        plan.execute(memStore, querySession)(sched)
+      }
+    }
+    val filters = Seq (ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val execPlan = PartKeysExec(QueryContext(), dummyDispatcher,
+    val execPlanLeaf1 = PartKeysExec(QueryContext(), dispatcher,
       timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now-5000, now)
+
+    val execPlanLeaf2 = PartKeysExec(QueryContext(), dispatcher,
+      timeseriesDatasetMultipleShardKeys.ref, 1, filters, false, now-5000, now)
+
+    val execPlan = PartKeysDistConcatExec(QueryContext(), dispatcher, Seq(execPlanLeaf1, execPlanLeaf2))
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = (resp: @unchecked) match {
@@ -141,9 +170,9 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
           val r = row.asInstanceOf[BinaryRecordRowReader]
           response(0).asInstanceOf[SerializedRangeVector]
             .schema.toStringPairs(r.recordBase, r.recordOffset).toMap
-        }.toList
-    }
-    result shouldEqual expectedLabelValues
+        }.toSet
+      }
+    result shouldEqual expectedLabelValues.toSet
   }
 
   it("should return one matching row (limit 1)") {
@@ -188,10 +217,24 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     result.toSet shouldEqual expectedLabels
   }
 
-  it("should be able to query with unicode filter") {
-    val filters = Seq(ColumnFilter("unicode_tag", Filter.Equals("uni\u03BCtag".utf8)))
-    val execPlan = LabelValuesExec(QueryContext(), dummyDispatcher,
+  it ("should be able to query with unicode filter") {
+    val dispatcher = new PlanDispatcher {
+      override def isLocalCall: Boolean = ???
+      override def clusterName: String = ???
+      override def dispatch(plan: ExecPlan)
+                           (implicit sched: Scheduler): Task[QueryResponse] = {
+        plan.execute(memStore, querySession)(sched)
+      }
+    }
+    val filters = Seq (ColumnFilter("unicode_tag", Filter.Equals("uni\u03BCtag".utf8)))
+
+    val execPlan1 = LabelValuesExec(QueryContext(), dispatcher,
       timeseriesDatasetMultipleShardKeys.ref, 0, filters, Seq("job", "unicode_tag"), now-5000, now)
+
+    val execPlan2 = LabelValuesExec(QueryContext(), dispatcher,
+      timeseriesDatasetMultipleShardKeys.ref, 1, filters, Seq("job", "unicode_tag"), now-5000, now)
+
+    val execPlan = LabelValuesDistConcatExec(QueryContext(), dispatcher, Seq(execPlan1, execPlan2))
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = (resp: @unchecked) match {
@@ -235,9 +278,9 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   }
 
   it ("should correctly execute metric cardinality query") {
-    val k = 2
+    val k = 3
     val shardKeyPrefix = Seq("demo", "App-0")
-    val numShards = 1
+    val numShards = shardPartKeyLabelValues.size
     val queryContext = QueryContext()
     val dispatcher = new PlanDispatcher {
       override def isLocalCall: Boolean = ???
@@ -248,10 +291,10 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
       }
     }
 
-    val leaves = (0 until numShards).map(ishard =>
+    val leaves = (0 until numShards).map{ ishard =>
       new MetricCardTopkExec(queryContext, dispatcher,
         timeseriesDatasetMultipleShardKeys.ref, ishard, shardKeyPrefix, k)
-    ).toSeq
+    }.toSeq
 
     val execPlan = MetricCardTopkReduceExec(queryContext, dispatcher, leaves, k)
     execPlan.addRangeVectorTransformer(MetricCardTopkPresenter(k))
@@ -266,12 +309,17 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
           r.getAny(0).toString -> r.getLong(1)
         }.toSeq
 
-        // should only contain two rows (1 for each of the above metrics)
-        rowPairs.size shouldEqual 2
-        rowPairs.map(_._1.utf8)
-          .toSet shouldEqual Set("http_req_total".utf8, "http_resp_time".utf8)
-        // each metric should only have cardinality 1
-        rowPairs.foreach(_._2 shouldEqual 1)
+        rowPairs.size shouldEqual 3
+        rowPairs.foldLeft(new mutable.HashMap[ZeroCopyUTF8String, Long]){ (counts, pair) =>
+          var count = counts.getOrElseUpdate(pair._1.utf8, 0)
+          count = count + pair._2
+          counts.update(pair._1.utf8, count)
+          counts
+        } shouldEqual Map(
+          "http_req_total".utf8 -> 2,
+          "http_foo_total".utf8 -> 1,
+          "http_bar_total".utf8 -> 1
+        )
     }
   }
 }
