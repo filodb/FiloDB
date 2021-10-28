@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
+
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.execution.Scheduler
@@ -9,12 +10,13 @@ import monix.execution.Scheduler.Implicits.global
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
+
 import filodb.core.MetricsTestData._
 import filodb.core.TestData
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, PlannerParams, QueryConfig, QueryContext, QuerySession, SerializedRangeVector}
+import filodb.core.query._
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
@@ -78,7 +80,8 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
-                         (implicit sched: Scheduler): Task[QueryResponse] = ???
+                         (implicit sched: Scheduler): Task[QueryResponse] = plan.execute(memStore,
+                          QuerySession(QueryContext(), queryConfig))(sched)
 
     override def clusterName: String = ???
 
@@ -198,6 +201,37 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     }
     result shouldEqual jobQueryResult2
   }
+
+
+  it ("should be able to query label cardinality") {
+    // Tests all, LabelCardinalityExec, LabelCardinalityDistConcatExec and LabelCardinalityPresenter
+    // Though we will search by ns, ws and metric name, technically we can search by any label in index
+    val filters = Seq (ColumnFilter("instance", Filter.Equals("someHost:8787".utf8)))
+    val qContext = QueryContext()
+
+    val leafExecPlan = LabelCardinalityExec(qContext, dummyDispatcher,
+      timeseriesDataset.ref, 0, filters, now-5000, now)
+
+    val execPlan = LabelCardinalityReduceExec(qContext, dummyDispatcher, leafExecPlan :: Nil)
+    execPlan.addRangeVectorTransformer(new LabelCardinalityPresenter())
+
+    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val result = (resp: @unchecked) match {
+      case QueryResult(id, _, response, _, _, _) => {
+        response.size shouldEqual 1
+        val rv = response(0)
+        rv.rows.size shouldEqual 1
+        val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
+        rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset).toMap
+      }
+    }
+    result shouldEqual Map( "unicode_tag" -> "2",
+                            "_type_" -> "1",
+                            "job" -> "1",
+                            "instance" -> "1",
+                            "_metric_" -> "2")
+  }
+
 
 }
 

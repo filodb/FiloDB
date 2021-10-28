@@ -27,6 +27,7 @@ sealed trait LogicalPlan {
       case r: RawSeriesLikePlan   => r.replaceRawSeriesFilters(filters)
       case l: LabelValues         => l.copy(filters = filters)
       case n: LabelNames          => n.copy(filters = filters)
+      case n: LabelCardinality    => n.copy(filters = filters)
       case s: SeriesKeysByFilters => s.copy(filters = filters)
     }
   }
@@ -107,6 +108,13 @@ case class LabelValues(labelNames: Seq[String],
                        filters: Seq[ColumnFilter],
                        startMs: Long,
                        endMs: Long) extends MetadataQueryPlan
+
+
+case class LabelCardinality( filters: Seq[ColumnFilter],
+                             startMs: Long,
+                             endMs: Long,
+                             clusterType: String  = "raw") extends MetadataQueryPlan
+
 case class LabelNames(filters: Seq[ColumnFilter],
                       startMs: Long,
                       endMs: Long) extends MetadataQueryPlan

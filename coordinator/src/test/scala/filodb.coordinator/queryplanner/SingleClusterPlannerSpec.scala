@@ -1,6 +1,7 @@
 package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration._
+
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
@@ -20,7 +21,9 @@ import filodb.query.exec._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
-class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures {
+import filodb.core.query.Filter.Equals
+
+class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures with PlanValidationSpec {
 
   implicit val system = ActorSystem()
   private val node = TestProbe().ref
@@ -784,5 +787,25 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         lastTransformer.asInstanceOf[AggregateMapReduce].aggrOp shouldEqual funcId
       }
     }
+  }
+
+  it("should materialize LabelCardinalityPlan") {
+    val filters = Seq(
+      ColumnFilter("job", Equals("job")),
+      ColumnFilter("__name__", Equals("metric"))
+    )
+    val lp = LabelCardinality(filters, 0 * 1000, 1634920729000L)
+
+    val queryContext = QueryContext(origQueryParams = promQlQueryParams)
+    val execPlan = engine.materialize(lp, queryContext)
+
+    val expected =
+    """T~LabelCardinalityPresenter(LabelCardinalityPresenter)
+    |-E~LabelCardinalityReduceExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
+    |--E~LabelCardinalityExec(shard=3, filters=List(ColumnFilter(job,Equals(job)), ColumnFilter(__name__,Equals(metric))), limit=1000000, startMs=0, endMs=1634920729000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
+    |--E~LabelCardinalityExec(shard=19, filters=List(ColumnFilter(job,Equals(job)), ColumnFilter(__name__,Equals(metric))), limit=1000000, startMs=0, endMs=1634920729000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)"""
+.stripMargin
+    validatePlan(execPlan, expected)
+
   }
 }

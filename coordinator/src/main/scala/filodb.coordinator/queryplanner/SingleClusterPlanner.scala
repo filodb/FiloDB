@@ -132,8 +132,18 @@ class SingleClusterPlanner(val dataset: Dataset,
       case PlanResult(many, stitch) =>
         val targetActor = PlannerUtil.pickDispatcher(many)
         many.head match {
-          case lve: LabelValuesExec => LabelValuesDistConcatExec(qContext, targetActor, many)
-          case lne: LabelNamesExec => LabelNamesDistConcatExec(qContext, targetActor, many)
+          case _: LabelValuesExec => LabelValuesDistConcatExec(qContext, targetActor, many)
+          case _: LabelNamesExec => LabelNamesDistConcatExec(qContext, targetActor, many)
+          case _: LabelCardinalityExec => {
+            val reduceExec = LabelCardinalityReduceExec(qContext, targetActor, many)
+            // Presenter here is added separately which use the bytes representing the sketch to get an estimate
+            // of cardinality. The presenter is kept separate from DistConcatExec to enable multi partition queries
+            // later if needed. The DistConcatExec's from multiple partitions can still return the map of label names
+            // and bytes and they can be merged to create a new sketch. Only the top level exec needs to then add the
+            // presenter to display the final mapping of label name and the count based on the sketch bytes.
+            reduceExec.addRangeVectorTransformer(new LabelCardinalityPresenter())
+            reduceExec
+          }
           case ske: PartKeysExec => PartKeysDistConcatExec(qContext, targetActor, many)
           case ep: ExecPlan =>
             val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, many)
@@ -235,7 +245,8 @@ class SingleClusterPlanner(val dataset: Dataset,
       case lp: ScalarBinaryOperation       => materializeScalarBinaryOperation(qContext, lp)
       case lp: SubqueryWithWindowing       => materializeSubqueryWithWindowing(qContext, lp)
       case lp: TopLevelSubquery            => materializeTopLevelSubquery(qContext, lp)
-      case _                               => throw new BadQueryException("Invalid logical plan")
+      case lp: LabelCardinality            => materializeLabelCardinality(qContext, lp)
+      //case _                               => throw new BadQueryException("Invalid logical plan")
     }
   }
   // scalastyle:on cyclomatic.complexity
@@ -474,6 +485,18 @@ class SingleClusterPlanner(val dataset: Dataset,
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       exec.LabelNamesExec(qContext, dispatcher, dsRef, shard, renamedFilters, lp.startMs, lp.endMs)
+    }
+    PlanResult(metaExec, false)
+  }
+
+  private def materializeLabelCardinality(qContext: QueryContext,
+                                    lp: LabelCardinality): PlanResult = {
+    val renamedFilters = renameMetricFilter(lp.filters)
+    val shardsToHit = shardsFromFilters(renamedFilters, qContext)
+
+    val metaExec = shardsToHit.map { shard =>
+      val dispatcher = dispatcherForShard(shard)
+      exec.LabelCardinalityExec(qContext, dispatcher, dsRef, shard, renamedFilters, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec, false)
   }

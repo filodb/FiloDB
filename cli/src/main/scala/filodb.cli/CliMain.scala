@@ -109,6 +109,7 @@ object CliMain extends FilodbClusterNode {
     println("  --host <hostname/IP> [--port ...] --command labelvalues --labelnames <lable-names> --labelfilter <label-filter> --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labels --labelfilter <label-filter> -dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command topkcard --dataset prometheus --k 2 --shardkeyprefix demo App-0")
+    println("  --host <hostname/IP> [--port ...] --command labelcardinality --labelfilter <label-filter> --dataset prometheus")
     println("  --host <hostname/IP> [--port ...] --command findqueryshards --queries <query> --spread <spread>")
     println("""  --command promFilterToPartKeyBR --promql "myMetricName{_ws_='myWs',_ns_='myNs'}" --schema prom-counter""")
     println("""  --command partKeyBrAsString --hexpk 0x2C0000000F1712000000200000004B8B36940C006D794D65747269634E616D650E00C104006D794E73C004006D795773""")
@@ -241,6 +242,14 @@ object CliMain extends FilodbClusterNode {
           parseLabelsQuery(remote, args.labelfilter(), args.dataset(),
             getQueryRange(args), options)
 
+        case Some("labelcardinality") =>
+          // TODO: labelfilter expects _ns_, _ws_ and _metric_, we need to ensure these three are present
+          require(args.host.isDefined && args.dataset.isDefined && args.labelfilter.isDefined, "--host, --dataset and --labelfilter must be defined")
+          val remote = Client.standaloneClient(system, args.host(), args.port())
+          val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
+            timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
+          parseLabelCardinalityQuery(remote, args.labelfilter(), args.dataset(),
+            getQueryRange(args), options)
         case x: Any =>
           // This will soon be deprecated
           args.promql.map { query =>
@@ -350,6 +359,14 @@ object CliMain extends FilodbClusterNode {
     // TODO support all filters
     val filters = constraints.map { case (k, v) => ColumnFilter(k, Filter.Equals(v)) }.toSeq
     val logicalPlan = LabelNames(filters, timeParams.start * 1000, timeParams.end * 1000)
+    executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
+  }
+
+  def parseLabelCardinalityQuery(client: LocalClient, constraints: Map[String, String], dataset: String,
+                       timeParams: TimeRangeParams,
+                       options: QOptions): Unit = {
+    val filters = constraints.map { case (k, v) => ColumnFilter(k, Filter.Equals(v)) }.toSeq
+    val logicalPlan = LabelCardinality(filters, timeParams.start * 1000, timeParams.end * 1000)
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 
