@@ -107,13 +107,26 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     override def isLocalCall: Boolean = ???
   }
 
-  it("should read the job names from timeseriesindex matching the columnfilters") {
+  val executeDispatcher = new PlanDispatcher {
+    override def isLocalCall: Boolean = ???
+    override def clusterName: String = ???
+    override def dispatch(plan: ExecPlan)
+                         (implicit sched: Scheduler): Task[QueryResponse] = {
+      plan.execute(memStore, querySession)(sched)
+    }
+  }
+
+  it ("should read the job names from timeseriesindex matching the columnfilters") {
     import ZeroCopyUTF8String._
     val filters = Seq(ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val execPlan = LabelValuesExec(QueryContext(), dummyDispatcher,
-      timeseriesDatasetMultipleShardKeys.ref, 0, filters, Seq("job", "unicode_tag"), now-5000, now)
+    val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
+      LabelValuesExec(QueryContext(), executeDispatcher, timeseriesDatasetMultipleShardKeys.ref,
+                      ishard, filters, Seq("job", "unicode_tag"), now-5000, now)
+    }.toSeq
+
+    val execPlan = LabelValuesDistConcatExec(QueryContext(), executeDispatcher, leaves)
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = (resp: @unchecked) match {
@@ -129,11 +142,15 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
   it("should not return any rows for wrong column filters") {
     import ZeroCopyUTF8String._
-    val filters = Seq(ColumnFilter("__name__", Filter.Equals("http_req_total1".utf8)),
-      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total1".utf8)),
+                       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val execPlan = PartKeysExec(QueryContext(), dummyDispatcher,
-      timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now-5000, now)
+    val leaves = (0 until shardPartKeyLabelValues.size).map { ishard =>
+      PartKeysExec(QueryContext(), executeDispatcher, timeseriesDatasetMultipleShardKeys.ref,
+                   ishard, filters, false, now-5000, now)
+    }.toSeq
+
+    val execPlan = PartKeysDistConcatExec(QueryContext(), executeDispatcher, leaves)
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     (resp: @unchecked) match {
@@ -144,23 +161,14 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
   it("should read the label names/values from timeseriesindex matching the columnfilters") {
     import ZeroCopyUTF8String._
-    val dispatcher = new PlanDispatcher {
-      override def isLocalCall: Boolean = ???
-      override def clusterName: String = ???
-      override def dispatch(plan: ExecPlan)
-                           (implicit sched: Scheduler): Task[QueryResponse] = {
-        plan.execute(memStore, querySession)(sched)
-      }
-    }
     val filters = Seq (ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val execPlanLeaf1 = PartKeysExec(QueryContext(), dispatcher,
-      timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now-5000, now)
+    val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
+      PartKeysExec(QueryContext(), executeDispatcher, timeseriesDatasetMultipleShardKeys.ref,
+                   ishard, filters, false, now-5000, now)
+    }.toSeq
 
-    val execPlanLeaf2 = PartKeysExec(QueryContext(), dispatcher,
-      timeseriesDatasetMultipleShardKeys.ref, 1, filters, false, now-5000, now)
-
-    val execPlan = PartKeysDistConcatExec(QueryContext(), dispatcher, Seq(execPlanLeaf1, execPlanLeaf2))
+    val execPlan = PartKeysDistConcatExec(QueryContext(), executeDispatcher, leaves)
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = (resp: @unchecked) match {
@@ -179,9 +187,9 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     import ZeroCopyUTF8String._
     val filters = Seq(ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    //Reducing limit results in truncated metadata response
-    val execPlan = PartKeysExec(QueryContext(plannerParams= PlannerParams(sampleLimit = limit - 1)), dummyDispatcher,
-      timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now-5000, now)
+    // Reducing limit results in truncated metadata response
+    val execPlan = PartKeysExec(QueryContext(plannerParams = PlannerParams(sampleLimit = limit - 1)), executeDispatcher,
+                                timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now)
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = (resp: @unchecked) match {
@@ -200,8 +208,13 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   it ("should be able to query labels with filter") {
     val expectedLabels = Set("job", "_metric_", "unicode_tag", "instance", "_ws_", "_ns_")
     val filters = Seq (ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
-    val execPlan = LabelNamesExec(QueryContext(), dummyDispatcher,
-      timeseriesDatasetMultipleShardKeys.ref, 0, filters, now-5000, now)
+
+    val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
+      LabelNamesExec(QueryContext(), executeDispatcher,
+        timeseriesDatasetMultipleShardKeys.ref, ishard, filters, now-5000, now)
+    }.toSeq
+
+    val execPlan = LabelNamesDistConcatExec(QueryContext(), executeDispatcher, leaves)
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = (resp: @unchecked) match {
@@ -218,23 +231,14 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   }
 
   it ("should be able to query with unicode filter") {
-    val dispatcher = new PlanDispatcher {
-      override def isLocalCall: Boolean = ???
-      override def clusterName: String = ???
-      override def dispatch(plan: ExecPlan)
-                           (implicit sched: Scheduler): Task[QueryResponse] = {
-        plan.execute(memStore, querySession)(sched)
-      }
-    }
     val filters = Seq (ColumnFilter("unicode_tag", Filter.Equals("uni\u03BCtag".utf8)))
 
-    val execPlan1 = LabelValuesExec(QueryContext(), dispatcher,
-      timeseriesDatasetMultipleShardKeys.ref, 0, filters, Seq("job", "unicode_tag"), now-5000, now)
+    val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
+      LabelValuesExec(QueryContext(), executeDispatcher, timeseriesDatasetMultipleShardKeys.ref,
+                      ishard, filters, Seq("job", "unicode_tag"), now-5000, now)
+    }.toSeq
 
-    val execPlan2 = LabelValuesExec(QueryContext(), dispatcher,
-      timeseriesDatasetMultipleShardKeys.ref, 1, filters, Seq("job", "unicode_tag"), now-5000, now)
-
-    val execPlan = LabelValuesDistConcatExec(QueryContext(), dispatcher, Seq(execPlan1, execPlan2))
+    val execPlan = LabelValuesDistConcatExec(QueryContext(), executeDispatcher, leaves)
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = (resp: @unchecked) match {
@@ -280,23 +284,13 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   it ("should correctly execute metric cardinality query") {
     val k = 3
     val shardKeyPrefix = Seq("demo", "App-0")
-    val numShards = shardPartKeyLabelValues.size
-    val queryContext = QueryContext()
-    val dispatcher = new PlanDispatcher {
-      override def isLocalCall: Boolean = ???
-      override def clusterName: String = ???
-      override def dispatch(plan: ExecPlan)
-                           (implicit sched: Scheduler): Task[QueryResponse] = {
-        plan.execute(memStore, querySession)(sched)
-      }
-    }
 
-    val leaves = (0 until numShards).map{ ishard =>
-      new MetricCardTopkExec(queryContext, dispatcher,
+    val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
+      new MetricCardTopkExec(QueryContext(), executeDispatcher,
         timeseriesDatasetMultipleShardKeys.ref, ishard, shardKeyPrefix, k)
     }.toSeq
 
-    val execPlan = MetricCardTopkReduceExec(queryContext, dispatcher, leaves, k)
+    val execPlan = MetricCardTopkReduceExec(QueryContext(), executeDispatcher, leaves, k)
     execPlan.addRangeVectorTransformer(MetricCardTopkPresenter(k))
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
