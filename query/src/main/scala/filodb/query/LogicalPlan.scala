@@ -125,6 +125,11 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
                                startMs: Long,
                                endMs: Long) extends MetadataQueryPlan
 
+/**
+ * Estimates the set of metrics with the top k cardinalities.
+ * See MetricCardTopkExec for more some implementation-specific information
+ *   about what "estimate" implies how that estimate can be tuned.
+ */
 case class MetricCardinalitiesTopK(shardKeyPrefix: Seq[String], k: Int) extends LogicalPlan
 
 /**

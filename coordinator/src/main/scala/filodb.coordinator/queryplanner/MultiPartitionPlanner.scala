@@ -429,6 +429,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   }
 
   private def materializeMetricCardinalitiesTopK(qContext: QueryContext, lp: MetricCardinalitiesTopK) : PlanResult = {
+    // This code is nearly identical to materializeMetadataQueryPlan, but it prevents some
+    //   boilerplate code clutter that results when MetricCardinalitiesTopK extends MetadataQueryPlan.
+    //   If this code's maintenance isn't worth some extra stand-in lines of code (i.e. at matchers that
+    //   take MetadataQueryPlan instances), then just extend MetricCardinalitiesTopK from MetadataQueryPlan.
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val partitions = partitionLocationProvider.getAuthorizedPartitions(
       TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))

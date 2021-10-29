@@ -397,11 +397,33 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
 
 final case object MetricCardTopkExec {
   // TODO: tune this
+  // See here for help choosing a size:
+  //   https://datasketches.apache.org/docs/Frequency/FrequentItemsErrorTable.html
   val MAX_ITEMSKETCH_MAP_SIZE = 128;
 }
 
 /**
-  * Retrieves the top-k metrics from a specific shard.
+  * Retrieves an estimate of the top-k metrics from a specific shard.
+  * This is an "estimate" because sketches are used to contain count data.
+  *
+  * The accuracy of the estimate is tunable by MAX_ITEMSKETCH_MAP_SIZE.
+  *   The link at its definition describes how its value will affect the estimate.
+  *
+  * Note that the sketch-- a DataSketches ItemsSketch-- maintains a set of
+  *    "heavy hitters." These are the elements whose counts lie above
+  *    a threshold that increases as any counts are increased. This means the
+  *    data must be "sufficiently skewed" in order for a sketch to show that
+  *    any of its elements were heavy hitters.
+  *
+  * Additionally, MAX_ITEMSKETCH_MAP_SIZE bounds the number of elements the
+  *   sketch counts at any given time. If sketch.update(elt, count) is called
+  *   on a currently-uncounted element while the sketch is at full capacity, then
+  *   all counters are decreased by some median count-value, and any below zero
+  *   are removed to make room for the new element. Again: tread carefully when
+  *   metric cardinalities are similar.
+  *
+  * See here for more details:
+  *   https://datasketches.apache.org/docs/Frequency/FrequentItemsOverview.html
   */
 final case class MetricCardTopkExec(queryContext: QueryContext,
                                     dispatcher: PlanDispatcher,
@@ -479,6 +501,7 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
   }
 
   object PrefixIterator {
+    // namespace and workspace
     val MAX_PREFIX_SIZE = 2
 
     /**
@@ -523,7 +546,7 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
           val topkCards = prefixIter.flatMap{ pref =>
             tsMemStore.topKCardinality(dataset, Seq(shard), pref, k)
           }
-          // include each into an ItemSketch
+          // Include each into an ItemSketch.
           val sketch = new ItemsSketch[String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE)
           topkCards.foreach(card => sketch.update(card.childName, card.timeSeriesCount.toLong))
           // serialize the sketch; pack it into a RangeVector
