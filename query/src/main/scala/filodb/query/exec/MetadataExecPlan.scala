@@ -1,6 +1,7 @@
 package filodb.query.exec
 
 import scala.collection.mutable
+
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -8,6 +9,7 @@ import org.apache.datasketches.ArrayOfStringsSerDe
 import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
 import org.apache.datasketches.frequencies.{ErrorType, ItemsSketch}
 import org.apache.datasketches.memory.Memory
+
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
 import filodb.core.memstore.{MemStore, TimeSeriesMemStore}
