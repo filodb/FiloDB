@@ -171,8 +171,8 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
                   |}]""".stripMargin
 
     parser.decode[List[ErrorResponse]](input) match {
-      case Right(errorResponse) => errorResponse.head shouldEqual(ErrorResponse("query_materialization_failed",
-        "Shard: 2 is not available", "error", None))
+      case Right(errorResponse) => errorResponse.head shouldEqual(ErrorResponse("error",
+        "query_materialization_failed", "Shard: 2 is not available", None))
       case Left(ex)             => throw ex
     }
   }
@@ -201,9 +201,9 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val qs = QueryStatistics(Seq("local", "raw", "ws1", "ns1", "metric1"), 24, 38784, 15492)
     parser.decode[List[ErrorResponse]](input) match {
       case Right(errorResponse) =>
-        errorResponse.head.errorType shouldEqual "query_materialization_failed"
-        errorResponse.head.error shouldEqual "Shard: 2 is not available"
-        errorResponse.head.status shouldEqual "error"
+        errorResponse.head.errorType shouldEqual "error"
+        errorResponse.head.error shouldEqual "query_materialization_failed"
+        errorResponse.head.status shouldEqual "Shard: 2 is not available"
         errorResponse.head.queryStats.isDefined shouldEqual true
         errorResponse.head.queryStats.get.size shouldEqual 1
         errorResponse.head.queryStats.get.head shouldBe qs

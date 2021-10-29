@@ -90,12 +90,12 @@ object PromCirceSupport {
   implicit val decodeErrorResponse: Decoder[ErrorResponse] = new Decoder[ErrorResponse] {
     final def apply(c: HCursor): Decoder.Result[ErrorResponse] = {
       for {
+        status    <- c.downField("status").as[String]
         errorType <- c.downField("errorType").as[String]
         error     <- c.downField("error").as[String]
-        status    <- c.downField("status").as[String]
         queryStats <- c.downField("queryStats").as[Option[Seq[QueryStatistics]]]
       } yield {
-        ErrorResponse(errorType, error, status, queryStats)
+        ErrorResponse(status, errorType, error, queryStats)
       }
     }
   }

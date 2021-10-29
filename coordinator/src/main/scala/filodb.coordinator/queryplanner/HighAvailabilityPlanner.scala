@@ -79,7 +79,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           val promQlParams = PromQlQueryParams(queryParams.promQl,
             (timeRange.startMs + offsetMs.max) / 1000, queryParams.stepSecs, (timeRange.endMs + offsetMs.min) / 1000)
           val newQueryContext = qContext.copy(origQueryParams = promQlParams, plannerParams = qContext.plannerParams.
-            copy(processFailure = false, processMultiPartition = false) )
+            copy(processFailure = false) )
           logger.debug("PromQlExec params:" + promQlParams)
           val httpEndpoint = remoteHttpEndpoint + queryParams.remoteQueryPath.getOrElse("")
           rootLogicalPlan match {

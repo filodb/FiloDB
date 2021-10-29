@@ -275,10 +275,13 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   def scanPartitions(lookup: PartLookupResult,
                      colIds: Seq[Types.ColumnId],
                      querySession: QuerySession): Observable[ReadablePartition] = {
+
     // Step 1: Choose the downsample level depending on the range requested
     val (resolutionMs, downsampledDataset) = chooseDownsampleResolution(lookup.chunkMethod)
     logger.debug(s"Chose resolution $downsampledDataset for chunk method ${lookup.chunkMethod}")
+
     capDataScannedPerShardCheck(lookup, resolutionMs)
+
     // Step 2: Query Cassandra table for that downsample level using downsampleColStore
     // Create a ReadablePartition objects that contain the time series data. This can be either a
     // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
@@ -287,29 +290,10 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       .mapAsync(downsampleStoreConfig.demandPagingParallelism) { partRec =>
         val startExecute = System.currentTimeMillis()
         // TODO test multi-partition scan if latencies are high
-        // IMPORTANT: The Raw partition reads need to honor the start time in the index. Suppose, the shards for the
-        // time series is migrated, the time series will show up in two shards but not in both at any given point in
-        // time. However if the start and end date range cover the point in time when the shard migration occurred, and
-        // if both shards query for the same user provided time range, we will have the same data returned twice,
-        // instead if the shards return the data for time duration they owned the data, we will not have duplicates
-        // Read raw partition adjusts the start time and takes it back by downsampleStoreConfig.maxChunkTime.toMillis.
-        // Consider the following scenario for downsample chunks
-        // T..........T + 6..........T + 12.........T + 18.........T + 24
-        //                   ^-------------------^
-        //                 start                end
-        // We notice (ds freq is 6 hrs), the start time is taken back by 6 hrs to ensure that the chunk  at T + 6
-        // is included in the result as the CQL in for chunk filter in cassandra will be chunkId => ? and chunkId <= ?
-        // This query will at the maximum get 12 hrs of additional data and thus the duplicate results will still occur
-        // but the impact is now reduced to a maximum of 12 (2*6) hours (whatever the downsampling frequency is) of data
-        // We believe this is a good enough fix and aiming for 0 duplicate results will require more changes possibly
-        // introducing regression to the stable codebase. However, if at later point of time no duplicates are tolerated
-        // we will have to revisit the logic and fix accordingly
         store.readRawPartitions(downsampledDataset,
                                 downsampleStoreConfig.maxChunkTime.toMillis,
                                 SinglePartitionScan(partRec.partKey, shardNum),
-                                TimeRangeChunkScan(
-                                  partRec.startTime.max(lookup.chunkMethod.startTime),
-                                  partRec.endTime.min(lookup.chunkMethod.endTime)))
+                                lookup.chunkMethod)
           .map { pd =>
             val part = makePagedPartition(pd, lookup.firstSchemaId.get, resolutionMs, colIds)
             stats.partitionsQueried.increment()
