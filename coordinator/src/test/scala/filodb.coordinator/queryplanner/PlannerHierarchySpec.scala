@@ -16,11 +16,12 @@ import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.prometheus.parse.Parser.Antlr
+import filodb.query.PlanValidationSpec
 import filodb.query.exec._
 
 // scalastyle:off line.size.limit
-class PlannerHierarchySpec extends AnyFunSpec with Matchers {
-  private implicit val system = ActorSystem()
+class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationSpec{
+  private implicit val system: ActorSystem = ActorSystem()
   private val node = TestProbe().ref
 
   private val mapper = new ShardMapper(2)
@@ -47,7 +48,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers {
   val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
     earliestRetainedTimestampFn = now - downsampleRetention, queryConfig, "downsample")
 
-  private def inProcessDispatcher = new InProcessPlanDispatcher(EmptyQueryConfig)
+  private def inProcessDispatcher =  InProcessPlanDispatcher(EmptyQueryConfig)
 
   private val timeToDownsample = 6.hours.toMillis
   private val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
@@ -59,13 +60,13 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers {
     earliestRetainedTimestampFn = now - rrRetention,
     queryConfig, "recordingRules")
 
-  val plannerSelector = (metricName: String) => {
+  private val plannerSelector = (metricName: String) => {
     if (metricName.contains(":1m")) "recordingRules" else "longTerm"
   }
   val planners = Map("longTerm" -> longTermPlanner, "recordingRules" -> recordingRulesPlanner)
   val singlePartitionPlanner = new SinglePartitionPlanner(planners, plannerSelector, "_metric_", queryConfig)
 
-  val partitionLocationProvider = new PartitionLocationProvider {
+  private val partitionLocationProvider = new PartitionLocationProvider {
     override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
       if (routingKey("_ns_") == "localNs") {
         List(PartitionAssignment("localPartition", "localPartition-url", TimeRange(timeRange.startMs, timeRange.endMs)))
@@ -82,7 +83,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers {
   val multiPartitionPlanner = new MultiPartitionPlanner(partitionLocationProvider, singlePartitionPlanner,
     "localPartition", dataset, queryConfig)
 
-  val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
+  private val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
     // to ensure that tests dont call something else that is not configured
     require(shardColumnFilters.exists(f => f.column == "_ns_" && f.filter.isInstanceOf[EqualsRegex]
       && f.filter.asInstanceOf[EqualsRegex].pattern.toString == ".*Ns"))
@@ -93,21 +94,12 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers {
   }
   val rootPlanner = new ShardKeyRegexPlanner(dataset, multiPartitionPlanner, shardKeyMatcherFn, queryConfig)
 
-  val startSeconds = now / 1000 - 10.days.toSeconds
-  val endSeconds = now / 1000
-  val step = 300
+  private val startSeconds = now / 1000 - 10.days.toSeconds
+  private val endSeconds = now / 1000
+  private val step = 300
 
   private val queryParams = PromQlQueryParams("notUsedQuery", 100, 1, 1000)
 
-  def validatePlan(plan: ExecPlan, expected: String): Unit = {
-    println(s"Gen: \n${plan.printTree()}")
-    val planString = plan.printTree()
-      .replaceAll("testProbe-.*\\]", "testActor]")
-      .replaceAll("InProcessPlanDispatcher.*\\)", "InProcessPlanDispatcher")
-    val expectedString = expected.replaceAll("testProbe-.*\\]", "testActor]")
-      .replaceAll("InProcessPlanDispatcher.*\\)", "InProcessPlanDispatcher")
-    planString shouldEqual expectedString
-  }
 
   it("should generate plan for one namespace query across raw/downsample") {
     val lp = Parser.queryRangeToLogicalPlan(

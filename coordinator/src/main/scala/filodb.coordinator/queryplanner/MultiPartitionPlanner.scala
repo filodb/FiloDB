@@ -172,7 +172,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       cf.filter(col => nonMetricColumnSet.contains(col.column)).map(
         x => (x.column, x.filter.valuesStrings.head.toString)).toMap
     })
-    // Get the start and end time is ms based on the lookback, offset and the user provided start and end time
+    // 3. Get the start and end time is ms based on the lookback, offset and the user provided start and end time
     val (maxOffsetMs, minOffsetMs) = LogicalPlanUtils.getOffsetMillis(logicalPlan)
       .foldLeft((Long.MinValue, Long.MaxValue)) {
         case ((accMax, accMin), currValue) => (accMax.max(currValue), accMin.min(currValue))
@@ -182,9 +182,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       (queryParams.endSecs * 1000) - minOffsetMs)
     val lookBackMs = getLookBackMillis(logicalPlan).max
 
+    //4. Get the Query time range based on user provided range, offsets in previous steps and lookback
     val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackMs,
       periodicSeriesTimeWithOffset.endMs)
 
+    //5. Based on the map in 2 and time range in 5, get the partitions to query
     nonMetricColumnsMap.flatMap(metricMap =>
       partitionLocationProvider.getPartitions(metricMap, queryTimeRange))
   }
@@ -208,7 +210,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
    * @param queryParams PromQlQueryParams having query details
    * @return Returns PartitionAssignment, lookback, offset and routing keys
    */
-  private def partitionUtilNonBinaryJoin(logicalPlan: LogicalPlan, queryParams: PromQlQueryParams) = {
+  private def resolvePartitionsAndRoutingKeys(logicalPlan: LogicalPlan, queryParams: PromQlQueryParams) = {
 
     val routingKeys = getRoutingKeys(logicalPlan)
 
@@ -262,8 +264,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   def materializePeriodicAndRawSeries(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
 
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val (partitions, lookBackMs, offsetMs, routingKeys) = partitionUtilNonBinaryJoin(logicalPlan, queryParams)
-    // TODO: Replace with routingKeys.isEmpty as getRoutingKeys alteady does this check and returns an empty Set?
+    val (partitions, lookBackMs, offsetMs, routingKeys) = resolvePartitionsAndRoutingKeys(logicalPlan, queryParams)
+    // TODO: Replace with routingKeys.isEmpty as getRoutingKeys already does this check and returns an empty Set?
     val execPlan = if (partitions.isEmpty || routingKeys.forall(_._2.isEmpty))
       localPartitionPlanner.materialize(logicalPlan, qContext)
     else {
