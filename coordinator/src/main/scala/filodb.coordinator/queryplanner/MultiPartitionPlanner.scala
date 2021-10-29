@@ -114,21 +114,21 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
    */
   private def walkMultiPartitionPlan(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
     logicalPlan match {
-      case lp: BinaryJoin => materializeMultiPartitionBinaryJoin(lp, qContext)
-      case mdq: MetadataQueryPlan => materializeMetadataQueryPlan(mdq, qContext)  // Redundant as trait if sealed
-      case lp: ApplyInstantFunction => super.materializeApplyInstantFunction(qContext, lp)
-      case lp: ApplyInstantFunctionRaw => super.materializeApplyInstantFunctionRaw(qContext, lp)
-      case lp: Aggregate => super.materializeAggregate(qContext, lp)
-      case lp: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, lp)
-      case lp: ApplyMiscellaneousFunction => super.materializeApplyMiscellaneousFunction(qContext, lp)
-      case lp: ApplySortFunction => super.materializeApplySortFunction(qContext, lp)
-      case lp: ScalarVaryingDoublePlan => super.materializeScalarPlan(qContext, lp)
-      case lp: ScalarTimeBasedPlan => super.materializeScalarTimeBased(qContext, lp)
-      case lp: VectorPlan => super.materializeVectorPlan(qContext, lp)
-      case lp: ScalarFixedDoublePlan => super.materializeFixedScalar(qContext, lp)
-      case lp: ApplyAbsentFunction => super.materializeAbsentFunction(qContext, lp)
-      case lp: ScalarBinaryOperation => super.materializeScalarBinaryOperation(qContext, lp)
-      case lp: ApplyLimitFunction => super.materializeLimitFunction(qContext, lp)
+      case lp: BinaryJoin                     => materializeMultiPartitionBinaryJoin(lp, qContext)
+      case mdq: MetadataQueryPlan             => materializeMetadataQueryPlan(mdq, qContext)  // Redundant as trait if sealed
+      case lp: ApplyInstantFunction           => super.materializeApplyInstantFunction(qContext, lp)
+      case lp: ApplyInstantFunctionRaw        => super.materializeApplyInstantFunctionRaw(qContext, lp)
+      case lp: Aggregate                      => super.materializeAggregate(qContext, lp)
+      case lp: ScalarVectorBinaryOperation    => super.materializeScalarVectorBinOp(qContext, lp)
+      case lp: ApplyMiscellaneousFunction     => super.materializeApplyMiscellaneousFunction(qContext, lp)
+      case lp: ApplySortFunction              => super.materializeApplySortFunction(qContext, lp)
+      case lp: ScalarVaryingDoublePlan        => super.materializeScalarPlan(qContext, lp)
+      case lp: ScalarTimeBasedPlan            => super.materializeScalarTimeBased(qContext, lp)
+      case lp: VectorPlan                     => super.materializeVectorPlan(qContext, lp)
+      case lp: ScalarFixedDoublePlan          => super.materializeFixedScalar(qContext, lp)
+      case lp: ApplyAbsentFunction            => super.materializeAbsentFunction(qContext, lp)
+      case lp: ScalarBinaryOperation          => super.materializeScalarBinaryOperation(qContext, lp)
+      case lp: ApplyLimitFunction             => super.materializeLimitFunction(qContext, lp)
 
       // Imp: At the moment, these two cases for subquery will not get executed, materialize is already
       // Checking if the plan is a TopLevelSubQuery or any of the descendant is a SubqueryWithWindowing and
@@ -138,11 +138,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       // comment, remove the special handling from materialize method and fix the next case handling
       // SubqueryWithWindowing and TopLevelSubquery
       case _: SubqueryWithWindowing |
-           _: TopLevelSubquery => PlanResult(materializeSubquery(logicalPlan, qContext) :: Nil)
+           _: TopLevelSubquery                => PlanResult(materializeSubquery(logicalPlan, qContext) :: Nil)
       case _: PeriodicSeries |
            _: PeriodicSeriesWithWindowing |
            _: RawChunkMeta |
-           _: RawSeries => materializePeriodicAndRawSeries(logicalPlan, qContext)
+           _: RawSeries                       => materializePeriodicAndRawSeries(logicalPlan, qContext)
     }
   }
 
