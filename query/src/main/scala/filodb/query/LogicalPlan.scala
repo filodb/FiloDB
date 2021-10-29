@@ -586,13 +586,21 @@ object LogicalPlan {
 
   def getColumnValues(columnFilters: Set[ColumnFilter], labelName: String): Set[String] = {
     columnFilters.flatMap(cFilter => {
-      cFilter.column == labelName match {
-        case true  => cFilter.filter.valuesStrings.map(_.toString)
-        case false => Seq.empty
+      if (cFilter.column == labelName) {
+        cFilter.filter.valuesStrings.map(_.toString)
+      } else {
+        Seq.empty
       }
     })
   }
 
+  /**
+   *  Given a LogicalPlan, the function finds a Seq of all Child nodes, and returns a Set of ColumnFilters for
+   *  each of the Leaf node
+   *
+   * @param logicalPlan the root LogicalPlan
+   * @return Seq of Set of Column filters, Seq has size same as the number of leaf nodes
+   */
   def getColumnFilterGroup(logicalPlan: LogicalPlan): Seq[Set[ColumnFilter]] = {
     LogicalPlan.findLeafLogicalPlans(logicalPlan) map { lp =>
       lp match {

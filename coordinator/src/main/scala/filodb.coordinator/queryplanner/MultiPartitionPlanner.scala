@@ -5,7 +5,7 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.query._
+import filodb.query.{MetadataQueryPlan, _}
 import filodb.query.exec._
 
 case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange)
@@ -61,43 +61,90 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       localPartitionPlanner.materialize(logicalPlan, qContext)
     }  else if (LogicalPlan.hasSubqueryWithWindowing(logicalPlan) || logicalPlan.isInstanceOf[TopLevelSubquery]) {
       materializeSubquery(logicalPlan, qContext)
-    } else {
-        walkLogicalPlanTree(logicalPlan, qContext).plans.head
+    } else logicalPlan match {
+      case mqp: MetadataQueryPlan               => materializeMetadataQueryPlan(mqp, qContext).plans.head
+      case _                                    => walkLogicalPlanTree(logicalPlan, qContext).plans.head
     }
   }
 
-  override def walkLogicalPlanTree(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = logicalPlan match {
-    case lp: BinaryJoin                  => materializeBinaryJoin(lp, qContext)
-    case mdq: MetadataQueryPlan          => materializeMetadataQueryPlan(mdq, qContext)
-    case lp: ApplyInstantFunction        => super.materializeApplyInstantFunction(qContext, lp)
-    case lp: ApplyInstantFunctionRaw     => super.materializeApplyInstantFunctionRaw(qContext, lp)
-    case lp: Aggregate                   => super.materializeAggregate(qContext, lp)
-    case lp: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, lp)
-    case lp: ApplyMiscellaneousFunction  => super.materializeApplyMiscellaneousFunction(qContext, lp)
-    case lp: ApplySortFunction           => super.materializeApplySortFunction(qContext, lp)
-    case lp: ScalarVaryingDoublePlan     => super.materializeScalarPlan(qContext, lp)
-    case lp: ScalarTimeBasedPlan         => super.materializeScalarTimeBased(qContext, lp)
-    case lp: VectorPlan                  => super.materializeVectorPlan(qContext, lp)
-    case lp: ScalarFixedDoublePlan       => super.materializeFixedScalar(qContext, lp)
-    case lp: ApplyAbsentFunction         => super.materializeAbsentFunction(qContext, lp)
-    case lp: ScalarBinaryOperation       => super.materializeScalarBinaryOperation(qContext, lp)
-    case lp: ApplyLimitFunction          => super.materializeLimitFunction(qContext, lp)
+  override def walkLogicalPlanTree(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
+    // Should avoid this asInstanceOf, far many places where we do this now.
+    val params = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val partitions = getPartitions(logicalPlan, params)
 
-    // Imp: At the moment, these two cases for subquery will not get executed, materialize is already
-    // Checking if the plan is a TopLevelSubQuery or any of the descendant is a SubqueryWithWindowing and
-    // will invoke materializeSubquery, currently these placeholders are added to make compiler happy as LogicalPlan
-    // is a sealed trait. Ideally, everything, including subqueries need to be walked and materialized by the
-    // Planner. Once we identify the test cases for subqueries that need to walk the tree, remove this block of
-    // comment, remove the special handling from materialize method and fix the next case handling SubqueryWithWindowing
-    // and TopLevelSubquery
-    case _: SubqueryWithWindowing |
-         _: TopLevelSubquery             => PlanResult(materializeSubquery(logicalPlan, qContext)::Nil)
-    case _: PeriodicSeries |
-         _: PeriodicSeriesWithWindowing |
-         _: RawChunkMeta |
-         _: RawSeries                    => materializePeriodicAndRawSeries(logicalPlan, qContext)
+
+    if (isSinglePartition(partitions)) {
+        // TODO: Do we use the start and endMs based on what we get in the params or the one in PartitionAssignment
+        //  like this?
+//        val (partitionName, startMs, endMs) = partitions.headOption.map(
+//              x => (  x.partitionName,
+//                  x.timeRange.startMs.max(params.startSecs * 1000L),
+//                  x.timeRange.endMs.min(params.endSecs * 1000L)
+//              )
+//            )
+//            .getOrElse((localPartitionPlanner, params.startSecs * 1000L, params.endSecs * 1000L))
+
+        val (partitionName, startMs, endMs) =
+          ( partitions.headOption.map(_.partitionName).getOrElse(localPartitionName),
+            params.startSecs * 1000L,
+            params.endSecs * 1000L)
+
+        // If the plan is on a single partition, then depending on partition name we either delegate to local or
+        // remote planner
+        val execPlan = if (partitionName.equals(localPartitionName)) {
+            localPartitionPlanner.materialize(logicalPlan, qContext)
+        } else {
+          // Single partition but remote, send the entire plan remotely
+          val remotePartitionEndpoint = partitions.head.endPoint
+          val httpEndpoint = remotePartitionEndpoint + params.remoteQueryPath.getOrElse("")
+          PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
+            generateRemoteExecParams(qContext, startMs, endMs),
+            inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
+        }
+        PlanResult(execPlan :: Nil)
+    } else walkMultiPartitionPlan(logicalPlan, qContext)
   }
 
+  /**
+   * Invoked when the plan tree spans multiple plans
+   *
+   * @param logicalPlan The multi partition LogicalPlan tree
+   * @param qContext the QueryContext object
+   * @return
+   */
+  private def walkMultiPartitionPlan(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
+    logicalPlan match {
+      case lp: BinaryJoin => materializeMultiPartitionBinaryJoin(lp, qContext)
+      case mdq: MetadataQueryPlan => materializeMetadataQueryPlan(mdq, qContext)  // Redundant as trait if sealed
+      case lp: ApplyInstantFunction => super.materializeApplyInstantFunction(qContext, lp)
+      case lp: ApplyInstantFunctionRaw => super.materializeApplyInstantFunctionRaw(qContext, lp)
+      case lp: Aggregate => super.materializeAggregate(qContext, lp)
+      case lp: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, lp)
+      case lp: ApplyMiscellaneousFunction => super.materializeApplyMiscellaneousFunction(qContext, lp)
+      case lp: ApplySortFunction => super.materializeApplySortFunction(qContext, lp)
+      case lp: ScalarVaryingDoublePlan => super.materializeScalarPlan(qContext, lp)
+      case lp: ScalarTimeBasedPlan => super.materializeScalarTimeBased(qContext, lp)
+      case lp: VectorPlan => super.materializeVectorPlan(qContext, lp)
+      case lp: ScalarFixedDoublePlan => super.materializeFixedScalar(qContext, lp)
+      case lp: ApplyAbsentFunction => super.materializeAbsentFunction(qContext, lp)
+      case lp: ScalarBinaryOperation => super.materializeScalarBinaryOperation(qContext, lp)
+      case lp: ApplyLimitFunction => super.materializeLimitFunction(qContext, lp)
+
+      // Imp: At the moment, these two cases for subquery will not get executed, materialize is already
+      // Checking if the plan is a TopLevelSubQuery or any of the descendant is a SubqueryWithWindowing and
+      // will invoke materializeSubquery, currently these placeholders are added to make compiler happy as LogicalPlan
+      // is a sealed trait. Ideally, everything, including subqueries need to be walked and materialized by the
+      // Planner. Once we identify the test cases for subqueries that need to walk the tree, remove this block of
+      // comment, remove the special handling from materialize method and fix the next case handling
+      // SubqueryWithWindowing and TopLevelSubquery
+      case _: SubqueryWithWindowing |
+           _: TopLevelSubquery => PlanResult(materializeSubquery(logicalPlan, qContext) :: Nil)
+      case _: PeriodicSeries |
+           _: PeriodicSeriesWithWindowing |
+           _: RawChunkMeta |
+           _: RawSeries => materializePeriodicAndRawSeries(logicalPlan, qContext)
+    }
+  }
 
   private def getRoutingKeys(logicalPlan: LogicalPlan) = {
     val columnFilterGroup = LogicalPlan.getColumnFilterGroup(logicalPlan)
@@ -111,6 +158,49 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     queryContext.copy(origQueryParams = queryParams.copy(startSecs = startMs/1000, endSecs = endMs / 1000),
       plannerParams = queryContext.plannerParams.copy(processMultiPartition = false))
   }
+
+  /**
+   * Gets the partition Assignment for the given plan
+   */
+  private def getPartitions(logicalPlan: LogicalPlan, queryParams: PromQlQueryParams) : Seq[PartitionAssignment] = {
+
+    //1.  Get a Seq of all Leaf node filters
+    val leafFilters = LogicalPlan.getColumnFilterGroup(logicalPlan)
+    val nonMetricColumnSet = dataset.options.nonMetricShardColumns.toSet
+    //2. Filter from each leaf node filters to keep only nonShardKeyColumns and convert them to key value map
+    val nonMetricColumnsMap = leafFilters.map(cf => {
+      cf.filter(col => nonMetricColumnSet.contains(col.column)).map(
+        x => (x.column, x.filter.valuesStrings.head.toString)).toMap
+    })
+    // Get the start and end time is ms based on the lookback, offset and the user provided start and end time
+    val (maxOffsetMs, minOffsetMs) = LogicalPlanUtils.getOffsetMillis(logicalPlan)
+      .foldLeft((Long.MinValue, Long.MaxValue)) {
+        case ((accMax, accMin), currValue) => (accMax.max(currValue), accMin.min(currValue))
+      }
+
+    val periodicSeriesTimeWithOffset = TimeRange((queryParams.startSecs * 1000) - maxOffsetMs,
+      (queryParams.endSecs * 1000) - minOffsetMs)
+    val lookBackMs = getLookBackMillis(logicalPlan).max
+
+    val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackMs,
+      periodicSeriesTimeWithOffset.endMs)
+
+    nonMetricColumnsMap.flatMap(metricMap =>
+      partitionLocationProvider.getPartitions(metricMap, queryTimeRange))
+  }
+
+  /**
+   * Checks if all the PartitionAssignments belong to same partition
+   */
+  private def isSinglePartition(partitions: Seq[PartitionAssignment]) : Boolean = {
+    if (partitions.isEmpty)
+      true
+    else {
+      val partName = partitions.head.partitionName
+      partitions.forall(_.partitionName.equals(partName))
+    }
+  }
+
 
   /**
    *
@@ -165,29 +255,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       logger.warn(s"No partitions found for routing keys: $routingKeys")
     (partitions, routingKeys)
   }
-  /**
-    * @param queryParams PromQlQueryParams having query details
-    * @param logicalPlan Logical plan
-   *  @return Returns PartitionAssignment and routing keys
-   */
-  private def partitionUtil(queryParams: PromQlQueryParams,
-                            logicalPlan: BinaryJoin): (List[PartitionAssignment], Seq[(String, Set[String])]) = {
-
-  val lhsPartitionsAndRoutingKeys = logicalPlan.lhs match {
-    case b: BinaryJoin => partitionUtil(queryParams, b)
-    case _             => val p = partitionUtilNonBinaryJoin(logicalPlan.lhs, queryParams)
-                          (p._1, p._4)
-  }
-
-    val rhsPartitionsAndRoutingKeys = logicalPlan.rhs match {
-      case b: BinaryJoin => partitionUtil(queryParams, b)
-      case _             => val p = partitionUtilNonBinaryJoin(logicalPlan.rhs, queryParams)
-                            (p._1, p._4)
-    }
-    (lhsPartitionsAndRoutingKeys._1 ++ rhsPartitionsAndRoutingKeys._1,
-      lhsPartitionsAndRoutingKeys._2 ++ rhsPartitionsAndRoutingKeys._2)
-  }
-
 
   /**
     * Materialize all queries except Binary Join and Metadata
@@ -196,6 +263,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val (partitions, lookBackMs, offsetMs, routingKeys) = partitionUtilNonBinaryJoin(logicalPlan, queryParams)
+    // TODO: Replace with routingKeys.isEmpty as getRoutingKeys alteady does this check and returns an empty Set?
     val execPlan = if (partitions.isEmpty || routingKeys.forall(_._2.isEmpty))
       localPartitionPlanner.materialize(logicalPlan, qContext)
     else {
@@ -279,7 +347,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     }
   }
 
-  private def materializeMultiPartitionBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): ExecPlan = {
+  private def materializeMultiPartitionBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): PlanResult = {
     val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
     val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
@@ -290,7 +358,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
     val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
 
-    if (logicalPlan.operator.isInstanceOf[SetOperator])
+    val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
       SetOperatorExec(qContext, InProcessPlanDispatcher(queryConfig), Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
         LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
@@ -299,31 +367,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn)
-  }
-
-  def materializeBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): PlanResult = {
-
-    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val (partitions, routingKeys) = partitionUtil(queryParams, logicalPlan)
-    val execPlan = if (partitions.isEmpty) {
-      logger.warn(s"No partitions found for routingKeys: $routingKeys")
-      localPartitionPlanner.materialize(logicalPlan, qContext)
-    } else if (routingKeys.forall(_._2.isEmpty)) localPartitionPlanner.materialize(logicalPlan, qContext)
-    else {
-      val partitionName = partitions.head.partitionName
-      // Binary Join for single partition
-      if (partitions.forall(_.partitionName.equals(partitionName))) {
-        if (partitionName.equals(localPartitionName)) localPartitionPlanner.materialize(logicalPlan, qContext)
-        else {
-          val httpEndpoint = partitions.head.endPoint + queryParams.remoteQueryPath.getOrElse("")
-          PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, generateRemoteExecParams(qContext,
-            queryParams.startSecs * 1000, queryParams.endSecs * 1000),
-            inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
-        }
-      }
-      else materializeMultiPartitionBinaryJoin(logicalPlan, qContext)
-    }
-    PlanResult(execPlan::Nil)
+    PlanResult(execPlan :: Nil)
   }
 
   private def copy(lp: MetadataQueryPlan, startMs: Long, endMs: Long): MetadataQueryPlan = lp match {

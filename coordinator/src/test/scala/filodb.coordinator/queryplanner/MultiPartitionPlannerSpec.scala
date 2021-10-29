@@ -15,10 +15,10 @@ import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.BinaryOperator.{ADD, LAND}
 import filodb.query.InstantFunctionId.Ln
-import filodb.query.{LogicalPlan, SeriesKeysByFilters}
+import filodb.query.{LogicalPlan, PlanValidationSpec, SeriesKeysByFilters}
 import filodb.query.exec._
 
-class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
+class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValidationSpec{
   private implicit val system = ActorSystem()
   private val node = TestProbe().ref
 
@@ -587,15 +587,15 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app"))) List(
-          PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
-            localPartitionStartMs - 1)), PartitionAssignment("remote", "remote-url",
+          PartitionAssignment("remote1", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
+            localPartitionStartMs - 1)), PartitionAssignment("remote2", "remote-url",
             TimeRange(localPartitionStartMs, endSeconds * 1000)))
         else Nil
       }
 
       override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = List(
-        PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
-          localPartitionStartMs - 1)), PartitionAssignment("remote", "remote-url",
+        PartitionAssignment("remote1", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
+          localPartitionStartMs - 1)), PartitionAssignment("remote2", "remote-url",
           TimeRange(localPartitionStartMs, endSeconds * 1000)))
 
     }
@@ -1022,61 +1022,30 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
     // the instant Function Ln should happen in query service (use InProcessPlanDispatcher). Finally the top level
     // binary join for + should be done in process
 
-//    E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@4f93bf0a)
-//    -E~BinaryJoinExec(binaryOp=MUL, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-359631060],raw)
-//    --T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,100,10000))
-//    ---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-359631060],raw)
-//    ----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-//    -----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-//    ------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=12, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-359631060],raw)
-//    ----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-//    -----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-//    ------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=28, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-359631060],raw)
-//    --T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,100,10000))
-//    ---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-359631060],raw)
-//    ----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-//    -----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-//    ------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-359631060],raw)
-//    ----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-//    -----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-//    ------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-359631060],raw)
-//    -T~InstantVectorFunctionMapper(function=Ln)
-//    --E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@4f93bf0a)
-//    ---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,100,10000))
-//    ----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@4f93bf0a)
-//    -----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-//    ------E~PromQlRemoteExec(PromQlQueryParams(sum(test3{job="app2"}),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@4f93bf0a)
-//    ---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,100,10000))
-//    ----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@4f93bf0a)
-//    -----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-//    ------E~PromQlRemoteExec(PromQlQueryParams(sum(test4{job="app3"}),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url-2, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@4f93bf0a)
+    val expectedPlan = """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@298b64f7)
+-E~BinaryJoinExec(binaryOp=MUL, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,100,10000))
+---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=12, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=28, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test1))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,100,10000))
+---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+-----T~PeriodicSamplesMapper(start=1000000, step=100000, end=10000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,10000000), filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test2))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#450220728],raw)
+-T~InstantVectorFunctionMapper(function=Ln)
+--E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@298b64f7)
+---E~PromQlRemoteExec(PromQlQueryParams(sum(test3{job="app2"}),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@298b64f7)
+---E~PromQlRemoteExec(PromQlQueryParams(sum(test4{job="app3"}),1000,100,10000,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url-2, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@298b64f7)"""
 
-    execPlan.isInstanceOf[BinaryJoinExec] shouldBe true
-    execPlan.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldBe true
-    val top = execPlan.asInstanceOf[BinaryJoinExec]
-    top.binaryOp shouldBe ADD
-    val (lhs, rhs) = (top.lhs.head, top.rhs.head)
-    lhs.isInstanceOf[BinaryJoinExec] shouldBe true
-    rhs.isInstanceOf[BinaryJoinExec] shouldBe true
+    validatePlan(execPlan, expectedPlan)
 
-    // Ensure LHS is entirely materialized by localPlanner
-    lhs.dispatcher.isInstanceOf[ActorPlanDispatcher] shouldBe true
-
-
-    rhs.rangeVectorTransformers.head shouldBe InstantVectorFunctionMapper(Ln, Nil)
-    rhs.isInstanceOf[BinaryJoinExec] shouldBe true
-    val rhsPlan = rhs.asInstanceOf[BinaryJoinExec]
-    rhsPlan.binaryOp shouldBe ADD
-    val (lhs1, rhs1) = (rhsPlan.lhs.head, rhsPlan.rhs.head)
-    lhs1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldBe true
-    rhs1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldBe true
-
-    lhs1.children.head.isInstanceOf[PromQlRemoteExec] shouldBe true
-    lhs1.children.head.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams
-      .asInstanceOf[PromQlQueryParams].promQl shouldEqual """sum(test3{job="app2"})"""
-
-    rhs1.children.head.isInstanceOf[PromQlRemoteExec] shouldBe true
-    rhs1.children.head.asInstanceOf[PromQlRemoteExec].queryContext.origQueryParams
-      .asInstanceOf[PromQlQueryParams].promQl shouldEqual """sum(test4{job="app3"})"""
   }
 }
