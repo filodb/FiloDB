@@ -133,23 +133,14 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     * mappings instead. The complete copy also offers a nice safeguard, in case the ShardMapper
     * is concurrently modified before the message is sent. This isn't really expected, however.
     */
-  private def mapperCopyOpt(ref: DatasetRef): Option[CurrentShardSnapshot] = {
-    val snapshot = _shardMappers.get(ref).map(m => CurrentShardSnapshot(ref, m.copy()))
-    // TODO: Remove logging later when the serialization issue is resolved.
-    val st = Thread.currentThread().getStackTrace.take(15).mkString("\n")
-    logger.info(s"Sending out snapshot copy for $ref with ${snapshot.map(_.summary())}, stackTrace: \n $st")
-    snapshot
-  }
+  private def mapperCopyOpt(ref: DatasetRef): Option[CurrentShardSnapshot] =
+    _shardMappers.get(ref).map(m => CurrentShardSnapshot(ref, m.copy()))
+
   /**
-   * Same as mapperCopyOpt, except it directly references the ShardMapper instance.
-   */
-  private def mapperOpt(ref: DatasetRef): Option[CurrentShardSnapshot] = {
-    val snapshot = _shardMappers.get(ref).map(m => CurrentShardSnapshot(ref, m))
-    // TODO: Remove logging later when the serialization issue is resolved.
-    val st = Thread.currentThread().getStackTrace.take(15).mkString("\n")
-    logger.info(s"Sending out snapshot for $ref with ${snapshot.map(_.summary())}, stackTrace: \n $st")
-    snapshot
-  }
+    * Same as mapperCopyOpt, except it directly references the ShardMapper instance.
+    */
+  private def mapperOpt(ref: DatasetRef): Option[CurrentShardSnapshot] =
+    _shardMappers.get(ref).map(m => CurrentShardSnapshot(ref, m))
 
   /** Called on MemberUp. Handles acquiring assignable shards, if any, assignment,
     * and full setup of new node.
