@@ -115,7 +115,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   private def walkMultiPartitionPlan(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
     logicalPlan match {
       case lp: BinaryJoin                     => materializeMultiPartitionBinaryJoin(lp, qContext)
-      case mdq: MetadataQueryPlan             => materializeMetadataQueryPlan(mdq, qContext)  // Redundant as trait if sealed
+      // Redundant as trait if sealed
+      case mdq: MetadataQueryPlan             => materializeMetadataQueryPlan(mdq, qContext)
       case lp: ApplyInstantFunction           => super.materializeApplyInstantFunction(qContext, lp)
       case lp: ApplyInstantFunctionRaw        => super.materializeApplyInstantFunctionRaw(qContext, lp)
       case lp: Aggregate                      => super.materializeAggregate(qContext, lp)
