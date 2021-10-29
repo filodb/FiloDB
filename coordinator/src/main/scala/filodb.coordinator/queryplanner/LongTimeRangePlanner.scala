@@ -49,7 +49,7 @@ import filodb.query.exec._
     val execPlan = if (!periodicSeriesPlan.isRoutable)
       rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
     else if (endWithOffsetMs < earliestRawTime) { // full time range in downsampled cluster
-      logger.info("materializing against downsample cluster:: {}", qContext.origQueryParams)
+      logger.debug("materializing against downsample cluster:: {}", qContext.origQueryParams)
       downsampleClusterPlanner.materialize(periodicSeriesPlan, qContext)
     } else if (startWithOffsetMs - lookbackMs >= earliestRawTime) { // full time range in raw cluster
       rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
@@ -78,7 +78,7 @@ import filodb.query.exec._
         copyLogicalPlanWithUpdatedTimeRange(periodicSeriesPlan,
           TimeRange(periodicSeriesPlan.startMs, latestDownsampleTimestampFn + offsetMillis.min))
       }
-      logger.info("materializing against downsample cluster:: {}", qContext.origQueryParams)
+      logger.debug("materializing against downsample cluster:: {}", qContext.origQueryParams)
       downsampleClusterPlanner.materialize(downsampleLp, qContext)
     } else { // raw/downsample overlapping query without long lookback
       // Split the query between raw and downsample planners
@@ -91,7 +91,7 @@ import filodb.query.exec._
       val downsampleLp = copyLogicalPlanWithUpdatedTimeRange(periodicSeriesPlan,
         TimeRange(periodicSeriesPlan.startMs, lastDownsampleInstant))
       val downsampleEp = downsampleClusterPlanner.materialize(downsampleLp, qContext)
-      logger.info("materializing against downsample cluster:: {}", qContext.origQueryParams)
+      logger.debug("materializing against downsample cluster:: {}", qContext.origQueryParams)
 
       val rawLp = copyLogicalPlanWithUpdatedTimeRange(periodicSeriesPlan, TimeRange(firstInstantInRaw,
         periodicSeriesPlan.endMs))
