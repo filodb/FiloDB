@@ -74,15 +74,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
 
     if (isSinglePartition(partitions)) {
-        // TODO: Do we use the start and endMs based on what we get in the params or the one in PartitionAssignment
-        //  like this?
-//        val (partitionName, startMs, endMs) = partitions.headOption.map(
-//              x => (  x.partitionName,
-//                  x.timeRange.startMs.max(params.startSecs * 1000L),
-//                  x.timeRange.endMs.min(params.endSecs * 1000L)
-//              )
-//            )
-//            .getOrElse((localPartitionPlanner, params.startSecs * 1000L, params.endSecs * 1000L))
 
         val (partitionName, startMs, endMs) =
           ( partitions.headOption.map(_.partitionName).getOrElse(localPartitionName),
@@ -101,7 +92,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             generateRemoteExecParams(qContext, startMs, endMs),
             inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
         }
-        PlanResult(execPlan :: Nil)
+        PlanResult(Seq(execPlan))
     } else walkMultiPartitionPlan(logicalPlan, qContext)
   }
 
@@ -114,22 +105,21 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
    */
   private def walkMultiPartitionPlan(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
     logicalPlan match {
-      case lp: BinaryJoin                     => materializeMultiPartitionBinaryJoin(lp, qContext)
-      // Redundant as trait if sealed
-      case mdq: MetadataQueryPlan             => materializeMetadataQueryPlan(mdq, qContext)
-      case lp: ApplyInstantFunction           => super.materializeApplyInstantFunction(qContext, lp)
-      case lp: ApplyInstantFunctionRaw        => super.materializeApplyInstantFunctionRaw(qContext, lp)
-      case lp: Aggregate                      => super.materializeAggregate(qContext, lp)
-      case lp: ScalarVectorBinaryOperation    => super.materializeScalarVectorBinOp(qContext, lp)
-      case lp: ApplyMiscellaneousFunction     => super.materializeApplyMiscellaneousFunction(qContext, lp)
-      case lp: ApplySortFunction              => super.materializeApplySortFunction(qContext, lp)
-      case lp: ScalarVaryingDoublePlan        => super.materializeScalarPlan(qContext, lp)
-      case lp: ScalarTimeBasedPlan            => super.materializeScalarTimeBased(qContext, lp)
-      case lp: VectorPlan                     => super.materializeVectorPlan(qContext, lp)
-      case lp: ScalarFixedDoublePlan          => super.materializeFixedScalar(qContext, lp)
-      case lp: ApplyAbsentFunction            => super.materializeAbsentFunction(qContext, lp)
-      case lp: ScalarBinaryOperation          => super.materializeScalarBinaryOperation(qContext, lp)
-      case lp: ApplyLimitFunction             => super.materializeLimitFunction(qContext, lp)
+      case lp: BinaryJoin                 => materializeMultiPartitionBinaryJoin(lp, qContext)
+      case _: MetadataQueryPlan           => throw new IllegalArgumentException("MetadataQueryPlan unexpected here")
+      case lp: ApplyInstantFunction       => super.materializeApplyInstantFunction(qContext, lp)
+      case lp: ApplyInstantFunctionRaw    => super.materializeApplyInstantFunctionRaw(qContext, lp)
+      case lp: Aggregate                  => super.materializeAggregate(qContext, lp)
+      case lp: ScalarVectorBinaryOperation=> super.materializeScalarVectorBinOp(qContext, lp)
+      case lp: ApplyMiscellaneousFunction => super.materializeApplyMiscellaneousFunction(qContext, lp)
+      case lp: ApplySortFunction          => super.materializeApplySortFunction(qContext, lp)
+      case lp: ScalarVaryingDoublePlan    => super.materializeScalarPlan(qContext, lp)
+      case _: ScalarTimeBasedPlan         => throw new IllegalArgumentException("ScalarTimeBasedPlan unexpected here")
+      case lp: VectorPlan                 => super.materializeVectorPlan(qContext, lp)
+      case _: ScalarFixedDoublePlan       => throw new IllegalArgumentException("ScalarFixedDoublePlan unexpected here")
+      case lp: ApplyAbsentFunction        => super.materializeAbsentFunction(qContext, lp)
+      case lp: ScalarBinaryOperation      => super.materializeScalarBinaryOperation(qContext, lp)
+      case lp: ApplyLimitFunction         => super.materializeLimitFunction(qContext, lp)
 
       // Imp: At the moment, these two cases for subquery will not get executed, materialize is already
       // Checking if the plan is a TopLevelSubQuery or any of the descendant is a SubqueryWithWindowing and
@@ -139,11 +129,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       // comment, remove the special handling from materialize method and fix the next case handling
       // SubqueryWithWindowing and TopLevelSubquery
       case _: SubqueryWithWindowing |
-           _: TopLevelSubquery                => PlanResult(materializeSubquery(logicalPlan, qContext) :: Nil)
+           _: TopLevelSubquery            => PlanResult(materializeSubquery(logicalPlan, qContext) :: Nil)
       case _: PeriodicSeries |
            _: PeriodicSeriesWithWindowing |
            _: RawChunkMeta |
-           _: RawSeries                       => materializePeriodicAndRawSeries(logicalPlan, qContext)
+           _: RawSeries                   => materializePeriodicAndRawSeries(logicalPlan, qContext)
     }
   }
 
@@ -169,7 +159,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val leafFilters = LogicalPlan.getColumnFilterGroup(logicalPlan)
     val nonMetricColumnSet = dataset.options.nonMetricShardColumns.toSet
     //2. Filter from each leaf node filters to keep only nonShardKeyColumns and convert them to key value map
-    val nonMetricColumnsMap = leafFilters.map(cf => {
+    val routingKeyMap = leafFilters.map(cf => {
       cf.filter(col => nonMetricColumnSet.contains(col.column)).map(
         x => (x.column, x.filter.valuesStrings.head.toString)).toMap
     })
@@ -188,7 +178,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       periodicSeriesTimeWithOffset.endMs)
 
     //5. Based on the map in 2 and time range in 5, get the partitions to query
-    nonMetricColumnsMap.flatMap(metricMap =>
+    routingKeyMap.flatMap(metricMap =>
       partitionLocationProvider.getPartitions(metricMap, queryTimeRange))
   }
 
@@ -266,7 +256,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val (partitions, lookBackMs, offsetMs, routingKeys) = resolvePartitionsAndRoutingKeys(logicalPlan, queryParams)
-    // TODO: Replace with routingKeys.isEmpty as getRoutingKeys already does this check and returns an empty Set?
     val execPlan = if (partitions.isEmpty || routingKeys.forall(_._2.isEmpty))
       localPartitionPlanner.materialize(logicalPlan, qContext)
     else {
