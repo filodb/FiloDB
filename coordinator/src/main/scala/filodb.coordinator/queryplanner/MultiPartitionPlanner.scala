@@ -53,9 +53,12 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
 
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+      // Pseudo code for the materialize
+      //
       // def materialize(lp) {
       //   walk(lp)
       // }
+      //
       // def walk(lp) {
       //   if lp.isLocalPlan() {
       //     localPlanner.materialize(lp)
