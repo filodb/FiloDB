@@ -51,8 +51,25 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   val datasetMetricColumn: String = dataset.options.metricColumn
 
-  override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
+  override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+      // def materialize(lp) {
+      //   walk(lp)
+      // }
+      // def walk(lp) {
+      //   if lp.isLocalPlan() {
+      //     localPlanner.materialize(lp)
+      //   } else if partitions(lp).size == 1 && partitions(lp.partitions).head.name != "localPartition" {
+      //     materializeRemoteExecPlan(lp)
+      //   } else {
+      //     case BinaryJoin:
+      //       lhs, rhs = walk(lp.lhs), walk(lp.rhs)
+      //       BinaryJoinExec(lhs, rhs, inProcess)
+      //     case x: _:
+      //       // X represents appropriate handler based on type of x
+      //       plannerHelper.materializeX(x)
+      //    }
+      // }
     val tsdbQueryParams = qContext.origQueryParams
 
     if(!tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)

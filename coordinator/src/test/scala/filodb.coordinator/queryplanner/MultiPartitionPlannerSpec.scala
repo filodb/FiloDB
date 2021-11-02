@@ -1051,7 +1051,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   }
 
 
-  it("should materialize a multi level multi partition binary join correctly 2") {
+  it("should push multi-namespace portion of query when all of it is in one partition") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
       TimeRange(timeRange.startMs, timeRange.endMs)))
 
@@ -1110,7 +1110,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     validatePlan(execPlan, expectedPlan)
   }
 
-  it("should materialize a multi level multi partition binary join correctly 3") {
+  it("should push entire query to remote partition when all of it is in one partition") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
       TimeRange(timeRange.startMs, timeRange.endMs)))
 
