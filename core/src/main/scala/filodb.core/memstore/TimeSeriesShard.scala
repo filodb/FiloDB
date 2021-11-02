@@ -675,7 +675,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     shardStats.indexRecoveryNumRecordsProcessed.increment()
     if (schema != Schemas.UnknownSchema) {
       if (storeConfig.meteringEnabled) {
-        cardTracker.incrementCount(shardKey, 1, if (pk.endTime == Long.MaxValue) 1 else 0)
+        cardTracker.modifyCount(shardKey, 1, if (pk.endTime == Long.MaxValue) 1 else 0)
       }
     }
     partId
@@ -1148,7 +1148,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
                                                         p.schema.options.shardKeyColumns)
         if (storeConfig.meteringEnabled) {
-          cardTracker.incrementCount(shardKey, 0, -1)
+          cardTracker.modifyCount(shardKey, 0, -1)
         }
       }
     }
@@ -1255,7 +1255,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         // causes endTime to be set to Long.MaxValue
         partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
         if (storeConfig.meteringEnabled) {
-          cardTracker.incrementCount(shardKey, 1, 1)
+          cardTracker.modifyCount(shardKey, 1, 1)
         }
       } else {
         // newly created partition is re-ingesting now, so update endTime
@@ -1317,7 +1317,7 @@ class TimeSeriesShard(val ref: DatasetRef,
               val shardKey = tsp.schema.partKeySchema.colValues(tsp.partKeyBase, tsp.partKeyOffset,
                 tsp.schema.options.shardKeyColumns)
               if (storeConfig.meteringEnabled) {
-                cardTracker.incrementCount(shardKey, 0, 1)
+                cardTracker.modifyCount(shardKey, 0, 1)
               }
             }
           }

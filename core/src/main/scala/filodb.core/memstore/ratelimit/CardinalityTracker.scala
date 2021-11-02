@@ -57,8 +57,12 @@ class CardinalityTracker(ref: DatasetRef,
    * @return current cardinality for each shard key prefix. There
    *         will be shardKeyLen + 1 items in the return value
    */
-  def incrementCount(shardKey: Seq[String], totalDelta: Int, activeDelta: Int): Seq[Cardinality] = {
+  def modifyCount(shardKey: Seq[String], totalDelta: Int, activeDelta: Int): Seq[Cardinality] = {
     require(shardKey.length == shardKeyLen, "full shard key is needed")
+    require(totalDelta == 1 && activeDelta == 0 ||   // new ts but inactive
+            totalDelta == 1 && activeDelta == 1 ||   // new ts and active
+            totalDelta == 0 && activeDelta == -1,    // existing ts that became inactive
+            "invalid values for totalDelta / activeDelta")
 
     val toStore = ArrayBuffer[(Seq[String], Cardinality)]()
     // first make sure there is no breach for any prefix
