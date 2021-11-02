@@ -133,7 +133,7 @@ import filodb.query.exec._
       case lp: BinaryJoin                  => materializeBinaryJoin(qContext, lp)
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp)
       case lp: LabelValues                 => rawClusterMaterialize(qContext, lp)
-      case lp: MetricCardinalitiesTopK     => rawClusterMaterialize(qContext, lp)
+      case lp: TopkCardinalities           => rawClusterMaterialize(qContext, lp)
       case lp: SeriesKeysByFilters         => rawClusterMaterialize(qContext, lp)
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplySortFunction           => materializeApplySortFunction(qContext, lp)

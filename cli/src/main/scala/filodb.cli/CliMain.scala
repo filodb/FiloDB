@@ -109,7 +109,7 @@ object CliMain extends FilodbClusterNode {
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labelvalues --labelnames <lable-names> --labelfilter <label-filter> --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labels --labelfilter <label-filter> -dataset <dataset>")
-    println("  --host <hostname/IP> [--port ...] --command topkcardmetric --dataset <dataset> --k <k> --shardkeyprefix <shard-key-prefix> ")
+    println("  --host <hostname/IP> [--port ...] --command topkcardspread --dataset <dataset> --k <k> --shardkeyprefix <shard-key-prefix> ")
     println("  --host <hostname/IP> [--port ...] --command topkcard --dataset prometheus --k 2 --shardkeyprefix demo App-0")
     println("  --host <hostname/IP> [--port ...] --command labelcardinality --labelfilter <label-filter> --dataset prometheus")
     println("  --host <hostname/IP> [--port ...] --command findqueryshards --queries <query> --spread <spread>")
@@ -254,12 +254,12 @@ object CliMain extends FilodbClusterNode {
           parseLabelCardinalityQuery(remote, args.labelfilter(), args.dataset(),
             getQueryRange(args), options)
 
-        case Some("topkcardmetric") =>
+        case Some("topkcardspread") =>
           require(args.host.isDefined && args.dataset.isDefined && args.labelfilter.isDefined, "--host, --dataset and --labelfilter must be defined")
           val remote = Client.standaloneClient(system, args.host(), args.port())
           val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
             timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
-          parseTopkCardMetricQuery(remote, args.k(), args.shardkeyprefix(), args.dataset(), options)
+          parseTopkCardSpreadQuery(remote, args.k(), args.shardkeyprefix(), args.dataset(), options)
 
         case x: Any =>
           // This will soon be deprecated
@@ -381,12 +381,12 @@ object CliMain extends FilodbClusterNode {
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 
-  def parseTopkCardMetricQuery(client: LocalClient,
+  def parseTopkCardSpreadQuery(client: LocalClient,
                                k: Int,
                                shardKeyPrefix: Seq[String],
                                dataset: String,
                                options: QOptions): Unit = {
-    val logicalPlan = MetricCardinalitiesTopK(shardKeyPrefix, k)
+    val logicalPlan = TopkCardinalities(shardKeyPrefix, k)
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 

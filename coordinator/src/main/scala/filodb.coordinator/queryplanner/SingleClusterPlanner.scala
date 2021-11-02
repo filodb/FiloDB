@@ -144,10 +144,10 @@ class SingleClusterPlanner(val dataset: Dataset,
             reduceExec.addRangeVectorTransformer(new LabelCardinalityPresenter())
             reduceExec
           }
-          case lce: MetricCardTopkExec => {
-            val merge = MetricCardTopkReduceExec(qContext, targetActor, many, lce.k)
-            merge.addRangeVectorTransformer(MetricCardTopkPresenter(lce.k))
-            merge
+          case lce: TopkCardExec => {
+            val reducer = TopkCardReduceExec(qContext, targetActor, many, lce.k)
+            reducer.addRangeVectorTransformer(TopkCardPresenter(lce.k))
+            reducer
           }
           case ske: PartKeysExec => PartKeysDistConcatExec(qContext, targetActor, many)
           case ep: ExecPlan =>
@@ -238,7 +238,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp)
       case lp: LabelValues                 => materializeLabelValues(qContext, lp)
       case lp: LabelNames                  => materializeLabelNames(qContext, lp)
-      case lp: MetricCardinalitiesTopK     => materializeMetricCardinalitiesTopK(qContext, lp)
+      case lp: TopkCardinalities           => materializeTopkCardinalities(qContext, lp)
       case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(qContext, lp)
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplySortFunction           => materializeApplySortFunction(qContext, lp)
@@ -507,11 +507,11 @@ class SingleClusterPlanner(val dataset: Dataset,
     PlanResult(metaExec, false)
   }
 
-  private def materializeMetricCardinalitiesTopK(qContext: QueryContext,
-                                                 lp: MetricCardinalitiesTopK): PlanResult = {
+  private def materializeTopkCardinalities(qContext: QueryContext,
+                                           lp: TopkCardinalities): PlanResult = {
     val metaExec = shardMapperFunc.assignedShards.map{ shard =>
       val dispatcher = dispatcherForShard(shard)
-      exec.MetricCardTopkExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.k)
+      exec.TopkCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.k)
     }
     PlanResult(metaExec, false)
   }

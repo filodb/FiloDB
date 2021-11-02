@@ -281,17 +281,17 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
                            "_metric_" -> "2")
   }
 
-  it ("should correctly execute metric cardinality query") {
+  it ("should correctly execute cardinality query") {
     val k = 3
     val shardKeyPrefix = Seq("demo", "App-0")
 
     val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
-      new MetricCardTopkExec(QueryContext(), executeDispatcher,
+      new TopkCardExec(QueryContext(), executeDispatcher,
         timeseriesDatasetMultipleShardKeys.ref, ishard, shardKeyPrefix, k)
     }.toSeq
 
-    val execPlan = MetricCardTopkReduceExec(QueryContext(), executeDispatcher, leaves, k)
-    execPlan.addRangeVectorTransformer(MetricCardTopkPresenter(k))
+    val execPlan = TopkCardReduceExec(QueryContext(), executeDispatcher, leaves, k)
+    execPlan.addRangeVectorTransformer(TopkCardPresenter(k))
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = (resp: @unchecked) match {

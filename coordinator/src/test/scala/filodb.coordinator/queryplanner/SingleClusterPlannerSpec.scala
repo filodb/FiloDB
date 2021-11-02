@@ -709,7 +709,6 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       head.equals("my_hist") shouldEqual true
   }
 
-<<<<<<< HEAD
   it("should generate correct execPlan for instant vector functions") {
     // ensures:
     //   (1) the execPlan tree has a LocalPartitionDistConcatExec root, and
@@ -808,22 +807,22 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     validatePlan(execPlan, expected)
   }
 
-  it ("should correctly materialize MetricCardTopkExec") {
+  it ("should correctly materialize TopkCardExec") {
     val k = 3
     val shardKeyPrefix = Seq("foo", "bar")
 
-    val lp = MetricCardinalitiesTopK(shardKeyPrefix, k)
+    val lp = TopkCardinalities(shardKeyPrefix, k)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    execPlan.isInstanceOf[MetricCardTopkReduceExec] shouldEqual true
+    execPlan.isInstanceOf[TopkCardReduceExec] shouldEqual true
 
-    val reducer = execPlan.asInstanceOf[MetricCardTopkReduceExec]
+    val reducer = execPlan.asInstanceOf[TopkCardReduceExec]
     reducer.rangeVectorTransformers.size shouldEqual 1
-    reducer.rangeVectorTransformers(0).isInstanceOf[MetricCardTopkPresenter] shouldEqual true
-    reducer.rangeVectorTransformers(0).asInstanceOf[MetricCardTopkPresenter].k shouldEqual k
+    reducer.rangeVectorTransformers(0).isInstanceOf[TopkCardPresenter] shouldEqual true
+    reducer.rangeVectorTransformers(0).asInstanceOf[TopkCardPresenter].k shouldEqual k
     reducer.children.size shouldEqual mapper.numShards
     reducer.children.foreach{ child =>
-      child.isInstanceOf[MetricCardTopkExec] shouldEqual true
-      val leaf = child.asInstanceOf[MetricCardTopkExec]
+      child.isInstanceOf[TopkCardExec] shouldEqual true
+      val leaf = child.asInstanceOf[TopkCardExec]
       leaf.shardKeyPrefix shouldEqual shardKeyPrefix
       leaf.k shouldEqual k
     }

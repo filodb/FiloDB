@@ -71,12 +71,12 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
                                         children: Seq[ExecPlan]) extends MetadataDistConcatExec
 
 /**
-  * Aggregates output from MetricCardTopkExec.
+  * Aggregates output from TopkCardExec.
   */
-final case class MetricCardTopkReduceExec(queryContext: QueryContext,
-                                          dispatcher: PlanDispatcher,
-                                          children: Seq[ExecPlan],
-                                          k: Int) extends NonLeafExecPlan {
+final case class TopkCardReduceExec(queryContext: QueryContext,
+                                    dispatcher: PlanDispatcher,
+                                    children: Seq[ExecPlan],
+                                    k: Int) extends NonLeafExecPlan {
   override protected def args: String = ""
 
   private def sketchFold(acc: ItemsSketch[String], rv: RangeVector):
@@ -97,7 +97,7 @@ final case class MetricCardTopkReduceExec(queryContext: QueryContext,
       case (QueryError(_, _, ex), _)         => throw ex
     }.flatten
       // fold all child sketches into a single sketch
-      .foldLeftL(new ItemsSketch[String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE))(sketchFold)
+      .foldLeftL(new ItemsSketch[String](TopkCardExec.MAX_ITEMSKETCH_MAP_SIZE))(sketchFold)
       .map{ sketch =>
         val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ArrayOfStringsSerDe))
         val it = Seq(SingleValueRowReader(serSketch)).iterator
@@ -111,7 +111,7 @@ final case class MetricCardTopkReduceExec(queryContext: QueryContext,
   * Deserializes the ItemsSketch, selects the top-k metrics,
  *  and packages them into a 2-columned range vector.
   */
-final case class MetricCardTopkPresenter(k: Int) extends RangeVectorTransformer {
+final case class TopkCardPresenter(k: Int) extends RangeVectorTransformer {
   override def funcParams: Seq[FuncArgs] = Nil
 
   override protected[exec] def args: String = ""
@@ -395,7 +395,7 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
     s" startMs=$startMs, endMs=$endMs"
 }
 
-final case object MetricCardTopkExec {
+final case object TopkCardExec {
   // TODO: tune this
   // See here for help choosing a size:
   //   https://datasketches.apache.org/docs/Frequency/FrequentItemsErrorTable.html
@@ -403,17 +403,18 @@ final case object MetricCardTopkExec {
 }
 
 /**
-  * Retrieves an estimate of the top-k metrics from a specific shard.
-  * This is an "estimate" because sketches are used to contain count data.
+  * Given a shardKeyPrefix, retrieves an estimate of the top-k label-values
+  *  from a specific shard. This is an "estimate" because sketches are used to
+  *  contain count data.
   *
   * The accuracy of the estimate is tunable by MAX_ITEMSKETCH_MAP_SIZE.
   *   The link at its definition describes how its value will affect the estimate.
   *
   * Note that the sketch-- a DataSketches ItemsSketch-- maintains a set of
-  *    "heavy hitters." These are the elements whose counts lie above
-  *    a threshold that increases as any counts are increased. This means the
-  *    data must be "sufficiently skewed" in order for a sketch to show that
-  *    any of its elements were heavy hitters.
+  *   "heavy hitters." These are the elements whose counts lie above
+  *   a threshold that increases as any counts are increased. This means the
+  *   data must be "sufficiently skewed" in order for a sketch to show that
+  *   any of its elements were heavy hitters.
   *
   * Additionally, MAX_ITEMSKETCH_MAP_SIZE bounds the number of elements the
   *   sketch counts at any given time. If sketch.update(elt, count) is called
@@ -425,12 +426,13 @@ final case object MetricCardTopkExec {
   * See here for more details:
   *   https://datasketches.apache.org/docs/Frequency/FrequentItemsOverview.html
   */
-final case class MetricCardTopkExec(queryContext: QueryContext,
-                                    dispatcher: PlanDispatcher,
-                                    dataset: DatasetRef,
-                                    shard: Int,
-                                    shardKeyPrefix: Seq[String],
-                                    k: Int) extends LeafExecPlan {
+final case class TopkCardExec(queryContext: QueryContext,
+                              dispatcher: PlanDispatcher,
+                              dataset: DatasetRef,
+                              shard: Int,
+                              shardKeyPrefix: Seq[String],
+                              k: Int) extends LeafExecPlan {
+
   override def enforceLimit: Boolean = false
 
   def doExecute(source: ChunkSource,
@@ -443,7 +445,7 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
         Observable.eval {
           val topkCards = tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix, k)
           // Include each into an ItemSketch.
-          val sketch = new ItemsSketch[String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE)
+          val sketch = new ItemsSketch[String](TopkCardExec.MAX_ITEMSKETCH_MAP_SIZE)
           topkCards.foreach(card => sketch.update(card.childName, card.timeSeriesCount.toLong))
           // serialize the sketch; pack it into a RangeVector
           val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ArrayOfStringsSerDe))

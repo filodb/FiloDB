@@ -428,11 +428,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     PlanResult(execPlan::Nil)
   }
 
-  private def materializeMetricCardinalitiesTopK(qContext: QueryContext, lp: MetricCardinalitiesTopK) : PlanResult = {
+  private def materializeTopkCardinalities(qContext: QueryContext, lp: TopkCardinalities) : PlanResult = {
     // This code is nearly identical to materializeMetadataQueryPlan, but it prevents some
-    //   boilerplate code clutter that results when MetricCardinalitiesTopK extends MetadataQueryPlan.
+    //   boilerplate code clutter that results when TopkCardinalities extends MetadataQueryPlan.
     //   If this code's maintenance isn't worth some extra stand-in lines of code (i.e. at matchers that
-    //   take MetadataQueryPlan instances), then just extend MetricCardinalitiesTopK from MetadataQueryPlan.
+    //   take MetadataQueryPlan instances), then just extend TopkCardinalities from MetadataQueryPlan.
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val partitions = partitionLocationProvider.getAuthorizedPartitions(
       TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
@@ -446,8 +446,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           localPartitionPlanner.materialize(lp.copy(), qContext)
         else ??? // TODO: handle remote
       }.toSeq
-      val reducer = MetricCardTopkReduceExec(qContext, inProcessPlanDispatcher, leafPlans, lp.k)
-      reducer.addRangeVectorTransformer(MetricCardTopkPresenter(lp.k))
+      val reducer = TopkCardReduceExec(qContext, inProcessPlanDispatcher, leafPlans, lp.k)
+      reducer.addRangeVectorTransformer(TopkCardPresenter(lp.k))
       reducer
     }
     PlanResult(execPlan::Nil)
