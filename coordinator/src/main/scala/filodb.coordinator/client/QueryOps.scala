@@ -49,9 +49,9 @@ trait QueryOps extends ClientBase with StrictLogging {
                      shards: Seq[Int],
                      shardKeyPrefix: Seq[String],
                      k: Int,
-                     totalNotActive: Boolean,
+                     addInactive: Boolean,
                      timeout: FiniteDuration = 15.seconds): Seq[CardinalityRecord] =
-    askCoordinator(GetTopkCardinality(dataset, shards, shardKeyPrefix, k, totalNotActive), timeout) {
+    askCoordinator(GetTopkCardinality(dataset, shards, shardKeyPrefix, k, addInactive), timeout) {
       case s: Seq[CardinalityRecord] @unchecked => s
       case e: QueryError => throw e.t
     }

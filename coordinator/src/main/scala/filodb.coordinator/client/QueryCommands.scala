@@ -36,7 +36,7 @@ object QueryCommands {
                                       shards: Seq[Int],
                                       shardKeyPrefix: Seq[String],
                                       k: Int,
-                                      totalNotActive: Boolean,
+                                      addInactive: Boolean,
                                       submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
   final case class StaticSpreadProvider(spreadChange: SpreadChange = SpreadChange()) extends SpreadProvider {

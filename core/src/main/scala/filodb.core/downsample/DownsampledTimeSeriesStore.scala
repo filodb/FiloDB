@@ -201,5 +201,5 @@ extends MemStore with StrictLogging {
                                shards: Seq[Int],
                                shardKeyPrefix: scala.Seq[String],
                                k: Int,
-                               totalNotActive: Boolean): scala.Seq[CardinalityRecord] = ???
+                               addInactive: Boolean): scala.Seq[CardinalityRecord] = ???
 }

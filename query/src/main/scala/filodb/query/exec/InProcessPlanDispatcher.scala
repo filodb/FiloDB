@@ -80,7 +80,7 @@ case class UnsupportedChunkSource() extends ChunkSource {
                                shards: Seq[Int],
                                shardKeyPrefix: scala.Seq[String],
                                k: Int,
-                               totalNotActive: Boolean): scala.Seq[CardinalityRecord] =
+                               addInactive: Boolean): scala.Seq[CardinalityRecord] =
     throw new UnsupportedOperationException("This operation is not supported")
 
   override def acquireSharedLock(ref: DatasetRef, shardNum: Int, querySession: QuerySession): Unit =

@@ -598,8 +598,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     _offset
   }
 
-  def topKCardinality(k: Int, shardKeyPrefix: Seq[String], totalNotActive: Boolean): Seq[CardinalityRecord] = {
-    if (storeConfig.meteringEnabled) cardTracker.topk(k, shardKeyPrefix, totalNotActive)
+  def topKCardinality(k: Int, shardKeyPrefix: Seq[String], addInactive: Boolean): Seq[CardinalityRecord] = {
+    if (storeConfig.meteringEnabled) cardTracker.topk(k, shardKeyPrefix, addInactive)
     else throw new IllegalArgumentException("Metering is not enabled")
   }
 

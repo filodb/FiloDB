@@ -171,11 +171,11 @@ class CardinalityTracker(ref: DatasetRef,
    * @param shardKeyPrefix zero or more elements that form a valid shard key prefix
    * @return Top-K records, can the less than K if fewer children
    */
-  def topk(k: Int, shardKeyPrefix: Seq[String], totalNotActive: Boolean): Seq[CardinalityRecord] = {
+  def topk(k: Int, shardKeyPrefix: Seq[String], addInactive: Boolean): Seq[CardinalityRecord] = {
     require(shardKeyPrefix.length <= shardKeyLen, s"Too many shard keys in $shardKeyPrefix - max $shardKeyLen")
     implicit val ord = new Ordering[CardinalityRecord]() {
       override def compare(x: CardinalityRecord, y: CardinalityRecord): Int = {
-        if (totalNotActive) x.tsCount - y.tsCount
+        if (addInactive) x.tsCount - y.tsCount
         else x.activeTsCount - y.activeTsCount
       }
     }.reverse
