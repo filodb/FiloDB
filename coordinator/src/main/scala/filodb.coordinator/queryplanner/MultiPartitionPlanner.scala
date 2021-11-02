@@ -1,6 +1,7 @@
 package filodb.coordinator.queryplanner
 
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
@@ -139,6 +140,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case lp: ApplyAbsentFunction        => super.materializeAbsentFunction(qContext, lp)
       case lp: ScalarBinaryOperation      => super.materializeScalarBinaryOperation(qContext, lp)
       case lp: ApplyLimitFunction         => super.materializeLimitFunction(qContext, lp)
+      case _: TopkCardinalities           => throw new IllegalArgumentException("TopkCardinalities unexpected here")
 
       // Imp: At the moment, these two cases for subquery will not get executed, materialize is already
       // Checking if the plan is a TopLevelSubQuery or any of the descendant is a SubqueryWithWindowing and
@@ -408,7 +410,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                  _: LabelNames |
                  _: LabelCardinality    => Map("match[]" -> queryParams.promQl)
             case lv: LabelValues        => PlannerUtil.getLabelValuesUrlParams(lv, queryParams)
-            case ln: LabelNames         => PlannerUtil.getLabelNamesUrlParams(ln, queryParams)
           }
           createMetadataRemoteExec(qContext, p, params)
         }

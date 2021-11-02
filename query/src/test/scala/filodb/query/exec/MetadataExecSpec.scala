@@ -258,10 +258,12 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val filters = Seq(ColumnFilter("instance", Filter.Equals("someHost:8787".utf8)))
     val qContext = QueryContext()
 
-    val leafExecPlan = LabelCardinalityExec(qContext, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, now - 5000, now)
+    val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
+      LabelCardinalityExec(qContext, dummyDispatcher,
+        timeseriesDatasetMultipleShardKeys.ref, ishard, filters, now - 5000, now)
+    }.toSeq
 
-    val execPlan = LabelCardinalityReduceExec(qContext, dummyDispatcher, leafExecPlan :: Nil)
+    val execPlan = LabelCardinalityReduceExec(qContext, dummyDispatcher, leaves)
     execPlan.addRangeVectorTransformer(new LabelCardinalityPresenter())
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
@@ -274,11 +276,13 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
         rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset).toMap
       }
     }
-    result shouldEqual Map("unicode_tag" -> "2",
+    result shouldEqual Map("_ns_" -> "1",
+                           "unicode_tag" -> "2",
                            "_type_" -> "1",
                            "job" -> "1",
                            "instance" -> "1",
-                           "_metric_" -> "2")
+                           "_metric_" -> "3",
+                           "_ws_" -> "1")
   }
 
   it ("should correctly execute cardinality query") {

@@ -118,6 +118,7 @@ import filodb.query.exec._
              _: ApplyInstantFunctionRaw |
              _: RawSeries |
              _: LabelNames |
+             _: TopkCardinalities |
              _: LabelCardinality           => rawClusterMaterialize(qContext, logicalPlan)
 
       }
