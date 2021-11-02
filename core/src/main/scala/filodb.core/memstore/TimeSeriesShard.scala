@@ -41,9 +41,6 @@ import filodb.memory.format.ZeroCopyUTF8String._
 class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
 
-  val timeseriesCount = Kamon.gauge("memstore-timeseries-count")
-  val activeTimeseriesCount = Kamon.gauge("memstore-active-timeseries-count")
-
   val shardTotalRecoveryTime = Kamon.gauge("memstore-total-shard-recovery-time",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
   val tsCountBySchema = Kamon.gauge("memstore-timeseries-by-schema").withTags(TagSet.from(tags))
@@ -683,41 +680,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
     partId
   }
-
-  /**
-   * Important to understand call hierarchy for this method to avoid double/missed counting.
-   *
-   * Increment when
-   *  1. At bootstrap time, when creating new TSP object for a time series whose endTime == Long.MaxValue
-   *     (captureActiveTimeseriesCount <- bootstrapPartKey <- recoverIndex)
-   *
-   *  2. At kafka recovery time, when creating new TSP object without ingesting data
-   *     (captureActiveTimeseriesCount <- addPartitionForIngestion <-
-   *                   getOrAddPartitionForIngestion <- IngestConsumer.onNext)
-   *
-   *  3. At regular ingestion time, when creating new TSP object for a non-existent time series
-   *     (captureActiveTimeseriesCount <- addPartitionForIngestion <-
-   *                   getOrAddPartitionForIngestion <- getOrAddPartitionAndIngest <- IngestConsumer.onNext)
-   *
-   *  4. At ingestion time, updating TSP object for an existing time series since it started re-ingesting
-   *        (captureActiveTimeseriesCount <- getOrAddPartitionAndIngest <- IngestConsumer.onNext)
-   *
-   * Decrement when:
-   *  1. Time series stops ingesting (captureActiveTimeseriesCount <- updateIndexWithEndTime <- doFlushSteps)
-   */
-//  private def captureActiveTimeseriesCount(schema: Schema, shardKey: Seq[String],
-//                                           delta: Int, partId: Int, reason: String) = {
-//    logger.debug(s"captureActiveTimeseriesCount shard=$shardNum partId=$partId  delta=$delta reason=$reason")
-//    // Assuming that the last element in the shardKeyColumn is always a metric name, we are making sure the
-//    // shardKeyColumn.length is > 1 and dropping the last element in shardKeyColumn.
-//    if (shardKeyLevelIngestionMetricsEnabled &&
-//      schema.options.shardKeyColumns.length > 1 &&
-//      shardKey.length == schema.options.shardKeyColumns.length) {
-//      val tagSetMap = (schema.options.shardKeyColumns.map(c => s"metric${c}tag") zip shardKey).dropRight(1).toMap
-//      shardStats.activeTimeseriesCount.withTags(TagSet.from(tagSetMap)).increment(delta)
-//    }
-//  }
-
 
   def indexNames(limit: Int): Seq[String] = partKeyIndex.indexNames(limit)
 
