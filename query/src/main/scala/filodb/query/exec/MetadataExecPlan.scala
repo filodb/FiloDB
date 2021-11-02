@@ -433,107 +433,6 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
                                     k: Int) extends LeafExecPlan {
   override def enforceLimit: Boolean = false
 
-  /**
-    * Generates and iterates through all "complete" shard key prefixes
-    *   (i.e. prefixes with exactly 2 labels) from a partial prefix
-    *   and a TimeSeriesMemStore.
-    *
-    * Note: next() will always return the same array instance.
-    */
-  class PrefixIterator private (tsMemStore: TimeSeriesMemStore) extends Iterator[Seq[String]]{
-
-    /* === All members are initialized by companion constructor. === */
-
-    // A queue for each set of "space" (i.e. namespace and workspace) labels.
-    // Spaces are stored in descending precedence, and each successive queue
-    //   contains labels for the "subspace" of the label at the front of the
-    //   previous queue.
-    private val spaceQueues = new Array[mutable.Queue[String]](PrefixIterator.MAX_PREFIX_SIZE)
-
-    // Stores the prefix returned by next().
-    private val currPrefix = new mutable.ArrayBuffer[String](PrefixIterator.MAX_PREFIX_SIZE)
-
-    private var iFirstEmptyQueue = -1
-
-    /**
-      * Dequeues from each queue-- in ascending precedence-- until a dequeue()
-      *   does not leave a queue empty.
-      *
-      * This method mostly exists as setup for enqueueAndUpdatePrefix().
-      */
-    private def dequeue(): Unit = {
-      require(spaceQueues.last.nonEmpty, "should never dequeue without full prefix")
-      iFirstEmptyQueue = spaceQueues.size
-      for (queue <- spaceQueues.reverseIterator) {
-        queue.dequeue()
-        if (queue.nonEmpty) {
-          return
-        }
-        iFirstEmptyQueue = iFirstEmptyQueue - 1
-      }
-    }
-
-    /**
-      * Given the prefix defined by the front of each queue,
-      *   repopulates empty queues with "subspace" labels.
-      */
-    private def enqueueAndUpdatePrefix(): Unit = {
-      currPrefix.reduceToSize(iFirstEmptyQueue)
-      // Fill each successive queue with the topKCardinality result such that
-      //   its argument prefix is defined by the preceding queue front labels.
-      for (iempty <- iFirstEmptyQueue until PrefixIterator.MAX_PREFIX_SIZE) {
-        tsMemStore.topKCardinality(dataset, Seq(shard), currPrefix, k).foreach{ card =>
-          spaceQueues(iempty).enqueue(card.childName)
-        }
-        // currPrefix will contain all front labels
-        currPrefix.append(spaceQueues(iempty).front)
-      }
-      iFirstEmptyQueue = PrefixIterator.MAX_PREFIX_SIZE
-    }
-
-    override def hasNext: Boolean = spaceQueues.head.nonEmpty
-
-    override def next(): Seq[String] = {
-      enqueueAndUpdatePrefix()
-      dequeue() // Note: also setup for hasNext().
-      currPrefix
-    }
-  }
-
-  object PrefixIterator {
-    // namespace and workspace
-    val MAX_PREFIX_SIZE = 2
-
-    /**
-     * @param tsMemStore contains the shard keys over which to iterate
-     * @param prefix shard key prefix to resolve
-     */
-    def apply(tsMemStore: TimeSeriesMemStore, prefix: Seq[String]): PrefixIterator = {
-      val res = new PrefixIterator(tsMemStore)
-
-      // initialize each of the queues
-      for (i <- 0 until MAX_PREFIX_SIZE) {
-        res.spaceQueues(i) = new mutable.Queue[String]
-      }
-
-      for (i <- 0 until prefix.size) {
-        // Place each existing prefix label into appropriate queue.
-        res.spaceQueues(i).enqueue(prefix(i))
-        // Store as much of the prefix as we have available.
-        res.currPrefix.append(prefix(i))
-      }
-
-      res.iFirstEmptyQueue = prefix.size
-
-      // Need this because an empty prefix is a valid argument, and hasNext()
-      //   relies on spaceQueues(0).size.
-      // This results in one extra enqueueAndUpdatePrefix() call at the first next().
-      res.enqueueAndUpdatePrefix()
-
-      res
-    }
-  }
-
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
@@ -542,10 +441,7 @@ final case class MetricCardTopkExec(queryContext: QueryContext,
     val rvs = source match {
       case tsMemStore: TimeSeriesMemStore =>
         Observable.eval {
-          val prefixIter = PrefixIterator(tsMemStore, shardKeyPrefix)
-          val topkCards = prefixIter.flatMap{ pref =>
-            tsMemStore.topKCardinality(dataset, Seq(shard), pref, k)
-          }
+          val topkCards = tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix, k)
           // Include each into an ItemSketch.
           val sketch = new ItemsSketch[String](MetricCardTopkExec.MAX_ITEMSKETCH_MAP_SIZE)
           topkCards.foreach(card => sketch.update(card.childName, card.timeSeriesCount.toLong))
