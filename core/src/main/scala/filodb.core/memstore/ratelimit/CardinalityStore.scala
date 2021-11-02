@@ -1,6 +1,15 @@
 package filodb.core.memstore.ratelimit
 
-case class Cardinality(name: String, timeSeriesCount: Int, childrenCount: Int, childrenQuota: Int)
+/**
+ * The data stored in each node of the Cardinality Store trie
+ * @param name name of the item in shardKeyPrefix
+ * @param tsCount total number of timeSeries under this shardKeyPrefix (example, number of timeseries under ws,ns)
+ * @param activeTsCount number of actively ingesting timeSeries under this shardKeyPrefix
+ *                      (example, number of timeseries under ws,ns)
+ * @param childrenCount number of immediate children for this shardKey (example, number of ns under ws)
+ * @param childrenQuota quota for number of immediate children
+ */
+case class Cardinality(name: String, tsCount: Int, activeTsCount: Int, childrenCount: Int, childrenQuota: Int)
 
 /**
  *

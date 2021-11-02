@@ -10,7 +10,8 @@ import filodb.core.DatasetRef
 case class QuotaReachedException(cannotSetShardKey: Seq[String], prefix: Seq[String], quota: Int)
   extends RuntimeException
 
-case class CardinalityRecord(shard: Int, childName: String, timeSeriesCount: Int,
+case class CardinalityRecord(shard: Int, childName: String, tsCount: Int,
+                             activeTsCount: Int,
                              childrenCount: Int, childrenQuota: Int)
 
 /**
@@ -56,7 +57,7 @@ class CardinalityTracker(ref: DatasetRef,
    * @return current cardinality for each shard key prefix. There
    *         will be shardKeyLen + 1 items in the return value
    */
-  def incrementCount(shardKey: Seq[String]): Seq[Cardinality] = {
+  def incrementCount(shardKey: Seq[String], totalDelta: Int, activeDelta: Int): Seq[Cardinality] = {
     require(shardKey.length == shardKeyLen, "full shard key is needed")
 
     val toStore = ArrayBuffer[(Seq[String], Cardinality)]()
@@ -64,14 +65,15 @@ class CardinalityTracker(ref: DatasetRef,
     (0 to shardKey.length).foreach { i =>
       val prefix = shardKey.take(i)
       val name = if (prefix.isEmpty) "" else prefix.last
-      val old = store.getOrZero(prefix, Cardinality(name, 0, 0, defaultChildrenQuota(i)))
-      val neu = old.copy(timeSeriesCount = old.timeSeriesCount + 1,
-                         childrenCount = if (i == shardKeyLen) old.childrenCount + 1 else old.childrenCount)
-      if (i == shardKeyLen && neu.timeSeriesCount > neu.childrenQuota) {
+      val old = store.getOrZero(prefix, Cardinality(name, 0, 0, 0, defaultChildrenQuota(i)))
+      val neu = old.copy(tsCount = old.tsCount + totalDelta,
+                         activeTsCount = old.activeTsCount + activeDelta,
+                         childrenCount = if (i == shardKeyLen) old.childrenCount + totalDelta else old.childrenCount)
+      if (i == shardKeyLen && neu.tsCount > neu.childrenQuota) {
         quotaExceededProtocol.quotaExceeded(ref, shard, prefix, neu.childrenQuota)
         throw QuotaReachedException(shardKey, prefix, neu.childrenQuota)
       }
-      if (i > 0 && neu.timeSeriesCount == 1) { // parent's new child
+      if (i > 0 && neu.tsCount == 1 && totalDelta == 1) { // parent's new child
         val parent = toStore(i-1)
         val neuParent = parent._2.copy(childrenCount = parent._2.childrenCount + 1)
         toStore(i-1) = (parent._1, neuParent)
@@ -89,6 +91,8 @@ class CardinalityTracker(ref: DatasetRef,
     }
   }
 
+
+
   /**
    * Fetch cardinality for given shard key or shard key prefix
    *
@@ -97,7 +101,7 @@ class CardinalityTracker(ref: DatasetRef,
   def getCardinality(shardKeyPrefix: Seq[String]): Cardinality = {
     require(shardKeyPrefix.length <= shardKeyLen, s"Too many shard keys in $shardKeyPrefix - max $shardKeyLen")
     val name = if (shardKeyPrefix.isEmpty) "" else shardKeyPrefix.last
-    store.getOrZero(shardKeyPrefix, Cardinality(name, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
+    store.getOrZero(shardKeyPrefix, Cardinality(name, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
   }
 
   /**
@@ -113,7 +117,7 @@ class CardinalityTracker(ref: DatasetRef,
 
     logger.debug(s"Setting children quota for $shardKeyPrefix as $childrenQuota")
     val name = if (shardKeyPrefix.isEmpty) "" else shardKeyPrefix.last
-    val old = store.getOrZero(shardKeyPrefix, Cardinality(name, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
+    val old = store.getOrZero(shardKeyPrefix, Cardinality(name, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
     val neu = old.copy(childrenQuota = childrenQuota)
     store.store(shardKeyPrefix, neu)
     neu
@@ -135,16 +139,17 @@ class CardinalityTracker(ref: DatasetRef,
       require(shardKey.length == shardKeyLen, "full shard key is needed")
       val toStore = (0 to shardKey.length).map { i =>
         val prefix = shardKey.take(i)
-        val old = store.getOrZero(prefix, Cardinality("", 0, 0, defaultChildrenQuota(i)))
-        if (old.timeSeriesCount == 0)
+        val old = store.getOrZero(prefix, Cardinality("", 0, 0, 0, defaultChildrenQuota(i)))
+        if (old.tsCount == 0)
           throw new IllegalArgumentException(s"$prefix count is already zero - cannot reduce " +
             s"further. A double delete likely happened.")
-        val neu = old.copy(timeSeriesCount = old.timeSeriesCount - 1)
+        val neu = old.copy(tsCount = old.tsCount - 1,
+                           childrenCount = if (i == shardKeyLen) old.childrenCount-1 else old.childrenCount)
         (prefix, neu)
       }
       toStore.map { case (prefix, neu) =>
         val name = if (prefix.isEmpty) "" else prefix.last
-        if (neu == Cardinality(name, 0, 0, defaultChildrenQuota(prefix.length))) {
+        if (neu == Cardinality(name, 0, 0, 0, defaultChildrenQuota(prefix.length))) {
           // node can be removed
           store.remove(prefix)
         } else {
@@ -166,19 +171,21 @@ class CardinalityTracker(ref: DatasetRef,
    * @param shardKeyPrefix zero or more elements that form a valid shard key prefix
    * @return Top-K records, can the less than K if fewer children
    */
-  def topk(k: Int, shardKeyPrefix: Seq[String]): Seq[CardinalityRecord] = {
+  def topk(k: Int, shardKeyPrefix: Seq[String], totalNotActive: Boolean): Seq[CardinalityRecord] = {
     require(shardKeyPrefix.length <= shardKeyLen, s"Too many shard keys in $shardKeyPrefix - max $shardKeyLen")
     implicit val ord = new Ordering[CardinalityRecord]() {
       override def compare(x: CardinalityRecord, y: CardinalityRecord): Int = {
-        x.timeSeriesCount - y.timeSeriesCount
+        if (totalNotActive) x.tsCount - y.tsCount
+        else x.activeTsCount - y.activeTsCount
       }
     }.reverse
     val heap = mutable.PriorityQueue[CardinalityRecord]()
     store.scanChildren(shardKeyPrefix).foreach { card =>
       heap.enqueue(
         CardinalityRecord(shard, card.name,
-                 card.timeSeriesCount,
-                 if (shardKeyPrefix.length == shardKeyLen - 1) card.timeSeriesCount else card.childrenCount,
+                 card.tsCount,
+                 card.activeTsCount,
+                 if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
                  card.childrenQuota))
       if (heap.size > k) heap.dequeue()
     }

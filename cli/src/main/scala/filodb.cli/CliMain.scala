@@ -67,6 +67,7 @@ class Arguments(args: Seq[String]) extends ScallopConf(args) {
   val shards = opt[List[String]]()
   val spread = opt[Int]()
   val k = opt[Int]()
+  val active = opt[Boolean](default = Some(false))
   val shardkeyprefix = opt[List[String]](default = Some(List()))
   val queries = opt[List[String]](default = Some(List()))
 
@@ -180,15 +181,15 @@ object CliMain extends FilodbClusterNode {
             "--host, --dataset, --k must be defined")
           val (remote, ref) = getClientAndRef(args)
           val res = remote.getTopkCardinality(ref, args.shards.getOrElse(Nil).map(_.toInt),
-                                                 args.shardkeyprefix(), args.k())
+                                                 args.shardkeyprefix(), args.k(), !args.active())
           println(s"ShardKeyPrefix: ${args.shardkeyprefix}")
           res.groupBy(_.shard).foreach { crs =>
             println(s"Shard: ${crs._1}")
             printf("%40s %12s %10s %10s\n", "Child", "TimeSeries", "Children", "Children")
             printf("%40s %12s %10s %10s\n", "Name", "Count", "Count", "Quota")
             println("===================================================================================")
-            crs._2.sortBy(_.timeSeriesCount)(Ordering.Int.reverse).foreach { cr =>
-              printf("%40s %12d %10d %10d\n", cr.childName, cr.timeSeriesCount, cr.childrenCount, cr.childrenQuota)
+            crs._2.sortBy(_.tsCount)(Ordering.Int.reverse).foreach { cr =>
+              printf("%40s %12d %10d %10d\n", cr.childName, cr.tsCount, cr.childrenCount, cr.childrenQuota)
             }
           }
 

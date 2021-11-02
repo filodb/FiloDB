@@ -36,7 +36,7 @@ class RocksDbCardinalityStoreMemoryCapSpec  extends AnyFunSpec with Matchers {
           name <- 0 until 50
           ts <- 0 until 100 } {
       val mName = s"name_really_really_really_really_very_really_long_metric_name_$name"
-      tracker.incrementCount(Seq( s"ws_prefix_$ws", s"ns_prefix_$ns", mName))
+      tracker.incrementCount(Seq( s"ws_prefix_$ws", s"ns_prefix_$ns", mName), 1, 0)
       if (name == 0 && ts ==0 ) assertStats()
     }
     val end = System.nanoTime()
