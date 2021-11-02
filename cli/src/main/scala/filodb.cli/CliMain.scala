@@ -180,16 +180,17 @@ object CliMain extends FilodbClusterNode {
           require(args.host.isDefined && args.dataset.isDefined && args.k.isDefined,
             "--host, --dataset, --k must be defined")
           val (remote, ref) = getClientAndRef(args)
+          val totalNotActive = !args.active()
           val res = remote.getTopkCardinality(ref, args.shards.getOrElse(Nil).map(_.toInt),
-                                                 args.shardkeyprefix(), args.k(), !args.active())
+                                                 args.shardkeyprefix(), args.k(), totalNotActive)
           println(s"ShardKeyPrefix: ${args.shardkeyprefix}")
           res.groupBy(_.shard).foreach { crs =>
             println(s"Shard: ${crs._1}")
-            printf("%40s %12s %10s %10s\n", "Child", "TimeSeries", "Children", "Children")
-            printf("%40s %12s %10s %10s\n", "Name", "Count", "Count", "Quota")
-            println("===================================================================================")
-            crs._2.sortBy(_.tsCount)(Ordering.Int.reverse).foreach { cr =>
-              printf("%40s %12d %10d %10d\n", cr.childName, cr.tsCount, cr.childrenCount, cr.childrenQuota)
+            printf("%40s %20s %20s %15s %15s\n", "Child", "TotalTimeSeries", "ActiveTimeSeries", "Children", "Children")
+            printf("%40s %20s %20s %15s %15s\n", "Name", "Count", "Count", "Count", "Quota")
+            println("==============================================================================================================================")
+            crs._2.sortBy(c => if (totalNotActive) c.tsCount else c.activeTsCount)(Ordering.Int.reverse).foreach { cr =>
+              printf("%40s %20d %20d %15d %15d\n", cr.childName, cr.tsCount, cr.activeTsCount, cr.childrenCount, cr.childrenQuota)
             }
           }
 
