@@ -62,7 +62,7 @@ private object Utils {
   def getTimeParamsWithAt(timeParams: TimeRangeParams, at: Option[Long]): TimeRangeParams = {
     at match {
       case Some(timestamp) => {
-        val delta = timeParams.end - timestamp
+        val delta = timestamp - timeParams.end
         TimeStepParams(timeParams.start + delta,
                        timeParams.step,
                        timeParams.end + delta)
