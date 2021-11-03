@@ -23,6 +23,8 @@ sealed trait JoinMatching {
   def labels: Seq[String]
 }
 
+case class VectorShift(offset: Option[Duration], at: Option[Long])
+
 case class Ignoring(labels: Seq[String]) extends JoinMatching
 
 case class On(labels: Seq[String]) extends JoinMatching
