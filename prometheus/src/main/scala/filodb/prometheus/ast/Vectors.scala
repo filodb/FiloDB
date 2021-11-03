@@ -55,6 +55,27 @@ case object ManyToMany extends Cardinal {
   def cardinality: Cardinality = Cardinality.ManyToMany
 }
 
+private object Utils {
+  /**
+   * Given an 'offset' duration and '@' timestamp, computes the difference (in milliseconds)
+   *   between timeParams.start and timeParams.start with 'offset' and 'at' applied.
+   *
+   * In other words, this returns the "total offset."
+   */
+  def getOffsetMillis(offset: Option[Duration],
+                              at: Option[Long],
+                              timeParams: TimeRangeParams): Long = {
+    // compute the offset millis given by the `offset` member
+    var offsetMillis: Long = if (offset.nonEmpty) offset.get.millis(timeParams.step * 1000) else 0
+    // increase the offset even further according to `at`
+    if (at.nonEmpty) {
+      val evalTimeWithOffset = (timeParams.start * 1000) - offsetMillis
+      offsetMillis = offsetMillis + (evalTimeWithOffset - (at.get * 1000))
+    }
+    offsetMillis
+  }
+}
+
 case class VectorMatch(matching: Option[JoinMatching],
                        grouping: Option[JoinGrouping]) {
   lazy val cardinality: Cardinal = grouping match {
@@ -273,13 +294,7 @@ case class InstantExpression(metricName: Option[String],
     // we start from 5 minutes earlier that provided start time in order to include last sample for the
     // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
 
-    // compute the offset millis given by the `offset` member
-    var offsetMillis: Long = if (offset.nonEmpty) offset.get.millis(timeParams.step * 1000) else 0
-    // increase the offset even further according to `at`
-    if (at.nonEmpty) {
-      val evalTimeWithOffset = (timeParams.start * 1000) - offsetMillis
-      offsetMillis = offsetMillis + (evalTimeWithOffset - (at.get * 1000))
-    }
+    val offsetMillis: Long = Utils.getOffsetMillis(offset, at, timeParams)
 
     val ps = PeriodicSeries(
       RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
@@ -350,14 +365,7 @@ case class RangeExpression(metricName: Option[String],
       throw new UnsupportedOperationException("Range expression is not allowed in query_range")
     }
 
-    // TODO(a_theimer): give this its own utility function
-    // compute the offset millis given by the `offset` member
-    var offsetMillis: Long = if (offset.nonEmpty) offset.get.millis(timeParams.step * 1000) else 0
-    // increase the offset even further according to `at`
-    if (at.nonEmpty) {
-      val evalTimeWithOffset = (timeParams.start * 1000) - offsetMillis
-      offsetMillis = offsetMillis + (evalTimeWithOffset - (at.get * 1000))
-    }
+    val offsetMillis: Long = Utils.getOffsetMillis(offset, at, timeParams)
 
     // multiply by 1000 to convert unix timestamp in seconds to millis
     val rs = RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq,
@@ -371,6 +379,3 @@ case class RangeExpression(metricName: Option[String],
     }.getOrElse(rs)
   }
 }
-
-
-
