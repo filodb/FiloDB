@@ -57,19 +57,20 @@ case object ManyToMany extends Cardinal {
 
 private object Utils {
   /**
-   * Given an 'offset' duration and '@' timestamp, computes the difference (in milliseconds)
-   *   between timeParams.start and timeParams.start with 'offset' and 'at' applied.
+   * Computes the difference (in milliseconds) between startSec and
+   *   min(startSec, at) - offset.
    *
-   * In other words, this returns the "total offset."
+   * In other words, this returns the "total offset" from startSec.
    */
-  def getOffsetMillis(offset: Option[Duration],
-                              at: Option[Long],
-                              timeParams: TimeRangeParams): Long = {
+  def getOffsetMillis(startSec: Long,
+                      stepSec: Long,
+                      offset: Option[Duration],
+                      at: Option[Long]): Long = {
     // compute the offset millis given by the `offset` member
-    var offsetMillis: Long = if (offset.nonEmpty) offset.get.millis(timeParams.step * 1000) else 0
+    var offsetMillis: Long = if (offset.nonEmpty) offset.get.millis(stepSec * 1000) else 0
     // increase the offset even further according to `at`
     if (at.nonEmpty) {
-      val evalTimeWithOffset = (timeParams.start * 1000) - offsetMillis
+      val evalTimeWithOffset = (startSec * 1000) - offsetMillis
       offsetMillis = offsetMillis + (evalTimeWithOffset - (at.get * 1000))
     }
     offsetMillis
@@ -109,9 +110,11 @@ case class VectorMatch(matching: Option[JoinMatching],
   }
 }
 
-case class SubqueryExpression(
-    subquery: PeriodicSeries, sqcl: SubqueryClause, offset: Option[Duration], limit: Option[Int]
-) extends Expression with PeriodicSeries {
+case class SubqueryExpression(subquery: PeriodicSeries,
+                              sqcl: SubqueryClause,
+                              offset: Option[Duration],
+                              at: Option[Long],
+                              limit: Option[Int]) extends Expression with PeriodicSeries {
 
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     // There are only two places for the subquery to be defined in the abstract syntax tree:
@@ -124,10 +127,8 @@ case class SubqueryExpression(
     // It's illegal to have a top level subquery expression to be called from query_range API
     // when start and end parameters are not the same.
     require(timeParams.start == timeParams.end, "Subquery is not allowed as a top level expression for query_range")
-    val offsetSec : Long = offset match {
-      case None => 0
-      case Some(duration) => duration.millis(1L) / 1000
-    }
+    val offsetMillis = Utils.getOffsetMillis(timeParams.start, 1L, offset, at)
+    val offsetSec = offsetMillis / 1000
     val stepToUseMs = SubqueryUtils.getSubqueryStepMs(sqcl.step);
     var startS = timeParams.start - (sqcl.window.millis(1L) / 1000) - offsetSec
     var endS = timeParams.start - offsetSec
@@ -144,11 +145,9 @@ case class SubqueryExpression(
       stepToUseMs,
       endS * 1000,
       sqcl.window.millis(1L),
-      offset.map(duration => duration.millis(1L))
+      if (offsetMillis > 0) Some(offsetMillis) else None
     )
-
   }
-
 }
 
 sealed trait Vector extends Expression {
@@ -294,7 +293,7 @@ case class InstantExpression(metricName: Option[String],
     // we start from 5 minutes earlier that provided start time in order to include last sample for the
     // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
 
-    val offsetMillis: Long = Utils.getOffsetMillis(offset, at, timeParams)
+    val offsetMillis: Long = Utils.getOffsetMillis(timeParams.start, timeParams.step, offset, at)
 
     val ps = PeriodicSeries(
       RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
@@ -365,7 +364,7 @@ case class RangeExpression(metricName: Option[String],
       throw new UnsupportedOperationException("Range expression is not allowed in query_range")
     }
 
-    val offsetMillis: Long = Utils.getOffsetMillis(offset, at, timeParams)
+    val offsetMillis: Long = Utils.getOffsetMillis(timeParams.start, timeParams.step, offset, at)
 
     // multiply by 1000 to convert unix timestamp in seconds to millis
     val rs = RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq,

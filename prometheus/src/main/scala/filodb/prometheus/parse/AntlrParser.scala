@@ -97,8 +97,13 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
     } else {
       Some(build[Duration](ctx.offset))
     }
+    val at: Option[Long] = if (ctx.at == null) {
+      None
+    } else {
+      build[Some[Long]](ctx.at)
+    }
     val limit: Option[Scalar] = None
-    SubqueryExpression(lhs.asInstanceOf[PeriodicSeries], sqcl, offset, limit.map(_.toScalar.toInt))
+    SubqueryExpression(lhs.asInstanceOf[PeriodicSeries], sqcl, offset, at, limit.map(_.toScalar.toInt))
   }
 
   override def visitSubquery(ctx: PromQLParser.SubqueryContext): SubqueryClause = {
