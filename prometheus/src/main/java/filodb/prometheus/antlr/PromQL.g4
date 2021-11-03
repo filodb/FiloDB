@@ -44,7 +44,7 @@ vector
 parens: '(' vectorExpression ')';
 
 // TODO: Make offset applicable to any expression.
-instantOrRangeSelector: instantSelector window? offset?;
+instantOrRangeSelector: instantSelector window? (offset | at | offset at | at offset)? ;
 
 instantSelector
     : metricName ('{' labelMatcherList? '}')?
@@ -54,6 +54,7 @@ instantSelector
 window: '[' DURATION ']';
 
 offset: OFFSET DURATION;
+at: AT TIMESTAMP;
 
 limit: LIMIT NUMBER;
 
@@ -119,13 +120,18 @@ labelKeyword
 
 literal: NUMBER | STRING;
 
+TIMESTAMP: INTEGER;
+
 // Number format is non-standard.
 // It doesn't support hex, NaN, Inf, and it doesn't require a digit after the decimal point.
 NUMBER: (
       [0-9]* '.'? [0-9]+ ([eE][-+]?[0-9]+)?
     | [0-9]+ '.'
     | '0' [xX] [0-9a-fA-F]+
+    | INTEGER
 );
+
+INTEGER: [0-9]+;
 
 STRING
     : '\'' (~('\'' | '\\') | '\\' .)* '\''
@@ -148,6 +154,8 @@ GE:  '>=';
 LE:  '<=';
 RE:  '=~';
 NRE: '!~';
+
+AT: '@';
 
 // See section below: "Magic for case-insensitive matching."
 AND:         A N D;
