@@ -258,7 +258,8 @@ sealed trait Vector extends Expression {
   */
 case class InstantExpression(metricName: Option[String],
                              labelSelection: Seq[LabelMatch],
-                             offset: Option[Duration]) extends Vector with PeriodicSeries {
+                             offset: Option[Duration],
+                             at: Option[Long]) extends Vector with PeriodicSeries {
 
   import WindowConstants._
 
@@ -271,11 +272,20 @@ case class InstantExpression(metricName: Option[String],
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     // we start from 5 minutes earlier that provided start time in order to include last sample for the
     // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
+
+    // compute the offset millis given by the `offset` member
+    var offsetMillis: Long = if (offset.nonEmpty) offset.get.millis(timeParams.step * 1000) else 0
+    // increase the offset even further according to `at`
+    if (at.nonEmpty) {
+      val evalTimeWithOffset = (timeParams.start * 1000) - offsetMillis
+      offsetMillis = offsetMillis + (evalTimeWithOffset - (at.get * 1000))
+    }
+
     val ps = PeriodicSeries(
       RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
         offset.map(_.millis(timeParams.step * 1000))),
       timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
-      offset.map(_.millis(timeParams.step * 1000))
+      if (offsetMillis > 0) Some(offsetMillis) else None
     )
     bucketOpt.map { bOpt =>
       // It's a fixed value, the range params don't matter at all
@@ -330,7 +340,8 @@ case class InstantExpression(metricName: Option[String],
 case class RangeExpression(metricName: Option[String],
                            labelSelection: Seq[LabelMatch],
                            window: Duration,
-                           offset: Option[Duration]) extends Vector with SimpleSeries {
+                           offset: Option[Duration],
+                           at: Option[Long]) extends Vector with SimpleSeries {
 
   private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
@@ -338,10 +349,20 @@ case class RangeExpression(metricName: Option[String],
     if (isRoot && timeParams.start != timeParams.end) {
       throw new UnsupportedOperationException("Range expression is not allowed in query_range")
     }
+
+    // TODO(a_theimer): give this its own utility function
+    // compute the offset millis given by the `offset` member
+    var offsetMillis: Long = if (offset.nonEmpty) offset.get.millis(timeParams.step * 1000) else 0
+    // increase the offset even further according to `at`
+    if (at.nonEmpty) {
+      val evalTimeWithOffset = (timeParams.start * 1000) - offsetMillis
+      offsetMillis = offsetMillis + (evalTimeWithOffset - (at.get * 1000))
+    }
+
     // multiply by 1000 to convert unix timestamp in seconds to millis
     val rs = RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq,
       Some(window.millis(timeParams.step * 1000)),
-      offset.map(_.millis(timeParams.step * 1000))
+      if (offsetMillis > 0) Some(offsetMillis) else None
     )
     bucketOpt.map { bOpt =>
       // It's a fixed value, the range params don't matter at all

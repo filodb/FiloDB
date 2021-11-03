@@ -198,13 +198,19 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
       Some(build[Duration](ctx.offset))
     }
 
+    val at: Option[Long] = if (ctx.at == null) {
+      None
+    } else {
+      build[Some[Long]](ctx.at)
+    }
+
     val limit: Option[Scalar] = None
 
     if (ctx.window == null) {
-      InstantExpression(metricName, labelSelection, offset)
+      InstantExpression(metricName, labelSelection, offset, at)
     } else {
       val window = build[Duration](ctx.window)
-      RangeExpression(metricName, labelSelection, window, offset)
+      RangeExpression(metricName, labelSelection, window, offset, at)
     }
   }
 
@@ -214,6 +220,11 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
 
   override def visitOffset(ctx: PromQLParser.OffsetContext): Duration = {
     parseDuration(ctx.DURATION)
+  }
+
+  override def visitAt(ctx: PromQLParser.AtContext): Some[Long] = {
+    // need to return a reference, so Long itself won't work
+    Some(ctx.TIMESTAMP.getText.toLong)
   }
 
   override def visitLimitOperation(ctx: PromQLParser.LimitOperationContext) = {
