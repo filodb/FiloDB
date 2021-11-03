@@ -57,7 +57,9 @@ case object ManyToMany extends Cardinal {
 
 private object Utils {
   /**
-   * Shifts the start/end times according to 'at' and the end time.
+   * Aligns the TimeRangeParams 'end' time to the 'at' timestamp (if it exists).
+   *   The 'start' time is shifted by the same diff.
+   * If the 'at' timestamp is not present: returns the argument TimeRangeParams.
    */
   def getTimeParamsWithAt(timeParams: TimeRangeParams, at: Option[Long]): TimeRangeParams = {
     at match {
@@ -360,7 +362,6 @@ case class RangeExpression(metricName: Option[String],
   private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
   def toSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): RawSeriesLikePlan = {
-    // TODO(a_theimer): update this?
     if (isRoot && timeParams.start != timeParams.end) {
       throw new UnsupportedOperationException("Range expression is not allowed in query_range")
     }
