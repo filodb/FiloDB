@@ -13,16 +13,16 @@ expression: vectorExpression EOF;
 // visitor methods.
 
 vectorExpression
-    : <assoc=right> vectorExpression powOp grouping? vectorExpression  #binaryOperation
-    | unaryOp vectorExpression                                         #unaryOperation
-    | vectorExpression multOp grouping? vectorExpression               #binaryOperation
-    | vectorExpression addOp grouping? vectorExpression                #binaryOperation
-    | vectorExpression compareOp grouping? vectorExpression            #binaryOperation
-    | vectorExpression andUnlessOp grouping? vectorExpression          #binaryOperation
-    | vectorExpression orOp grouping? vectorExpression                 #binaryOperation
-    | vectorExpression subquery offset?                                #subqueryOperation
-    | vectorExpression limit                                           #limitOperation
-    | vector                                                           #vectorOperation
+    : <assoc=right> vectorExpression powOp grouping? vectorExpression   #binaryOperation
+    | unaryOp vectorExpression                                          #unaryOperation
+    | vectorExpression multOp grouping? vectorExpression                #binaryOperation
+    | vectorExpression addOp grouping? vectorExpression                 #binaryOperation
+    | vectorExpression compareOp grouping? vectorExpression             #binaryOperation
+    | vectorExpression andUnlessOp grouping? vectorExpression           #binaryOperation
+    | vectorExpression orOp grouping? vectorExpression                  #binaryOperation
+    | vectorExpression subquery (offset | at | offset at | at offset)?  #subqueryOperation
+    | vectorExpression limit                                            #limitOperation
+    | vector                                                            #vectorOperation
     ;
 
 unaryOp:     ADD | SUB;
