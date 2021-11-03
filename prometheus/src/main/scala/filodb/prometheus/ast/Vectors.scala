@@ -55,28 +55,6 @@ case object ManyToMany extends Cardinal {
   def cardinality: Cardinality = Cardinality.ManyToMany
 }
 
-private object Utils {
-  /**
-   * Computes the difference (in milliseconds) between startSec and
-   *   min(startSec, at) - offset.
-   *
-   * In other words, this returns the "total offset" from startSec.
-   */
-  def getOffsetMillis(startSec: Long,
-                      stepSec: Long,
-                      offset: Option[Duration],
-                      at: Option[Long]): Long = {
-    // compute the offset millis given by the `offset` member
-    var offsetMillis: Long = if (offset.nonEmpty) offset.get.millis(stepSec * 1000) else 0
-    // increase the offset even further according to `at`
-    if (at.nonEmpty) {
-      val evalTimeWithOffset = (startSec * 1000) - offsetMillis
-      offsetMillis = offsetMillis + (evalTimeWithOffset - (at.get * 1000))
-    }
-    offsetMillis
-  }
-}
-
 case class VectorMatch(matching: Option[JoinMatching],
                        grouping: Option[JoinGrouping]) {
   lazy val cardinality: Cardinal = grouping match {
@@ -127,11 +105,17 @@ case class SubqueryExpression(subquery: PeriodicSeries,
     // It's illegal to have a top level subquery expression to be called from query_range API
     // when start and end parameters are not the same.
     require(timeParams.start == timeParams.end, "Subquery is not allowed as a top level expression for query_range")
-    val offsetMillis = Utils.getOffsetMillis(timeParams.start, 1L, offset, at)
-    val offsetSec = offsetMillis / 1000
+
+    val offsetSec : Long = offset match {
+      case Some(duration) => duration.millis(1L) / 1000
+      case None => 0
+    }
+    var endS = at match {
+      case Some(timestamp) => timestamp - offsetSec
+      case None => timeParams.start - offsetSec
+    }
     val stepToUseMs = SubqueryUtils.getSubqueryStepMs(sqcl.step);
-    var startS = timeParams.start - (sqcl.window.millis(1L) / 1000) - offsetSec
-    var endS = timeParams.start - offsetSec
+    var startS = endS - (sqcl.window.millis(1L) / 1000)
     startS = SubqueryUtils.getStartForFastSubquery(startS, stepToUseMs/1000 )
     endS = SubqueryUtils.getEndForFastSubquery(endS, stepToUseMs/1000 )
     val timeParamsToUse = TimeStepParams(
@@ -145,7 +129,7 @@ case class SubqueryExpression(subquery: PeriodicSeries,
       stepToUseMs,
       endS * 1000,
       sqcl.window.millis(1L),
-      if (offsetMillis > 0) Some(offsetMillis) else None
+      offset.map(duration => duration.millis(1L))
     )
   }
 }
@@ -293,14 +277,23 @@ case class InstantExpression(metricName: Option[String],
     // we start from 5 minutes earlier that provided start time in order to include last sample for the
     // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
 
-    val offsetMillis: Long = Utils.getOffsetMillis(timeParams.start, timeParams.step, offset, at)
+    val timeParamsWithAt = at match {
+      case Some(timestamp) => {
+        val delta = timeParams.end - timestamp
+        TimeStepParams(timeParams.start + delta,
+                       timeParams.step,
+                       timeParams.end + delta)
+      }
+      case None => timeParams
+    }
 
     val ps = PeriodicSeries(
-      RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
-        offset.map(_.millis(timeParams.step * 1000))),
-      timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
-      if (offsetMillis > 0) Some(offsetMillis) else None
+      RawSeries(Base.timeParamToSelector(timeParamsWithAt), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
+        offset.map(_.millis(timeParamsWithAt.step * 1000))),
+      timeParamsWithAt.start * 1000, timeParamsWithAt.step * 1000, timeParamsWithAt.end * 1000,
+      offset.map(_.millis(timeParamsWithAt.step * 1000))
     )
+
     bucketOpt.map { bOpt =>
       // It's a fixed value, the range params don't matter at all
       val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
@@ -360,17 +353,27 @@ case class RangeExpression(metricName: Option[String],
   private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
   def toSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): RawSeriesLikePlan = {
+    // TODO(a_theimer): update this?
     if (isRoot && timeParams.start != timeParams.end) {
       throw new UnsupportedOperationException("Range expression is not allowed in query_range")
     }
 
-    val offsetMillis: Long = Utils.getOffsetMillis(timeParams.start, timeParams.step, offset, at)
+    val timeParamsWithAt = at match {
+      case Some(timestamp) => {
+        val delta = timeParams.end - timestamp
+        TimeStepParams(timeParams.start + delta,
+          timeParams.step,
+          timeParams.end + delta)
+      }
+      case None => timeParams
+    }
 
     // multiply by 1000 to convert unix timestamp in seconds to millis
-    val rs = RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq,
-      Some(window.millis(timeParams.step * 1000)),
-      if (offsetMillis > 0) Some(offsetMillis) else None
+    val rs = RawSeries(Base.timeParamToSelector(timeParamsWithAt), columnFilters, column.toSeq,
+      Some(window.millis(timeParamsWithAt.step * 1000)),
+      offset.map(_.millis(timeParamsWithAt.step * 1000))
     )
+
     bucketOpt.map { bOpt =>
       // It's a fixed value, the range params don't matter at all
       val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
