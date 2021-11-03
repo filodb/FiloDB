@@ -55,6 +55,23 @@ case object ManyToMany extends Cardinal {
   def cardinality: Cardinality = Cardinality.ManyToMany
 }
 
+private object Utils {
+  /**
+   * Shifts the start/end times according to 'at' and the end time.
+   */
+  def getTimeParamsWithAt(timeParams: TimeRangeParams, at: Option[Long]): TimeRangeParams = {
+    at match {
+      case Some(timestamp) => {
+        val delta = timeParams.end - timestamp
+        TimeStepParams(timeParams.start + delta,
+                       timeParams.step,
+                       timeParams.end + delta)
+      }
+      case None => timeParams
+    }
+  }
+}
+
 case class VectorMatch(matching: Option[JoinMatching],
                        grouping: Option[JoinGrouping]) {
   lazy val cardinality: Cardinal = grouping match {
@@ -276,24 +293,13 @@ case class InstantExpression(metricName: Option[String],
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     // we start from 5 minutes earlier that provided start time in order to include last sample for the
     // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
-
-    val timeParamsWithAt = at match {
-      case Some(timestamp) => {
-        val delta = timeParams.end - timestamp
-        TimeStepParams(timeParams.start + delta,
-                       timeParams.step,
-                       timeParams.end + delta)
-      }
-      case None => timeParams
-    }
-
+    val timeParamsWithAt = Utils.getTimeParamsWithAt(timeParams, at)
     val ps = PeriodicSeries(
       RawSeries(Base.timeParamToSelector(timeParamsWithAt), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
         offset.map(_.millis(timeParamsWithAt.step * 1000))),
       timeParamsWithAt.start * 1000, timeParamsWithAt.step * 1000, timeParamsWithAt.end * 1000,
       offset.map(_.millis(timeParamsWithAt.step * 1000))
     )
-
     bucketOpt.map { bOpt =>
       // It's a fixed value, the range params don't matter at all
       val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
@@ -313,7 +319,8 @@ case class InstantExpression(metricName: Option[String],
     LabelCardinality(columnFilters, timeParams.start * 1000, timeParams.end * 1000)
 
   def toRawSeriesPlan(timeParams: TimeRangeParams, offsetMs: Option[Long] = None): RawSeries = {
-    RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
+    val timeParamsWithAt = Utils.getTimeParamsWithAt(timeParams, at)
+    RawSeries(Base.timeParamToSelector(timeParamsWithAt), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
       offsetMs)
   }
 
@@ -357,23 +364,12 @@ case class RangeExpression(metricName: Option[String],
     if (isRoot && timeParams.start != timeParams.end) {
       throw new UnsupportedOperationException("Range expression is not allowed in query_range")
     }
-
-    val timeParamsWithAt = at match {
-      case Some(timestamp) => {
-        val delta = timeParams.end - timestamp
-        TimeStepParams(timeParams.start + delta,
-          timeParams.step,
-          timeParams.end + delta)
-      }
-      case None => timeParams
-    }
-
+    val timeParamsWithAt = Utils.getTimeParamsWithAt(timeParams, at)
     // multiply by 1000 to convert unix timestamp in seconds to millis
     val rs = RawSeries(Base.timeParamToSelector(timeParamsWithAt), columnFilters, column.toSeq,
       Some(window.millis(timeParamsWithAt.step * 1000)),
       offset.map(_.millis(timeParamsWithAt.step * 1000))
     )
-
     bucketOpt.map { bOpt =>
       // It's a fixed value, the range params don't matter at all
       val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
