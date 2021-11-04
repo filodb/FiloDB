@@ -497,6 +497,84 @@ class ParserSpec extends AnyFunSpec with Matchers {
     )
   }
 
+  it ("should fail to parse with antlr") {
+    val queries = Seq(
+      "foo @",
+      """@{_ws_="bar"}""",
+      "foo @ bar",
+      "foo @ offset 1m",
+      "foo offset 1m @",
+      "foo @ 12345 offset",
+      "foo offset @",
+      "foo @ offset",
+      "foo 12345 @",
+      "foo[5m] @",
+      "foo[1m] @ bar",
+      """sum(http_requests_total{method="GET"}) @ 1609746000""",
+      """sum(http_requests_total[5m]) @ 1609746000""",
+      """sum(http_requests_total[10m:30s]) @ 1609746000""",
+      "@",
+      "@ offset",
+      "offset @"
+    )
+    queries.foreach{ query =>
+      assertThrows[IllegalArgumentException](AntlrParser.parseQuery(query))
+    }
+  }
+
+  it ("should successfully parse with antlr") {
+    val queryToLpString = Map(
+      "foo @ 12345" ->
+        "PeriodicSeries(RawSeries(IntervalSelector(12345000,12345000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),12345000,1000000,12345000,None)",
+      "foo @ 12345 offset 1m" ->
+        "PeriodicSeries(RawSeries(IntervalSelector(12345000,12345000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),Some(60000)),12345000,1000000,12345000,Some(60000))",
+      "foo offset 1m @ 12345" ->
+        "PeriodicSeries(RawSeries(IntervalSelector(12345000,12345000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),Some(60000)),12345000,1000000,12345000,Some(60000))",
+      // TODO: these NUMBERs be supported
+      // "foo @ +12345.67" ->
+      //   "aaa",
+      // "foo @ -12345.67" ->
+      //   "bbb",
+      // "foo @ 0xaBcD123" ->
+      //   "ccc",
+      // "foo @ 123.4e-5" ->
+      //   "ddd",
+      "foo[5m] @ 12345" ->
+        "RawSeries(IntervalSelector(12345000,12345000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None)",
+      "foo[5m] @ 12345 offset 1h" ->
+        "RawSeries(IntervalSelector(12345000,12345000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),Some(3600000))",
+      "foo[5m] offset 1h @ 12345" ->
+        "RawSeries(IntervalSelector(12345000,12345000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),Some(3600000))",
+      "foo[5m:30s] @ 12345" ->
+        "TopLevelSubquery(PeriodicSeries(RawSeries(IntervalSelector(12060000,12330000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),12060000,30000,12330000,None),12060000,30000,12330000,300000,None)",
+      "foo[5m:30s] @ 12345 offset 1h" ->
+        "TopLevelSubquery(PeriodicSeries(RawSeries(IntervalSelector(8460000,8730000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),8460000,30000,8730000,None),8460000,30000,8730000,300000,Some(3600000))",
+      "foo[5m:30s] offset 1h @ 12345" ->
+        "TopLevelSubquery(PeriodicSeries(RawSeries(IntervalSelector(8460000,8730000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),8460000,30000,8730000,None),8460000,30000,8730000,300000,Some(3600000))",
+      "sum(http_requests_total{method=\"GET\"} @ 1609746000)" ->
+        "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1609746000000,1609746000000),List(ColumnFilter(method,Equals(GET)), ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1609746000000,1000000,1609746000000,None),List(),List(),List())",
+      "sum(http_requests_total{method=\"GET\"} @ 1609746000 offset 5m)" ->
+        "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1609746000000,1609746000000),List(ColumnFilter(method,Equals(GET)), ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),Some(300000)),1609746000000,1000000,1609746000000,Some(300000)),List(),List(),List())",
+      "sum(http_requests_total{method=\"GET\"} offset 5m @ 1609746000)" ->
+        "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1609746000000,1609746000000),List(ColumnFilter(method,Equals(GET)), ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),Some(300000)),1609746000000,1000000,1609746000000,Some(300000)),List(),List(),List())",
+      "rate(http_requests_total[5m] @ 1609746000)" ->
+       "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1609746000000,1609746000000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,300000,Rate,false,List(),None,List(ColumnFilter(__name__,Equals(http_requests_total))))",
+      "rate(http_requests_total[5m] @ 1609746000 offset 1m)" ->
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1609746000000,1609746000000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),Some(60000)),1524855988000,1000000,1524855988000,300000,Rate,false,List(),Some(60000),List(ColumnFilter(__name__,Equals(http_requests_total))))",
+      "rate(http_requests_total[5m] offset 1m @ 1609746000)" ->
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1609746000000,1609746000000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),Some(60000)),1524855988000,1000000,1524855988000,300000,Rate,false,List(),Some(60000),List(ColumnFilter(__name__,Equals(http_requests_total))))",
+      "rate(foo[10m:30s] @ 12345)" ->
+        "SubqueryWithWindowing(PeriodicSeries(RawSeries(IntervalSelector(1524855390000,1524855960000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855390000,30000,1524855960000,None),1524855988000,0,1524855988000,Rate,List(),600000,30000,None)",
+      "rate(foo[10m:30s] offset 1m @ 12345)" ->
+        "SubqueryWithWindowing(PeriodicSeries(RawSeries(IntervalSelector(1524855330000,1524855900000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855330000,30000,1524855900000,None),1524855988000,0,1524855988000,Rate,List(),600000,30000,Some(60000))",
+      "rate(foo[10m:30s] @ 12345 offset 1m)" ->
+        "SubqueryWithWindowing(PeriodicSeries(RawSeries(IntervalSelector(1524855330000,1524855900000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855330000,30000,1524855900000,None),1524855988000,0,1524855988000,Rate,List(),600000,30000,Some(60000))"
+    )
+    queryToLpString.foreach { case (query, exp) =>
+      parseWithAntlr(query, exp)
+    }
+  }
+
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
       "http_requests_total + time()" -> "ScalarVectorBinaryOperation(ADD,ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),false)",
