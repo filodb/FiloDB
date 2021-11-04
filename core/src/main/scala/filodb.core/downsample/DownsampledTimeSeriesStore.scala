@@ -200,5 +200,6 @@ extends MemStore with StrictLogging {
   override def topKCardinality(ref: DatasetRef,
                                shards: Seq[Int],
                                shardKeyPrefix: scala.Seq[String],
-                               k: Int): scala.Seq[CardinalityRecord] = ???
+                               k: Int,
+                               addInactive: Boolean): scala.Seq[CardinalityRecord] = ???
 }

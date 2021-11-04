@@ -23,13 +23,15 @@ import filodb.memory.format.UnsafeUtils
 class CardinalitySerializer extends Serializer[Cardinality] {
   def write(kryo: Kryo, output: Output, card: Cardinality): Unit = {
     output.writeString(card.name)
-    output.writeInt(card.timeSeriesCount, true)
+    output.writeInt(card.tsCount, true)
+    output.writeInt(card.activeTsCount, true)
     output.writeInt(card.childrenCount, true)
     output.writeInt(card.childrenQuota, true)
   }
 
   def read(kryo: Kryo, input: Input, t: Class[Cardinality]): Cardinality = {
-    Cardinality(input.readString(), input.readInt(true), input.readInt(true), input.readInt(true))
+    Cardinality(input.readString(), input.readInt(true), input.readInt(true),
+      input.readInt(true), input.readInt(true))
   }
 }
 

@@ -213,7 +213,7 @@ final class QueryActor(memStore: MemStore,
 
   private def execTopkCardinalityQuery(q: GetTopkCardinality, sender: ActorRef): Unit = {
     try {
-      val ret = memStore.topKCardinality(q.dataset, q.shards, q.shardKeyPrefix, q.k)
+      val ret = memStore.topKCardinality(q.dataset, q.shards, q.shardKeyPrefix, q.k, q.addInactive)
       sender ! ret
     } catch { case e: Exception =>
       sender ! QueryError(s"Error Occurred", QueryStats(), e)

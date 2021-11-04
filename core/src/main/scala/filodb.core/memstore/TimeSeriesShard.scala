@@ -41,9 +41,6 @@ import filodb.memory.format.ZeroCopyUTF8String._
 class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
 
-  val timeseriesCount = Kamon.gauge("memstore-timeseries-count")
-  val activeTimeseriesCount = Kamon.gauge("memstore-active-timeseries-count")
-
   val shardTotalRecoveryTime = Kamon.gauge("memstore-total-shard-recovery-time",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
   val tsCountBySchema = Kamon.gauge("memstore-timeseries-by-schema").withTags(TagSet.from(tags))
@@ -601,8 +598,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     _offset
   }
 
-  def topKCardinality(k: Int, shardKeyPrefix: Seq[String]): Seq[CardinalityRecord] = {
-    if (storeConfig.meteringEnabled) cardTracker.topk(k, shardKeyPrefix)
+  def topKCardinality(k: Int, shardKeyPrefix: Seq[String], addInactive: Boolean): Seq[CardinalityRecord] = {
+    if (storeConfig.meteringEnabled) cardTracker.topk(k, shardKeyPrefix, addInactive)
     else throw new IllegalArgumentException("Metering is not enabled")
   }
 
@@ -647,7 +644,6 @@ class TimeSeriesShard(val ref: DatasetRef,
           -1
         } else {
           val stamp = partSetLock.writeLock()
-          captureActiveTimeseriesCount(schema, shardKey, 1, part.partID, "bootstrapPartKey")
           try {
             partSet.add(part) // createNewPartition doesn't add part to partSet
             part.ingesting = true
@@ -678,60 +674,12 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
     shardStats.indexRecoveryNumRecordsProcessed.increment()
     if (schema != Schemas.UnknownSchema) {
-      captureTimeseriesCount(schema, shardKey, 1)
       if (storeConfig.meteringEnabled) {
-        cardTracker.incrementCount(shardKey)
+        cardTracker.modifyCount(shardKey, 1, if (pk.endTime == Long.MaxValue) 1 else 0)
       }
     }
     partId
   }
-
-  private def captureTimeseriesCount(schema: Schema, shardKey: Seq[String], times: Double) = {
-    // Assuming that the last element in the shardKeyColumn is always a metric name, we are making sure the
-    // shardKeyColumn.length is > 1 and dropping the last element in shardKeyColumn.
-    if (shardKeyLevelIngestionMetricsEnabled &&
-        schema.options.shardKeyColumns.length > 1 &&
-        shardKey.length == schema.options.shardKeyColumns.length) {
-      val tagSetMap = (schema.options.shardKeyColumns.map(c => s"metric${c}tag") zip shardKey).dropRight(1).toMap
-      shardStats.timeseriesCount.withTags(TagSet.from(tagSetMap)).increment(times)
-    }
-    shardStats.tsCountBySchema.withTag("schema", schema.name).increment(times)
-  }
-
-  /**
-   * Important to understand call hierarchy for this method to avoid double/missed counting.
-   *
-   * Increment when
-   *  1. At bootstrap time, when creating new TSP object for a time series whose endTime == Long.MaxValue
-   *     (captureActiveTimeseriesCount <- bootstrapPartKey <- recoverIndex)
-   *
-   *  2. At kafka recovery time, when creating new TSP object without ingesting data
-   *     (captureActiveTimeseriesCount <- addPartitionForIngestion <-
-   *                   getOrAddPartitionForIngestion <- IngestConsumer.onNext)
-   *
-   *  3. At regular ingestion time, when creating new TSP object for a non-existent time series
-   *     (captureActiveTimeseriesCount <- addPartitionForIngestion <-
-   *                   getOrAddPartitionForIngestion <- getOrAddPartitionAndIngest <- IngestConsumer.onNext)
-   *
-   *  4. At ingestion time, updating TSP object for an existing time series since it started re-ingesting
-   *        (captureActiveTimeseriesCount <- getOrAddPartitionAndIngest <- IngestConsumer.onNext)
-   *
-   * Decrement when:
-   *  1. Time series stops ingesting (captureActiveTimeseriesCount <- updateIndexWithEndTime <- doFlushSteps)
-   */
-  private def captureActiveTimeseriesCount(schema: Schema, shardKey: Seq[String],
-                                           delta: Int, partId: Int, reason: String) = {
-    logger.debug(s"captureActiveTimeseriesCount shard=$shardNum partId=$partId  delta=$delta reason=$reason")
-    // Assuming that the last element in the shardKeyColumn is always a metric name, we are making sure the
-    // shardKeyColumn.length is > 1 and dropping the last element in shardKeyColumn.
-    if (shardKeyLevelIngestionMetricsEnabled &&
-      schema.options.shardKeyColumns.length > 1 &&
-      shardKey.length == schema.options.shardKeyColumns.length) {
-      val tagSetMap = (schema.options.shardKeyColumns.map(c => s"metric${c}tag") zip shardKey).dropRight(1).toMap
-      shardStats.activeTimeseriesCount.withTags(TagSet.from(tagSetMap)).increment(delta)
-    }
-  }
-
 
   def indexNames(limit: Int): Seq[String] = partKeyIndex.indexNames(limit)
 
@@ -926,7 +874,6 @@ class TimeSeriesShard(val ref: DatasetRef,
           s"memory in dataset=$ref shard=$shardNum")
         val schema = p.schema
         val shardKey = schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset, schema.options.shardKeyColumns)
-        captureTimeseriesCount(schema, shardKey, -1)
         if (storeConfig.meteringEnabled) {
           try {
             cardTracker.decrementCount(shardKey)
@@ -951,7 +898,6 @@ class TimeSeriesShard(val ref: DatasetRef,
             logger.error("Got exception when reducing cardinality in tracker", e)
           }
         }
-        captureTimeseriesCount(schema, shardKey, -1)
       }
     }
     partKeyIndex.removePartKeys(partIter.skippedPartIDs)
@@ -1201,7 +1147,9 @@ class TimeSeriesShard(val ref: DatasetRef,
         markPartAsNotIngesting(p, odp = false)
         val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
                                                         p.schema.options.shardKeyColumns)
-        captureActiveTimeseriesCount(p.schema, shardKey, -1, p.partID, "updateIndexWithEndTime")
+        if (storeConfig.meteringEnabled) {
+          cardTracker.modifyCount(shardKey, 0, -1)
+        }
       }
     }
   }
@@ -1306,9 +1254,8 @@ class TimeSeriesShard(val ref: DatasetRef,
         // add new lucene entry if this partKey was never seen before
         // causes endTime to be set to Long.MaxValue
         partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
-        captureTimeseriesCount(schema, shardKey, 1)
         if (storeConfig.meteringEnabled) {
-          cardTracker.incrementCount(shardKey)
+          cardTracker.modifyCount(shardKey, 1, 1)
         }
       } else {
         // newly created partition is re-ingesting now, so update endTime
@@ -1319,7 +1266,6 @@ class TimeSeriesShard(val ref: DatasetRef,
         activelyIngesting += partId
         newPart.ingesting = true
       }
-      captureActiveTimeseriesCount(schema, shardKey, 1, partId, "addPartitionForIngestion")
       val stamp = partSetLock.writeLock()
       try {
         partSet.add(newPart)
@@ -1370,7 +1316,9 @@ class TimeSeriesShard(val ref: DatasetRef,
               tsp.ingesting = true
               val shardKey = tsp.schema.partKeySchema.colValues(tsp.partKeyBase, tsp.partKeyOffset,
                 tsp.schema.options.shardKeyColumns)
-              captureActiveTimeseriesCount(tsp.schema, shardKey, 1, tsp.partID, "getOrAddPartitionAndIngest")
+              if (storeConfig.meteringEnabled) {
+                cardTracker.modifyCount(shardKey, 0, 1)
+              }
             }
           }
         }
