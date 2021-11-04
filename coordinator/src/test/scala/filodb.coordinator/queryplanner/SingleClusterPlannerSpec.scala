@@ -811,7 +811,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val k = 3
     val shardKeyPrefix = Seq("foo", "bar")
 
-    val lp = TopkCardinalities(shardKeyPrefix, k)
+    val addInactive = true
+    val lp = TopkCardinalities(shardKeyPrefix, k, addInactive)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[TopkCardReduceExec] shouldEqual true
 

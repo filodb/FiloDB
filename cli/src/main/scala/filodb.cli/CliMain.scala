@@ -109,7 +109,7 @@ object CliMain extends FilodbClusterNode {
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labelvalues --labelnames <lable-names> --labelfilter <label-filter> --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labels --labelfilter <label-filter> -dataset <dataset>")
-    println("  --host <hostname/IP> [--port ...] --command topkcardspread --dataset <dataset> --k <k> --shardkeyprefix <shard-key-prefix> ")
+    println("  --host <hostname/IP> [--port ...] --command topkcardspread --dataset <dataset> --k <k> [--active] --shardkeyprefix <shard-key-prefix> ")
     println("  --host <hostname/IP> [--port ...] --command topkcard --dataset prometheus --k 2 --shardkeyprefix demo App-0")
     println("  --host <hostname/IP> [--port ...] --command labelcardinality --labelfilter <label-filter> --dataset prometheus")
     println("  --host <hostname/IP> [--port ...] --command findqueryshards --queries <query> --spread <spread>")
@@ -259,7 +259,7 @@ object CliMain extends FilodbClusterNode {
           val remote = Client.standaloneClient(system, args.host(), args.port())
           val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
             timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
-          parseTopkCardSpreadQuery(remote, args.k(), args.shardkeyprefix(), args.dataset(), options)
+          parseTopkCardSpreadQuery(remote, args.k(), args.active(), args.shardkeyprefix(), args.dataset(), options)
 
         case x: Any =>
           // This will soon be deprecated
@@ -383,10 +383,12 @@ object CliMain extends FilodbClusterNode {
 
   def parseTopkCardSpreadQuery(client: LocalClient,
                                k: Int,
+                               active: Boolean,
                                shardKeyPrefix: Seq[String],
                                dataset: String,
                                options: QOptions): Unit = {
-    val logicalPlan = TopkCardinalities(shardKeyPrefix, k)
+    val addInactive = !active
+    val logicalPlan = TopkCardinalities(shardKeyPrefix, k, addInactive)
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 

@@ -511,7 +511,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                                            lp: TopkCardinalities): PlanResult = {
     val metaExec = shardMapperFunc.assignedShards.map{ shard =>
       val dispatcher = dispatcherForShard(shard)
-      exec.TopkCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.k)
+      exec.TopkCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.k, lp.addInactive)
     }
     PlanResult(metaExec, false)
   }

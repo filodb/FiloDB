@@ -431,7 +431,8 @@ final case class TopkCardExec(queryContext: QueryContext,
                               dataset: DatasetRef,
                               shard: Int,
                               shardKeyPrefix: Seq[String],
-                              k: Int) extends LeafExecPlan {
+                              k: Int,
+                              addInactive: Boolean) extends LeafExecPlan {
 
   override def enforceLimit: Boolean = false
 
@@ -443,10 +444,10 @@ final case class TopkCardExec(queryContext: QueryContext,
     val rvs = source match {
       case tsMemStore: TimeSeriesMemStore =>
         Observable.eval {
-          val topkCards = tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix, k)
+          val topkCards = tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix, k, addInactive)
           // Include each into an ItemSketch.
           val sketch = new ItemsSketch[String](TopkCardExec.MAX_ITEMSKETCH_MAP_SIZE)
-          topkCards.foreach(card => sketch.update(card.childName, card.timeSeriesCount.toLong))
+          topkCards.foreach(card => sketch.update(card.childName, card.tsCount.toLong))
           // serialize the sketch; pack it into a RangeVector
           val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ArrayOfStringsSerDe))
           val it = Seq(SingleValueRowReader(serSketch)).iterator

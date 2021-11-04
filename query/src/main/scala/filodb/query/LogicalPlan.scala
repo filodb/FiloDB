@@ -130,7 +130,7 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
  * See TopkCardExec for more some implementation-specific information
  *   about what "estimate" implies how that estimate can be tuned.
  */
-case class TopkCardinalities(shardKeyPrefix: Seq[String], k: Int) extends LogicalPlan
+case class TopkCardinalities(shardKeyPrefix: Seq[String], k: Int, addInactive: Boolean) extends LogicalPlan
 
 /**
  * Concrete logical plan to query for chunk metadata from raw time series in a given range

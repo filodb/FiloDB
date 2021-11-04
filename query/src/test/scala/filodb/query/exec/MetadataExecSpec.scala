@@ -289,9 +289,10 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val k = 3
     val shardKeyPrefix = Seq("demo", "App-0")
 
+    val addInactive = true
     val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
       new TopkCardExec(QueryContext(), executeDispatcher,
-        timeseriesDatasetMultipleShardKeys.ref, ishard, shardKeyPrefix, k)
+        timeseriesDatasetMultipleShardKeys.ref, ishard, shardKeyPrefix, k, addInactive)
     }.toSeq
 
     val execPlan = TopkCardReduceExec(QueryContext(), executeDispatcher, leaves, k)
