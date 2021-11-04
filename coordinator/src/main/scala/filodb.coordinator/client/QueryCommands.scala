@@ -44,6 +44,7 @@ object QueryCommands {
       Seq(spreadChange)
     }
   }
+
   case class SpreadAssignment(shardKeysMap: collection.Map[String, String], spread: Int)
 
   /**
