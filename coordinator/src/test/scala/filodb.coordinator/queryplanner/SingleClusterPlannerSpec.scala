@@ -6,7 +6,6 @@ import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, StaticSpreadProvider}
 import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange}
@@ -515,7 +514,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan("""sum(foo{_ns_="bar", _ws_="test"}) by (__name__)""",
       TimeStepParams(1000, 20, 2000))
-    
+
     val execPlan1 = engine.materialize(logicalPlan1, QueryContext(origQueryParams = promQlQueryParams))
 
     execPlan1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
@@ -800,12 +799,33 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val execPlan = engine.materialize(lp, queryContext)
 
     val expected =
-    """T~LabelCardinalityPresenter(LabelCardinalityPresenter)
-    |-E~LabelCardinalityReduceExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
-    |--E~LabelCardinalityExec(shard=3, filters=List(ColumnFilter(job,Equals(job)), ColumnFilter(__name__,Equals(metric))), limit=1000000, startMs=0, endMs=1634920729000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
-    |--E~LabelCardinalityExec(shard=19, filters=List(ColumnFilter(job,Equals(job)), ColumnFilter(__name__,Equals(metric))), limit=1000000, startMs=0, endMs=1634920729000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)"""
-.stripMargin
+      """T~LabelCardinalityPresenter(LabelCardinalityPresenter)
+        |-E~LabelCardinalityReduceExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
+        |--E~LabelCardinalityExec(shard=3, filters=List(ColumnFilter(job,Equals(job)), ColumnFilter(__name__,Equals(metric))), limit=1000000, startMs=0, endMs=1634920729000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
+        |--E~LabelCardinalityExec(shard=19, filters=List(ColumnFilter(job,Equals(job)), ColumnFilter(__name__,Equals(metric))), limit=1000000, startMs=0, endMs=1634920729000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)"""
+        .stripMargin
     validatePlan(execPlan, expected)
+  }
 
+  it ("should correctly materialize TopkCardExec") {
+    val k = 3
+    val shardKeyPrefix = Seq("foo", "bar")
+
+    val addInactive = true
+    val lp = TopkCardinalities(shardKeyPrefix, k, addInactive)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[TopkCardReduceExec] shouldEqual true
+
+    val reducer = execPlan.asInstanceOf[TopkCardReduceExec]
+    reducer.rangeVectorTransformers.size shouldEqual 1
+    reducer.rangeVectorTransformers(0).isInstanceOf[TopkCardPresenter] shouldEqual true
+    reducer.rangeVectorTransformers(0).asInstanceOf[TopkCardPresenter].k shouldEqual k
+    reducer.children.size shouldEqual mapper.numShards
+    reducer.children.foreach{ child =>
+      child.isInstanceOf[TopkCardExec] shouldEqual true
+      val leaf = child.asInstanceOf[TopkCardExec]
+      leaf.shardKeyPrefix shouldEqual shardKeyPrefix
+      leaf.k shouldEqual k
+    }
   }
 }

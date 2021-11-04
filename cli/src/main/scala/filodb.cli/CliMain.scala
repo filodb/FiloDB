@@ -103,13 +103,14 @@ object CliMain extends FilodbClusterNode {
     println("\nStandalone client commands:")
     println("  --host <hostname/IP> [--port ...] --command indexnames --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command indexvalues --indexname <index> --dataset <dataset> --shards SS")
-    println("  --host <hostname/IP> [--port ...]  --dataset <dataset> --promql <query> --start <start> --step <step> --end <end>")
+    println("  --host <hostname/IP> [--port ...] --dataset <dataset> --promql <query> --start <start> --step <step> --end <end>")
     println("  --host <hostname/IP> [--port ...] --command setup --filename <configFile> | --configpath <path>")
     println("  --host <hostname/IP> [--port ...] --command list")
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labelvalues --labelnames <lable-names> --labelfilter <label-filter> --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labels --labelfilter <label-filter> -dataset <dataset>")
-    println("  --host <hostname/IP> [--port ...] --command topkcard --dataset prometheus --k 2 --shardkeyprefix demo App-0")
+    println("  --host <hostname/IP> [--port ...] --command topkcard --dataset <dataset> --k <k> [--active] --shardkeyprefix <shard-key-prefix> ")
+    println("  --host <hostname/IP> [--port ...] --command topkcardlocal --dataset prometheus --k 2 --shardkeyprefix demo App-0")
     println("  --host <hostname/IP> [--port ...] --command labelcardinality --labelfilter <label-filter> --dataset prometheus")
     println("  --host <hostname/IP> [--port ...] --command findqueryshards --queries <query> --spread <spread>")
     println("""  --command promFilterToPartKeyBR --promql "myMetricName{_ws_='myWs',_ns_='myNs'}" --schema prom-counter""")
@@ -176,7 +177,7 @@ object CliMain extends FilodbClusterNode {
           val values = remote.getIndexValues(ref, args.indexname(), args.shards().head.toInt, args.limit())
           values.foreach { case (term, freq) => println(f"$term%40s\t$freq") }
 
-        case Some("topkcard") =>
+        case Some("topkcardlocal") =>
           require(args.host.isDefined && args.dataset.isDefined && args.k.isDefined,
             "--host, --dataset, --k must be defined")
           val (remote, ref) = getClientAndRef(args)
@@ -252,6 +253,14 @@ object CliMain extends FilodbClusterNode {
             timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
           parseLabelCardinalityQuery(remote, args.labelfilter(), args.dataset(),
             getQueryRange(args), options)
+
+        case Some("topkcard") =>
+          require(args.host.isDefined && args.dataset.isDefined && args.labelfilter.isDefined, "--host, --dataset and --labelfilter must be defined")
+          val remote = Client.standaloneClient(system, args.host(), args.port())
+          val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
+            timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
+          parseTopkCardQuery(remote, args.k(), args.active(), args.shardkeyprefix(), args.dataset(), options)
+
         case x: Any =>
           // This will soon be deprecated
           args.promql.map { query =>
@@ -369,6 +378,17 @@ object CliMain extends FilodbClusterNode {
                        options: QOptions): Unit = {
     val filters = constraints.map { case (k, v) => ColumnFilter(k, Filter.Equals(v)) }.toSeq
     val logicalPlan = LabelCardinality(filters, timeParams.start * 1000, timeParams.end * 1000)
+    executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
+  }
+
+  def parseTopkCardQuery(client: LocalClient,
+                         k: Int,
+                         active: Boolean,
+                         shardKeyPrefix: Seq[String],
+                         dataset: String,
+                         options: QOptions): Unit = {
+    val addInactive = !active
+    val logicalPlan = TopkCardinalities(shardKeyPrefix, k, addInactive)
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 

@@ -1,19 +1,25 @@
 package filodb.query.exec
 
+import scala.collection.mutable
+
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
+import org.apache.datasketches.ArrayOfStringsSerDe
 import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
+import org.apache.datasketches.frequencies.{ErrorType, ItemsSketch}
+import org.apache.datasketches.memory.Memory
 
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
-import filodb.core.memstore.MemStore
+import filodb.core.memstore.{MemStore, TimeSeriesMemStore}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.store.ChunkSource
 import filodb.memory.{UTF8StringMedium, UTF8StringShort}
-import filodb.memory.format.{StringArrayRowReader, UnsafeUtils, UTF8MapIteratorRowReader, ZeroCopyUTF8String}
+import filodb.memory.format.{RowReader, SeqRowReader, SingleValueRowReader, StringArrayRowReader,
+                             UnsafeUtils, UTF8MapIteratorRowReader, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
@@ -63,6 +69,98 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
 final case class PartKeysDistConcatExec(queryContext: QueryContext,
                                         dispatcher: PlanDispatcher,
                                         children: Seq[ExecPlan]) extends MetadataDistConcatExec
+
+/**
+  * Aggregates output from TopkCardExec.
+  */
+final case class TopkCardReduceExec(queryContext: QueryContext,
+                                    dispatcher: PlanDispatcher,
+                                    children: Seq[ExecPlan],
+                                    k: Int) extends NonLeafExecPlan {
+  override protected def args: String = ""
+
+  private def sketchFold(acc: ItemsSketch[String], rv: RangeVector):
+            ItemsSketch[String] = {
+    rv.rows().foreach{ r =>
+      val sketchSer = r.getString(0).getBytes
+      val sketch = ItemsSketch.getInstance(Memory.wrap(sketchSer), new ArrayOfStringsSerDe)
+      acc.merge(sketch)
+    }
+    acc
+  }
+
+  override protected def compose(childResponses: Observable[(QueryResponse, Int)],
+                                 firstSchema: Task[ResultSchema],
+                                 querySession: QuerySession): Observable[RangeVector] = {
+    val taskOfResults = childResponses.map {
+      case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
+      case (QueryError(_, _, ex), _)         => throw ex
+    }.flatten
+      // fold all child sketches into a single sketch
+      .foldLeftL(new ItemsSketch[String](TopkCardExec.MAX_ITEMSKETCH_MAP_SIZE))(sketchFold)
+      .map{ sketch =>
+        val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ArrayOfStringsSerDe))
+        val it = Seq(SingleValueRowReader(serSketch)).iterator
+        IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
+      }
+    Observable.fromTask(taskOfResults)
+  }
+}
+
+/**
+  * Deserializes the ItemsSketch, selects the top-k metrics,
+ *  and packages them into a 2-columned range vector.
+  */
+final case class TopkCardPresenter(k: Int) extends RangeVectorTransformer {
+  override def funcParams: Seq[FuncArgs] = Nil
+
+  override protected[exec] def args: String = ""
+
+  def apply(source: Observable[RangeVector],
+            querySession: QuerySession,
+            limit: Int,
+            sourceSchema: ResultSchema, paramsResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
+    source.map { rv =>
+      // Deserialize the sketch.
+      // Note: getString() throws a ClassCastException.
+      val sketchSer = rv.rows.next.getAny(0).asInstanceOf[ZeroCopyUTF8String].bytes
+      ItemsSketch.getInstance(Memory.wrap(sketchSer), new ArrayOfStringsSerDe)
+    }.map{ sketch =>
+      // Collect all rows from the union with frequency estimate upper bounds above a default threshold.
+      val freqRows = sketch.getFrequentItems(ErrorType.NO_FALSE_NEGATIVES)
+
+      // find the topk with a pqueue
+      val topkPqueue =
+        mutable.PriorityQueue[ItemsSketch.Row[String]]()(Ordering.by(row => -row.getEstimate))
+      freqRows.foreach { row =>
+        if (topkPqueue.size < k) {
+          topkPqueue.enqueue(row)
+        } else if (topkPqueue.head.getEstimate < row.getEstimate) {
+          // min count in the heap is less than the current count
+          topkPqueue.dequeue()
+          topkPqueue.enqueue(row)
+        }
+      }
+
+      // Convert the topk to match the schema, then store them in-order in an array.
+      // Use the array's iterator as the backend of a RangeVector.
+      val resSize = math.min(k, topkPqueue.size)
+      val topkRows = new mutable.ArraySeq[RowReader](resSize)
+      for (i <- 0 until resSize) {
+        val heapMin = topkPqueue.dequeue()
+        topkRows(i) = SeqRowReader(Seq(heapMin.getItem, heapMin.getEstimate))
+      }
+
+      IteratorBackedRangeVector(CustomRangeVectorKey(Map.empty),
+        new NoCloseCursor(topkRows.reverseIterator),
+        None)
+    }
+  }
+
+  override def schema(source: ResultSchema): ResultSchema = ResultSchema(
+    Seq(ColumnInfo("Metric", ColumnType.StringColumn),
+        ColumnInfo("Cardinality", ColumnType.LongColumn)), 1)
+}
 
 final case class LabelValuesDistConcatExec(queryContext: QueryContext,
                                            dispatcher: PlanDispatcher,
@@ -251,8 +349,6 @@ final case class LabelValuesExec(queryContext: QueryContext,
     s" startMs=$startMs, endMs=$endMs"
 }
 
-
-
 final case class LabelCardinalityExec(queryContext: QueryContext,
                                  dispatcher: PlanDispatcher,
                                  dataset: DatasetRef,
@@ -275,20 +371,20 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
         // TODO: We don't need to allocate intermediate Map and create an Iterator of Map, instead we can get raw byte
         //  sequences and operate directly with it to create the final data structures we need
         val partKeysMap = ms.partKeysWithFilters(dataset, shard, filters, fetchFirstLastSampleTimes = false,
-          endMs, startMs, limit= 1000000)
+          endMs, startMs, limit = 1000000)
 
         val metadataResult = scala.collection.mutable.Map.empty[String, CpcSketch]
         partKeysMap.foreach { rv =>
           rv.foreach {
             case (labelName, labelValue) =>
-                  metadataResult.getOrElseUpdate(labelName.toString, new CpcSketch(logK)).update(labelValue.toString)
-            }
+              metadataResult.getOrElseUpdate(labelName.toString, new CpcSketch(logK)).update(labelValue.toString)
+          }
         }
-        val sketchMapIterator = (metadataResult.map{
+        val sketchMapIterator = (metadataResult.map {
           case (label, cpcSketch) => (ZeroCopyUTF8String(label), ZeroCopyUTF8String(cpcSketch.toByteArray))
         }.toMap :: Nil).toIterator
         Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-            UTF8MapIteratorRowReader(sketchMapIterator), None))
+          UTF8MapIteratorRowReader(sketchMapIterator), None))
       case _ => Observable.empty
     }
     val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
@@ -297,6 +393,78 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
 
   def args: String = s"shard=$shard, filters=$filters, limit=${queryContext.plannerParams.sampleLimit}," +
     s" startMs=$startMs, endMs=$endMs"
+}
+
+final case object TopkCardExec {
+  // TODO: tune this
+  // See here for help choosing a size:
+  //   https://datasketches.apache.org/docs/Frequency/FrequentItemsErrorTable.html
+  val MAX_ITEMSKETCH_MAP_SIZE = 256;
+}
+
+/**
+  * Given a shardKeyPrefix, retrieves an estimate of the top-k label-values
+  *  from a specific shard. This is an "estimate" because sketches are used to
+  *  contain count data.
+  *
+  * The accuracy of the estimate is tunable by MAX_ITEMSKETCH_MAP_SIZE.
+  *   The link at its definition describes how its value will affect the estimate.
+  *
+  * Note that the sketch-- a DataSketches ItemsSketch-- maintains a set of
+  *   "heavy hitters." These are the elements whose counts lie above
+  *   a threshold that increases as any counts are increased. This means the
+  *   data must be "sufficiently skewed" in order for a sketch to show that
+  *   any of its elements were heavy hitters.
+  *
+  * Additionally, MAX_ITEMSKETCH_MAP_SIZE bounds the number of elements the
+  *   sketch counts at any given time. If sketch.update(elt, count) is called
+  *   on a currently-uncounted element while the sketch is at full capacity, then
+  *   all counters are decreased by some median count-value, and any below zero
+  *   are removed to make room for the new element. Again: tread carefully when
+  *   metric cardinalities are similar.
+  *
+  * See here for more details:
+  *   https://datasketches.apache.org/docs/Frequency/FrequentItemsOverview.html
+  */
+final case class TopkCardExec(queryContext: QueryContext,
+                              dispatcher: PlanDispatcher,
+                              dataset: DatasetRef,
+                              shard: Int,
+                              shardKeyPrefix: Seq[String],
+                              k: Int,
+                              addInactive: Boolean) extends LeafExecPlan {
+
+  override def enforceLimit: Boolean = false
+
+  def doExecute(source: ChunkSource,
+                querySession: QuerySession)
+               (implicit sched: Scheduler): ExecResult = {
+    source.checkReadyForQuery(dataset, shard, querySession)
+    source.acquireSharedLock(dataset, shard, querySession)
+    val rvs = source match {
+      case tsMemStore: TimeSeriesMemStore =>
+        Observable.eval {
+          val topkCards = tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix, k, addInactive)
+          // Include each into an ItemSketch.
+          val sketch = new ItemsSketch[String](TopkCardExec.MAX_ITEMSKETCH_MAP_SIZE)
+          topkCards.foreach{ card =>
+            val count = if (addInactive) card.tsCount.toLong else card.activeTsCount.toLong
+            sketch.update(card.childName, count)
+          }
+          // serialize the sketch; pack it into a RangeVector
+          val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ArrayOfStringsSerDe))
+          val it = Seq(SingleValueRowReader(serSketch)).iterator
+          IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
+        }
+      case other =>
+        Observable.empty
+    }
+    val sch = ResultSchema(Seq(ColumnInfo("MetricTopkSketch", ColumnType.StringColumn)), 1)
+    ExecResult(rvs, Task.eval(sch))
+  }
+
+  def args: String = s"shard=$shard, shardKeyPrefix=$shardKeyPrefix, k=$k, " +
+    s"limit=${queryContext.plannerParams.sampleLimit}"
 }
 
 final case class LabelNamesExec(queryContext: QueryContext,

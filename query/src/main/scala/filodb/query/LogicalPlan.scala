@@ -23,12 +23,13 @@ sealed trait LogicalPlan {
     */
   def replaceFilters(filters: Seq[ColumnFilter]): LogicalPlan = {
     this match {
-      case p: PeriodicSeriesPlan  => p.replacePeriodicSeriesFilters(filters)
-      case r: RawSeriesLikePlan   => r.replaceRawSeriesFilters(filters)
-      case l: LabelValues         => l.copy(filters = filters)
-      case n: LabelNames          => n.copy(filters = filters)
-      case n: LabelCardinality    => n.copy(filters = filters)
-      case s: SeriesKeysByFilters => s.copy(filters = filters)
+      case n: LabelCardinality         => n.copy(filters = filters)
+      case p: PeriodicSeriesPlan       => p.replacePeriodicSeriesFilters(filters)
+      case r: RawSeriesLikePlan        => r.replaceRawSeriesFilters(filters)
+      case l: LabelValues              => l.copy(filters = filters)
+      case n: LabelNames               => n.copy(filters = filters)
+      case s: SeriesKeysByFilters      => s.copy(filters = filters)
+      case c: TopkCardinalities        => c.copy()
     }
   }
 }
@@ -123,6 +124,13 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
                                fetchFirstLastSampleTimes: Boolean,
                                startMs: Long,
                                endMs: Long) extends MetadataQueryPlan
+
+/**
+ * Given a shard key prefix, estimates the set of label values with the top k cardinalities.
+ * See TopkCardExec for more some implementation-specific information
+ *   about what "estimate" implies how that estimate can be tuned.
+ */
+case class TopkCardinalities(shardKeyPrefix: Seq[String], k: Int, addInactive: Boolean) extends LogicalPlan
 
 /**
  * Concrete logical plan to query for chunk metadata from raw time series in a given range
@@ -546,6 +554,7 @@ object LogicalPlan {
      // Find leaf logical plans for all children and concatenate results
      case lp: NonLeafLogicalPlan          => lp.children.flatMap(findLeafLogicalPlans)
      case lp: MetadataQueryPlan           => Seq(lp)
+     case lp: TopkCardinalities           => Seq(lp)
      case lp: ScalarBinaryOperation       => val lhsLeafs = if (lp.lhs.isRight) findLeafLogicalPlans(lp.lhs.right.get)
                                                              else Nil
                                              val rhsLeafs = if (lp.rhs.isRight) findLeafLogicalPlans(lp.rhs.right.get)

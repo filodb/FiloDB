@@ -144,6 +144,11 @@ class SingleClusterPlanner(val dataset: Dataset,
             reduceExec.addRangeVectorTransformer(new LabelCardinalityPresenter())
             reduceExec
           }
+          case lce: TopkCardExec => {
+            val reducer = TopkCardReduceExec(qContext, targetActor, many, lce.k)
+            reducer.addRangeVectorTransformer(TopkCardPresenter(lce.k))
+            reducer
+          }
           case ske: PartKeysExec => PartKeysDistConcatExec(qContext, targetActor, many)
           case ep: ExecPlan =>
             val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, many)
@@ -233,6 +238,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp)
       case lp: LabelValues                 => materializeLabelValues(qContext, lp)
       case lp: LabelNames                  => materializeLabelNames(qContext, lp)
+      case lp: TopkCardinalities           => materializeTopkCardinalities(qContext, lp)
       case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(qContext, lp)
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplySortFunction           => materializeApplySortFunction(qContext, lp)
@@ -497,6 +503,15 @@ class SingleClusterPlanner(val dataset: Dataset,
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       exec.LabelCardinalityExec(qContext, dispatcher, dsRef, shard, renamedFilters, lp.startMs, lp.endMs)
+    }
+    PlanResult(metaExec, false)
+  }
+
+  private def materializeTopkCardinalities(qContext: QueryContext,
+                                           lp: TopkCardinalities): PlanResult = {
+    val metaExec = shardMapperFunc.assignedShards.map{ shard =>
+      val dispatcher = dispatcherForShard(shard)
+      exec.TopkCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.k, lp.addInactive)
     }
     PlanResult(metaExec, false)
   }

@@ -140,6 +140,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case lp: ApplyAbsentFunction        => super.materializeAbsentFunction(qContext, lp)
       case lp: ScalarBinaryOperation      => super.materializeScalarBinaryOperation(qContext, lp)
       case lp: ApplyLimitFunction         => super.materializeLimitFunction(qContext, lp)
+      case _: TopkCardinalities           => throw new IllegalArgumentException("TopkCardinalities unexpected here")
 
       // Imp: At the moment, these two cases for subquery will not get executed, materialize is already
       // Checking if the plan is a TopLevelSubQuery or any of the descendant is a SubqueryWithWindowing and
@@ -383,10 +384,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   }
 
   private def copy(lp: MetadataQueryPlan, startMs: Long, endMs: Long): MetadataQueryPlan = lp match {
-    case sk: SeriesKeysByFilters  => sk.copy(startMs = startMs, endMs = endMs)
-    case lv: LabelValues          => lv.copy(startMs = startMs, endMs = endMs)
-    case ln: LabelNames           => ln.copy(startMs = startMs, endMs = endMs)
-    case lc: LabelCardinality     => lc.copy(startMs = startMs, endMs = endMs)
+    case sk: SeriesKeysByFilters       => sk.copy(startMs = startMs, endMs = endMs)
+    case lv: LabelValues               => lv.copy(startMs = startMs, endMs = endMs)
+    case ln: LabelNames                => ln.copy(startMs = startMs, endMs = endMs)
+    case lc: LabelCardinality          => lc.copy(startMs = startMs, endMs = endMs)
   }
 
   def materializeMetadataQueryPlan(lp: MetadataQueryPlan, qContext: QueryContext): PlanResult = {
@@ -407,8 +408,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           val params: Map[String, String] = lp match {
             case _: SeriesKeysByFilters |
                  _: LabelNames |
-                 _: LabelCardinality          => Map("match[]" -> queryParams.promQl)
-            case lv: LabelValues              => PlannerUtil.getLabelValuesUrlParams(lv, queryParams)
+                 _: LabelCardinality    => Map("match[]" -> queryParams.promQl)
+            case lv: LabelValues        => PlannerUtil.getLabelValuesUrlParams(lv, queryParams)
           }
           createMetadataRemoteExec(qContext, p, params)
         }
@@ -424,6 +425,31 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         case _: LabelCardinality => LabelCardinalityReduceExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
       }
+    }
+    PlanResult(execPlan::Nil)
+  }
+
+  private def materializeTopkCardinalities(qContext: QueryContext, lp: TopkCardinalities) : PlanResult = {
+    // This code is nearly identical to materializeMetadataQueryPlan, but it prevents some
+    //   boilerplate code clutter that results when TopkCardinalities extends MetadataQueryPlan.
+    //   If this code's maintenance isn't worth some extra stand-in lines of code (i.e. at matchers that
+    //   take MetadataQueryPlan instances), then just extend TopkCardinalities from MetadataQueryPlan.
+    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val partitions = partitionLocationProvider.getAuthorizedPartitions(
+      TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
+    val execPlan = if (partitions.isEmpty) {
+      logger.warn(s"No partitions found for ${queryParams.startSecs}, ${queryParams.endSecs}")
+      localPartitionPlanner.materialize(lp, qContext)
+    } else {
+      val leafPlans = partitions.map { p =>
+        logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
+        if (p.partitionName.equals(localPartitionName))
+          localPartitionPlanner.materialize(lp.copy(), qContext)
+        else ??? // TODO: handle remote
+      }.toSeq
+      val reducer = TopkCardReduceExec(qContext, inProcessPlanDispatcher, leafPlans, lp.k)
+      reducer.addRangeVectorTransformer(TopkCardPresenter(lp.k))
+      reducer
     }
     PlanResult(execPlan::Nil)
   }
