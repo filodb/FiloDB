@@ -447,7 +447,10 @@ final case class TopkCardExec(queryContext: QueryContext,
           val topkCards = tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix, k, addInactive)
           // Include each into an ItemSketch.
           val sketch = new ItemsSketch[String](TopkCardExec.MAX_ITEMSKETCH_MAP_SIZE)
-          topkCards.foreach(card => sketch.update(card.childName, card.tsCount.toLong))
+          topkCards.foreach{ card =>
+            val count = if (addInactive) card.tsCount.toLong else card.activeTsCount.toLong
+            sketch.update(card.childName, count)
+          }
           // serialize the sketch; pack it into a RangeVector
           val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ArrayOfStringsSerDe))
           val it = Seq(SingleValueRowReader(serSketch)).iterator
