@@ -233,7 +233,7 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
 
   override def visitAt(ctx: PromQLParser.AtContext): Some[Long] = {
     // need to return a reference, so Long itself won't work
-    Some(ctx.TIMESTAMP.getText.toLong)
+    Some(ctx.NUMBER().getText.toLong)
   }
 
   override def visitLimitOperation(ctx: PromQLParser.LimitOperationContext) = {
