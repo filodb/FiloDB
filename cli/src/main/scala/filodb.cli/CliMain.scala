@@ -109,8 +109,8 @@ object CliMain extends FilodbClusterNode {
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labelvalues --labelnames <lable-names> --labelfilter <label-filter> --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labels --labelfilter <label-filter> -dataset <dataset>")
-    println("  --host <hostname/IP> [--port ...] --command topkcardspread --dataset <dataset> --k <k> [--active] --shardkeyprefix <shard-key-prefix> ")
-    println("  --host <hostname/IP> [--port ...] --command topkcard --dataset prometheus --k 2 --shardkeyprefix demo App-0")
+    println("  --host <hostname/IP> [--port ...] --command topkcard --dataset <dataset> --k <k> [--active] --shardkeyprefix <shard-key-prefix> ")
+    println("  --host <hostname/IP> [--port ...] --command topkcardlocal --dataset prometheus --k 2 --shardkeyprefix demo App-0")
     println("  --host <hostname/IP> [--port ...] --command labelcardinality --labelfilter <label-filter> --dataset prometheus")
     println("  --host <hostname/IP> [--port ...] --command findqueryshards --queries <query> --spread <spread>")
     println("""  --command promFilterToPartKeyBR --promql "myMetricName{_ws_='myWs',_ns_='myNs'}" --schema prom-counter""")
@@ -177,7 +177,7 @@ object CliMain extends FilodbClusterNode {
           val values = remote.getIndexValues(ref, args.indexname(), args.shards().head.toInt, args.limit())
           values.foreach { case (term, freq) => println(f"$term%40s\t$freq") }
 
-        case Some("topkcard") =>
+        case Some("topkcardlocal") =>
           require(args.host.isDefined && args.dataset.isDefined && args.k.isDefined,
             "--host, --dataset, --k must be defined")
           val (remote, ref) = getClientAndRef(args)
@@ -254,12 +254,12 @@ object CliMain extends FilodbClusterNode {
           parseLabelCardinalityQuery(remote, args.labelfilter(), args.dataset(),
             getQueryRange(args), options)
 
-        case Some("topkcardspread") =>
+        case Some("topkcard") =>
           require(args.host.isDefined && args.dataset.isDefined && args.labelfilter.isDefined, "--host, --dataset and --labelfilter must be defined")
           val remote = Client.standaloneClient(system, args.host(), args.port())
           val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
             timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
-          parseTopkCardSpreadQuery(remote, args.k(), args.active(), args.shardkeyprefix(), args.dataset(), options)
+          parseTopkCardQuery(remote, args.k(), args.active(), args.shardkeyprefix(), args.dataset(), options)
 
         case x: Any =>
           // This will soon be deprecated
@@ -381,12 +381,12 @@ object CliMain extends FilodbClusterNode {
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 
-  def parseTopkCardSpreadQuery(client: LocalClient,
-                               k: Int,
-                               active: Boolean,
-                               shardKeyPrefix: Seq[String],
-                               dataset: String,
-                               options: QOptions): Unit = {
+  def parseTopkCardQuery(client: LocalClient,
+                         k: Int,
+                         active: Boolean,
+                         shardKeyPrefix: Seq[String],
+                         dataset: String,
+                         options: QOptions): Unit = {
     val addInactive = !active
     val logicalPlan = TopkCardinalities(shardKeyPrefix, k, addInactive)
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
