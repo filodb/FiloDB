@@ -399,7 +399,7 @@ final case object TopkCardExec {
   // TODO: tune this
   // See here for help choosing a size:
   //   https://datasketches.apache.org/docs/Frequency/FrequentItemsErrorTable.html
-  val MAX_ITEMSKETCH_MAP_SIZE = 128;
+  val MAX_ITEMSKETCH_MAP_SIZE = 256;
 }
 
 /**
