@@ -1,17 +1,22 @@
 package filodb.coordinator
 
 import scala.collection.mutable
-import scala.util.{Failure, Success}
+import scala.concurrent.duration.FiniteDuration
+import scala.util.{Failure, Random, Success}
 
 import akka.actor.{ActorRef, Address, AddressFromURIString}
+import akka.pattern.AskTimeoutException
 import com.typesafe.scalalogging.StrictLogging
+import java.util.concurrent.TimeUnit
 import org.scalactic._
 
 import filodb.coordinator.NodeClusterActor._
+import filodb.coordinator.client.QueryCommands.LogicalPlan2Query
 import filodb.core.{DatasetRef, ErrorResponse, Response, Success => SuccessResponse}
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.Dataset
 import filodb.core.store.{AssignShardConfig, IngestionConfig, StoreConfig}
+import filodb.query.{QueryError, QueryResponse, QueryResult, TopkCardinalities}
 
 /**
   * NodeClusterActor delegates shard management business logic to this class.
@@ -30,6 +35,55 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
 
   import ShardManager._
 
+  // TODO(a_theimer): can't make this an object because static code is lazily evaluated?
+  private class ShardMetricAggregator {
+    import kamon.Kamon
+    import kamon.tag.TagSet
+    import monix.execution.Scheduler.{global => scheduler}
+
+    import filodb.coordinator.client.Client
+
+    private val INIT_DELAY_SEC = 10
+    private val DELAY_SEC = 10
+    private val WAIT_SEC = 30
+    private val TIME_UNIT = TimeUnit.SECONDS
+    private val METRIC_NAME = "shard_metric_agg"
+    private val NS = "metadata"
+    private val WS = "shard"
+    private val LOGICAL_PLAN = TopkCardinalities(Nil, 250, true)
+
+    scheduler.scheduleWithFixedDelay(
+      INIT_DELAY_SEC, DELAY_SEC, TIME_UNIT,
+      () => {
+        // TODO(a_theimer): slow-- necessary to randomize?
+        val actorRef: ActorRef = _coordinators.toSeq(
+          Random.nextInt(Integer.MAX_VALUE) % _coordinators.size)._2
+        val askExtractor: PartialFunction[Any, QueryResponse] = {
+          case resp: QueryResponse => resp
+        }
+        try {
+          // TODO(a_theimer): slow-- necessary to randomize?
+          val dsetRef = _datasetInfo.keySet.toList(Random.nextInt % _datasetInfo.size)
+          val resp = Client.actorAsk(actorRef, LogicalPlan2Query(dsetRef, LOGICAL_PLAN),
+                                     FiniteDuration(WAIT_SEC, TIME_UNIT))(askExtractor)
+          resp match {
+            case qres: QueryResult => {
+              qres.result.foreach(_.rows().foreach { rr =>
+                val ns = rr.getString(0)  // TODO(a_theimer): might need getAny/toString here
+                val count = rr.getLong(1)
+                val tags = Map("_ns_" -> NS, "_ws_" -> WS, "ns" -> ns)
+                Kamon.gauge(METRIC_NAME).withTags(TagSet.from(tags)).update(count.toDouble)
+              })
+            }
+            case qerr: QueryError => ???
+          }
+        } catch {
+          case e: AskTimeoutException => ???
+        }
+      })
+  }
+
+  private val _shardMetricAggregator = new ShardMetricAggregator
   private var _subscriptions = ShardSubscriptions(Set.empty, Set.empty)
   private val _datasetInfo = new mutable.HashMap[DatasetRef, DatasetInfo]
   private val _shardMappers = new mutable.HashMap[DatasetRef, ShardMapper]
