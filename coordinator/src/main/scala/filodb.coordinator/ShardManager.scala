@@ -1,17 +1,18 @@
 package filodb.coordinator
 
 import scala.collection.mutable
-import scala.util.{Failure, Random, Success}
-
+import scala.util.{Failure, Success}
 import akka.actor.{ActorRef, Address, AddressFromURIString}
 import com.typesafe.scalalogging.StrictLogging
 import org.scalactic._
-
 import filodb.coordinator.NodeClusterActor._
 import filodb.core.{DatasetRef, ErrorResponse, Response, Success => SuccessResponse}
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.Dataset
 import filodb.core.store.{AssignShardConfig, IngestionConfig, StoreConfig}
+
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.{Await, Future}
 
 /**
   * NodeClusterActor delegates shard management business logic to this class.
@@ -31,9 +32,8 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
   import ShardManager._
 
   /**
-   * Periodically sends a randomly-chosen node a namespace-level
-   * TopkCardinalities LogicalPlan to resolve. Kamon gauges are updated with
-   * the response data.
+   * Periodically queries randomly-chosen nodes for each dataset's namespace
+   * cardinalities. Kamon gauges are updated with the response data.
    *
    * The intent is to publish a low-cardinality metric such that namespace
    * cardinality queries can be efficiently answered.
@@ -42,7 +42,6 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     // TODO(a_theimer): can't make this an object because static code is lazily evaluated?
     import scala.concurrent.duration.FiniteDuration
 
-    import akka.pattern.AskTimeoutException
     import java.util.concurrent.TimeUnit
     import kamon.Kamon
     import kamon.tag.TagSet
@@ -50,7 +49,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
 
     import filodb.coordinator.client.Client
     import filodb.coordinator.client.QueryCommands.LogicalPlan2Query
-    import filodb.query.{QueryError, QueryResponse, QueryResult, TopkCardinalities}
+    import filodb.query.{QueryError, QueryResult, TopkCardinalities}
 
     // All "_TU" constants quantify units of TIME_UNIT.
     private val TIME_UNIT = TimeUnit.SECONDS
@@ -61,37 +60,60 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     private val METRIC_NAME = "shard_metric_agg"
     private val NS_VALUE = "metadata"
     private val WS_VALUE = "shard"
-    private val LOGICAL_PLAN = TopkCardinalities(Nil, 250, true)
+    private val K: Int = 250
 
     scheduler.scheduleWithFixedDelay(
       SCHED_INIT_DELAY_TU, SCHED_DELAY_TU, TIME_UNIT,
       () => {
-        // TODO(a_theimer): slow-- necessary to randomize?
-        // Randomly choose a node coordinator to query.
-        val actorRef: ActorRef = _coordinators.toSeq(
-          Random.nextInt(Integer.MAX_VALUE) % _coordinators.size)._2
-        val responseMatcher: PartialFunction[Any, QueryResponse] = {
-          case resp: QueryResponse => resp
+        // Evenly pair LogicalPlan2Query instances to nodes.
+        // TODO(a_theimer): more efficient (or scala-thonic) way to do this?
+        val datasetRefs = _datasetInfo.map{case (dsRef, _) => dsRef}.toSeq
+        val shuffledCoordinators = util.Random.shuffle(_coordinators.map{case (_, actorRef) => actorRef}.toSeq)
+        val numPairs = 2*datasetInfo.size  // one pair for every dataSet/addInactive combo
+        val lp2qNodePairs = new mutable.ArrayBuffer[(LogicalPlan2Query, ActorRef)](numPairs)
+        for (i <- 0 until numPairs) {
+          // Dataset increments every 2; one TopkCardinalities for each addInactive
+          val dsRef = datasetRefs(i >> 1)
+          val addInactive: Boolean = if ((i & 1) == 0) false else true // TODO(a_theimer): avoid the 'if'?
+          val actorRef = shuffledCoordinators(i % shuffledCoordinators.size)
+          lp2qNodePairs.append((
+            LogicalPlan2Query(dsRef, TopkCardinalities(Nil, K, addInactive)),
+            actorRef))
         }
-        try {
-          // TODO(a_theimer): which dataset to use?
-          val dsetRef = _datasetInfo.keySet.toSeq(
-            Random.nextInt(Integer.MAX_VALUE) % _datasetInfo.size)
-          val resp = Client.actorAsk(actorRef, LogicalPlan2Query(dsetRef, LOGICAL_PLAN),
-                                     FiniteDuration(ASK_TIMEOUT_TU, TIME_UNIT))(responseMatcher)
-          resp match {
-            case qres: QueryResult => {
-              qres.result.foreach(_.rows().foreach { rr =>
-                val ns = rr.getString(0)  // TODO(a_theimer): might need getAny/toString here
-                val count = rr.getLong(1)
-                val tags = Map("_ns_" -> NS_VALUE, "_ws_" -> WS_VALUE, "ns" -> ns)
-                Kamon.gauge(METRIC_NAME).withTags(TagSet.from(tags)).update(count.toDouble)
-              })
+
+        // Send a LogicalPlan to each node and store a Future for each.
+        val futures = new mutable.ArrayBuffer[Future[Any]](numPairs)
+        lp2qNodePairs.foreach{ case (lp2q, actorRef) =>
+          futures.append(Client.asyncAsk(
+            actorRef, lp2q, FiniteDuration(ASK_TIMEOUT_TU, TIME_UNIT)))
+        }
+
+        // Await all futures until ASK_TIMEOUT_TU, then process each.
+        val futSeq = Future.sequence(
+          futures.map(_.map(Success(_)).recover{ case t => Failure(t)}))
+        val readyTrys = Await.result(futSeq, FiniteDuration(ASK_TIMEOUT_TU, TIME_UNIT))
+        (0 until numPairs).foreach { i =>
+          // The Try/Dataset below correspond to a pair in lp2qNodePairs
+          val readyTry = readyTrys(i)
+          val dsString = lp2qNodePairs(i)._1.dataset.dataset
+          val addInactive = lp2qNodePairs(i)._1.logicalPlan.asInstanceOf[TopkCardinalities].addInactive
+          readyTry match {
+            case s: Success[Any] => {
+              s.value match {
+                case qres: QueryResult => {
+                  qres.result.foreach(_.rows().foreach { rr =>
+                    val ns = rr.getString(0)  // TODO(a_theimer): might need getAny/toString here
+                    val count = rr.getLong(1)
+                    val tags = Map("_ws_" -> WS_VALUE, "_ns_" -> NS_VALUE,
+                                   "ds" -> dsString, "ns" -> ns, "addInactive" -> addInactive.toString)
+                    Kamon.gauge(METRIC_NAME).withTags(TagSet.from(tags)).update(count.toDouble)
+                  })
+                }
+                case qerr: QueryError => ???
+              }
             }
-            case qerr: QueryError => ???
+            case f: Failure[Any] => ???
           }
-        } catch {
-          case e: AskTimeoutException => ???
         }
       })
   }
