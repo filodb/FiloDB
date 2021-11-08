@@ -1,22 +1,17 @@
 package filodb.coordinator
 
 import scala.collection.mutable
-import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Random, Success}
 
 import akka.actor.{ActorRef, Address, AddressFromURIString}
-import akka.pattern.AskTimeoutException
 import com.typesafe.scalalogging.StrictLogging
-import java.util.concurrent.TimeUnit
 import org.scalactic._
 
 import filodb.coordinator.NodeClusterActor._
-import filodb.coordinator.client.QueryCommands.LogicalPlan2Query
 import filodb.core.{DatasetRef, ErrorResponse, Response, Success => SuccessResponse}
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.Dataset
 import filodb.core.store.{AssignShardConfig, IngestionConfig, StoreConfig}
-import filodb.query.{QueryError, QueryResponse, QueryResult, TopkCardinalities}
 
 /**
   * NodeClusterActor delegates shard management business logic to this class.
@@ -35,43 +30,61 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
 
   import ShardManager._
 
-  // TODO(a_theimer): can't make this an object because static code is lazily evaluated?
+  /**
+   * Periodically sends a randomly-chosen node a namespace-level
+   * TopkCardinalities LogicalPlan to resolve. Kamon gauges are updated with
+   * the response data.
+   *
+   * The intent is to publish a low-cardinality metric such that namespace
+   * cardinality queries can be efficiently answered.
+   */
   private class ShardMetricAggregator {
+    // TODO(a_theimer): can't make this an object because static code is lazily evaluated?
+    import scala.concurrent.duration.FiniteDuration
+
+    import akka.pattern.AskTimeoutException
+    import java.util.concurrent.TimeUnit
     import kamon.Kamon
     import kamon.tag.TagSet
     import monix.execution.Scheduler.{global => scheduler}
 
     import filodb.coordinator.client.Client
+    import filodb.coordinator.client.QueryCommands.LogicalPlan2Query
+    import filodb.query.{QueryError, QueryResponse, QueryResult, TopkCardinalities}
 
-    private val INIT_DELAY_SEC = 10
-    private val DELAY_SEC = 10
-    private val WAIT_SEC = 30
+    // All "_TU" constants quantify units of TIME_UNIT.
     private val TIME_UNIT = TimeUnit.SECONDS
+    private val SCHED_INIT_DELAY_TU = 10
+    private val SCHED_DELAY_TU = 10
+    private val ASK_TIMEOUT_TU = 30
+
     private val METRIC_NAME = "shard_metric_agg"
-    private val NS = "metadata"
-    private val WS = "shard"
+    private val NS_VALUE = "metadata"
+    private val WS_VALUE = "shard"
     private val LOGICAL_PLAN = TopkCardinalities(Nil, 250, true)
 
     scheduler.scheduleWithFixedDelay(
-      INIT_DELAY_SEC, DELAY_SEC, TIME_UNIT,
+      SCHED_INIT_DELAY_TU, SCHED_DELAY_TU, TIME_UNIT,
       () => {
         // TODO(a_theimer): slow-- necessary to randomize?
+        // Randomly choose a node coordinator to query.
         val actorRef: ActorRef = _coordinators.toSeq(
           Random.nextInt(Integer.MAX_VALUE) % _coordinators.size)._2
-        val askExtractor: PartialFunction[Any, QueryResponse] = {
+        val responseMatcher: PartialFunction[Any, QueryResponse] = {
           case resp: QueryResponse => resp
         }
         try {
-          // TODO(a_theimer): slow-- necessary to randomize?
-          val dsetRef = _datasetInfo.keySet.toList(Random.nextInt % _datasetInfo.size)
+          // TODO(a_theimer): which dataset to use?
+          val dsetRef = _datasetInfo.keySet.toSeq(
+            Random.nextInt(Integer.MAX_VALUE) % _datasetInfo.size)
           val resp = Client.actorAsk(actorRef, LogicalPlan2Query(dsetRef, LOGICAL_PLAN),
-                                     FiniteDuration(WAIT_SEC, TIME_UNIT))(askExtractor)
+                                     FiniteDuration(ASK_TIMEOUT_TU, TIME_UNIT))(responseMatcher)
           resp match {
             case qres: QueryResult => {
               qres.result.foreach(_.rows().foreach { rr =>
                 val ns = rr.getString(0)  // TODO(a_theimer): might need getAny/toString here
                 val count = rr.getLong(1)
-                val tags = Map("_ns_" -> NS, "_ws_" -> WS, "ns" -> ns)
+                val tags = Map("_ns_" -> NS_VALUE, "_ws_" -> WS_VALUE, "ns" -> ns)
                 Kamon.gauge(METRIC_NAME).withTags(TagSet.from(tags)).update(count.toDouble)
               })
             }
