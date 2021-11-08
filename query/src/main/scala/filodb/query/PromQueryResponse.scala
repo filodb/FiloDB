@@ -21,7 +21,7 @@ final case class QueryStatistics(group: Seq[String], timeSeriesScanned: Long,
 
 final case class Data(resultType: String, result: Seq[Result])
 
-final case class MetadataSuccessResponse(data: Seq[Map[String, String]],
+final case class MetadataSuccessResponse(data: Seq[DataSampl],
                                          status: String = "success",
                                          partial: Option[Boolean]= None,
                                          message: Option[String]= None) extends PromQueryResponse
