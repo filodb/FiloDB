@@ -53,8 +53,6 @@ object DownsamplerMain extends App {
 
 class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsampler) extends Serializable {
 
-  @transient lazy private val jobCompleted = Kamon.counter("chunk-migration-completed").withoutTags()
-
   // Gotcha!! Need separate function (Cannot be within body of a class)
   // to create a closure for spark to serialize and move to executors.
   // Otherwise, config values below were not being sent over.
@@ -86,12 +84,14 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
     val ingestionTimeStart: Long = userTimeStart - settings.widenIngestionTimeRangeBy.toMillis
     val ingestionTimeEnd: Long = userTimeEndExclusive + settings.widenIngestionTimeRangeBy.toMillis
 
+    val downsamplePeriodStr = java.time.Instant.ofEpochMilli(userTimeStart).toString
+
     DownsamplerContext.dsLogger.info(s"This is the Downsampling driver. Starting downsampling job " +
       s"rawDataset=${settings.rawDatasetName} for " +
       s"userTimeInPeriod=${java.time.Instant.ofEpochMilli(userTimeInPeriod)} " +
       s"ingestionTimeStart=${java.time.Instant.ofEpochMilli(ingestionTimeStart)} " +
       s"ingestionTimeEnd=${java.time.Instant.ofEpochMilli(ingestionTimeEnd)} " +
-      s"userTimeStart=${java.time.Instant.ofEpochMilli(userTimeStart)} " +
+      s"userTimeStart=$downsamplePeriodStr " +
       s"userTimeEndExclusive=${java.time.Instant.ofEpochMilli(userTimeEndExclusive)}")
     DownsamplerContext.dsLogger.info(s"To rerun this job add the following spark config: " +
       s""""spark.filodb.downsampler.userTimeOverride": "${java.time.Instant.ofEpochMilli(userTimeInPeriod)}"""")
@@ -124,7 +124,10 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
         batchDownsampler.downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
       }
 
-    DownsamplerContext.dsLogger.info(s"Downsampling Driver completed successfully")
+    DownsamplerContext.dsLogger.info(s"Chunk Downsampling Driver completed successfully for downsample period " +
+      s"$downsamplePeriodStr")
+    val jobCompleted = Kamon.counter("chunk-migration-completed")
+      .withTag("downsamplePeriod", downsamplePeriodStr)
     jobCompleted.increment()
     spark
   }
