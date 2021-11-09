@@ -56,10 +56,6 @@ object Parser extends StrictLogging {
       case Antlr => AntlrParser.parseQuery(query)
       case Legacy => LegacyParser.parseQueryWithPrecedence(query)
       case Shadow => {
-        // TODO(a_theimer): should this be changed to something like:
-        //   if (both parse) then { assert match }
-        //   else if (none parse) then { throw }
-        //   else { just log the failure and hope for the best }
         val expr = LegacyParser.parseQueryWithPrecedence(query)
         try {
           val antlrExpr = AntlrParser.parseQuery(query)

@@ -264,26 +264,27 @@ trait SelectorParser extends OperatorParser with UnitParser with BaseParser {
   lazy val instantVectorSelector: PackratParser[InstantExpression]
   = metricNameIdentifier ~ labelSelection.? ~ offset.? ^^ {
     case metricName ~ ls ~ opt =>
-      InstantExpression(Some(metricName.str), ls.getOrElse(Seq.empty), opt.map(_.duration), None) // TODO(a_theimer)
+      InstantExpression(Some(metricName.str), ls.getOrElse(Seq.empty),
+        opt.map(_.duration), None /* TODO: implement @ if needed */)
   }
 
   lazy val instantVectorSelector2: PackratParser[InstantExpression]
   = labelSelection ~ offset.? ^^ {
     case ls ~ opt =>
-      InstantExpression(None, ls, opt.map(_.duration), None)  // TODO(a_theimer)
+      InstantExpression(None, ls, opt.map(_.duration), None /* TODO: implement @ if needed */)
   }
 
   lazy val rangeVectorSelector: PackratParser[RangeExpression] =
     metricNameIdentifier ~ labelSelection.? ~ simpleLookback ~ offset.? ^^ {
       case metricName ~ ls ~ simpleLookback ~ opt =>
         RangeExpression(Some(metricName.str), ls.getOrElse(Seq.empty), simpleLookback.duration,
-          opt.map(_.duration), None)  // TODO(a_theimer)
+          opt.map(_.duration), None /* TODO: implement @ if needed */)
     }
 
   lazy val rangeVectorSelector2: PackratParser[RangeExpression] =
     labelSelection ~ simpleLookback ~ offset.? ^^ {
       case ls ~ simpleLookback ~ opt =>
-        RangeExpression(None, ls, simpleLookback.duration, opt.map(_.duration), None)  // TODO(a_theimer)
+        RangeExpression(None, ls, simpleLookback.duration, opt.map(_.duration), None /* TODO: implement @ if needed */)
     }
 
   lazy val vector: PackratParser[Vector] =
