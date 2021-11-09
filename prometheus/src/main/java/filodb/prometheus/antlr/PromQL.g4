@@ -61,7 +61,7 @@ vectorShift
 window: '[' DURATION ']';
 
 offset: OFFSET DURATION;
-at: AT NUMBER;
+at: AT (NUMBER | START | END);
 
 limit: LIMIT NUMBER;
 
@@ -172,6 +172,8 @@ GROUP_RIGHT: G R O U P '_' R I G H T;
 OFFSET:      O F F S E T;
 LIMIT:       L I M I T;
 BOOL:        B O O L;
+START:       S T A R T '(' ')';
+END:         E N D '(' ')';
 
 // See section below: "Magic for case-insensitive matching."
 AGGREGATION_OP
