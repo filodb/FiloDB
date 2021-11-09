@@ -82,7 +82,7 @@ final case class TopkCardReduceExec(queryContext: QueryContext,
   private def sketchFold(acc: ItemsSketch[String], rv: RangeVector):
             ItemsSketch[String] = {
     rv.rows().foreach{ r =>
-      val sketchSer = r.getString(0).getBytes
+      val sketchSer = r.getAny(0).asInstanceOf[ZeroCopyUTF8String].bytes
       val sketch = ItemsSketch.getInstance(Memory.wrap(sketchSer), new ArrayOfStringsSerDe)
       acc.merge(sketch)
     }
