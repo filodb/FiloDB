@@ -219,10 +219,10 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
     } else {
       Some(build[Duration](ctx.offset))
     }
-    val at: Option[Long] = if (ctx.at == null) {
+    val at: Option[AtTimestamp] = if (ctx.at == null) {
       None
     } else {
-      build[Some[Long]](ctx.at)
+      Some(build[AtTimestamp](ctx.at))
     }
     VectorShift(offset, at)
   }
@@ -231,9 +231,14 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
     parseDuration(ctx.DURATION)
   }
 
-  override def visitAt(ctx: PromQLParser.AtContext): Some[Long] = {
-    // need to return a reference, so Long itself won't work
-    Some(ctx.NUMBER().getText.toLong)
+  override def visitAt(ctx: PromQLParser.AtContext): AtTimestamp = {
+    if (ctx.NUMBER() != null) {
+      AtUnix(ctx.NUMBER().getText.toLong)
+    } else if (ctx.START() != null) {
+      AtStart()
+    } else {  // ctx.END() != null
+      AtEnd()
+    }
   }
 
   override def visitLimitOperation(ctx: PromQLParser.LimitOperationContext) = {

@@ -23,7 +23,29 @@ sealed trait JoinMatching {
   def labels: Seq[String]
 }
 
-case class VectorShift(offset: Option[Duration], at: Option[Long])
+sealed trait AtTimestamp {
+  def getUnix(timeParams: TimeRangeParams) : Long
+}
+
+case class AtUnix(time: Long) extends AtTimestamp {
+  override def getUnix(timeParams: TimeRangeParams): Long = {
+    time
+  }
+}
+
+case class AtStart() extends AtTimestamp {
+  override def getUnix(timeParams: TimeRangeParams): Long = {
+    timeParams.start
+  }
+}
+
+case class AtEnd() extends AtTimestamp {
+  override def getUnix(timeParams: TimeRangeParams): Long = {
+    timeParams.end
+  }
+}
+
+case class VectorShift(offset: Option[Duration], at: Option[AtTimestamp])
 
 case class Ignoring(labels: Seq[String]) extends JoinMatching
 
@@ -63,12 +85,13 @@ private object Utils {
    *   The 'start' time is shifted by the same diff.
    * If the 'at' timestamp is not present: returns the argument TimeRangeParams.
    */
-  def getTimeParamsWithAt(timeParams: TimeRangeParams, at: Option[Long]): TimeRangeParams = {
+  def getTimeParamsWithAt(timeParams: TimeRangeParams, at: Option[AtTimestamp]): TimeRangeParams = {
     at match {
-      case Some(timestamp) => {
+      case Some(atTimestamp) => {
+        val unixTimestamp = atTimestamp.getUnix(timeParams)
         // TODO: Prometheus allows negative timestamps
-        require(timestamp > 0, "negative '@' timestamp not allowed")
-        val delta = timestamp - timeParams.end
+        require(unixTimestamp > 0, "negative '@' timestamp not allowed")
+        val delta = unixTimestamp - timeParams.end
         require(timeParams.start + delta > 0,
           "timeParams.start must be > 0 when timeParams.end is aligned to the '@' timestamp")
         TimeStepParams(timeParams.start + delta,
@@ -116,7 +139,7 @@ case class VectorMatch(matching: Option[JoinMatching],
 case class SubqueryExpression(subquery: PeriodicSeries,
                               sqcl: SubqueryClause,
                               offset: Option[Duration],
-                              at: Option[Long],
+                              at: Option[AtTimestamp],
                               limit: Option[Int]) extends Expression with PeriodicSeries {
 
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
@@ -136,7 +159,7 @@ case class SubqueryExpression(subquery: PeriodicSeries,
       case None => 0
     }
     var endS = at match {
-      case Some(timestamp) => timestamp - offsetSec
+      case Some(atTimestamp) => atTimestamp.getUnix(timeParams) - offsetSec
       case None => timeParams.start - offsetSec
     }
     val stepToUseMs = SubqueryUtils.getSubqueryStepMs(sqcl.step);
@@ -288,7 +311,7 @@ sealed trait Vector extends Expression {
 case class InstantExpression(metricName: Option[String],
                              labelSelection: Seq[LabelMatch],
                              offset: Option[Duration],
-                             at: Option[Long]) extends Vector with PeriodicSeries {
+                             at: Option[AtTimestamp]) extends Vector with PeriodicSeries {
 
   import WindowConstants._
 
@@ -363,7 +386,7 @@ case class RangeExpression(metricName: Option[String],
                            labelSelection: Seq[LabelMatch],
                            window: Duration,
                            offset: Option[Duration],
-                           at: Option[Long]) extends Vector with SimpleSeries {
+                           at: Option[AtTimestamp]) extends Vector with SimpleSeries {
 
   private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
