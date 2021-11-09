@@ -66,7 +66,11 @@ private object Utils {
   def getTimeParamsWithAt(timeParams: TimeRangeParams, at: Option[Long]): TimeRangeParams = {
     at match {
       case Some(timestamp) => {
+        // TODO: Prometheus allows negative timestamps
+        require(timestamp > 0, "negative '@' timestamp not allowed")
         val delta = timestamp - timeParams.end
+        require(timeParams.start + delta > 0,
+          "timeParams.start must be > 0 when timeParams.end is aligned to the '@' timestamp")
         TimeStepParams(timeParams.start + delta,
                        timeParams.step,
                        timeParams.end + delta)
