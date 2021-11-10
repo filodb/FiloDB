@@ -81,25 +81,36 @@ case object ManyToMany extends Cardinal {
 
 private object Utils {
   /**
+   * TODO(a_theimer): outdated
    * Aligns the TimeRangeParams 'end' time to the 'at' timestamp (if it exists).
    *   The 'start' time is shifted by the same diff.
    * If the 'at' timestamp is not present: returns the argument TimeRangeParams.
    */
-  def getTimeParamsWithAt(timeParams: TimeRangeParams, at: Option[AtTimestamp]): TimeRangeParams = {
-    at match {
+  def getTotalOffsetMs(timeParams: TimeRangeParams,
+                      at: Option[AtTimestamp],
+                      offset: Option[Duration]): Long = {
+    val atOffsetMs = at match {
       case Some(atTimestamp) => {
         val unixTimestamp = atTimestamp.getUnix(timeParams)
         // TODO: Prometheus allows negative timestamps
-        require(unixTimestamp > 0, "negative '@' timestamp not allowed")
+        // TODO(a_theimer): should not be checked here
+        require(unixTimestamp >= 0, "negative '@' timestamp not allowed")
         val delta = unixTimestamp - timeParams.end
-        require(timeParams.start + delta > 0,
-          "timeParams.start must be > 0 when timeParams.end is aligned to the '@' timestamp")
-        TimeStepParams(timeParams.start + delta,
-                       timeParams.step,
-                       timeParams.end + delta)
+        require(timeParams.start + delta >= 0,
+          "timeParams.start must be non-negative when timeParams.end is aligned to the '@' timestamp")
+        -(1000 * delta)
       }
-      case None => timeParams
+      case None => 0
     }
+
+    val offsetMs = offset match {
+      case Some(duration) => {
+        duration.millis(timeParams.step * 1000)
+      }
+      case None => 0
+    }
+
+    atOffsetMs + offsetMs
   }
 }
 
@@ -154,14 +165,8 @@ case class SubqueryExpression(subquery: PeriodicSeries,
     // when start and end parameters are not the same.
     require(timeParams.start == timeParams.end, "Subquery is not allowed as a top level expression for query_range")
 
-    val offsetSec : Long = offset match {
-      case Some(duration) => duration.millis(1L) / 1000
-      case None => 0
-    }
-    var endS = at match {
-      case Some(atTimestamp) => atTimestamp.getUnix(timeParams) - offsetSec
-      case None => timeParams.start - offsetSec
-    }
+    val offsetSec = Utils.getTotalOffsetMs(timeParams, at, offset) / 1000
+    var endS = timeParams.start - offsetSec
     val stepToUseMs = SubqueryUtils.getSubqueryStepMs(sqcl.step);
     var startS = endS - (sqcl.window.millis(1L) / 1000)
     startS = SubqueryUtils.getStartForFastSubquery(startS, stepToUseMs/1000 )
@@ -171,13 +176,15 @@ case class SubqueryExpression(subquery: PeriodicSeries,
       stepToUseMs/1000,
       endS
     )
+    //scalastyle:off
+    println(subquery.getClass)
     TopLevelSubquery(
       subquery.toSeriesPlan(timeParamsToUse),
       startS * 1000,
       stepToUseMs,
       endS * 1000,
       sqcl.window.millis(1L),
-      offset.map(duration => duration.millis(1L))
+      if (offsetSec > 0) Some(offsetSec * 1000) else None
     )
   }
 }
@@ -324,12 +331,15 @@ case class InstantExpression(metricName: Option[String],
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     // we start from 5 minutes earlier that provided start time in order to include last sample for the
     // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
-    val timeParamsWithAt = Utils.getTimeParamsWithAt(timeParams, at)
+    val offsetMs = Utils.getTotalOffsetMs(timeParams, at, offset)
+    //scalastyle:off
+    println(if (offsetMs > 0) Some(offsetMs) else None)
     val ps = PeriodicSeries(
-      RawSeries(Base.timeParamToSelector(timeParamsWithAt), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
-        offset.map(_.millis(timeParamsWithAt.step * 1000))),
-      timeParamsWithAt.start * 1000, timeParamsWithAt.step * 1000, timeParamsWithAt.end * 1000,
-      offset.map(_.millis(timeParamsWithAt.step * 1000))
+      RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq,
+                Some(staleDataLookbackMillis),
+                if (offsetMs > 0) Some(offsetMs) else None),
+      timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
+      if (offsetMs > 0) Some(offsetMs) else None
     )
     bucketOpt.map { bOpt =>
       // It's a fixed value, the range params don't matter at all
@@ -350,9 +360,10 @@ case class InstantExpression(metricName: Option[String],
     LabelCardinality(columnFilters, timeParams.start * 1000, timeParams.end * 1000)
 
   def toRawSeriesPlan(timeParams: TimeRangeParams, offsetMs: Option[Long] = None): RawSeries = {
-    val timeParamsWithAt = Utils.getTimeParamsWithAt(timeParams, at)
-    RawSeries(Base.timeParamToSelector(timeParamsWithAt), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
-      offsetMs)
+    require(offsetMs.isEmpty)  // TODO(a_theimer)
+    val offsetMsTotal = Utils.getTotalOffsetMs(timeParams, at, offset)
+    RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
+      if (offsetMsTotal > 0) Some(offsetMsTotal) else None)
   }
 
   /**
@@ -394,11 +405,11 @@ case class RangeExpression(metricName: Option[String],
     if (isRoot && timeParams.start != timeParams.end) {
       throw new UnsupportedOperationException("Range expression is not allowed in query_range")
     }
-    val timeParamsWithAt = Utils.getTimeParamsWithAt(timeParams, at)
+    val offsetMs = Utils.getTotalOffsetMs(timeParams, at, offset)
     // multiply by 1000 to convert unix timestamp in seconds to millis
-    val rs = RawSeries(Base.timeParamToSelector(timeParamsWithAt), columnFilters, column.toSeq,
-      Some(window.millis(timeParamsWithAt.step * 1000)),
-      offset.map(_.millis(timeParamsWithAt.step * 1000))
+    val rs = RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq,
+      Some(window.millis(timeParams.step * 1000)),
+      if (offsetMs > 0) Some(offsetMs) else None
     )
     bucketOpt.map { bOpt =>
       // It's a fixed value, the range params don't matter at all
