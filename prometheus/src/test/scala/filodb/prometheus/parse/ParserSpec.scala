@@ -502,11 +502,19 @@ class ParserSpec extends AnyFunSpec with Matchers {
       "foo @",
       "foo @ -1",  // TODO: Prometheus allows this
       "foo[5s] @ 1",  // TODO(a_theimer): double-check
+      "foo @ start",
+      "foo @ end",
+      "foo[1m] @ start",
+      "foo[1m] offset 1m @ start",
+      "foo[1m] @ end offset 1m",
+      "foo @ 12345 offset start()",
+      "foo @ start() @ end()",
       """@{_ws_="bar"}""",
       "foo @ bar",
       "foo @ offset 1m",
       "foo offset 1m @",
       "foo @ 12345 offset",
+      "foo @ 12345 @ 12345",
       "foo offset @",
       "foo @ offset",
       "foo 12345 @",
@@ -572,6 +580,24 @@ class ParserSpec extends AnyFunSpec with Matchers {
       "foo[5m:10s] @ 1524855987 offset 1m" ->  // @ end - 1s - 1m
         "TopLevelSubquery(PeriodicSeries(RawSeries(IntervalSelector(1524855630000,1524855920000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855630000,10000,1524855920000,None),1524855630000,10000,1524855920000,300000,Some(61000))",
       "rate(foo[5m:10s] @ 1524855987 offset 1m)" ->  // same as above
+        "SubqueryWithWindowing(PeriodicSeries(RawSeries(IntervalSelector(1524855630000,1524855920000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855630000,10000,1524855920000,None),1524855988000,0,1524855988000,Rate,List(),300000,10000,Some(60000))",
+      "foo @ start()" ->  // same as "foo @ 1524855988000"
+        "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None)",
+      "foo @ end()" ->  // same as above (no effect to instant queries)
+        "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None)",
+      "foo @ start() offset 1m" ->
+        "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),Some(60000)),1524855988000,1000000,1524855988000,Some(60000))",
+      "foo offset 1m @ end()" ->  // same as above
+        "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),Some(60000)),1524855988000,1000000,1524855988000,Some(60000))",
+      "foo[1m] offset 1s @ end()" ->  // @ end is same as unchanged evaluation time
+        "RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(60000),Some(1000))",
+      "foo[1m] offset 1s @ start()" ->  // start is beginning of window (when its end is at the usual evaluation time)
+        "RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(60000),Some(61000))",
+      "foo[5m:10s] @ start() offset 1m" ->  // as above: start is the beginning of the window
+        "TopLevelSubquery(PeriodicSeries(RawSeries(IntervalSelector(1524855330000,1524855620000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855330000,10000,1524855620000,None),1524855330000,10000,1524855620000,300000,Some(360000))",
+      "foo[5m:10s] offset 1m @ end()" ->
+        "TopLevelSubquery(PeriodicSeries(RawSeries(IntervalSelector(1524855630000,1524855920000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855630000,10000,1524855920000,None),1524855630000,10000,1524855920000,300000,Some(60000))",
+      "rate(foo[5m:10s] offset 1m @ end())" ->
         "SubqueryWithWindowing(PeriodicSeries(RawSeries(IntervalSelector(1524855630000,1524855920000),List(ColumnFilter(__name__,Equals(foo))),List(),Some(300000),None),1524855630000,10000,1524855920000,None),1524855988000,0,1524855988000,Rate,List(),300000,10000,Some(60000))"
     )
     queryToLpString.foreach { case (query, exp) =>
