@@ -1,7 +1,8 @@
 package filodb.prometheus.ast
 
 import scala.util.Try
-import filodb.core.{GlobalConfig, query}
+
+import filodb.core.{query, GlobalConfig}
 import filodb.core.query.{ColumnFilter, RangeParams}
 import filodb.prometheus.parse.Parser
 import filodb.query._
@@ -22,7 +23,15 @@ sealed trait JoinMatching {
   def labels: Seq[String]
 }
 
+/**
+ * Represents the timestamp of a PromQL '@' modifier.
+ */
 sealed trait AtTimestamp {
+  /**
+   * Returns the Unix timestamp.
+   * @param windowSec the duration of the window that this AtTimestamp modifies.
+   *   Note: this exists only to suport AtStart.
+   */
   def getUnix(timeParams: TimeRangeParams, windowSec: Long) : Long
 }
 
@@ -80,10 +89,7 @@ case object ManyToMany extends Cardinal {
 
 private object Utils {
   /**
-   * TODO(a_theimer): outdated
-   * Aligns the TimeRangeParams 'end' time to the 'at' timestamp (if it exists).
-   *   The 'start' time is shifted by the same diff.
-   * If the 'at' timestamp is not present: returns the argument TimeRangeParams.
+   * Returns the total offset required to account for both the "offset" and "at" modifiers.
    */
   def getTotalOffsetMs(timeParams: TimeRangeParams,
                        windowSec: Long,
@@ -93,7 +99,6 @@ private object Utils {
       case Some(atTimestamp) => {
         val unixTimestamp = atTimestamp.getUnix(timeParams, windowSec)
         // TODO: Prometheus allows negative timestamps
-        // TODO(a_theimer): should not be checked here
         require(unixTimestamp >= 0, "negative '@' timestamp not allowed")
         val delta = unixTimestamp - timeParams.end
         require(timeParams.start + delta >= 0,
@@ -330,14 +335,13 @@ case class InstantExpression(metricName: Option[String],
     // we start from 5 minutes earlier that provided start time in order to include last sample for the
     // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
     val offsetMs = Utils.getTotalOffsetMs(timeParams, 0, at, offset)
-    //scalastyle:off
-    println(if (offsetMs > 0) Some(offsetMs) else None)
+    val offsetOpt = if (offsetMs > 0) Some(offsetMs) else None
     val ps = PeriodicSeries(
       RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq,
                 Some(staleDataLookbackMillis),
-                if (offsetMs > 0) Some(offsetMs) else None),
+                offsetOpt),
       timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
-      if (offsetMs > 0) Some(offsetMs) else None
+      offsetOpt
     )
     bucketOpt.map { bOpt =>
       // It's a fixed value, the range params don't matter at all
@@ -358,10 +362,13 @@ case class InstantExpression(metricName: Option[String],
     LabelCardinality(columnFilters, timeParams.start * 1000, timeParams.end * 1000)
 
   def toRawSeriesPlan(timeParams: TimeRangeParams, offsetMs: Option[Long] = None): RawSeries = {
-    require(offsetMs.isEmpty)  // TODO(a_theimer)
+    require(offsetMs.isEmpty)  // TODO(a_theimer): offsetMs is never passed a non-default argument. What is it for?
     val offsetMsTotal = Utils.getTotalOffsetMs(timeParams, 0, at, offset)
-    RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
-      if (offsetMsTotal > 0) Some(offsetMsTotal) else None)
+    RawSeries(Base.timeParamToSelector(timeParams),
+              columnFilters,
+              column.toSeq,
+              Some(staleDataLookbackMillis),
+              if (offsetMsTotal > 0) Some(offsetMsTotal) else None)
   }
 
   /**

@@ -500,8 +500,6 @@ class ParserSpec extends AnyFunSpec with Matchers {
   it ("should fail to parse with antlr") {
     val queries = Seq(
       "foo @",
-      "foo @ -1",  // TODO: Prometheus allows this
-      "foo[5s] @ 1",  // TODO(a_theimer): double-check
       "foo @ start",
       "foo @ end",
       "foo[1m] @ start",
@@ -903,12 +901,6 @@ class ParserSpec extends AnyFunSpec with Matchers {
       case _ => throw new UnsupportedOperationException()
     }
     val planString = lp.toString
-    // TODO(a_theimer)
-    if (planString != expectedLp) {
-      println(query)
-      println(planString)
-      println(expectedLp)
-    }
     planString shouldEqual (expectedLp)
   }
 
