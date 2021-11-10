@@ -1,8 +1,7 @@
 package filodb.prometheus.ast
 
 import scala.util.Try
-
-import filodb.core.{query, GlobalConfig}
+import filodb.core.{GlobalConfig, query}
 import filodb.core.query.{ColumnFilter, RangeParams}
 import filodb.prometheus.parse.Parser
 import filodb.query._
@@ -24,23 +23,23 @@ sealed trait JoinMatching {
 }
 
 sealed trait AtTimestamp {
-  def getUnix(timeParams: TimeRangeParams) : Long
+  def getUnix(timeParams: TimeRangeParams, windowSec: Long) : Long
 }
 
 case class AtUnix(time: Long) extends AtTimestamp {
-  override def getUnix(timeParams: TimeRangeParams): Long = {
+  override def getUnix(timeParams: TimeRangeParams, windowSec: Long): Long = {
     time
   }
 }
 
 case class AtStart() extends AtTimestamp {
-  override def getUnix(timeParams: TimeRangeParams): Long = {
-    timeParams.start
+  override def getUnix(timeParams: TimeRangeParams, windowSec: Long): Long = {
+    timeParams.start - windowSec
   }
 }
 
 case class AtEnd() extends AtTimestamp {
-  override def getUnix(timeParams: TimeRangeParams): Long = {
+  override def getUnix(timeParams: TimeRangeParams, windowSec: Long): Long = {
     timeParams.end
   }
 }
@@ -87,11 +86,12 @@ private object Utils {
    * If the 'at' timestamp is not present: returns the argument TimeRangeParams.
    */
   def getTotalOffsetMs(timeParams: TimeRangeParams,
-                      at: Option[AtTimestamp],
-                      offset: Option[Duration]): Long = {
+                       windowSec: Long,
+                       at: Option[AtTimestamp],
+                       offset: Option[Duration]): Long = {
     val atOffsetMs = at match {
       case Some(atTimestamp) => {
-        val unixTimestamp = atTimestamp.getUnix(timeParams)
+        val unixTimestamp = atTimestamp.getUnix(timeParams, windowSec)
         // TODO: Prometheus allows negative timestamps
         // TODO(a_theimer): should not be checked here
         require(unixTimestamp >= 0, "negative '@' timestamp not allowed")
@@ -165,7 +165,7 @@ case class SubqueryExpression(subquery: PeriodicSeries,
     // when start and end parameters are not the same.
     require(timeParams.start == timeParams.end, "Subquery is not allowed as a top level expression for query_range")
 
-    val offsetSec = Utils.getTotalOffsetMs(timeParams, at, offset) / 1000
+    val offsetSec = Utils.getTotalOffsetMs(timeParams, sqcl.window.millis(1L) / 1000, at, offset) / 1000
     var endS = timeParams.start - offsetSec
     val stepToUseMs = SubqueryUtils.getSubqueryStepMs(sqcl.step);
     var startS = endS - (sqcl.window.millis(1L) / 1000)
@@ -176,8 +176,6 @@ case class SubqueryExpression(subquery: PeriodicSeries,
       stepToUseMs/1000,
       endS
     )
-    //scalastyle:off
-    println(subquery.getClass)
     TopLevelSubquery(
       subquery.toSeriesPlan(timeParamsToUse),
       startS * 1000,
@@ -331,7 +329,7 @@ case class InstantExpression(metricName: Option[String],
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     // we start from 5 minutes earlier that provided start time in order to include last sample for the
     // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
-    val offsetMs = Utils.getTotalOffsetMs(timeParams, at, offset)
+    val offsetMs = Utils.getTotalOffsetMs(timeParams, 0, at, offset)
     //scalastyle:off
     println(if (offsetMs > 0) Some(offsetMs) else None)
     val ps = PeriodicSeries(
@@ -361,7 +359,7 @@ case class InstantExpression(metricName: Option[String],
 
   def toRawSeriesPlan(timeParams: TimeRangeParams, offsetMs: Option[Long] = None): RawSeries = {
     require(offsetMs.isEmpty)  // TODO(a_theimer)
-    val offsetMsTotal = Utils.getTotalOffsetMs(timeParams, at, offset)
+    val offsetMsTotal = Utils.getTotalOffsetMs(timeParams, 0, at, offset)
     RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
       if (offsetMsTotal > 0) Some(offsetMsTotal) else None)
   }
@@ -405,7 +403,7 @@ case class RangeExpression(metricName: Option[String],
     if (isRoot && timeParams.start != timeParams.end) {
       throw new UnsupportedOperationException("Range expression is not allowed in query_range")
     }
-    val offsetMs = Utils.getTotalOffsetMs(timeParams, at, offset)
+    val offsetMs = Utils.getTotalOffsetMs(timeParams, window.millis(timeParams.step * 1000) / 1000, at, offset)
     // multiply by 1000 to convert unix timestamp in seconds to millis
     val rs = RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq,
       Some(window.millis(timeParams.step * 1000)),
