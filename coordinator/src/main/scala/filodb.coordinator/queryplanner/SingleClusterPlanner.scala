@@ -148,7 +148,7 @@ class SingleClusterPlanner(val dataset: Dataset,
           }
           case lce: TsCardExec => {
             val reducer = TsCardReduceExec(qContext, targetActor, many)
-            reducer.addRangeVectorTransformer(TsCardPresenter())
+            reducer.addRangeVectorTransformer(TsCardPresenter(lce.groupDepth))
             reducer
           }
           case ske: PartKeysExec => PartKeysDistConcatExec(qContext, targetActor, many)
@@ -510,10 +510,10 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
 
   private def materializeTsCardinalities(qContext: QueryContext,
-                                           lp: TsCardinalities): PlanResult = {
+                                         lp: TsCardinalities): PlanResult = {
     val metaExec = shardMapperFunc.assignedShards.map{ shard =>
       val dispatcher = dispatcherForShard(shard)
-      exec.TsCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix)
+      exec.TsCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.groupDepth)
     }
     PlanResult(metaExec, false)
   }

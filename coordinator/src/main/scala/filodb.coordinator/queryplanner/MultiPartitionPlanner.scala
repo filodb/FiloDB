@@ -429,32 +429,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     PlanResult(execPlan::Nil)
   }
 
-  private def materializeTsCardinalities(qContext: QueryContext, lp: TsCardinalities) : PlanResult = {
-    // TODO(a_theimer): outdated?
-    // This code is nearly identical to materializeMetadataQueryPlan, but it prevents some
-    //   boilerplate code clutter that results when TopkCardinalities extends MetadataQueryPlan.
-    //   If this code's maintenance isn't worth some extra stand-in lines of code (i.e. at matchers that
-    //   take MetadataQueryPlan instances), then just extend TopkCardinalities from MetadataQueryPlan.
-    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val partitions = partitionLocationProvider.getAuthorizedPartitions(
-      TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
-    val execPlan = if (partitions.isEmpty) {
-      logger.warn(s"No partitions found for ${queryParams.startSecs}, ${queryParams.endSecs}")
-      localPartitionPlanner.materialize(lp, qContext)
-    } else {
-      val leafPlans = partitions.map { p =>
-        logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
-        if (p.partitionName.equals(localPartitionName))
-          localPartitionPlanner.materialize(lp.copy(), qContext)
-        else ??? // TODO: handle remote
-      }.toSeq
-      val reducer = TsCardReduceExec(qContext, inProcessPlanDispatcher, leafPlans)
-      reducer.addRangeVectorTransformer(TsCardPresenter())
-      reducer
-    }
-    PlanResult(execPlan::Nil)
-  }
-
   private def createMetadataRemoteExec(qContext: QueryContext, partitionAssignment: PartitionAssignment,
                                        urlParams: Map[String, String]) = {
     val finalQueryContext = generateRemoteExecParams(

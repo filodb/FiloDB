@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import scala.collection.mutable
 
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -15,11 +16,12 @@ import filodb.core.query._
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.store.ChunkSource
 import filodb.memory.{UTF8StringMedium, UTF8StringShort}
-import filodb.memory.format.{SeqRowReader, SingleValueRowReader, StringArrayRowReader, UTF8MapIteratorRowReader, UnsafeUtils, ZeroCopyUTF8String}
+import filodb.memory.format.{SeqRowReader, SingleValueRowReader, StringArrayRowReader,
+                             UTF8MapIteratorRowReader, UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
-import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
+import filodb.query.exec.TsCardExec.{ADD_INACTIVE, MAX_RESPONSE_SIZE}
 
 trait MetadataDistConcatExec extends NonLeafExecPlan {
 
@@ -63,18 +65,23 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
   }
 }
 
-// TODO(a_theimer): probably broken
 case object SerializeUtils {
   def serialize(obj: Any) : Array[Byte] = {
     val byte_os = new ByteArrayOutputStream()
     val obj_os = new ObjectOutputStream(byte_os)
     obj_os.writeObject(obj)
-    byte_os.toByteArray
+    val res = byte_os.toByteArray
+    byte_os.close()
+    obj_os.close()
+    res
   }
   def deSerialize[T](bytes: Array[Byte]): T = {
-    val bis = new ByteArrayInputStream(bytes)
-    val ois = new ObjectInputStream(bis)
-    ois.readObject().asInstanceOf[T]
+    val byte_is = new ByteArrayInputStream(bytes)
+    val obj_is = new ObjectInputStream(byte_is)
+    val res = obj_is.readObject().asInstanceOf[T]
+    byte_is.close()
+    obj_is.close()
+    res
   }
 }
 
@@ -83,8 +90,7 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
                                         children: Seq[ExecPlan]) extends MetadataDistConcatExec
 
 /**
-  * TODO(a_theimer): outdated
-  * Aggregates output from TopkCardExec.
+  * Aggregates output from TsCardExec.
   */
 final case class TsCardReduceExec(queryContext: QueryContext,
                                   dispatcher: PlanDispatcher,
@@ -93,16 +99,21 @@ final case class TsCardReduceExec(queryContext: QueryContext,
 
   override protected def args: String = ""
 
-  private def mapFold(acc: mutable.HashMap[ZeroCopyUTF8String, CardCounts], rv: RangeVector):
-      mutable.HashMap[ZeroCopyUTF8String, CardCounts] = {
+  private def mapFold(acc: mutable.HashMap[Seq[ZeroCopyUTF8String], CardCounts], rv: RangeVector):
+      mutable.HashMap[Seq[ZeroCopyUTF8String], CardCounts] = {
     rv.rows().foreach{ r =>
       val mapSer = r.getAny(0).asInstanceOf[ZeroCopyUTF8String].bytes
-      val map = SerializeUtils.deSerialize[Map[ZeroCopyUTF8String, CardCounts]](mapSer)
+      val map = SerializeUtils.deSerialize[Map[Seq[ZeroCopyUTF8String], CardCounts]](mapSer)
       map.foreach{ case (name, counts) =>
-        val accCounts = acc.getOrElse(name, CardCounts(0, 0))
-        val sumCounts = CardCounts(accCounts.active + counts.active,
-                                   accCounts.total + counts.total)
-        acc.update(name, sumCounts)
+        val accCountsOpt = acc.get(name)
+        // check if we either (1) won't increase the size or (2) have enough room for another
+        // TODO(a_theimer): something other than just dropping extras
+        if (accCountsOpt.nonEmpty || acc.size < MAX_RESPONSE_SIZE) {
+          val accCounts = accCountsOpt.getOrElse(CardCounts(0, 0))
+          val sumCounts = CardCounts(accCounts.active + counts.active,
+                                     accCounts.total + counts.total)
+          acc.update(name, sumCounts)
+        }
       }
     }
     acc
@@ -115,8 +126,7 @@ final case class TsCardReduceExec(queryContext: QueryContext,
       case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
       case (QueryError(_, _, ex), _)         => throw ex
     }.flatten
-      // fold all child sketches into a single map
-      .foldLeftL(new mutable.HashMap[ZeroCopyUTF8String, CardCounts])(mapFold)
+      .foldLeftL(new mutable.HashMap[Seq[ZeroCopyUTF8String], CardCounts])(mapFold)
       .map{ aggMap =>
         val serMap = ZeroCopyUTF8String(SerializeUtils.serialize(aggMap.toMap))  // TODO(a_theimer): toMap needed?
         val it = Seq(SingleValueRowReader(serMap)).iterator
@@ -127,11 +137,10 @@ final case class TsCardReduceExec(queryContext: QueryContext,
 }
 
 /**
-  * TODO(a_theimer): outdated
-  * Deserializes the ItemsSketch, selects the top-k metrics,
-  * and packages them into a 2-columned range vector.
+  * Dynamically packages the (prefix -> cardinalities) map into a RangeVector,
+  *   where its width and column names depend upon the size of each shard key prefix.
   */
-final case class TsCardPresenter() extends RangeVectorTransformer {
+final case class TsCardPresenter(groupDepth: Int) extends RangeVectorTransformer {
   import TsCardExec._
 
   override def funcParams: Seq[FuncArgs] = Nil
@@ -141,16 +150,16 @@ final case class TsCardPresenter() extends RangeVectorTransformer {
   def apply(source: Observable[RangeVector],
             querySession: QuerySession,
             limit: Int,
-            sourceSchema: ResultSchema, paramsResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
+            sourceSchema: ResultSchema, paramsResponse: Seq[Observable[ScalarRangeVector]]
+           ): Observable[RangeVector] = {
     source.map { rv =>
-      // TODO(a_theimer): lots of comments outdated
-      // Deserialize the sketch.
       // Note: getString() throws a ClassCastException.
       val mapSer = rv.rows.next.getAny(0).asInstanceOf[ZeroCopyUTF8String].bytes
-      SerializeUtils.deSerialize[Map[ZeroCopyUTF8String, CardCounts]](mapSer)
+      SerializeUtils.deSerialize[Map[Seq[ZeroCopyUTF8String], CardCounts]](mapSer)
     }.map { countMap =>
-      val iter = countMap.map{ case (name, count) =>
-        SeqRowReader(Seq(name, count.active, count.total))
+      val iter = countMap.map{ case (names, counts) =>
+        val concatColValues = Seq(names, Seq(counts.active, counts.total)).flatten
+        SeqRowReader(concatColValues)
       }.iterator
       IteratorBackedRangeVector(CustomRangeVectorKey(Map.empty),
         new NoCloseCursor(iter),
@@ -158,10 +167,19 @@ final case class TsCardPresenter() extends RangeVectorTransformer {
     }
   }
 
-  override def schema(source: ResultSchema): ResultSchema = ResultSchema(
-    Seq(ColumnInfo("Name", ColumnType.StringColumn),
-        ColumnInfo("Active", ColumnType.IntColumn),
-        ColumnInfo("Total", ColumnType.IntColumn)), 1)
+  override def schema(source: ResultSchema): ResultSchema = {
+    // append the appropriate columns according to groupDepth
+    val nameColSeq = new mutable.ArrayBuffer[String](1 + groupDepth)
+    nameColSeq.append("ws")
+    if (groupDepth > 0) nameColSeq.append("ns")
+    if (groupDepth > 1) nameColSeq.append("metric")
+    ResultSchema(
+      Seq(
+        nameColSeq.map(s => ColumnInfo(s, ColumnType.StringColumn)),
+        Seq(ColumnInfo("Active", ColumnType.IntColumn),
+            ColumnInfo("Total", ColumnType.IntColumn))
+      ).flatten, 1)
+  }
 }
 
 final case class LabelValuesDistConcatExec(queryContext: QueryContext,
@@ -399,45 +417,127 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
 
 final case object TsCardExec {
   // TODO: tune this
-  val MAX_RESPONSE_SIZE = 5000;
+  val MAX_RESPONSE_SIZE = 5000
+
+  // just to keep memStore.topKCardinality calls consistent
+  val ADD_INACTIVE = true
 
   // TODO(a_theimer): Int? Long?
-  case class CardCounts(active: Int, total: Int)
+  case class CardCounts(active: Int, total: Int) {
+    require(total >= active, "total must be at least as large as active")
+  }
 }
 
 /**
- * // TODO(a_theimer): outdated
-  * Given a shardKeyPrefix, retrieves an estimate of the top-k label-values
-  *  from a specific shard. This is an "estimate" because sketches are used to
-  *  contain count data.
-  *
-  * The accuracy of the estimate is tunable by MAX_ITEMSKETCH_MAP_SIZE.
-  *   The link at its definition describes how its value will affect the estimate.
-  *
-  * Note that the sketch-- a DataSketches ItemsSketch-- maintains a set of
-  *   "heavy hitters." These are the elements whose counts lie above
-  *   a threshold that increases as any counts are increased. This means the
-  *   data must be "sufficiently skewed" in order for a sketch to show that
-  *   any of its elements were heavy hitters.
-  *
-  * Additionally, MAX_ITEMSKETCH_MAP_SIZE bounds the number of elements the
-  *   sketch counts at any given time. If sketch.update(elt, count) is called
-  *   on a currently-uncounted element while the sketch is at full capacity, then
-  *   all counters are decreased by some median count-value, and any below zero
-  *   are removed to make room for the new element. Again: tread carefully when
-  *   metric cardinalities are similar.
-  *
-  * See here for more details:
-  *   https://datasketches.apache.org/docs/Frequency/FrequentItemsOverview.html
+  * Creates a map of (prefix -> cardinalities) according to the TsCardinalities LogicalPlan.
+  *   See TsCardinalities for more details.
   */
 final case class TsCardExec(queryContext: QueryContext,
                             dispatcher: PlanDispatcher,
                             dataset: DatasetRef,
                             shard: Int,
-                            shardKeyPrefix: Seq[String]) extends LeafExecPlan {
+                            shardKeyPrefix: Seq[String],
+                            groupDepth: Int) extends LeafExecPlan {
 
   override def enforceLimit: Boolean = false
 
+  /**
+   * Given a shard key prefix, iterates through all child
+   *   prefixes with the specified size.
+   *
+   * Note: next() will always return the same array instance.
+   *
+   * @param tsMemStore contains the shard keys over which to iterate
+   * @param initPrefix shard key prefix to resolve
+   * @param extendToSize the length of the prefix children to iterate through
+   */
+  class PrefixIterator (tsMemStore: TimeSeriesMemStore,
+                        initPrefix: Seq[String],
+                        extendToSize: Int) extends Iterator[Seq[String]]{
+
+    // A queue for each set of "space" (i.e. namespace, workspace, metric) labels.
+    // Spaces are stored in descending precedence, and each successive queue
+    //   contains labels for the "subspace" of the label at the front of the
+    //   previous queue.
+    private val spaceQueues = new Array[mutable.Queue[String]](extendToSize)
+
+    // Stores the prefix returned by next().
+    private val currPrefix = new mutable.ArrayBuffer[String](extendToSize)
+
+    private var iFirstEmptyQueue = -1
+
+    // TODO(a_theimer): this feels gross
+    initialize()
+
+    private def initialize(): Unit = {
+      // initialize each of the queues
+      for (i <- 0 until extendToSize) {
+        spaceQueues(i) = new mutable.Queue[String]
+      }
+
+      for (i <- 0 until initPrefix.size) {
+        // Place each existing prefix label into appropriate queue.
+        spaceQueues(i).enqueue(initPrefix(i))
+        // Store as much of the prefix as we have available.
+        currPrefix.append(initPrefix(i))
+      }
+
+      iFirstEmptyQueue = initPrefix.size
+
+      // Need this because an empty prefix is a valid argument, and hasNext()
+      //   relies on spaceQueues(0).size.
+      // This results in one extra enqueueAndUpdatePrefix() call at the first next().
+      enqueueAndUpdatePrefix()
+    }
+
+    /**
+     * Dequeues from each queue-- in ascending precedence-- until a dequeue()
+     *   does not leave a queue empty.
+     *
+     * This method mostly exists as setup for enqueueAndUpdatePrefix().
+     */
+    private def dequeue(): Unit = {
+      require(spaceQueues.last.nonEmpty, "should never dequeue without full prefix")
+      iFirstEmptyQueue = spaceQueues.size
+      for (queue <- spaceQueues.reverseIterator) {
+        queue.dequeue()
+        if (queue.nonEmpty) {
+          return
+        }
+        iFirstEmptyQueue = iFirstEmptyQueue - 1
+      }
+    }
+
+    /**
+     * Given the prefix defined by the front of each queue,
+     *   repopulates empty queues with "subspace" labels.
+     */
+    private def enqueueAndUpdatePrefix(): Unit = {
+      currPrefix.reduceToSize(iFirstEmptyQueue)
+      // Fill each successive queue with the topKCardinality result such that
+      //   its argument prefix is defined by the preceding queue front labels.
+      for (iempty <- iFirstEmptyQueue until extendToSize) {
+        // TODO(a_theimer): MAX_RESPONSE_SIZE works, but not exactly the same meaning
+        tsMemStore.topKCardinality(dataset, Seq(shard), currPrefix,
+                                   MAX_RESPONSE_SIZE, ADD_INACTIVE).foreach{ card =>
+          spaceQueues(iempty).enqueue(card.childName)
+        }
+        // currPrefix will contain all front labels
+        currPrefix.append(spaceQueues(iempty).front)
+      }
+      iFirstEmptyQueue = extendToSize
+    }
+
+    override def hasNext: Boolean = spaceQueues.head.nonEmpty
+
+    override def next(): Seq[String] = {
+      enqueueAndUpdatePrefix()
+      dequeue() // Note: also setup for hasNext().
+      currPrefix
+    }
+  }
+
+  // scalastyle:off cyclomatic.complexity
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
@@ -449,23 +549,46 @@ final case class TsCardExec(queryContext: QueryContext,
     val rvs = source match {
       case tsMemStore: TimeSeriesMemStore =>
         Observable.eval {
-          val addInactive = true  // this doesn't matter since (ideally) we'll exhaust the store
-          val topkCards = tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix,
-                                                     MAX_RESPONSE_SIZE, addInactive)
+          val countMap = if (groupDepth == shardKeyPrefix.size - 1) {
+            // shardKeyPrefix is as deep as the groupDepth; we execute only a single topKCardinality
+            //   call on the "prefix's prefix", then map the prefix to its cardinality iff the
+            //   "deepest" prefix label is found in the results.
+            val res = tsMemStore.topKCardinality(dataset, Seq(shard),
+                                                 shardKeyPrefix.dropRight(1),
+                                                 MAX_RESPONSE_SIZE, ADD_INACTIVE)
+              .find(card => card.childName == shardKeyPrefix.last)
+            if (res.nonEmpty) {
+              Map(shardKeyPrefix -> CardCounts(res.get.activeTsCount, res.get.tsCount))
+            } else {
+              Map()
+            }
+          } else {
+            // groupDepth is deeper than shardKeyPrefix.
+            // We will "expand" shardKeyPrefix into all of its child prefixes at groupDepth - 1,
+            //   then we'll pass the children to memstore.topKCardinality and map the results.
 
-          // Store each count.
-          val countMap = topkCards.map{ card =>
-            card.childName.utf8 -> CardCounts(card.activeTsCount, card.tsCount)
-          }.toMap  // TODO(a_theimer): need this?
+            // The conditional exists because PrefixIterator currently
+            //   needs to extend a prefix to a size > 0
+            val prefixIter = if (groupDepth > 0) {
+              // Note: groupDepth equals the length of the prefix to extend to (at groupDepth - 1)
+              new PrefixIterator(tsMemStore, shardKeyPrefix, groupDepth)
+            } else {
+              Seq(Seq()).iterator
+            }
+
+            prefixIter.flatMap { prefix =>
+              tsMemStore.topKCardinality(dataset, Seq(shard), prefix,
+                                         MAX_RESPONSE_SIZE, ADD_INACTIVE)
+                .map{ card =>
+                  // Concatenate `prefix` with the least-significant name.
+                  val totalPrefix = Seq(prefix, Seq(card.childName)).flatMap(_.map(_.utf8)).toSeq
+                  totalPrefix -> CardCounts(card.activeTsCount, card.tsCount)
+                }
+            }.toMap
+          }
 
           // serialize the map; pack it into a RangeVector
           val serMap = ZeroCopyUTF8String(SerializeUtils.serialize(countMap))
-
-          // TODO(a_theimer: remove this)
-          val deserMap = SerializeUtils.deSerialize[Map[ZeroCopyUTF8String, CardCounts]](serMap.bytes)
-          if (countMap != deserMap) {
-            ???
-          }
 
           val it = Seq(SingleValueRowReader(serMap)).iterator
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
@@ -476,6 +599,7 @@ final case class TsCardExec(queryContext: QueryContext,
     val sch = ResultSchema(Seq(ColumnInfo("TsCardMap", ColumnType.StringColumn)), 1)
     ExecResult(rvs, Task.eval(sch))
   }
+  // scalastyle:on cyclomatic.complexity
 
   def args: String = s"shard=$shard, shardKeyPrefix=$shardKeyPrefix, " +
     s"limit=${queryContext.plannerParams.sampleLimit}"
