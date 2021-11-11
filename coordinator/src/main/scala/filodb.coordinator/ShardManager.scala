@@ -41,7 +41,9 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     () => { _datasetInfo.map{ case (dsRef, _) => dsRef}.toIterator },
     () => { _coordinators.head._2 }
   )
-  _shardMetricAggregator.scheduleAggregatorJob()
+  if (settings.config.getBoolean("shard-key-level-ingestion-metrics-enabled")) {
+    _shardMetricAggregator.scheduleAggregatorJob()
+  }
 
   val shardReassignmentMinInterval = settings.config.getDuration("shard-manager.reassignment-min-interval")
 
