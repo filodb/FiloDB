@@ -5,10 +5,7 @@ import scala.collection.mutable
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
-import org.apache.datasketches.ArrayOfStringsSerDe
 import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
-import org.apache.datasketches.frequencies.{ErrorType, ItemsSketch}
-import org.apache.datasketches.memory.Memory
 
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
@@ -18,11 +15,11 @@ import filodb.core.query._
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.store.ChunkSource
 import filodb.memory.{UTF8StringMedium, UTF8StringShort}
-import filodb.memory.format.{RowReader, SeqRowReader, SingleValueRowReader, StringArrayRowReader,
-                             UnsafeUtils, UTF8MapIteratorRowReader, ZeroCopyUTF8String}
+import filodb.memory.format.{SeqRowReader, SingleValueRowReader, StringArrayRowReader, UTF8MapIteratorRowReader, UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 
 trait MetadataDistConcatExec extends NonLeafExecPlan {
 
@@ -66,25 +63,47 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
   }
 }
 
+// TODO(a_theimer): probably broken
+case object SerializeUtils {
+  def serialize(obj: Any) : Array[Byte] = {
+    val byte_os = new ByteArrayOutputStream()
+    val obj_os = new ObjectOutputStream(byte_os)
+    obj_os.writeObject(obj)
+    byte_os.toByteArray
+  }
+  def deSerialize[T](bytes: Array[Byte]): T = {
+    val bis = new ByteArrayInputStream(bytes)
+    val ois = new ObjectInputStream(bis)
+    ois.readObject().asInstanceOf[T]
+  }
+}
+
 final case class PartKeysDistConcatExec(queryContext: QueryContext,
                                         dispatcher: PlanDispatcher,
                                         children: Seq[ExecPlan]) extends MetadataDistConcatExec
 
 /**
+  * TODO(a_theimer): outdated
   * Aggregates output from TopkCardExec.
   */
-final case class TopkCardReduceExec(queryContext: QueryContext,
-                                    dispatcher: PlanDispatcher,
-                                    children: Seq[ExecPlan],
-                                    k: Int) extends NonLeafExecPlan {
+final case class TsCardReduceExec(queryContext: QueryContext,
+                                  dispatcher: PlanDispatcher,
+                                  children: Seq[ExecPlan]) extends NonLeafExecPlan {
+  import TsCardExec._
+
   override protected def args: String = ""
 
-  private def sketchFold(acc: ItemsSketch[String], rv: RangeVector):
-            ItemsSketch[String] = {
+  private def mapFold(acc: mutable.HashMap[ZeroCopyUTF8String, CardCounts], rv: RangeVector):
+      mutable.HashMap[ZeroCopyUTF8String, CardCounts] = {
     rv.rows().foreach{ r =>
-      val sketchSer = r.getAny(0).asInstanceOf[ZeroCopyUTF8String].bytes
-      val sketch = ItemsSketch.getInstance(Memory.wrap(sketchSer), new ArrayOfStringsSerDe)
-      acc.merge(sketch)
+      val mapSer = r.getAny(0).asInstanceOf[ZeroCopyUTF8String].bytes
+      val map = SerializeUtils.deSerialize[Map[ZeroCopyUTF8String, CardCounts]](mapSer)
+      map.foreach{ case (name, counts) =>
+        val accCounts = acc.getOrElse(name, CardCounts(0, 0))
+        val sumCounts = CardCounts(accCounts.active + counts.active,
+                                   accCounts.total + counts.total)
+        acc.update(name, sumCounts)
+      }
     }
     acc
   }
@@ -96,11 +115,11 @@ final case class TopkCardReduceExec(queryContext: QueryContext,
       case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
       case (QueryError(_, _, ex), _)         => throw ex
     }.flatten
-      // fold all child sketches into a single sketch
-      .foldLeftL(new ItemsSketch[String](TopkCardExec.MAX_ITEMSKETCH_MAP_SIZE))(sketchFold)
-      .map{ sketch =>
-        val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ArrayOfStringsSerDe))
-        val it = Seq(SingleValueRowReader(serSketch)).iterator
+      // fold all child sketches into a single map
+      .foldLeftL(new mutable.HashMap[ZeroCopyUTF8String, CardCounts])(mapFold)
+      .map{ aggMap =>
+        val serMap = ZeroCopyUTF8String(SerializeUtils.serialize(aggMap.toMap))  // TODO(a_theimer): toMap needed?
+        val it = Seq(SingleValueRowReader(serMap)).iterator
         IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
       }
     Observable.fromTask(taskOfResults)
@@ -108,10 +127,13 @@ final case class TopkCardReduceExec(queryContext: QueryContext,
 }
 
 /**
+  * TODO(a_theimer): outdated
   * Deserializes the ItemsSketch, selects the top-k metrics,
- *  and packages them into a 2-columned range vector.
+  * and packages them into a 2-columned range vector.
   */
-final case class TopkCardPresenter(k: Int) extends RangeVectorTransformer {
+final case class TsCardPresenter() extends RangeVectorTransformer {
+  import TsCardExec._
+
   override def funcParams: Seq[FuncArgs] = Nil
 
   override protected[exec] def args: String = ""
@@ -121,45 +143,25 @@ final case class TopkCardPresenter(k: Int) extends RangeVectorTransformer {
             limit: Int,
             sourceSchema: ResultSchema, paramsResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     source.map { rv =>
+      // TODO(a_theimer): lots of comments outdated
       // Deserialize the sketch.
       // Note: getString() throws a ClassCastException.
-      val sketchSer = rv.rows.next.getAny(0).asInstanceOf[ZeroCopyUTF8String].bytes
-      ItemsSketch.getInstance(Memory.wrap(sketchSer), new ArrayOfStringsSerDe)
-    }.map{ sketch =>
-      // Collect all rows from the union with frequency estimate upper bounds above a default threshold.
-      val freqRows = sketch.getFrequentItems(ErrorType.NO_FALSE_NEGATIVES)
-
-      // find the topk with a pqueue
-      val topkPqueue =
-        mutable.PriorityQueue[ItemsSketch.Row[String]]()(Ordering.by(row => -row.getEstimate))
-      freqRows.foreach { row =>
-        if (topkPqueue.size < k) {
-          topkPqueue.enqueue(row)
-        } else if (topkPqueue.head.getEstimate < row.getEstimate) {
-          // min count in the heap is less than the current count
-          topkPqueue.dequeue()
-          topkPqueue.enqueue(row)
-        }
-      }
-
-      // Convert the topk to match the schema, then store them in-order in an array.
-      // Use the array's iterator as the backend of a RangeVector.
-      val resSize = math.min(k, topkPqueue.size)
-      val topkRows = new mutable.ArraySeq[RowReader](resSize)
-      for (i <- 0 until resSize) {
-        val heapMin = topkPqueue.dequeue()
-        topkRows(i) = SeqRowReader(Seq(heapMin.getItem, heapMin.getEstimate))
-      }
-
+      val mapSer = rv.rows.next.getAny(0).asInstanceOf[ZeroCopyUTF8String].bytes
+      SerializeUtils.deSerialize[Map[ZeroCopyUTF8String, CardCounts]](mapSer)
+    }.map { countMap =>
+      val iter = countMap.map{ case (name, count) =>
+        SeqRowReader(Seq(name, count.active, count.total))
+      }.iterator
       IteratorBackedRangeVector(CustomRangeVectorKey(Map.empty),
-        new NoCloseCursor(topkRows.reverseIterator),
+        new NoCloseCursor(iter),
         None)
     }
   }
 
   override def schema(source: ResultSchema): ResultSchema = ResultSchema(
-    Seq(ColumnInfo("Metric", ColumnType.StringColumn),
-        ColumnInfo("Cardinality", ColumnType.LongColumn)), 1)
+    Seq(ColumnInfo("Name", ColumnType.StringColumn),
+        ColumnInfo("Active", ColumnType.IntColumn),
+        ColumnInfo("Total", ColumnType.IntColumn)), 1)
 }
 
 final case class LabelValuesDistConcatExec(queryContext: QueryContext,
@@ -395,14 +397,16 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
     s" startMs=$startMs, endMs=$endMs"
 }
 
-final case object TopkCardExec {
+final case object TsCardExec {
   // TODO: tune this
-  // See here for help choosing a size:
-  //   https://datasketches.apache.org/docs/Frequency/FrequentItemsErrorTable.html
-  val MAX_ITEMSKETCH_MAP_SIZE = 256;
+  val MAX_RESPONSE_SIZE = 5000;
+
+  // TODO(a_theimer): Int? Long?
+  case class CardCounts(active: Int, total: Int)
 }
 
 /**
+ * // TODO(a_theimer): outdated
   * Given a shardKeyPrefix, retrieves an estimate of the top-k label-values
   *  from a specific shard. This is an "estimate" because sketches are used to
   *  contain count data.
@@ -426,44 +430,54 @@ final case object TopkCardExec {
   * See here for more details:
   *   https://datasketches.apache.org/docs/Frequency/FrequentItemsOverview.html
   */
-final case class TopkCardExec(queryContext: QueryContext,
-                              dispatcher: PlanDispatcher,
-                              dataset: DatasetRef,
-                              shard: Int,
-                              shardKeyPrefix: Seq[String],
-                              k: Int,
-                              addInactive: Boolean) extends LeafExecPlan {
+final case class TsCardExec(queryContext: QueryContext,
+                            dispatcher: PlanDispatcher,
+                            dataset: DatasetRef,
+                            shard: Int,
+                            shardKeyPrefix: Seq[String]) extends LeafExecPlan {
 
   override def enforceLimit: Boolean = false
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
+    import TsCardExec._
+
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
+
     val rvs = source match {
       case tsMemStore: TimeSeriesMemStore =>
         Observable.eval {
-          val topkCards = tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix, k, addInactive)
-          // Include each into an ItemSketch.
-          val sketch = new ItemsSketch[String](TopkCardExec.MAX_ITEMSKETCH_MAP_SIZE)
-          topkCards.foreach{ card =>
-            val count = if (addInactive) card.tsCount.toLong else card.activeTsCount.toLong
-            sketch.update(card.childName, count)
+          val addInactive = true  // this doesn't matter since (ideally) we'll exhaust the store
+          val topkCards = tsMemStore.topKCardinality(dataset, Seq(shard), shardKeyPrefix,
+                                                     MAX_RESPONSE_SIZE, addInactive)
+
+          // Store each count.
+          val countMap = topkCards.map{ card =>
+            card.childName.utf8 -> CardCounts(card.activeTsCount, card.tsCount)
+          }.toMap  // TODO(a_theimer): need this?
+
+          // serialize the map; pack it into a RangeVector
+          val serMap = ZeroCopyUTF8String(SerializeUtils.serialize(countMap))
+
+          // TODO(a_theimer: remove this)
+          val deserMap = SerializeUtils.deSerialize[Map[ZeroCopyUTF8String, CardCounts]](serMap.bytes)
+          if (countMap != deserMap) {
+            ???
           }
-          // serialize the sketch; pack it into a RangeVector
-          val serSketch = ZeroCopyUTF8String(sketch.toByteArray(new ArrayOfStringsSerDe))
-          val it = Seq(SingleValueRowReader(serSketch)).iterator
+
+          val it = Seq(SingleValueRowReader(serMap)).iterator
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
         }
       case other =>
         Observable.empty
     }
-    val sch = ResultSchema(Seq(ColumnInfo("MetricTopkSketch", ColumnType.StringColumn)), 1)
+    val sch = ResultSchema(Seq(ColumnInfo("TsCardMap", ColumnType.StringColumn)), 1)
     ExecResult(rvs, Task.eval(sch))
   }
 
-  def args: String = s"shard=$shard, shardKeyPrefix=$shardKeyPrefix, k=$k, " +
+  def args: String = s"shard=$shard, shardKeyPrefix=$shardKeyPrefix, " +
     s"limit=${queryContext.plannerParams.sampleLimit}"
 }
 

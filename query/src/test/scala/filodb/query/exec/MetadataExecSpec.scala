@@ -2,7 +2,6 @@ package filodb.query.exec
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
-
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.execution.Scheduler
@@ -10,7 +9,6 @@ import monix.execution.Scheduler.Implicits.global
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.core.MetricsTestData._
 import filodb.core.TestData
 import filodb.core.binaryrecord2.BinaryRecordRowReader
@@ -285,18 +283,17 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
                            "_ws_" -> "1")
   }
 
+  // TODO(a_theimer): update
   it ("should correctly execute cardinality query") {
-    val k = 3
     val shardKeyPrefix = Seq("demo", "App-0")
 
-    val addInactive = true
     val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
-      new TopkCardExec(QueryContext(), executeDispatcher,
-        timeseriesDatasetMultipleShardKeys.ref, ishard, shardKeyPrefix, k, addInactive)
+      new TsCardExec(QueryContext(), executeDispatcher,
+        timeseriesDatasetMultipleShardKeys.ref, ishard, shardKeyPrefix)
     }.toSeq
 
-    val execPlan = TopkCardReduceExec(QueryContext(), executeDispatcher, leaves, k)
-    execPlan.addRangeVectorTransformer(TopkCardPresenter(k))
+    val execPlan = TsCardReduceExec(QueryContext(), executeDispatcher, leaves)
+    execPlan.addRangeVectorTransformer(TsCardPresenter())
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = (resp: @unchecked) match {
@@ -305,15 +302,14 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
         response.size shouldEqual 1
 
         val rowPairs = response(0).rows().map{r =>
-          r.getAny(0).toString -> r.getLong(1)
+          r.getAny(0).toString.utf8 -> r.getInt(1)
         }.toSeq
 
         rowPairs.size shouldEqual 3
-        rowPairs.foldLeft(new mutable.HashMap[ZeroCopyUTF8String, Long]){ (counts, pair) =>
-          var count = counts.getOrElseUpdate(pair._1.utf8, 0)
-          count = count + pair._2
-          counts.update(pair._1.utf8, count)
-          counts
+        rowPairs.foldLeft(new mutable.HashMap[ZeroCopyUTF8String, Int]){ (countAcc, pair) =>
+          val (name, value) = pair
+          countAcc.update(name, value)
+          countAcc
         } shouldEqual Map(
           "http_req_total".utf8 -> 2,
           "http_foo_total".utf8 -> 1,

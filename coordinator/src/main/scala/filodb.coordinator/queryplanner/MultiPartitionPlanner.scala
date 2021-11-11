@@ -140,7 +140,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case lp: ApplyAbsentFunction        => super.materializeAbsentFunction(qContext, lp)
       case lp: ScalarBinaryOperation      => super.materializeScalarBinaryOperation(qContext, lp)
       case lp: ApplyLimitFunction         => super.materializeLimitFunction(qContext, lp)
-      case _: TopkCardinalities           => throw new IllegalArgumentException("TopkCardinalities unexpected here")
+      case _: TsCardinalities             => throw new IllegalArgumentException("TsCardinalities unexpected here")
 
       // Imp: At the moment, these two cases for subquery will not get executed, materialize is already
       // Checking if the plan is a TopLevelSubQuery or any of the descendant is a SubqueryWithWindowing and
@@ -429,7 +429,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     PlanResult(execPlan::Nil)
   }
 
-  private def materializeTopkCardinalities(qContext: QueryContext, lp: TopkCardinalities) : PlanResult = {
+  private def materializeTsCardinalities(qContext: QueryContext, lp: TsCardinalities) : PlanResult = {
+    // TODO(a_theimer): outdated?
     // This code is nearly identical to materializeMetadataQueryPlan, but it prevents some
     //   boilerplate code clutter that results when TopkCardinalities extends MetadataQueryPlan.
     //   If this code's maintenance isn't worth some extra stand-in lines of code (i.e. at matchers that
@@ -447,8 +448,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           localPartitionPlanner.materialize(lp.copy(), qContext)
         else ??? // TODO: handle remote
       }.toSeq
-      val reducer = TopkCardReduceExec(qContext, inProcessPlanDispatcher, leafPlans, lp.k)
-      reducer.addRangeVectorTransformer(TopkCardPresenter(lp.k))
+      val reducer = TsCardReduceExec(qContext, inProcessPlanDispatcher, leafPlans)
+      reducer.addRangeVectorTransformer(TsCardPresenter())
       reducer
     }
     PlanResult(execPlan::Nil)

@@ -115,7 +115,8 @@ object ZeroCopyBinary {
  */
 // scalastyle:off
 // FIXME Needs to use MemoryAccessor
-final class ZeroCopyUTF8String(val base: Any, val offset: Long, val numBytes: Int) extends ZeroCopyBinary {
+final class ZeroCopyUTF8String(val base: Any, val offset: Long, val numBytes: Int
+                  ) extends ZeroCopyBinary with Serializable {  // TODO(a_theimer): does this actually work?
   import ZeroCopyUTF8String._
   import filodb.memory.UTF8String._
 

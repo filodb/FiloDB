@@ -66,8 +66,7 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: LabelValues                 => TimeRange(lp.startMs, lp.endMs)
       case lp: LabelCardinality            => TimeRange(lp.startMs, lp.endMs)
       case lp: LabelNames                  => TimeRange(lp.startMs, lp.endMs)
-      case lp: TopkCardinalities           => throw new IllegalArgumentException(
-                                                          "no time params for TopKCardinalitites")
+      case lp: TsCardinalities             => throw new IllegalArgumentException("no time params for TsCardinalitites")
       case lp: SeriesKeysByFilters         => TimeRange(lp.startMs, lp.endMs)
       case lp: ApplyInstantFunctionRaw     => getTimeFromLogicalPlan(lp.vectors)
       case lp: ScalarBinaryOperation       => TimeRange(lp.rangeParams.startSecs * 1000, lp.rangeParams.endSecs * 1000)
@@ -93,7 +92,7 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: LabelValues              => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
       case lp: LabelNames               => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
       case lp: LabelCardinality         => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
-      case lp: TopkCardinalities        => lp.copy()
+      case lp: TsCardinalities          => lp.copy()
       case lp: SeriesKeysByFilters      => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
     }
   }
@@ -344,7 +343,7 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: RawChunkMeta                => None
       case sq: SubqueryWithWindowing       => getPeriodicSeriesPlan(sq.innerPeriodicSeries)
       case tlsq: TopLevelSubquery          => getPeriodicSeriesPlan(tlsq.innerPeriodicSeries)
-      case lp: TopkCardinalities           => None
+      case lp: TsCardinalities             => None
     }
   }
 
