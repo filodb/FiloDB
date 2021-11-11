@@ -2,16 +2,16 @@ package filodb.coordinator
 
 import scala.collection.mutable
 import scala.util.{Failure, Success}
+
 import akka.actor.{ActorRef, Address, AddressFromURIString}
-import akka.pattern.AskTimeoutException
 import com.typesafe.scalalogging.StrictLogging
 import org.scalactic._
+
 import filodb.coordinator.NodeClusterActor._
 import filodb.core.{DatasetRef, ErrorResponse, Response, Success => SuccessResponse}
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.Dataset
 import filodb.core.store.{AssignShardConfig, IngestionConfig, StoreConfig}
-import filodb.query.QueryResponse
 
 /**
   * NodeClusterActor delegates shard management business logic to this class.
@@ -30,104 +30,18 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
 
   import ShardManager._
 
-  /**
-   * Periodically queries a node for all namespace cardinalities.
-   * Kamon gauges are updated with the response data.
-   *
-   * The intent is to publish a low-cardinality metric such that namespace
-   * cardinality queries can be efficiently answered.
-   */
-  private class ShardMetricAggregator {
-    // TODO(a_theimer): can't make this an object because static code is lazily evaluated?
-    import scala.concurrent.duration.FiniteDuration
-
-    import java.util.concurrent.TimeUnit
-    import kamon.Kamon
-    import kamon.tag.TagSet
-    import monix.execution.Scheduler.{global => scheduler}
-
-    import filodb.coordinator.client.Client
-    import filodb.coordinator.client.QueryCommands.LogicalPlan2Query
-    import filodb.query.{QueryError, QueryResult, TopkCardinalities}
-
-    // All "_TU" constants quantify units of TIME_UNIT.
-    private val TIME_UNIT = TimeUnit.SECONDS
-    private val SCHED_INIT_DELAY_TU = 10
-    private val SCHED_DELAY_TU = 10
-    private val ASK_TIMEOUT_TU = 30
-
-    private val METRIC_NAME = "shard_metric_agg"
-    private val NS_VALUE = "metadata"
-    private val WS_VALUE = "shard"
-    private val K: Int = 250
-
-    // TODO(a_theimer): can this be static in a function? Weird to have here...
-    private val ASK_EXTRACTOR: PartialFunction[Any, QueryResponse] = {
-      case qres: QueryResponse => qres
-    }
-
-    // This will be scheduled when an instance is created.
-    scheduler.scheduleWithFixedDelay(
-      SCHED_INIT_DELAY_TU, SCHED_DELAY_TU, TIME_UNIT,
-      () => {
-        // foreach addInactive / dataset pair...
-        Seq(true, false).foreach{ addInactive =>
-          _datasetInfo.foreach { case (dsRef, _) =>
-            // get the topk workspace values
-            val wsResponse = askTopkBlocking(dsRef, Nil, addInactive)
-            val wsValues = new mutable.ArrayBuffer[String]
-            wsResponse match {
-              case qres: QueryResult => {
-                qres.result.foreach(_.rows().foreach{ rr =>
-                  wsValues.append(rr.getString(0))
-                }
-              )}
-              case qerr: QueryError => ???
-            }
-            // for each workspace, get the topk namespaces
-            wsValues.foreach{ ws =>
-              val nsRes = askTopkBlocking(dsRef, Seq(ws), addInactive)
-              nsRes match {
-                case qres: QueryResult => {
-                  qres.result.foreach(_.rows().foreach{ rr =>
-                    // publish a cardinality metric for each namespace
-                    val ns = rr.getString(0)
-                    val count = rr.getLong(1)
-                    val tags = Map("_ws_" -> WS_VALUE, "_ns_" -> NS_VALUE,
-                                   "ds" -> dsRef.dataset, "ws" -> ws, "ns" -> ns,
-                                   "addInactive" -> addInactive.toString)
-                    Kamon.gauge(METRIC_NAME).withTags(TagSet.from(tags)).update(count.toDouble)
-                  })
-                }
-                case qerr: QueryError => ???
-              }
-            }
-          }
-        }
-      })
-
-    private def askTopkBlocking(dsRef: DatasetRef,
-                                shardKeyPrefix: Seq[String],
-                                addInactive: Boolean): QueryResponse = {
-      try {
-        // asks the first node in _coordinators
-        Client.actorAsk(_coordinators.head._2,
-          LogicalPlan2Query(dsRef, TopkCardinalities(shardKeyPrefix, K, addInactive)),
-          FiniteDuration(ASK_TIMEOUT_TU, TIME_UNIT))(ASK_EXTRACTOR)
-      } catch {
-        case e: AskTimeoutException => ???
-      }
-
-    }
-  }
-
-  private val _shardMetricAggregator = new ShardMetricAggregator
   private var _subscriptions = ShardSubscriptions(Set.empty, Set.empty)
   private val _datasetInfo = new mutable.HashMap[DatasetRef, DatasetInfo]
   private val _shardMappers = new mutable.HashMap[DatasetRef, ShardMapper]
   // preserve deployment order - newest last
   private val _coordinators = new mutable.LinkedHashMap[Address, ActorRef]
   private val _errorShardReassignedAt = new mutable.HashMap[DatasetRef, mutable.HashMap[Int, Long]]
+
+  private val _shardMetricAggregator = ShardMetricAggregator(
+    () => { _datasetInfo.map{ case (dsRef, _) => dsRef}.toIterator },
+    () => { _coordinators.head._2 }
+  )
+  _shardMetricAggregator.scheduleAggregatorJob()
 
   val shardReassignmentMinInterval = settings.config.getDuration("shard-manager.reassignment-min-interval")
 
