@@ -576,7 +576,7 @@ final case class TsCardExec(queryContext: QueryContext,
                                                  MAX_RESPONSE_SIZE, ADD_INACTIVE)
               .find(card => card.childName == shardKeyPrefix.last)
             if (res.nonEmpty) {
-              Map(shardKeyPrefix -> CardCounts(res.get.activeTsCount, res.get.tsCount))
+              Map(shardKeyPrefix.map(_.utf8).toSeq -> CardCounts(res.get.activeTsCount, res.get.tsCount))
             } else {
               Map()
             }

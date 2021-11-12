@@ -285,6 +285,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   it ("should correctly execute TsCardExec") {
     case class TestSpec(shardKeyPrefix: Seq[String], groupDepth: Int, exp: Map[Seq[String], CardCounts])
 
+    // Note: these strings are eventually converted to ZeroCopyUTF8Strings.
     Seq(
       TestSpec(Seq(), 0, Map(
         Seq("demo") -> CardCounts(4,4)
@@ -336,12 +337,14 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
           response.size shouldEqual 1
 
           val resultMap = response(0).rows().map{r =>
-            val prefix = (0 to testSpec.groupDepth).map(i => r.getAny(i).toString).toSeq
+            val prefix = (0 to testSpec.groupDepth).map(i => r.getAny(i).asInstanceOf[ZeroCopyUTF8String]).toSeq
             val counts = CardCounts(r.getInt(testSpec.groupDepth + 1), r.getInt(testSpec.groupDepth + 2))
             prefix -> counts
           }.toMap
 
-          resultMap shouldEqual testSpec.exp
+          resultMap shouldEqual testSpec.exp.map { case (names, counts) =>
+            names.map(_.utf8) -> counts
+          }.toMap
       }
     }
   }
