@@ -282,45 +282,67 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
                            "_ws_" -> "1")
   }
 
-  // TODO(a_theimer): update
-  it ("should correctly execute cardinality query") {
-    val shardKeyPrefix = Seq()
-    val groupDepth = 2
+  it ("should correctly execute TsCardExec") {
+    case class TestSpec(shardKeyPrefix: Seq[String], groupDepth: Int, exp: Map[Seq[String], CardCounts])
 
-    val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
-      new TsCardExec(QueryContext(), executeDispatcher,
-        timeseriesDatasetMultipleShardKeys.ref, ishard, shardKeyPrefix, groupDepth)
-    }.toSeq
+    Seq(
+      TestSpec(Seq(), 0, Map(
+        Seq("demo") -> CardCounts(4,4)
+      )),
+      TestSpec(Seq(), 1, Map(
+        Seq("demo", "App-0") -> CardCounts(4,4)
+      )),
+      TestSpec(Seq(), 2, Map(
+        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
+        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
+        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1)
+      )),
+      TestSpec(Seq("demo"), 0, Map(
+        Seq("demo") -> CardCounts(4,4)
+      )),
+      TestSpec(Seq("demo"), 1, Map(
+        Seq("demo", "App-0") -> CardCounts(4,4)
+      )),
+      TestSpec(Seq("demo"), 2, Map(
+        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
+        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
+        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1)
+      )),
+      TestSpec(Seq("demo", "App-0"), 1, Map(
+        Seq("demo", "App-0") -> CardCounts(4,4)
+      )),
+      TestSpec(Seq("demo", "App-0"), 2, Map(
+        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
+        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
+        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1)
+      )),
+      TestSpec(Seq("demo", "App-0", "http_req_total"), 2, Map(
+        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2)
+      ))
+    ).foreach{ testSpec =>
 
-    val execPlan = TsCardReduceExec(QueryContext(), executeDispatcher, leaves)
-    execPlan.addRangeVectorTransformer(TsCardPresenter(groupDepth))
+      val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
+        new TsCardExec(QueryContext(), executeDispatcher,
+          timeseriesDatasetMultipleShardKeys.ref, ishard, testSpec.shardKeyPrefix, testSpec.groupDepth)
+      }.toSeq
 
-    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
-    val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _) =>
-        // should only have a single RowVector
-        response.size shouldEqual 1
+      val execPlan = TsCardReduceExec(QueryContext(), executeDispatcher, leaves)
+      execPlan.addRangeVectorTransformer(TsCardPresenter(testSpec.groupDepth))
 
-        val rowPairs = response(0).rows().map{r =>
-          val prefix = (0 to groupDepth).map(i => r.getAny(i).toString.utf8).toSeq
-          val counts = CardCounts(r.getInt(groupDepth+1), r.getInt(groupDepth+2))
-          prefix -> counts
-        }.toSeq
+      val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+      val result = (resp: @unchecked) match {
+        case QueryResult(id, _, response, _, _, _) =>
+          // should only have a single RowVector
+          response.size shouldEqual 1
 
-        rowPairs.foreach{ case (names, counts) =>
-          println(names.toString + ": " + counts.toString)
-        }
+          val resultMap = response(0).rows().map{r =>
+            val prefix = (0 to testSpec.groupDepth).map(i => r.getAny(i).toString).toSeq
+            val counts = CardCounts(r.getInt(testSpec.groupDepth + 1), r.getInt(testSpec.groupDepth + 2))
+            prefix -> counts
+          }.toMap
 
-//        rowPairs.size shouldEqual 3
-//        rowPairs.foldLeft(new mutable.HashMap[Seq[ZeroCopyUTF8String], CardCounts]){ (countAcc, pair) =>
-//          val (name, value) = pair
-//          countAcc.update(name, value)
-//          countAcc
-//        } shouldEqual Map(
-//          "http_req_total".utf8 -> CardCounts(2,2),
-//          "http_foo_total".utf8 -> CardCounts(1, 1),
-//          "http_bar_total".utf8 -> CardCounts(1, 1)
-//        )
+          resultMap shouldEqual testSpec.exp
+      }
     }
   }
 }

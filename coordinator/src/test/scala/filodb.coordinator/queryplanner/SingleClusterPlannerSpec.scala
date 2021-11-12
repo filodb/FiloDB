@@ -807,8 +807,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     validatePlan(execPlan, expected)
   }
 
-  // TODO(a_theimer)
-  it ("should correctly materialize TopkCardExec") {
+  it ("should correctly materialize TsCardExec") {
     val shardKeyPrefix = Seq("foo", "bar")
     val groupDepth = 2
 
@@ -824,6 +823,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       child.isInstanceOf[TsCardExec] shouldEqual true
       val leaf = child.asInstanceOf[TsCardExec]
       leaf.shardKeyPrefix shouldEqual shardKeyPrefix
+      leaf.groupDepth shouldEqual groupDepth
     }
   }
 }
