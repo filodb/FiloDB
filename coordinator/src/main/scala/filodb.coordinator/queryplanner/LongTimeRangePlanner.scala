@@ -98,12 +98,61 @@ import filodb.query.exec._
       val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
       StitchRvsExec(qContext, stitchDispatcher, Seq(rawEp, downsampleEp))
     }
-    PlanResult(Seq(execPlan), false)
+    PlanResult(Seq(execPlan))
   }
   // scalastyle:on method.length
 
   def rawClusterMaterialize(qContext: QueryContext, logicalPlan: LogicalPlan): PlanResult = {
     PlanResult(Seq(rawClusterPlanner.materialize(logicalPlan, qContext)))
+  }
+
+  /**
+   * Materializes Label cardinality plan, the entire plan is split in long term cluster and raw cluster
+   * The split will be performed in the following fashion if the user provided start and end time spans across
+   * earliestRawTs and latestDSTS
+   *
+   *                  |------------------------|-----------------|-------------------------------|
+   *                  ^                        ^                 ^                               ^
+   *    User provided start time          earliestRawTS      latestDSTS                User provided end time
+   *
+   *
+   *                           <merge sketches to get total cardinality>
+   *                             |                                   |
+   *                 |------------------------|             |------------------------|
+   *                 ^                        ^             ^                        ^
+   *   User provided start time           latestDSTS   earliestRawTS            User provided end time
+   *
+   * @param logicalPlan           The LabelCardinality logical plan to materialize
+   * @param queryContext          The QueryContext object
+   * @return
+   */
+  private def materializeLabelCardinalityPlan(logicalPlan: LabelCardinality, queryContext: QueryContext): PlanResult = {
+    val (startTime, endTime) = (logicalPlan.startMs, logicalPlan.endMs)
+    val execPlan = if (startTime > latestDownsampleTimestampFn) {
+      // This is the case where no data cardinality will be retrieved from DownsampleStore, simply push down to
+      // raw planner
+      rawClusterPlanner.materialize(logicalPlan, queryContext)
+    } else if (endTime < earliestRawTimestampFn) {
+      // This is the case where no data cardinality will be retrieved from RawStore, simply push down to
+      // DS planner
+      downsampleClusterPlanner.materialize(logicalPlan, queryContext)
+    } else {
+      // There is a split, send to DS and Raw planners and get sketches from them without the presenter,
+      // perform a local reduction merge the sketches and add a presenter
+      val dsLogicalPlan = logicalPlan.copy(endMs = latestDownsampleTimestampFn.min(endTime), clusterType = "downsample")
+      val rawLogicalPlan = logicalPlan.copy(startMs = earliestRawTimestampFn.max(startTime))
+      val qCtx = queryContext.copy(plannerParams = queryContext.plannerParams.copy(skipAggregatePresent = true))
+
+      val dsPlan = downsampleClusterPlanner.materialize(dsLogicalPlan, qCtx)
+      val rawPlan = rawClusterPlanner.materialize(rawLogicalPlan, qCtx)
+
+      val reduceExec = LabelCardinalityReduceExec(queryContext, stitchDispatcher, Seq(dsPlan, rawPlan))
+      if (!queryContext.plannerParams.skipAggregatePresent) {
+        reduceExec.addRangeVectorTransformer(new LabelCardinalityPresenter())
+      }
+      reduceExec
+    }
+    PlanResult(Seq(execPlan))
   }
 
   // scalastyle:off cyclomatic.complexity
@@ -112,14 +161,14 @@ import filodb.query.exec._
     if (!LogicalPlanUtils.hasBinaryJoin(logicalPlan)) {
       logicalPlan match {
         case p: PeriodicSeriesPlan         => materializePeriodicSeriesPlan(qContext, p)
+        case lc: LabelCardinality          => materializeLabelCardinalityPlan(lc, qContext)
         case _: LabelValues |
              _: ApplyLimitFunction |
              _: SeriesKeysByFilters |
              _: ApplyInstantFunctionRaw |
              _: RawSeries |
              _: LabelNames |
-             _: TopkCardinalities |
-             _: LabelCardinality           => rawClusterMaterialize(qContext, logicalPlan)
+             _: TopkCardinalities          => rawClusterMaterialize(qContext, logicalPlan)
 
       }
     }

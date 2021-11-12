@@ -16,7 +16,7 @@ import filodb.core.query.Filter.{Equals, EqualsRegex}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.prometheus.parse.Parser.Antlr
-import filodb.query.PlanValidationSpec
+import filodb.query.{LabelCardinality, PlanValidationSpec}
 import filodb.query.exec._
 
 // scalastyle:off line.size.limit
@@ -308,4 +308,66 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     validatePlan(execPlan, expected)
   }
 
+  it("should generate correct plan for LabelCardinality on all planners") {
+    val filters = Seq(
+        ColumnFilter("_ws_", Equals("ws")),
+        ColumnFilter("_ns_", Equals("ns")),
+        ColumnFilter("_metric_", Equals("metric"))
+      )
+
+    val logicalPlan = LabelCardinality(filters, startSeconds * 1000L, endSeconds * 1000L)
+    val queryContext = QueryContext(origQueryParams = UnavailablePromQlQueryParams,
+      plannerParams = PlannerParams(processMultiPartition = true))
+    val rawPlan = rawPlanner.materialize(logicalPlan, queryContext)
+
+    val expectedRawPlannerPlan =
+    """T~LabelCardinalityPresenter(LabelCardinalityPresenter)
+       |-E~LabelCardinalityReduceExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-93033340],raw)
+       |--E~LabelCardinalityExec(shard=0, filters=List(ColumnFilter(_ws_,Equals(ws)), ColumnFilter(_ns_,Equals(ns)), ColumnFilter(_metric_,Equals(metric))), limit=1000000, startMs=1633913330000, endMs=1634777330000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-93033340],raw)
+       |--E~LabelCardinalityExec(shard=1, filters=List(ColumnFilter(_ws_,Equals(ws)), ColumnFilter(_ns_,Equals(ns)), ColumnFilter(_metric_,Equals(metric))), limit=1000000, startMs=1633913330000, endMs=1634777330000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-93033340],raw)""".stripMargin
+    validatePlan(rawPlan, expectedRawPlannerPlan)
+
+    // LTRPlanner cases
+    // Case 1: startTime < rawStart < dsStartTime < endTime
+    // Should go to both clusters
+    // DS Time range should be [userStartTime, dsEndTime]
+    // Raw Time range should be [rawStartTime, userEndTime]
+
+    val longTermPlan = longTermPlanner.materialize(logicalPlan, queryContext)
+
+    val expectedLongTermPlan =
+           """T~LabelCardinalityPresenter(LabelCardinalityPresenter)
+             |-E~LabelCardinalityReduceExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@10272bbb)
+             |--E~LabelCardinalityReduceExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1598944375],downsample)
+             |---E~LabelCardinalityExec(shard=0, filters=List(ColumnFilter(_ws_,Equals(ws)), ColumnFilter(_ns_,Equals(ns)), ColumnFilter(_metric_,Equals(metric))), limit=1000000, startMs=1633913330000, endMs=1634755730000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1598944375],downsample)
+             |---E~LabelCardinalityExec(shard=1, filters=List(ColumnFilter(_ws_,Equals(ws)), ColumnFilter(_ns_,Equals(ns)), ColumnFilter(_metric_,Equals(metric))), limit=1000000, startMs=1633913330000, endMs=1634755730000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1598944375],downsample)
+             |--E~LabelCardinalityReduceExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1598944375],raw)
+             |---E~LabelCardinalityExec(shard=0, filters=List(ColumnFilter(_ws_,Equals(ws)), ColumnFilter(_ns_,Equals(ns)), ColumnFilter(_metric_,Equals(metric))), limit=1000000, startMs=1634172530000, endMs=1634777330000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1598944375],raw)
+             |---E~LabelCardinalityExec(shard=1, filters=List(ColumnFilter(_ws_,Equals(ws)), ColumnFilter(_ns_,Equals(ns)), ColumnFilter(_metric_,Equals(metric))), limit=1000000, startMs=1634172530000, endMs=1634777330000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1598944375],raw)""".stripMargin
+    validatePlan(longTermPlan, expectedLongTermPlan)
+
+    // Case 2: startTime < endTime < rawStart < dsEndTime
+    // Should go completely to DS Cluster
+    val case2EndTime = endSeconds - 8.days.toSeconds
+    val logicalPlan2 = LabelCardinality(filters, startSeconds * 1000L, case2EndTime * 1000L)
+    val case2Plan = longTermPlanner.materialize(logicalPlan2, queryContext)
+    val expectedDSOnlyPlan =
+      """T~LabelCardinalityPresenter(LabelCardinalityPresenter)
+        |-E~LabelCardinalityReduceExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#872531041],downsample)
+        |--E~LabelCardinalityExec(shard=0, filters=List(ColumnFilter(_ws_,Equals(ws)), ColumnFilter(_ns_,Equals(ns)), ColumnFilter(_metric_,Equals(metric))), limit=1000000, startMs=1633913330000, endMs=1634086130000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#872531041],downsample)
+        |--E~LabelCardinalityExec(shard=1, filters=List(ColumnFilter(_ws_,Equals(ws)), ColumnFilter(_ns_,Equals(ns)), ColumnFilter(_metric_,Equals(metric))), limit=1000000, startMs=1633913330000, endMs=1634086130000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#872531041],downsample)""".stripMargin
+
+    validatePlan(case2Plan, expectedDSOnlyPlan)
+
+    // Case 3: rawStart < dsEndTime < startTime  < endTime
+    // Should go completely to RawCluster
+    // TODO
+
+    // Case 4: rawStart < startTime < endTime < dsEndTime
+    // Should go completely to both clusters but the start and endtime in both clusters should be user provided times
+    // TODO
+
+
+
+  }
 }
