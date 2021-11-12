@@ -1,8 +1,9 @@
 package filodb.query.exec
 
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
+
 import scala.collection.mutable
 
-import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -17,7 +18,7 @@ import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.store.ChunkSource
 import filodb.memory.{UTF8StringMedium, UTF8StringShort}
 import filodb.memory.format.{SeqRowReader, SingleValueRowReader, StringArrayRowReader,
-                             UTF8MapIteratorRowReader, UnsafeUtils, ZeroCopyUTF8String}
+                             UnsafeUtils, UTF8MapIteratorRowReader, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
@@ -545,7 +546,7 @@ final case class TsCardExec(queryContext: QueryContext,
     }
   }
 
-  // scalastyle:off cyclomatic.complexity
+  // scalastyle:off method.length
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
@@ -607,7 +608,7 @@ final case class TsCardExec(queryContext: QueryContext,
     val sch = ResultSchema(Seq(ColumnInfo("TsCardMap", ColumnType.StringColumn)), 1)
     ExecResult(rvs, Task.eval(sch))
   }
-  // scalastyle:on cyclomatic.complexity
+  // scalastyle:on method.length
 
   def args: String = s"shard=$shard, shardKeyPrefix=$shardKeyPrefix, " +
     s"limit=${queryContext.plannerParams.sampleLimit}"
