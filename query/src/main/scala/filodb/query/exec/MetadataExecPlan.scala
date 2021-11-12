@@ -447,6 +447,10 @@ final case class TsCardExec(queryContext: QueryContext,
                             shard: Int,
                             shardKeyPrefix: Seq[String],
                             groupDepth: Int) extends LeafExecPlan {
+  require(groupDepth >= 0,
+    "groupDepth must be non-negative")
+  require(1 + groupDepth >= shardKeyPrefix.size,
+    "groupDepth indicate a depth at least as deep as shardKeyPrefix")
 
   override def enforceLimit: Boolean = false
 
@@ -458,11 +462,16 @@ final case class TsCardExec(queryContext: QueryContext,
    *
    * @param tsMemStore contains the shard keys over which to iterate
    * @param initPrefix shard key prefix to resolve
-   * @param extendToSize the length of the prefix children to iterate through
+   * @param extendToSize the length of the prefix children to iterate through.
+   *   Must be at (1) least initPrefix.size and (2) greater than zero.
    */
   class PrefixIterator (tsMemStore: TimeSeriesMemStore,
                         initPrefix: Seq[String],
                         extendToSize: Int) extends Iterator[Seq[String]]{
+    require(extendToSize > 0,
+      "extendToSize must be positive")
+    require(extendToSize >= initPrefix.size,
+      "extendToSize must be at least initPrefix.size")
 
     // A queue for each set of "space" (i.e. namespace, workspace, metric) labels.
     // Spaces are stored in descending precedence, and each successive queue
