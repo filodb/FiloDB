@@ -129,6 +129,9 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
     val jobCompleted = Kamon.counter("chunk-migration-completed")
       .withTag("downsamplePeriod", downsamplePeriodStr)
     jobCompleted.increment()
+    val downsampleHourStartGauge = Kamon.gauge("chunk-downsampler-period-start-hour")
+      .withTag("downsamplePeriod", downsamplePeriodStr)
+    downsampleHourStartGauge.update(userTimeStart / 1000 / 60 / 60)
     spark
   }
 
