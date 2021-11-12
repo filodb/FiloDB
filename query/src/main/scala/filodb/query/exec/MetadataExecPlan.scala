@@ -91,6 +91,8 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
 
 /**
   * Aggregates output from TsCardExec.
+  * When the aggregated data contains MAX_RESPONSE_SIZE (names -> cardinalities) pairs,
+  *   pairs with previously-unseen names will be counted into an overflow bucket.
   */
 final case class TsCardReduceExec(queryContext: QueryContext,
                                   dispatcher: PlanDispatcher,
@@ -104,16 +106,17 @@ final case class TsCardReduceExec(queryContext: QueryContext,
     rv.rows().foreach{ r =>
       val mapSer = r.getAny(0).asInstanceOf[ZeroCopyUTF8String].bytes
       val map = SerializeUtils.deSerialize[Map[Seq[ZeroCopyUTF8String], CardCounts]](mapSer)
-      map.foreach{ case (name, counts) =>
-        val accCountsOpt = acc.get(name)
+      map.foreach{ case (names, counts) =>
+        val accCountsOpt = acc.get(names)
         // check if we either (1) won't increase the size or (2) have enough room for another
-        // TODO(a_theimer): something other than just dropping extras
-        if (accCountsOpt.nonEmpty || acc.size < MAX_RESPONSE_SIZE) {
-          val accCounts = accCountsOpt.getOrElse(CardCounts(0, 0))
-          val sumCounts = CardCounts(accCounts.active + counts.active,
-                                     accCounts.total + counts.total)
-          acc.update(name, sumCounts)
+        val accCounts = if (accCountsOpt.nonEmpty || acc.size < MAX_RESPONSE_SIZE) {
+          accCountsOpt.getOrElse(CardCounts(0, 0))
+        } else {
+          acc.getOrElseUpdate(names.map(_ => OVERFLOW_NAME).toSeq, CardCounts(0, 0))
         }
+        val sumCounts = CardCounts(accCounts.active + counts.active,
+                                   accCounts.total + counts.total)
+        acc.update(names, sumCounts)
       }
     }
     acc
@@ -415,12 +418,17 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
     s" startMs=$startMs, endMs=$endMs"
 }
 
+/**
+ * Contains utilities for all TsCardinality materialize() derivatives.
+ */
 final case object TsCardExec {
   // TODO: tune this
   val MAX_RESPONSE_SIZE = 5000
 
   // just to keep memStore.topKCardinality calls consistent
   val ADD_INACTIVE = true
+
+  val OVERFLOW_NAME = "_overflow_".utf8
 
   // TODO(a_theimer): Int? Long?
   case class CardCounts(active: Int, total: Int) {
