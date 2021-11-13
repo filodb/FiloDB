@@ -531,17 +531,25 @@ final case class TsCardExec(queryContext: QueryContext,
      *   repopulates empty queues with "subspace" labels.
      */
     private def enqueueAndUpdatePrefix(): Unit = {
-      currPrefix.reduceToSize(iFirstEmptyQueue)
-      // Fill each successive queue with the topKCardinality result such that
-      //   its argument prefix is defined by the preceding queue front labels.
-      for (iempty <- iFirstEmptyQueue until extendToSize) {
-        // TODO(a_theimer): MAX_RESPONSE_SIZE works, but not exactly the same meaning
-        tsMemStore.topKCardinality(dataset, Seq(shard), currPrefix,
-                                   MAX_RESPONSE_SIZE, ADD_INACTIVE).foreach{ card =>
-          spaceQueues(iempty).enqueue(card.childName)
+      if (iFirstEmptyQueue == extendToSize) {
+        // final queue still contains elements; no need to call topk
+        currPrefix(currPrefix.size - 1) = spaceQueues(currPrefix.size - 1).front
+      } else {
+        currPrefix.reduceToSize(iFirstEmptyQueue)
+        if (iFirstEmptyQueue > 0) {
+          currPrefix(iFirstEmptyQueue - 1) = spaceQueues(iFirstEmptyQueue - 1).front
         }
-        // currPrefix will contain all front labels
-        currPrefix.append(spaceQueues(iempty).front)
+        // Fill each successive queue with the topKCardinality result such that
+        //   its argument prefix is defined by the preceding queue front labels.
+        for (iempty <- iFirstEmptyQueue until extendToSize) {
+          // TODO(a_theimer): MAX_RESPONSE_SIZE works, but not exactly the same meaning
+          tsMemStore.topKCardinality(dataset, Seq(shard), currPrefix,
+            MAX_RESPONSE_SIZE, ADD_INACTIVE).foreach{ card =>
+            spaceQueues(iempty).enqueue(card.childName)
+          }
+          // currPrefix will contain all front labels
+          currPrefix.append(spaceQueues(iempty).front)
+        }
       }
       iFirstEmptyQueue = extendToSize
     }
