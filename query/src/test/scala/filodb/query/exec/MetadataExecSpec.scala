@@ -54,7 +54,9 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
       ("http_req_total", Map("instance"->"someHost:9090", "job"->"myCoolService",
                              "unicode_tag" -> "uni\u03C0tag", "_ws_" -> "demo", "_ns_" -> "App-0")),
       ("http_bar_total", Map("instance"->"someHost:8787", "job"->"myCoolService",
-                             "unicode_tag" -> "uni\u03C0tag", "_ws_" -> "demo", "_ns_" -> "App-0"))
+                             "unicode_tag" -> "uni\u03C0tag", "_ws_" -> "demo", "_ns_" -> "App-0")),
+      ("http_req_total-A", Map("instance"->"someHost:9090", "job"->"myCoolService",
+                             "unicode_tag" -> "uni\u03C0tag", "_ws_" -> "demo-A", "_ns_" -> "App-A")),
     )
   )
 
@@ -288,38 +290,32 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     // Note: these strings are eventually converted to ZeroCopyUTF8Strings.
     Seq(
       TestSpec(Seq(), 0, Map(
-        Seq("demo") -> CardCounts(4,4)
-      )),
+        Seq("demo-A") -> CardCounts(1,1),
+        Seq("demo") -> CardCounts(4,4))),
       TestSpec(Seq(), 1, Map(
-        Seq("demo", "App-0") -> CardCounts(4,4)
-      )),
+        Seq("demo", "App-0") -> CardCounts(4,4),
+        Seq("demo-A", "App-A") -> CardCounts(1,1))),
       TestSpec(Seq(), 2, Map(
         Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
         Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
-        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1)
-      )),
+        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1),
+        Seq("demo-A", "App-A", "http_req_total-A") -> CardCounts(1,1))),
       TestSpec(Seq("demo"), 0, Map(
-        Seq("demo") -> CardCounts(4,4)
-      )),
+        Seq("demo") -> CardCounts(4,4))),
       TestSpec(Seq("demo"), 1, Map(
-        Seq("demo", "App-0") -> CardCounts(4,4)
-      )),
+        Seq("demo", "App-0") -> CardCounts(4,4))),
       TestSpec(Seq("demo"), 2, Map(
         Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
         Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
-        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1)
-      )),
+        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1))),
       TestSpec(Seq("demo", "App-0"), 1, Map(
-        Seq("demo", "App-0") -> CardCounts(4,4)
-      )),
+        Seq("demo", "App-0") -> CardCounts(4,4))),
       TestSpec(Seq("demo", "App-0"), 2, Map(
         Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
         Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
-        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1)
-      )),
+        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1))),
       TestSpec(Seq("demo", "App-0", "http_req_total"), 2, Map(
-        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2)
-      ))
+        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2)))
     ).foreach{ testSpec =>
 
       val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
