@@ -537,6 +537,7 @@ final case class TsCardExec(queryContext: QueryContext,
       } else {
         currPrefix.reduceToSize(iFirstEmptyQueue)
         if (iFirstEmptyQueue > 0) {
+          // this space name is still unused
           currPrefix(iFirstEmptyQueue - 1) = spaceQueues(iFirstEmptyQueue - 1).front
         }
         // Fill each successive queue with the topKCardinality result such that
@@ -547,7 +548,7 @@ final case class TsCardExec(queryContext: QueryContext,
             MAX_RESPONSE_SIZE, ADD_INACTIVE).foreach{ card =>
             spaceQueues(iempty).enqueue(card.childName)
           }
-          // currPrefix will contain all front labels
+          // currPrefix will contain all front labels, so we store them as we iterate
           currPrefix.append(spaceQueues(iempty).front)
         }
       }
