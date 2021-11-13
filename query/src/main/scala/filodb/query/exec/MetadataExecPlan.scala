@@ -144,7 +144,7 @@ final case class TsCardReduceExec(queryContext: QueryContext,
   * Dynamically packages the (prefix -> cardinalities) map into a RangeVector,
   *   where its width and column names depend upon the size of each shard key prefix.
   */
-final case class TsCardPresenter(groupDepth: Int) extends RangeVectorTransformer {
+final case class TsCardPresenter(groupDepth: GroupDepth.Value) extends RangeVectorTransformer {
   import TsCardExec._
 
   override def funcParams: Seq[FuncArgs] = Nil
@@ -173,10 +173,10 @@ final case class TsCardPresenter(groupDepth: Int) extends RangeVectorTransformer
 
   override def schema(source: ResultSchema): ResultSchema = {
     // append the appropriate columns according to groupDepth
-    val nameColSeq = new mutable.ArrayBuffer[String](1 + groupDepth)
+    val nameColSeq = new mutable.ArrayBuffer[String](1 + groupDepth.prefixIndex)
     nameColSeq.append("ws")
-    if (groupDepth > 0) nameColSeq.append("ns")
-    if (groupDepth > 1) nameColSeq.append("metric")
+    if (groupDepth.prefixIndex > 0) nameColSeq.append("ns")
+    if (groupDepth.prefixIndex > 1) nameColSeq.append("metric")
     ResultSchema(
       Seq(
         nameColSeq.map(s => ColumnInfo(s, ColumnType.StringColumn)),
@@ -446,10 +446,8 @@ final case class TsCardExec(queryContext: QueryContext,
                             dataset: DatasetRef,
                             shard: Int,
                             shardKeyPrefix: Seq[String],
-                            groupDepth: Int) extends LeafExecPlan {
-  require(groupDepth >= 0,
-    "groupDepth must be non-negative")
-  require(1 + groupDepth >= shardKeyPrefix.size,
+                            groupDepth: GroupDepth.Value) extends LeafExecPlan {
+  require(1 + groupDepth.prefixIndex >= shardKeyPrefix.size,
     "groupDepth indicate a depth at least as deep as shardKeyPrefix")
 
   override def enforceLimit: Boolean = false
@@ -576,7 +574,7 @@ final case class TsCardExec(queryContext: QueryContext,
     val rvs = source match {
       case tsMemStore: TimeSeriesMemStore =>
         Observable.eval {
-          val countMap = if (groupDepth == shardKeyPrefix.size - 1) {
+          val countMap = if (groupDepth.prefixIndex == shardKeyPrefix.size - 1) {
             // shardKeyPrefix is as deep as the groupDepth; we execute only a single topKCardinality
             //   call on the "prefix's prefix", then map the prefix to its cardinality iff the
             //   "deepest" prefix label is found in the results.
@@ -591,14 +589,14 @@ final case class TsCardExec(queryContext: QueryContext,
             }
           } else {
             // groupDepth is deeper than shardKeyPrefix.
-            // We will "expand" shardKeyPrefix into all of its child prefixes at groupDepth - 1,
+            // We will "expand" shardKeyPrefix into all of its child prefixes at groupDepth.prefixIndex - 1,
             //   then we'll pass the children to memstore.topKCardinality and map the results.
 
             // The conditional exists because PrefixIterator currently
             //   needs to extend a prefix to a size > 0
-            val prefixIter = if (groupDepth > 0) {
-              // Note: groupDepth equals the length of the prefix to extend to (at groupDepth - 1)
-              new PrefixIterator(tsMemStore, shardKeyPrefix, groupDepth)
+            val prefixIter = if (groupDepth.prefixIndex > 0) {
+              // Note: groupDepth.prefixIndex equals the length of the prefix to extend to (at groupDepth - 1)
+              new PrefixIterator(tsMemStore, shardKeyPrefix, groupDepth.prefixIndex)
             } else {
               Seq(Seq()).iterator
             }
