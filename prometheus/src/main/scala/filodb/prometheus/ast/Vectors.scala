@@ -27,28 +27,23 @@ sealed trait JoinMatching {
  * Represents the timestamp of a PromQL '@' modifier.
  */
 sealed trait AtTimestamp {
-  /**
-   * Returns the Unix timestamp.
-   * @param windowSec the duration of the window that this AtTimestamp modifies.
-   *   Note: this exists only to suport AtStart.
-   */
-  def getUnix(timeParams: TimeRangeParams, windowSec: Long) : Long
+  def getUnix(timeParams: TimeRangeParams) : Long
 }
 
 case class AtUnix(time: Long) extends AtTimestamp {
-  override def getUnix(timeParams: TimeRangeParams, windowSec: Long): Long = {
+  override def getUnix(timeParams: TimeRangeParams): Long = {
     time
   }
 }
 
 case class AtStart() extends AtTimestamp {
-  override def getUnix(timeParams: TimeRangeParams, windowSec: Long): Long = {
-    timeParams.start - windowSec
+  override def getUnix(timeParams: TimeRangeParams): Long = {
+    timeParams.start
   }
 }
 
 case class AtEnd() extends AtTimestamp {
-  override def getUnix(timeParams: TimeRangeParams, windowSec: Long): Long = {
+  override def getUnix(timeParams: TimeRangeParams): Long = {
     timeParams.end
   }
 }
@@ -92,12 +87,11 @@ private object Utils {
    * Returns the total offset required to account for both the "offset" and "at" modifiers.
    */
   def getTotalOffsetMs(timeParams: TimeRangeParams,
-                       windowSec: Long,
                        at: Option[AtTimestamp],
                        offset: Option[Duration]): Long = {
     val atOffsetMs = at match {
       case Some(atTimestamp) => {
-        val unixTimestamp = atTimestamp.getUnix(timeParams, windowSec)
+        val unixTimestamp = atTimestamp.getUnix(timeParams)
         // TODO: Prometheus allows negative timestamps
         require(unixTimestamp >= 0, "negative '@' timestamp not allowed")
         val delta = unixTimestamp - timeParams.end
@@ -170,7 +164,7 @@ case class SubqueryExpression(subquery: PeriodicSeries,
     // when start and end parameters are not the same.
     require(timeParams.start == timeParams.end, "Subquery is not allowed as a top level expression for query_range")
 
-    val offsetSec = Utils.getTotalOffsetMs(timeParams, sqcl.window.millis(1L) / 1000, at, offset) / 1000
+    val offsetSec = Utils.getTotalOffsetMs(timeParams, at, offset) / 1000
     var endS = timeParams.start - offsetSec
     val stepToUseMs = SubqueryUtils.getSubqueryStepMs(sqcl.step);
     var startS = endS - (sqcl.window.millis(1L) / 1000)
@@ -334,7 +328,7 @@ case class InstantExpression(metricName: Option[String],
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     // we start from 5 minutes earlier that provided start time in order to include last sample for the
     // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
-    val offsetMs = Utils.getTotalOffsetMs(timeParams, 0, at, offset)
+    val offsetMs = Utils.getTotalOffsetMs(timeParams, at, offset)
     val offsetOpt = if (offsetMs > 0) Some(offsetMs) else None
     val ps = PeriodicSeries(
       RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq,
@@ -363,7 +357,7 @@ case class InstantExpression(metricName: Option[String],
 
   def toRawSeriesPlan(timeParams: TimeRangeParams, offsetMs: Option[Long] = None): RawSeries = {
     require(offsetMs.isEmpty)  // TODO(a_theimer): offsetMs is never passed a non-default argument. What is it for?
-    val offsetMsTotal = Utils.getTotalOffsetMs(timeParams, 0, at, offset)
+    val offsetMsTotal = Utils.getTotalOffsetMs(timeParams, at, offset)
     RawSeries(Base.timeParamToSelector(timeParams),
               columnFilters,
               column.toSeq,
@@ -410,7 +404,7 @@ case class RangeExpression(metricName: Option[String],
     if (isRoot && timeParams.start != timeParams.end) {
       throw new UnsupportedOperationException("Range expression is not allowed in query_range")
     }
-    val offsetMs = Utils.getTotalOffsetMs(timeParams, window.millis(timeParams.step * 1000) / 1000, at, offset)
+    val offsetMs = Utils.getTotalOffsetMs(timeParams, at, offset)
     // multiply by 1000 to convert unix timestamp in seconds to millis
     val rs = RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq,
       Some(window.millis(timeParams.step * 1000)),
