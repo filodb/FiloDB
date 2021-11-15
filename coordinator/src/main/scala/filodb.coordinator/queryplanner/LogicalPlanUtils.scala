@@ -92,7 +92,7 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: LabelValues              => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
       case lp: LabelNames               => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
       case lp: LabelCardinality         => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
-      case lp: TsCardinalities          => lp.copy()
+      case lp: TsCardinalities          => lp  // immutable & no members need to be updated
       case lp: SeriesKeysByFilters      => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
     }
   }

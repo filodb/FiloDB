@@ -29,7 +29,7 @@ sealed trait LogicalPlan {
       case l: LabelValues              => l.copy(filters = filters)
       case n: LabelNames               => n.copy(filters = filters)
       case s: SeriesKeysByFilters      => s.copy(filters = filters)
-      case c: TsCardinalities          => c.copy()
+      case c: TsCardinalities          => c  // immutable & no members need to be updated
     }
   }
 }
