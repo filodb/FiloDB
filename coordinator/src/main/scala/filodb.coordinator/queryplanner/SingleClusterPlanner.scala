@@ -225,6 +225,7 @@ class SingleClusterPlanner(val dataset: Dataset,
   def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                   qContext: QueryContext): PlanResult = {
      logicalPlan match {
+      case lp: AtSeries                    => materializeAtSeries(qContext, lp)
       case lp: RawSeries                   => materializeRawSeries(qContext, lp)
       case lp: RawChunkMeta                => materializeRawChunkMeta(qContext, lp)
       case lp: PeriodicSeries              => materializePeriodicSeries(qContext, lp)
@@ -254,6 +255,14 @@ class SingleClusterPlanner(val dataset: Dataset,
     }
   }
   // scalastyle:on cyclomatic.complexity
+
+  private def materializeAtSeries(context: QueryContext,
+                                  series: AtSeries): PlanResult = {
+    // TODO(a_theimer): ???
+    val innerPlan = walkLogicalPlanTree(series.series, context)
+    val n = math.max(1, (series.endMs - series.startMs) / series.stepMs).toInt
+    PlanResult(Seq(AtExec(innerPlan.plans(0), n)), false)
+  }
 
   override def materializeBinaryJoin(qContext: QueryContext,
                                      lp: BinaryJoin): PlanResult = {

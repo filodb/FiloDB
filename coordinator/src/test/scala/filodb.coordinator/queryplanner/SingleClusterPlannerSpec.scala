@@ -824,4 +824,12 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       leaf.numGroupByFields shouldEqual numGroupByFields
     }
   }
+
+  // TODO(a_theimer): remove
+  it("TEMP-- REMOVE") {
+
+    val lp = Parser.queryToLogicalPlan("""foo{job="app"} @ 12345""", 1000, 1000)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+
+  }
 }

@@ -162,6 +162,7 @@ import filodb.query.exec._
 
     if (!LogicalPlanUtils.hasBinaryJoin(logicalPlan)) {
       logicalPlan match {
+        case lp: AtSeries                  => ???  // TODO(a_theimer)
         case p: PeriodicSeriesPlan         => materializePeriodicSeriesPlan(qContext, p)
         case lc: LabelCardinality          => materializeLabelCardinalityPlan(lc, qContext)
         case _: LabelValues |
@@ -174,6 +175,7 @@ import filodb.query.exec._
       }
     }
     else logicalPlan match {
+      case lp: AtSeries                  => ???  // TODO(a_theimer)
       case lp: RawSeries                   => rawClusterMaterialize(qContext, lp)
       case lp: RawChunkMeta                => rawClusterMaterialize(qContext, lp)
       case lp: PeriodicSeries              => materializePeriodicSeriesPlan(qContext, lp)

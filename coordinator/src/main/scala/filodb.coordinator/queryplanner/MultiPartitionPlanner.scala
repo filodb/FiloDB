@@ -140,6 +140,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case _: ScalarFixedDoublePlan       => throw new IllegalArgumentException("ScalarFixedDoublePlan unexpected here")
       case lp: ApplyAbsentFunction        => super.materializeAbsentFunction(qContext, lp)
       case lp: ScalarBinaryOperation      => super.materializeScalarBinaryOperation(qContext, lp)
+      case lp: AtSeries                   => ???  // TODO(a_theimer)
       case lp: ApplyLimitFunction         => super.materializeLimitFunction(qContext, lp)
       case lp: TsCardinalities            => materializeTsCardinalities(lp, qContext)
 

@@ -24,6 +24,7 @@ sealed trait LogicalPlan {
     */
   def replaceFilters(filters: Seq[ColumnFilter]): LogicalPlan = {
     this match {
+      case a: AtSeries            => a  // TODO(a_theimer): ???
       case n: LabelCardinality         => n.copy(filters = filters)
       case p: PeriodicSeriesPlan       => p.replacePeriodicSeriesFilters(filters)
       case r: RawSeriesLikePlan        => r.replaceRawSeriesFilters(filters)
@@ -201,6 +202,35 @@ case class RawChunkMeta(rangeSelector: RangeSelector,
     val updatedFilters = this.filters.filterNot(f => filterColumns.contains(f.column)) ++ newFilters
     this.copy(filters = updatedFilters)
   }
+}
+
+// TODO(a_theimer): make case class?
+abstract class AtSeries(val series: LogicalPlan,
+                        val startMs: Long,
+                        val stepMs: Long,
+                        val endMs: Long,
+                        val atMs: Long) extends NonLeafLogicalPlan
+
+// TODO(a_theimer)
+class AtSeriesRaw(series: RawSeriesLikePlan,
+                  startMs: Long,
+                  stepMs: Long,
+                  endMs: Long,
+                  atMs: Long) extends AtSeries(series, startMs, stepMs, endMs, atMs)
+                              with RawSeriesLikePlan {  // TODO(a_theimer): just RawSeries?
+  override def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan = ???
+  override def children: Seq[LogicalPlan] = Seq(series)
+}
+
+// TODO(a_theimer)
+class AtSeriesPeriodic(series: PeriodicSeriesPlan,
+                       startMs: Long,
+                       stepMs: Long,
+                       endMs: Long,
+                       atMs: Long) extends AtSeries(series, startMs, stepMs, endMs, atMs)
+                                   with PeriodicSeriesPlan {  // TODO(a_theimer): just PeriodicSeries?
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = ???
+  override def children: Seq[LogicalPlan] = Seq(series)
 }
 
 /**
