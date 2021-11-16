@@ -285,36 +285,36 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   }
 
   it ("should correctly execute TsCardExec") {
-    case class TestSpec(shardKeyPrefix: Seq[String], groupDepth: GroupDepth.Value, exp: Map[Seq[String], CardCounts])
+    case class TestSpec(shardKeyPrefix: Seq[String], groupDepth: Int, exp: Map[Seq[String], CardCounts])
 
     // Note: these strings are eventually converted to ZeroCopyUTF8Strings.
     Seq(
-      TestSpec(Seq(), GroupDepth.WS, Map(
+      TestSpec(Seq(), 0, Map(
         Seq("demo-A") -> CardCounts(1,1),
         Seq("demo") -> CardCounts(4,4))),
-      TestSpec(Seq(), GroupDepth.NS, Map(
+      TestSpec(Seq(), 1, Map(
         Seq("demo", "App-0") -> CardCounts(4,4),
         Seq("demo-A", "App-A") -> CardCounts(1,1))),
-      TestSpec(Seq(), GroupDepth.METRIC, Map(
+      TestSpec(Seq(), 2, Map(
         Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
         Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
         Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1),
         Seq("demo-A", "App-A", "http_req_total-A") -> CardCounts(1,1))),
-      TestSpec(Seq("demo"), GroupDepth.WS, Map(
+      TestSpec(Seq("demo"), 0, Map(
         Seq("demo") -> CardCounts(4,4))),
-      TestSpec(Seq("demo"), GroupDepth.NS, Map(
+      TestSpec(Seq("demo"), 1, Map(
         Seq("demo", "App-0") -> CardCounts(4,4))),
-      TestSpec(Seq("demo"), GroupDepth.METRIC, Map(
+      TestSpec(Seq("demo"), 2, Map(
         Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
         Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
         Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1))),
-      TestSpec(Seq("demo", "App-0"), GroupDepth.NS, Map(
+      TestSpec(Seq("demo", "App-0"), 1, Map(
         Seq("demo", "App-0") -> CardCounts(4,4))),
-      TestSpec(Seq("demo", "App-0"), GroupDepth.METRIC, Map(
+      TestSpec(Seq("demo", "App-0"), 2, Map(
         Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
         Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
         Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1))),
-      TestSpec(Seq("demo", "App-0", "http_req_total"), GroupDepth.METRIC, Map(
+      TestSpec(Seq("demo", "App-0", "http_req_total"), 2, Map(
         Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2)))
     ).foreach{ testSpec =>
 
@@ -333,10 +333,8 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
           response.size shouldEqual 1
 
           val resultMap = response(0).rows().map{r =>
-            val prefix = (0 to testSpec.groupDepth.prefixIndex)
-              .map(i => r.getAny(i).asInstanceOf[ZeroCopyUTF8String]).toSeq
-            val counts = CardCounts(r.getInt(testSpec.groupDepth.prefixIndex + 1),
-                                    r.getInt(testSpec.groupDepth.prefixIndex + 2))
+            val prefix = (0 to testSpec.groupDepth).map(i => r.getAny(i).asInstanceOf[ZeroCopyUTF8String]).toSeq
+            val counts = CardCounts(r.getInt(testSpec.groupDepth + 1), r.getInt(testSpec.groupDepth + 2))
             prefix -> counts
           }.toMap
 

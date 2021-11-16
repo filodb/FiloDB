@@ -126,20 +126,6 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
                                endMs: Long) extends MetadataQueryPlan
 
 /**
- * Used to identify how a TsCardinalities result should be grouped.
- */
-object GroupDepth extends Enumeration {
-  protected case class GroupDepthVal(prefixIndex: Int) extends super.Val
-
-  import scala.language.implicitConversions
-  implicit def valueToGroupDepthVal(v: Value): GroupDepthVal = v.asInstanceOf[GroupDepthVal]
-
-  val WS = GroupDepthVal(0)
-  val NS = GroupDepthVal(1)
-  val METRIC = GroupDepthVal(2)
-}
-
-/**
  * Plan to answer queries of the abstract form:
  *
  * Find (active, total) cardinality pairs for all time series with <shard-key-prefix>,
@@ -147,33 +133,38 @@ object GroupDepth extends Enumeration {
  *
  * Examples:
  *
- *  { prefix=[], groupDepth=NS } -> {
+ *  { prefix=[], groupDepth=1 } -> {
  *      prefix=["ws_a", "ns_a"] -> (4, 6),
  *      prefix=["ws_a", "ns_b"] -> (2, 4),
  *      prefix=["ws_b", "ns_c"] -> (3, 5) }
  *
- *  { prefix=["ws_a", "ns_a"], groupDepth=METRIC } -> {
+ *  { prefix=["ws_a", "ns_a"], groupDepth=2 } -> {
  *      prefix=["ws_a", "ns_a", "met_a"] -> (4, 6),
  *      prefix=["ws_a", "ns_a", "met_b"] -> (3, 5) }
  *
- *  { prefix=["ws_a"], groupDepth=WS } -> {
+ *  { prefix=["ws_a"], groupDepth=0 } -> {
  *      prefix=["ws_a"] -> (3, 5) }
  *
  * @param groupDepth: indicates "hierarchical depth" at which to group cardinalities:
+ *     0 -> workspace
+ *     1 -> namespace
+ *     2 -> metric
  *   Must indicate a depth:
  *     (1) at least as deep as shardKeyPrefix
- *     (2) less than METRIC when the prefix does not contain ws and ns
+ *     (2) less than '2' when the prefix does not contain ws and ns
  *   Specifically:
  *     shardKeyPrefix     groupDepth
- *     []                 { WS, NS }
- *     [ws]               { WS, NS }
- *     [ws, ns]           { NS, METRIC }
- *     [ws, ns, metric]   { METRIC }
+ *     []                 { 0, 1 }
+ *     [ws]               { 0, 1 }
+ *     [ws, ns]           { 1, 2 }
+ *     [ws, ns, metric]   { 2 }
  */
-case class TsCardinalities(shardKeyPrefix: Seq[String], groupDepth: GroupDepth.Value) extends LogicalPlan {
-  require(1 + groupDepth.prefixIndex >= shardKeyPrefix.size,
-    "groupDepth must indicate a depth at least as deep as shardKeyPrefix")
-  require(groupDepth != GroupDepth.METRIC || shardKeyPrefix.size == 2,
+case class TsCardinalities(shardKeyPrefix: Seq[String], groupDepth: Int) extends LogicalPlan {
+  require(groupDepth >= 0 && groupDepth < 3,
+    "groupDepth must lie on [0, 2]")
+  require(1 + groupDepth >= shardKeyPrefix.size,
+    "groupDepth indicate a depth at least as deep as shardKeyPrefix")
+  require(groupDepth < 2 || shardKeyPrefix.size == 2,
     "cannot group at the metric level when prefix does not contain ws and ns")
 }
 

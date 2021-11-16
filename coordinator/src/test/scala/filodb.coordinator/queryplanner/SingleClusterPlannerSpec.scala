@@ -809,7 +809,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   it ("should correctly materialize TsCardExec") {
     val shardKeyPrefix = Seq("foo", "bar")
-    val groupDepth = GroupDepth.METRIC
+    val groupDepth = 2
 
     val lp = TsCardinalities(shardKeyPrefix, groupDepth)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
