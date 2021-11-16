@@ -1,8 +1,7 @@
 package filodb.query.exec
 
-import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
-
 import scala.collection.mutable
+import scala.collection.mutable.{ArrayBuilder}
 
 import monix.eval.Task
 import monix.execution.Scheduler
@@ -22,7 +21,6 @@ import filodb.memory.format.{SeqRowReader, SingleValueRowReader, StringArrayRowR
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
-import filodb.query.exec.TsCardExec.{ADD_INACTIVE, MAX_RESPONSE_SIZE}
 
 trait MetadataDistConcatExec extends NonLeafExecPlan {
 
@@ -66,26 +64,6 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
   }
 }
 
-case object SerializeUtils {
-  def serialize(obj: Any) : Array[Byte] = {
-    val byte_os = new ByteArrayOutputStream()
-    val obj_os = new ObjectOutputStream(byte_os)
-    obj_os.writeObject(obj)
-    val res = byte_os.toByteArray
-    byte_os.close()
-    obj_os.close()
-    res
-  }
-  def deSerialize[T](bytes: Array[Byte]): T = {
-    val byte_is = new ByteArrayInputStream(bytes)
-    val obj_is = new ObjectInputStream(byte_is)
-    val res = obj_is.readObject().asInstanceOf[T]
-    byte_is.close()
-    obj_is.close()
-    res
-  }
-}
-
 final case class PartKeysDistConcatExec(queryContext: QueryContext,
                                         dispatcher: PlanDispatcher,
                                         children: Seq[ExecPlan]) extends MetadataDistConcatExec
@@ -106,7 +84,7 @@ final case class TsCardReduceExec(queryContext: QueryContext,
       mutable.HashMap[Seq[ZeroCopyUTF8String], CardCounts] = {
     rv.rows().foreach{ r =>
       val mapSer = r.getAny(0).asInstanceOf[ZeroCopyUTF8String].bytes
-      val map = SerializeUtils.deSerialize[Map[Seq[ZeroCopyUTF8String], CardCounts]](mapSer)
+      val map = deSerializeMap(mapSer)
       map.foreach{ case (names, counts) =>
         val accCountsOpt = acc.get(names)
         // check if we either (1) won't increase the size or (2) have enough room for another
@@ -132,7 +110,7 @@ final case class TsCardReduceExec(queryContext: QueryContext,
     }.flatten
       .foldLeftL(new mutable.HashMap[Seq[ZeroCopyUTF8String], CardCounts])(mapFold)
       .map{ aggMap =>
-        val serMap = ZeroCopyUTF8String(SerializeUtils.serialize(aggMap.toMap))
+        val serMap = ZeroCopyUTF8String(serializeMap(aggMap.toMap))
         val it = Seq(SingleValueRowReader(serMap)).iterator
         IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
       }
@@ -159,7 +137,7 @@ final case class TsCardPresenter(groupDepth: GroupDepth.Value) extends RangeVect
     source.map { rv =>
       // Note: getString() throws a ClassCastException.
       val mapSer = rv.rows.next.getAny(0).asInstanceOf[ZeroCopyUTF8String].bytes
-      SerializeUtils.deSerialize[Map[Seq[ZeroCopyUTF8String], CardCounts]](mapSer)
+      deSerializeMap(mapSer)
     }.map { countMap =>
       val iter = countMap.map{ case (names, counts) =>
         val concatColValues = Seq(names, Seq(counts.active, counts.total)).flatten
@@ -434,6 +412,74 @@ final case object TsCardExec {
   case class CardCounts(active: Int, total: Int) {
     require(total >= active, "total must be at least as large as active")
   }
+
+  // --- Serialization Utilities are Below ---
+
+  val NUM_INT_BYTES: Int = 4
+
+  private def intToBytes(num: Int, base: Array[Byte], offset: Int): Unit = {
+    val bytes = java.nio.ByteBuffer.wrap(base, offset, NUM_INT_BYTES)
+    bytes.putInt(num)
+  }
+
+  private def bytesToInt(base: Array[Byte], offset: Int): Int = {
+    val reader = java.nio.ByteBuffer.wrap(base, offset, NUM_INT_BYTES)
+    reader.getInt()
+  }
+
+  def deSerializeMap(bytes: Array[Byte]): Map[Seq[ZeroCopyUTF8String], CardCounts] = {
+    val result = new mutable.HashMap[Seq[ZeroCopyUTF8String], CardCounts]
+    val prefixSize = bytesToInt(bytes, 0)
+    var ibyte = NUM_INT_BYTES;  // since we just read prefixSize
+    while (ibyte < bytes.length) {
+      // deser the prefix first
+      val prefix = new mutable.ArraySeq[ZeroCopyUTF8String](prefixSize)
+      for (iname <- 0 until prefixSize) {
+        val size = bytesToInt(bytes, ibyte)
+        ibyte = ibyte + NUM_INT_BYTES
+        val name = ZeroCopyUTF8String(bytes, ibyte, size)
+        ibyte = ibyte + size
+        prefix(iname) = name
+      }
+      // now deser the counts
+      val active = bytesToInt(bytes, ibyte)
+      ibyte = ibyte + NUM_INT_BYTES
+      val total = bytesToInt(bytes, ibyte)
+      ibyte = ibyte + NUM_INT_BYTES
+      result.update(prefix, CardCounts(active, total))
+    }
+    result.toMap
+  }
+
+  def serializeMap(myMap: Map[Seq[ZeroCopyUTF8String], CardCounts]): Array[Byte] = {
+    // Need a quick way to access the underlying array.
+    val builder = new ArrayBuilder.ofByte
+
+    // Pre-allocate a space to store the bytes for use with a
+    //   Java ByteBuffer. Then we'll addAll() to the ArrayBuilder.
+    // TODO: unsafe casts to bypass individual byte writes?
+    val byteSpace = new Array[Byte](NUM_INT_BYTES)
+
+    // store the prefix size first
+    val prefixSize = if (myMap.nonEmpty) myMap.head._1.size else 0
+    intToBytes(prefixSize, byteSpace, 0)
+    builder ++= byteSpace
+
+    myMap.foreach { case (prefix, counts) =>
+      prefix.foreach { name =>
+        // serialize each (size, name)
+        intToBytes(name.length, byteSpace, 0)
+        builder ++= byteSpace
+        builder ++= name.bytes
+      }
+      // now serialize the cardinality counts
+      intToBytes(counts.active, byteSpace, 0)
+      builder ++= byteSpace
+      intToBytes(counts.total, byteSpace, 0)
+      builder ++= byteSpace
+    }
+    builder.result()
+  }
 }
 
 /**
@@ -446,6 +492,8 @@ final case class TsCardExec(queryContext: QueryContext,
                             shard: Int,
                             shardKeyPrefix: Seq[String],
                             groupDepth: GroupDepth.Value) extends LeafExecPlan {
+  import TsCardExec._
+
   require(1 + groupDepth.prefixIndex >= shardKeyPrefix.size,
     "groupDepth indicate a depth at least as deep as shardKeyPrefix")
 
@@ -610,7 +658,7 @@ final case class TsCardExec(queryContext: QueryContext,
           }
 
           // serialize the map; pack it into a RangeVector
-          val serMap = ZeroCopyUTF8String(SerializeUtils.serialize(countMap))
+          val serMap = ZeroCopyUTF8String(serializeMap(countMap.toMap))
 
           val it = Seq(SingleValueRowReader(serMap)).iterator
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
