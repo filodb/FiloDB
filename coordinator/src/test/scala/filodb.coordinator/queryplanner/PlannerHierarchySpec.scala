@@ -333,7 +333,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     // DS Time range should be [userStartTime, dsEndTime]
     // Raw Time range should be [rawStartTime, userEndTime]
 
-    val longTermPlan = longTermPlanner.materialize(logicalPlan, queryContext)
+    val longTermPlan = rootPlanner.materialize(logicalPlan, queryContext)
 
     val expectedLongTermPlan =
            """T~LabelCardinalityPresenter(LabelCardinalityPresenter)
@@ -350,7 +350,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     // Should go completely to DS Cluster
     val case2EndTime = endSeconds - 8.days.toSeconds
     val logicalPlan2 = LabelCardinality(filters, startSeconds * 1000L, case2EndTime * 1000L)
-    val case2Plan = longTermPlanner.materialize(logicalPlan2, queryContext)
+    val case2Plan = rootPlanner.materialize(logicalPlan2, queryContext)
     val expectedDSOnlyPlan =
       """T~LabelCardinalityPresenter(LabelCardinalityPresenter)
         |-E~LabelCardinalityReduceExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#872531041],downsample)
@@ -361,12 +361,52 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
     // Case 3: rawStart < dsEndTime < startTime  < endTime
     // Should go completely to RawCluster
-    // TODO
+
+    val case3startTime = endSeconds - 2.hours.toSeconds
+    val case3EndTime = endSeconds - 1.hour.toSeconds
+    val logicalPlan4 = LabelCardinality(filters, case3startTime * 1000L, case3EndTime * 1000L)
+    val case3Plan = rootPlanner.materialize(logicalPlan4, queryContext)
+    val expectedRawOnlyPlan =
+    """T~LabelCardinalityPresenter(LabelCardinalityPresenter)
+      |-E~LabelCardinalityReduceExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-652694969],raw)
+      |--E~LabelCardinalityExec(shard=0, filters=List(ColumnFilter(_ws_,Equals(ws)), ColumnFilter(_ns_,Equals(ns)), ColumnFilter(_metric_,Equals(metric))), limit=1000000, startMs=1634770130000, endMs=1634773730000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-652694969],raw)
+      |--E~LabelCardinalityExec(shard=1, filters=List(ColumnFilter(_ws_,Equals(ws)), ColumnFilter(_ns_,Equals(ns)), ColumnFilter(_metric_,Equals(metric))), limit=1000000, startMs=1634770130000, endMs=1634773730000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-652694969],raw)""".stripMargin
+
+    validatePlan(case3Plan, expectedRawOnlyPlan)
 
     // Case 4: rawStart < startTime < endTime < dsEndTime
-    // Should go completely to both clusters but the start and endtime in both clusters should be user provided times
-    // TODO
+    // Should go to both clusters but the start and endtime in both clusters should be user provided times
 
+    val case4startTime = endSeconds - 4.days.toSeconds
+    val case4EndTime = endSeconds - 3.days.toSeconds
+    val logicalPlan5 = LabelCardinality(filters, case4startTime * 1000L, case4EndTime * 1000L)
+    val case4Plan = rootPlanner.materialize(logicalPlan5, queryContext)
+    val expectedCase4Plan =
+    """T~LabelCardinalityPresenter(LabelCardinalityPresenter)
+      |-E~LabelCardinalityReduceExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@1f2f0109)
+      |--E~LabelCardinalityReduceExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1578174761],downsample)
+      |---E~LabelCardinalityExec(shard=0, filters=List(ColumnFilter(_ws_,Equals(ws)), ColumnFilter(_ns_,Equals(ns)), ColumnFilter(_metric_,Equals(metric))), limit=1000000, startMs=1634431730000, endMs=1634518130000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1578174761],downsample)
+      |---E~LabelCardinalityExec(shard=1, filters=List(ColumnFilter(_ws_,Equals(ws)), ColumnFilter(_ns_,Equals(ns)), ColumnFilter(_metric_,Equals(metric))), limit=1000000, startMs=1634431730000, endMs=1634518130000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1578174761],downsample)
+      |--E~LabelCardinalityReduceExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1578174761],raw)
+      |---E~LabelCardinalityExec(shard=0, filters=List(ColumnFilter(_ws_,Equals(ws)), ColumnFilter(_ns_,Equals(ns)), ColumnFilter(_metric_,Equals(metric))), limit=1000000, startMs=1634431730000, endMs=1634518130000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1578174761],raw)
+      |---E~LabelCardinalityExec(shard=1, filters=List(ColumnFilter(_ws_,Equals(ws)), ColumnFilter(_ns_,Equals(ns)), ColumnFilter(_metric_,Equals(metric))), limit=1000000, startMs=1634431730000, endMs=1634518130000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1578174761],raw)""".stripMargin
+
+    validatePlan(case4Plan, expectedCase4Plan)
+
+    // Case 5, should go entirely to Recording rule cluster.
+    val rrFilters = Seq(
+      ColumnFilter("_ws_", Equals("ws")),
+      ColumnFilter("_ns_", Equals("ns")),
+      ColumnFilter("_metric_", Equals("metric:1m"))
+    )
+    val logicalPlan6 = LabelCardinality(rrFilters, startSeconds * 1000L, endSeconds * 1000L)
+    val case5Plan = rootPlanner.materialize(logicalPlan6, queryContext)
+    val expectedCase5Plan =
+    """T~LabelCardinalityPresenter(LabelCardinalityPresenter)
+      |-E~LabelCardinalityReduceExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1163475801],recordingRules)
+      |--E~LabelCardinalityExec(shard=0, filters=List(ColumnFilter(_ws_,Equals(ws)), ColumnFilter(_ns_,Equals(ns)), ColumnFilter(_metric_,Equals(metric:1m))), limit=1000000, startMs=1633913330000, endMs=1634777330000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1163475801],recordingRules)
+      |--E~LabelCardinalityExec(shard=1, filters=List(ColumnFilter(_ws_,Equals(ws)), ColumnFilter(_ns_,Equals(ns)), ColumnFilter(_metric_,Equals(metric:1m))), limit=1000000, startMs=1633913330000, endMs=1634777330000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1163475801],recordingRules)""".stripMargin
+    validatePlan(case5Plan, expectedCase5Plan)
 
 
   }

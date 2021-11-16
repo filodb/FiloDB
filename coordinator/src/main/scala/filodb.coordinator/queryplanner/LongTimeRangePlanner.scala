@@ -197,7 +197,7 @@ import filodb.query.exec._
       case lp: TopLevelSubquery            => materializeTopLevelSubquery(qContext, lp)
       case lp: ApplyLimitFunction          => rawClusterMaterialize(qContext, lp)
       case lp: LabelNames                  => rawClusterMaterialize(qContext, lp)
-      case lp: LabelCardinality            => rawClusterMaterialize(qContext, lp)
+      case lp: LabelCardinality            => materializeLabelCardinalityPlan(lp, qContext)
     }
     // scalastyle:on cyclomatic.complexity
   }
