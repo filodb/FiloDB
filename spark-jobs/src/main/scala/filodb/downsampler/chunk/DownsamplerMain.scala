@@ -132,6 +132,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
     val downsampleHourStartGauge = Kamon.gauge("chunk-downsampler-period-start-hour")
       .withTag("downsamplePeriod", downsamplePeriodStr)
     downsampleHourStartGauge.update(userTimeStart / 1000 / 60 / 60)
+    Thread.sleep(62000) // quick & dirty hack to ensure that the completed metric gets published
     spark
   }
 
