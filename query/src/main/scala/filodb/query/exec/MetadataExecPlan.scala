@@ -132,7 +132,7 @@ final case class TsCardReduceExec(queryContext: QueryContext,
     }.flatten
       .foldLeftL(new mutable.HashMap[Seq[ZeroCopyUTF8String], CardCounts])(mapFold)
       .map{ aggMap =>
-        val serMap = ZeroCopyUTF8String(SerializeUtils.serialize(aggMap.toMap))  // TODO(a_theimer): toMap needed?
+        val serMap = ZeroCopyUTF8String(SerializeUtils.serialize(aggMap.toMap))
         val it = Seq(SingleValueRowReader(serMap)).iterator
         IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
       }
@@ -431,7 +431,6 @@ final case object TsCardExec {
 
   val OVERFLOW_NAME = "_overflow_".utf8
 
-  // TODO(a_theimer): Int? Long?
   case class CardCounts(active: Int, total: Int) {
     require(total >= active, "total must be at least as large as active")
   }
@@ -482,7 +481,6 @@ final case class TsCardExec(queryContext: QueryContext,
 
     private var iFirstEmptyQueue = -1
 
-    // TODO(a_theimer): this feels gross
     initialize()
 
     private def initialize(): Unit = {
@@ -541,7 +539,6 @@ final case class TsCardExec(queryContext: QueryContext,
         // Fill each successive queue with the topKCardinality result such that
         //   its argument prefix is defined by the preceding queue front labels.
         for (iempty <- iFirstEmptyQueue until extendToSize) {
-          // TODO(a_theimer): MAX_RESPONSE_SIZE works, but not exactly the same meaning
           tsMemStore.topKCardinality(dataset, Seq(shard), currPrefix,
             MAX_RESPONSE_SIZE, ADD_INACTIVE).foreach{ card =>
             spaceQueues(iempty).enqueue(card.childName)
