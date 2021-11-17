@@ -129,7 +129,7 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
  * Plan to answer queries of the abstract form:
  *
  * Find (active, total) cardinality pairs for all time series with <shard-key-prefix>,
- *   then group them by ns[, ws[, metric]].
+ *   then group them by { key[:1], key[:2], key[:3], ... }.
  *
  * Examples:
  *
@@ -145,14 +145,15 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
  *  { prefix=["ws_a"], groupDepth=0 } -> {
  *      prefix=["ws_a"] -> (3, 5) }
  *
- * @param groupDepth: indicates "hierarchical depth" at which to group cardinalities:
+ * @param groupDepth: indicates "hierarchical depth" at which to group cardinalities.
+ *   For example:
  *     0 -> workspace
  *     1 -> namespace
  *     2 -> metric
  *   Must indicate a depth:
- *     (1) at least as deep as shardKeyPrefix
- *     (2) less than '2' when the prefix does not contain ws and ns
- *   Specifically:
+ *     (1) at least as deep as shardKeyPrefix.
+ *     (2) less than '2' when the prefix does not contain values for all lesser depths.
+ *   Example (if shard keys specify a ws, ns, and metric):
  *     shardKeyPrefix     groupDepth
  *     []                 { 0, 1 }
  *     [ws]               { 0, 1 }
