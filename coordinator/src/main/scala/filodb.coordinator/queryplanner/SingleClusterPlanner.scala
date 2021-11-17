@@ -134,6 +134,7 @@ class SingleClusterPlanner(val dataset: Dataset,
         many.head match {
           case _: LabelValuesExec => LabelValuesDistConcatExec(qContext, targetActor, many)
           case _: LabelNamesExec => LabelNamesDistConcatExec(qContext, targetActor, many)
+          case _: TsCardExec => TsCardReduceExec(qContext, targetActor, many)
           case _: LabelCardinalityExec => {
             val reduceExec = LabelCardinalityReduceExec(qContext, targetActor, many)
             // Presenter here is added separately which use the bytes representing the sketch to get an estimate
@@ -145,11 +146,6 @@ class SingleClusterPlanner(val dataset: Dataset,
               reduceExec.addRangeVectorTransformer(new LabelCardinalityPresenter())
             }
             reduceExec
-          }
-          case lce: TsCardExec => {
-            val reducer = TsCardReduceExec(qContext, targetActor, many)
-            reducer.addRangeVectorTransformer(TsCardPresenter(lce.groupDepth))
-            reducer
           }
           case ske: PartKeysExec => PartKeysDistConcatExec(qContext, targetActor, many)
           case ep: ExecPlan =>

@@ -1,7 +1,6 @@
 package filodb.query.exec
 
 import scala.collection.mutable
-import scala.collection.mutable.{ArrayBuilder}
 
 import monix.eval.Task
 import monix.execution.Scheduler
@@ -16,7 +15,7 @@ import filodb.core.query._
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.store.ChunkSource
 import filodb.memory.{UTF8StringMedium, UTF8StringShort}
-import filodb.memory.format.{SeqRowReader, SingleValueRowReader, StringArrayRowReader,
+import filodb.memory.format.{RowReader, SeqRowReader, StringArrayRowReader,
                              UnsafeUtils, UTF8MapIteratorRowReader, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
@@ -80,25 +79,19 @@ final case class TsCardReduceExec(queryContext: QueryContext,
 
   override protected def args: String = ""
 
-  private def mapFold(acc: mutable.HashMap[Seq[ZeroCopyUTF8String], CardCounts], rv: RangeVector):
-      mutable.HashMap[Seq[ZeroCopyUTF8String], CardCounts] = {
+  private def mapFold(acc: mutable.HashMap[ZeroCopyUTF8String, CardCounts], rv: RangeVector):
+      mutable.HashMap[ZeroCopyUTF8String, CardCounts] = {
     rv.rows().foreach{ r =>
-      val mapSer = r.getAny(0).asInstanceOf[ZeroCopyUTF8String].bytes
-      val map = deSerializeMap(mapSer)
-      map.foreach{ case (prefix, counts) =>
-        val accCountsOpt = acc.get(prefix)
-        // Check if we either (1) won't increase the size or (2) have enough room for another.
-        // Accordingly retrieve the key to update and the counts to increment.
-        val (prefixKey, accCounts) = if (accCountsOpt.nonEmpty || acc.size < MAX_RESPONSE_SIZE) {
-          (prefix, accCountsOpt.getOrElse(CardCounts(0, 0)))
-        } else {
-          val prefixKey = prefix.map(_ => OVERFLOW_NAME).toSeq
-          (prefixKey, acc.getOrElseUpdate(prefixKey, CardCounts(0, 0)))
-        }
-        val sumCounts = CardCounts(accCounts.active + counts.active,
-                                   accCounts.total + counts.total)
-        acc.update(prefixKey, sumCounts)
+      val data = RowData.fromRowReader(r)
+      val accCountsOpt = acc.get(data.group)
+      // Check if we either (1) won't increase the size or (2) have enough room for another.
+      // Accordingly retrieve the key to update and the counts to increment.
+      val (groupKey, accCounts) = if (accCountsOpt.nonEmpty || acc.size < MAX_RESPONSE_SIZE) {
+        (data.group, accCountsOpt.getOrElse(CardCounts(0, 0)))
+      } else {
+        (OVERFLOW_NAME, acc.getOrElseUpdate(OVERFLOW_NAME, CardCounts(0, 0)))
       }
+      acc.update(groupKey, accCounts.add(data.counts))
     }
     acc
   }
@@ -110,59 +103,14 @@ final case class TsCardReduceExec(queryContext: QueryContext,
       case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
       case (QueryError(_, _, ex), _)         => throw ex
     }.flatten
-      .foldLeftL(new mutable.HashMap[Seq[ZeroCopyUTF8String], CardCounts])(mapFold)
+      .foldLeftL(new mutable.HashMap[ZeroCopyUTF8String, CardCounts])(mapFold)
       .map{ aggMap =>
-        val serMap = ZeroCopyUTF8String(serializeMap(aggMap.toMap))
-        val it = Seq(SingleValueRowReader(serMap)).iterator
+        val it = aggMap.map{ case (group, counts) =>
+          RowData(group, counts).toRowReader()
+        }.iterator
         IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
       }
     Observable.fromTask(taskOfResults)
-  }
-}
-
-/**
-  * Dynamically packages the (prefix -> cardinalities) map into a RangeVector,
-  *   where its width and column names depend upon the size of each shard key prefix.
-  */
-final case class TsCardPresenter(groupDepth: Int) extends RangeVectorTransformer {
-  import TsCardExec._
-
-  override def funcParams: Seq[FuncArgs] = Nil
-
-  override protected[exec] def args: String = ""
-
-  def apply(source: Observable[RangeVector],
-            querySession: QuerySession,
-            limit: Int,
-            sourceSchema: ResultSchema, paramsResponse: Seq[Observable[ScalarRangeVector]]
-           ): Observable[RangeVector] = {
-    source.map { rv =>
-      // Note: getString() throws a ClassCastException.
-      val mapSer = rv.rows.next.getAny(0).asInstanceOf[ZeroCopyUTF8String].bytes
-      deSerializeMap(mapSer)
-    }.map { countMap =>
-      val iter = countMap.map{ case (names, counts) =>
-        val concatColValues = Seq(names, Seq(counts.active, counts.total)).flatten
-        SeqRowReader(concatColValues)
-      }.iterator
-      IteratorBackedRangeVector(CustomRangeVectorKey(Map.empty),
-        new NoCloseCursor(iter),
-        None)
-    }
-  }
-
-  override def schema(source: ResultSchema): ResultSchema = {
-    // append the appropriate columns according to groupDepth
-    val nameColSeq = new mutable.ArrayBuffer[String](1 + groupDepth)
-    nameColSeq.append("ws")
-    if (groupDepth > 0) nameColSeq.append("ns")
-    if (groupDepth > 1) nameColSeq.append("metric")
-    ResultSchema(
-      Seq(
-        nameColSeq.map(s => ColumnInfo(s, ColumnType.StringColumn)),
-        Seq(ColumnInfo("Active", ColumnType.IntColumn),
-            ColumnInfo("Total", ColumnType.IntColumn))
-      ).flatten, 1)
   }
 }
 
@@ -403,84 +351,36 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
  * Contains utilities for all TsCardinality materialize() derivatives.
  */
 final case object TsCardExec {
-  // TODO: tune this
-  val MAX_RESPONSE_SIZE = 5000
-
-  // just to keep memStore.topKCardinality calls consistent
-  val ADD_INACTIVE = true
-
+  val MAX_RESPONSE_SIZE = 5000  // TODO: tune this
+  val ADD_INACTIVE = true  // just to keep memStore.topKCardinality calls consistent
   val OVERFLOW_NAME = "_overflow_".utf8
+  val PREFIX_DELIM = ","  // not a utf8 in order to make use of mkString
 
   case class CardCounts(active: Int, total: Int) {
-    require(total >= active, "total must be at least as large as active")
-  }
-
-  // --- Serialization Utilities are Below ---
-
-  val NUM_INT_BYTES: Int = 4
-
-  private def intToBytes(num: Int, base: Array[Byte], offset: Int): Unit = {
-    val bytes = java.nio.ByteBuffer.wrap(base, offset, NUM_INT_BYTES)
-    bytes.putInt(num)
-  }
-
-  private def bytesToInt(base: Array[Byte], offset: Int): Int = {
-    val reader = java.nio.ByteBuffer.wrap(base, offset, NUM_INT_BYTES)
-    reader.getInt()
-  }
-
-  def deSerializeMap(bytes: Array[Byte]): Map[Seq[ZeroCopyUTF8String], CardCounts] = {
-    val result = new mutable.HashMap[Seq[ZeroCopyUTF8String], CardCounts]
-    val prefixSize = bytesToInt(bytes, 0)
-    var ibyte = NUM_INT_BYTES;  // since we just read prefixSize
-    while (ibyte < bytes.length) {
-      // deser the prefix first
-      val prefix = new mutable.ArraySeq[ZeroCopyUTF8String](prefixSize)
-      for (iname <- 0 until prefixSize) {
-        val size = bytesToInt(bytes, ibyte)
-        ibyte = ibyte + NUM_INT_BYTES
-        val name = ZeroCopyUTF8String(bytes, ibyte, size)
-        ibyte = ibyte + size
-        prefix(iname) = name
-      }
-      // now deser the counts
-      val active = bytesToInt(bytes, ibyte)
-      ibyte = ibyte + NUM_INT_BYTES
-      val total = bytesToInt(bytes, ibyte)
-      ibyte = ibyte + NUM_INT_BYTES
-      result.update(prefix, CardCounts(active, total))
+    if (total < active) {
+      qLogger.warn(s"CardCounts created with total < active; total: $total, active: $active")
     }
-    result.toMap
+    def add(other: CardCounts): CardCounts = {
+      CardCounts(active + other.active,
+                 total + other.total)
+    }
   }
 
-  def serializeMap(myMap: Map[Seq[ZeroCopyUTF8String], CardCounts]): Array[Byte] = {
-    // Need a quick way to access the underlying array.
-    val builder = new ArrayBuilder.ofByte
-
-    // Pre-allocate a space to store the bytes for use with a
-    //   Java ByteBuffer. Then we'll addAll() to the ArrayBuilder.
-    // TODO: unsafe casts to bypass individual byte writes?
-    val byteSpace = new Array[Byte](NUM_INT_BYTES)
-
-    // store the prefix size first
-    val prefixSize = if (myMap.nonEmpty) myMap.head._1.size else 0
-    intToBytes(prefixSize, byteSpace, 0)
-    builder ++= byteSpace
-
-    myMap.foreach { case (prefix, counts) =>
-      prefix.foreach { name =>
-        // serialize each (size, name)
-        intToBytes(name.length, byteSpace, 0)
-        builder ++= byteSpace
-        builder ++= name.bytes
-      }
-      // now serialize the cardinality counts
-      intToBytes(counts.active, byteSpace, 0)
-      builder ++= byteSpace
-      intToBytes(counts.total, byteSpace, 0)
-      builder ++= byteSpace
+  /**
+   * Convenience class for converting between RowReader and TsCardExec data.
+   */
+  case class RowData(group: ZeroCopyUTF8String, counts: CardCounts) {
+    def toRowReader(): RowReader = {
+      SeqRowReader(Seq(group, counts.active, counts.total))
     }
-    builder.result()
+  }
+  object RowData {
+    def fromRowReader(rr: RowReader): RowData = {
+      val group = rr.getAny(0).asInstanceOf[ZeroCopyUTF8String]
+      val counts = CardCounts(rr.getInt(1),
+                              rr.getInt(2))
+      RowData(group, counts)
+    }
   }
 }
 
@@ -632,7 +532,8 @@ final case class TsCardExec(queryContext: QueryContext,
                                                  MAX_RESPONSE_SIZE, ADD_INACTIVE)
               .find(card => card.childName == shardKeyPrefix.last)
             if (res.nonEmpty) {
-              Map(shardKeyPrefix.map(_.utf8).toSeq -> CardCounts(res.get.activeTsCount, res.get.tsCount))
+              Map(shardKeyPrefix.mkString(PREFIX_DELIM).utf8 ->
+                    CardCounts(res.get.activeTsCount, res.get.tsCount))
             } else {
               Map()
             }
@@ -655,22 +556,26 @@ final case class TsCardExec(queryContext: QueryContext,
                                          MAX_RESPONSE_SIZE, ADD_INACTIVE)
                 .map{ card =>
                   // Concatenate `prefix` with the least-significant name.
-                  val totalPrefix = Seq(prefix, Seq(card.childName)).flatMap(_.map(_.utf8)).toSeq
-                  totalPrefix -> CardCounts(card.activeTsCount, card.tsCount)
+                  val group = Seq(prefix, Seq(card.childName)).flatten.mkString(PREFIX_DELIM).utf8
+                  group -> CardCounts(card.activeTsCount, card.tsCount)
                 }
-            }.toMap
+            }
           }
 
-          // serialize the map; pack it into a RangeVector
-          val serMap = ZeroCopyUTF8String(serializeMap(countMap.toMap))
+          // pack the map into a RangeVector
+          val it = countMap.map{ case (group, counts) =>
+            RowData(group, counts).toRowReader()
+          }.toSeq.iterator
 
-          val it = Seq(SingleValueRowReader(serMap)).iterator
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
         }
       case other =>
         Observable.empty
     }
-    val sch = ResultSchema(Seq(ColumnInfo("TsCardMap", ColumnType.StringColumn)), 1)
+    val sch = ResultSchema(
+      Seq(ColumnInfo("group", ColumnType.StringColumn),
+          ColumnInfo("active", ColumnType.IntColumn),
+          ColumnInfo("total", ColumnType.IntColumn)), 1)
     ExecResult(rvs, Task.eval(sch))
   }
   // scalastyle:on method.length

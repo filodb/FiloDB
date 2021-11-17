@@ -285,9 +285,12 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   }
 
   it ("should correctly execute TsCardExec") {
+    import filodb.query.exec.TsCardExec._
+
     case class TestSpec(shardKeyPrefix: Seq[String], groupDepth: Int, exp: Map[Seq[String], CardCounts])
 
-    // Note: these strings are eventually converted to ZeroCopyUTF8Strings.
+    // Note: expected strings are eventually concatenated with a delimiter
+    //   and converted to ZeroCopyUTF8Strings.
     Seq(
       TestSpec(Seq(), 0, Map(
         Seq("demo-A") -> CardCounts(1,1),
@@ -324,22 +327,20 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
       }.toSeq
 
       val execPlan = TsCardReduceExec(QueryContext(), executeDispatcher, leaves)
-      execPlan.addRangeVectorTransformer(TsCardPresenter(testSpec.groupDepth))
 
       val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
       val result = (resp: @unchecked) match {
         case QueryResult(id, _, response, _, _, _) =>
-          // should only have a single RowVector
+          // should only have a single RangeVector
           response.size shouldEqual 1
 
           val resultMap = response(0).rows().map{r =>
-            val prefix = (0 to testSpec.groupDepth).map(i => r.getAny(i).asInstanceOf[ZeroCopyUTF8String]).toSeq
-            val counts = CardCounts(r.getInt(testSpec.groupDepth + 1), r.getInt(testSpec.groupDepth + 2))
-            prefix -> counts
+            val data = RowData.fromRowReader(r)
+            data.group -> data.counts
           }.toMap
 
-          resultMap shouldEqual testSpec.exp.map { case (names, counts) =>
-            names.map(_.utf8) -> counts
+          resultMap shouldEqual testSpec.exp.map { case (prefix, counts) =>
+            prefix.mkString(PREFIX_DELIM).utf8 -> counts
           }.toMap
       }
     }

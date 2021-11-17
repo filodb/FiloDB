@@ -816,8 +816,6 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.isInstanceOf[TsCardReduceExec] shouldEqual true
 
     val reducer = execPlan.asInstanceOf[TsCardReduceExec]
-    reducer.rangeVectorTransformers.size shouldEqual 1
-    reducer.rangeVectorTransformers(0).isInstanceOf[TsCardPresenter] shouldEqual true
     reducer.children.size shouldEqual mapper.numShards
     reducer.children.foreach{ child =>
       child.isInstanceOf[TsCardExec] shouldEqual true
