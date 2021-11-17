@@ -44,8 +44,6 @@ object DSIndexJobMain extends App {
 
 class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSIndexJobSettings) extends Serializable {
 
-  @transient lazy private val jobCompleted = Kamon.counter("index-migration-completed").withoutTags()
-
   // scalastyle:off method.length
   def run(conf: SparkConf): SparkSession = {
     val spark = SparkSession.builder()
@@ -54,6 +52,7 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
       .getOrCreate()
 
     def hour(millis: Long) = millis / 1000 / 60 / 60
+    def hourToStr(hour: Long) = java.time.Instant.ofEpochMilli(hour * 1000 * 60 * 60)
 
     val timeInMigrationPeriod: Long = spark.sparkContext.getConf
       .getOption("spark.filodb.downsampler.index.timeInPeriodOverride") match {
@@ -62,6 +61,10 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
       // examples: 2019-10-20T12:34:56Z  or  2019-10-20T12:34:56-08:00
       case Some(str) => Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str)).toEpochMilli()
     }
+
+    val userTimeStart: Long = (timeInMigrationPeriod / dsSettings.downsampleChunkDuration) *
+                                              dsSettings.downsampleChunkDuration
+    val downsamplePeriodStr = java.time.Instant.ofEpochMilli(userTimeStart).toString
 
     val hourInMigrationPeriod = hour(timeInMigrationPeriod)
     val jobIntervalInHours = dsIndexJobSettings.batchLookbackInHours
@@ -84,9 +87,10 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
 
     val job = new DSIndexJob(dsSettings, dsIndexJobSettings)
 
-    DownsamplerContext.dsLogger.info(s"This is the Downsampling Index Migration driver. Starting job... " +
-      s"fromHour=$fromHour " +
-      s"toHourExcl=$toHourExcl " +
+    DownsamplerContext.dsLogger.info(s"This is the Index Downsampling driver. Starting job... " +
+      s"fromHour=${hourToStr(fromHour)} " +
+      s"toHourExcl=${hourToStr(toHourExcl)} " +
+      s"downsamplePeriod=$downsamplePeriodStr " +
       s"timeInMigrationPeriod=${java.time.Instant.ofEpochMilli(timeInMigrationPeriod)} " +
       s"doFullMigration=$doFullMigration")
     DownsamplerContext.dsLogger.info(s"To rerun this job add the following spark config: " +
@@ -107,8 +111,17 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
         KamonShutdownHook.registerShutdownHook()
         job.updateDSPartKeyIndex(shard, startHour, endHourExcl, doFullMigration)
       }
-    DownsamplerContext.dsLogger.info(s"IndexUpdater Driver completed successfully")
+    DownsamplerContext.dsLogger.info(s"Index Downsampling Driver completed successfully for downsample period " +
+      s"$downsamplePeriodStr doFullMigration=$doFullMigration")
+    val jobCompleted = Kamon.counter("index-migration-completed").withTag("downsamplePeriod", downsamplePeriodStr)
     jobCompleted.increment()
+
+    if (!doFullMigration) {
+      val downsampleHourStartGauge = Kamon.gauge("index-downsampler-period-start-hour")
+        .withTag("downsamplePeriod", downsamplePeriodStr)
+      downsampleHourStartGauge.update(userTimeStart / 1000 / 60 / 60)
+    }
+    Thread.sleep(62000) // quick & dirty hack to ensure that the completed metric gets published
     spark
   }
 
