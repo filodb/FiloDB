@@ -85,17 +85,19 @@ final case class TsCardReduceExec(queryContext: QueryContext,
     rv.rows().foreach{ r =>
       val mapSer = r.getAny(0).asInstanceOf[ZeroCopyUTF8String].bytes
       val map = deSerializeMap(mapSer)
-      map.foreach{ case (names, counts) =>
-        val accCountsOpt = acc.get(names)
-        // check if we either (1) won't increase the size or (2) have enough room for another
-        val accCounts = if (accCountsOpt.nonEmpty || acc.size < MAX_RESPONSE_SIZE) {
-          accCountsOpt.getOrElse(CardCounts(0, 0))
+      map.foreach{ case (prefix, counts) =>
+        val accCountsOpt = acc.get(prefix)
+        // Check if we either (1) won't increase the size or (2) have enough room for another.
+        // Accordingly retrieve the key to update and the counts to increment.
+        val (prefixKey, accCounts) = if (accCountsOpt.nonEmpty || acc.size < MAX_RESPONSE_SIZE) {
+          (prefix, accCountsOpt.getOrElse(CardCounts(0, 0)))
         } else {
-          acc.getOrElseUpdate(names.map(_ => OVERFLOW_NAME).toSeq, CardCounts(0, 0))
+          val prefixKey = prefix.map(_ => OVERFLOW_NAME).toSeq
+          (prefixKey, acc.getOrElseUpdate(prefixKey, CardCounts(0, 0)))
         }
         val sumCounts = CardCounts(accCounts.active + counts.active,
                                    accCounts.total + counts.total)
-        acc.update(names, sumCounts)
+        acc.update(prefixKey, sumCounts)
       }
     }
     acc
