@@ -137,7 +137,8 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   // consider compaction-pending yes/no
 
   /**
-   * TODO(a_theimer): update
+   * TODO(a_theimer): this is outdated; see toStringKey for current schema
+   *
    * In order to enable quick prefix search, we formulate string based keys to the RocksDB
    * key-value store.
    *
@@ -170,11 +171,20 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
    *                     fetch immediate children in trie. Use false to fetch one specific node.
    * @return string key to use to perform reads and writes of entries into RocksDB
    */
+
+  /**
+   * Builds keys as:
+   *   <keyDepth>{KeySeparator}<name-1>{KeySeparator}<name-2> ... <name-n>
+   */
   private def toStringKey(shardKeyPrefix: Seq[String]): String = {
     toStringKeyPrefix(shardKeyPrefix, shardKeyPrefix.size)
   }
 
-  // TODO(a_theimer): rename
+  /**
+   * When keyDepth > shardKeyPrefix.size, builds keys as:
+   *   <keyDepth>{KeySeparator}<name-1>{KeySeparator}<name-2> ... <name-n>{KeySeparator}
+   * When keyDepth == shardKeyPrefix.size, the final KeySeparator is omitted.
+   */
   private def toStringKeyPrefix(shardKeyPrefix: Seq[String], keyDepth: Int): String = {
     import RocksDbCardinalityStore._
 
@@ -219,17 +229,9 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
     db.delete(toStringKey(shardKeyPrefix).getBytes(StandardCharsets.UTF_8))
   }
 
-  override def scanImmediateChildren(shardKeyPrefix: Seq[String]): Seq[Cardinality] = {
-    scanChildren(shardKeyPrefix, shardKeyPrefix.size + 1)
-  }
-
-  // TODO(a_theimer): cleanup/api/assertions
   override def scanChildren(shardKeyPrefix: Seq[String], depth: Int): Seq[Cardinality] = {
-    if (depth == shardKeyPrefix.size) {
-      val value = db.get(toStringKey(shardKeyPrefix).getBytes(StandardCharsets.UTF_8))
-      return if (value == NotFound) Seq() else Seq(bytesToCardinality(value))
-    }
-
+    require(depth > shardKeyPrefix.size,
+      s"scan depth $depth must be greater than the size of the prefix ${shardKeyPrefix.size}")
     val it = db.newIterator()
     val buf = ArrayBuffer[Cardinality]()
     try {

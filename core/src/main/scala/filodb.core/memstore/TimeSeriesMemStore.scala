@@ -79,12 +79,6 @@ extends MemStore with StrictLogging {
     }
   }
 
-  // TODO(a_theimer)
-  def topKCardinalityImmediate(ref: DatasetRef, shards: Seq[Int],
-                               shardKeyPrefix: Seq[String], k: Int, addInactive: Boolean): Seq[CardinalityRecord] = {
-    topKCardinality(ref, shards, shardKeyPrefix, shardKeyPrefix.size + 1, k, addInactive)
-  }
-
   def topKCardinality(ref: DatasetRef, shards: Seq[Int],
                       shardKeyPrefix: Seq[String], depth: Int,
                       k: Int, addInactive: Boolean): Seq[CardinalityRecord] = {

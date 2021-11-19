@@ -48,7 +48,7 @@ class CardinalityTracker(ref: DatasetRef,
   require(defaultChildrenQuota.forall(q => q > 0))
   logger.info(s"Initializing Cardinality Tracker for shard $shard with $defaultChildrenQuota")
 
-  // TODO(a_theimer)
+  // separates ws, ns, metric, etc. names
   val NAME_DELIMITER = ","
 
   /**
@@ -171,24 +171,35 @@ class CardinalityTracker(ref: DatasetRef,
     }
   }
 
-  // TODO(a_theimer): depth requirements everywhere
-  // TODO(a_theimer)
   /**
-   * Use this method to query the top-k cardinality consumers immediately
-   * under a provided shard key prefix
+   * Use this method to query the top-k cardinality consumers
+   *   under a provided shard key prefix.
    *
-   * @param k
+   * @param depth cardinalities are returned for all prefixes of this size
    * @param shardKeyPrefix zero or more elements that form a valid shard key prefix
    * @return Top-K records, can the less than K if fewer children
    */
   def topk(k: Int, shardKeyPrefix: Seq[String], depth: Int, addInactive: Boolean): Seq[CardinalityRecord] = {
     require(shardKeyPrefix.length <= shardKeyLen, s"Too many shard keys in $shardKeyPrefix - max $shardKeyLen")
+    require(depth >= shardKeyPrefix.size,
+      s"depth $depth must be at least the size of the prefix ${shardKeyPrefix.size}")
+
     implicit val ord = new Ordering[CardinalityRecord]() {
       override def compare(x: CardinalityRecord, y: CardinalityRecord): Int = {
         if (addInactive) x.tsCount - y.tsCount
         else x.activeTsCount - y.activeTsCount
       }
     }.reverse
+
+    if (shardKeyPrefix.size == depth) {
+      // directly fetch the cardinality and return
+      val card = getCardinality(shardKeyPrefix)
+      return Seq(CardinalityRecord(
+        shard, card.name, card.tsCount, card.activeTsCount,
+        if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
+        card.childrenQuota))
+    }
+
     val heap = mutable.PriorityQueue[CardinalityRecord]()
     store.scanChildren(shardKeyPrefix, depth).foreach { card =>
       heap.enqueue(
@@ -200,11 +211,6 @@ class CardinalityTracker(ref: DatasetRef,
       if (heap.size > k) heap.dequeue()
     }
     heap.toSeq
-  }
-
-  // TODO(a_theimer)
-  def topkImmediate(k: Int, shardKeyPrefix: Seq[String], addInactive: Boolean): Seq[CardinalityRecord] = {
-    topk(k, shardKeyPrefix, shardKeyPrefix.size + 1, addInactive)
   }
 
   def close(): Unit = {
