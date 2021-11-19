@@ -212,12 +212,17 @@ final class QueryActor(memStore: MemStore,
   }
 
   private def execTopkCardinalityQuery(q: GetTopkCardinality, sender: ActorRef): Unit = {
-    try {
-      val ret = memStore.topKCardinality(q.dataset, q.shards, q.shardKeyPrefix, q.k, q.addInactive)
-      sender ! ret
-    } catch { case e: Exception =>
-      sender ! QueryError(s"Error Occurred", QueryStats(), e)
-    }
+    // TODO(a_theimer)
+    // scalastyle:off
+    println("========= TODO TODO TODO THIS IS DISABLED ============")
+//    try {
+//      val ret = memStore.topKCardinality(q.dataset, q.shards,
+//        q.shardKeyPrefix, 0, q.k, q.addInactive)
+//      sender ! ret
+//    } catch { case e: Exception =>
+//      sender ! QueryError(s"Error Occurred", QueryStats(), e)
+//    }
+    //scalastyle:on
   }
 
   def checkTimeout(queryContext: QueryContext, replyTo: ActorRef): Boolean = {

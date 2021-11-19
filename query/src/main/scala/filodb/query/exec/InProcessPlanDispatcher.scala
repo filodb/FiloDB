@@ -79,6 +79,7 @@ case class UnsupportedChunkSource() extends ChunkSource {
   override def topKCardinality(ref: DatasetRef,
                                shards: Seq[Int],
                                shardKeyPrefix: scala.Seq[String],
+                               depth: Int,
                                k: Int,
                                addInactive: Boolean): scala.Seq[CardinalityRecord] =
     throw new UnsupportedOperationException("This operation is not supported")

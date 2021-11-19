@@ -598,9 +598,15 @@ class TimeSeriesShard(val ref: DatasetRef,
     _offset
   }
 
-  def topKCardinality(k: Int, shardKeyPrefix: Seq[String], addInactive: Boolean): Seq[CardinalityRecord] = {
-    if (storeConfig.meteringEnabled) cardTracker.topk(k, shardKeyPrefix, addInactive)
+  // TODO(a_theimer)
+  def topKCardinality(k: Int, shardKeyPrefix: Seq[String], depth: Int, addInactive: Boolean): Seq[CardinalityRecord] = {
+    if (storeConfig.meteringEnabled) cardTracker.topk(k, shardKeyPrefix, depth, addInactive)
     else throw new IllegalArgumentException("Metering is not enabled")
+  }
+
+  // TODO(a_theimer)
+  def topKCardinalityImmediate(k: Int, shardKeyPrefix: Seq[String], addInactive: Boolean): Seq[CardinalityRecord] = {
+    topKCardinality(k, shardKeyPrefix, shardKeyPrefix.size + 1, addInactive)
   }
 
   def startFlushingIndex(): Unit =

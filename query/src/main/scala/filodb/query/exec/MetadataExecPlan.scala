@@ -394,122 +394,12 @@ final case class TsCardExec(queryContext: QueryContext,
                             shard: Int,
                             shardKeyPrefix: Seq[String],
                             groupDepth: Int) extends LeafExecPlan {
-  import TsCardExec._
-
   require(groupDepth >= 0,
     "groupDepth must be non-negative")
   require(1 + groupDepth >= shardKeyPrefix.size,
     "groupDepth indicate a depth at least as deep as shardKeyPrefix")
 
   override def enforceLimit: Boolean = false
-
-  /**
-   * Given a shard key prefix, iterates through all child
-   *   prefixes with the specified size.
-   *
-   * Note: next() will always return the same array instance.
-   *
-   * @param tsMemStore contains the shard keys over which to iterate
-   * @param initPrefix shard key prefix to resolve
-   * @param extendToSize the length of the prefix children to iterate through.
-   *   Must be at (1) least initPrefix.size and (2) greater than zero.
-   */
-  class PrefixIterator (tsMemStore: TimeSeriesMemStore,
-                        initPrefix: Seq[String],
-                        extendToSize: Int) extends Iterator[Seq[String]]{
-    require(extendToSize > 0,
-      "extendToSize must be positive")
-    require(extendToSize >= initPrefix.size,
-      "extendToSize must be at least initPrefix.size")
-
-    // A queue for each set of "space" (i.e. namespace, workspace, metric) labels.
-    // Spaces are stored in descending precedence, and each successive queue
-    //   contains labels for the "subspace" of the label at the front of the
-    //   previous queue.
-    private val spaceQueues = new Array[mutable.Queue[String]](extendToSize)
-
-    // Stores the prefix returned by next().
-    private val currPrefix = new mutable.ArrayBuffer[String](extendToSize)
-
-    private var iFirstEmptyQueue = -1
-
-    initialize()
-
-    private def initialize(): Unit = {
-      // initialize each of the queues
-      for (i <- 0 until extendToSize) {
-        spaceQueues(i) = new mutable.Queue[String]
-      }
-
-      for (i <- 0 until initPrefix.size) {
-        // Place each existing prefix label into appropriate queue.
-        spaceQueues(i).enqueue(initPrefix(i))
-        // Store as much of the prefix as we have available.
-        currPrefix.append(initPrefix(i))
-      }
-
-      iFirstEmptyQueue = initPrefix.size
-
-      // Need this because an empty prefix is a valid argument, and hasNext()
-      //   relies on spaceQueues(0).size.
-      // This results in one extra enqueueAndUpdatePrefix() call at the first next().
-      enqueueAndUpdatePrefix()
-    }
-
-    /**
-     * Dequeues from each queue-- in ascending precedence-- until a dequeue()
-     *   does not leave a queue empty.
-     *
-     * This method mostly exists as setup for enqueueAndUpdatePrefix().
-     */
-    private def dequeue(): Unit = {
-      require(spaceQueues.last.nonEmpty, "should never dequeue without full prefix")
-      iFirstEmptyQueue = spaceQueues.size
-      for (queue <- spaceQueues.reverseIterator) {
-        queue.dequeue()
-        if (queue.nonEmpty) {
-          return
-        }
-        iFirstEmptyQueue = iFirstEmptyQueue - 1
-      }
-    }
-
-    /**
-     * Given the prefix defined by the front of each queue,
-     *   repopulates empty queues with "subspace" labels.
-     */
-    private def enqueueAndUpdatePrefix(): Unit = {
-      if (iFirstEmptyQueue == extendToSize) {
-        // final queue still contains elements; no need to call topk
-        currPrefix(currPrefix.size - 1) = spaceQueues(currPrefix.size - 1).front
-      } else {
-        currPrefix.reduceToSize(iFirstEmptyQueue)
-        if (iFirstEmptyQueue > 0) {
-          // this space name is still unused
-          currPrefix(iFirstEmptyQueue - 1) = spaceQueues(iFirstEmptyQueue - 1).front
-        }
-        // Fill each successive queue with the topKCardinality result such that
-        //   its argument prefix is defined by the preceding queue front labels.
-        for (iempty <- iFirstEmptyQueue until extendToSize) {
-          tsMemStore.topKCardinality(dataset, Seq(shard), currPrefix,
-            MAX_RESPONSE_SIZE, ADD_INACTIVE).foreach{ card =>
-            spaceQueues(iempty).enqueue(card.childName)
-          }
-          // currPrefix will contain all front labels, so we store them as we iterate
-          currPrefix.append(spaceQueues(iempty).front)
-        }
-      }
-      iFirstEmptyQueue = extendToSize
-    }
-
-    override def hasNext: Boolean = spaceQueues.head.nonEmpty
-
-    override def next(): Seq[String] = {
-      enqueueAndUpdatePrefix()
-      dequeue() // Note: also setup for hasNext().
-      currPrefix
-    }
-  }
 
   // scalastyle:off method.length
   def doExecute(source: ChunkSource,
@@ -520,52 +410,16 @@ final case class TsCardExec(queryContext: QueryContext,
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
 
+    // TODO(a_theimer): cleanup
     val rvs = source match {
       case tsMemStore: TimeSeriesMemStore =>
         Observable.eval {
-          val countMap = if (groupDepth == shardKeyPrefix.size - 1) {
-            // shardKeyPrefix is as deep as the groupDepth; we execute only a single topKCardinality
-            //   call on the "prefix's prefix", then map the prefix to its cardinality iff the
-            //   "deepest" prefix label is found in the results.
-            val res = tsMemStore.topKCardinality(dataset, Seq(shard),
-                                                 shardKeyPrefix.dropRight(1),
-                                                 MAX_RESPONSE_SIZE, ADD_INACTIVE)
-              .find(card => card.childName == shardKeyPrefix.last)
-            if (res.nonEmpty) {
-              Map(shardKeyPrefix.mkString(PREFIX_DELIM).utf8 ->
-                    CardCounts(res.get.activeTsCount, res.get.tsCount))
-            } else {
-              Map()
-            }
-          } else {
-            // groupDepth is deeper than shardKeyPrefix.
-            // We will "expand" shardKeyPrefix into all of its child prefixes at groupDepth - 1,
-            //   then we'll pass the children to memstore.topKCardinality and map the results.
-
-            // The conditional exists because PrefixIterator currently
-            //   needs to extend a prefix to a size > 0
-            val prefixIter = if (groupDepth > 0) {
-              // Note: groupDepth equals the length of the prefix to extend to (at groupDepth - 1)
-              new PrefixIterator(tsMemStore, shardKeyPrefix, groupDepth)
-            } else {
-              Seq(Seq()).iterator
-            }
-
-            prefixIter.flatMap { prefix =>
-              tsMemStore.topKCardinality(dataset, Seq(shard), prefix,
-                                         MAX_RESPONSE_SIZE, ADD_INACTIVE)
-                .map{ card =>
-                  // Concatenate `prefix` with the least-significant name.
-                  val group = Seq(prefix, Seq(card.childName)).flatten.mkString(PREFIX_DELIM).utf8
-                  group -> CardCounts(card.activeTsCount, card.tsCount)
-                }
-            }
-          }
-
-          // pack the map into a RangeVector
-          val it = countMap.map{ case (group, counts) =>
-            RowData(group, counts).toRowReader()
-          }.toSeq.iterator
+          val it =
+            tsMemStore.topKCardinality(dataset, Seq(shard),
+              shardKeyPrefix, groupDepth + 1,
+              MAX_RESPONSE_SIZE, ADD_INACTIVE).map{ card =>
+              RowData(card.childName.utf8, CardCounts(card.activeTsCount, card.tsCount)).toRowReader()
+            }.iterator
 
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
         }

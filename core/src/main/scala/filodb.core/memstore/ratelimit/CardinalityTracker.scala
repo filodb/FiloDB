@@ -171,6 +171,8 @@ class CardinalityTracker(ref: DatasetRef,
     }
   }
 
+  // TODO(a_theimer): depth requirements everywhere
+  // TODO(a_theimer)
   /**
    * Use this method to query the top-k cardinality consumers immediately
    * under a provided shard key prefix
@@ -179,7 +181,7 @@ class CardinalityTracker(ref: DatasetRef,
    * @param shardKeyPrefix zero or more elements that form a valid shard key prefix
    * @return Top-K records, can the less than K if fewer children
    */
-  def topk(k: Int, shardKeyPrefix: Seq[String], addInactive: Boolean): Seq[CardinalityRecord] = {
+  def topk(k: Int, shardKeyPrefix: Seq[String], depth: Int, addInactive: Boolean): Seq[CardinalityRecord] = {
     require(shardKeyPrefix.length <= shardKeyLen, s"Too many shard keys in $shardKeyPrefix - max $shardKeyLen")
     implicit val ord = new Ordering[CardinalityRecord]() {
       override def compare(x: CardinalityRecord, y: CardinalityRecord): Int = {
@@ -188,7 +190,7 @@ class CardinalityTracker(ref: DatasetRef,
       }
     }.reverse
     val heap = mutable.PriorityQueue[CardinalityRecord]()
-    store.scanImmediateChildren(shardKeyPrefix).foreach { card =>
+    store.scanChildren(shardKeyPrefix, depth).foreach { card =>
       heap.enqueue(
         CardinalityRecord(shard, card.name,
                  card.tsCount,
@@ -198,6 +200,11 @@ class CardinalityTracker(ref: DatasetRef,
       if (heap.size > k) heap.dequeue()
     }
     heap.toSeq
+  }
+
+  // TODO(a_theimer)
+  def topkImmediate(k: Int, shardKeyPrefix: Seq[String], addInactive: Boolean): Seq[CardinalityRecord] = {
+    topk(k, shardKeyPrefix, shardKeyPrefix.size + 1, addInactive)
   }
 
   def close(): Unit = {

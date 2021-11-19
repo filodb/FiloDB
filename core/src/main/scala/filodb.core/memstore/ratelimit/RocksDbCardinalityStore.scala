@@ -2,11 +2,9 @@ package filodb.core.memstore.ratelimit
 
 import java.io.File
 import java.nio.charset.StandardCharsets
-
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
 import scala.reflect.io.Directory
-
 import com.esotericsoftware.kryo.{Kryo, Serializer}
 import com.esotericsoftware.kryo.io.{Input, Output}
 import com.typesafe.scalalogging.StrictLogging
@@ -16,7 +14,6 @@ import kamon.tag.TagSet
 import monix.reactive.Observable
 import org.rocksdb._
 import spire.syntax.cfor._
-
 import filodb.core.{DatasetRef, GlobalScheduler}
 import filodb.memory.format.UnsafeUtils
 
@@ -226,8 +223,13 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
     scanChildren(shardKeyPrefix, shardKeyPrefix.size + 1)
   }
 
-  // TODO(a_theimer)
+  // TODO(a_theimer): cleanup/api/assertions
   override def scanChildren(shardKeyPrefix: Seq[String], depth: Int): Seq[Cardinality] = {
+    if (depth == shardKeyPrefix.size) {
+      val value = db.get(toStringKey(shardKeyPrefix).getBytes(StandardCharsets.UTF_8))
+      return if (value == NotFound) Seq() else Seq(bytesToCardinality(value))
+    }
+
     val it = db.newIterator()
     val buf = ArrayBuffer[Cardinality]()
     try {
