@@ -42,7 +42,6 @@ object LogicalPlanUtils extends StrictLogging {
   def getTimeFromLogicalPlan(logicalPlan: LogicalPlan): TimeRange = {
     logicalPlan match {
       case lp: PeriodicSeries              => TimeRange(lp.startMs, lp.endMs)
-      case lp: AtSeries                    => TimeRange(lp.startMs, lp.endMs)
       case lp: PeriodicSeriesWithWindowing => TimeRange(lp.startMs, lp.endMs)
       case lp: ApplyInstantFunction        => getTimeFromLogicalPlan(lp.vectors)
       case lp: Aggregate                   => getTimeFromLogicalPlan(lp.vectors)
@@ -88,14 +87,12 @@ object LogicalPlanUtils extends StrictLogging {
   def copyLogicalPlanWithUpdatedTimeRange(logicalPlan: LogicalPlan,
                                           timeRange: TimeRange): LogicalPlan = {
     logicalPlan match {
-      case lp: AtSeries            => lp  // TODO(a_theimer)
-      case lp: PeriodicSeriesPlan       => copyWithUpdatedTimeRange(lp, timeRange)
-      case lp: RawSeriesLikePlan        => copyNonPeriodicWithUpdatedTimeRange(lp, timeRange)
-      case lp: LabelValues              => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
-      case lp: LabelNames               => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
-      case lp: LabelCardinality         => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
-      case lp: TsCardinalities          => lp  // immutable & no members need to be updated
-      case lp: SeriesKeysByFilters      => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: PeriodicSeriesPlan  => copyWithUpdatedTimeRange(lp, timeRange)
+      case lp: RawSeriesLikePlan   => copyNonPeriodicWithUpdatedTimeRange(lp, timeRange)
+      case lp: LabelValues         => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: LabelNames          => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: LabelCardinality    => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: SeriesKeysByFilters => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
     }
   }
 
@@ -112,7 +109,6 @@ object LogicalPlanUtils extends StrictLogging {
                                                       endMs = timeRange.endMs,
                                                       rawSeries = copyNonPeriodicWithUpdatedTimeRange(lp.rawSeries,
                                                        timeRange).asInstanceOf[RawSeries])
-      case lp: AtSeries                    => ???  // TODO(a_theimer)
       case lp: PeriodicSeriesWithWindowing => lp.copy(startMs = timeRange.startMs,
                                                       endMs = timeRange.endMs,
                                                       series = copyNonPeriodicWithUpdatedTimeRange(lp.series,
@@ -316,9 +312,6 @@ object LogicalPlanUtils extends StrictLogging {
    */
   def getPeriodicSeriesPlan(logicalPlan: LogicalPlan): Option[Seq[LogicalPlan]] = {
     logicalPlan match {
-      case lp: AtSeriesPeriodic            => getPeriodicSeriesPlan(lp.series)  // TODO(a_theimer)
-      case lp: AtSeriesRaw                 => getPeriodicSeriesPlan(lp.series)  // Some(Seq(lp))   TODO(a_theimer)
-      case lp: AtSeries                    => ???  // should never happen  TODO(a_theimer)
       case lp: PeriodicSeries              => Some(Seq(lp))
       case lp: PeriodicSeriesWithWindowing => Some(Seq(lp))
       case lp: ApplyInstantFunction        => getPeriodicSeriesPlan(lp.vectors)

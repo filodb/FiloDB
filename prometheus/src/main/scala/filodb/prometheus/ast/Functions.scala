@@ -213,6 +213,7 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
       rangeExpression.window.timeUnit == IntervalMultiple,
       otherParams,
       rangeExpression.offset.map(_.millis(timeParams.step * 1000)),
+      rangeExpression.at.map(_.getUnix(timeParams) * 1000),
       rangeExpression.columnFilters
     )
   }
@@ -231,23 +232,17 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
     }
     val stepForInnerMs = subqueryStepToUseMs
     val offsetMs = sqe.offset.map { _.millis(1L) }
+    val atMs = sqe.at.map(_.getUnix(timeParams) * 1000)
     val offsetSecForInner = offsetMs match {
       case None => 0
       case Some(ofMs) => ofMs / 1000
     }
 
-//    val timeParamsWithAt = if (sqe.at.nonEmpty) {
-//      val endSec = sqe.at.get.getUnix(timeParams)
-//      val startSec = endSec - (timeParams.end - timeParams.start)
-//      TimeStepParams(startSec, timeParams.step, endSec)
-//    } else {
-//      timeParams
-//    }
-
-    val preciseStartForInnerS = timeParams.start - (sqe.sqcl.window.millis(1L) / 1000) - offsetSecForInner
+    val preciseStartForInnerS = atMs.map(_ / 1000).getOrElse(timeParams.start) -
+      (sqe.sqcl.window.millis(1L) / 1000) - offsetSecForInner
     val startForInnerS = SubqueryUtils.getStartForFastSubquery(preciseStartForInnerS, subqueryStepToUseMs/1000)
 
-    val preciseEndForInnerS = timeParams.end - offsetSecForInner
+    val preciseEndForInnerS = atMs.map(_ / 1000).getOrElse(timeParams.end) - offsetSecForInner
     val endForInnerS =
       SubqueryUtils.getEndForFastSubquery(preciseEndForInnerS, subqueryStepToUseMs/1000)
 
@@ -261,47 +256,16 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
     // as a wider single query with newly calculated start and step. Later we
     // apply a transformation against the resulting time series to form the actual
     // response of the subquery.
-    if (sqe.at.isEmpty) {
-      val subquery = sqe.subquery.toSeriesPlan(timeParamsForInner)
-      SubqueryWithWindowing(
-        subquery,
-        timeParams.start * 1000, outerStepMs, timeParams.end * 1000,
-        rangeFunctionId,
-        otherParams,
-        sqe.sqcl.window.millis(1L),
-        subqueryStepToUseMs,
-        offsetMs
-      )
-    } else {
-      val offsetSec = offsetMs.getOrElse(0L) / 1000
-
-      // limit range start/end
-      val sqStartSec = sqe.at.get.getUnix(timeParams) - offsetSec
-      val sqEndSec = sqStartSec
-      val sqStepSec = timeParams.step  // TODO(a_theimer): doesn't matter?
-
-      // limit periodic start/end
-      val innerEndSec = sqEndSec
-      val innerStartSec = innerEndSec - (sqe.sqcl.window.millis(1L) / 1000)
-      val innerStepSec = subqueryStepToUseMs / 1000
-
-      val inner = sqe.subquery.toSeriesPlan(
-        TimeStepParams(innerStartSec, innerStepSec, innerEndSec))
-
-      val sq = SubqueryWithWindowing(
-        inner,
-        sqStartSec * 1000, sqStepSec * 1000, sqEndSec * 1000,
-        rangeFunctionId,
-        otherParams,
-        sqe.sqcl.window.millis(1L),
-        subqueryStepToUseMs,
-        offsetMs
-      )
-
-      new AtSeriesPeriodic(sq, timeParams.start * 1000, timeParams.step * 1000,
-                           timeParams.end * 1000, sqStartSec * 1000)
-    }
-
+    val subquery = sqe.subquery.toSeriesPlan(timeParamsForInner)
+    SubqueryWithWindowing(
+      subquery,
+      timeParams.start * 1000, outerStepMs, timeParams.end * 1000,
+      rangeFunctionId,
+      otherParams,
+      sqe.sqcl.window.millis(1L),
+      subqueryStepToUseMs,
+      offsetMs,
+      atMs)
   }
   // scalastyle:on method.length
 }

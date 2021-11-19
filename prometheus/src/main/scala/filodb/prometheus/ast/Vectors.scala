@@ -136,14 +136,10 @@ case class SubqueryExpression(subquery: PeriodicSeries,
 
     // TODO(a_theimer): confirm
     val offsetOptMs = offset.map(_.millis(timeParams.step * 1000))
+    val atOptMs = at.map(_.getUnix(timeParams) * 1000)
 
-    val endWithAtSec = if (at.nonEmpty) {
-      at.get.getUnix(timeParams)
-    } else {
-      timeParams.end
-    }
-
-    var endS = endWithAtSec - offsetOptMs.getOrElse(0L) / 1000
+    // TODO(a_theimer): make sure nothing borked
+    var endS = atOptMs.map(_ / 1000).getOrElse(timeParams.end) - offsetOptMs.getOrElse(0L) / 1000
     val stepToUseMs = SubqueryUtils.getSubqueryStepMs(sqcl.step);
     var startS = endS - (sqcl.window.millis(1L) / 1000)
     startS = SubqueryUtils.getStartForFastSubquery(startS, stepToUseMs/1000 )
@@ -159,8 +155,9 @@ case class SubqueryExpression(subquery: PeriodicSeries,
       stepToUseMs,
       endS * 1000,
       sqcl.window.millis(1L),
-      offsetOptMs  // TODO(a_theimer): double-check this should be
-                   //   included in start/end (as it currently is)
+      offsetOptMs,  // TODO(a_theimer): double-check this should be
+                    //   included in start/end (as it currently is)
+      atOptMs
     )
   }
 }
@@ -308,37 +305,20 @@ case class InstantExpression(metricName: Option[String],
     // we start from 5 minutes earlier that provided start time in order to include last sample for the
     // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
     val offsetOptMs = offset.map(_.millis(timeParams.step * 1000))  // TODO(a_theimer): confirm
-    val ps = if (at.isEmpty) {
-      PeriodicSeries(
-        RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq,
-          Some(staleDataLookbackMillis),
-          offsetOptMs),
-        timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
-        offsetOptMs
-      )
-    } else {
-      // TODO(a_theimer): cleanup
-      val unixTime = at.get.getUnix(timeParams)
-      val timeParamsToUse = TimeStepParams(unixTime, timeParams.step, unixTime)
-      new AtSeriesPeriodic(
-        PeriodicSeries(
-          // use modified timeParams; offset deferred to argument
-          RawSeries(Base.timeParamToSelector(timeParamsToUse),
-                    columnFilters,
-                    column.toSeq,
-                    Some(staleDataLookbackMillis),
-                    offsetOptMs),
-          // use modified timeParams; offset deferred to argument
-          timeParamsToUse.start * 1000,
-          timeParamsToUse.step * 1000,
-          timeParamsToUse.end * 1000,
-          offsetOptMs),
-        // use the timeParams shifted by offset
-        timeParams.start * 1000 - offsetOptMs.getOrElse(0L),
-        timeParams.step * 1000 - offsetOptMs.getOrElse(0L),
-        timeParams.end * 1000 - offsetOptMs.getOrElse(0L),
-        unixTime * 1000)
-    }
+    val atOptMs = at.map(_.getUnix(timeParams) * 1000)
+    val ps = PeriodicSeries(
+               RawSeries(
+                 Base.timeParamToSelector(timeParams),
+                 columnFilters,
+                 column.toSeq,
+                 Some(staleDataLookbackMillis),
+                 offsetOptMs,
+                 atOptMs),
+               timeParams.start * 1000,
+               timeParams.step * 1000,
+               timeParams.end * 1000,
+               offsetOptMs,
+               atOptMs)
     bucketOpt.map { bOpt =>
       // It's a fixed value, the range params don't matter at all
       val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
@@ -361,29 +341,13 @@ case class InstantExpression(metricName: Option[String],
     require(offsetMs.isEmpty)  // TODO(a_theimer): offsetMs is never passed a non-default argument. What is it for?
 
     val offsetOptMs = offset.map(_.millis(timeParams.step * 1000))  // TODO(a_theimer): confirm
-    if (at.isEmpty) {
-      // use original timeParams
-      RawSeries(Base.timeParamToSelector(timeParams),
-                columnFilters,
-                column.toSeq,
-                Some(staleDataLookbackMillis),
-                offsetOptMs)
-    } else {
-      val unixTime = at.get.getUnix(timeParams)
-      val timeParamsToUse = TimeStepParams(unixTime, timeParams.step, unixTime)
-      new AtSeriesRaw(
-        // use fixed timeParams; defer offset to argument
-        RawSeries(Base.timeParamToSelector(timeParamsToUse),
-          columnFilters,
-          column.toSeq,
-          Some(staleDataLookbackMillis),
-          offsetOptMs),
-        // use original timeParams with offset included
-        timeParams.start * 1000 - offsetOptMs.getOrElse(0L),
-        timeParams.step * 1000 - offsetOptMs.getOrElse(0L),
-        timeParams.end * 1000 - offsetOptMs.getOrElse(0L),
-        unixTime * 1000)
-    }
+    val atOptMs = at.map(_.getUnix(timeParams) * 1000)
+    RawSeries(Base.timeParamToSelector(timeParams),
+              columnFilters,
+              column.toSeq,
+              Some(staleDataLookbackMillis),
+              offsetOptMs,
+              atOptMs)
   }
 
   /**
@@ -437,30 +401,17 @@ case class RangeExpression(metricName: Option[String],
 
     // multiply by 1000 to convert unix timestamp in seconds to millis
     val offsetOptMs = offset.map(_.millis(timeParams.step * 1000))  // TODO(a_theimer): confirm
-    if (at.isEmpty) {
-      // use original timeParams
-      applyBucketThing(
-        RawSeries(Base.timeParamToSelector(timeParams),
-                  columnFilters,
-                  column.toSeq,
-                  Some(window.millis(timeParams.step * 1000)),
-                  offsetOptMs))
-    } else {
-      val unixTime = at.get.getUnix(timeParams)
-      val timeParamsToUse = TimeStepParams(unixTime, timeParams.step, unixTime)
-      new AtSeriesRaw(
-        // use fixed timeParams; defer offset to argument
-        applyBucketThing(
-          RawSeries(Base.timeParamToSelector(timeParamsToUse),
-                    columnFilters,
-                    column.toSeq,
-                    Some(window.millis(timeParamsToUse.step * 1000)),
-                    offsetOptMs)),
-        // use original timeParams with offset included
-        timeParams.start * 1000 - offsetOptMs.getOrElse(0L),
-        timeParams.step * 1000 - offsetOptMs.getOrElse(0L),
-        timeParams.end * 1000 - offsetOptMs.getOrElse(0L),
-        unixTime * 1000)
-    }
+    val atOptMs = at.map(_.getUnix(timeParams) * 1000)
+    val rs = RawSeries(Base.timeParamToSelector(timeParams),
+                       columnFilters,
+                       column.toSeq,
+                       Some(window.millis(timeParams.step * 1000)),
+                       offsetOptMs,
+                       atOptMs)
+    bucketOpt.map { bOpt =>
+      // It's a fixed value, the range params don't matter at all
+      val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
+      ApplyInstantFunctionRaw(rs, InstantFunctionId.HistogramBucket, Seq(param))
+    }.getOrElse(rs)
   }
 }

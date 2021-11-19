@@ -225,7 +225,7 @@ trait  PlannerHelper {
     val window = Some(sqww.subqueryWindowMs)
     // Here the inner periodic series already has start/end/step populated
     // in Function's toSeriesPlan(), Functions.scala subqqueryArgument() method.
-    val innerExecPlan = walkLogicalPlanTree(sqww.innerPeriodicSeries, qContext)
+    var innerExecPlan = walkLogicalPlanTree(sqww.innerPeriodicSeries, qContext)
     if (sqww.functionId != RangeFunctionId.AbsentOverTime) {
       val rangeFn = InternalRangeFunction.lpToInternalFunc(sqww.functionId)
       val paramsExec = materializeFunctionArgs(sqww.functionArgs, qContext)
@@ -238,13 +238,23 @@ trait  PlannerHelper {
           false,
           paramsExec,
           sqww.offsetMs,
+          sqww.atMs,
           false,
           true
         )
       innerExecPlan.plans.foreach { p => p.addRangeVectorTransformer(rangeVectorTransformer)}
+
+      // repeat the same timestep if '@' is specified
+      if (sqww.atMs.nonEmpty) {
+        innerExecPlan = innerExecPlan.copy(
+          plans = innerExecPlan.plans.map(
+            AtExec(_, math.max(1L, (sqww.endMs - sqww.startMs) / math.max(1L, sqww.stepMs)).toInt)))  // TODO(a_theimer)
+      }
+
       innerExecPlan
     } else {
-      createAbsentOverTimePlan(innerExecPlan, innerPlan, qContext, window, sqww.offsetMs, sqww)
+      ???  // TODO(a_theimer)
+//      createAbsentOverTimePlan(innerExecPlan, innerPlan, qContext, window, sqww.offsetMs, sqww)
     }
   }
 
@@ -265,6 +275,7 @@ trait  PlannerHelper {
         false,
         Seq(),
         offsetMs,
+        sqww.atMs,
         false
       ))
     )

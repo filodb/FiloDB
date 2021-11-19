@@ -24,7 +24,6 @@ sealed trait LogicalPlan {
     */
   def replaceFilters(filters: Seq[ColumnFilter]): LogicalPlan = {
     this match {
-      case a: AtSeries            => a  // TODO(a_theimer): ???
       case n: LabelCardinality         => n.copy(filters = filters)
       case p: PeriodicSeriesPlan       => p.replacePeriodicSeriesFilters(filters)
       case r: RawSeriesLikePlan        => r.replaceRawSeriesFilters(filters)
@@ -97,7 +96,8 @@ case class RawSeries(rangeSelector: RangeSelector,
                      filters: Seq[ColumnFilter],
                      columns: Seq[String],
                      lookbackMs: Option[Long] = None,
-                     offsetMs: Option[Long] = None) extends RawSeriesLikePlan {
+                     offsetMs: Option[Long] = None,
+                     atMs: Option[Long] = None) extends RawSeriesLikePlan {
   override def isRaw: Boolean = true
 
   override def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan = {
@@ -204,35 +204,6 @@ case class RawChunkMeta(rangeSelector: RangeSelector,
   }
 }
 
-// TODO(a_theimer): make case class?
-abstract class AtSeries(val series: LogicalPlan,
-                        val startMs: Long,
-                        val stepMs: Long,
-                        val endMs: Long,
-                        val atMs: Long) extends NonLeafLogicalPlan
-
-// TODO(a_theimer)
-class AtSeriesRaw(series: RawSeriesLikePlan,
-                  startMs: Long,
-                  stepMs: Long,
-                  endMs: Long,
-                  atMs: Long) extends AtSeries(series, startMs, stepMs, endMs, atMs)
-                              with RawSeriesLikePlan {  // TODO(a_theimer): just RawSeries?
-  override def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan = ???
-  override def children: Seq[LogicalPlan] = Seq(series)
-}
-
-// TODO(a_theimer)
-class AtSeriesPeriodic(series: PeriodicSeriesPlan,
-                       startMs: Long,
-                       stepMs: Long,
-                       endMs: Long,
-                       atMs: Long) extends AtSeries(series, startMs, stepMs, endMs, atMs)
-                                   with PeriodicSeriesPlan {  // TODO(a_theimer): just PeriodicSeries?
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = ???
-  override def children: Seq[LogicalPlan] = Seq(series)
-}
-
 /**
   * Concrete logical plan to query for data in a given range
   * with results in a regular time interval.
@@ -248,7 +219,8 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
                           startMs: Long,
                           stepMs: Long,
                           endMs: Long,
-                          offsetMs: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                          offsetMs: Option[Long] = None,
+                          atMs: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(rawSeries)
 
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(rawSeries =
@@ -305,7 +277,8 @@ case class SubqueryWithWindowing(
   functionArgs: Seq[FunctionArgsPlan] = Nil,
   subqueryWindowMs: Long, // 5m
   subqueryStepMs: Long, //1m
-  offsetMs: Option[Long]
+  offsetMs: Option[Long],
+  atMs: Option[Long]
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
 
@@ -342,7 +315,8 @@ case class TopLevelSubquery(
   stepMs: Long,
   endMs: Long,
   orginalLookbackMs: Long,
-  originalOffsetMs: Option[Long]
+  originalOffsetMs: Option[Long],
+  atMs: Option[Long]
 ) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(innerPeriodicSeries)
 
@@ -372,6 +346,7 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
                                        stepMultipleNotationUsed: Boolean = false,
                                        functionArgs: Seq[FunctionArgsPlan] = Nil,
                                        offsetMs: Option[Long] = None,
+                                       atMs: Option[Long] = None,
                                        columnFilters: Seq[ColumnFilter] = Nil) extends PeriodicSeriesPlan
   with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(series)
