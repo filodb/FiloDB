@@ -69,9 +69,12 @@ trait CardinalityStore {
   def remove(shardKeyPrefix: Seq[String]): Unit
 
   /**
-   * Fetch immediate children of the node for the given shard key prefix
+   * Fetch immediate children of the node for the given shard key prefix.
    */
-  def scanChildren(shardKeyPrefix: Seq[String]): Seq[Cardinality]
+  def scanImmediateChildren(shardKeyPrefix: Seq[String]): Seq[Cardinality]
+
+  // TODO(a_theimer)
+  def scanChildren(shardKeyPrefix: Seq[String], depth: Int): Seq[Cardinality]
 
   /**
    * Close store. Data will be thrown away

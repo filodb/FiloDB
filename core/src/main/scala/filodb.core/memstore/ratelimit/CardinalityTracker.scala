@@ -48,6 +48,9 @@ class CardinalityTracker(ref: DatasetRef,
   require(defaultChildrenQuota.forall(q => q > 0))
   logger.info(s"Initializing Cardinality Tracker for shard $shard with $defaultChildrenQuota")
 
+  // TODO(a_theimer)
+  val NAME_DELIMITER = ","
+
   /**
    * Call when a new time series with the given shard key has been added to the system.
    * This will update the cardinality at each level within the trie. If quota is breached,
@@ -69,7 +72,7 @@ class CardinalityTracker(ref: DatasetRef,
     // first make sure there is no breach for any prefix
     (0 to shardKey.length).foreach { i =>
       val prefix = shardKey.take(i)
-      val name = if (prefix.isEmpty) "" else prefix.last
+      val name = if (prefix.isEmpty) "" else prefix.mkString(NAME_DELIMITER)
       val old = store.getOrZero(prefix, Cardinality(name, 0, 0, 0, defaultChildrenQuota(i)))
       val neu = old.copy(tsCount = old.tsCount + totalDelta,
                          activeTsCount = old.activeTsCount + activeDelta,
@@ -105,7 +108,7 @@ class CardinalityTracker(ref: DatasetRef,
    */
   def getCardinality(shardKeyPrefix: Seq[String]): Cardinality = {
     require(shardKeyPrefix.length <= shardKeyLen, s"Too many shard keys in $shardKeyPrefix - max $shardKeyLen")
-    val name = if (shardKeyPrefix.isEmpty) "" else shardKeyPrefix.last
+    val name = if (shardKeyPrefix.isEmpty) "" else shardKeyPrefix.mkString(NAME_DELIMITER)
     store.getOrZero(shardKeyPrefix, Cardinality(name, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
   }
 
@@ -121,7 +124,7 @@ class CardinalityTracker(ref: DatasetRef,
     require(childrenQuota > 0 && childrenQuota < 2000000, "Children quota invalid. Provide [1, 2000000)")
 
     logger.debug(s"Setting children quota for $shardKeyPrefix as $childrenQuota")
-    val name = if (shardKeyPrefix.isEmpty) "" else shardKeyPrefix.last
+    val name = if (shardKeyPrefix.isEmpty) "" else shardKeyPrefix.mkString(NAME_DELIMITER)
     val old = store.getOrZero(shardKeyPrefix, Cardinality(name, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
     val neu = old.copy(childrenQuota = childrenQuota)
     store.store(shardKeyPrefix, neu)
@@ -153,7 +156,7 @@ class CardinalityTracker(ref: DatasetRef,
         (prefix, neu)
       }
       toStore.map { case (prefix, neu) =>
-        val name = if (prefix.isEmpty) "" else prefix.last
+        val name = if (prefix.isEmpty) "" else prefix.mkString(NAME_DELIMITER)
         if (neu == Cardinality(name, 0, 0, 0, defaultChildrenQuota(prefix.length))) {
           // node can be removed
           store.remove(prefix)
@@ -185,7 +188,7 @@ class CardinalityTracker(ref: DatasetRef,
       }
     }.reverse
     val heap = mutable.PriorityQueue[CardinalityRecord]()
-    store.scanChildren(shardKeyPrefix).foreach { card =>
+    store.scanImmediateChildren(shardKeyPrefix).foreach { card =>
       heap.enqueue(
         CardinalityRecord(shard, card.name,
                  card.tsCount,

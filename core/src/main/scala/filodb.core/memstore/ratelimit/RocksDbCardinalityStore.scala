@@ -37,8 +37,7 @@ class CardinalitySerializer extends Serializer[Cardinality] {
 
 object RocksDbCardinalityStore {
   private lazy val loadRocksDbLibrary = RocksDB.loadLibrary()
-  private val LastKeySeparator: Char = 0x1E
-  private val NotLastKeySeparator: Char = 0x1D
+  private val KeySeparator: Char = 0x1E
   private val NotFound = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]
 
   // ======= DB Tuning ===========
@@ -141,6 +140,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   // consider compaction-pending yes/no
 
   /**
+   * TODO(a_theimer): update
    * In order to enable quick prefix search, we formulate string based keys to the RocksDB
    * key-value store.
    *
@@ -173,26 +173,24 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
    *                     fetch immediate children in trie. Use false to fetch one specific node.
    * @return string key to use to perform reads and writes of entries into RocksDB
    */
-  private def toStringKey(shardKeyPrefix: Seq[String], prefixSearch: Boolean): String = {
+  private def toStringKey(shardKeyPrefix: Seq[String]): String = {
+    toStringKeyPrefix(shardKeyPrefix, shardKeyPrefix.size)
+  }
+
+  // TODO(a_theimer): rename
+  private def toStringKeyPrefix(shardKeyPrefix: Seq[String], keyDepth: Int): String = {
     import RocksDbCardinalityStore._
-    if (shardKeyPrefix.isEmpty) {
-      if (prefixSearch) LastKeySeparator.toString else ""
-    } else {
-      val b = new StringBuilder
-      cforRange { 0 until shardKeyPrefix.length - 1 } { i =>
-        b.append(NotLastKeySeparator)
-        b.append(shardKeyPrefix(i))
-      }
-      if (prefixSearch) {
-        b.append(NotLastKeySeparator)
-        b.append(shardKeyPrefix.last)
-        b.append(LastKeySeparator)
-      } else {
-        b.append(LastKeySeparator)
-        b.append(shardKeyPrefix.last)
-      }
-      b.toString()
+
+    val b = new StringBuilder
+    b.append(keyDepth)
+    cforRange { 0 until shardKeyPrefix.length } { i =>
+      b.append(KeySeparator)
+      b.append(shardKeyPrefix(i))
     }
+    if (keyDepth > shardKeyPrefix.size) {
+      b.append(KeySeparator)
+    }
+    b.toString()
   }
 
   private def cardinalityToBytes(card: Cardinality): Array[Byte] = {
@@ -210,25 +208,30 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   }
 
   override def store(shardKeyPrefix: Seq[String], card: Cardinality): Unit = {
-    val key = toStringKey(shardKeyPrefix, false).getBytes(StandardCharsets.UTF_8)
+    val key = toStringKey(shardKeyPrefix).getBytes(StandardCharsets.UTF_8)
     logger.debug(s"Storing shard=$shard dataset=$ref ${new String(key)} with $card")
     db.put(key, cardinalityToBytes(card))
   }
 
   def getOrZero(shardKeyPrefix: Seq[String], zero: Cardinality): Cardinality = {
-    val value = db.get(toStringKey(shardKeyPrefix, false).getBytes(StandardCharsets.UTF_8))
+    val value = db.get(toStringKey(shardKeyPrefix).getBytes(StandardCharsets.UTF_8))
     if (value == NotFound) zero else bytesToCardinality(value)
   }
 
   override def remove(shardKeyPrefix: Seq[String]): Unit = {
-    db.delete(toStringKey(shardKeyPrefix, false).getBytes(StandardCharsets.UTF_8))
+    db.delete(toStringKey(shardKeyPrefix).getBytes(StandardCharsets.UTF_8))
   }
 
-  override def scanChildren(shardKeyPrefix: Seq[String]): Seq[Cardinality] = {
+  override def scanImmediateChildren(shardKeyPrefix: Seq[String]): Seq[Cardinality] = {
+    scanChildren(shardKeyPrefix, shardKeyPrefix.size + 1)
+  }
+
+  // TODO(a_theimer)
+  override def scanChildren(shardKeyPrefix: Seq[String], depth: Int): Seq[Cardinality] = {
     val it = db.newIterator()
     val buf = ArrayBuffer[Cardinality]()
     try {
-      val searchPrefix = toStringKey(shardKeyPrefix, true)
+      val searchPrefix = toStringKeyPrefix(shardKeyPrefix, depth)
       logger.debug(s"Scanning shard=$shard dataset=$ref ${new String(searchPrefix)}")
       it.seek(searchPrefix.getBytes(StandardCharsets.UTF_8))
       import scala.util.control.Breaks._
