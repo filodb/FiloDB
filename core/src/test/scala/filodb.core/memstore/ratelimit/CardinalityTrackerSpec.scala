@@ -243,15 +243,15 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
     t.modifyCount(Seq("a", "ab", "abe"), 1, 0)
 
     t.topk(3, Seq("a", "ac"), 3, true) shouldEqual Seq(
-      CardinalityRecord(0, "a,ac,acc", 11, 0, 11, 100),
-      CardinalityRecord(0, "a,ac,acg", 15, 0, 15, 100),
-      CardinalityRecord(0, "a,ac,acb", 20, 0, 20, 100)
+      CardinalityRecord(0, "acc", 11, 0, 11, 100),
+      CardinalityRecord(0, "acg", 15, 0, 15, 100),
+      CardinalityRecord(0, "acb", 20, 0, 20, 100)
     )
 
     t.topk(3, Seq("a"), 2, true) shouldEqual Seq(
-      CardinalityRecord(0, "a,aa", 4, 0, 4, 100),
-      CardinalityRecord(0, "a,ab", 5, 0, 5, 100),
-      CardinalityRecord(0, "a,ac", 72, 0, 7, 100)
+      CardinalityRecord(0, "aa", 4, 0, 4, 100),
+      CardinalityRecord(0, "ab", 5, 0, 5, 100),
+      CardinalityRecord(0, "ac", 72, 0, 7, 100)
     )
 
     t.topk(3, Nil, 1, true) shouldEqual Seq(
