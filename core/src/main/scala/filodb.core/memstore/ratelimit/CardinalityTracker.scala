@@ -2,9 +2,7 @@ package filodb.core.memstore.ratelimit
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
-
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.core.DatasetRef
 
 case class QuotaReachedException(cannotSetShardKey: Seq[String], prefix: Seq[String], quota: Int)
@@ -201,14 +199,19 @@ class CardinalityTracker(ref: DatasetRef,
     }
 
     val heap = mutable.PriorityQueue[CardinalityRecord]()
-    store.scanChildren(shardKeyPrefix, depth).foreach { card =>
-      heap.enqueue(
-        CardinalityRecord(shard, card.name,
-                 card.tsCount,
-                 card.activeTsCount,
-                 if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
-                 card.childrenQuota))
-      if (heap.size > k) heap.dequeue()
+    val it = store.scanChildren(shardKeyPrefix, depth)
+    try {
+      it.foreach { card =>
+        heap.enqueue(
+          CardinalityRecord(shard, card.name,
+            card.tsCount,
+            card.activeTsCount,
+            if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
+            card.childrenQuota))
+        if (heap.size > k) heap.dequeue()
+      }
+    } finally {
+      it.close()
     }
     heap.toSeq
   }

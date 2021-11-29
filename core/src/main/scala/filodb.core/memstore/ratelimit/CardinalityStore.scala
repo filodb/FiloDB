@@ -1,7 +1,10 @@
 package filodb.core.memstore.ratelimit
 
+import java.io.Closeable
+
 /**
  * The data stored in each node of the Cardinality Store trie
+ *
  * @param name name of the item in shardKeyPrefix
  * @param tsCount total number of timeSeries under this shardKeyPrefix (example, number of timeseries under ws,ns)
  * @param activeTsCount number of actively ingesting timeSeries under this shardKeyPrefix
@@ -72,7 +75,7 @@ trait CardinalityStore {
    * Fetch children of the node for the given shard key prefix.
    * @param depth: only children of this size will be scanned.
    */
-  def scanChildren(shardKeyPrefix: Seq[String], depth: Int): Seq[Cardinality]
+  def scanChildren(shardKeyPrefix: Seq[String], depth: Int): Iterator[Cardinality] with Closeable
 
   /**
    * Close store. Data will be thrown away

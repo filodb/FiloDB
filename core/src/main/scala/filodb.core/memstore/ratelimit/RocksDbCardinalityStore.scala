@@ -1,8 +1,7 @@
 package filodb.core.memstore.ratelimit
 
-import java.io.File
+import java.io.{Closeable, File}
 import java.nio.charset.StandardCharsets
-import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
 import scala.reflect.io.Directory
 import com.esotericsoftware.kryo.{Kryo, Serializer}
@@ -229,30 +228,43 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
     db.delete(toStringKey(shardKeyPrefix).getBytes(StandardCharsets.UTF_8))
   }
 
-  override def scanChildren(shardKeyPrefix: Seq[String], depth: Int): Seq[Cardinality] = {
+  override def scanChildren(shardKeyPrefix: Seq[String], depth: Int): Iterator[Cardinality] with Closeable = {
     require(depth > shardKeyPrefix.size,
       s"scan depth $depth must be greater than the size of the prefix ${shardKeyPrefix.size}")
-    val it = db.newIterator()
-    val buf = ArrayBuffer[Cardinality]()
-    try {
-      val searchPrefix = toStringKeyPrefix(shardKeyPrefix, depth)
-      logger.debug(s"Scanning shard=$shard dataset=$ref ${new String(searchPrefix)}")
-      it.seek(searchPrefix.getBytes(StandardCharsets.UTF_8))
-      import scala.util.control.Breaks._
 
-      breakable {
-        while (it.isValid()) {
-          val key = new String(it.key(), StandardCharsets.UTF_8)
-          if (key.startsWith(searchPrefix)) {
-            buf += bytesToCardinality(it.value())
-          } else break // dont continue beyond valid results
-          it.next()
-        }
+    // TODO(a_theimer): this should be its own class, also add an init() method?
+    new Iterator[Cardinality] with Closeable {
+      val it_ = db.newIterator()
+      var nextCard_ = Cardinality("should be overwritten before exposed", -1, -1, -1, -1)
+      val strPrefix_ = toStringKeyPrefix(shardKeyPrefix, depth)
+
+      logger.debug(s"Scanning shard=$shard dataset=$ref ${new String(strPrefix_)}")
+      try {
+        it_.seek(strPrefix_.getBytes(StandardCharsets.UTF_8))
+      } catch {
+        // also causes hasNext to return false
+        case e : Exception => it_.close()
       }
-    } finally {
-      it.close();
+
+      // note: must be called exactly once before each next() call
+      override def hasNext: Boolean = {
+        if (it_.isValid) {
+          // store the next matching key and increment the iterator
+          val key = new String(it_.key(), StandardCharsets.UTF_8)
+          if (key.startsWith(strPrefix_)) {
+            nextCard_ = bytesToCardinality(it_.value())
+            it_.next()
+            return true
+          }
+        }
+        it_.close()
+        false
+      }
+
+      override def next(): Cardinality = nextCard_
+
+      override def close(): Unit = it_.close()
     }
-    buf
   }
 
   def close(): Unit = {
