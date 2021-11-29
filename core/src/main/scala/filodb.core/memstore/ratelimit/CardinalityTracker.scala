@@ -72,7 +72,7 @@ class CardinalityTracker(ref: DatasetRef,
     // first make sure there is no breach for any prefix
     (0 to shardKey.length).foreach { i =>
       val prefix = shardKey.take(i)
-      val name = if (prefix.isEmpty) "" else prefix.mkString(NAME_DELIMITER)
+      val name = if (prefix.isEmpty) "" else prefix.last
       val old = store.getOrZero(prefix, Cardinality(name, 0, 0, 0, defaultChildrenQuota(i)))
       val neu = old.copy(tsCount = old.tsCount + totalDelta,
                          activeTsCount = old.activeTsCount + activeDelta,
@@ -108,7 +108,7 @@ class CardinalityTracker(ref: DatasetRef,
    */
   def getCardinality(shardKeyPrefix: Seq[String]): Cardinality = {
     require(shardKeyPrefix.length <= shardKeyLen, s"Too many shard keys in $shardKeyPrefix - max $shardKeyLen")
-    val name = if (shardKeyPrefix.isEmpty) "" else shardKeyPrefix.mkString(NAME_DELIMITER)
+    val name = if (shardKeyPrefix.isEmpty) "" else shardKeyPrefix.last
     store.getOrZero(shardKeyPrefix, Cardinality(name, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
   }
 
@@ -124,7 +124,7 @@ class CardinalityTracker(ref: DatasetRef,
     require(childrenQuota > 0 && childrenQuota < 2000000, "Children quota invalid. Provide [1, 2000000)")
 
     logger.debug(s"Setting children quota for $shardKeyPrefix as $childrenQuota")
-    val name = if (shardKeyPrefix.isEmpty) "" else shardKeyPrefix.mkString(NAME_DELIMITER)
+    val name = if (shardKeyPrefix.isEmpty) "" else shardKeyPrefix.last
     val old = store.getOrZero(shardKeyPrefix, Cardinality(name, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
     val neu = old.copy(childrenQuota = childrenQuota)
     store.store(shardKeyPrefix, neu)
@@ -156,7 +156,7 @@ class CardinalityTracker(ref: DatasetRef,
         (prefix, neu)
       }
       toStore.map { case (prefix, neu) =>
-        val name = if (prefix.isEmpty) "" else prefix.mkString(NAME_DELIMITER)
+        val name = if (prefix.isEmpty) "" else prefix.last
         if (neu == Cardinality(name, 0, 0, 0, defaultChildrenQuota(prefix.length))) {
           // node can be removed
           store.remove(prefix)
