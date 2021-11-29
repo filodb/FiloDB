@@ -117,10 +117,12 @@ import filodb.query.exec._
    *
    *
    *                           <merge sketches to get total cardinality>
+   *                                  |                           \
+   *                        <Sketch from DS Cluster>          <Sketch from Raw Cluster>
    *                             |                                   |
    *                 |------------------------|             |------------------------|
    *                 ^                        ^             ^                        ^
-   *   User provided start time           latestDSTS   earliestRawTS            User provided end time
+   *   User provided start time           earliestRawTS   earliestRawTS            User provided end time
    *
    * @param logicalPlan           The LabelCardinality logical plan to materialize
    * @param queryContext          The QueryContext object
@@ -138,9 +140,9 @@ import filodb.query.exec._
       downsampleClusterPlanner.materialize(logicalPlan, queryContext)
     } else {
       // There is a split, send to DS and Raw planners and get sketches from them without the presenter,
-      // perform a local reduction merge the sketches and add a presenter
-      val dsLogicalPlan = logicalPlan.copy(endMs = latestDownsampleTimestampFn.min(endTime), clusterType = "downsample")
-      val rawLogicalPlan = logicalPlan.copy(startMs = earliestRawTimestampFn.max(startTime))
+      // perform a local reduction to merge the sketches and add a presenter
+      val dsLogicalPlan = logicalPlan.copy(endMs = earliestRawTimestampFn, clusterType = "downsample")
+      val rawLogicalPlan = logicalPlan.copy(startMs = earliestRawTimestampFn)
       val qCtx = queryContext.copy(plannerParams = queryContext.plannerParams.copy(skipAggregatePresent = true))
 
       val dsPlan = downsampleClusterPlanner.materialize(dsLogicalPlan, qCtx)
