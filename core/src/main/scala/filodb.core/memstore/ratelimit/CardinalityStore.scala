@@ -5,14 +5,14 @@ import java.io.Closeable
 /**
  * The data stored in each node of the Cardinality Store trie
  *
- * @param name name of the item in shardKeyPrefix
+ * @param prefix name of the item in shardKeyPrefix
  * @param tsCount total number of timeSeries under this shardKeyPrefix (example, number of timeseries under ws,ns)
  * @param activeTsCount number of actively ingesting timeSeries under this shardKeyPrefix
  *                      (example, number of timeseries under ws,ns)
  * @param childrenCount number of immediate children for this shardKey (example, number of ns under ws)
  * @param childrenQuota quota for number of immediate children
  */
-case class Cardinality(name: String, tsCount: Int, activeTsCount: Int, childrenCount: Int, childrenQuota: Int)
+case class Cardinality(prefix: Seq[String], tsCount: Int, activeTsCount: Int, childrenCount: Int, childrenQuota: Int)
 
 /**
  *
@@ -57,7 +57,7 @@ trait CardinalityStore {
    * This method will be called for each shard key prefix when a new time series is added
    * to the index.
    */
-  def store(shardKeyPrefix: Seq[String], card: Cardinality): Unit
+  def store(card: Cardinality): Unit
 
   /**
    * Read existing cardinality value, if one does not exist return the zero value

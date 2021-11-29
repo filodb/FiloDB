@@ -2,15 +2,16 @@ package filodb.core.memstore.ratelimit
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.DatasetRef
 
 case class QuotaReachedException(cannotSetShardKey: Seq[String], prefix: Seq[String], quota: Int)
   extends RuntimeException
 
-case class CardinalityRecord(shard: Int, childName: String, tsCount: Int,
-                             activeTsCount: Int,
-                             childrenCount: Int, childrenQuota: Int)
+case class CardinalityRecord(shard: Int, card: Cardinality)
+
 
 /**
   * Tracks cardinality (number of time series) under each shard key prefix. The shard key
@@ -70,8 +71,7 @@ class CardinalityTracker(ref: DatasetRef,
     // first make sure there is no breach for any prefix
     (0 to shardKey.length).foreach { i =>
       val prefix = shardKey.take(i)
-      val name = if (prefix.isEmpty) "" else prefix.last
-      val old = store.getOrZero(prefix, Cardinality(name, 0, 0, 0, defaultChildrenQuota(i)))
+      val old = store.getOrZero(prefix, Cardinality(prefix, 0, 0, 0, defaultChildrenQuota(i)))
       val neu = old.copy(tsCount = old.tsCount + totalDelta,
                          activeTsCount = old.activeTsCount + activeDelta,
                          childrenCount = if (i == shardKeyLen) old.childrenCount + totalDelta else old.childrenCount)
@@ -92,7 +92,7 @@ class CardinalityTracker(ref: DatasetRef,
     }
 
     toStore.map { case (prefix, neu) =>
-      store.store(prefix, neu)
+      store.store(neu)
       neu
     }
   }
@@ -106,8 +106,7 @@ class CardinalityTracker(ref: DatasetRef,
    */
   def getCardinality(shardKeyPrefix: Seq[String]): Cardinality = {
     require(shardKeyPrefix.length <= shardKeyLen, s"Too many shard keys in $shardKeyPrefix - max $shardKeyLen")
-    val name = if (shardKeyPrefix.isEmpty) "" else shardKeyPrefix.last
-    store.getOrZero(shardKeyPrefix, Cardinality(name, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
+    store.getOrZero(shardKeyPrefix, Cardinality(shardKeyPrefix, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
   }
 
   /**
@@ -122,10 +121,10 @@ class CardinalityTracker(ref: DatasetRef,
     require(childrenQuota > 0 && childrenQuota < 2000000, "Children quota invalid. Provide [1, 2000000)")
 
     logger.debug(s"Setting children quota for $shardKeyPrefix as $childrenQuota")
-    val name = if (shardKeyPrefix.isEmpty) "" else shardKeyPrefix.last
-    val old = store.getOrZero(shardKeyPrefix, Cardinality(name, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
+    val old = store.getOrZero(shardKeyPrefix,
+                              Cardinality(shardKeyPrefix, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
     val neu = old.copy(childrenQuota = childrenQuota)
-    store.store(shardKeyPrefix, neu)
+    store.store(neu)
     neu
   }
 
@@ -145,21 +144,20 @@ class CardinalityTracker(ref: DatasetRef,
       require(shardKey.length == shardKeyLen, "full shard key is needed")
       val toStore = (0 to shardKey.length).map { i =>
         val prefix = shardKey.take(i)
-        val old = store.getOrZero(prefix, Cardinality("", 0, 0, 0, defaultChildrenQuota(i)))
+        val old = store.getOrZero(prefix, Cardinality(Seq(""), 0, 0, 0, defaultChildrenQuota(i)))
         if (old.tsCount == 0)
           throw new IllegalArgumentException(s"$prefix count is already zero - cannot reduce " +
             s"further. A double delete likely happened.")
         val neu = old.copy(tsCount = old.tsCount - 1,
-                           childrenCount = if (i == shardKeyLen) old.childrenCount-1 else old.childrenCount)
+                          childrenCount = if (i == shardKeyLen) old.childrenCount-1 else old.childrenCount)
         (prefix, neu)
       }
       toStore.map { case (prefix, neu) =>
-        val name = if (prefix.isEmpty) "" else prefix.last
-        if (neu == Cardinality(name, 0, 0, 0, defaultChildrenQuota(prefix.length))) {
+        if (neu == Cardinality(prefix, 0, 0, 0, defaultChildrenQuota(prefix.length))) {
           // node can be removed
           store.remove(prefix)
         } else {
-          store.store(prefix, neu)
+          store.store(neu)
         }
         neu
       }
@@ -184,8 +182,8 @@ class CardinalityTracker(ref: DatasetRef,
 
     implicit val ord = new Ordering[CardinalityRecord]() {
       override def compare(x: CardinalityRecord, y: CardinalityRecord): Int = {
-        if (addInactive) x.tsCount - y.tsCount
-        else x.activeTsCount - y.activeTsCount
+        if (addInactive) x.card.tsCount - y.card.tsCount
+        else x.card.activeTsCount - y.card.activeTsCount
       }
     }.reverse
 
@@ -193,9 +191,11 @@ class CardinalityTracker(ref: DatasetRef,
       // directly fetch the cardinality and return
       val card = getCardinality(shardKeyPrefix)
       return Seq(CardinalityRecord(
-        shard, card.name, card.tsCount, card.activeTsCount,
-        if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
-        card.childrenQuota))
+        shard,
+        Cardinality(
+          card.prefix, card.tsCount, card.activeTsCount,
+          if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
+          card.childrenQuota)))
     }
 
     val heap = mutable.PriorityQueue[CardinalityRecord]()
@@ -203,11 +203,14 @@ class CardinalityTracker(ref: DatasetRef,
     try {
       it.foreach { card =>
         heap.enqueue(
-          CardinalityRecord(shard, card.name,
-            card.tsCount,
-            card.activeTsCount,
-            if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
-            card.childrenQuota))
+          CardinalityRecord(
+            shard,
+            Cardinality(
+              card.prefix,
+              card.tsCount,
+              card.activeTsCount,
+              if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
+              card.childrenQuota)))
         if (heap.size > k) heap.dequeue()
       }
     } finally {

@@ -2,8 +2,10 @@ package filodb.core.memstore.ratelimit
 
 import java.io.{Closeable, File}
 import java.nio.charset.StandardCharsets
+
 import scala.concurrent.duration._
 import scala.reflect.io.Directory
+
 import com.esotericsoftware.kryo.{Kryo, Serializer}
 import com.esotericsoftware.kryo.io.{Input, Output}
 import com.typesafe.scalalogging.StrictLogging
@@ -13,11 +15,25 @@ import kamon.tag.TagSet
 import monix.reactive.Observable
 import org.rocksdb._
 import spire.syntax.cfor._
+
 import filodb.core.{DatasetRef, GlobalScheduler}
 import filodb.memory.format.UnsafeUtils
 
-class CardinalitySerializer extends Serializer[Cardinality] {
-  def write(kryo: Kryo, output: Output, card: Cardinality): Unit = {
+case class CardinalityNode(name: String, tsCount: Int, activeTsCount: Int, childrenCount: Int, childrenQuota: Int)
+
+case object CardinalityNode {
+  def fromCardinality(card: Cardinality): CardinalityNode = {
+    CardinalityNode(if (card.prefix.nonEmpty) card.prefix.last else "",
+                    card.tsCount, card.activeTsCount, card.childrenCount, card.childrenQuota)
+  }
+
+  def toCardinality(card: CardinalityNode, prefix: Seq[String]): Cardinality = {
+    Cardinality(prefix, card.tsCount, card.activeTsCount, card.childrenCount, card.childrenQuota)
+  }
+}
+
+class CardinalityNodeSerializer extends Serializer[CardinalityNode] {
+  def write(kryo: Kryo, output: Output, card: CardinalityNode): Unit = {
     output.writeString(card.name)
     output.writeInt(card.tsCount, true)
     output.writeInt(card.activeTsCount, true)
@@ -25,9 +41,9 @@ class CardinalitySerializer extends Serializer[Cardinality] {
     output.writeInt(card.childrenQuota, true)
   }
 
-  def read(kryo: Kryo, input: Input, t: Class[Cardinality]): Cardinality = {
-    Cardinality(input.readString(), input.readInt(true), input.readInt(true),
-      input.readInt(true), input.readInt(true))
+  def read(kryo: Kryo, input: Input, t: Class[CardinalityNode]): CardinalityNode = {
+    CardinalityNode(input.readString(), input.readInt(true), input.readInt(true),
+                    input.readInt(true), input.readInt(true))
   }
 }
 
@@ -83,7 +99,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   private val kryo = new ThreadLocal[Kryo]() {
     override def initialValue(): Kryo = {
       val k = new Kryo()
-      k.addDefaultSerializer(classOf[Cardinality], classOf[CardinalitySerializer])
+      k.addDefaultSerializer(classOf[CardinalityNode], classOf[CardinalityNodeSerializer])
       k
     }
   }
@@ -199,29 +215,29 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
     b.toString()
   }
 
-  private def cardinalityToBytes(card: Cardinality): Array[Byte] = {
+  private def cardinalityNodeToBytes(card: CardinalityNode): Array[Byte] = {
     val out = new Output(500)
     kryo.get().writeObject(out, card)
     out.close()
     out.toBytes
   }
 
-  private def bytesToCardinality(bytes: Array[Byte]): Cardinality = {
+  private def bytesToCardinalityNode(bytes: Array[Byte]): CardinalityNode = {
     val inp = new Input(bytes)
-    val c = kryo.get().readObject(inp, classOf[Cardinality])
+    val c = kryo.get().readObject(inp, classOf[CardinalityNode])
     inp.close()
     c
   }
 
-  override def store(shardKeyPrefix: Seq[String], card: Cardinality): Unit = {
-    val key = toStringKey(shardKeyPrefix).getBytes(StandardCharsets.UTF_8)
+  override def store(card: Cardinality): Unit = {
+    val key = toStringKey(card.prefix).getBytes(StandardCharsets.UTF_8)
     logger.debug(s"Storing shard=$shard dataset=$ref ${new String(key)} with $card")
-    db.put(key, cardinalityToBytes(card))
+    db.put(key, cardinalityNodeToBytes(CardinalityNode.fromCardinality(card)))
   }
 
   def getOrZero(shardKeyPrefix: Seq[String], zero: Cardinality): Cardinality = {
     val value = db.get(toStringKey(shardKeyPrefix).getBytes(StandardCharsets.UTF_8))
-    if (value == NotFound) zero else bytesToCardinality(value)
+    if (value == NotFound) zero else CardinalityNode.toCardinality(bytesToCardinalityNode(value), shardKeyPrefix)
   }
 
   override def remove(shardKeyPrefix: Seq[String]): Unit = {
@@ -235,7 +251,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
     // TODO(a_theimer): this should be its own class, also add an init() method?
     new Iterator[Cardinality] with Closeable {
       val it_ = db.newIterator()
-      var nextCard_ = Cardinality("should be overwritten before exposed", -1, -1, -1, -1)
+      var nextCard_ = Cardinality(Seq("should be overwritten before exposed"), -1, -1, -1, -1)
       val strPrefix_ = toStringKeyPrefix(shardKeyPrefix, depth)
 
       logger.debug(s"Scanning shard=$shard dataset=$ref ${new String(strPrefix_)}")
@@ -252,7 +268,9 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
           // store the next matching key and increment the iterator
           val key = new String(it_.key(), StandardCharsets.UTF_8)
           if (key.startsWith(strPrefix_)) {
-            nextCard_ = bytesToCardinality(it_.value())
+            val node = bytesToCardinalityNode(it_.value())
+            val prefix = key.split(KeySeparator).drop(1)
+            nextCard_ = CardinalityNode.toCardinality(node, prefix)
             it_.next()
             return true
           }
