@@ -1,18 +1,21 @@
 package filodb.coordinator
 
-import scala.collection.mutable
-import scala.concurrent.duration.FiniteDuration
-import akka.actor.ActorRef
-import akka.pattern.AskTimeoutException
-
 import java.util.concurrent.TimeUnit
+
+import scala.collection.mutable
+import scala.concurrent.Future
+import scala.concurrent.duration.FiniteDuration
+import scala.util.Success
+
+import akka.actor.ActorRef
 import kamon.Kamon
 import kamon.tag.TagSet
 import monix.execution.Scheduler.{global => scheduler}
+
 import filodb.coordinator.client.Client
 import filodb.coordinator.client.QueryCommands.LogicalPlan2Query
 import filodb.core.DatasetRef
-import filodb.query.{QueryError, QueryResponse, QueryResult, TopkCardinalities, TsCardinalities}
+import filodb.query.{QueryResult, TsCardinalities}
 
 /**
  * Periodically queries a node for all namespace cardinalities.
@@ -21,8 +24,8 @@ import filodb.query.{QueryError, QueryResponse, QueryResult, TopkCardinalities, 
  * The intent is to publish a low-cardinality metric such that namespace
  * cardinality queries can be efficiently answered.
  */
-case class ShardMetricAggregator(dsIterProducer: () => Iterator[DatasetRef],
-                                 coordProducer: () => ActorRef) {
+case class NamespaceCardinalityPublisher(dsIterProducer: () => Iterator[DatasetRef],
+                                         coordProducer: () => ActorRef) {
   // All "_TU" constants quantify units of TIME_UNIT.
   private val TIME_UNIT = TimeUnit.SECONDS
   private val SCHED_INIT_DELAY_TU = 10
@@ -34,46 +37,44 @@ case class ShardMetricAggregator(dsIterProducer: () => Iterator[DatasetRef],
   private val NS = "ns_agg"
   private val WS = "ns_agg"
 
-  def scheduleAggregatorJob() : Unit = {
+  private val futQueue_ = new mutable.Queue[Future[Any]]()
+
+  def schedulePeriodicPublishJob() : Unit = {
     scheduler.scheduleWithFixedDelay(
       SCHED_INIT_DELAY_TU,
       SCHED_DELAY_TU,
       TIME_UNIT,
-      () => executeAggregateQuery())
+      () => queryAndSchedulePublish())
   }
 
-  private def executeAggregateQuery() : Unit = {
+  private def publishFutureData() : Unit = {
     import filodb.query.exec.TsCardExec.RowData
-    dsIterProducer().foreach { dsRef =>
-      val res = askTopkBlocking(dsRef)
-      res match {
-        case qres: QueryResult =>
-          qres.result.foreach(_.rows().foreach{ rr =>
+    while (futQueue_.nonEmpty && futQueue_.front.isCompleted) {
+      val fut = futQueue_.dequeue()
+      fut.value match {
+        case Some(Success(QueryResult(_, _, rv, _, _, _))) =>
+          rv.foreach(_.rows().foreach{ rr =>
             // publish a cardinality metric for each namespace
             val data = RowData.fromRowReader(rr)
-            val tags = Map("_ws_" -> WS, "_ns_" -> NS, "ds" -> dsRef.dataset)
+            val tags = Map("_ws_" -> WS, "_ns_" -> NS)  // TODO(a_theimer): dataset
             Kamon.gauge(METRIC_ACTIVE).withTags(TagSet.from(tags)).update(data.counts.active.toDouble)
             Kamon.gauge(METRIC_TOTAL).withTags(TagSet.from(tags)).update(data.counts.total.toDouble)
           })
-        case qerr: QueryError => ???
+        case _ => ???
       }
     }
   }
 
-  private def askTopkBlocking(dsRef: DatasetRef): QueryResponse = {
+  private def queryAndSchedulePublish() : Unit = {
     val groupDepth = 1
     val prefix = Nil
-    val askExtractor: PartialFunction[Any, QueryResponse] = {
-      case qres: QueryResponse => qres
-    }
-    try {
-      Client.actorAsk(
+    dsIterProducer().foreach { dsRef =>
+      val fut = Client.asyncAsk(
         coordProducer(),
         LogicalPlan2Query(dsRef, TsCardinalities(prefix, groupDepth)),
-        FiniteDuration(ASK_TIMEOUT_TU, TIME_UNIT))(askExtractor)
-    } catch {
-      case e: AskTimeoutException => ???
+        FiniteDuration(ASK_TIMEOUT_TU, TIME_UNIT))
+      futQueue_.enqueue(fut)
     }
-
+    scheduler.scheduleOnce(ASK_TIMEOUT_TU, TIME_UNIT, () => publishFutureData)
   }
 }
