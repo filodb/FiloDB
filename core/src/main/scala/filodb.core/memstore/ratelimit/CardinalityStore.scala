@@ -5,7 +5,7 @@ import java.io.Closeable
 /**
  * The data stored in each node of the Cardinality Store trie
  *
- * @param prefix name of the item in shardKeyPrefix
+ * @param prefix the shard key prefix that corresponds with the cardinality data
  * @param tsCount total number of timeSeries under this shardKeyPrefix (example, number of timeseries under ws,ns)
  * @param activeTsCount number of actively ingesting timeSeries under this shardKeyPrefix
  *                      (example, number of timeseries under ws,ns)

@@ -19,20 +19,20 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
     t.setQuota(Seq("a", "aa"), 2) shouldEqual Cardinality(Seq("a", "aa"), 0, 0, 0, 2)
     t.setQuota(Seq("a"), 1) shouldEqual Cardinality(Seq("a"), 0, 0, 0, 1)
 
-    t.modifyCount(Seq("a", "aa", "aaa"), 1, 1) should contain theSameElementsInOrderAs
+    t.modifyCount(Seq("a", "aa", "aaa"), 1, 1) shouldEqual
       Seq(Cardinality(Nil, 1, 1, 1, 4),
         Cardinality(Seq("a"), 1, 1, 1, 1),
         Cardinality(Seq("a", "aa"), 1, 1, 1, 2),
         Cardinality(Seq("a", "aa", "aaa"), 1, 1, 1, 1))
 
-    t.modifyCount(Seq("a", "aa", "aab"), 1, 1) should contain theSameElementsInOrderAs
+    t.modifyCount(Seq("a", "aa", "aab"), 1, 1) shouldEqual
       Seq(Cardinality(Nil, 2, 2, 1, 4),
         Cardinality(Seq("a"), 2, 2, 1, 1),
         Cardinality(Seq("a", "aa"), 2, 2, 2, 2),
         Cardinality(Seq("a", "aa", "aab"), 1, 1, 1, 4))
 
     // aab stopped ingesting
-    t.modifyCount(Seq("a", "aa", "aab"), 0, -1) should contain theSameElementsInOrderAs
+    t.modifyCount(Seq("a", "aa", "aab"), 0, -1) shouldEqual
       Seq(Cardinality(Nil, 2, 1, 1, 4),
         Cardinality(Seq("a"), 2, 1, 1, 1),
         Cardinality(Seq("a", "aa"), 2, 1, 2, 2),

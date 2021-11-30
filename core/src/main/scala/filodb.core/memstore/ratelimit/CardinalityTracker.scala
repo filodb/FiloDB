@@ -145,7 +145,7 @@ class CardinalityTracker(ref: DatasetRef,
       require(shardKey.length == shardKeyLen, "full shard key is needed")
       val toStore = (0 to shardKey.length).map { i =>
         val prefix = shardKey.take(i)
-        val old = store.getOrZero(prefix, Cardinality(Seq(""), 0, 0, 0, defaultChildrenQuota(i)))
+        val old = store.getOrZero(prefix, Cardinality(Nil, 0, 0, 0, defaultChildrenQuota(i)))
         if (old.tsCount == 0)
           throw new IllegalArgumentException(s"$prefix count is already zero - cannot reduce " +
             s"further. A double delete likely happened.")

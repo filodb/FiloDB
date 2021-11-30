@@ -19,7 +19,12 @@ import spire.syntax.cfor._
 import filodb.core.{DatasetRef, GlobalScheduler}
 import filodb.memory.format.UnsafeUtils
 
-case class CardinalityNode(name: String, tsCount: Int, activeTsCount: Int, childrenCount: Int, childrenQuota: Int)
+/**
+ * Stored as values in the RocksDb database.
+ * Identical to Cardinality, except that only the least-significant prefix name is stored.
+ */
+case class CardinalityNode(name: String, tsCount: Int, activeTsCount: Int,
+                           childrenCount: Int, childrenQuota: Int)
 
 case object CardinalityNode {
   def fromCardinality(card: Cardinality): CardinalityNode = {
