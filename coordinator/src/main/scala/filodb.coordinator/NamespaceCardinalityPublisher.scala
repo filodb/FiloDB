@@ -37,7 +37,7 @@ case class NamespaceCardinalityPublisher(dsIterProducer: () => Iterator[DatasetR
   private val NS = "ns_agg"
   private val WS = "ns_agg"
 
-  private val futQueue_ = new mutable.Queue[Future[Any]]()
+  private val futQueue_ = new java.util.concurrent.ConcurrentLinkedQueue[Future[Any]]()
 
   def schedulePeriodicPublishJob() : Unit = {
     scheduler.scheduleWithFixedDelay(
@@ -49,14 +49,25 @@ case class NamespaceCardinalityPublisher(dsIterProducer: () => Iterator[DatasetR
 
   private def publishFutureData() : Unit = {
     import filodb.query.exec.TsCardExec.RowData
-    while (futQueue_.nonEmpty && futQueue_.front.isCompleted) {
-      val fut = futQueue_.dequeue()
-      fut.value match {
+
+    while (true) {
+      var futOpt : Option[Future[Any]] = None
+      futQueue_.synchronized{
+        if (!futQueue_.isEmpty && futQueue_.peek().isCompleted) {
+          futOpt = Some(futQueue_.poll())
+        }
+      }
+
+      if (futOpt.isEmpty) {
+        return
+      }
+
+      futOpt.get.value match {
         case Some(Success(QueryResult(_, _, rv, _, _, _))) =>
           rv.foreach(_.rows().foreach{ rr =>
             // publish a cardinality metric for each namespace
             val data = RowData.fromRowReader(rr)
-            val tags = Map("_ws_" -> WS, "_ns_" -> NS)  // TODO(a_theimer): dataset
+            val tags = Map("_ws_" -> WS, "_ns_" -> NS, "prefix" -> data.group)  // TODO(a_theimer): dataset
             Kamon.gauge(METRIC_ACTIVE).withTags(TagSet.from(tags)).update(data.counts.active.toDouble)
             Kamon.gauge(METRIC_TOTAL).withTags(TagSet.from(tags)).update(data.counts.total.toDouble)
           })
@@ -73,7 +84,7 @@ case class NamespaceCardinalityPublisher(dsIterProducer: () => Iterator[DatasetR
         coordProducer(),
         LogicalPlan2Query(dsRef, TsCardinalities(prefix, groupDepth)),
         FiniteDuration(ASK_TIMEOUT_TU, TIME_UNIT))
-      futQueue_.enqueue(fut)
+      futQueue_.add(fut)
     }
     scheduler.scheduleOnce(ASK_TIMEOUT_TU, TIME_UNIT, () => publishFutureData)
   }
