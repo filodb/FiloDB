@@ -10,7 +10,8 @@ import filodb.core.DatasetRef
 case class QuotaReachedException(cannotSetShardKey: Seq[String], prefix: Seq[String], quota: Int)
   extends RuntimeException
 
-case class CardinalityRecord(shard: Int, card: Cardinality)
+case class CardinalityRecord(shard: Int, prefix: Seq[String], tsCount: Int,
+                             activeTsCount: Int, childrenCount: Int, childrenQuota: Int)
 
 
 /**
@@ -182,8 +183,8 @@ class CardinalityTracker(ref: DatasetRef,
 
     implicit val ord = new Ordering[CardinalityRecord]() {
       override def compare(x: CardinalityRecord, y: CardinalityRecord): Int = {
-        if (addInactive) x.card.tsCount - y.card.tsCount
-        else x.card.activeTsCount - y.card.activeTsCount
+        if (addInactive) x.tsCount - y.tsCount
+        else x.activeTsCount - y.activeTsCount
       }
     }.reverse
 
@@ -191,26 +192,20 @@ class CardinalityTracker(ref: DatasetRef,
       // directly fetch the cardinality and return
       val card = getCardinality(shardKeyPrefix)
       return Seq(CardinalityRecord(
-        shard,
-        Cardinality(
-          card.prefix, card.tsCount, card.activeTsCount,
-          if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
-          card.childrenQuota)))
+        shard, card.prefix, card.tsCount, card.activeTsCount,
+        if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
+        card.childrenQuota))
     }
 
     val heap = mutable.PriorityQueue[CardinalityRecord]()
     val it = store.scanChildren(shardKeyPrefix, depth)
     try {
       it.foreach { card =>
-        heap.enqueue(
-          CardinalityRecord(
-            shard,
-            Cardinality(
-              card.prefix,
-              card.tsCount,
-              card.activeTsCount,
-              if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
-              card.childrenQuota)))
+        heap.enqueue(CardinalityRecord(
+          shard, card.prefix, card.tsCount,
+          card.activeTsCount,
+          if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
+          card.childrenQuota))
         if (heap.size > k) heap.dequeue()
       }
     } finally {

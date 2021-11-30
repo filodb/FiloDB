@@ -245,21 +245,21 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
     t.modifyCount(Seq("a", "ab", "abe"), 1, 0)
 
     t.topk(3, Seq("a", "ac"), 3, true) shouldEqual Seq(
-      CardinalityRecord(0, Cardinality(Seq("a", "ac", "acc"), 11, 0, 11, 100)),
-      CardinalityRecord(0, Cardinality(Seq("a", "ac", "acg"), 15, 0, 15, 100)),
-      CardinalityRecord(0, Cardinality(Seq("a", "ac", "acb"), 20, 0, 20, 100))
+      CardinalityRecord(0, Seq("a", "ac", "acc"), 11, 0, 11, 100),
+      CardinalityRecord(0, Seq("a", "ac", "acg"), 15, 0, 15, 100),
+      CardinalityRecord(0, Seq("a", "ac", "acb"), 20, 0, 20, 100)
     )
 
     t.topk(3, Seq("a"), 2, true) shouldEqual Seq(
-      CardinalityRecord(0, Cardinality(Seq("a", "aa"), 4, 0, 4, 100)),
-      CardinalityRecord(0, Cardinality(Seq("a", "ab"), 5, 0, 5, 100)),
-      CardinalityRecord(0, Cardinality(Seq("a", "ac"), 72, 0, 7, 100))
+      CardinalityRecord(0, Seq("a", "aa"), 4, 0, 4, 100),
+      CardinalityRecord(0, Seq("a", "ab"), 5, 0, 5, 100),
+      CardinalityRecord(0, Seq("a", "ac"), 72, 0, 7, 100)
     )
 
     t.topk(3, Nil, 1, true) shouldEqual Seq(
-      CardinalityRecord(0, Cardinality(Seq("c"), 5, 0, 1, 100)),
-      CardinalityRecord(0, Cardinality(Seq("a"), 81, 0, 3, 100)),
-      CardinalityRecord(0, Cardinality(Seq("b"), 35, 0, 4, 100))
+      CardinalityRecord(0, Seq("c"), 5, 0, 1, 100),
+      CardinalityRecord(0, Seq("a"), 81, 0, 3, 100),
+      CardinalityRecord(0, Seq("b"), 35, 0, 4, 100)
     )
     t.close()
   }

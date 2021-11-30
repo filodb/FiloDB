@@ -191,10 +191,10 @@ object CliMain extends FilodbClusterNode {
             printf("%40s %20s %20s %15s %15s\n", "Child", "TotalTimeSeries", "ActiveTimeSeries", "Children", "Children")
             printf("%40s %20s %20s %15s %15s\n", "Name", "Count", "Count", "Count", "Quota")
             println("==============================================================================================================================")
-            crs._2.sortBy(c => if (addInactive) c.card.tsCount else c.card.activeTsCount)(Ordering.Int.reverse)
+            crs._2.sortBy(c => if (addInactive) c.tsCount else c.activeTsCount)(Ordering.Int.reverse)
               .foreach { cr =>
-                printf("%40s %20d %20d %15d %15d\n", cr.card.prefix, cr.card.tsCount,
-                       cr.card.activeTsCount, cr.card.childrenCount, cr.card.childrenQuota)
+                printf("%40s %20d %20d %15d %15d\n", cr.prefix, cr.tsCount,
+                       cr.activeTsCount, cr.childrenCount, cr.childrenQuota)
               }
           }
 

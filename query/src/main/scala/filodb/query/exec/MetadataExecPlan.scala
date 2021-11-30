@@ -418,8 +418,8 @@ final case class TsCardExec(queryContext: QueryContext,
               dataset, Seq(shard), shardKeyPrefix, groupDepth + 1,
               MAX_RESPONSE_SIZE, ADD_INACTIVE)
             .map{ card =>
-              RowData(card.card.prefix.mkString(PREFIX_DELIM).utf8,
-                      CardCounts(card.card.activeTsCount, card.card.tsCount))
+              RowData(card.prefix.mkString(PREFIX_DELIM).utf8,
+                      CardCounts(card.activeTsCount, card.tsCount))
               .toRowReader()
             }.iterator
 
