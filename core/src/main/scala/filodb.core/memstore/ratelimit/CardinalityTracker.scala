@@ -200,6 +200,7 @@ class CardinalityTracker(ref: DatasetRef,
     val heap = mutable.PriorityQueue[CardinalityRecord]()
     val it = store.scanChildren(shardKeyPrefix, depth)
     try {
+      it.seek()
       it.foreach { card =>
         heap.enqueue(CardinalityRecord(
           shard, card.prefix, card.tsCount,

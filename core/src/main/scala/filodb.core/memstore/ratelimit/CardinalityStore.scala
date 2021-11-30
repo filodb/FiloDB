@@ -15,6 +15,16 @@ import java.io.Closeable
 case class Cardinality(prefix: Seq[String], tsCount: Int, activeTsCount: Int, childrenCount: Int, childrenQuota: Int)
 
 /**
+ * Interface for CardinalityStore iterator.
+ */
+trait CardIter extends Iterator[Cardinality] with Closeable {
+  /**
+   * Must be called before iteration.
+   */
+  def seek(): Unit
+}
+
+/**
  *
  * Abstracts storage of cardinality for each shard prefix.
  *
@@ -75,7 +85,7 @@ trait CardinalityStore {
    * Fetch children of the node for the given shard key prefix.
    * @param depth: only children of this size will be scanned.
    */
-  def scanChildren(shardKeyPrefix: Seq[String], depth: Int): Iterator[Cardinality] with Closeable
+  def scanChildren(shardKeyPrefix: Seq[String], depth: Int): CardIter
 
   /**
    * Close store. Data will be thrown away

@@ -1,6 +1,6 @@
 package filodb.core.memstore.ratelimit
 
-import java.io.{Closeable, File}
+import java.io.File
 import java.nio.charset.StandardCharsets
 
 import scala.concurrent.duration._
@@ -245,38 +245,34 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
     db.delete(toStringKey(shardKeyPrefix).getBytes(StandardCharsets.UTF_8))
   }
 
-  override def scanChildren(shardKeyPrefix: Seq[String], depth: Int): Iterator[Cardinality] with Closeable = {
+  override def scanChildren(shardKeyPrefix: Seq[String], depth: Int): CardIter = {
     require(depth > shardKeyPrefix.size,
       s"scan depth $depth must be greater than the size of the prefix ${shardKeyPrefix.size}")
 
-    new Iterator[Cardinality] with Closeable {
+    new CardIter {
       val it_ = db.newIterator()
       var nextCard_ = Cardinality(Seq("should be overwritten before exposed"), -1, -1, -1, -1)
       val strPrefix_ = toStringKeyPrefix(shardKeyPrefix, depth)
+      var isSeeked = false
 
-      logger.debug(s"Scanning shard=$shard dataset=$ref ${new String(strPrefix_)}")
-      try {
+      override def seek(): Unit = {
+        logger.debug(s"Scanning shard=$shard dataset=$ref ${new String(strPrefix_)}")
         it_.seek(strPrefix_.getBytes(StandardCharsets.UTF_8))
-      } catch {
-        // also causes hasNext to return false
-        case e : Throwable => it_.close()
+        isSeeked = true
       }
 
       // note: must be called exactly once before each next() call
       override def hasNext: Boolean = {
+        assert(isSeeked, "must call seek() before use")
         if (it_.isValid) {
-          try{
-            // store the next matching key and increment the iterator
-            val key = new String(it_.key(), StandardCharsets.UTF_8)
-            if (key.startsWith(strPrefix_)) {
-              val node = bytesToCardinalityNode(it_.value())
-              val prefix = key.split(KeySeparator).drop(1)
-              nextCard_ = CardinalityNode.toCardinality(node, prefix)
-              it_.next()
-              return true
-            }
-          } catch {
-            case e: Throwable => it_.close(); return false
+          // store the next matching key and increment the iterator
+          val key = new String(it_.key(), StandardCharsets.UTF_8)
+          if (key.startsWith(strPrefix_)) {
+            val node = bytesToCardinalityNode(it_.value())
+            val prefix = key.split(KeySeparator).drop(1)
+            nextCard_ = CardinalityNode.toCardinality(node, prefix)
+            it_.next()
+            return true
           }
         }
         it_.close()
