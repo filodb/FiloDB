@@ -309,8 +309,7 @@ class SingleClusterPlanner(val dataset: Dataset,
 
     // repeat the same timestep if '@' is specified
     if (lp.atMs.nonEmpty) {
-      series = series.copy(
-        plans = series.plans.map(AtExec(_, math.max(1L, (lp.endMs - lp.startMs) / lp.startMs).toInt)))
+      series.plans.foreach(_.addRangeVectorTransformer(RepeatTransformer(lp.startMs, lp.stepMs, lp.endMs)))
     }
 
     // TODO(a_theimer)
@@ -370,8 +369,7 @@ class SingleClusterPlanner(val dataset: Dataset,
 
     // repeat the same timestep if '@' is specified
     if (lp.atMs.nonEmpty) {
-      rawSeries = rawSeries.copy(
-        plans = rawSeries.plans.map(AtExec(_, math.max(1L, (lp.endMs - lp.startMs) / lp.stepMs).toInt)))
+      rawSeries.plans.foreach(_.addRangeVectorTransformer(RepeatTransformer(lp.startMs, lp.stepMs, lp.endMs)))
     }
 
     // TODO(a_theimer)
@@ -440,11 +438,14 @@ class SingleClusterPlanner(val dataset: Dataset,
     val rangeSelectorWithModifiers = lp.rangeSelector match {
       case IntervalSelector(fromMs, toMs) => {
         val toRealMs = lp.atMs.getOrElse(toMs) - offsetMillis
-        val rangeDiff = lp.atMs.map(_ => toMs - fromMs).getOrElse(0L)  // TODO(a_theimer): explain
-        val fromRealMs = toRealMs - rangeDiff - lp.lookbackMs.getOrElse(queryConfig.staleSampleAfterMs)
+        val fromRealMs = {
+          val windowStartMs = toRealMs - lp.lookbackMs.getOrElse(queryConfig.staleSampleAfterMs)
+          val rangeMs = if (lp.atMs.isEmpty) toMs - fromMs else 0
+          windowStartMs - rangeMs
+        }
         IntervalSelector(fromRealMs, toRealMs)
       }
-      case _                              => lp.rangeSelector
+      case _                          => lp.rangeSelector
     }
     val needsStitch = rangeSelectorWithModifiers match {
       case IntervalSelector(from, to) => spreadChanges.exists(c => c.time >= from && c.time <= to)

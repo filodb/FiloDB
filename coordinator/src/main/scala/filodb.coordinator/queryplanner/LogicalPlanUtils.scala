@@ -87,12 +87,13 @@ object LogicalPlanUtils extends StrictLogging {
   def copyLogicalPlanWithUpdatedTimeRange(logicalPlan: LogicalPlan,
                                           timeRange: TimeRange): LogicalPlan = {
     logicalPlan match {
-      case lp: PeriodicSeriesPlan  => copyWithUpdatedTimeRange(lp, timeRange)
-      case lp: RawSeriesLikePlan   => copyNonPeriodicWithUpdatedTimeRange(lp, timeRange)
-      case lp: LabelValues         => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
-      case lp: LabelNames          => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
-      case lp: LabelCardinality    => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
-      case lp: SeriesKeysByFilters => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: PeriodicSeriesPlan       => copyWithUpdatedTimeRange(lp, timeRange)
+      case lp: RawSeriesLikePlan        => copyNonPeriodicWithUpdatedTimeRange(lp, timeRange)
+      case lp: LabelValues              => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: LabelNames               => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: LabelCardinality         => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: TsCardinalities          => lp  // immutable & no members need to be updated
+      case lp: SeriesKeysByFilters      => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
     }
   }
 

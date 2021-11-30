@@ -19,46 +19,6 @@ import filodb.memory.format.RowReader
 import filodb.query._
 import filodb.query.Query.qLogger
 
-// TODO(a_theimer): move this
-case class AtExec(ep: ExecPlan, n: Int) extends NonLeafExecPlan {
-  override protected def compose(childResponses: Observable[(QueryResponse, Int)],
-                                 firstSchema: Task[ResultSchema],
-                                 querySession: QuerySession): Observable[RangeVector] = {
-    // TODO(a_theimer): flatMap doesn't make sense here?
-    childResponses.flatMap{ case (response, _) =>
-      response match {
-        case QueryResult(_, _, rvs, _, _, _) =>
-          val it = (0 until n).map(_ => rvs(0)).iterator
-          Observable.fromIterator(it)
-        case _ => ???
-      }
-    }
-  }
-
-  /**
-   * Query Processing parameters
-   */
-  override def queryContext: QueryContext = ep.queryContext // TODO(a_theimer)
-
-  /**
-   * Child execution plans representing sub-queries
-   */
-  override def children: Seq[ExecPlan] = Seq(ep)
-
-  /**
-   * The dispatcher is used to dispatch the ExecPlan
-   * to the node where it will be executed. The Query Engine
-   * will supply this parameter
-   */
-  override def dispatcher: PlanDispatcher = ep.dispatcher  // TODO(a_theimer)
-
-  /**
-   * Args to use for the ExecPlan for printTree purposes only.
-   * DO NOT change to a val. Increases heap usage.
-   */
-  override protected def args: String = s"n: $n"  // TODO(a_theimer)
-}
-
 /**
  * The observable of vectors and the schema that is returned by ExecPlan doExecute
  */
