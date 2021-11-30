@@ -410,17 +410,17 @@ final case class TsCardExec(queryContext: QueryContext,
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
 
-    // TODO(a_theimer): cleanup
     val rvs = source match {
       case tsMemStore: TimeSeriesMemStore =>
         Observable.eval {
           val it =
-            tsMemStore.topKCardinality(dataset, Seq(shard),
-              shardKeyPrefix, groupDepth + 1,
-              MAX_RESPONSE_SIZE, ADD_INACTIVE).map{ card =>
+            tsMemStore.topKCardinality(
+              dataset, Seq(shard), shardKeyPrefix, groupDepth + 1,
+              MAX_RESPONSE_SIZE, ADD_INACTIVE)
+            .map{ card =>
               RowData(card.card.prefix.mkString(PREFIX_DELIM).utf8,
                       CardCounts(card.card.activeTsCount, card.card.tsCount))
-                .toRowReader()
+              .toRowReader()
             }.iterator
 
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)

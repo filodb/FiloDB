@@ -152,53 +152,40 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   // consider compaction-pending yes/no
 
   /**
-   * TODO(a_theimer): this is outdated; see toStringKey for current schema
-   *
    * In order to enable quick prefix search, we formulate string based keys to the RocksDB
    * key-value store.
    *
-   * For example, here is the list of rocksDb keys for a few shard keys. {LastKeySeparator} and
-   * {NotLastKeySeparator} are special characters chosen as separator char between shard key elements.
-   * {LastKeySeparator} is used just prior to last shard key element. {NotLastKeySeparator} is used otherwise.
+   * For example, here is the list of rocksDb keys for a few shard keys. {KeySeparator} is a
+   * special character chosen as the separator char between shard key elements. The value
+   * at the beginning of each key indicates the size of the prefix it represents.
+   *
    * This model helps with fast prefix searches to do top-k scans.
    *
    * BTW, Remove quote chars from actual string key.
-   * They are there just to emphasize the shard key element in the string. "" represents the root.
+   * They are there just to emphasize the shard key element in the string. "0" represents the root.
    *
    * <pre>
-   * ""
-   * ""{LastKeySeparator}"myWs1"
-   * ""{LastKeySeparator}"myWs2"
-   * ""{NotLastKeySeparator}"myWs1"{LastKeySeparator}"myNs11"
-   * ""{NotLastKeySeparator}"myWs1"{LastKeySeparator}"myNs12"
-   * ""{NotLastKeySeparator}"myWs2"{LastKeySeparator}"myNs21"
-   * ""{NotLastKeySeparator}"myWs2"{LastKeySeparator}"myNs22"
-   * ""{NotLastKeySeparator}"myWs1"{NotLastKeySeparator}"myNs11"{LastKeySeparator}"heap_usage"
-   * ""{NotLastKeySeparator}"myWs1"{NotLastKeySeparator}"myNs11"{LastKeySeparator}"cpu_usage"
-   * ""{NotLastKeySeparator}"myWs1"{NotLastKeySeparator}"myNs11"{LastKeySeparator}"network_usage"
+   * 0
+   * 1{KeySeparator}"myWs1"
+   * 1{KeySeparator}"myWs2"
+   * 2{KeySeparator}"myWs1"{KeySeparator}"myNs11"
+   * 2{KeySeparator}"myWs1"{KeySeparator}"myNs12"
+   * 2{KeySeparator}"myWs2"{KeySeparator}"myNs21"
+   * 2{KeySeparator}"myWs2"{KeySeparator}"myNs22"
+   * 3{KeySeparator}"myWs1"{KeySeparator}"myNs11"{KeySeparator}"heap_usage"
+   * 3{KeySeparator}"myWs1"{KeySeparator}"myNs11"{KeySeparator}"cpu_usage"
+   * 3{KeySeparator}"myWs2"{KeySeparator}"myNs21"{KeySeparator}"network_usage"
    * </pre>
    *
-   * In the above tree, we simply do a prefix search on <pre> ""{NotLastKeySeparator}"myWs1"{LastKeySeparator} </pre>
+   * In the above tree, we simply do a prefix search on <pre> 2{KeySeparator}"myWs1"{KeySeparator} </pre>
    * to get namespaces under workspace myWs1.
    *
    * @param shardKeyPrefix Zero or more elements that make up shard key prefix
-   * @param prefixSearch If true, returns key that can be used to perform prefix search to
-   *                     fetch immediate children in trie. Use false to fetch one specific node.
+   * @param keyDepth size to append at the beginning of the key
+   *   Note: When keyDepth > shardKeyPrefix.size, builds keys as:
+   *         <keyDepth>{KeySeparator}<name-1>{KeySeparator}<name-2> ... <name-n>{KeySeparator}
+   *         When keyDepth == shardKeyPrefix.size, the final KeySeparator is omitted.
    * @return string key to use to perform reads and writes of entries into RocksDB
-   */
-
-  /**
-   * Builds keys as:
-   *   <keyDepth>{KeySeparator}<name-1>{KeySeparator}<name-2> ... <name-n>
-   */
-  private def toStringKey(shardKeyPrefix: Seq[String]): String = {
-    toStringKeyPrefix(shardKeyPrefix, shardKeyPrefix.size)
-  }
-
-  /**
-   * When keyDepth > shardKeyPrefix.size, builds keys as:
-   *   <keyDepth>{KeySeparator}<name-1>{KeySeparator}<name-2> ... <name-n>{KeySeparator}
-   * When keyDepth == shardKeyPrefix.size, the final KeySeparator is omitted.
    */
   private def toStringKeyPrefix(shardKeyPrefix: Seq[String], keyDepth: Int): String = {
     import RocksDbCardinalityStore._
@@ -213,6 +200,15 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
       b.append(KeySeparator)
     }
     b.toString()
+  }
+
+  /**
+   * Builds keys as:
+   *   <keyDepth>{KeySeparator}<name-1>{KeySeparator}<name-2> ... <name-n>
+   * The final {KeySeparator} is always omitted.
+   */
+  private def toStringKey(shardKeyPrefix: Seq[String]): String = {
+    toStringKeyPrefix(shardKeyPrefix, shardKeyPrefix.size)
   }
 
   private def cardinalityNodeToBytes(card: CardinalityNode): Array[Byte] = {
