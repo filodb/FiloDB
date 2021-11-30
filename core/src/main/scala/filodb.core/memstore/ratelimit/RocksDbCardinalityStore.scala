@@ -248,7 +248,6 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
     require(depth > shardKeyPrefix.size,
       s"scan depth $depth must be greater than the size of the prefix ${shardKeyPrefix.size}")
 
-    // TODO(a_theimer): this should be its own class, also add an init() method?
     new Iterator[Cardinality] with Closeable {
       val it_ = db.newIterator()
       var nextCard_ = Cardinality(Seq("should be overwritten before exposed"), -1, -1, -1, -1)
@@ -259,20 +258,24 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
         it_.seek(strPrefix_.getBytes(StandardCharsets.UTF_8))
       } catch {
         // also causes hasNext to return false
-        case e : Exception => it_.close()
+        case e : Throwable => it_.close()
       }
 
       // note: must be called exactly once before each next() call
       override def hasNext: Boolean = {
         if (it_.isValid) {
-          // store the next matching key and increment the iterator
-          val key = new String(it_.key(), StandardCharsets.UTF_8)
-          if (key.startsWith(strPrefix_)) {
-            val node = bytesToCardinalityNode(it_.value())
-            val prefix = key.split(KeySeparator).drop(1)
-            nextCard_ = CardinalityNode.toCardinality(node, prefix)
-            it_.next()
-            return true
+          try{
+            // store the next matching key and increment the iterator
+            val key = new String(it_.key(), StandardCharsets.UTF_8)
+            if (key.startsWith(strPrefix_)) {
+              val node = bytesToCardinalityNode(it_.value())
+              val prefix = key.split(KeySeparator).drop(1)
+              nextCard_ = CardinalityNode.toCardinality(node, prefix)
+              it_.next()
+              return true
+            }
+          } catch {
+            case e: Throwable => it_.close(); return false
           }
         }
         it_.close()
