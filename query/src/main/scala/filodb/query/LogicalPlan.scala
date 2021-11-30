@@ -618,6 +618,7 @@ object LogicalPlan {
         case lp: RawSeries             => lp.filters toSet
         case lp: RawChunkMeta          => lp.filters toSet
         case lp: SeriesKeysByFilters   => lp.filters toSet
+        case lp: LabelCardinality      => lp.filters.toSet
         case _: ScalarTimeBasedPlan    => Set.empty[ColumnFilter] // Plan does not have labels
         case _: ScalarFixedDoublePlan  => Set.empty[ColumnFilter]
         case _: ScalarBinaryOperation  => Set.empty[ColumnFilter]

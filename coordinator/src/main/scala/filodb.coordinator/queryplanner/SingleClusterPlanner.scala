@@ -141,7 +141,9 @@ class SingleClusterPlanner(val dataset: Dataset,
             // later if needed. The DistConcatExec's from multiple partitions can still return the map of label names
             // and bytes and they can be merged to create a new sketch. Only the top level exec needs to then add the
             // presenter to display the final mapping of label name and the count based on the sketch bytes.
-            reduceExec.addRangeVectorTransformer(new LabelCardinalityPresenter())
+            if (!qContext.plannerParams.skipAggregatePresent) {
+              reduceExec.addRangeVectorTransformer(new LabelCardinalityPresenter())
+            }
             reduceExec
           }
           case lce: TopkCardExec => {
