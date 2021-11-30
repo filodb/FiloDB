@@ -36,6 +36,7 @@ case class NamespaceCardinalityPublisher(dsIterProducer: () => Iterator[DatasetR
   private val NS = "ns_agg"
   private val WS = "ns_agg"
 
+  // (future, dataset) pairs
   private val futQueue_ = new java.util.concurrent.ConcurrentLinkedQueue[(Future[Any], String)]()
 
   def schedulePeriodicPublishJob() : Unit = {
@@ -46,10 +47,16 @@ case class NamespaceCardinalityPublisher(dsIterProducer: () => Iterator[DatasetR
       () => queryAndSchedulePublish())
   }
 
+  /**
+   * Publishes Future results until the queue is exhausted or
+   *   the Future at the front of the queue is incomplete.
+   */
   private def publishFutureData() : Unit = {
     import filodb.query.exec.TsCardExec.RowData
 
     while (true) {
+      // Need to acquire the queue lock for the duration of the
+      //   occupancy/isCompleted checks and poll() call.
       var futOpt : Option[(Future[Any], String)] = None
       futQueue_.synchronized{
         if (!futQueue_.isEmpty && futQueue_.peek()._1.isCompleted) {
@@ -58,6 +65,7 @@ case class NamespaceCardinalityPublisher(dsIterProducer: () => Iterator[DatasetR
       }
 
       if (futOpt.isEmpty) {
+        // We've exhausted the queue.
         return
       }
 
@@ -76,6 +84,10 @@ case class NamespaceCardinalityPublisher(dsIterProducer: () => Iterator[DatasetR
     }
   }
 
+  /**
+   * For each dataset, ask a Coordinator with a TsCardinalities LogicalPlan.
+   * Schedules a job to publish the Coordinator's response.
+   */
   private def queryAndSchedulePublish() : Unit = {
     val groupDepth = 1
     val prefix = Nil
