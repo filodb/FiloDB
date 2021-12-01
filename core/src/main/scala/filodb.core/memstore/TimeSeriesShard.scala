@@ -599,8 +599,24 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   def topKCardinality(k: Int, shardKeyPrefix: Seq[String], depth: Int, addInactive: Boolean): Seq[CardinalityRecord] = {
-    if (storeConfig.meteringEnabled) cardTracker.topk(k, shardKeyPrefix, depth, addInactive)
-    else throw new IllegalArgumentException("Metering is not enabled")
+    implicit val ord = new Ordering[CardinalityRecord]() {
+      override def compare(x: CardinalityRecord, y: CardinalityRecord): Int = {
+        if (addInactive) x.tsCount - y.tsCount
+        else x.activeTsCount - y.activeTsCount
+      }
+    }.reverse
+
+    if (storeConfig.meteringEnabled) {
+      val heap = mutable.PriorityQueue[CardinalityRecord]()
+      val childCards = cardTracker.scan(shardKeyPrefix, depth)
+      childCards.foreach { card =>
+        heap.enqueue(card)
+        if (heap.size > k) heap.dequeue()
+      }
+      heap.toSeq
+    } else {
+      throw new IllegalArgumentException("Metering is not enabled")
+    }
   }
 
   def startFlushingIndex(): Unit =

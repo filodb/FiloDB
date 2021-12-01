@@ -1,6 +1,5 @@
 package filodb.core.memstore.ratelimit
 
-import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 import com.typesafe.scalalogging.StrictLogging
@@ -168,48 +167,22 @@ class CardinalityTracker(ref: DatasetRef,
   }
 
   /**
-   * Use this method to query the top-k cardinality consumers
-   *   under a provided shard key prefix.
+   * Use this method to query cardinalities under a provided shard key prefix.
    *
    * @param depth cardinalities are returned for all prefixes of this size
    * @param shardKeyPrefix zero or more elements that form a valid shard key prefix
-   * @return Top-K records, can the less than K if fewer children
    */
-  def topk(k: Int, shardKeyPrefix: Seq[String], depth: Int, addInactive: Boolean): Seq[CardinalityRecord] = {
+  def scan(shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord] = {
     require(shardKeyPrefix.length <= shardKeyLen, s"Too many shard keys in $shardKeyPrefix - max $shardKeyLen")
     require(depth >= shardKeyPrefix.size,
       s"depth $depth must be at least the size of the prefix ${shardKeyPrefix.size}")
 
-    implicit val ord = new Ordering[CardinalityRecord]() {
-      override def compare(x: CardinalityRecord, y: CardinalityRecord): Int = {
-        if (addInactive) x.tsCount - y.tsCount
-        else x.activeTsCount - y.activeTsCount
-      }
-    }.reverse
-
     if (shardKeyPrefix.size == depth) {
-      // directly fetch the cardinality and return
-      return Seq(getCardinality(shardKeyPrefix))
-      // TODO(a_theimer): need to keep this?
-//      return Seq(CardinalityRecord(
-//        shard, card.prefix, card.tsCount, card.activeTsCount,
-//        if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
-//        card.childrenQuota))
+      // directly fetch the single cardinality
+      Seq(getCardinality(shardKeyPrefix))
+    } else {
+      store.scanChildren(shardKeyPrefix, depth)
     }
-
-    val heap = mutable.PriorityQueue[CardinalityRecord]()
-    val childCards = store.scanChildren(shardKeyPrefix, depth, 5000)  // TODO(a_theimer)
-    childCards.foreach { card =>
-      heap.enqueue(card)
-      // TODO(a_theimer: need to keep this?)
-//      heap.enqueue(CardinalityRecord(
-//        shard, card.prefix, card.tsCount,
-//        card.activeTsCount,
-//        if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
-//        card.childrenQuota))
-      if (heap.size > k) heap.dequeue()
-    }
-    heap.toSeq
   }
 
   def close(): Unit = {
