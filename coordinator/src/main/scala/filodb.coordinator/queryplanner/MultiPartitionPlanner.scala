@@ -299,7 +299,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         if (p.partitionName.equals(localPartitionName))
           localPartitionPlanner.materialize(lp.copy(startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
         else
-          createMetadataRemoteExec(qContext, queryParams, p, Map("match[]" -> queryParams.promQl))
+          createMetadataRemoteExec(qContext, queryParams, p,
+            Map("match[]" -> LogicalPlanParser.metatadataMatchToQuery(lp)))
       }
       if (execPlans.size == 1) execPlans.head
       else PartKeysDistConcatExec(qContext, inProcessPlanDispatcher,
@@ -341,7 +342,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         if (p.partitionName.equals(localPartitionName))
           localPartitionPlanner.materialize(lp.copy(startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
         else
-          createMetadataRemoteExec(qContext, queryParams, p, Map("match[]" -> queryParams.promQl))
+          createMetadataRemoteExec(qContext, queryParams, p,
+            Map("match[]" -> LogicalPlanParser.metatadataMatchToQuery(lp)))
       }
       if (execPlans.size == 1) execPlans.head
       else LabelNamesDistConcatExec(qContext, inProcessPlanDispatcher,
