@@ -10,10 +10,6 @@ import filodb.core.DatasetRef
 case class QuotaReachedException(cannotSetShardKey: Seq[String], prefix: Seq[String], quota: Int)
   extends RuntimeException
 
-case class CardinalityRecord(shard: Int, prefix: Seq[String], tsCount: Int,
-                             activeTsCount: Int, childrenCount: Int, childrenQuota: Int)
-
-
 /**
   * Tracks cardinality (number of time series) under each shard key prefix. The shard key
   * essentially comprises of the part key key/value pairs that determine which shard a time
@@ -60,7 +56,7 @@ class CardinalityTracker(ref: DatasetRef,
    * @return current cardinality for each shard key prefix. There
    *         will be shardKeyLen + 1 items in the return value
    */
-  def modifyCount(shardKey: Seq[String], totalDelta: Int, activeDelta: Int): Seq[Cardinality] = {
+  def modifyCount(shardKey: Seq[String], totalDelta: Int, activeDelta: Int): Seq[CardinalityRecord] = {
     require(shardKey.length == shardKeyLen, "full shard key is needed")
     require(totalDelta == 1 && activeDelta == 0 ||   // new ts but inactive
             totalDelta == 1 && activeDelta == 1 ||   // new ts and active
@@ -68,11 +64,11 @@ class CardinalityTracker(ref: DatasetRef,
             totalDelta == 0 && activeDelta == -1,    // existing active ts that became inactive
             "invalid values for totalDelta / activeDelta")
 
-    val toStore = ArrayBuffer[(Seq[String], Cardinality)]()
+    val toStore = ArrayBuffer[(Seq[String], CardinalityRecord)]()
     // first make sure there is no breach for any prefix
     (0 to shardKey.length).foreach { i =>
       val prefix = shardKey.take(i)
-      val old = store.getOrZero(prefix, Cardinality(prefix, 0, 0, 0, defaultChildrenQuota(i)))
+      val old = store.getOrZero(prefix, CardinalityRecord(shard, prefix, 0, 0, 0, defaultChildrenQuota(i)))
       val neu = old.copy(tsCount = old.tsCount + totalDelta,
                          activeTsCount = old.activeTsCount + activeDelta,
                          childrenCount = if (i == shardKeyLen) old.childrenCount + totalDelta else old.childrenCount)
@@ -105,9 +101,11 @@ class CardinalityTracker(ref: DatasetRef,
    *
    * @param shardKeyPrefix zero or more elements that form a valid shard key prefix
    */
-  def getCardinality(shardKeyPrefix: Seq[String]): Cardinality = {
+  def getCardinality(shardKeyPrefix: Seq[String]): CardinalityRecord = {
     require(shardKeyPrefix.length <= shardKeyLen, s"Too many shard keys in $shardKeyPrefix - max $shardKeyLen")
-    store.getOrZero(shardKeyPrefix, Cardinality(shardKeyPrefix, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
+    store.getOrZero(
+      shardKeyPrefix,
+      CardinalityRecord(shard, shardKeyPrefix, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
   }
 
   /**
@@ -115,15 +113,16 @@ class CardinalityTracker(ref: DatasetRef,
    *
    * @param shardKeyPrefix zero or more elements that form a valid shard key prefix
    * @param childrenQuota maximum number of time series for this prefix
-   * @return current Cardinality for the prefix
+   * @return current CardinalityRecord for the prefix
    */
-  def setQuota(shardKeyPrefix: Seq[String], childrenQuota: Int): Cardinality = {
+  def setQuota(shardKeyPrefix: Seq[String], childrenQuota: Int): CardinalityRecord = {
     require(shardKeyPrefix.length <= shardKeyLen, s"Too many shard keys in $shardKeyPrefix - max $shardKeyLen")
     require(childrenQuota > 0 && childrenQuota < 2000000, "Children quota invalid. Provide [1, 2000000)")
 
     logger.debug(s"Setting children quota for $shardKeyPrefix as $childrenQuota")
-    val old = store.getOrZero(shardKeyPrefix,
-                              Cardinality(shardKeyPrefix, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
+    val old = store.getOrZero(
+      shardKeyPrefix,
+      CardinalityRecord(shard, shardKeyPrefix, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
     val neu = old.copy(childrenQuota = childrenQuota)
     store.store(neu)
     neu
@@ -140,12 +139,12 @@ class CardinalityTracker(ref: DatasetRef,
    * @return current cardinality for each shard key prefix. There
    *         will be shardKeyLen + 1 items in the return value
    */
-  def decrementCount(shardKey: Seq[String]): Seq[Cardinality] = {
+  def decrementCount(shardKey: Seq[String]): Seq[CardinalityRecord] = {
     try {
       require(shardKey.length == shardKeyLen, "full shard key is needed")
       val toStore = (0 to shardKey.length).map { i =>
         val prefix = shardKey.take(i)
-        val old = store.getOrZero(prefix, Cardinality(Nil, 0, 0, 0, defaultChildrenQuota(i)))
+        val old = store.getOrZero(prefix, CardinalityRecord(shard, Nil, 0, 0, 0, defaultChildrenQuota(i)))
         if (old.tsCount == 0)
           throw new IllegalArgumentException(s"$prefix count is already zero - cannot reduce " +
             s"further. A double delete likely happened.")
@@ -154,7 +153,7 @@ class CardinalityTracker(ref: DatasetRef,
         (prefix, neu)
       }
       toStore.map { case (prefix, neu) =>
-        if (neu == Cardinality(prefix, 0, 0, 0, defaultChildrenQuota(prefix.length))) {
+        if (neu == CardinalityRecord(shard, prefix, 0, 0, 0, defaultChildrenQuota(prefix.length))) {
           // node can be removed
           store.remove(prefix)
         } else {
@@ -190,17 +189,17 @@ class CardinalityTracker(ref: DatasetRef,
 
     if (shardKeyPrefix.size == depth) {
       // directly fetch the cardinality and return
-      val card = getCardinality(shardKeyPrefix)
-      return Seq(CardinalityRecord(
-        shard, card.prefix, card.tsCount, card.activeTsCount,
-        if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
-        card.childrenQuota))
+      return Seq(getCardinality(shardKeyPrefix))
+      // TODO(a_theimer): need to keep this?
+//      return Seq(CardinalityRecord(
+//        shard, card.prefix, card.tsCount, card.activeTsCount,
+//        if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
+//        card.childrenQuota))
     }
 
     val heap = mutable.PriorityQueue[CardinalityRecord]()
     val it = store.scanChildren(shardKeyPrefix, depth)
     try {
-      it.seek()
       it.foreach { card =>
         heap.enqueue(CardinalityRecord(
           shard, card.prefix, card.tsCount,

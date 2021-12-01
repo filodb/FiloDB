@@ -15,28 +15,28 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
 
   it("should enforce quota when set explicitly for all levels") {
     val t = new CardinalityTracker(ref, 0, 3, Seq(4, 4, 4, 4), newCardStore)
-    t.setQuota(Seq("a", "aa", "aaa"), 1) shouldEqual  Cardinality(Seq("a", "aa", "aaa"), 0, 0, 0, 1)
-    t.setQuota(Seq("a", "aa"), 2) shouldEqual Cardinality(Seq("a", "aa"), 0, 0, 0, 2)
-    t.setQuota(Seq("a"), 1) shouldEqual Cardinality(Seq("a"), 0, 0, 0, 1)
+    t.setQuota(Seq("a", "aa", "aaa"), 1) shouldEqual  CardinalityRecord(0, Seq("a", "aa", "aaa"), 0, 0, 0, 1)
+    t.setQuota(Seq("a", "aa"), 2) shouldEqual CardinalityRecord(0, Seq("a", "aa"), 0, 0, 0, 2)
+    t.setQuota(Seq("a"), 1) shouldEqual CardinalityRecord(0, Seq("a"), 0, 0, 0, 1)
 
     t.modifyCount(Seq("a", "aa", "aaa"), 1, 1) shouldEqual
-      Seq(Cardinality(Nil, 1, 1, 1, 4),
-        Cardinality(Seq("a"), 1, 1, 1, 1),
-        Cardinality(Seq("a", "aa"), 1, 1, 1, 2),
-        Cardinality(Seq("a", "aa", "aaa"), 1, 1, 1, 1))
+      Seq(CardinalityRecord(0, Nil, 1, 1, 1, 4),
+        CardinalityRecord(0, Seq("a"), 1, 1, 1, 1),
+        CardinalityRecord(0, Seq("a", "aa"), 1, 1, 1, 2),
+        CardinalityRecord(0, Seq("a", "aa", "aaa"), 1, 1, 1, 1))
 
     t.modifyCount(Seq("a", "aa", "aab"), 1, 1) shouldEqual
-      Seq(Cardinality(Nil, 2, 2, 1, 4),
-        Cardinality(Seq("a"), 2, 2, 1, 1),
-        Cardinality(Seq("a", "aa"), 2, 2, 2, 2),
-        Cardinality(Seq("a", "aa", "aab"), 1, 1, 1, 4))
+      Seq(CardinalityRecord(0, Nil, 2, 2, 1, 4),
+        CardinalityRecord(0, Seq("a"), 2, 2, 1, 1),
+        CardinalityRecord(0, Seq("a", "aa"), 2, 2, 2, 2),
+        CardinalityRecord(0, Seq("a", "aa", "aab"), 1, 1, 1, 4))
 
     // aab stopped ingesting
     t.modifyCount(Seq("a", "aa", "aab"), 0, -1) shouldEqual
-      Seq(Cardinality(Nil, 2, 1, 1, 4),
-        Cardinality(Seq("a"), 2, 1, 1, 1),
-        Cardinality(Seq("a", "aa"), 2, 1, 2, 2),
-        Cardinality(Seq("a", "aa", "aab"), 1, 0, 1, 4))
+      Seq(CardinalityRecord(0, Nil, 2, 1, 1, 4),
+        CardinalityRecord(0, Seq("a"), 2, 1, 1, 1),
+        CardinalityRecord(0, Seq("a", "aa"), 2, 1, 2, 2),
+        CardinalityRecord(0, Seq("a", "aa", "aab"), 1, 0, 1, 4))
 
     val ex = intercept[QuotaReachedException] {
       t.modifyCount(Seq("a", "aa", "aac"), 1, 0)
@@ -44,16 +44,16 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
     ex.prefix shouldEqual (Seq("a", "aa"))
 
     // increment should not have been applied for any prefix
-    t.getCardinality(Seq("a")) shouldEqual Cardinality(Seq("a"), 2, 1, 1, 1)
-    t.getCardinality(Seq("a", "aa")) shouldEqual Cardinality(Seq("a", "aa"), 2, 1, 2, 2)
-    t.getCardinality(Seq("a", "aa", "aac")) shouldEqual Cardinality(Seq("a", "aa", "aac"), 0, 0, 0, 4)
+    t.getCardinality(Seq("a")) shouldEqual CardinalityRecord(0, Seq("a"), 2, 1, 1, 1)
+    t.getCardinality(Seq("a", "aa")) shouldEqual CardinalityRecord(0, Seq("a", "aa"), 2, 1, 2, 2)
+    t.getCardinality(Seq("a", "aa", "aac")) shouldEqual CardinalityRecord(0, Seq("a", "aa", "aac"), 0, 0, 0, 4)
 
     // aab was purged
     t.decrementCount(Seq("a", "aa", "aab")) shouldEqual
-      Seq(Cardinality(Nil, 1, 1, 1, 4),
-        Cardinality(Seq("a"), 1, 1, 1, 1),
-        Cardinality(Seq("a", "aa"), 1, 1, 2, 2),
-        Cardinality(Seq("a", "aa", "aab"), 0, 0, 0, 4))
+      Seq(CardinalityRecord(0, Nil, 1, 1, 1, 4),
+        CardinalityRecord(0, Seq("a"), 1, 1, 1, 1),
+        CardinalityRecord(0, Seq("a", "aa"), 1, 1, 2, 2),
+        CardinalityRecord(0, Seq("a", "aa", "aab"), 0, 0, 0, 4))
 
     t.close()
   }
@@ -83,49 +83,49 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
   it("should enforce quota when not set for any level") {
     val t = new CardinalityTracker(ref, 0, 3, Seq(4, 4, 4, 4), newCardStore)
     t.modifyCount(Seq("a", "ab", "aba"), 1, 0) shouldEqual
-      Seq(Cardinality(Nil, 1, 0, 1, 4),
-        Cardinality(Seq("a"), 1, 0, 1, 4),
-        Cardinality(Seq("a", "ab"), 1, 0, 1, 4),
-        Cardinality(Seq("a", "ab", "aba"), 1, 0, 1, 4))
+      Seq(CardinalityRecord(0, Nil, 1, 0, 1, 4),
+        CardinalityRecord(0, Seq("a"), 1, 0, 1, 4),
+        CardinalityRecord(0, Seq("a", "ab"), 1, 0, 1, 4),
+        CardinalityRecord(0, Seq("a", "ab", "aba"), 1, 0, 1, 4))
     t.close()
   }
 
   it("should be able to enforce for top 2 levels always, and enforce for 3rd level only in some cases") {
     val t = new CardinalityTracker(ref, 0, 3, Seq(20, 20, 20, 20), newCardStore)
-    t.setQuota(Seq("a"), 10) shouldEqual Cardinality(Seq("a"), 0, 0, 0, 10)
-    t.setQuota(Seq("a", "aa"), 10) shouldEqual Cardinality(Seq("a", "aa"), 0, 0, 0, 10)
+    t.setQuota(Seq("a"), 10) shouldEqual CardinalityRecord(0, Seq("a"), 0, 0, 0, 10)
+    t.setQuota(Seq("a", "aa"), 10) shouldEqual CardinalityRecord(0, Seq("a", "aa"), 0, 0, 0, 10)
     // enforce for 3rd level only for aaa
-    t.setQuota(Seq("a", "aa", "aaa"), 2) shouldEqual Cardinality(Seq("a", "aa", "aaa"), 0, 0, 0, 2)
+    t.setQuota(Seq("a", "aa", "aaa"), 2) shouldEqual CardinalityRecord(0, Seq("a", "aa", "aaa"), 0, 0, 0, 2)
     t.modifyCount(Seq("a", "aa", "aaa"), 1, 0) shouldEqual
-      Seq(Cardinality(Nil, 1, 0, 1, 20),
-        Cardinality(Seq("a"), 1, 0, 1, 10),
-        Cardinality(Seq("a", "aa"), 1, 0, 1, 10),
-        Cardinality(Seq("a", "aa", "aaa"), 1, 0, 1, 2))
+      Seq(CardinalityRecord(0, Nil, 1, 0, 1, 20),
+        CardinalityRecord(0, Seq("a"), 1, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa"), 1, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa", "aaa"), 1, 0, 1, 2))
     t.modifyCount(Seq("a", "aa", "aaa"), 1, 0) shouldEqual
-      Seq(Cardinality(Nil, 2, 0, 1, 20),
-        Cardinality(Seq("a"), 2, 0, 1, 10),
-        Cardinality(Seq("a", "aa"), 2, 0, 1, 10),
-        Cardinality(Seq("a", "aa", "aaa"), 2, 0, 2, 2))
+      Seq(CardinalityRecord(0, Nil, 2, 0, 1, 20),
+        CardinalityRecord(0, Seq("a"), 2, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa"), 2, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa", "aaa"), 2, 0, 2, 2))
     t.modifyCount(Seq("a", "aa", "aab"), 1, 0) shouldEqual
-      Seq(Cardinality(Nil, 3, 0, 1, 20),
-        Cardinality(Seq("a"), 3, 0, 1, 10),
-        Cardinality(Seq("a", "aa"), 3, 0, 2, 10),
-        Cardinality(Seq("a", "aa", "aab"), 1, 0, 1, 20))
+      Seq(CardinalityRecord(0, Nil, 3, 0, 1, 20),
+        CardinalityRecord(0, Seq("a"), 3, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa"), 3, 0, 2, 10),
+        CardinalityRecord(0, Seq("a", "aa", "aab"), 1, 0, 1, 20))
     t.modifyCount(Seq("a", "aa", "aab"), 1, 0) shouldEqual
-      Seq(Cardinality(Nil, 4, 0, 1, 20),
-        Cardinality(Seq("a"), 4, 0, 1, 10),
-        Cardinality(Seq("a", "aa"), 4, 0, 2, 10),
-        Cardinality(Seq("a", "aa", "aab"), 2, 0, 2, 20))
+      Seq(CardinalityRecord(0, Nil, 4, 0, 1, 20),
+        CardinalityRecord(0, Seq("a"), 4, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa"), 4, 0, 2, 10),
+        CardinalityRecord(0, Seq("a", "aa", "aab"), 2, 0, 2, 20))
     t.modifyCount(Seq("a", "aa", "aab"), 1, 0) shouldEqual
-      Seq(Cardinality(Nil, 5, 0, 1, 20),
-        Cardinality(Seq("a"), 5, 0, 1, 10),
-        Cardinality(Seq("a", "aa"), 5, 0, 2, 10),
-        Cardinality(Seq("a", "aa", "aab"), 3, 0, 3, 20))
+      Seq(CardinalityRecord(0, Nil, 5, 0, 1, 20),
+        CardinalityRecord(0, Seq("a"), 5, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa"), 5, 0, 2, 10),
+        CardinalityRecord(0, Seq("a", "aa", "aab"), 3, 0, 3, 20))
     t.modifyCount(Seq("a", "aa", "aab"), 1, 0) shouldEqual
-      Seq(Cardinality(Nil, 6, 0, 1, 20),
-        Cardinality(Seq("a"), 6, 0, 1, 10),
-        Cardinality(Seq("a", "aa"), 6, 0, 2, 10),
-        Cardinality(Seq("a", "aa", "aab"), 4, 0, 4, 20))
+      Seq(CardinalityRecord(0, Nil, 6, 0, 1, 20),
+        CardinalityRecord(0, Seq("a"), 6, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa"), 6, 0, 2, 10),
+        CardinalityRecord(0, Seq("a", "aa", "aab"), 4, 0, 4, 20))
 
     val ex = intercept[QuotaReachedException] {
       t.modifyCount(Seq("a", "aa", "aaa"), 1, 0)
@@ -137,20 +137,20 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
 
   it("should be able to increase and decrease quota after it has been set before") {
     val t = new CardinalityTracker(ref, 0, 3, Seq(20, 20, 20, 20), newCardStore)
-    t.setQuota(Seq("a"), 10) shouldEqual Cardinality(Seq("a"), 0, 0, 0, 10)
-    t.setQuota(Seq("a", "aa"), 10) shouldEqual Cardinality(Seq("a", "aa"), 0, 0, 0, 10)
+    t.setQuota(Seq("a"), 10) shouldEqual CardinalityRecord(0, Seq("a"), 0, 0, 0, 10)
+    t.setQuota(Seq("a", "aa"), 10) shouldEqual CardinalityRecord(0, Seq("a", "aa"), 0, 0, 0, 10)
     // enforce for 3rd level only for aaa
-    t.setQuota(Seq("a", "aa", "aaa"), 2) shouldEqual Cardinality(Seq("a", "aa", "aaa"), 0, 0, 0, 2)
+    t.setQuota(Seq("a", "aa", "aaa"), 2) shouldEqual CardinalityRecord(0, Seq("a", "aa", "aaa"), 0, 0, 0, 2)
     t.modifyCount(Seq("a", "aa", "aaa"), 1, 0) shouldEqual
-      Seq(Cardinality(Nil, 1, 0, 1, 20),
-        Cardinality(Seq("a"), 1, 0, 1, 10),
-        Cardinality(Seq("a", "aa"), 1, 0, 1, 10),
-        Cardinality(Seq("a", "aa", "aaa"), 1, 0, 1, 2))
+      Seq(CardinalityRecord(0, Nil, 1, 0, 1, 20),
+        CardinalityRecord(0, Seq("a"), 1, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa"), 1, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa", "aaa"), 1, 0, 1, 2))
     t.modifyCount(Seq("a", "aa", "aaa"), 1, 0) shouldEqual
-      Seq(Cardinality(Nil, 2, 0, 1, 20),
-        Cardinality(Seq("a"), 2, 0, 1, 10),
-        Cardinality(Seq("a", "aa"), 2, 0, 1, 10),
-        Cardinality(Seq("a", "aa", "aaa"), 2, 0, 2, 2))
+      Seq(CardinalityRecord(0, Nil, 2, 0, 1, 20),
+        CardinalityRecord(0, Seq("a"), 2, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa"), 2, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa", "aaa"), 2, 0, 2, 2))
 
     val ex = intercept[QuotaReachedException] {
       t.modifyCount(Seq("a", "aa", "aaa"), 1, 0)
@@ -158,20 +158,20 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
     ex.prefix shouldEqual (Seq("a", "aa", "aaa"))
 
     // increase quota
-    t.setQuota(Seq("a", "aa", "aaa"), 5) shouldEqual Cardinality(Seq("a", "aa", "aaa"), 2, 0, 2, 5)
+    t.setQuota(Seq("a", "aa", "aaa"), 5) shouldEqual CardinalityRecord(0, Seq("a", "aa", "aaa"), 2, 0, 2, 5)
     t.modifyCount(Seq("a", "aa", "aaa"), 1, 0) shouldEqual
-      Seq(Cardinality(Nil, 3, 0, 1, 20),
-        Cardinality(Seq("a"), 3, 0, 1, 10),
-        Cardinality(Seq("a", "aa"), 3, 0, 1, 10),
-        Cardinality(Seq("a", "aa", "aaa"), 3, 0, 3, 5))
+      Seq(CardinalityRecord(0, Nil, 3, 0, 1, 20),
+        CardinalityRecord(0, Seq("a"), 3, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa"), 3, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa", "aaa"), 3, 0, 3, 5))
 
     // decrease quota
-    t.setQuota(Seq("a", "aa", "aaa"), 4) shouldEqual Cardinality(Seq("a", "aa", "aaa"), 3, 0, 3, 4)
+    t.setQuota(Seq("a", "aa", "aaa"), 4) shouldEqual CardinalityRecord(0, Seq("a", "aa", "aaa"), 3, 0, 3, 4)
     t.modifyCount(Seq("a", "aa", "aaa"), 1, 0) shouldEqual
-      Seq(Cardinality(Nil, 4, 0, 1, 20),
-        Cardinality(Seq("a"), 4, 0, 1, 10),
-        Cardinality(Seq("a", "aa"), 4, 0, 1, 10),
-        Cardinality(Seq("a", "aa", "aaa"), 4, 0, 4, 4))
+      Seq(CardinalityRecord(0, Nil, 4, 0, 1, 20),
+        CardinalityRecord(0, Seq("a"), 4, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa"), 4, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa", "aaa"), 4, 0, 4, 4))
     val ex2 = intercept[QuotaReachedException] {
       t.modifyCount(Seq("a", "aa", "aaa"), 1, 0)
     }
@@ -181,33 +181,33 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
 
   it("should be able to decrease quota if count is higher than new quota") {
     val t = new CardinalityTracker(ref, 0, 3, Seq(20, 20, 20, 20), newCardStore)
-    t.setQuota(Seq("a"), 10) shouldEqual Cardinality(Seq("a"), 0, 0, 0, 10)
-    t.setQuota(Seq("a", "aa"), 10) shouldEqual Cardinality(Seq("a", "aa"), 0, 0, 0, 10)
+    t.setQuota(Seq("a"), 10) shouldEqual CardinalityRecord(0, Seq("a"), 0, 0, 0, 10)
+    t.setQuota(Seq("a", "aa"), 10) shouldEqual CardinalityRecord(0, Seq("a", "aa"), 0, 0, 0, 10)
     t.modifyCount(Seq("a", "aa", "aab"), 1, 0) shouldEqual
-      Seq(Cardinality(Nil, 1, 0, 1, 20),
-        Cardinality(Seq("a"), 1, 0, 1, 10),
-        Cardinality(Seq("a", "aa"), 1, 0, 1, 10),
-        Cardinality(Seq("a", "aa", "aab"), 1, 0, 1, 20))
+      Seq(CardinalityRecord(0, Nil, 1, 0, 1, 20),
+        CardinalityRecord(0, Seq("a"), 1, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa"), 1, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa", "aab"), 1, 0, 1, 20))
     t.modifyCount(Seq("a", "aa", "aab"), 1, 0) shouldEqual
-      Seq(Cardinality(Nil, 2, 0, 1, 20),
-        Cardinality(Seq("a"), 2, 0, 1, 10),
-        Cardinality(Seq("a", "aa"), 2, 0, 1, 10),
-        Cardinality(Seq("a", "aa", "aab"), 2, 0, 2, 20))
+      Seq(CardinalityRecord(0, Nil, 2, 0, 1, 20),
+        CardinalityRecord(0, Seq("a"), 2, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa"), 2, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa", "aab"), 2, 0, 2, 20))
     t.modifyCount(Seq("a", "aa", "aab"), 1, 0) shouldEqual
-      Seq(Cardinality(Nil, 3, 0, 1, 20),
-        Cardinality(Seq("a"), 3, 0, 1, 10),
-        Cardinality(Seq("a", "aa"), 3, 0, 1, 10),
-        Cardinality(Seq("a", "aa", "aab"), 3, 0, 3, 20))
+      Seq(CardinalityRecord(0, Nil, 3, 0, 1, 20),
+        CardinalityRecord(0, Seq("a"), 3, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa"), 3, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa", "aab"), 3, 0, 3, 20))
     t.modifyCount(Seq("a", "aa", "aab"), 1, 0) shouldEqual
-      Seq(Cardinality(Nil, 4, 0, 1, 20),
-        Cardinality(Seq("a"), 4, 0, 1, 10),
-        Cardinality(Seq("a", "aa"), 4, 0, 1, 10),
-        Cardinality(Seq("a", "aa", "aab"), 4, 0, 4, 20))
+      Seq(CardinalityRecord(0, Nil, 4, 0, 1, 20),
+        CardinalityRecord(0, Seq("a"), 4, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa"), 4, 0, 1, 10),
+        CardinalityRecord(0, Seq("a", "aa", "aab"), 4, 0, 4, 20))
 
-    t.getCardinality(Seq("a", "aa", "aab")) shouldEqual Cardinality(Seq("a", "aa", "aab"), 4, 0, 4, 20)
+    t.getCardinality(Seq("a", "aa", "aab")) shouldEqual CardinalityRecord(0, Seq("a", "aa", "aab"), 4, 0, 4, 20)
 
     t.setQuota(Seq("a", "aa", "aab"), 3)
-    t.getCardinality(Seq("a", "aa", "aab")) shouldEqual Cardinality(Seq("a", "aa", "aab"), 4, 0, 4, 3)
+    t.getCardinality(Seq("a", "aa", "aab")) shouldEqual CardinalityRecord(0, Seq("a", "aa", "aab"), 4, 0, 4, 3)
     val ex2 = intercept[QuotaReachedException] {
       t.modifyCount(Seq("a", "aa", "aab"), 1, 0)
     }

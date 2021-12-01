@@ -5,6 +5,7 @@ import java.io.Closeable
 /**
  * The data stored in each node of the Cardinality Store trie
  *
+ * @param shard the shard ID for which this CardinalityStore contains data
  * @param prefix the shard key prefix that corresponds with the cardinality data
  * @param tsCount total number of timeSeries under this shardKeyPrefix (example, number of timeseries under ws,ns)
  * @param activeTsCount number of actively ingesting timeSeries under this shardKeyPrefix
@@ -12,17 +13,8 @@ import java.io.Closeable
  * @param childrenCount number of immediate children for this shardKey (example, number of ns under ws)
  * @param childrenQuota quota for number of immediate children
  */
-case class Cardinality(prefix: Seq[String], tsCount: Int, activeTsCount: Int, childrenCount: Int, childrenQuota: Int)
-
-/**
- * Interface for CardinalityStore iterator.
- */
-trait CardIter extends Iterator[Cardinality] with Closeable {
-  /**
-   * Must be called before iteration.
-   */
-  def seek(): Unit
-}
+case class CardinalityRecord(shard: Int, prefix: Seq[String], tsCount: Int,
+                             activeTsCount: Int, childrenCount: Int, childrenQuota: Int)
 
 /**
  *
@@ -67,13 +59,13 @@ trait CardinalityStore {
    * This method will be called for each shard key prefix when a new time series is added
    * to the index.
    */
-  def store(card: Cardinality): Unit
+  def store(card: CardinalityRecord): Unit
 
   /**
    * Read existing cardinality value, if one does not exist return the zero value
    * indicated
    */
-  def getOrZero(shardKeyPrefix: Seq[String], zero: Cardinality): Cardinality
+  def getOrZero(shardKeyPrefix: Seq[String], zero: CardinalityRecord): CardinalityRecord
 
   /**
    * Remove entry from store. Need to call for each shard key prefix to fully remove shard key.
@@ -85,7 +77,7 @@ trait CardinalityStore {
    * Fetch children of the node for the given shard key prefix.
    * @param depth: only children of this size will be scanned.
    */
-  def scanChildren(shardKeyPrefix: Seq[String], depth: Int): CardIter
+  def scanChildren(shardKeyPrefix: Seq[String], depth: Int): Iterator[CardinalityRecord] with Closeable
 
   /**
    * Close store. Data will be thrown away

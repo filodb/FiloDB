@@ -1,6 +1,6 @@
 package filodb.core.memstore.ratelimit
 
-import java.io.File
+import java.io.{Closeable, File}
 import java.nio.charset.StandardCharsets
 
 import scala.concurrent.duration._
@@ -21,24 +21,30 @@ import filodb.memory.format.UnsafeUtils
 
 /**
  * Stored as values in the RocksDb database.
- * Identical to Cardinality, except that only the least-significant prefix name is stored.
+ * Identical to CardinalityRecord, except that:
+ *   (1) only the least-significant prefix name is stored.
+ *   (2) no shard ID is store
  */
-case class CardinalityNode(name: String, tsCount: Int, activeTsCount: Int,
-                           childrenCount: Int, childrenQuota: Int)
+case class CardinalityValue(name: String, tsCount: Int, activeTsCount: Int,
+                            childrenCount: Int, childrenQuota: Int)
 
-case object CardinalityNode {
-  def fromCardinality(card: Cardinality): CardinalityNode = {
-    CardinalityNode(if (card.prefix.nonEmpty) card.prefix.last else "",
-                    card.tsCount, card.activeTsCount, card.childrenCount, card.childrenQuota)
+case object CardinalityValue {
+  def fromCardinalityRecord(card: CardinalityRecord): CardinalityValue = {
+    CardinalityValue(if (card.prefix.nonEmpty) card.prefix.last else "",
+                    card.tsCount, card.activeTsCount,
+                    card.childrenCount, card.childrenQuota)
   }
 
-  def toCardinality(card: CardinalityNode, prefix: Seq[String]): Cardinality = {
-    Cardinality(prefix, card.tsCount, card.activeTsCount, card.childrenCount, card.childrenQuota)
+  def toCardinalityRecord(card: CardinalityValue,
+                          prefix: Seq[String],
+                          shard: Int): CardinalityRecord = {
+    CardinalityRecord(shard, prefix, card.tsCount, card.activeTsCount,
+                      card.childrenCount, card.childrenQuota)
   }
 }
 
-class CardinalityNodeSerializer extends Serializer[CardinalityNode] {
-  def write(kryo: Kryo, output: Output, card: CardinalityNode): Unit = {
+class CardinalityNodeSerializer extends Serializer[CardinalityValue] {
+  def write(kryo: Kryo, output: Output, card: CardinalityValue): Unit = {
     output.writeString(card.name)
     output.writeInt(card.tsCount, true)
     output.writeInt(card.activeTsCount, true)
@@ -46,8 +52,8 @@ class CardinalityNodeSerializer extends Serializer[CardinalityNode] {
     output.writeInt(card.childrenQuota, true)
   }
 
-  def read(kryo: Kryo, input: Input, t: Class[CardinalityNode]): CardinalityNode = {
-    CardinalityNode(input.readString(), input.readInt(true), input.readInt(true),
+  def read(kryo: Kryo, input: Input, t: Class[CardinalityValue]): CardinalityValue = {
+    CardinalityValue(input.readString(), input.readInt(true), input.readInt(true),
                     input.readInt(true), input.readInt(true))
   }
 }
@@ -104,7 +110,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   private val kryo = new ThreadLocal[Kryo]() {
     override def initialValue(): Kryo = {
       val k = new Kryo()
-      k.addDefaultSerializer(classOf[CardinalityNode], classOf[CardinalityNodeSerializer])
+      k.addDefaultSerializer(classOf[CardinalityValue], classOf[CardinalityNodeSerializer])
       k
     }
   }
@@ -189,10 +195,13 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
    * @param keyDepth size to append at the beginning of the key
    *   Note: When keyDepth > shardKeyPrefix.size, builds keys as:
    *         <keyDepth>{KeySeparator}<name-1>{KeySeparator}<name-2> ... <name-n>{KeySeparator}
-   *         When keyDepth == shardKeyPrefix.size, the final KeySeparator is omitted.
+   *         The result key should be used for a prefix search.
+   *   Note: When keyDepth == shardKeyPrefix.size, the final KeySeparator is omitted.
+   *         In this case, the result key cannot be used for a prefix search.
+   *
    * @return string key to use to perform reads and writes of entries into RocksDB
    */
-  private def toStringKeyPrefix(shardKeyPrefix: Seq[String], keyDepth: Int): String = {
+  private def toStringKey(shardKeyPrefix: Seq[String], keyDepth: Int): String = {
     import RocksDbCardinalityStore._
 
     val b = new StringBuilder
@@ -208,69 +217,73 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   }
 
   /**
-   * Builds keys as:
+   * Builds a fully-specified search key as:
    *   <keyDepth>{KeySeparator}<name-1>{KeySeparator}<name-2> ... <name-n>
-   * The final {KeySeparator} is always omitted.
+   * Keys returned from this function can only be used to lookup a single value.
+   * They cannot be used for a prefix search.
+   *
+   * @param shardKey must be a complete (non-prefix) shard key.
    */
-  private def toStringKey(shardKeyPrefix: Seq[String]): String = {
-    toStringKeyPrefix(shardKeyPrefix, shardKeyPrefix.size)
+  private def toCompleteStringKey(shardKey: Seq[String]): String = {
+    // When the keyDepth argument equals shardKey.size, the final {KeySeparator}
+    //   normally attached to a prefix key is omitted.
+    toStringKey(shardKey, shardKey.size)
   }
 
-  private def cardinalityNodeToBytes(card: CardinalityNode): Array[Byte] = {
+  private def cardinalityValueToBytes(card: CardinalityValue): Array[Byte] = {
     val out = new Output(500)
     kryo.get().writeObject(out, card)
     out.close()
     out.toBytes
   }
 
-  private def bytesToCardinalityNode(bytes: Array[Byte]): CardinalityNode = {
+  private def bytesToCardinalityValue(bytes: Array[Byte]): CardinalityValue = {
     val inp = new Input(bytes)
-    val c = kryo.get().readObject(inp, classOf[CardinalityNode])
+    val c = kryo.get().readObject(inp, classOf[CardinalityValue])
     inp.close()
     c
   }
 
-  override def store(card: Cardinality): Unit = {
-    val key = toStringKey(card.prefix).getBytes(StandardCharsets.UTF_8)
+  override def store(card: CardinalityRecord): Unit = {
+    val key = toCompleteStringKey(card.prefix).getBytes(StandardCharsets.UTF_8)
     logger.debug(s"Storing shard=$shard dataset=$ref ${new String(key)} with $card")
-    db.put(key, cardinalityNodeToBytes(CardinalityNode.fromCardinality(card)))
+    db.put(key, cardinalityValueToBytes(CardinalityValue.fromCardinalityRecord(card)))
   }
 
-  def getOrZero(shardKeyPrefix: Seq[String], zero: Cardinality): Cardinality = {
-    val value = db.get(toStringKey(shardKeyPrefix).getBytes(StandardCharsets.UTF_8))
-    if (value == NotFound) zero else CardinalityNode.toCardinality(bytesToCardinalityNode(value), shardKeyPrefix)
+  def getOrZero(shardKeyPrefix: Seq[String], zero: CardinalityRecord): CardinalityRecord = {
+    val value = db.get(toCompleteStringKey(shardKeyPrefix).getBytes(StandardCharsets.UTF_8))
+    if (value == NotFound) zero
+    else CardinalityValue.toCardinalityRecord(bytesToCardinalityValue(value), shardKeyPrefix, shard)
   }
 
   override def remove(shardKeyPrefix: Seq[String]): Unit = {
-    db.delete(toStringKey(shardKeyPrefix).getBytes(StandardCharsets.UTF_8))
+    db.delete(toCompleteStringKey(shardKeyPrefix).getBytes(StandardCharsets.UTF_8))
   }
 
-  override def scanChildren(shardKeyPrefix: Seq[String], depth: Int): CardIter = {
+  override def scanChildren(shardKeyPrefix: Seq[String],
+                            depth: Int): Iterator[CardinalityRecord] with Closeable = {
     require(depth > shardKeyPrefix.size,
       s"scan depth $depth must be greater than the size of the prefix ${shardKeyPrefix.size}")
 
-    new CardIter {
+    new Iterator[CardinalityRecord] with Closeable {
       val it_ = db.newIterator()
-      var nextCard_ = Cardinality(Seq("should be overwritten before exposed"), -1, -1, -1, -1)
-      val strPrefix_ = toStringKeyPrefix(shardKeyPrefix, depth)
-      var isSeeked = false
+      var nextCard_ = CardinalityRecord(-1, Seq("should be overwritten before exposed"), -1, -1, -1, -1)
+      val strPrefix_ = toStringKey(shardKeyPrefix, depth)
 
-      override def seek(): Unit = {
-        logger.debug(s"Scanning shard=$shard dataset=$ref ${new String(strPrefix_)}")
-        it_.seek(strPrefix_.getBytes(StandardCharsets.UTF_8))
-        isSeeked = true
-      }
+      logger.debug(s"Scanning shard=$shard dataset=$ref ${new String(strPrefix_)}")
+      it_.seek(strPrefix_.getBytes(StandardCharsets.UTF_8))
 
       // note: must be called exactly once before each next() call
       override def hasNext: Boolean = {
-        assert(isSeeked, "must call seek() before use")
         if (it_.isValid) {
           // store the next matching key and increment the iterator
           val key = new String(it_.key(), StandardCharsets.UTF_8)
           if (key.startsWith(strPrefix_)) {
-            val node = bytesToCardinalityNode(it_.value())
+            val node = bytesToCardinalityValue(it_.value())
+            // Drop the first element, since it's just the size of the prefix.
+            // Ex: 2{KeySeparator}A{KeySeparator}B ==(split)==> [2, A, B] ==(drop)==> [A, B]
             val prefix = key.split(KeySeparator).drop(1)
-            nextCard_ = CardinalityNode.toCardinality(node, prefix)
+            nextCard_ = CardinalityValue.toCardinalityRecord(node, prefix, shard)
             it_.next()
             return true
           }
@@ -279,7 +292,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
         false
       }
 
-      override def next(): Cardinality = nextCard_
+      override def next(): CardinalityRecord = nextCard_
 
       override def close(): Unit = it_.close()
     }
