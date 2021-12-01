@@ -198,18 +198,16 @@ class CardinalityTracker(ref: DatasetRef,
     }
 
     val heap = mutable.PriorityQueue[CardinalityRecord]()
-    val it = store.scanChildren(shardKeyPrefix, depth)
-    try {
-      it.foreach { card =>
-        heap.enqueue(CardinalityRecord(
-          shard, card.prefix, card.tsCount,
-          card.activeTsCount,
-          if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
-          card.childrenQuota))
-        if (heap.size > k) heap.dequeue()
-      }
-    } finally {
-      it.close()
+    val childCards = store.scanChildren(shardKeyPrefix, depth, 5000)  // TODO(a_theimer)
+    childCards.foreach { card =>
+      heap.enqueue(card)
+      // TODO(a_theimer: need to keep this?)
+//      heap.enqueue(CardinalityRecord(
+//        shard, card.prefix, card.tsCount,
+//        card.activeTsCount,
+//        if (shardKeyPrefix.length == shardKeyLen - 1) card.tsCount else card.childrenCount,
+//        card.childrenQuota))
+      if (heap.size > k) heap.dequeue()
     }
     heap.toSeq
   }

@@ -1,8 +1,9 @@
 package filodb.core.memstore.ratelimit
 
-import java.io.{Closeable, File}
+import java.io.File
 import java.nio.charset.StandardCharsets
 
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
 import scala.reflect.io.Directory
 
@@ -18,6 +19,7 @@ import spire.syntax.cfor._
 
 import filodb.core.{DatasetRef, GlobalScheduler}
 import filodb.memory.format.UnsafeUtils
+
 
 /**
  * Stored as values in the RocksDb database.
@@ -261,41 +263,43 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   }
 
   override def scanChildren(shardKeyPrefix: Seq[String],
-                            depth: Int): Iterator[CardinalityRecord] with Closeable = {
+                            depth: Int): Seq[CardinalityRecord] = {
+
     require(depth > shardKeyPrefix.size,
       s"scan depth $depth must be greater than the size of the prefix ${shardKeyPrefix.size}")
 
-    new Iterator[CardinalityRecord] with Closeable {
-      val it_ = db.newIterator()
-      var nextCard_ = CardinalityRecord(-1, Seq("should be overwritten before exposed"), -1, -1, -1, -1)
-      val strPrefix_ = toStringKey(shardKeyPrefix, depth)
+    val NMAX = 10000
 
-      logger.debug(s"Scanning shard=$shard dataset=$ref ${new String(strPrefix_)}")
-      it_.seek(strPrefix_.getBytes(StandardCharsets.UTF_8))
+    val it = db.newIterator()
+    val buf = new ArrayBuffer[CardinalityRecord]()
+    try {
+      val searchPrefix = toStringKey(shardKeyPrefix, depth)
+      logger.debug(s"Scanning shard=$shard dataset=$ref ${new String(searchPrefix)}")
+      it.seek(searchPrefix.getBytes(StandardCharsets.UTF_8))
+      import scala.util.control.Breaks._
 
-      // note: must be called exactly once before each next() call
-      override def hasNext: Boolean = {
-        if (it_.isValid) {
-          // store the next matching key and increment the iterator
-          val key = new String(it_.key(), StandardCharsets.UTF_8)
-          if (key.startsWith(strPrefix_)) {
-            val node = bytesToCardinalityValue(it_.value())
+      breakable {
+        while (it.isValid() && buf.size < NMAX) {
+          val key = new String(it.key(), StandardCharsets.UTF_8)
+          if (key.startsWith(searchPrefix)) {
+            val node = bytesToCardinalityValue(it.value())
             // Drop the first element, since it's just the size of the prefix.
             // Ex: 2{KeySeparator}A{KeySeparator}B ==(split)==> [2, A, B] ==(drop)==> [A, B]
             val prefix = key.split(KeySeparator).drop(1)
-            nextCard_ = CardinalityValue.toCardinalityRecord(node, prefix, shard)
-            it_.next()
-            return true
+            buf += CardinalityValue.toCardinalityRecord(node, prefix, shard)
+          } else {
+            if (buf.size == NMAX) {
+              logger.warn(s"scanChildren result clipped")
+            }
+            break // dont continue beyond valid results or NMAX
           }
+          it.next()
         }
-        it_.close()
-        false
       }
-
-      override def next(): CardinalityRecord = nextCard_
-
-      override def close(): Unit = it_.close()
+    } finally {
+      it.close();
     }
+    buf
   }
 
   def close(): Unit = {
