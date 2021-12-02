@@ -215,53 +215,57 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
     t.close()
   }
 
-  // TODO(a_theimer)
-//  it ("should be able to do topk") {
-//    val t = new CardinalityTracker(ref, 0, 3, Seq(100, 100, 100, 100), newCardStore)
-//    (1 to 10).foreach(_ => t.modifyCount(Seq("a", "ac", "aca"), 1, 0))
-//    (1 to 20).foreach(_ => t.modifyCount(Seq("a", "ac", "acb"), 1, 0))
-//    (1 to 11).foreach(_ => t.modifyCount(Seq("a", "ac", "acc"), 1, 0))
-//    (1 to 6).foreach(_ => t.modifyCount(Seq("a", "ac", "acd"), 1, 0))
-//    (1 to 1).foreach(_ => t.modifyCount(Seq("a", "ac", "ace"), 1, 0))
-//    (1 to 9).foreach(_ => t.modifyCount(Seq("a", "ac", "acf"), 1, 0))
-//    (1 to 15).foreach(_ => t.modifyCount(Seq("a", "ac", "acg"), 1, 0))
-//
-//    (1 to 15).foreach(_ => t.modifyCount(Seq("b", "bc", "bcg"), 1, 0))
-//    (1 to 9).foreach(_ => t.modifyCount(Seq("b", "bc", "bch"), 1, 0))
-//    (1 to 9).foreach(_ => t.modifyCount(Seq("b", "bd", "bdh"), 1, 0))
-//
-//    (1 to 3).foreach(_ => t.modifyCount(Seq("c", "cc", "ccg"), 1, 0))
-//    (1 to 2).foreach(_ => t.modifyCount(Seq("c", "cc", "cch"), 1, 0))
-//
-//    t.modifyCount(Seq("a", "aa", "aaa"), 1, 0)
-//    t.modifyCount(Seq("a", "aa", "aab"), 1, 0)
-//    t.modifyCount(Seq("a", "aa", "aac"), 1, 0)
-//    t.modifyCount(Seq("a", "aa", "aad"), 1, 0)
-//    t.modifyCount(Seq("b", "ba", "baa"), 1, 0)
-//    t.modifyCount(Seq("b", "bb", "bba"), 1, 0)
-//    t.modifyCount(Seq("a", "ab", "aba"), 1, 0)
-//    t.modifyCount(Seq("a", "ab", "abb"), 1, 0)
-//    t.modifyCount(Seq("a", "ab", "abc"), 1, 0)
-//    t.modifyCount(Seq("a", "ab", "abd"), 1, 0)
-//    t.modifyCount(Seq("a", "ab", "abe"), 1, 0)
-//
-//    t.scan(3, Seq("a", "ac"), 3, true) shouldEqual Seq(
-//      CardinalityRecord(0, Seq("a", "ac", "acc"), 11, 0, 11, 100),
-//      CardinalityRecord(0, Seq("a", "ac", "acg"), 15, 0, 15, 100),
-//      CardinalityRecord(0, Seq("a", "ac", "acb"), 20, 0, 20, 100)
-//    )
-//
-//    t.scan(3, Seq("a"), 2, true) shouldEqual Seq(
-//      CardinalityRecord(0, Seq("a", "aa"), 4, 0, 4, 100),
-//      CardinalityRecord(0, Seq("a", "ab"), 5, 0, 5, 100),
-//      CardinalityRecord(0, Seq("a", "ac"), 72, 0, 7, 100)
-//    )
-//
-//    t.scan(3, Nil, 1, true) shouldEqual Seq(
-//      CardinalityRecord(0, Seq("c"), 5, 0, 1, 100),
-//      CardinalityRecord(0, Seq("a"), 81, 0, 3, 100),
-//      CardinalityRecord(0, Seq("b"), 35, 0, 4, 100)
-//    )
-//    t.close()
-//  }
+  it ("should be able to do scan") {
+    val t = new CardinalityTracker(ref, 0, 3, Seq(100, 100, 100, 100), newCardStore)
+    (1 to 10).foreach(_ => t.modifyCount(Seq("a", "ac", "aca"), 1, 0))
+    (1 to 20).foreach(_ => t.modifyCount(Seq("a", "ac", "acb"), 1, 0))
+    (1 to 11).foreach(_ => t.modifyCount(Seq("a", "ac", "acc"), 1, 0))
+    (1 to 6).foreach(_ => t.modifyCount(Seq("a", "ac", "acd"), 1, 0))
+    (1 to 1).foreach(_ => t.modifyCount(Seq("a", "ac", "ace"), 1, 0))
+    (1 to 9).foreach(_ => t.modifyCount(Seq("a", "ac", "acf"), 1, 0))
+    (1 to 15).foreach(_ => t.modifyCount(Seq("a", "ac", "acg"), 1, 0))
+
+    (1 to 15).foreach(_ => t.modifyCount(Seq("b", "bc", "bcg"), 1, 0))
+    (1 to 9).foreach(_ => t.modifyCount(Seq("b", "bc", "bch"), 1, 0))
+    (1 to 9).foreach(_ => t.modifyCount(Seq("b", "bd", "bdh"), 1, 0))
+
+    (1 to 3).foreach(_ => t.modifyCount(Seq("c", "cc", "ccg"), 1, 0))
+    (1 to 2).foreach(_ => t.modifyCount(Seq("c", "cc", "cch"), 1, 0))
+
+    t.modifyCount(Seq("a", "aa", "aaa"), 1, 0)
+    t.modifyCount(Seq("a", "aa", "aab"), 1, 0)
+    t.modifyCount(Seq("a", "aa", "aac"), 1, 0)
+    t.modifyCount(Seq("a", "aa", "aad"), 1, 0)
+    t.modifyCount(Seq("b", "ba", "baa"), 1, 0)
+    t.modifyCount(Seq("b", "bb", "bba"), 1, 0)
+    t.modifyCount(Seq("a", "ab", "aba"), 1, 0)
+    t.modifyCount(Seq("a", "ab", "abb"), 1, 0)
+    t.modifyCount(Seq("a", "ab", "abc"), 1, 0)
+    t.modifyCount(Seq("a", "ab", "abd"), 1, 0)
+    t.modifyCount(Seq("a", "ab", "abe"), 1, 0)
+
+    t.scan(Seq("a", "ac"), 3) should contain theSameElementsAs Seq(
+      CardinalityRecord(0, Seq("a", "ac", "aca"), 10, 0, 10, 100),
+      CardinalityRecord(0, Seq("a", "ac", "acb"), 20, 0, 20, 100),
+      CardinalityRecord(0, Seq("a", "ac", "acc"), 11, 0, 11, 100),
+      CardinalityRecord(0, Seq("a", "ac", "acd"), 6, 0, 6, 100),
+      CardinalityRecord(0, Seq("a", "ac", "ace"), 1, 0, 1, 100),
+      CardinalityRecord(0, Seq("a", "ac", "acf"), 9, 0, 9, 100),
+      CardinalityRecord(0, Seq("a", "ac", "acg"), 15, 0, 15, 100),
+    )
+
+    t.scan(Seq("a"), 2) should contain theSameElementsAs Seq(
+      CardinalityRecord(0, Seq("a", "aa"), 4, 0, 4, 100),
+      CardinalityRecord(0, Seq("a", "ab"), 5, 0, 5, 100),
+      CardinalityRecord(0, Seq("a", "ac"), 72, 0, 7, 100)
+    )
+
+    t.scan(Nil, 1) should contain theSameElementsAs Seq(
+      CardinalityRecord(0, Seq("c"), 5, 0, 1, 100),
+      CardinalityRecord(0, Seq("a"), 81, 0, 3, 100),
+      CardinalityRecord(0, Seq("b"), 35, 0, 4, 100)
+    )
+
+    t.close()
+  }
 }
