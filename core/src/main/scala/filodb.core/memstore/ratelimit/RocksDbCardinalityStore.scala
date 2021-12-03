@@ -262,6 +262,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
     db.delete(toCompleteStringKey(shardKeyPrefix).getBytes(StandardCharsets.UTF_8))
   }
 
+  // scalastyle:off method.length
   override def scanChildren(shardKeyPrefix: Seq[String],
                             depth: Int): Seq[CardinalityRecord] = {
 
@@ -269,6 +270,10 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
       s"scan depth $depth must be greater than the size of the prefix ${shardKeyPrefix.size}")
 
     val MAX_RESULT_SIZE = 10000
+
+    // If MAX_RESULT_SIZE is reached, one extra CardinalityRecord is added
+    //   with this prefix. Its counts are the sum all the overflow counts.
+    val OVERFLOW_PREFIX = Seq("_overflow_")
 
     val it = db.newIterator()
     val buf = new ArrayBuffer[CardinalityRecord]()
@@ -278,8 +283,9 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
       it.seek(searchPrefix.getBytes(StandardCharsets.UTF_8))
       import scala.util.control.Breaks._
 
+      var complete = false
       breakable {
-        while (it.isValid() && buf.size < MAX_RESULT_SIZE) {
+        while (it.isValid() && (buf.size < MAX_RESULT_SIZE)) {
           val key = new String(it.key(), StandardCharsets.UTF_8)
           if (key.startsWith(searchPrefix)) {
             val node = bytesToCardinalityValue(it.value())
@@ -288,19 +294,43 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
             val prefix = key.split(KeySeparator).drop(1)
             buf += CardinalityValue.toCardinalityRecord(node, prefix, shard)
           } else {
-            if (buf.size == MAX_RESULT_SIZE) {
-              logger.warn(s"scanChildren result clipped")
-            }
-            break // dont continue beyond valid results or MAX_RESULT_SIZE
+            // no matching prefixes remain
+            complete = true
+            break
           }
           it.next()
         }
+      }
+
+      // result reached MAX_RESULT_SIZE, but still more cardinalities
+      if (it.isValid() && !complete) {
+        // sum the remaining counts into these values
+        var tsCount, activeTsCount, childrenCount, childrenQuota = 0
+        breakable {
+          do {
+            // note: the iterator is valid here on the first iteration
+            val key = new String(it.key(), StandardCharsets.UTF_8)
+            if (key.startsWith(searchPrefix)) {
+              val node = bytesToCardinalityValue(it.value())
+              tsCount = tsCount + node.tsCount
+              activeTsCount = activeTsCount + node.activeTsCount
+              childrenCount = childrenCount + node.childrenCount
+              childrenQuota = childrenQuota + node.childrenQuota
+            } else {
+              break  // don't continue beyond valid results
+            }
+            it.next()
+          } while (it.isValid())
+        }
+        buf.append(CardinalityRecord(shard, OVERFLOW_PREFIX,
+          tsCount, activeTsCount, childrenCount, childrenQuota))
       }
     } finally {
       it.close();
     }
     buf
   }
+  // scalastyle:on method.length
 
   def close(): Unit = {
     closed = true
