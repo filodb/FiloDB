@@ -268,7 +268,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
     require(depth > shardKeyPrefix.size,
       s"scan depth $depth must be greater than the size of the prefix ${shardKeyPrefix.size}")
 
-    val NMAX = 10000
+    val MAX_RESULT_SIZE = 10000
 
     val it = db.newIterator()
     val buf = new ArrayBuffer[CardinalityRecord]()
@@ -279,7 +279,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
       import scala.util.control.Breaks._
 
       breakable {
-        while (it.isValid() && buf.size < NMAX) {
+        while (it.isValid() && buf.size < MAX_RESULT_SIZE) {
           val key = new String(it.key(), StandardCharsets.UTF_8)
           if (key.startsWith(searchPrefix)) {
             val node = bytesToCardinalityValue(it.value())
@@ -288,10 +288,10 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
             val prefix = key.split(KeySeparator).drop(1)
             buf += CardinalityValue.toCardinalityRecord(node, prefix, shard)
           } else {
-            if (buf.size == NMAX) {
+            if (buf.size == MAX_RESULT_SIZE) {
               logger.warn(s"scanChildren result clipped")
             }
-            break // dont continue beyond valid results or NMAX
+            break // dont continue beyond valid results or MAX_RESULT_SIZE
           }
           it.next()
         }
