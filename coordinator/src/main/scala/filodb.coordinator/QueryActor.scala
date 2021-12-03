@@ -2,7 +2,10 @@ package filodb.coordinator
 
 import java.lang.Thread.UncaughtExceptionHandler
 import java.util.concurrent.{ForkJoinPool, ForkJoinWorkerThread}
+
+import scala.collection.mutable
 import scala.util.control.NonFatal
+
 import akka.actor.{ActorRef, Props}
 import akka.pattern.AskTimeoutException
 import kamon.Kamon
@@ -12,17 +15,16 @@ import monix.execution.Scheduler
 import monix.execution.schedulers.SchedulerService
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
+
 import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
-import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
+import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryStats}
 import filodb.core.store.CorruptVectorException
 import filodb.query._
 import filodb.query.exec.ExecPlan
-
-import scala.collection.mutable
 
 object QueryActor {
   final case class ThrowException(dataset: DatasetRef)
