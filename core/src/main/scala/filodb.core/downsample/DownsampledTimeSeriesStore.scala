@@ -197,10 +197,5 @@ extends MemStore with StrictLogging {
                                  chunkMethod: ChunkScanMethod): Observable[RawPartData] = ???
 
   // TODO we need breakdown for downsample store too, but in a less memory intensive way
-  override def topKCardinality(ref: DatasetRef,
-                               shards: Seq[Int],
-                               shardKeyPrefix: scala.Seq[String],
-                               depth: Int,
-                               k: Int,
-                               addInactive: Boolean): scala.Seq[CardinalityRecord] = ???
+  override def scanTsCardinalities(ref: DatasetRef, shards: Seq[Int], shardKeyPrefix: Seq[String], depth: Int): scala.Seq[CardinalityRecord] = ???
 }

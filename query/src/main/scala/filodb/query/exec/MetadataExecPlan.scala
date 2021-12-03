@@ -414,9 +414,7 @@ final case class TsCardExec(queryContext: QueryContext,
       case tsMemStore: TimeSeriesMemStore =>
         Observable.eval {
           val it =
-            tsMemStore.topKCardinality(
-              dataset, Seq(shard), shardKeyPrefix, groupDepth + 1,
-              MAX_RESPONSE_SIZE, ADD_INACTIVE)
+            tsMemStore.scanTsCardinalities(dataset, Seq(shard), shardKeyPrefix, groupDepth + 1)
             .map{ card =>
               RowData(card.prefix.mkString(PREFIX_DELIM).utf8,
                       CardCounts(card.activeTsCount, card.tsCount))
