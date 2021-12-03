@@ -447,7 +447,7 @@ final case class TsCardExec(queryContext: QueryContext,
         Observable.eval {
           val cards = tsMemStore.scanTsCardinalities(
             dataset, Seq(shard), shardKeyPrefix, groupDepth + 1)
-          val it = cards.take(MAX_RESULT_SIZE).map{ card =>
+          val it = cards.map{ card =>
             CardRowReader(prefixToGroup(card.prefix),
                           CardCounts(card.activeTsCount, card.tsCount))
             }.iterator
