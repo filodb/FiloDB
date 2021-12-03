@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import scala.collection.mutable
 
+import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -352,7 +353,6 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
  */
 final case object TsCardExec {
   val MAX_RESPONSE_SIZE = 5000  // TODO: tune this
-  val ADD_INACTIVE = true  // just to keep memStore.topKCardinality calls consistent
   val OVERFLOW_NAME = "_overflow_".utf8
   val PREFIX_DELIM = ","  // not a utf8 in order to make use of mkString
 
@@ -393,7 +393,7 @@ final case class TsCardExec(queryContext: QueryContext,
                             dataset: DatasetRef,
                             shard: Int,
                             shardKeyPrefix: Seq[String],
-                            groupDepth: Int) extends LeafExecPlan {
+                            groupDepth: Int) extends LeafExecPlan with StrictLogging {
   require(groupDepth >= 0,
     "groupDepth must be non-negative")
   require(1 + groupDepth >= shardKeyPrefix.size,
@@ -413,14 +413,17 @@ final case class TsCardExec(queryContext: QueryContext,
     val rvs = source match {
       case tsMemStore: TimeSeriesMemStore =>
         Observable.eval {
-          val it =
-            tsMemStore.scanTsCardinalities(dataset, Seq(shard), shardKeyPrefix, groupDepth + 1)
-            .map{ card =>
-              RowData(card.prefix.mkString(PREFIX_DELIM).utf8,
-                      CardCounts(card.activeTsCount, card.tsCount))
-              .toRowReader()
+          val cards = tsMemStore.scanTsCardinalities(
+            dataset, Seq(shard), shardKeyPrefix, groupDepth + 1)
+          if (cards.size > MAX_RESPONSE_SIZE) {
+            logger.warn(s"clipping tsMemStore scanTsCardinalities response " +
+                        s"from ${cards.size} to $MAX_RESPONSE_SIZE")
+          }
+          val it = cards.take(MAX_RESPONSE_SIZE).map{ card =>
+             RowData(card.prefix.mkString(PREFIX_DELIM).utf8,
+                     CardCounts(card.activeTsCount, card.tsCount))
+             .toRowReader()
             }.iterator
-
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
         }
       case other =>
