@@ -1,14 +1,12 @@
 package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration.FiniteDuration
-
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
-
 import filodb.core.query.QueryContext
 import filodb.query.{LogicalPlan, QueryResponse}
-import filodb.query.exec.{ClientParams, ExecPlan, RunTimePlanContainer}
+import filodb.query.exec.{ClientParams, DispatchedPlan, ExecPlan}
 
 /**
   * Abstraction for Query Planning. QueryPlanners can be composed using decorator pattern to add capabilities.
@@ -35,7 +33,7 @@ trait QueryPlanner {
     // kamon uses thread-locals.
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(parentSpan, false) {
-      execPlan.dispatcher.dispatch(RunTimePlanContainer(execPlan,
+      execPlan.dispatcher.dispatch(DispatchedPlan(execPlan,
         ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis)))
     }
   }

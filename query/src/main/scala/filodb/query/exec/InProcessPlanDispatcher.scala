@@ -11,7 +11,7 @@ import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.PartLookupResult
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.Schemas
-import filodb.core.query.{QueryConfig, QuerySession, QueryStats}
+import filodb.core.query.{QueryConfig, QuerySession}
 import filodb.core.store._
 import filodb.query.QueryResponse
 
@@ -25,7 +25,7 @@ import filodb.query.QueryResponse
   case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatcher {
 
   val clusterName = InetAddress.getLocalHost().getHostName()
-  override def dispatch(plan: RunTimePlanContainer)(implicit sched: Scheduler): Task[QueryResponse] = {
+  override def dispatch(plan: DispatchedPlan)(implicit sched: Scheduler): Task[QueryResponse] = {
     // unsupported source since its does not apply in case of non-leaf plans
     val source = UnsupportedChunkSource()
 
@@ -35,7 +35,7 @@ import filodb.query.QueryResponse
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(Kamon.currentSpan(), false) {
       // translate implicit ExecutionContext to monix.Scheduler
-      val querySession = QuerySession(plan.execPlan.queryContext, queryConfig, QueryStats())
+      val querySession = QuerySession(plan.execPlan.queryContext, queryConfig)
       plan.execPlan.execute(source, querySession)
     }
   }

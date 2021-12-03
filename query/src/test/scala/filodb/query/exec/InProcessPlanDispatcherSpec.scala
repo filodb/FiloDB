@@ -107,7 +107,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
       0, filters, AllChunkScan,"_metric_")
 
     val sep = StitchRvsExec(QueryContext(), dispatcher, Seq(execPlan1, execPlan2))
-    val result = dispatcher.dispatch(RunTimePlanContainer(sep, ClientParams
+    val result = dispatcher.dispatch(DispatchedPlan(sep, ClientParams
     (sep.queryContext.plannerParams.queryTimeoutMillis))).runAsync.futureValue
 
     result match {
@@ -136,7 +136,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
       0, emptyFilters, AllChunkScan, "_metric_")
 
     val sep = StitchRvsExec(QueryContext(), dispatcher, Seq(execPlan1, execPlan2))
-    val result = dispatcher.dispatch(RunTimePlanContainer(sep, ClientParams
+    val result = dispatcher.dispatch(DispatchedPlan(sep, ClientParams
     (sep.queryContext.plannerParams.queryTimeoutMillis))).runAsync.futureValue
 
     result match {
@@ -149,7 +149,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
 
     // Switch the order and make sure it's OK if the first result doesn't have any data
     val sep2 = StitchRvsExec(QueryContext(), dispatcher, Seq(execPlan2, execPlan1))
-    val result2 = dispatcher.dispatch(RunTimePlanContainer(sep2, ClientParams
+    val result2 = dispatcher.dispatch(DispatchedPlan(sep2, ClientParams
     (sep.queryContext.plannerParams.queryTimeoutMillis))).runAsync.futureValue
 
     result2 match {
@@ -162,7 +162,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
 
     // Two children none of which returns data
     val sep3 = StitchRvsExec(QueryContext(), dispatcher, Seq(execPlan2, execPlan2))
-    val result3 = dispatcher.dispatch(RunTimePlanContainer(sep3, ClientParams
+    val result3 = dispatcher.dispatch(DispatchedPlan(sep3, ClientParams
     (sep.queryContext.plannerParams.queryTimeoutMillis))).runAsync.futureValue
 
     result3 match {
@@ -176,7 +176,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
 
 case class DummyDispatcher(memStore: TimeSeriesMemStore, querySession: QuerySession) extends PlanDispatcher {
   // run locally withing any check.
-  override def dispatch(plan: RunTimePlanContainer)
+  override def dispatch(plan: DispatchedPlan)
                        (implicit sched: Scheduler): Task[QueryResponse] = {
     plan.execPlan.execute(memStore, querySession)
   }

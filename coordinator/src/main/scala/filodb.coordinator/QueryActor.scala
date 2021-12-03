@@ -22,7 +22,7 @@ import filodb.core.metadata.Schemas
 import filodb.core.query.{QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.CorruptVectorException
 import filodb.query._
-import filodb.query.exec.ExecPlan
+import filodb.query.exec.{ClientParams, DispatchedPlan}
 
 object QueryActor {
   final case class ThrowException(dataset: DatasetRef)
@@ -116,8 +116,8 @@ final class QueryActor(memStore: MemStore,
     Scheduler.apply(ExecutorInstrumentation.instrument(executor, schedName))
   }
 
-  def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
-    if (checkTimeout(q.queryContext, replyTo)) {
+  def execPhysicalPlan2(q: DispatchedPlan, replyTo: ActorRef): Unit = {
+    if (checkTimeout(q.execPlan.queryContext, replyTo)) {
       epRequests.increment()
       val queryExecuteSpan = Kamon.spanBuilder(s"query-actor-exec-plan-execute-${q.getClass.getSimpleName}")
         .asChildOf(Kamon.currentSpan())
@@ -125,10 +125,10 @@ final class QueryActor(memStore: MemStore,
       // Dont finish span since we finish it asynchronously when response is received
       Kamon.runWithSpan(queryExecuteSpan, false) {
         queryExecuteSpan.tag("query", q.getClass.getSimpleName)
-        queryExecuteSpan.tag("query-id", q.queryContext.queryId)
-        val querySession = QuerySession(q.queryContext, queryConfig)
+        queryExecuteSpan.tag("query-id", q.execPlan.queryContext.queryId)
+        val querySession = QuerySession(q.execPlan.queryContext, queryConfig, q.clientParams.deadline)
         queryExecuteSpan.mark("query-actor-received-execute-start")
-        q.execute(memStore, querySession)(queryScheduler)
+        q.execPlan.execute(memStore, querySession)(queryScheduler)
           .foreach { res =>
             FiloSchedulers.assertThreadName(QuerySchedName)
             querySession.close()
@@ -143,11 +143,11 @@ final class QueryActor(memStore: MemStore,
                   case _: BadQueryException => // dont log user errors
                   case _: AskTimeoutException => // dont log ask timeouts. useless - let it simply flow up
                   case e: QueryTimeoutException => // log just message, no need for stacktrace
-                    logger.error(s"queryId: ${q.queryContext.queryId} QueryTimeoutException: " +
-                      s"${q.queryContext.origQueryParams} ${e.getMessage}")
+                    logger.error(s"queryId: ${q.execPlan.queryContext.queryId} QueryTimeoutException: " +
+                      s"${q.execPlan.queryContext.origQueryParams} ${e.getMessage}")
                   case e: Throwable =>
-                    logger.error(s"queryId: ${q.queryContext.queryId} Query Error: " +
-                      s"${q.queryContext.origQueryParams}", e)
+                    logger.error(s"queryId: ${q.execPlan.queryContext.queryId} Query Error: " +
+                      s"${q.execPlan.queryContext.origQueryParams}", e)
                 }
                 // debug logging
                 e.t match {
@@ -159,10 +159,10 @@ final class QueryActor(memStore: MemStore,
           }(queryScheduler).recover { case ex =>
             querySession.close()
             // Unhandled exception in query, should be rare
-            logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error," +
-              s" query was ${q.queryContext.origQueryParams}", ex)
+            logger.error(s"queryId ${q.execPlan.queryContext.queryId} Unhandled Query Error," +
+              s" query was ${q.execPlan.queryContext.origQueryParams}", ex)
             queryExecuteSpan.finish()
-            replyTo ! QueryError(q.queryContext.queryId, ex)
+            replyTo ! QueryError(q.execPlan.queryContext.queryId, ex)
           }(queryScheduler)
       }
     }
@@ -234,7 +234,7 @@ final class QueryActor(memStore: MemStore,
                                       processLogicalPlan2Query(q, replyTo)
     case q: ExplainPlan2Query      => val replyTo = sender()
                                       processExplainPlanQuery(q, replyTo)
-    case q: ExecPlan              =>  execPhysicalPlan2(q, sender())
+    case q: DispatchedPlan         => execPhysicalPlan2(q, sender())
     case q: GetTopkCardinality     => execTopkCardinalityQuery(q, sender())
 
     case GetIndexNames(ref, limit, _) =>

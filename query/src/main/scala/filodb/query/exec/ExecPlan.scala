@@ -107,7 +107,7 @@ trait ExecPlan extends QueryCommand {
     def checkTimeout(timeoutAt: String): Unit = {
       val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
       if (queryTimeElapsed >= queryContext.plannerParams.queryTimeoutMillis) {
-          throw QueryTimeoutException(queryTimeElapsed, timeoutAt)
+        throw QueryTimeoutException(queryTimeElapsed, timeoutAt)
       }
     }
 
@@ -324,8 +324,8 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
 
   override def getResult(querySession: QuerySession)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.fromTask(
-      execPlan.dispatcher.dispatch(RunTimePlanContainer(execPlan,
-        ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis - 1000))).
+      execPlan.dispatcher.dispatch(DispatchedPlan(execPlan,
+        ClientParams(querySession.deadline- 1000))).
         onErrorHandle { case ex: Throwable =>
         QueryError(execPlan.queryContext.queryId, ex)
       }.map {
@@ -382,15 +382,15 @@ abstract class NonLeafExecPlan extends ExecPlan {
   // Use-cases include splitting longer range query into multiple smaller range queries.
   def parallelChildTasks: Boolean = true
 
-  private def dispatchRemotePlan(plan: ExecPlan, span: kamon.trace.Span)
+  private def dispatchRemotePlan(plan: ExecPlan, span: kamon.trace.Span, querySession: QuerySession)
                                 (implicit sched: Scheduler) = {
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since
     // kamon uses thread-locals.
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
-      plan.dispatcher.dispatch(RunTimePlanContainer(plan,
-        ClientParams(plan.queryContext.plannerParams.queryTimeoutMillis - 1000))).onErrorHandle { case ex: Throwable =>
+      plan.dispatcher.dispatch(DispatchedPlan(plan,
+        ClientParams(querySession.deadline - 1000))).onErrorHandle { case ex: Throwable =>
         QueryError(queryContext.queryId, ex)
       }
     }
@@ -420,7 +420,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
     val childTasks = Observable.fromIterable(children.zipWithIndex)
                                .mapAsync(parallelism) { case (plan, i) =>
-                                 val task = dispatchRemotePlan(plan, span).map((_, i))
+                                 val task = dispatchRemotePlan(plan, span, querySession).map((_, i))
                                  span.mark(s"child-plan-$i-dispatched-${plan.getClass.getSimpleName}")
                                  task
                                }
@@ -504,5 +504,5 @@ object IgnoreFixedVectorLenAndColumnNamesSchemaReducer {
   }
 }
 
-case class ClientParams(timeout: Long)
-case class RunTimePlanContainer(execPlan: ExecPlan, clientParams: ClientParams)
+case class ClientParams(deadline: Long)
+case class DispatchedPlan(execPlan: ExecPlan, clientParams: ClientParams)

@@ -89,6 +89,7 @@ object QueryContext {
   */
 case class QuerySession(qContext: QueryContext,
                         queryConfig: QueryConfig,
+                        deadline: Long = 30000,
                         queryStats: QueryStats = QueryStats(),
                         var lock: Option[EvictionLock] = None,
                         var resultCouldBePartial: Boolean = false,
@@ -138,5 +139,5 @@ case class QueryStats() {
 }
 
 object QuerySession {
-  def makeForTestingOnly(): QuerySession = QuerySession(QueryContext(), EmptyQueryConfig, QueryStats())
+  def makeForTestingOnly(): QuerySession = QuerySession(QueryContext(), EmptyQueryConfig)
 }

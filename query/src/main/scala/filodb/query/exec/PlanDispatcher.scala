@@ -22,7 +22,7 @@ import filodb.query.QueryResult
   */
 trait PlanDispatcher extends java.io.Serializable {
   def clusterName: String
-  def dispatch(plan: RunTimePlanContainer)
+  def dispatch(plan: DispatchedPlan)
               (implicit sched: Scheduler): Task[QueryResponse]
   def isLocalCall: Boolean
 }
@@ -33,21 +33,22 @@ trait PlanDispatcher extends java.io.Serializable {
   */
 case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends PlanDispatcher {
 
-  def dispatch(plan: RunTimePlanContainer)(implicit sched: Scheduler): Task[QueryResponse] = {
+  def dispatch(plan: DispatchedPlan)(implicit sched: Scheduler): Task[QueryResponse] = {
     val queryTimeElapsed = System.currentTimeMillis() - plan.execPlan.queryContext.submitTime
-    val remainingTime = plan.clientParams.timeout - queryTimeElapsed
+    val remainingTime = plan.clientParams.deadline - queryTimeElapsed
     // Don't send if time left is very small
     if (remainingTime < 1) {
       Task.raiseError(QueryTimeoutException(queryTimeElapsed, this.getClass.getName))
     } else {
       val t = Timeout(FiniteDuration(remainingTime, TimeUnit.MILLISECONDS))
-      val fut = (target ? plan.execPlan)(t).map {
+      val fut = (target ? plan)(t).map {
         case resp: QueryResponse => resp
         case e =>  throw new IllegalStateException(s"Received bad response $e")
       }
       // TODO We can send partial results on timeout. Try later. Need to address QueryTimeoutException too.
         .recover { // if partial results allowed, then return empty result
-        case e: AskTimeoutException if (plan.execPlan.queryContext.plannerParams.allowPartialResults)
+        case e: AskTimeoutException
+          if (plan.execPlan.queryContext.plannerParams.allowPartialResults)
            =>
             qLogger.warn(s"Swallowed AskTimeoutException since partial result was enabled: ${e.getMessage}")
             QueryResult(plan.execPlan.queryContext.queryId, ResultSchema.empty, Nil, QueryStats(), true,
