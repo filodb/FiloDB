@@ -22,7 +22,7 @@ import filodb.core.metadata.Schemas
 import filodb.core.query.{QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.CorruptVectorException
 import filodb.query._
-import filodb.query.exec.{ClientParams, DispatchedPlan}
+import filodb.query.exec.DispatchedPlan
 
 object QueryActor {
   final case class ThrowException(dataset: DatasetRef)
