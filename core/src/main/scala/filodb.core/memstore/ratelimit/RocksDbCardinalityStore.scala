@@ -18,8 +18,8 @@ import org.rocksdb._
 import spire.syntax.cfor._
 
 import filodb.core.{DatasetRef, GlobalScheduler}
+import filodb.core.memstore.ratelimit.CardinalityStore._
 import filodb.memory.format.UnsafeUtils
-
 
 /**
  * Stored as values in the RocksDb database.
@@ -268,12 +268,6 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
 
     require(depth > shardKeyPrefix.size,
       s"scan depth $depth must be greater than the size of the prefix ${shardKeyPrefix.size}")
-
-    val MAX_RESULT_SIZE = 10000
-
-    // If MAX_RESULT_SIZE is reached, one extra CardinalityRecord is added
-    //   with this prefix. Its counts are the sum all the overflow counts.
-    val OVERFLOW_PREFIX = Seq("_overflow_")
 
     val it = db.newIterator()
     val buf = new ArrayBuffer[CardinalityRecord]()

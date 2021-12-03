@@ -340,7 +340,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
           }.toMap
 
           resultMap shouldEqual testSpec.exp.map { case (prefix, counts) =>
-            prefix.mkString(PREFIX_DELIM).utf8 -> counts
+            prefixToGroup(prefix) -> counts
           }.toMap
       }
     }

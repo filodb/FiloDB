@@ -73,6 +73,10 @@ trait CardinalityStore {
 
   /**
    * Fetch children of the node for the given shard key prefix.
+   * Result size is limited to MAX_RESULT_SIZE. If more children exist,
+   *   their counts summed into one additional CardinalityRecord with
+   *   prefix OVERFLOW_PREFIX.
+   *
    * @param depth: only children of this size will be scanned.
    */
   def scanChildren(shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord]
@@ -81,4 +85,10 @@ trait CardinalityStore {
    * Close store. Data will be thrown away
    */
   def close(): Unit
+}
+
+object CardinalityStore {
+  // See scanChildren doc for details.
+  val MAX_RESULT_SIZE = 5000
+  val OVERFLOW_PREFIX = Seq("_overflow_")
 }

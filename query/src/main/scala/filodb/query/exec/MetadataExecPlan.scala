@@ -70,8 +70,9 @@ final case class PartKeysDistConcatExec(queryContext: QueryContext,
 
 /**
   * Aggregates output from TsCardExec.
-  * When the aggregated data contains MAX_RESPONSE_SIZE (names -> cardinalities) pairs,
-  *   pairs with previously-unseen names will be counted into an overflow bucket.
+  * When the aggregated data contains MAX_RESULT_SIZE (names -> cardinalities) pairs,
+  *   pairs with previously-unseen names will be counted into an overflow bucket
+  *   with group OVERFLOW_GROUP.
   */
 final case class TsCardReduceExec(queryContext: QueryContext,
                                   dispatcher: PlanDispatcher,
@@ -87,10 +88,10 @@ final case class TsCardReduceExec(queryContext: QueryContext,
       val accCountsOpt = acc.get(data.group)
       // Check if we either (1) won't increase the size or (2) have enough room for another.
       // Accordingly retrieve the key to update and the counts to increment.
-      val (groupKey, accCounts) = if (accCountsOpt.nonEmpty || acc.size < MAX_RESPONSE_SIZE) {
+      val (groupKey, accCounts) = if (accCountsOpt.nonEmpty || acc.size < MAX_RESULT_SIZE) {
         (data.group, accCountsOpt.getOrElse(CardCounts(0, 0)))
       } else {
-        (OVERFLOW_NAME, acc.getOrElseUpdate(OVERFLOW_NAME, CardCounts(0, 0)))
+        (OVERFLOW_GROUP, acc.getOrElseUpdate(OVERFLOW_GROUP, CardCounts(0, 0)))
       }
       acc.update(groupKey, accCounts.add(data.counts))
     }
@@ -352,9 +353,21 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
  * Contains utilities for all TsCardinality materialize() derivatives.
  */
 final case object TsCardExec {
-  val MAX_RESPONSE_SIZE = 5000  // TODO: tune this
-  val OVERFLOW_NAME = "_overflow_".utf8
-  val PREFIX_DELIM = ","  // not a utf8 in order to make use of mkString
+  import filodb.core.memstore.ratelimit.CardinalityStore
+
+  // results from all TsCardinality derivatives are clipped to this size
+  val MAX_RESULT_SIZE = CardinalityStore.MAX_RESULT_SIZE
+
+  // row name assigned to overflow counts
+  val OVERFLOW_GROUP = prefixToGroup(CardinalityStore.OVERFLOW_PREFIX)
+
+  /**
+   * Convert a shard key prefix to a row's group name.
+   */
+  def prefixToGroup(prefix: Seq[String]): ZeroCopyUTF8String = {
+    // just concat the prefix together with a single char delimiter
+    prefix.mkString(",").utf8
+  }
 
   case class CardCounts(active: Int, total: Int) {
     if (total < active) {
@@ -415,12 +428,8 @@ final case class TsCardExec(queryContext: QueryContext,
         Observable.eval {
           val cards = tsMemStore.scanTsCardinalities(
             dataset, Seq(shard), shardKeyPrefix, groupDepth + 1)
-          if (cards.size > MAX_RESPONSE_SIZE) {
-            logger.warn(s"clipping tsMemStore scanTsCardinalities response " +
-                        s"from ${cards.size} to $MAX_RESPONSE_SIZE")
-          }
-          val it = cards.take(MAX_RESPONSE_SIZE).map{ card =>
-             RowData(card.prefix.mkString(PREFIX_DELIM).utf8,
+          val it = cards.take(MAX_RESULT_SIZE).map{ card =>
+             RowData(prefixToGroup(card.prefix),
                      CardCounts(card.activeTsCount, card.tsCount))
              .toRowReader()
             }.iterator
