@@ -16,7 +16,7 @@ import filodb.core.query._
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.store.ChunkSource
 import filodb.memory.{UTF8StringMedium, UTF8StringShort}
-import filodb.memory.format.{RowReader, SeqRowReader, StringArrayRowReader,
+import filodb.memory.format.{RowReader, StringArrayRowReader,
                              UnsafeUtils, UTF8MapIteratorRowReader, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
@@ -108,7 +108,7 @@ final case class TsCardReduceExec(queryContext: QueryContext,
       .foldLeftL(new mutable.HashMap[ZeroCopyUTF8String, CardCounts])(mapFold)
       .map{ aggMap =>
         val it = aggMap.map{ case (group, counts) =>
-          RowData(group, counts).toRowReader()
+          CardRowReader(group, counts)
         }.iterator
         IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
       }
@@ -379,14 +379,33 @@ final case object TsCardExec {
     }
   }
 
-  /**
-   * Convenience class for converting between RowReader and TsCardExec data.
-   */
-  case class RowData(group: ZeroCopyUTF8String, counts: CardCounts) {
-    def toRowReader(): RowReader = {
-      SeqRowReader(Seq(group, counts.active, counts.total))
+  case class CardRowReader(group: ZeroCopyUTF8String, counts: CardCounts) extends RowReader {
+    override def notNull(columnNo: Int): Boolean = ???
+    override def getBoolean(columnNo: Int): Boolean = ???
+    override def getInt(columnNo: Int): Int = columnNo match {
+      case 1 => counts.active
+      case 2 => counts.total
+      case _ => throw new IllegalArgumentException(s"illegal getInt columnNo: $columnNo")
     }
+    override def getLong(columnNo: Int): Long = ???
+    override def getDouble(columnNo: Int): Double = ???
+    override def getFloat(columnNo: Int): Float = ???
+    override def getString(columnNo: Int): String = {
+      throw new RuntimeException("for group: call getAny and cast to ZeroCopyUtf8String")
+    }
+    override def getAny(columnNo: Int): Any = columnNo match {
+      case 0 => group
+      case _ => throw new IllegalArgumentException(s"illegal getAny columnNo: $columnNo")
+    }
+    override def getBlobBase(columnNo: Int): Any = ???
+    override def getBlobOffset(columnNo: Int): Long = ???
+    override def getBlobNumBytes(columnNo: Int): Int = ???
   }
+
+  /**
+   * Convenience class for interpreting RowReader data.
+   */
+  case class RowData(group: ZeroCopyUTF8String, counts: CardCounts)
   object RowData {
     def fromRowReader(rr: RowReader): RowData = {
       val group = rr.getAny(0).asInstanceOf[ZeroCopyUTF8String]
@@ -429,9 +448,8 @@ final case class TsCardExec(queryContext: QueryContext,
           val cards = tsMemStore.scanTsCardinalities(
             dataset, Seq(shard), shardKeyPrefix, groupDepth + 1)
           val it = cards.take(MAX_RESULT_SIZE).map{ card =>
-             RowData(prefixToGroup(card.prefix),
-                     CardCounts(card.activeTsCount, card.tsCount))
-             .toRowReader()
+            CardRowReader(prefixToGroup(card.prefix),
+                          CardCounts(card.activeTsCount, card.tsCount))
             }.iterator
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
         }
