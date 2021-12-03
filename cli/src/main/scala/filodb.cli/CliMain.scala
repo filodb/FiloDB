@@ -178,7 +178,6 @@ object CliMain extends FilodbClusterNode {
           val values = remote.getIndexValues(ref, args.indexname(), args.shards().head.toInt, args.limit())
           values.foreach { case (term, freq) => println(f"$term%40s\t$freq") }
         case Some("topkcardlocal") =>
-          // TODO(a_theimer): make sure actually returns topk
           require(args.host.isDefined && args.dataset.isDefined && args.k.isDefined,
             "--host, --dataset, --k must be defined")
           val (remote, ref) = getClientAndRef(args)
