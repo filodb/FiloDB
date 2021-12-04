@@ -361,12 +361,14 @@ final case object TsCardExec {
   // row name assigned to overflow counts
   val OVERFLOW_GROUP = prefixToGroup(CardinalityStore.OVERFLOW_PREFIX)
 
+  val PREFIX_DELIM = ","
+
   /**
    * Convert a shard key prefix to a row's group name.
    */
   def prefixToGroup(prefix: Seq[String]): ZeroCopyUTF8String = {
     // just concat the prefix together with a single char delimiter
-    prefix.mkString(",").utf8
+    prefix.mkString(PREFIX_DELIM).utf8
   }
 
   case class CardCounts(active: Int, total: Int) {
