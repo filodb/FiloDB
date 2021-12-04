@@ -2,7 +2,6 @@ package filodb.query.exec
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
-
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.execution.Scheduler
@@ -10,7 +9,6 @@ import monix.execution.Scheduler.Implicits.global
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.core.MetricsTestData._
 import filodb.core.TestData
 import filodb.core.binaryrecord2.BinaryRecordRowReader
@@ -20,10 +18,9 @@ import filodb.core.query._
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
+import filodb.query.exec.TsCardExec.CardCounts
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-
-import scala.collection.mutable
 
 class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
 
@@ -57,7 +54,9 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
       ("http_req_total", Map("instance"->"someHost:9090", "job"->"myCoolService",
                              "unicode_tag" -> "uni\u03C0tag", "_ws_" -> "demo", "_ns_" -> "App-0")),
       ("http_bar_total", Map("instance"->"someHost:8787", "job"->"myCoolService",
-                             "unicode_tag" -> "uni\u03C0tag", "_ws_" -> "demo", "_ns_" -> "App-0"))
+                             "unicode_tag" -> "uni\u03C0tag", "_ws_" -> "demo", "_ns_" -> "App-0")),
+      ("http_req_total-A", Map("instance"->"someHost:9090", "job"->"myCoolService",
+                             "unicode_tag" -> "uni\u03C0tag", "_ws_" -> "demo-A", "_ns_" -> "App-A")),
     )
   )
 
@@ -285,40 +284,65 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
                            "_ws_" -> "1")
   }
 
-  it ("should correctly execute cardinality query") {
-    val k = 3
-    val shardKeyPrefix = Seq("demo", "App-0")
+  it ("should correctly execute TsCardExec") {
+    import filodb.query.exec.TsCardExec._
 
-    val addInactive = true
-    val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
-      new TopkCardExec(QueryContext(), executeDispatcher,
-        timeseriesDatasetMultipleShardKeys.ref, ishard, shardKeyPrefix, k, addInactive)
-    }.toSeq
+    case class TestSpec(shardKeyPrefix: Seq[String], groupDepth: Int, exp: Map[Seq[String], CardCounts])
 
-    val execPlan = TopkCardReduceExec(QueryContext(), executeDispatcher, leaves, k)
-    execPlan.addRangeVectorTransformer(TopkCardPresenter(k))
+    // Note: expected strings are eventually concatenated with a delimiter
+    //   and converted to ZeroCopyUTF8Strings.
+    Seq(
+      TestSpec(Seq(), 0, Map(
+        Seq("demo-A") -> CardCounts(1,1),
+        Seq("demo") -> CardCounts(4,4))),
+      TestSpec(Seq(), 1, Map(
+        Seq("demo", "App-0") -> CardCounts(4,4),
+        Seq("demo-A", "App-A") -> CardCounts(1,1))),
+      TestSpec(Seq(), 2, Map(
+        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
+        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
+        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1),
+        Seq("demo-A", "App-A", "http_req_total-A") -> CardCounts(1,1))),
+      TestSpec(Seq("demo"), 0, Map(
+        Seq("demo") -> CardCounts(4,4))),
+      TestSpec(Seq("demo"), 1, Map(
+        Seq("demo", "App-0") -> CardCounts(4,4))),
+      TestSpec(Seq("demo"), 2, Map(
+        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
+        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
+        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1))),
+      TestSpec(Seq("demo", "App-0"), 1, Map(
+        Seq("demo", "App-0") -> CardCounts(4,4))),
+      TestSpec(Seq("demo", "App-0"), 2, Map(
+        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
+        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
+        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1))),
+      TestSpec(Seq("demo", "App-0", "http_req_total"), 2, Map(
+        Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2)))
+    ).foreach{ testSpec =>
 
-    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
-    val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _) =>
-        // should only have a single RowVector
-        response.size shouldEqual 1
+      val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
+        new TsCardExec(QueryContext(), executeDispatcher,
+          timeseriesDatasetMultipleShardKeys.ref, ishard, testSpec.shardKeyPrefix, testSpec.groupDepth)
+      }.toSeq
 
-        val rowPairs = response(0).rows().map{r =>
-          r.getAny(0).toString -> r.getLong(1)
-        }.toSeq
+      val execPlan = TsCardReduceExec(QueryContext(), executeDispatcher, leaves)
 
-        rowPairs.size shouldEqual 3
-        rowPairs.foldLeft(new mutable.HashMap[ZeroCopyUTF8String, Long]){ (counts, pair) =>
-          var count = counts.getOrElseUpdate(pair._1.utf8, 0)
-          count = count + pair._2
-          counts.update(pair._1.utf8, count)
-          counts
-        } shouldEqual Map(
-          "http_req_total".utf8 -> 2,
-          "http_foo_total".utf8 -> 1,
-          "http_bar_total".utf8 -> 1
-        )
+      val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+      val result = (resp: @unchecked) match {
+        case QueryResult(id, _, response, _, _, _) =>
+          // should only have a single RangeVector
+          response.size shouldEqual 1
+
+          val resultMap = response(0).rows().map{r =>
+            val data = RowData.fromRowReader(r)
+            data.group -> data.counts
+          }.toMap
+
+          resultMap shouldEqual testSpec.exp.map { case (prefix, counts) =>
+            prefixToGroup(prefix) -> counts
+          }.toMap
+      }
     }
   }
 }

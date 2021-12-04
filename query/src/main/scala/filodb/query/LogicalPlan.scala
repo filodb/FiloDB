@@ -29,7 +29,7 @@ sealed trait LogicalPlan {
       case l: LabelValues              => l.copy(filters = filters)
       case n: LabelNames               => n.copy(filters = filters)
       case s: SeriesKeysByFilters      => s.copy(filters = filters)
-      case c: TopkCardinalities        => c.copy()
+      case c: TsCardinalities          => c  // immutable & no members need to be updated
     }
   }
 }
@@ -126,11 +126,48 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
                                endMs: Long) extends MetadataQueryPlan
 
 /**
- * Given a shard key prefix, estimates the set of label values with the top k cardinalities.
- * See TopkCardExec for more some implementation-specific information
- *   about what "estimate" implies how that estimate can be tuned.
+ * Plan to answer queries of the abstract form:
+ *
+ * Find (active, total) cardinality pairs for all time series with <shard-key-prefix>,
+ *   then group them by { key[:1], key[:2], key[:3], ... }.
+ *
+ * Examples:
+ *
+ *  { prefix=[], groupDepth=1 } -> {
+ *      prefix=["ws_a", "ns_a"] -> (4, 6),
+ *      prefix=["ws_a", "ns_b"] -> (2, 4),
+ *      prefix=["ws_b", "ns_c"] -> (3, 5) }
+ *
+ *  { prefix=["ws_a", "ns_a"], groupDepth=2 } -> {
+ *      prefix=["ws_a", "ns_a", "met_a"] -> (4, 6),
+ *      prefix=["ws_a", "ns_a", "met_b"] -> (3, 5) }
+ *
+ *  { prefix=["ws_a"], groupDepth=0 } -> {
+ *      prefix=["ws_a"] -> (3, 5) }
+ *
+ * @param groupDepth: indicates "hierarchical depth" at which to group cardinalities.
+ *   For example:
+ *     0 -> workspace
+ *     1 -> namespace
+ *     2 -> metric
+ *   Must indicate a depth:
+ *     (1) at least as deep as shardKeyPrefix.
+ *     (2) less than '2' when the prefix does not contain values for all lesser depths.
+ *   Example (if shard keys specify a ws, ns, and metric):
+ *     shardKeyPrefix     groupDepth
+ *     []                 { 0, 1 }
+ *     [ws]               { 0, 1 }
+ *     [ws, ns]           { 1, 2 }
+ *     [ws, ns, metric]   { 2 }
  */
-case class TopkCardinalities(shardKeyPrefix: Seq[String], k: Int, addInactive: Boolean) extends LogicalPlan
+case class TsCardinalities(shardKeyPrefix: Seq[String], groupDepth: Int) extends LogicalPlan {
+  require(groupDepth >= 0 && groupDepth < 3,
+    "groupDepth must lie on [0, 2]")
+  require(1 + groupDepth >= shardKeyPrefix.size,
+    "groupDepth indicate a depth at least as deep as shardKeyPrefix")
+  require(groupDepth < 2 || shardKeyPrefix.size == 2,
+    "cannot group at the metric level when prefix does not contain ws and ns")
+}
 
 /**
  * Concrete logical plan to query for chunk metadata from raw time series in a given range
@@ -554,7 +591,7 @@ object LogicalPlan {
      // Find leaf logical plans for all children and concatenate results
      case lp: NonLeafLogicalPlan          => lp.children.flatMap(findLeafLogicalPlans)
      case lp: MetadataQueryPlan           => Seq(lp)
-     case lp: TopkCardinalities           => Seq(lp)
+     case lp: TsCardinalities             => Seq(lp)
      case lp: ScalarBinaryOperation       => val lhsLeafs = if (lp.lhs.isRight) findLeafLogicalPlans(lp.lhs.right.get)
                                                              else Nil
                                              val rhsLeafs = if (lp.rhs.isRight) findLeafLogicalPlans(lp.rhs.right.get)

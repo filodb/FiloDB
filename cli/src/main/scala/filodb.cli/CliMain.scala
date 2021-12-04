@@ -67,6 +67,7 @@ class Arguments(args: Seq[String]) extends ScallopConf(args) {
   val shards = opt[List[String]]()
   val spread = opt[Int]()
   val k = opt[Int]()
+  val groupdepth = opt[Int]()
   val active = opt[Boolean](default = Some(false))
   val shardkeyprefix = opt[List[String]](default = Some(List()))
   val queries = opt[List[String]](default = Some(List()))
@@ -109,7 +110,7 @@ object CliMain extends FilodbClusterNode {
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labelvalues --labelnames <lable-names> --labelfilter <label-filter> --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labels --labelfilter <label-filter> -dataset <dataset>")
-    println("  --host <hostname/IP> [--port ...] --command topkcard --dataset <dataset> --k <k> [--active] --shardkeyprefix <shard-key-prefix> ")
+    println("  --host <hostname/IP> [--port ...] --command tscard --dataset <dataset> --shardkeyprefix <shard-key-prefix> --groupdepth {0,1,2}")
     println("  --host <hostname/IP> [--port ...] --command topkcardlocal --dataset prometheus --k 2 --shardkeyprefix demo App-0")
     println("  --host <hostname/IP> [--port ...] --command labelcardinality --labelfilter <label-filter> --dataset prometheus")
     println("  --host <hostname/IP> [--port ...] --command findqueryshards --queries <query> --spread <spread>")
@@ -176,7 +177,6 @@ object CliMain extends FilodbClusterNode {
           val (remote, ref) = getClientAndRef(args)
           val values = remote.getIndexValues(ref, args.indexname(), args.shards().head.toInt, args.limit())
           values.foreach { case (term, freq) => println(f"$term%40s\t$freq") }
-
         case Some("topkcardlocal") =>
           require(args.host.isDefined && args.dataset.isDefined && args.k.isDefined,
             "--host, --dataset, --k must be defined")
@@ -190,9 +190,11 @@ object CliMain extends FilodbClusterNode {
             printf("%40s %20s %20s %15s %15s\n", "Child", "TotalTimeSeries", "ActiveTimeSeries", "Children", "Children")
             printf("%40s %20s %20s %15s %15s\n", "Name", "Count", "Count", "Count", "Quota")
             println("==============================================================================================================================")
-            crs._2.sortBy(c => if (addInactive) c.tsCount else c.activeTsCount)(Ordering.Int.reverse).foreach { cr =>
-              printf("%40s %20d %20d %15d %15d\n", cr.childName, cr.tsCount, cr.activeTsCount, cr.childrenCount, cr.childrenQuota)
-            }
+            crs._2.sortBy(c => if (addInactive) c.tsCount else c.activeTsCount)(Ordering.Int.reverse)
+              .foreach { cr =>
+                printf("%40s %20d %20d %15d %15d\n", cr.prefix, cr.tsCount,
+                       cr.activeTsCount, cr.childrenCount, cr.childrenQuota)
+              }
           }
 
         case Some("status") =>
@@ -254,12 +256,12 @@ object CliMain extends FilodbClusterNode {
           parseLabelCardinalityQuery(remote, args.labelfilter(), args.dataset(),
             getQueryRange(args), options)
 
-        case Some("topkcard") =>
+        case Some("tscard") =>
           require(args.host.isDefined && args.dataset.isDefined && args.labelfilter.isDefined, "--host, --dataset and --labelfilter must be defined")
           val remote = Client.standaloneClient(system, args.host(), args.port())
           val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
             timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
-          parseTopkCardQuery(remote, args.k(), args.active(), args.shardkeyprefix(), args.dataset(), options)
+          parseTsCardQuery(remote, args.shardkeyprefix(), args.groupdepth(), args.dataset(), options)
 
         case x: Any =>
           // This will soon be deprecated
@@ -381,14 +383,12 @@ object CliMain extends FilodbClusterNode {
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 
-  def parseTopkCardQuery(client: LocalClient,
-                         k: Int,
-                         active: Boolean,
-                         shardKeyPrefix: Seq[String],
-                         dataset: String,
-                         options: QOptions): Unit = {
-    val addInactive = !active
-    val logicalPlan = TopkCardinalities(shardKeyPrefix, k, addInactive)
+  def parseTsCardQuery(client: LocalClient,
+                       shardKeyPrefix: Seq[String],
+                       groupDepth: Int,
+                       dataset: String,
+                       options: QOptions): Unit = {
+    val logicalPlan = TsCardinalities(shardKeyPrefix, groupDepth)
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 

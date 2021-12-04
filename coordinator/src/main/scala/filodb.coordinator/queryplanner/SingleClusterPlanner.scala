@@ -134,6 +134,7 @@ class SingleClusterPlanner(val dataset: Dataset,
         many.head match {
           case _: LabelValuesExec => LabelValuesDistConcatExec(qContext, targetActor, many)
           case _: LabelNamesExec => LabelNamesDistConcatExec(qContext, targetActor, many)
+          case _: TsCardExec => TsCardReduceExec(qContext, targetActor, many)
           case _: LabelCardinalityExec => {
             val reduceExec = LabelCardinalityReduceExec(qContext, targetActor, many)
             // Presenter here is added separately which use the bytes representing the sketch to get an estimate
@@ -145,11 +146,6 @@ class SingleClusterPlanner(val dataset: Dataset,
               reduceExec.addRangeVectorTransformer(new LabelCardinalityPresenter())
             }
             reduceExec
-          }
-          case lce: TopkCardExec => {
-            val reducer = TopkCardReduceExec(qContext, targetActor, many, lce.k)
-            reducer.addRangeVectorTransformer(TopkCardPresenter(lce.k))
-            reducer
           }
           case ske: PartKeysExec => PartKeysDistConcatExec(qContext, targetActor, many)
           case ep: ExecPlan =>
@@ -240,7 +236,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp)
       case lp: LabelValues                 => materializeLabelValues(qContext, lp)
       case lp: LabelNames                  => materializeLabelNames(qContext, lp)
-      case lp: TopkCardinalities           => materializeTopkCardinalities(qContext, lp)
+      case lp: TsCardinalities             => materializeTsCardinalities(qContext, lp)
       case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(qContext, lp)
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplySortFunction           => materializeApplySortFunction(qContext, lp)
@@ -509,11 +505,11 @@ class SingleClusterPlanner(val dataset: Dataset,
     PlanResult(metaExec, false)
   }
 
-  private def materializeTopkCardinalities(qContext: QueryContext,
-                                           lp: TopkCardinalities): PlanResult = {
+  private def materializeTsCardinalities(qContext: QueryContext,
+                                         lp: TsCardinalities): PlanResult = {
     val metaExec = shardMapperFunc.assignedShards.map{ shard =>
       val dispatcher = dispatcherForShard(shard)
-      exec.TopkCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.k, lp.addInactive)
+      exec.TsCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.groupDepth)
     }
     PlanResult(metaExec, false)
   }
