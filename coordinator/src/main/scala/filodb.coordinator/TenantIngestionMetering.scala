@@ -2,14 +2,14 @@ package filodb.coordinator
 
 import java.util.concurrent.TimeUnit
 
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Success}
 
-import akka.actor.{ActorRef, ActorSystem}
+import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import kamon.tag.TagSet
+import monix.execution.Scheduler.Implicits.{global => scheduler}
 
 import filodb.coordinator.client.Client
 import filodb.coordinator.client.QueryCommands.LogicalPlan2Query
@@ -43,9 +43,13 @@ case class TenantIngestionMetering(settings: FilodbSettings,
   private val METRIC_TOTAL = "total_timeseries_by_tenant"
 
   def schedulePeriodicPublishJob() : Unit = {
-    ActorSystem().scheduler.schedule(
-      SCHED_INIT_DELAY,
-      SCHED_DELAY,
+    // NOTE: the FiniteDuration overload of scheduleWithFixedDelay
+    //  does not work. Unsure why, but that's why these FiniteDurations are
+    //  awkwardly parsed into seconds.
+    scheduler.scheduleWithFixedDelay(
+      SCHED_INIT_DELAY.toSeconds,
+      SCHED_DELAY.toSeconds,
+      TimeUnit.SECONDS,
       () => queryAndSchedulePublish())
   }
 
