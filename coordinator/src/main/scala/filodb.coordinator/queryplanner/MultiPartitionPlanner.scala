@@ -83,6 +83,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       materializeSubquery(logicalPlan, qContext)
     } else logicalPlan match {
       case mqp: MetadataQueryPlan               => materializeMetadataQueryPlan(mqp, qContext).plans.head
+      case lp: TsCardinalities                  => materializeTsCardinalities(lp, qContext).plans.head
       case _                                    => walkLogicalPlanTree(logicalPlan, qContext).plans.head
     }
   }
@@ -140,7 +141,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case lp: ApplyAbsentFunction        => super.materializeAbsentFunction(qContext, lp)
       case lp: ScalarBinaryOperation      => super.materializeScalarBinaryOperation(qContext, lp)
       case lp: ApplyLimitFunction         => super.materializeLimitFunction(qContext, lp)
-      case _: TsCardinalities             => throw new IllegalArgumentException("TsCardinalities unexpected here")
+      case lp: TsCardinalities            => materializeTsCardinalities(lp, qContext)
 
       // Imp: At the moment, these two cases for subquery will not get executed, materialize is already
       // Checking if the plan is a TopLevelSubQuery or any of the descendant is a SubqueryWithWindowing and
@@ -430,6 +431,42 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         case _: LabelNames => LabelNamesDistConcatExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
         case _: LabelCardinality => LabelCardinalityReduceExec(qContext, inProcessPlanDispatcher,
+          execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
+      }
+    }
+    PlanResult(execPlan::Nil)
+  }
+
+  def materializeTsCardinalities(lp: TsCardinalities, qContext: QueryContext): PlanResult = {
+    // This code is nearly identical to materializeMetadataQueryPlan, but it prevents some
+    //   boilerplate code clutter that results when TsCardinalities extends MetadataQueryPlan.
+    //   If this code's maintenance isn't worth some extra stand-in lines of code (i.e. at matchers that
+    //   take MetadataQueryPlan instances), then just extend TsCardinalities from MetadataQueryPlan.
+
+    import filodb.query.exec.TsCardExec.PREFIX_DELIM
+
+    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val partitions = partitionLocationProvider.getAuthorizedPartitions(
+      TimeRange(0, Long.MaxValue))
+    val execPlan = if (partitions.isEmpty) {
+      logger.warn(s"No partitions found for ${queryParams.startSecs}, ${queryParams.endSecs}")
+      localPartitionPlanner.materialize(lp, qContext)
+    } else {
+      val execPlans = partitions.map { p =>
+        logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
+        if (p.partitionName.equals(localPartitionName))
+          localPartitionPlanner.materialize(lp, qContext)
+        else {
+          val params = Map(
+            "shardKeyPrefix" -> lp.shardKeyPrefix.mkString(PREFIX_DELIM),
+            "numGroupByFields" -> lp.numGroupByFields.toString)
+          createMetadataRemoteExec(qContext, p, params)
+        }
+      }
+      if (execPlans.size == 1) {
+        execPlans.head
+      } else {
+        TsCardReduceExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
       }
     }
