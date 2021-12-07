@@ -10,6 +10,7 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, QueryTimeoutException}
+import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.query._
@@ -107,7 +108,7 @@ trait ExecPlan extends QueryCommand {
     def checkTimeout(timeoutAt: String): Unit = {
       val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
       if (queryTimeElapsed >= queryContext.plannerParams.queryTimeoutMillis) {
-          throw QueryTimeoutException(queryTimeElapsed, timeoutAt)
+        throw QueryTimeoutException(queryTimeElapsed, timeoutAt)
       }
     }
 
@@ -141,30 +142,53 @@ trait ExecPlan extends QueryCommand {
         .record(Math.max(0, System.currentTimeMillis - startExecute))
       span.mark(s"execute-step2-start-${getClass.getSimpleName}")
       FiloSchedulers.assertThreadName(QuerySchedName)
-      val emptySchemaTransformers = allTransformers.filter(_.canHandleEmptySchemas)
-      // It is possible a null schema is returned (due to no time series). In that case just return empty results
-      val resultTask = if (resSchema == ResultSchema.empty && emptySchemaTransformers.isEmpty) {
-        qLogger.debug(s"queryId: ${queryContext.queryId} Empty plan $this, returning empty results")
-        span.mark("empty-plan")
-        span.mark(s"execute-step2-end-${getClass.getSimpleName}")
-        Task.eval(QueryResult(queryContext.queryId, resSchema, Nil, querySession.queryStats,
-          querySession.resultCouldBePartial, querySession.partialResultsReason))
-      } else {
-        val transformersToRun = if (resSchema == ResultSchema.empty) emptySchemaTransformers else allTransformers
-        val finalRes = transformersToRun.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
+      val resultTask = {
+        val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult(querySession))
-          (transf.apply(acc._1, querySession, queryContext.plannerParams.sampleLimit, acc._2,
-            paramRangeVector), transf.schema(acc._2))
+          val resultSchema : ResultSchema = acc._2
+          if (resultSchema == ResultSchema.empty && (!transf.canHandleEmptySchemas)) {
+            // It is possible a null schema is returned (due to no time series). In that case just skip the
+            // transformers that cannot handle empty results
+            (acc._1, resultSchema)
+          } else {
+            val rangeVector : Observable[RangeVector] = transf.apply(
+              acc._1, querySession, queryContext.plannerParams.sampleLimit, acc._2, paramRangeVector
+            )
+            val schema = transf.schema(resultSchema)
+            (rangeVector, schema)
+          }
         }
-        val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
-        Kamon.histogram("query-execute-time-elapsed-step2-transformer-pipeline-setup",
-                    MeasurementUnit.time.milliseconds)
-          .withTag("plan", getClass.getSimpleName)
-          .record(Math.max(0, System.currentTimeMillis - startExecute))
-        val builder = SerializedRangeVector.newBuilder()
+        if (finalRes._2 == ResultSchema.empty) {
+          qLogger.debug(s"queryId: ${queryContext.queryId} Empty plan $this, returning empty results")
+          span.mark("empty-plan")
+          span.mark(s"execute-step2-end-${getClass.getSimpleName}")
+          Task.eval(QueryResult(
+            queryContext.queryId, resSchema, Nil, querySession.queryStats,
+            querySession.resultCouldBePartial, querySession.partialResultsReason
+          ))
+        } else {
+          val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
+          Kamon
+            .histogram(
+            "query-execute-time-elapsed-step2-transformer-pipeline-setup",
+              MeasurementUnit.time.milliseconds
+            )
+            .withTag("plan", getClass.getSimpleName)
+            .record(Math.max(0, System.currentTimeMillis - startExecute))
+          makeResult(finalRes._1, recSchema, finalRes._2)
+        }
+      }
+      resultTask.onErrorHandle { case ex: Throwable =>
+        QueryError(queryContext.queryId, querySession.queryStats, ex)
+      }
+    }.flatten
+
+    def makeResult(
+      rv : Observable[RangeVector], recordSchema: RecordSchema, resultSchema: ResultSchema
+    ): Task[QueryResult] = {
         @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
-        finalRes._1
-          .doOnStart(_ => span.mark("before-first-materialized-result-rv"))
+        val builder = SerializedRangeVector.newBuilder()
+        rv.doOnStart(_ => span.mark("before-first-materialized-result-rv"))
           .map {
             case srv: SerializableRangeVector =>
               numResultSamples += srv.numRowsSerialized
@@ -176,7 +200,7 @@ trait ExecPlan extends QueryCommand {
             case rv: RangeVector =>
               // materialize, and limit rows per RV
               val execPlanString = queryWithPlanName(queryContext)
-              val srv = SerializedRangeVector(rv, builder, recSchema, execPlanString)
+              val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString)
               if (rv.outputRange.isEmpty)
                 qLogger.debug(s"Empty rangevector found. Rv class is:  ${rv.getClass.getSimpleName}, " +
                   s"execPlan is: $execPlanString, execPlan children ${this.children}")
@@ -204,14 +228,10 @@ trait ExecPlan extends QueryCommand {
             span.mark(s"resultSamples=$numResultSamples")
             span.mark(s"numSrv=${r.size}")
             span.mark(s"execute-step2-end-${getClass.getSimpleName}")
-            QueryResult(queryContext.queryId, finalRes._2, r, querySession.queryStats,
+            QueryResult(queryContext.queryId, resultSchema, r, querySession.queryStats,
               querySession.resultCouldBePartial, querySession.partialResultsReason)
           }
-      }
-      resultTask.onErrorHandle { case ex: Throwable =>
-        QueryError(queryContext.queryId, querySession.queryStats, ex)
-      }
-    }.flatten
+    }
 
     val qresp = for { res <- step1
                     qResult <- step2(res) }

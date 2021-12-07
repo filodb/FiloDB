@@ -807,25 +807,21 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     validatePlan(execPlan, expected)
   }
 
-  it ("should correctly materialize TopkCardExec") {
-    val k = 3
+  it ("should correctly materialize TsCardExec") {
     val shardKeyPrefix = Seq("foo", "bar")
+    val groupDepth = 2
 
-    val addInactive = true
-    val lp = TopkCardinalities(shardKeyPrefix, k, addInactive)
+    val lp = TsCardinalities(shardKeyPrefix, groupDepth)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    execPlan.isInstanceOf[TopkCardReduceExec] shouldEqual true
+    execPlan.isInstanceOf[TsCardReduceExec] shouldEqual true
 
-    val reducer = execPlan.asInstanceOf[TopkCardReduceExec]
-    reducer.rangeVectorTransformers.size shouldEqual 1
-    reducer.rangeVectorTransformers(0).isInstanceOf[TopkCardPresenter] shouldEqual true
-    reducer.rangeVectorTransformers(0).asInstanceOf[TopkCardPresenter].k shouldEqual k
+    val reducer = execPlan.asInstanceOf[TsCardReduceExec]
     reducer.children.size shouldEqual mapper.numShards
     reducer.children.foreach{ child =>
-      child.isInstanceOf[TopkCardExec] shouldEqual true
-      val leaf = child.asInstanceOf[TopkCardExec]
+      child.isInstanceOf[TsCardExec] shouldEqual true
+      val leaf = child.asInstanceOf[TsCardExec]
       leaf.shardKeyPrefix shouldEqual shardKeyPrefix
-      leaf.k shouldEqual k
+      leaf.groupDepth shouldEqual groupDepth
     }
   }
 }

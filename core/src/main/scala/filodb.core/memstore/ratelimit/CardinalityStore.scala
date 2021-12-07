@@ -2,14 +2,17 @@ package filodb.core.memstore.ratelimit
 
 /**
  * The data stored in each node of the Cardinality Store trie
- * @param name name of the item in shardKeyPrefix
+ *
+ * @param shard the shard ID for which this CardinalityStore contains data
+ * @param prefix the shard key prefix that corresponds with the cardinality data
  * @param tsCount total number of timeSeries under this shardKeyPrefix (example, number of timeseries under ws,ns)
  * @param activeTsCount number of actively ingesting timeSeries under this shardKeyPrefix
  *                      (example, number of timeseries under ws,ns)
  * @param childrenCount number of immediate children for this shardKey (example, number of ns under ws)
  * @param childrenQuota quota for number of immediate children
  */
-case class Cardinality(name: String, tsCount: Int, activeTsCount: Int, childrenCount: Int, childrenQuota: Int)
+case class CardinalityRecord(shard: Int, prefix: Seq[String], tsCount: Int,
+                             activeTsCount: Int, childrenCount: Int, childrenQuota: Int)
 
 /**
  *
@@ -54,13 +57,13 @@ trait CardinalityStore {
    * This method will be called for each shard key prefix when a new time series is added
    * to the index.
    */
-  def store(shardKeyPrefix: Seq[String], card: Cardinality): Unit
+  def store(card: CardinalityRecord): Unit
 
   /**
    * Read existing cardinality value, if one does not exist return the zero value
    * indicated
    */
-  def getOrZero(shardKeyPrefix: Seq[String], zero: Cardinality): Cardinality
+  def getOrZero(shardKeyPrefix: Seq[String], zero: CardinalityRecord): CardinalityRecord
 
   /**
    * Remove entry from store. Need to call for each shard key prefix to fully remove shard key.
@@ -69,12 +72,23 @@ trait CardinalityStore {
   def remove(shardKeyPrefix: Seq[String]): Unit
 
   /**
-   * Fetch immediate children of the node for the given shard key prefix
+   * Fetch children of the node for the given shard key prefix.
+   * Result size is limited to MAX_RESULT_SIZE. If more children exist,
+   *   their counts summed into one additional CardinalityRecord with
+   *   prefix OVERFLOW_PREFIX.
+   *
+   * @param depth: only children of this size will be scanned.
    */
-  def scanChildren(shardKeyPrefix: Seq[String]): Seq[Cardinality]
+  def scanChildren(shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord]
 
   /**
    * Close store. Data will be thrown away
    */
   def close(): Unit
+}
+
+object CardinalityStore {
+  // See scanChildren doc for details.
+  val MAX_RESULT_SIZE = 5000
+  val OVERFLOW_PREFIX = Seq("_overflow_")
 }

@@ -3,6 +3,7 @@ package filodb.coordinator
 import java.lang.Thread.UncaughtExceptionHandler
 import java.util.concurrent.{ForkJoinPool, ForkJoinWorkerThread}
 
+import scala.collection.mutable
 import scala.util.control.NonFatal
 
 import akka.actor.{ActorRef, Props}
@@ -18,6 +19,7 @@ import net.ceedubs.ficus.readers.ValueReader
 import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
+import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryStats}
 import filodb.core.store.CorruptVectorException
@@ -212,9 +214,20 @@ final class QueryActor(memStore: MemStore,
   }
 
   private def execTopkCardinalityQuery(q: GetTopkCardinality, sender: ActorRef): Unit = {
+    implicit val ord = new Ordering[CardinalityRecord]() {
+      override def compare(x: CardinalityRecord, y: CardinalityRecord): Int = {
+        if (q.addInactive) x.tsCount - y.tsCount
+          else x.activeTsCount - y.activeTsCount
+        }
+      }.reverse
     try {
-      val ret = memStore.topKCardinality(q.dataset, q.shards, q.shardKeyPrefix, q.k, q.addInactive)
-      sender ! ret
+      val cards = memStore.scanTsCardinalities(q.dataset, q.shards, q.shardKeyPrefix, q.depth)
+      val heap = mutable.PriorityQueue[CardinalityRecord]()
+      cards.foreach { card =>
+          heap.enqueue(card)
+          if (heap.size > q.k) heap.dequeue()
+        }
+      sender ! heap.toSeq
     } catch { case e: Exception =>
       sender ! QueryError(s"Error Occurred", QueryStats(), e)
     }

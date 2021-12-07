@@ -87,6 +87,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
       sparkTasksFailed.increment
       throw e
     }
+    Thread.sleep(62000) // quick & dirty hack to ensure that the completed metric gets published
   }
 
   def migrateWithDownsamplePartKeys(partKeys: Observable[PartKeyRecord], shard: Int): Int = {

@@ -18,9 +18,9 @@ import monix.execution.Scheduler
 import org.asynchttpclient.{AsyncHttpClientConfig, DefaultAsyncHttpClientConfig}
 import org.asynchttpclient.proxy.ProxyServer
 
-import filodb.core.query.{PromQlQueryParams, QuerySession}
+import filodb.core.query.{PromQlQueryParams, QuerySession, QueryStats}
 import filodb.core.store.ChunkSource
-import filodb.query.{BadQueryException, MetadataSuccessResponse, PromCirceSupport, QueryResponse, SuccessResponse}
+import filodb.query._
 
 trait RemoteExec extends LeafExecPlan with StrictLogging {
 
@@ -84,6 +84,15 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     finalUrlParams
   }
 
+  def readQueryStats(queryStatsResponse: Option[Seq[QueryStatistics]]): QueryStats = {
+    val queryStats = QueryStats()
+    if (queryStatsResponse.isDefined && queryStatsResponse.get.nonEmpty) queryStatsResponse.get.foreach { stat =>
+      queryStats.getTimeSeriesScannedCounter(stat.group).addAndGet(stat.timeSeriesScanned)
+      queryStats.getDataBytesScannedCounter(stat.group).addAndGet(stat.dataBytesScanned)
+      queryStats.getResultBytesCounter(stat.group).addAndGet(stat.resultBytes)
+    }
+    queryStats
+  }
 }
 
 /**

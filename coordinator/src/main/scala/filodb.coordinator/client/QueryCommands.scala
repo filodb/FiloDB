@@ -35,6 +35,7 @@ object QueryCommands {
   final case class GetTopkCardinality(dataset: DatasetRef,
                                       shards: Seq[Int],
                                       shardKeyPrefix: Seq[String],
+                                      depth: Int,
                                       k: Int,
                                       addInactive: Boolean,
                                       submitTime: Long = System.currentTimeMillis()) extends QueryCommand
