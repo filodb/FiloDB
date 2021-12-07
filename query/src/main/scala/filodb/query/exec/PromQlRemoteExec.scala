@@ -246,13 +246,4 @@ case class PromQlRemoteExec(queryEndpoint: String,
       if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 
-  def readQueryStats(queryStatsResponse: Option[Seq[QueryStatistics]]): QueryStats = {
-    val queryStats = QueryStats()
-    if (queryStatsResponse.isDefined && queryStatsResponse.get.nonEmpty) queryStatsResponse.get.foreach { stat =>
-      queryStats.getTimeSeriesScannedCounter(stat.group).addAndGet(stat.timeSeriesScanned)
-      queryStats.getDataBytesScannedCounter(stat.group).addAndGet(stat.dataBytesScanned)
-      queryStats.getResultBytesCounter(stat.group).addAndGet(stat.resultBytes)
-    }
-    queryStats
-  }
 }
