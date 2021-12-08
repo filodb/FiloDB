@@ -224,9 +224,19 @@ trait  PlannerHelper {
     // subqueries separately
     val innerPlan = sqww.innerPeriodicSeries
     val window = Some(sqww.subqueryWindowMs)
+    val qp = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val newQp = qp.copy(
+      promQl = LogicalPlanParser.convertToQuery(sqww.innerPeriodicSeries),
+      startSecs = sqww.innerPeriodicSeries.startMs/1000,
+      stepSecs = sqww.innerPeriodicSeries.stepMs/1000,
+      endSecs = sqww.innerPeriodicSeries.endMs/1000
+    )
+    val updatedQueryContext = qContext.copy(
+      origQueryParams = newQp
+    )
     // Here the inner periodic series already has start/end/step populated
     // in Function's toSeriesPlan(), Functions.scala subqqueryArgument() method.
-    val innerExecPlan = walkLogicalPlanTree(sqww.innerPeriodicSeries, qContext)
+    val innerExecPlan = walkLogicalPlanTree(sqww.innerPeriodicSeries, updatedQueryContext)
     if (sqww.functionId != RangeFunctionId.AbsentOverTime) {
       val rangeFn = InternalRangeFunction.lpToInternalFunc(sqww.functionId)
       val paramsExec = materializeFunctionArgs(sqww.functionArgs, qContext)
@@ -290,12 +300,22 @@ trait  PlannerHelper {
   }
 
   def materializeTopLevelSubquery(qContext: QueryContext, tlsq: TopLevelSubquery): PlanResult = {
+    val qp = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val newQp = qp.copy(
+      promQl = LogicalPlanParser.convertToQuery(tlsq.innerPeriodicSeries),
+      startSecs = tlsq.innerPeriodicSeries.startMs/1000,
+      stepSecs = tlsq.innerPeriodicSeries.stepMs/1000,
+      endSecs = tlsq.innerPeriodicSeries.endMs/1000
+    )
+    val updatedQueryContext = qContext.copy(
+      origQueryParams = newQp
+    )
     // This physical plan will try to execute only one range query instead of a number of individual subqueries.
     // If ranges of each of the subqueries have overlap, retrieving the total range
     // is optimal, if there is no overlap and even worse significant gap between the individual subqueries, retrieving
     // the entire range might be suboptimal, this still might be a better option than issuing and concatenating numerous
     // subqueries separately
-    walkLogicalPlanTree(tlsq.innerPeriodicSeries, qContext)
+    walkLogicalPlanTree(tlsq.innerPeriodicSeries, updatedQueryContext)
   }
 
   def materializeScalarTimeBased(qContext: QueryContext,
