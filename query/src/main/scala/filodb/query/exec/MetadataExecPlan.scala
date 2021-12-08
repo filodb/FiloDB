@@ -12,12 +12,12 @@ import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
 import filodb.core.memstore.{MemStore, TimeSeriesMemStore}
 import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
 import filodb.core.query._
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.store.ChunkSource
 import filodb.memory.{UTF8StringMedium, UTF8StringShort}
-import filodb.memory.format.{RowReader, StringArrayRowReader,
-                             UnsafeUtils, UTF8MapIteratorRowReader, ZeroCopyUTF8String}
+import filodb.memory.format._
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
@@ -47,7 +47,7 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
     }.toListL.map { resp =>
       val metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
       resp.foreach { rv =>
-        metadataResult ++= rv.head.rows().map { rowReader =>
+        metadataResult ++= rv.head.rows.map { rowReader =>
           val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
           rv.head match {
             case srv: SerializedRangeVector =>
@@ -118,7 +118,59 @@ final case class TsCardReduceExec(queryContext: QueryContext,
 
 final case class LabelValuesDistConcatExec(queryContext: QueryContext,
                                            dispatcher: PlanDispatcher,
-                                           children: Seq[ExecPlan]) extends MetadataDistConcatExec
+                                           children: Seq[ExecPlan]) extends MetadataDistConcatExec {
+  /**
+   * Compose the sub-query/leaf results here.
+   */
+  override final def compose(childResponses: Observable[(QueryResponse, Int)],
+                        firstSchema: Task[ResultSchema],
+                        querySession: QuerySession): Observable[RangeVector] = {
+    qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
+    val taskOfResults = childResponses.map {
+      case (QueryResult(_, schema, result, _, _, _), _) => (schema, result)
+      case (QueryError(_, _, ex), _)         => throw ex
+    }.toListL.map { resp =>
+      val colType = resp.head._1.columns.head.colType
+      if (colType == MapColumn) {
+        val metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+        resp.foreach { result =>
+          val rv = result._2
+          metadataResult ++= transformRVs(rv.head, colType)
+            .asInstanceOf[Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]]
+        }
+        IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
+          UTF8MapIteratorRowReader(metadataResult.toIterator), None)
+      } else {
+        val metadataResult = scala.collection.mutable.Set.empty[String]
+        resp.foreach { result =>
+          val rv = result._2
+          metadataResult ++= transformRVs(rv.head, colType)
+            .asInstanceOf[Iterator[String]]
+        }
+        IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
+          NoCloseCursor(StringArrayRowReader(metadataResult.toSeq)), None)
+      }
+    }
+    Observable.fromTask(taskOfResults)
+  }
+
+  private def transformRVs(rv: RangeVector, colType: ColumnType): Iterator[Any] = {
+    val metadataResult = rv.rows.map { rowReader =>
+      val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
+      rv match {
+        case srv: SerializedRangeVector if colType == MapColumn =>
+          srv.schema.toStringPairs (binaryRowReader.recordBase, binaryRowReader.recordOffset)
+            .map (pair => pair._1.utf8 -> pair._2.utf8).toMap
+        case srv: SerializedRangeVector if colType == StringColumn =>
+          srv.schema.toStringPairs (binaryRowReader.recordBase, binaryRowReader.recordOffset)
+            .map (_._2).head
+        case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
+      }
+    }
+    metadataResult
+  }
+
+}
 
 final class LabelCardinalityPresenter(val funcParams: Seq[FuncArgs]  = Nil) extends RangeVectorTransformer {
 
@@ -145,18 +197,18 @@ final class LabelCardinalityPresenter(val funcParams: Seq[FuncArgs]  = Nil) exte
 
 final case class LabelNamesDistConcatExec(queryContext: QueryContext,
                                            dispatcher: PlanDispatcher,
-                                           children: Seq[ExecPlan]) extends DistConcatExec {
+                                           children: Seq[ExecPlan]) extends MetadataDistConcatExec {
   /**
    * Pick first non empty result from child.
    */
-  override protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  override final def compose(childResponses: Observable[(QueryResponse, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     childResponses.map {
       case (QueryResult(_, _, result, _, _, _), _) => result
       case (QueryError(_, _, ex), _)         => throw ex
-    }.filter(s => s.head.numRows.getOrElse(1) > 0).headF.map(_.head)
+    }.filter(s => s.nonEmpty && s.head.numRows.getOrElse(1) > 0).headF.map(_.head)
   }
 }
 
@@ -279,24 +331,33 @@ final case class LabelValuesExec(queryContext: QueryContext,
                (implicit sched: Scheduler): ExecResult = {
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
-    val rvs = if (source.isInstanceOf[MemStore]) {
+    val execResult = if (source.isInstanceOf[MemStore]) {
       val memStore = source.asInstanceOf[MemStore]
-      val response = filters.isEmpty match {
+      filters.isEmpty match {
         // retrieves label values for a single label - no column filter
-        case true if columns.size == 1 => memStore.labelValues(dataset, shard, columns.head, queryContext.
-          plannerParams.sampleLimit).map(termInfo => Map(columns.head.utf8 -> termInfo.term)).toIterator
+        case true if (columns.size == 1) =>
+          val labels = memStore.labelValues(dataset, shard, columns.head,
+            queryContext.plannerParams.sampleLimit).map(_.term.toString)
+          val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
+            NoCloseCursor(StringArrayRowReader(labels)), None))
+          val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.StringColumn)), 1)
+          ExecResult(resp, Task.eval(sch))
         case true => throw new BadQueryException("either label name is missing " +
           "or there are multiple label names without filter")
-        case false => memStore.labelValuesWithFilters(dataset, shard, filters, columns, endMs, startMs,
+        case false =>
+          val metadataMap = memStore.labelValuesWithFilters(dataset, shard, filters, columns, endMs, startMs,
           queryContext.plannerParams.sampleLimit)
+          val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
+            UTF8MapIteratorRowReader(metadataMap), None))
+          val sch = ResultSchema(Seq(ColumnInfo("Series", ColumnType.MapColumn)), 1)
+          ExecResult(resp, Task.eval(sch))
       }
-      Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-        UTF8MapIteratorRowReader(response), None))
     } else {
-      Observable.empty
+      val resp = Observable.empty
+      val sch = ResultSchema(Seq(ColumnInfo("Series", ColumnType.MapColumn)), 1)
+      ExecResult(resp, Task.eval(sch))
     }
-    val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
-    ExecResult(rvs, Task.eval(sch))
+    execResult
   }
 
   def args: String = s"shard=$shard, filters=$filters, col=$columns, limit=${queryContext.plannerParams.sampleLimit}," +
