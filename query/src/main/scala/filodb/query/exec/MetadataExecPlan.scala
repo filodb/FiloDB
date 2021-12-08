@@ -12,7 +12,7 @@ import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
 import filodb.core.memstore.{MemStore, TimeSeriesMemStore}
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.Column.ColumnType.MapColumn
+import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
 import filodb.core.query._
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.store.ChunkSource
@@ -135,15 +135,8 @@ final case class LabelValuesDistConcatExec(queryContext: QueryContext,
         val metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
         resp.foreach { result =>
           val rv = result._2
-          metadataResult ++= rv.head.rows.map { rowReader =>
-            val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
-            rv.head match {
-              case srv: SerializedRangeVector =>
-                srv.schema.toStringPairs (binaryRowReader.recordBase, binaryRowReader.recordOffset)
-                  .map (pair => pair._1.utf8 -> pair._2.utf8).toMap
-              case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
-            }
-          }
+          metadataResult ++= transformRVs(rv.head, colType)
+            .asInstanceOf[Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]]
         }
         IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
           UTF8MapIteratorRowReader(metadataResult.toIterator), None)
@@ -151,15 +144,8 @@ final case class LabelValuesDistConcatExec(queryContext: QueryContext,
         val metadataResult = scala.collection.mutable.Set.empty[String]
         resp.foreach { result =>
           val rv = result._2
-          metadataResult ++= rv.head.rows.map { rowReader =>
-            val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
-            rv.head match {
-              case srv: SerializedRangeVector =>
-                srv.schema.toStringPairs (binaryRowReader.recordBase, binaryRowReader.recordOffset)
-                  .map (_._2).head
-              case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
-            }
-          }
+          metadataResult ++= transformRVs(rv.head, colType)
+            .asInstanceOf[Iterator[String]]
         }
         IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
           NoCloseCursor(StringArrayRowReader(metadataResult.toSeq)), None)
@@ -167,6 +153,23 @@ final case class LabelValuesDistConcatExec(queryContext: QueryContext,
     }
     Observable.fromTask(taskOfResults)
   }
+
+  private def transformRVs(rv: RangeVector, colType: ColumnType): Iterator[Any] = {
+    val metadataResult = rv.rows.map { rowReader =>
+      val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
+      rv match {
+        case srv: SerializedRangeVector if colType == MapColumn =>
+          srv.schema.toStringPairs (binaryRowReader.recordBase, binaryRowReader.recordOffset)
+            .map (pair => pair._1.utf8 -> pair._2.utf8).toMap
+        case srv: SerializedRangeVector if colType == StringColumn =>
+          srv.schema.toStringPairs (binaryRowReader.recordBase, binaryRowReader.recordOffset)
+            .map (_._2).head
+        case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
+      }
+    }
+    metadataResult
+  }
+
 }
 
 final class LabelCardinalityPresenter(val funcParams: Seq[FuncArgs]  = Nil) extends RangeVectorTransformer {
