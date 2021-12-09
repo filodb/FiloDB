@@ -294,4 +294,33 @@ class LogicalPlanSpec extends AnyFunSpec with Matchers {
     res2(0).size.shouldEqual(2)
     res1.hashCode() shouldEqual res2.hashCode()
   }
+
+  it ("should construct TsCardinalities only when args are valid") {
+    // TODO: these tests (and TsCardinalities construction requirements)
+    //   are designed for a ws/ns/metric shard key prefix. If/when a more
+    //   general setup is needed, these tests/requirements need to be updated.
+    assertThrows[IllegalArgumentException] {
+      // need ws/ns in order to group by metric
+      TsCardinalities(Seq(), 2)
+    }
+    assertThrows[IllegalArgumentException] {
+      // need ws/ns in order to group by metric
+      TsCardinalities(Seq("a"), 2)
+    }
+    assertThrows[IllegalArgumentException] {
+      // insufficient group depth
+      TsCardinalities(Seq("a", "b"), 0)
+    }
+    assertThrows[IllegalArgumentException] {
+      // insufficient group depth
+      TsCardinalities(Seq("a", "b", "c"), 1)
+    }
+    TsCardinalities(Seq(), 0)
+    TsCardinalities(Seq(), 1)
+    TsCardinalities(Seq("a"), 0)
+    TsCardinalities(Seq("a"), 1)
+    TsCardinalities(Seq("a", "b"), 1)
+    TsCardinalities(Seq("a", "b"), 2)
+    TsCardinalities(Seq("a", "b", "c"), 2)
+  }
 }

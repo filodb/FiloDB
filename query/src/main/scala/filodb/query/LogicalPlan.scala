@@ -165,7 +165,7 @@ case class TsCardinalities(shardKeyPrefix: Seq[String], groupDepth: Int) extends
     "groupDepth must lie on [0, 2]")
   require(1 + groupDepth >= shardKeyPrefix.size,
     "groupDepth indicate a depth at least as deep as shardKeyPrefix")
-  require(groupDepth < 2 || shardKeyPrefix.size == 2,
+  require(groupDepth < 2 || shardKeyPrefix.size >= 2,
     "cannot group at the metric level when prefix does not contain ws and ns")
 }
 
