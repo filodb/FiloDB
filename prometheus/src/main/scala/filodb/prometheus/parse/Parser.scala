@@ -105,6 +105,11 @@ object Parser extends StrictLogging {
     }
   }
 
+  def labelCardinalityToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = parseQuery(query) match {
+      case p: InstantExpression => p.toLabelCardinalityPlan(timeParams)
+      case _ => throw new UnsupportedOperationException()
+  }
+
   // Only called by tests.
   def labelValuesQueryToLogicalPlan(labelNames: Seq[String], filterQuery: Option[String],
                                     timeParams: TimeRangeParams): LogicalPlan = {

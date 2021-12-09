@@ -180,15 +180,14 @@ final class LabelCardinalityPresenter(val funcParams: Seq[FuncArgs]  = Nil) exte
                      sourceSchema: ResultSchema,
                      paramsResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
 
-    source.map(rv => {
+    source.filter(!_.rows().isEmpty).map(rv => {
           val x = rv.rows().next()
           // TODO: We expect only one column to be a map, pattern matching does not work, is there better way?
           val sketchMap = x.getAny(columnNo = 0).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
           val sketchMapIterator = (sketchMap.mapValues {
             sketch => ZeroCopyUTF8String(Math.round(CpcSketch.heapify(sketch.bytes).getEstimate).toInt.toString)}
             :: Nil).toIterator
-          IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-            UTF8MapIteratorRowReader(sketchMapIterator), None)
+          IteratorBackedRangeVector(rv.key, UTF8MapIteratorRowReader(sketchMapIterator), None)
       })
   }
 
@@ -216,7 +215,7 @@ trait LabelCardinalityExecPlan {
   /**
    * Parameter deciding the sketch size to be used for approximating cardinality
    */
-  val logK = 12
+  val logK = 10
 }
 final case class LabelCardinalityReduceExec(queryContext: QueryContext,
                                             dispatcher: PlanDispatcher,
@@ -249,38 +248,50 @@ final case class LabelCardinalityReduceExec(queryContext: QueryContext,
                                  firstSchema: Task[ResultSchema],
                                  querySession: QuerySession): Observable[RangeVector] = {
       qLogger.debug(s"LabelCardinalityDistConcatExec: Concatenating results")
-      val taskOfResults = childResponses.map {
+      val taskOfResults: Task[Observable[RangeVector]] = childResponses.map {
         case (QueryResult(_, _, result, _, _, _), _) => result
         case (QueryError(_, _, ex), _)         => throw ex
-      }.foldLeftL(scala.collection.mutable.Map.empty[ZeroCopyUTF8String, CpcSketch])
+      }.filter(!_.isEmpty)
+        .foldLeftL(MutableMap.empty[RangeVectorKey, MutableMap[ZeroCopyUTF8String, CpcSketch]])
       { case (metadataResult, rv) =>
-          rv.head.rows().foreach { rowReader =>
-            val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
-            rv.head match {
-              case srv: SerializedRangeVector =>
-                srv.schema.consumeMapItems(
-                  binaryRowReader.recordBase,
-                  binaryRowReader.recordOffset,
-                  index = 0,
-                  mapConsumer(metadataResult))
-              case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
+          val rangeVector = rv.head
+          val key = rangeVector.key
+          if (key.keySize > 0) {
+            val sketchMap = metadataResult.getOrElseUpdate(key, MutableMap.empty[ZeroCopyUTF8String, CpcSketch])
+            rangeVector.rows().foreach { rowReader =>
+              val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
+              rv.head match {
+                case srv: SerializedRangeVector =>
+                  srv.schema.consumeMapItems(binaryRowReader.recordBase, binaryRowReader.recordOffset, index = 0,
+                    mapConsumer(sketchMap))
+                case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
+              }
             }
-        }
+          }
         metadataResult
       }.map (metaDataMutableMap => {
-        // metaDataMutableMap is a MutableMap[ZeroCopyUTF8String, CPCSketch], we map its values to get a
-        // MutableMap[ZeroCopyUTF8String, ZeroCopyUTF8String] where the value represents the sketch bytes. The toMap
-        // is called to get an  ImmutableMap. This on-heap Map then needs to be converted to a range vector by getting
-        // an Iterator and then using it with IteratorBackedRangeVector.
-        //TODO: There is a lot of boiler plate to convert a heap based Map to RangeVector. We either need to avoid
-        // using heap data structures or get a clean oneliner to achieve it.
-        val labelSketchMapIterator =
-          (metaDataMutableMap.mapValues(cpcSketch => ZeroCopyUTF8String(cpcSketch.toByteArray)).toMap:: Nil).toIterator
-          IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-            UTF8MapIteratorRowReader(labelSketchMapIterator), None)
+          // metaDataMutableMap is a Map of [RangeVectorKey, MutableMap[ZeroCopyUTF8String, CpcSketch]]
+          // Since the key query is specific to one ws/ns/metric, we see no more than one entry in the Map
+          // The value of the map is a MutableMap[ZeroCopyUTF8String, CPCSketch], we map its values to get a
+          // MutableMap[ZeroCopyUTF8String, ZeroCopyUTF8String] where the value represents the sketch bytes. The toMap
+          // is called to get an  ImmutableMap. This on-heap Map then needs to be converted to a range vector by getting
+          // an Iterator and then using it with IteratorBackedRangeVector.
+          //TODO: There is a lot of boiler plate to convert a heap based Map to RangeVector. We either need to avoid
+          // using heap data structures or get a clean oneliner to achieve it.
+          if (metaDataMutableMap.isEmpty) {
+            Observable.now(IteratorBackedRangeVector(CustomRangeVectorKey(Map.empty),
+              UTF8MapIteratorRowReader(List.empty.toIterator), None))
+          } else {
+            val x = for ((key, sketchMap) <- metaDataMutableMap) yield {
+              val labelSketchMapIterator =
+                Seq(sketchMap.mapValues(cpcSketch => ZeroCopyUTF8String(cpcSketch.toByteArray)).toMap).toIterator
+              IteratorBackedRangeVector(key, UTF8MapIteratorRowReader(labelSketchMapIterator), None)
+            }
+            Observable.fromIterable(x)
+          }
         }
       )
-      Observable.fromTask(taskOfResults)
+      Observable.fromTask(taskOfResults).flatten
   }
 }
 
@@ -387,19 +398,29 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
         //  sequences and operate directly with it to create the final data structures we need
         val partKeysMap = ms.partKeysWithFilters(dataset, shard, filters, fetchFirstLastSampleTimes = false,
           endMs, startMs, limit = 1000000)
-
-        val metadataResult = scala.collection.mutable.Map.empty[String, CpcSketch]
+        import scala.collection.mutable.{Map => MutableMap}
+        val metadataResult = MutableMap.empty[RangeVectorKey, MutableMap[String, CpcSketch]]
         partKeysMap.foreach { rv =>
+          val rvKey = CustomRangeVectorKey(rv.filterKeys(key => {
+            val keyStr = key.toString
+            keyStr.equals("_ws_") || keyStr.equals("_ns_") || keyStr.equals("_metric_")
+          }))
+          val sketchMap = metadataResult.getOrElseUpdate(rvKey, MutableMap.empty)
           rv.foreach {
             case (labelName, labelValue) =>
-              metadataResult.getOrElseUpdate(labelName.toString, new CpcSketch(logK)).update(labelValue.toString)
+              val (labelNameStr, labelValueStr) = (labelName.toString, labelValue.toString)
+              sketchMap.getOrElseUpdate(labelNameStr, new CpcSketch(logK)).update(labelValueStr)
           }
         }
-        val sketchMapIterator = (metadataResult.map {
-          case (label, cpcSketch) => (ZeroCopyUTF8String(label), ZeroCopyUTF8String(cpcSketch.toByteArray))
-        }.toMap :: Nil).toIterator
-        Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-          UTF8MapIteratorRowReader(sketchMapIterator), None))
+        val rvIterable = for((key, sketchMap) <- metadataResult) yield {
+          IteratorBackedRangeVector(key,
+            UTF8MapIteratorRowReader(
+              Seq(sketchMap.map {
+                case (label, cpcSketch) =>
+                  (ZeroCopyUTF8String(label), ZeroCopyUTF8String(cpcSketch.toByteArray))}.toMap).toIterator),
+            None)
+        }
+        Observable.fromIterable(rvIterable)
       case _ => Observable.empty
     }
     val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)

@@ -266,22 +266,38 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     execPlan.addRangeVectorTransformer(new LabelCardinalityPresenter())
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
-    val result = (resp: @unchecked) match {
+    (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _) => {
-        response.size shouldEqual 1
-        val rv = response(0)
-        rv.rows.size shouldEqual 1
-        val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
-        rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset).toMap
+        response.size shouldEqual 2
+        val rv1 = response(0)
+        val rv2 = response(1)
+        rv1.rows.size shouldEqual 1
+        rv2.rows.size shouldEqual 1
+        val record1 = rv1.rows.next().asInstanceOf[BinaryRecordRowReader]
+        val result1 = rv1.asInstanceOf[SerializedRangeVector]
+                          .schema.toStringPairs(record1.recordBase, record1.recordOffset).toMap
+
+        val record2 = rv2.rows.next().asInstanceOf[BinaryRecordRowReader]
+        val result2 = rv2.asInstanceOf[SerializedRangeVector]
+                            .schema.toStringPairs(record2.recordBase, record2.recordOffset).toMap
+
+        result1 shouldEqual Map("_ns_" -> "1",
+          "unicode_tag" -> "1",
+          "_type_" -> "1",
+          "job" -> "1",
+          "instance" -> "1",
+          "_metric_" -> "1",
+          "_ws_" -> "1")
+
+        result2 shouldEqual Map("_ns_" -> "1",
+          "unicode_tag" -> "1",
+          "_type_" -> "1",
+          "job" -> "1",
+          "instance" -> "1",
+          "_metric_" -> "1",
+          "_ws_" -> "1")
       }
     }
-    result shouldEqual Map("_ns_" -> "1",
-                           "unicode_tag" -> "2",
-                           "_type_" -> "1",
-                           "job" -> "1",
-                           "instance" -> "1",
-                           "_metric_" -> "3",
-                           "_ws_" -> "1")
   }
 
   it ("should correctly execute TsCardExec") {
