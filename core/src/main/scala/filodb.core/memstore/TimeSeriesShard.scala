@@ -632,7 +632,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     assertThreadName(IngestSchedName)
     val schemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
     val schema = schemas(schemaId)
-    val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
     val partId = if (pk.endTime == Long.MaxValue) {
       // this is an actively ingesting partition
       val group = partKeyGroup(schemas.part.binSchema, pk.partKey, UnsafeUtils.arayOffset, numGroups)
@@ -678,6 +677,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     shardStats.indexRecoveryNumRecordsProcessed.increment()
     if (schema != Schemas.UnknownSchema) {
       if (storeConfig.meteringEnabled) {
+        val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
         cardTracker.modifyCount(shardKey, 1, if (pk.endTime == Long.MaxValue) 1 else 0)
       }
     }
