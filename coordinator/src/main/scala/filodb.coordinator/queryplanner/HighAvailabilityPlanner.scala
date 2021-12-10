@@ -1,10 +1,9 @@
 package filodb.coordinator.queryplanner
 
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.core.DatasetRef
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.query.{LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters}
+import filodb.query.{LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters, TsCardinalities}
 import filodb.query.exec._
 
 /**
@@ -53,6 +52,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     }
   }
 
+  //scalastyle:off method.length
   /**
     * Converts Route objects returned by FailureProvider to ExecPlan
     */
@@ -93,6 +93,13 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
                                             MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                               urlParams, newQueryContext, inProcessPlanDispatcher,
                                               dsRef, remoteExecHttpClient)
+            case lp: TsCardinalities     => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
+                                              Map("shardKeyPrefix" ->
+                                                    lp.shardKeyPrefix.mkString(TsCardExec.PREFIX_DELIM),
+                                                  "groupDepth" ->
+                                                    lp.groupDepth.toString),
+                                              newQueryContext,
+                                              inProcessPlanDispatcher, dsRef, remoteExecHttpClient)
             case _                       => PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                             newQueryContext, inProcessPlanDispatcher, dsRef, remoteExecHttpClient)
           }
@@ -103,6 +110,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     if (execPlans.size == 1) execPlans.head
     else stitchPlans(rootLogicalPlan, execPlans, qContext)
   }
+  //scalastyle:on method.length
 
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
