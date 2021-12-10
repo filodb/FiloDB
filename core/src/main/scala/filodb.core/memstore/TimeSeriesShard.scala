@@ -677,7 +677,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     shardStats.indexRecoveryNumRecordsProcessed.increment()
     if (schema != Schemas.UnknownSchema) {
       if (storeConfig.meteringEnabled) {
-        val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
+        val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset,
+                                                      schema.options.shardKeyColumns)
         cardTracker.modifyCount(shardKey, 1, if (pk.endTime == Long.MaxValue) 1 else 0)
       }
     }
