@@ -510,9 +510,9 @@ final case class TsCardExec(queryContext: QueryContext,
                             shard: Int,
                             shardKeyPrefix: Seq[String],
                             groupDepth: Int) extends LeafExecPlan with StrictLogging {
-  require(groupDepth >= 0,
-    "groupDepth must be non-negative")
-  require(1 + groupDepth >= shardKeyPrefix.size,
+  require(groupDepth >= 1,
+    "groupDepth must be positive")
+  require(groupDepth >= shardKeyPrefix.size,
     "groupDepth indicate a depth at least as deep as shardKeyPrefix")
 
   override def enforceLimit: Boolean = false
@@ -530,7 +530,7 @@ final case class TsCardExec(queryContext: QueryContext,
       case tsMemStore: TimeSeriesMemStore =>
         Observable.eval {
           val cards = tsMemStore.scanTsCardinalities(
-            dataset, Seq(shard), shardKeyPrefix, groupDepth + 1)
+            dataset, Seq(shard), shardKeyPrefix, groupDepth)
           val it = cards.map{ card =>
             CardRowReader(prefixToGroup(card.prefix),
                           CardCounts(card.activeTsCount, card.tsCount))

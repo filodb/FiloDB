@@ -110,7 +110,7 @@ object CliMain extends FilodbClusterNode {
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labelvalues --labelnames <lable-names> --labelfilter <label-filter> --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labels --labelfilter <label-filter> -dataset <dataset>")
-    println("  --host <hostname/IP> [--port ...] --command tscard --dataset <dataset> --shardkeyprefix <shard-key-prefix> --groupdepth {0,1,2}")
+    println("  --host <hostname/IP> [--port ...] --command tscard --dataset <dataset> --shardkeyprefix <shard-key-prefix> --groupdepth {1,2,3}")
     println("  --host <hostname/IP> [--port ...] --command topkcardlocal --dataset prometheus --k 2 --shardkeyprefix demo App-0")
     println("  --host <hostname/IP> [--port ...] --command labelcardinality --labelfilter <label-filter> --dataset prometheus")
     println("  --host <hostname/IP> [--port ...] --command findqueryshards --queries <query> --spread <spread>")
