@@ -418,6 +418,9 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("sum_over_time(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
     parseError("sum_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
 
+    // regexp length
+    parseError(s"sum_over_time(some_metric{longregex~='${"f"*1001}'})") // reason : Regex len > 1000
+
     //  Timestamp
     parseSuccessfully("timestamp(some_metric)")
     parseError("timestamp(some_metric[5m])") // reason : Expected instant vector, got range vector

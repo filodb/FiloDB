@@ -40,7 +40,9 @@ object PrometheusModel {
         val filter = m.getType match {
           case MatchType.EQUAL => Filter.Equals(m.getValue)
           case MatchType.NOT_EQUAL => Filter.NotEquals(m.getValue)
-          case MatchType.REGEX_MATCH => Filter.EqualsRegex(m.getValue)
+          case MatchType.REGEX_MATCH =>
+            require(m.getValue.length < 1000, "Regular expression filters should be < 1000 characters")
+            Filter.EqualsRegex(m.getValue)
           case MatchType.REGEX_NO_MATCH => Filter.NotEqualsRegex(m.getValue)
         }
         ColumnFilter(m.getName, filter)
