@@ -420,6 +420,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
 
     // regexp length
     parseError(s"sum_over_time(some_metric{longregex~='${"f"*1001}'})") // reason : Regex len > 1000
+    parseError(s"sum_over_time(some_metric{longregex~!'${"f"*1001}'})") // reason : Regex len > 1000
 
     //  Timestamp
     parseSuccessfully("timestamp(some_metric)")

@@ -189,7 +189,9 @@ sealed trait Vector extends Expression {
       } else { labelVal }
       labelMatch.labelMatchOp match {
         case EqualMatch      => ColumnFilter(labelMatch.label, query.Filter.Equals(labelValue))
-        case NotRegexMatch   => ColumnFilter(labelMatch.label, query.Filter.NotEqualsRegex(labelValue))
+        case NotRegexMatch   => require(labelValue.length <= Parser.REGEX_MAX_LEN,
+                                         s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters")
+                                ColumnFilter(labelMatch.label, query.Filter.NotEqualsRegex(labelValue))
         case RegexMatch      => require(labelValue.length <= Parser.REGEX_MAX_LEN,
                                          s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters")
                                 ColumnFilter(labelMatch.label, query.Filter.EqualsRegex(labelValue))

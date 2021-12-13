@@ -121,7 +121,9 @@ object Parser extends StrictLogging {
         val columnFilters = parseLabelValueFilter(filter).map { l =>
           l.labelMatchOp match {
             case EqualMatch => ColumnFilter(l.label, Filter.Equals(l.value))
-            case NotRegexMatch => ColumnFilter(l.label, Filter.NotEqualsRegex(l.value))
+            case NotRegexMatch => require(l.value.length <= REGEX_MAX_LEN,
+                                   s"Regular expression filters should be <= $REGEX_MAX_LEN characters")
+                                  ColumnFilter(l.label, Filter.NotEqualsRegex(l.value))
             case RegexMatch =>  require(l.value.length <= REGEX_MAX_LEN,
                                    s"Regular expression filters should be <= $REGEX_MAX_LEN characters")
                                 ColumnFilter(l.label, Filter.EqualsRegex(l.value))

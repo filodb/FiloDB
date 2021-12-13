@@ -42,10 +42,13 @@ object PrometheusModel {
           case MatchType.EQUAL => Filter.Equals(m.getValue)
           case MatchType.NOT_EQUAL => Filter.NotEquals(m.getValue)
           case MatchType.REGEX_MATCH =>
-            require(m.getValue.length <= REGEX_MAX_LEN, s"Regular expression filters should " +
-              s"be <= ${REGEX_MAX_LEN} characters")
-            Filter.EqualsRegex(m.getValue)
-          case MatchType.REGEX_NO_MATCH => Filter.NotEqualsRegex(m.getValue)
+                            require(m.getValue.length <= REGEX_MAX_LEN, s"Regular expression filters should " +
+                              s"be <= ${REGEX_MAX_LEN} characters")
+                            Filter.EqualsRegex(m.getValue)
+          case MatchType.REGEX_NO_MATCH =>
+                            require(m.getValue.length <= REGEX_MAX_LEN, s"Regular expression filters should " +
+                              s"be <= ${REGEX_MAX_LEN} characters")
+                            Filter.NotEqualsRegex(m.getValue)
         }
         ColumnFilter(m.getName, filter)
       }
