@@ -158,6 +158,21 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     execPlan.asInstanceOf[PartKeysDistConcatExec].children(2).asInstanceOf[MockExecPlan].name shouldEqual ("rules2")
   }
 
+  it("should generate Exec plan for TsCardinalities") {
+    val lp = TsCardinalities(Seq("a", "b"), 2)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams.copy(promQl = "")))
+    execPlan.isInstanceOf[TsCardReduceExec] shouldEqual (true)
+    execPlan.asInstanceOf[TsCardReduceExec].children.length shouldEqual(3)
+
+    // TODO(a_theimer): what else to check?
+    // TODO(a_theimer): does promql params time range need to change?
+    execPlan.children(0).isInstanceOf[MetadataRemoteExec] shouldEqual true
+
+    execPlan.asInstanceOf[TsCardReduceExec].children(1).asInstanceOf[MockExecPlan].name shouldEqual ("rules1")
+    execPlan.asInstanceOf[TsCardReduceExec].children(2).asInstanceOf[MockExecPlan].name shouldEqual ("rules2")
+  }
+
   it("should generate Exec plan for Scalar query which does not have any metric") {
     val lp = Parser.queryToLogicalPlan("time()", 1000, 1000)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
