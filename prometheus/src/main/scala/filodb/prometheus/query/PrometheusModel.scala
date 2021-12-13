@@ -7,6 +7,7 @@ import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query.{Result => _, _}
+import filodb.prometheus.parse.Parser.REGEX_MAX_LEN
 import filodb.query.{QueryResult => FiloQueryResult, _}
 import filodb.query.AggregationOperator.Avg
 import filodb.query.exec.{ExecPlan, HistToPromSeriesMapper}
@@ -40,8 +41,14 @@ object PrometheusModel {
         val filter = m.getType match {
           case MatchType.EQUAL => Filter.Equals(m.getValue)
           case MatchType.NOT_EQUAL => Filter.NotEquals(m.getValue)
-          case MatchType.REGEX_MATCH => Filter.EqualsRegex(m.getValue)
-          case MatchType.REGEX_NO_MATCH => Filter.NotEqualsRegex(m.getValue)
+          case MatchType.REGEX_MATCH =>
+                            require(m.getValue.length <= REGEX_MAX_LEN, s"Regular expression filters should " +
+                              s"be <= ${REGEX_MAX_LEN} characters")
+                            Filter.EqualsRegex(m.getValue)
+          case MatchType.REGEX_NO_MATCH =>
+                            require(m.getValue.length <= REGEX_MAX_LEN, s"Regular expression filters should " +
+                              s"be <= ${REGEX_MAX_LEN} characters")
+                            Filter.NotEqualsRegex(m.getValue)
         }
         ColumnFilter(m.getName, filter)
       }

@@ -4,6 +4,7 @@ import scala.util.Try
 
 import filodb.core.{query, GlobalConfig}
 import filodb.core.query.{ColumnFilter, RangeParams}
+import filodb.prometheus.parse.Parser
 import filodb.query._
 
 object Vectors {
@@ -188,8 +189,12 @@ sealed trait Vector extends Expression {
       } else { labelVal }
       labelMatch.labelMatchOp match {
         case EqualMatch      => ColumnFilter(labelMatch.label, query.Filter.Equals(labelValue))
-        case NotRegexMatch   => ColumnFilter(labelMatch.label, query.Filter.NotEqualsRegex(labelValue))
-        case RegexMatch      => ColumnFilter(labelMatch.label, query.Filter.EqualsRegex(labelValue))
+        case NotRegexMatch   => require(labelValue.length <= Parser.REGEX_MAX_LEN,
+                                         s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters")
+                                ColumnFilter(labelMatch.label, query.Filter.NotEqualsRegex(labelValue))
+        case RegexMatch      => require(labelValue.length <= Parser.REGEX_MAX_LEN,
+                                         s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters")
+                                ColumnFilter(labelMatch.label, query.Filter.EqualsRegex(labelValue))
         case NotEqual(false) => ColumnFilter(labelMatch.label, query.Filter.NotEquals(labelValue))
         case other: Any      => throw new IllegalArgumentException(s"Unknown match operator $other")
       }
