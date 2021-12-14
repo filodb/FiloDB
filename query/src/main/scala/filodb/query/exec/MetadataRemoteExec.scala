@@ -20,7 +20,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
                               dataset: DatasetRef,
                               remoteExecHttpClient: RemoteExecHttpClient) extends RemoteExec {
 
-  private val lvColumns = Seq(ColumnInfo("LabelValues", ColumnType.MapColumn))
+  private val lvColumns = Seq(ColumnInfo("metadataMap", ColumnType.MapColumn))
   private val resultSchema = ResultSchema(lvColumns, 1)
   private val recordSchema = SerializedRangeVector.toSchema(lvColumns)
 

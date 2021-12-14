@@ -319,7 +319,7 @@ final case class PartKeysExec(queryContext: QueryContext,
           new CustomRangeVectorKey(Map.empty), UTF8MapIteratorRowReader(response), None))
       case _ => Observable.empty
     }
-    val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
+    val sch = ResultSchema(Seq(ColumnInfo("metadataMap", ColumnType.MapColumn)), 1)
     ExecResult(rvs, Task.eval(sch))
   }
 
@@ -360,12 +360,12 @@ final case class LabelValuesExec(queryContext: QueryContext,
           queryContext.plannerParams.sampleLimit)
           val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
             UTF8MapIteratorRowReader(metadataMap), None))
-          val sch = ResultSchema(Seq(ColumnInfo("Series", ColumnType.MapColumn)), 1)
+          val sch = ResultSchema(Seq(ColumnInfo("metadataMap", ColumnType.MapColumn)), 1)
           ExecResult(resp, Task.eval(sch))
       }
     } else {
       val resp = Observable.empty
-      val sch = ResultSchema(Seq(ColumnInfo("Series", ColumnType.MapColumn)), 1)
+      val sch = ResultSchema(Seq(ColumnInfo("metadataMap", ColumnType.MapColumn)), 1)
       ExecResult(resp, Task.eval(sch))
     }
     execResult
@@ -423,7 +423,7 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
         Observable.fromIterable(rvIterable)
       case _ => Observable.empty
     }
-    val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
+    val sch = ResultSchema(Seq(ColumnInfo("metadataMap", ColumnType.MapColumn)), 1)
     ExecResult(rvs, Task.eval(sch))
   }
 
