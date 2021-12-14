@@ -66,7 +66,8 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: LabelValues                 => TimeRange(lp.startMs, lp.endMs)
       case lp: LabelCardinality            => TimeRange(lp.startMs, lp.endMs)
       case lp: LabelNames                  => TimeRange(lp.startMs, lp.endMs)
-      case lp: TsCardinalities             => TimeRange(0, Long.MaxValue)  // TODO(a_theimer)
+      case lp: TsCardinalities             => throw new UnsupportedOperationException(
+                                                          "TsCardinalities does not have times")
       case lp: SeriesKeysByFilters         => TimeRange(lp.startMs, lp.endMs)
       case lp: ApplyInstantFunctionRaw     => getTimeFromLogicalPlan(lp.vectors)
       case lp: ScalarBinaryOperation       => TimeRange(lp.rangeParams.startSecs * 1000, lp.rangeParams.endSecs * 1000)
@@ -74,8 +75,8 @@ object LogicalPlanUtils extends StrictLogging {
                                               lp.timeStepParams.endSecs * 1000)
       case sq: SubqueryWithWindowing       => TimeRange(sq.startMs, sq.endMs)
       case tlsq: TopLevelSubquery          => TimeRange(tlsq.startMs, tlsq.endMs)
-      case lp: RawChunkMeta                => throw new UnsupportedOperationException(s"RawChunkMeta does not have " +
-                                              s"time")
+      case lp: RawChunkMeta                => throw new UnsupportedOperationException(
+                                                          "RawChunkMeta does not have times")
     }
   }
   // scalastyle:on cyclomatic.complexity

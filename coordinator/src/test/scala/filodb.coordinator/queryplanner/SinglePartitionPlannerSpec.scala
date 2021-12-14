@@ -158,17 +158,22 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     execPlan.asInstanceOf[PartKeysDistConcatExec].children(2).asInstanceOf[MockExecPlan].name shouldEqual ("rules2")
   }
 
-  it("should generate Exec plan for TsCardinalities") {
+  it("should generate correct ExecPlan for TsCardinalities") {
+
+    // Note: this test is expected to break when TsCardinalities.isRoutable = true
+
     val lp = TsCardinalities(Seq("a", "b"), 2)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams.copy(promQl = "")))
     execPlan.isInstanceOf[TsCardReduceExec] shouldEqual (true)
     execPlan.asInstanceOf[TsCardReduceExec].children.length shouldEqual(3)
 
-    // TODO(a_theimer): what else to check?
-    // TODO(a_theimer): does promql params time range need to change?
-    execPlan.children(0).isInstanceOf[MetadataRemoteExec] shouldEqual true
+    // local planner
+    execPlan.children(0).isInstanceOf[TsCardReduceExec] shouldEqual true
+    execPlan.children(0).children.forall(_.isInstanceOf[TsCardExec]) shouldEqual true
+    execPlan.children(0).children.size shouldEqual 32
 
+    // mock planners
     execPlan.asInstanceOf[TsCardReduceExec].children(1).asInstanceOf[MockExecPlan].name shouldEqual ("rules1")
     execPlan.asInstanceOf[TsCardReduceExec].children(2).asInstanceOf[MockExecPlan].name shouldEqual ("rules2")
   }

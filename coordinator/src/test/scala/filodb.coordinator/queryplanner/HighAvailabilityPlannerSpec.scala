@@ -465,27 +465,4 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     queryParams.endSecs shouldEqual (to)
 
   }
-
-  it("should generate correct ExecPlan for TsCardinalities") {
-    val toMs = Long.MaxValue
-    val fromMs = 0
-    val lp = TsCardinalities(Seq("a", "b"), 3)
-
-    val failureProvider = new FailureProvider {
-      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
-        Seq(FailureTimeRange("local", datasetRef,
-          TimeRange(fromMs * 1000, (fromMs + 200) * 1000), false))
-      }
-    }
-
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
-
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-
-    execPlan.isInstanceOf[MetadataRemoteExec] shouldEqual (true)
-    val queryParams = execPlan.asInstanceOf[MetadataRemoteExec].queryContext
-                              .origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryParams.startSecs shouldEqual (fromMs / 1000)
-    queryParams.endSecs shouldEqual (toMs / 1000)
-  }
 }

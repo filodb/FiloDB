@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.DatasetRef
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.query.{LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters, TsCardinalities}
+import filodb.query.{LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters}
 import filodb.query.exec._
 
 /**
@@ -94,13 +94,6 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
                                             MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                               urlParams, newQueryContext, inProcessPlanDispatcher,
                                               dsRef, remoteExecHttpClient)
-            case lp: TsCardinalities     => MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-                                              Map("shardKeyPrefix" ->
-                                                    lp.shardKeyPrefix.mkString(TsCardExec.PREFIX_DELIM),
-                                                  "groupDepth" ->
-                                                    lp.groupDepth.toString),
-                                              newQueryContext,
-                                              inProcessPlanDispatcher, dsRef, remoteExecHttpClient)
             case _                       => PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                             newQueryContext, inProcessPlanDispatcher, dsRef, remoteExecHttpClient)
           }
