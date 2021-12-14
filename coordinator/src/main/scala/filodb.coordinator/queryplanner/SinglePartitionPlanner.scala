@@ -119,9 +119,13 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
   }
 
   private def materializeTsCardinalities(logicalPlan: TsCardinalities, qContext: QueryContext): ExecPlan = {
-    val execPlans = planners.values.toList.distinct.map(_.materialize(logicalPlan, qContext))
-    if (execPlans.size == 1) execPlans.head
-    else TsCardReduceExec(qContext, inProcessPlanDispatcher, execPlans)
+    // TODO: this is a hacky fix to prevent delegation to planners with reduce-incompatible data.
+    val execPlans = planners.filter{case (name, _) => name.startsWith("raw")}
+                            .values.toList.distinct
+                            .map(_.materialize(logicalPlan, qContext))
+    assert(execPlans.size == 1,
+      s"exactly 1 planner name should match the 'raw' filter, but ${execPlans.size} planners matched")
+    execPlans.head
   }
 }
 
