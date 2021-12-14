@@ -5,7 +5,6 @@ import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
@@ -15,7 +14,7 @@ import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.BinaryOperator.{ADD, LAND}
 import filodb.query.InstantFunctionId.Ln
-import filodb.query.{LogicalPlan, PlanValidationSpec, SeriesKeysByFilters, LabelCardinality}
+import filodb.query.{LogicalPlan, PlanValidationSpec, SeriesKeysByFilters, LabelCardinality, TsCardinalities}
 import filodb.query.exec._
 
 class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValidationSpec{
@@ -670,6 +669,33 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       (endSeconds * 1000)
   }
 
+  it ("should generate correct ExecPlan for TsCardinalities query") {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] =
+      List(PartitionAssignment("remote", "remote-url",
+        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
+        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+
+      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = TsCardinalities(Seq("a", "b"), 3)
+    val promQlQueryParams = PromQlQueryParams("", startSeconds, step, endSeconds, Some("/api/v1/tscard"))
+    val expectedUrlParams = Map("shardKeyPrefix" -> s"a${TsCardExec.PREFIX_DELIM}b", "numGroupByFields" -> "3")
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[TsCardReduceExec] shouldEqual (true)
+    execPlan.children(0).isInstanceOf[TsCardReduceExec] shouldEqual(true)
+    execPlan.children(1).isInstanceOf[MetadataRemoteExec] shouldEqual(true)
+    execPlan.children(1).asInstanceOf[MetadataRemoteExec].urlParams shouldEqual(expectedUrlParams)
+  }
 
   it ("should generate multipartition BinaryJoin") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
