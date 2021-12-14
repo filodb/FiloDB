@@ -28,6 +28,9 @@ case class MetadataRemoteExec(queryEndpoint: String,
   private val labelsResultSchema = ResultSchema(labelColumns, 1)
   private val labelsRecordSchema = SerializedRangeVector.toSchema(labelColumns)
 
+  private val lcLabelNameField  = "label"
+  private val lcLabelCountField = "count"
+
   private val builder = SerializedRangeVector.newBuilder()
 
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
@@ -60,9 +63,28 @@ case class MetadataRemoteExec(queryEndpoint: String,
   def toQueryResponse(response: MetadataSuccessResponse, id: String, parentSpan: kamon.trace.Span): QueryResponse = {
       if (response.data.isEmpty) mapTypeQueryResponse(response, id)
       else response.data.head match {
-        case _: MetadataSampl => mapTypeQueryResponse(response, id)
-        case _ => labelsQueryResponse(response, id)
+        case _: MetadataSampl            => mapTypeQueryResponse(response, id)
+        case _: LabelCardinalitySampl    => mapLabelCardinalityResponse(response, id)
+        case _                           => labelsQueryResponse(response, id)
       }
+  }
+
+  private def mapLabelCardinalityResponse(response: MetadataSuccessResponse, id: String): QueryResponse = {
+
+    import NoCloseCursor._
+    val data = response.data.asInstanceOf[Seq[LabelCardinalitySampl]]
+      .map(lc => {
+          val key = CustomRangeVectorKey(Map(
+            "_ws_".utf8 -> lc.ws.utf8,
+            "_ns_".utf8 -> lc.ns.utf8,
+            "_metric_".utf8 -> lc.metric.utf8))
+          val data = Seq(lc.cardinality.map(k => (k.getOrElse(lcLabelNameField, "").utf8,
+                                                  k.getOrElse(lcLabelCountField, "").utf8)).toMap)
+          val rv = IteratorBackedRangeVector(key, UTF8MapIteratorRowReader(data.toIterator), None)
+          SerializedRangeVector(rv, builder, recordSchema, queryWithPlanName(queryContext))
+        }
+      )
+    QueryResult(id, resultSchema, data)
   }
 
   def mapTypeQueryResponse(response: MetadataSuccessResponse, id: String): QueryResponse = {

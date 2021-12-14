@@ -392,8 +392,17 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   def materializeMetadataQueryPlan(lp: MetadataQueryPlan, qContext: QueryContext): PlanResult = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val partitions = partitionLocationProvider.getAuthorizedPartitions(
-      TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
+
+
+    // LabelCardinality is a special case, here the partitions to send this query to is not  the authorized partition
+    // but the actual one where data resides, similar to how non metadata plans work, however, getting label cardinality
+    // is a metadata operation and shares common components with other metadata endpoints.
+    val partitions = lp match {
+      case lc: LabelCardinality       => getPartitions(lc, qContext.origQueryParams.asInstanceOf[PromQlQueryParams])
+      case _                          => partitionLocationProvider.getAuthorizedPartitions(
+        TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
+    }
+
     val execPlan = if (partitions.isEmpty) {
       logger.warn(s"No partitions found for ${queryParams.startSecs}, ${queryParams.endSecs}")
       localPartitionPlanner.materialize(lp, qContext)

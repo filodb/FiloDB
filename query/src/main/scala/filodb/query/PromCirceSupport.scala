@@ -13,6 +13,10 @@ object PromCirceSupport {
     case h @ HistSampl(t, b) => Json.fromValues(Seq(t.asJson, b.asJson))
     case m @ MetadataSampl(v) => Json.fromValues(Seq(v.asJson))
     case l @ LabelSampl(v) => Json.fromValues(Seq(v.asJson))
+    // Where are these used? added to make compiler happy
+    case l @ LabelCardinalitySampl(ns, ws, metric, cardinality)
+                           => Json.fromValues(Seq(ns.asJson, ws.asJson, metric.asJson, cardinality.asJson))
+
   }
 
   implicit val decodeAvgSample: Decoder[AvgSampl] = new Decoder[AvgSampl] {
@@ -40,21 +44,33 @@ object PromCirceSupport {
 
   implicit val decodeFoo: Decoder[DataSampl] = new Decoder[DataSampl] {
     final def apply(c: HCursor): Decoder.Result[DataSampl] = {
-      val tsResult = c.downArray.as[Long]
-      val rightCurs = c.downArray.right
-      if (rightCurs.focus.get.isObject) {
-        for { timestamp <- tsResult
-              buckets   <- rightCurs.as[Map[String, Double]] } yield {
-          HistSampl(timestamp, buckets)
-        }
-      } else {
-        for { timestamp <- tsResult
-              value     <- rightCurs.as[String] } yield {
-          Sampl(timestamp, value.toDouble)
-        }
+      c.downField("cardinality").focus match {
+        case Some(_) =>
+          // TODO: Not the best way to find if this is a label cardinality response, is there a better way?
+          for {ws     <- c.get[String]("ws")
+               ns     <- c.get[String]("ns")
+               metric <- c.get[String]("metric")
+               card   <- c.downField("cardinality").as[Seq[Map[String, String]]]
+               } yield LabelCardinalitySampl(ws, ns, metric, card)
+
+        case None              =>
+          val tsResult = c.downArray.as[Long]
+          val rightCurs = c.downArray.right
+          if (rightCurs.focus.get.isObject) {
+            for { timestamp <- tsResult
+                  buckets   <- rightCurs.as[Map[String, Double]] } yield {
+              HistSampl(timestamp, buckets)
+            }
+          } else {
+            for { timestamp <- tsResult
+                  value     <- rightCurs.as[String] } yield {
+              Sampl(timestamp, value.toDouble)
+            }
+          }
       }
     }
   }
+
 
   implicit val decodeAggregate: Decoder[AggregateResponse] = new Decoder[AggregateResponse] {
     final def apply(c: HCursor): Decoder.Result[AggregateResponse] = {

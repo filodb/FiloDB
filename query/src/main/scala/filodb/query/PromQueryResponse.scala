@@ -51,3 +51,9 @@ final case class LabelSampl(values: Seq[String]) extends DataSampl
 final case class AvgSampl(timestamp: Long, value: Double, count: Long) extends AggregateSampl
 
 final case class StdValSampl(timestamp: Long, stddev: Double, mean: Double, count: Long) extends AggregateSampl
+
+// Note: Its ok to have ns, ws and metric as columns as these are not assuming any specific shard key. LabelCardinality
+// by definition is the cardinality of the metric in a given ws/ns combination. It does not make any assumptions
+// on the shard key.
+final case class LabelCardinalitySampl(ns: String, ws: String, metric: String,
+                                       cardinality: Seq[Map[String, String]])  extends DataSampl
