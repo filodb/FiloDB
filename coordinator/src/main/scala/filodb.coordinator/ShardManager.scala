@@ -39,7 +39,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
 
   private val _tenantIngestionMeteringOpt =
     if (settings.config.getBoolean("shard-key-level-ingestion-metrics-enabled")) {
-      val inst = TenantIngestionMetering(
+      val inst = new TenantIngestionMetering(
                    settings,
                    () => { _datasetInfo.map{ case (dsRef, _) => dsRef}.toIterator },
                    () => { _coordinators.head._2 })
