@@ -15,7 +15,7 @@ import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.BinaryOperator.{ADD, LAND}
 import filodb.query.InstantFunctionId.Ln
-import filodb.query.{LogicalPlan, PlanValidationSpec, SeriesKeysByFilters}
+import filodb.query.{LogicalPlan, PlanValidationSpec, SeriesKeysByFilters, LabelCardinality}
 import filodb.query.exec._
 
 class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValidationSpec{
@@ -1146,4 +1146,53 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
     validatePlan(execPlan, expectedPlan)
   }
+
+
+  it("should materialize to local or remote based on where the job") {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
+      TimeRange(timeRange.startMs, timeRange.endMs)))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        if (routingKey.equals(Map("job" -> "app2"))) List(
+          PartitionAssignment("remote-1", "remote-url-1", TimeRange(timeRange.startMs,
+            timeRange.endMs)))
+        else List(
+          PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,
+            timeRange.endMs)))
+      }
+
+      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val mpPlanner = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+
+    val localPlan = LabelCardinality(Seq(ColumnFilter("job", Equals("app1")), ColumnFilter("__name__", Equals("test"))),
+      startSeconds * 1000, endSeconds * 1000)
+
+    val localExecPlan = mpPlanner.materialize(localPlan,
+      QueryContext(PromQlQueryParams("test{job=\"app1\"}", 1000, 100, 10000), plannerParams =
+        PlannerParams(processMultiPartition = true)))
+
+    val expectedLocalPlan =
+      s"""T~LabelCardinalityPresenter(LabelCardinalityPresenter)
+         |-E~LabelCardinalityReduceExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1403863627],raw)
+         |--E~LabelCardinalityExec(shard=7, filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test))), limit=1000000, startMs=1000000, endMs=10000000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1403863627],raw)
+         |--E~LabelCardinalityExec(shard=23, filters=List(ColumnFilter(job,Equals(app1)), ColumnFilter(__name__,Equals(test))), limit=1000000, startMs=1000000, endMs=10000000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1403863627],raw)""".stripMargin
+
+    validatePlan(localExecPlan, expectedLocalPlan)
+
+    val remotePlan = LabelCardinality(Seq(ColumnFilter("job", Equals("app2")), ColumnFilter("__name__", Equals("test"))),
+      startSeconds * 1000, endSeconds * 1000)
+
+    val remoteExecPlan = mpPlanner.materialize(remotePlan,
+      QueryContext(PromQlQueryParams("test{job=\"app2\"}", 1000, 100, 10000), plannerParams =
+        PlannerParams(processMultiPartition = true)))
+
+
+    val expectedRemotePlan = """E~MetadataRemoteExec(PromQlQueryParams(test{job="app2"},1000,100,10000,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url-1, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@73c48264)"""
+    validatePlan(remoteExecPlan, expectedRemotePlan)
+  }
+
 }

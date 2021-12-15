@@ -46,7 +46,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
           parser.decode[ErrorResponse](response.body.left.get) match {
             case Right(errorResponse) =>
               QueryError(queryContext.queryId, readQueryStats(errorResponse.queryStats),
-                RemoteQueryFailureException(response.code.toInt, errorResponse.status, errorResponse.errorType,
+                RemoteQueryFailureException(response.code, errorResponse.status, errorResponse.errorType,
                   errorResponse.error))
             case Left(ex)             => QueryError(queryContext.queryId, QueryStats(), ex)
           }
@@ -74,10 +74,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
     import NoCloseCursor._
     val data = response.data.asInstanceOf[Seq[LabelCardinalitySampl]]
       .map(lc => {
-          val key = CustomRangeVectorKey(Map(
-            "_ws_".utf8 -> lc.ws.utf8,
-            "_ns_".utf8 -> lc.ns.utf8,
-            "_metric_".utf8 -> lc.metric.utf8))
+          val key = CustomRangeVectorKey(lc.metric.map{case (k, v) => (k.utf8, v.utf8)})
           val data = Seq(lc.cardinality.map(k => (k.getOrElse(lcLabelNameField, "").utf8,
                                                   k.getOrElse(lcLabelCountField, "").utf8)).toMap)
           val rv = IteratorBackedRangeVector(key, UTF8MapIteratorRowReader(data.toIterator), None)

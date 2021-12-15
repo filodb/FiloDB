@@ -9,13 +9,12 @@ object PromCirceSupport {
   // necessary to encode sample in promql response as an array with long and double value as string
   // Specific encoders for *Sampl types
   implicit val encodeSampl: Encoder[DataSampl] = Encoder.instance {
-    case s @ Sampl(t, v)     => Json.fromValues(Seq(t.asJson, v.toString.asJson))
-    case h @ HistSampl(t, b) => Json.fromValues(Seq(t.asJson, b.asJson))
-    case m @ MetadataSampl(v) => Json.fromValues(Seq(v.asJson))
-    case l @ LabelSampl(v) => Json.fromValues(Seq(v.asJson))
+    case s @ Sampl(t, v)                                => Json.fromValues(Seq(t.asJson, v.toString.asJson))
+    case h @ HistSampl(t, b)                            => Json.fromValues(Seq(t.asJson, b.asJson))
+    case m @ MetadataSampl(v)                           => Json.fromValues(Seq(v.asJson))
+    case l @ LabelSampl(v)                              => Json.fromValues(Seq(v.asJson))
     // Where are these used? added to make compiler happy
-    case l @ LabelCardinalitySampl(ns, ws, metric, cardinality)
-                           => Json.fromValues(Seq(ns.asJson, ws.asJson, metric.asJson, cardinality.asJson))
+    case l @ LabelCardinalitySampl(group, cardinality)  => Json.fromValues(Seq(group.asJson, cardinality.asJson))
 
   }
 
@@ -47,11 +46,9 @@ object PromCirceSupport {
       c.downField("cardinality").focus match {
         case Some(_) =>
           // TODO: Not the best way to find if this is a label cardinality response, is there a better way?
-          for {ws     <- c.get[String]("ws")
-               ns     <- c.get[String]("ns")
-               metric <- c.get[String]("metric")
-               card   <- c.downField("cardinality").as[Seq[Map[String, String]]]
-               } yield LabelCardinalitySampl(ws, ns, metric, card)
+          for {metric     <- c.get[Map[String, String]]("metric")
+               card      <- c.get[Seq[Map[String, String]]]("cardinality")
+               } yield LabelCardinalitySampl(metric, card)
 
         case None              =>
           val tsResult = c.downArray.as[Long]
