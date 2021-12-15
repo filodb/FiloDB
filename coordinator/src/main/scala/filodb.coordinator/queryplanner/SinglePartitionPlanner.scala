@@ -11,9 +11,13 @@ import filodb.query.exec._
   *
   * @param planners map of clusters names in the local partition to their Planner objects
   * @param plannerSelector a function that selects the planner name given the metric name
-  *
+  * @param defaultPlanner TsCardinalities queries are routed here.
+  *   Note: this is a temporary fix only to support TsCardinalities queries.
+  *     These must be routed to planners according to the data they govern, and
+  *     this information isn't accessible without this parameter.
   */
 class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
+                             defaultPlanner: String,  // TODO: remove this-- see above.
                              plannerSelector: String => String,
                              datasetMetricColumn: String,
                              queryConfig: QueryConfig)
