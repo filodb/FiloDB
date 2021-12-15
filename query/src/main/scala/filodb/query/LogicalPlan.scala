@@ -133,19 +133,19 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
  *
  * Examples:
  *
- *  { prefix=[], groupDepth=2 } -> {
+ *  { prefix=[], numGroupByFields=2 } -> {
  *      prefix=["ws_a", "ns_a"] -> (4, 6),
  *      prefix=["ws_a", "ns_b"] -> (2, 4),
  *      prefix=["ws_b", "ns_c"] -> (3, 5) }
  *
- *  { prefix=["ws_a", "ns_a"], groupDepth=3 } -> {
+ *  { prefix=["ws_a", "ns_a"], numGroupByFields=3 } -> {
  *      prefix=["ws_a", "ns_a", "met_a"] -> (4, 6),
  *      prefix=["ws_a", "ns_a", "met_b"] -> (3, 5) }
  *
- *  { prefix=["ws_a"], groupDepth=1 } -> {
+ *  { prefix=["ws_a"], numGroupByFields=1 } -> {
  *      prefix=["ws_a"] -> (3, 5) }
  *
- * @param groupDepth: indicates "hierarchical depth" at which to group cardinalities.
+ * @param numGroupByFields: indicates "hierarchical depth" at which to group cardinalities.
  *   For example:
  *     1 -> workspace
  *     2 -> namespace
@@ -154,18 +154,18 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
  *     (1) at least as deep as shardKeyPrefix.
  *     (2) less than '3' when the prefix does not contain values for all lesser depths.
  *   Example (if shard keys specify a ws, ns, and metric):
- *     shardKeyPrefix     groupDepth
+ *     shardKeyPrefix     numGroupByFields
  *     []                 { 1, 2 }
  *     [ws]               { 1, 2 }
  *     [ws, ns]           { 2, 3 }
  *     [ws, ns, metric]   { 3 }
  */
-case class TsCardinalities(shardKeyPrefix: Seq[String], groupDepth: Int) extends LogicalPlan {
-  require(groupDepth >= 1 && groupDepth <= 3,
-    "groupDepth must lie on [1, 3]")
-  require(groupDepth >= shardKeyPrefix.size,
-    "groupDepth indicate a depth at least as deep as shardKeyPrefix")
-  require(groupDepth < 3 || shardKeyPrefix.size >= 2,
+case class TsCardinalities(shardKeyPrefix: Seq[String], numGroupByFields: Int) extends LogicalPlan {
+  require(numGroupByFields >= 1 && numGroupByFields <= 3,
+    "numGroupByFields must lie on [1, 3]")
+  require(numGroupByFields >= shardKeyPrefix.size,
+    "numGroupByFields indicate a depth at least as deep as shardKeyPrefix")
+  require(numGroupByFields < 3 || shardKeyPrefix.size >= 2,
     "cannot group at the metric level when prefix does not contain ws and ns")
 
   // TODO: this should eventually be "true" to enable HAP/LTRP routing

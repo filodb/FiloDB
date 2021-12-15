@@ -303,7 +303,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   it ("should correctly execute TsCardExec") {
     import filodb.query.exec.TsCardExec._
 
-    case class TestSpec(shardKeyPrefix: Seq[String], groupDepth: Int, exp: Map[Seq[String], CardCounts])
+    case class TestSpec(shardKeyPrefix: Seq[String], numGroupByFields: Int, exp: Map[Seq[String], CardCounts])
 
     // Note: expected strings are eventually concatenated with a delimiter
     //   and converted to ZeroCopyUTF8Strings.
@@ -339,7 +339,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
       val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
         new TsCardExec(QueryContext(), executeDispatcher,
-          timeseriesDatasetMultipleShardKeys.ref, ishard, testSpec.shardKeyPrefix, testSpec.groupDepth)
+          timeseriesDatasetMultipleShardKeys.ref, ishard, testSpec.shardKeyPrefix, testSpec.numGroupByFields)
       }.toSeq
 
       val execPlan = TsCardReduceExec(QueryContext(), executeDispatcher, leaves)
