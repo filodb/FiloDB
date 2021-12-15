@@ -173,7 +173,7 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     val lp = TsCardinalities(Seq("a", "b"), 2)
 
     // Plan should just contain a single root TsCardReduceExec and its TsCardExec children.
-    // Currently, queries are routed only to planners whose name begins with "raw".
+    // Currently, queries are routed only to the planner who's name equals the SPP's "defaultPlanner" member.
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams.copy(promQl = "")))
     execPlan.isInstanceOf[TsCardReduceExec] shouldEqual (true)
     execPlan.asInstanceOf[TsCardReduceExec].children.length shouldEqual(32)
