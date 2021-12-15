@@ -229,8 +229,12 @@ object LogicalPlanUtils extends StrictLogging {
   }
 
   def getLookBackMillis(logicalPlan: LogicalPlan): Seq[Long] = {
+    // getLookBackMillis is used primarily for LongTimeRangePlanner,
+    // SubqueryWtihWindowing returns lookback but TopLevelSubquery does not. The conceptual meaning of the lookback
+    // is an interval that we want to process on one machine (primarily to compute range functions).
+    // SubqueryWithWindowing has such a lookback while TopLevelSubquery does not.
     logicalPlan match {
-      case sww: SubqueryWithWindowing => Seq(sww.subqueryWindowMs + getLookBackMillis(sww.innerPeriodicSeries).max)
+      case sww: SubqueryWithWindowing => getLookBackMillis(sww.innerPeriodicSeries).map(lb => lb + sww.subqueryWindowMs)
       case _ => {
         val staleDataLookbackMillis = WindowConstants.staleDataLookbackMillis
         val leaf = LogicalPlan.findLeafLogicalPlans(logicalPlan)

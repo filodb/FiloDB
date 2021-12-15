@@ -93,8 +93,20 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
     // Should avoid this asInstanceOf, far many places where we do this now.
     val params = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val partitions = getPartitions(logicalPlan, params)
-
+    // MultiPartitionPlanner has capability to stitch across time partitions
+    // To see if we do have  across-time partitions
+    // (or just multiple partitions because of a binary join) we call getPartitions() function
+    // In case of TopLevelSubquery normal start-end of query it not enough as they might access the data beyond
+    // query start-end, hence, we "enhance" update params with the start-end that the queries will indeed cover.
+    // The notion of lookback that getPartitions() understands, is not applicable to TopLevelSubquery, hence, special
+    // treatment here. The parameters produced, however, are used exclusively to see if we have multiple
+    // partitions.
+    val updatedQueryContext = logicalPlan match {
+      case tlsq: TopLevelSubquery => topLevelSubqueryContext(tlsq, qContext)
+      case _ => qContext
+    }
+    val paramToCheckPartitions = updatedQueryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val partitions = getPartitions(logicalPlan, paramToCheckPartitions)
 
     if (isSinglePartition(partitions)) {
         val (partitionName, startMs, endMs) =
@@ -117,6 +129,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         PlanResult(Seq(execPlan))
     } else walkMultiPartitionPlan(logicalPlan, qContext)
   }
+
 
   /**
    * Invoked when the plan tree spans multiple plans
