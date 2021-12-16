@@ -92,4 +92,9 @@ case class AggregateExpression(name: String, params: Seq[Expression],
         )
     }
   }
+
+  override def validateNames(): Expression = {
+    allParams.foreach(_.validateNames())
+    this
+  }
 }

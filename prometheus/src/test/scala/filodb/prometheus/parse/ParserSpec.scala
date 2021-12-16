@@ -791,14 +791,14 @@ class ParserSpec extends AnyFunSpec with Matchers {
 
   private def parseError(query: String) = {
     intercept[IllegalArgumentException] {
-      LegacyParser.parseQuery(query)
+      LegacyParser.parseQuery(query).validateNames()
     }
     antlrParseError(query)
   }
 
   private def antlrParseError(query: String) = {
     intercept[IllegalArgumentException] {
-      AntlrParser.parseQuery(query)
+      AntlrParser.parseQuery(query).validateNames()
       try {
         Parser.queryToLogicalPlan(query, 1524855988L, 0)
       } catch {

@@ -83,6 +83,11 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
     }
   }
 
+  override def validateNames(): Expression = {
+    allParams.foreach(_.validateNames())
+    this
+  }
+
   /**
     *
     * @return true when function is scalar or time

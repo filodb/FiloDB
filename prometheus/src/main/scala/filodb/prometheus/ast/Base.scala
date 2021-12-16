@@ -22,7 +22,16 @@ final case class WriteBuffersParam(step: Long) extends TimeRangeParams {
   val end = System.currentTimeMillis / 1000
 }
 
-trait Expression
+trait Expression {
+  /**
+   * Validates the metric names of an expression (if they exist).
+   * Specifically, exactly one of
+   *   (1) the __name__ label
+   *   (2) the de-facto metric name (as in foo{~})
+   * must exist.
+   */
+  def validateNames() : Expression = this
+}
 
 trait Series
 

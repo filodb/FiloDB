@@ -141,15 +141,22 @@ sealed trait Vector extends Expression {
   // Convert metricName{labels} -> {labels, __name__="metricName"} so it's uniform
   lazy val mergeNameToLabels: Seq[LabelMatch] = {
     val nameLabel = labelSelection.find(_.label == PromMetricLabel)
-    if (nameLabel.isEmpty && metricName.isEmpty)
-      throw new IllegalArgumentException("Metric name is not present")
     if (metricName.nonEmpty) {
-      if (nameLabel.nonEmpty) throw new IllegalArgumentException("Metric name should not be set twice")
       // metric name specified but no __name__ label.  Add it
       labelSelection :+ LabelMatch(PromMetricLabel, EqualMatch, metricName.get)
     } else {
       labelSelection
     }
+  }
+
+  override def validateNames() : Expression = {
+    val nameLabel = labelSelection.find(_.label == PromMetricLabel)
+    if (nameLabel.isEmpty && metricName.isEmpty)
+      throw new IllegalArgumentException("Metric name is not present")
+    if (metricName.nonEmpty) {
+      if (nameLabel.nonEmpty) throw new IllegalArgumentException("Metric name should not be set twice")
+    }
+    this
   }
 
   def realMetricName: String = mergeNameToLabels.find(_.label == PromMetricLabel).get.value
@@ -251,6 +258,7 @@ case class InstantExpression(metricName: Option[String],
     RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
       offsetMs)
   }
+
 }
 
 /**
