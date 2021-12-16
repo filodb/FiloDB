@@ -51,3 +51,6 @@ final case class LabelSampl(values: Seq[String]) extends DataSampl
 final case class AvgSampl(timestamp: Long, value: Double, count: Long) extends AggregateSampl
 
 final case class StdValSampl(timestamp: Long, stddev: Double, mean: Double, count: Long) extends AggregateSampl
+
+final case class LabelCardinalitySampl(metric: Map[String, String],
+                                       cardinality: Seq[Map[String, String]]) extends DataSampl

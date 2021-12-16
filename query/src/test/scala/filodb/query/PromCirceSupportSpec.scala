@@ -211,6 +211,80 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
     }
   }
 
+  it("should parse label cardinality response correctly") {
+    val input =
+      """[
+        |{
+        |  "status": "success",
+        |  "data": [
+        |    {
+        |      "cardinality": [
+        |        {
+        |          "count": "1",
+        |          "label": "app"
+        |        },
+        |        {
+        |          "count": "1",
+        |          "label": "_type_"
+        |        },
+        |        {
+        |          "count": "1",
+        |          "label": "__name__"
+        |        },
+        |        {
+        |          "count": "1",
+        |          "label": "_ns_"
+        |        },
+        |        {
+        |          "count": "1",
+        |          "label": "_ws_"
+        |        },
+        |        {
+        |          "count": "1",
+        |          "label": "host"
+        |        },
+        |        {
+        |          "count": "1",
+        |          "label": "version"
+        |        }
+        |      ],
+        |      "metric": {
+        |        "_ns_": "App-0",
+        |        "_metric_": "go_info",
+        |        "_ws_": "filodb-demo"
+        |      }
+        |    }
+        |  ],
+        |  "errorType": null,
+        |  "error": null
+        |}
+        |]""".stripMargin
+
+    val lc = Seq(LabelCardinalitySampl(
+      Map("_ws_"      -> "filodb-demo",
+          "_ns_"      -> "App-0",
+          "_metric_"  -> "go_info"),
+      List(
+        Map("label" -> "app", "count" -> "1"),
+        Map("label" -> "_type_", "count" -> "1"),
+        Map("label" -> "__name__", "count" -> "1"),
+        Map("label" -> "_ns_", "count" -> "1"),
+        Map("label" -> "_ws_", "count" -> "1"),
+        Map("label" -> "host", "count" -> "1"),
+        Map("label" -> "version", "count" -> "1"),
+    )))
+    val expected = MetadataSuccessResponse(lc)
+    val resp: Either[io.circe.Error, List[MetadataSuccessResponse]] =
+      parser.decode[List[MetadataSuccessResponse]](input)
+    resp match {
+      case Right(success :: Nil)        =>
+            success shouldEqual expected
+
+      case Left(ex)                     => throw ex
+      case _                            => fail("Expected to see a Right with just one element")
+    }
+  }
+
   it("should parse remote partial response") {
     val input = """[{
                   |  "status" : "partial",
