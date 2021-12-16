@@ -53,6 +53,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     }
   }
 
+  //scalastyle:off method.length
   /**
     * Converts Route objects returned by FailureProvider to ExecPlan
     */
@@ -103,6 +104,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     if (execPlans.size == 1) execPlans.head
     else stitchPlans(rootLogicalPlan, execPlans, qContext)
   }
+  //scalastyle:on method.length
 
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 

@@ -301,26 +301,26 @@ class LogicalPlanSpec extends AnyFunSpec with Matchers {
     //   general setup is needed, these tests/requirements need to be updated.
     assertThrows[IllegalArgumentException] {
       // need ws/ns in order to group by metric
-      TsCardinalities(Seq(), 2)
+      TsCardinalities(Seq(), 3)
     }
     assertThrows[IllegalArgumentException] {
       // need ws/ns in order to group by metric
-      TsCardinalities(Seq("a"), 2)
+      TsCardinalities(Seq("a"), 3)
     }
     assertThrows[IllegalArgumentException] {
       // insufficient group depth
-      TsCardinalities(Seq("a", "b"), 0)
+      TsCardinalities(Seq("a", "b"), 1)
     }
     assertThrows[IllegalArgumentException] {
       // insufficient group depth
-      TsCardinalities(Seq("a", "b", "c"), 1)
+      TsCardinalities(Seq("a", "b", "c"), 2)
     }
-    TsCardinalities(Seq(), 0)
     TsCardinalities(Seq(), 1)
-    TsCardinalities(Seq("a"), 0)
+    TsCardinalities(Seq(), 2)
     TsCardinalities(Seq("a"), 1)
-    TsCardinalities(Seq("a", "b"), 1)
+    TsCardinalities(Seq("a"), 2)
     TsCardinalities(Seq("a", "b"), 2)
-    TsCardinalities(Seq("a", "b", "c"), 2)
+    TsCardinalities(Seq("a", "b"), 3)
+    TsCardinalities(Seq("a", "b", "c"), 3)
   }
 }

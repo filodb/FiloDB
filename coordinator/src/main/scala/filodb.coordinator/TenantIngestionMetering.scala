@@ -59,12 +59,12 @@ case class TenantIngestionMetering(settings: FilodbSettings,
    */
   private def queryAndSchedulePublish() : Unit = {
     import filodb.query.exec.TsCardExec._
-    val groupDepth = 1  // group cardinalities at the second level (i.e. ws & ns)
+    val numGroupByFields = 2  // group cardinalities at the second level (i.e. ws & ns)
     val prefix = Nil  // query for cardinalities regardless of first-level name (i.e. ws name)
     dsIterProducer().foreach { dsRef =>
       val fut = Client.asyncAsk(
         coordActorProducer(),
-        LogicalPlan2Query(dsRef, TsCardinalities(prefix, groupDepth)),
+        LogicalPlan2Query(dsRef, TsCardinalities(prefix, numGroupByFields)),
         ASK_TIMEOUT)
       fut.onComplete {
         case Success(QueryResult(_, _, rv, _, _, _)) =>

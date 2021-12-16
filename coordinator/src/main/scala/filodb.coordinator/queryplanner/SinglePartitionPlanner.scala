@@ -1,7 +1,8 @@
 package filodb.coordinator.queryplanner
 
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.query.{BinaryJoin, LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters, SetOperator}
+import filodb.query.{BinaryJoin, LabelNames, LabelValues, LogicalPlan,
+                     SeriesKeysByFilters, SetOperator, TsCardinalities}
 import filodb.query.exec._
 
 /**
@@ -10,9 +11,13 @@ import filodb.query.exec._
   *
   * @param planners map of clusters names in the local partition to their Planner objects
   * @param plannerSelector a function that selects the planner name given the metric name
-  *
+  * @param defaultPlanner TsCardinalities queries are routed here.
+  *   Note: this is a temporary fix only to support TsCardinalities queries.
+  *     These must be routed to planners according to the data they govern, and
+  *     this information isn't accessible without this parameter.
   */
 class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
+                             defaultPlanner: String,  // TODO: remove this-- see above.
                              plannerSelector: String => String,
                              datasetMetricColumn: String,
                              queryConfig: QueryConfig)
@@ -26,6 +31,7 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
       case lp: LabelValues         => materializeLabelValues(lp, qContext)
       case lp: LabelNames          => materializeLabelNames(lp, qContext)
       case lp: SeriesKeysByFilters => materializeSeriesKeysFilters(lp, qContext)
+      case lp: TsCardinalities     => materializeTsCardinalities(lp, qContext)
       case _                       => materializeSimpleQuery(logicalPlan, qContext)
 
     }
@@ -114,6 +120,11 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
     val execPlans = planners.values.toList.distinct.map(_.materialize(logicalPlan, qContext))
     if (execPlans.size == 1) execPlans.head
     else PartKeysDistConcatExec(qContext, inProcessPlanDispatcher, execPlans)
+  }
+
+  private def materializeTsCardinalities(logicalPlan: TsCardinalities, qContext: QueryContext): ExecPlan = {
+    // TODO: this is a hacky fix to prevent delegation to planners with reduce-incompatible data.
+    planners.find{case (name, _) => name == defaultPlanner}.get._2.materialize(logicalPlan, qContext)
   }
 }
 

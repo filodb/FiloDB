@@ -67,7 +67,7 @@ class Arguments(args: Seq[String]) extends ScallopConf(args) {
   val shards = opt[List[String]]()
   val spread = opt[Int]()
   val k = opt[Int]()
-  val groupdepth = opt[Int]()
+  val numgroupbyfields = opt[Int]()
   val active = opt[Boolean](default = Some(false))
   val shardkeyprefix = opt[List[String]](default = Some(List()))
   val queries = opt[List[String]](default = Some(List()))
@@ -110,7 +110,7 @@ object CliMain extends FilodbClusterNode {
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labelvalues --labelnames <lable-names> --labelfilter <label-filter> --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command labels --labelfilter <label-filter> -dataset <dataset>")
-    println("  --host <hostname/IP> [--port ...] --command tscard --dataset <dataset> --shardkeyprefix <shard-key-prefix> --groupdepth {0,1,2}")
+    println("  --host <hostname/IP> [--port ...] --command tscard --dataset <dataset> --shardkeyprefix <shard-key-prefix> --numgroupbyfields {1,2,3}")
     println("  --host <hostname/IP> [--port ...] --command topkcardlocal --dataset prometheus --k 2 --shardkeyprefix demo App-0")
     println("  --host <hostname/IP> [--port ...] --command labelcardinality --labelfilter <label-filter> --dataset prometheus")
     println("  --host <hostname/IP> [--port ...] --command findqueryshards --queries <query> --spread <spread>")
@@ -261,7 +261,7 @@ object CliMain extends FilodbClusterNode {
           val remote = Client.standaloneClient(system, args.host(), args.port())
           val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
             timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
-          parseTsCardQuery(remote, args.shardkeyprefix(), args.groupdepth(), args.dataset(), options)
+          parseTsCardQuery(remote, args.shardkeyprefix(), args.numgroupbyfields(), args.dataset(), options)
 
         case x: Any =>
           // This will soon be deprecated
@@ -385,10 +385,10 @@ object CliMain extends FilodbClusterNode {
 
   def parseTsCardQuery(client: LocalClient,
                        shardKeyPrefix: Seq[String],
-                       groupDepth: Int,
+                       numGroupByFields: Int,
                        dataset: String,
                        options: QOptions): Unit = {
-    val logicalPlan = TsCardinalities(shardKeyPrefix, groupDepth)
+    val logicalPlan = TsCardinalities(shardKeyPrefix, numGroupByFields)
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 
