@@ -513,7 +513,8 @@ final case class TsCardExec(queryContext: QueryContext,
   require(numGroupByFields >= 1,
     "numGroupByFields must be positive")
   require(numGroupByFields >= shardKeyPrefix.size,
-    "numGroupByFields indicate a depth at least as deep as shardKeyPrefix")
+    s"numGroupByFields ($numGroupByFields) must indicate at least as many " +
+    s"fields as shardKeyPrefix.size (${shardKeyPrefix.size})")
 
   override def enforceLimit: Boolean = false
 

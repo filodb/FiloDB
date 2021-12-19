@@ -108,6 +108,14 @@ object Parser extends StrictLogging {
     }
   }
 
+  def tsCardinalitiesMatcherToLogicalPlan(query: String): LogicalPlan = {
+    val expression = parseQuery(query).asInstanceOf[InstantExpression]
+    expression match {
+      case p: InstantExpression => p.toTsCardinalitiesMatcherPlan()
+      case _ => throw new UnsupportedOperationException()
+    }
+  }
+
   def labelCardinalityToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = parseQuery(query) match {
       case p: InstantExpression => p.toLabelCardinalityPlan(timeParams)
       case _ => throw new UnsupportedOperationException()

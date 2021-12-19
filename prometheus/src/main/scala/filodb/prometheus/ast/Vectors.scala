@@ -139,9 +139,30 @@ sealed trait Vector extends Expression {
   val regexColumnName: String = "::(?=[^::]+$)" //regex pattern to extract ::columnName at the end
 
   // Convert metricName{labels} -> {labels, __name__="metricName"} so it's uniform
-  lazy val mergeNameToLabels: Seq[LabelMatch] = {
+  // Note: see makeMergeNameToLabels before changing the laziness.
+  lazy val mergeNameToLabels: Seq[LabelMatch] = makeMergeNameToLabels()
+
+  /**
+   * Constructs the mergeNameToLabels member.
+   *
+   * Note:
+   * At present, FiloDB requires the existence of a metric name for all vector selectors, and
+   *   that requirement is enforced at the initialization of mergeNameToLabels. However,
+   *   this makes it impossible to initialize a Vector type with PromQL-valid label selectors
+   *   that lack an implicit/explicit __name__ label.
+   *
+   * If you need to make use of a name-optional Vector (i.e. as a temporary vessel for parsed PromQL),
+   *   the hacky workaround is as follows:
+   *     (1) lazily initialize mergeNameToLabels so a metric name is not explicitly required
+   *         at the Vector's initialization, and
+   *     (2) when needed, locally initialize a "mergeNameToLabels-like" value without
+   *         a name requirement.
+   *
+   * This method exists only to consolidate code for the initialization of these values.
+   */
+  def makeMergeNameToLabels(requireName: Boolean = true): Seq[LabelMatch] = {
     val nameLabel = labelSelection.find(_.label == PromMetricLabel)
-    if (nameLabel.isEmpty && metricName.isEmpty)
+    if (requireName && nameLabel.isEmpty && metricName.isEmpty)
       throw new IllegalArgumentException("Metric name is not present")
     if (metricName.nonEmpty) {
       if (nameLabel.nonEmpty) throw new IllegalArgumentException("Metric name should not be set twice")
@@ -218,7 +239,11 @@ case class InstantExpression(metricName: Option[String],
 
   import WindowConstants._
 
-  val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
+  // TODO: mergeNameToLabels requires a metric name at its initialization, but a valid PromQL
+  //   instant selector does not necessarily contain a metric name. This name requirement should
+  //   be moved elsewhere. For now, this (and mergeNameToLabels) must remain lazy in order
+  //   to allow nameless instant selectors (see toOptionalNameMetadataPlan).
+  lazy val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     // we start from 5 minutes earlier that provided start time in order to include last sample for the
@@ -250,6 +275,33 @@ case class InstantExpression(metricName: Option[String],
   def toRawSeriesPlan(timeParams: TimeRangeParams, offsetMs: Option[Long] = None): RawSeries = {
     RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
       offsetMs)
+  }
+
+  /**
+   * Identical to toMetadataPlan, except:
+   *   (1) the returned SeriesKeysByFilters is constructed with a dummy time range.
+   *   (2) a metric name for this selector is not required.
+   *
+   * This is intended only to facilitate the parse of PromQL without a metric name
+   *   (i.e. for the matcher of a timeseries cardinality query).
+   *
+   * === WARNING ===
+   * This method signature intentionally limits the scope of its use.
+   * FiloDB requires that queries contain a metric name.
+   * Do not materialize the returned plan.
+   */
+  def toTsCardinalitiesMatcherPlan() : SeriesKeysByFilters = {
+
+    val requireName = false
+    val dummyFetchFirstLastSampleTimes = false
+    val dummyTimeParams = TimeStepParams(0, 0, 0)
+
+    // these shadow their name-required Vector member counterparts
+    val mergeNameToLabels = makeMergeNameToLabels(requireName)
+    val (columnFilters, _, _) = labelMatchesToFilters(mergeNameToLabels)
+
+    SeriesKeysByFilters(columnFilters, dummyFetchFirstLastSampleTimes,
+                        dummyTimeParams.start * 1000, dummyTimeParams.end * 1000)
   }
 }
 
