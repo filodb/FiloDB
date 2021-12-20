@@ -726,6 +726,29 @@ class ParserSpec extends AnyFunSpec with Matchers {
     Parser.queryToLogicalPlan(q, qts, step)
   }
 
+  it("should correctly build a label map") {
+    val queryMapPairs = Seq(
+      ("foo", Map("__name__" -> "foo")),
+      ("""{__name__="foo"}""" -> Map("__name__" -> "foo")),
+      ("""{__name__="foo", bar="baz"}""" -> Map("__name__" -> "foo", "bar" -> "baz")),
+      ("""{bar="baz"}""" -> Map("bar" -> "baz")),
+      ("""foo{bar="baz", bog="bah"}""" -> Map("__name__" -> "foo", "bar" -> "baz", "bog" -> "bah")),
+    )
+
+    val queriesShouldFail = Seq(
+      """foo{__name__="bar"}""",
+      """foo{__name__="bar", bog="baz"}""",
+    )
+
+    queryMapPairs.foreach{case (query, expectedMap) =>
+      Parser.queryToLabelMap(query) shouldEqual expectedMap
+    }
+
+    queriesShouldFail.foreach{query =>
+      assertThrows[IllegalArgumentException](Parser.queryToLabelMap(query))
+    }
+  }
+
   private def printBinaryJoin( lp: LogicalPlan, level: Int = 0) : scala.Unit =  {
     if (!lp.isInstanceOf[BinaryJoin]) {
       info(s"${"  "*level}" + lp.toString)
