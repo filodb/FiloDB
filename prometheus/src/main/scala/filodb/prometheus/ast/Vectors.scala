@@ -1,8 +1,7 @@
 package filodb.prometheus.ast
 
 import scala.util.Try
-
-import filodb.core.{query, GlobalConfig}
+import filodb.core.{GlobalConfig, query}
 import filodb.core.query.{ColumnFilter, RangeParams}
 import filodb.prometheus.parse.Parser
 import filodb.query._
@@ -278,30 +277,18 @@ case class InstantExpression(metricName: Option[String],
   }
 
   /**
-   * Identical to toMetadataPlan, except:
-   *   (1) the returned SeriesKeysByFilters is constructed with a dummy time range.
-   *   (2) a metric name for this selector is not required.
+   * Returns a mapping of labels to values.
    *
-   * This is intended only to facilitate the parse of PromQL without a metric name
-   *   (i.e. for the matcher of a timeseries cardinality query).
-   *
-   * === WARNING ===
-   * This method signature intentionally limits the scope of its use.
-   * FiloDB requires that queries contain a metric name.
-   * Do not materialize the returned plan.
+   * Note: this InstantExpression does not require a metric name in order
+   *   for this method to run to completion.
    */
-  def toTsCardinalitiesMatcherPlan() : SeriesKeysByFilters = {
-
+  def toLabelMap() : Map[String, String] = {
+    // See Vector::mergeNameToLabels for details about why we're ignoring the member variable.
     val requireName = false
-    val dummyFetchFirstLastSampleTimes = false
-    val dummyTimeParams = TimeStepParams(0, 0, 0)
-
-    // these shadow their name-required Vector member counterparts
-    val mergeNameToLabels = makeMergeNameToLabels(requireName)
-    val (columnFilters, _, _) = labelMatchesToFilters(mergeNameToLabels)
-
-    SeriesKeysByFilters(columnFilters, dummyFetchFirstLastSampleTimes,
-                        dummyTimeParams.start * 1000, dummyTimeParams.end * 1000)
+    val mergeNameToLabelsLocal = makeMergeNameToLabels(requireName)
+    mergeNameToLabelsLocal.map{ labelMatch =>
+      labelMatch.label -> labelMatch.value
+    }.toMap
   }
 }
 

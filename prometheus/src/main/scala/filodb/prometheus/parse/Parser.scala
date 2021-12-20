@@ -108,10 +108,13 @@ object Parser extends StrictLogging {
     }
   }
 
-  def tsCardinalitiesMatcherToLogicalPlan(query: String): LogicalPlan = {
-    val expression = parseQuery(query).asInstanceOf[InstantExpression]
+  /**
+   * Returns a mapping from selector labels to values.
+   */
+  def queryToLabelMap(query: String): Map[String, String] = {
+    val expression = parseQuery(query)
     expression match {
-      case p: InstantExpression => p.toTsCardinalitiesMatcherPlan()
+      case p: InstantExpression => p.toLabelMap()
       case _ => throw new UnsupportedOperationException()
     }
   }
