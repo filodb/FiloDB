@@ -30,6 +30,126 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
    parseAndValidate(inputString, List(Sampl(1600102672,1.2), Sampl(1600102687,3.1)))
   }
 
+  it("should parse LabelSampl") {
+    val inputString = """{
+                         |    "status": "success",
+                         |    "data": ["data1","data2","data3"]
+                         |}""".stripMargin
+
+    parser.decode[MetadataSuccessResponse](inputString) match {
+      case Right(labels) => labels shouldEqual
+        MetadataSuccessResponse(List(LabelSampl("data1"), LabelSampl("data2"), LabelSampl("data3")), "success", None, None)
+      case Left(ex) => throw ex
+    }
+  }
+
+  it("should parse MetadataMapSampl") {
+    val expected = Seq(
+      MetadataMapSampl(Map("tag1" -> "value1", "tag2" -> "value2", "tag3" -> "value3")),
+      MetadataMapSampl(Map("tag11" -> "value11", "tag22" -> "value22", "tag33" -> "value33"))
+    )
+    val inputString =
+      """{
+        |    "status": "success",
+        |    "data": [
+        |       {
+        |		      "tag1": "value1",
+        |		      "tag2": "value2",
+        |		      "tag3": "value3"
+        |       },
+        |       {
+        |		      "tag11": "value11",
+        |		      "tag22": "value22",
+        |		      "tag33": "value33"
+        |       }
+        |     ]
+        |}""".stripMargin
+
+    parser.decode[MetadataSuccessResponse](inputString) match {
+      case Right(response) => response shouldEqual MetadataSuccessResponse(expected)
+      case Left(ex) => throw ex
+    }
+  }
+
+  /**
+   *   final case class LabelCardinalitySampl(metric: Map[String, String],
+                                       cardinality: Seq[Map[String, String]]) extends MetadataSampl
+   */
+
+  it("should parse LabelCardinalitySampl") {
+    val expected = Seq(
+      LabelCardinalitySampl(
+        Map("_ws_" -> "demo", "_ns_" -> "App-0", "_metric_" -> "heap_usage"),
+        Seq(
+          Map("tag" -> "instance", "count" -> "10"),
+          Map("tag" -> "host", "count" -> "5"),
+          Map("tag" -> "datacenter", "count" -> "2")
+        )
+      ),
+      LabelCardinalitySampl(Map("_ws_" -> "demo", "_ns_" -> "App-1", "_metric_" -> "request_latency"),
+        Seq(
+          Map("tag" -> "instance", "count" -> "6"),
+          Map("tag" -> "host", "count" -> "2"),
+          Map("tag" -> "datacenter", "count" -> "2")
+        ))
+    )
+    val inputString =
+      """{
+        |    "status": "success",
+        |    "data": [
+        |       {
+        |		      "metric": {
+        |           "_ws_": "demo",
+        |		        "_ns_": "App-0",
+        |		        "_metric_": "heap_usage"
+        |          },
+        |          "cardinality":
+        |             [
+        |               {
+        |                 "tag": "instance",
+        |                 "count": "10"
+        |               },
+        |               {
+        |                 "tag": "host",
+        |                 "count": "5"
+        |               },
+        |               {
+        |                 "tag": "datacenter",
+        |                 "count": "2"
+        |               }
+        |             ]
+        |       },
+        |       {
+        |		      "metric": {
+        |           "_ws_": "demo",
+        |		        "_ns_": "App-1",
+        |		        "_metric_": "request_latency"
+        |          },
+        |          "cardinality":
+        |             [
+        |               {
+        |                 "tag": "instance",
+        |                 "count": "6"
+        |               },
+        |               {
+        |                 "tag": "host",
+        |                 "count": "2"
+        |               },
+        |               {
+        |                 "tag": "datacenter",
+        |                 "count": "2"
+        |               }
+        |             ]
+        |       }
+        |     ]
+        |}""".stripMargin
+
+    parser.decode[MetadataSuccessResponse](inputString) match {
+      case Right(response) => response shouldEqual MetadataSuccessResponse(expected)
+      case Left(ex) => throw ex
+    }
+  }
+
   it("should parse aggregateResponse") {
     val input = """[{
                   |	"status": "success",
