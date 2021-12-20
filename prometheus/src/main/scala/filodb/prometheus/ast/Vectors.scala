@@ -1,7 +1,8 @@
 package filodb.prometheus.ast
 
 import scala.util.Try
-import filodb.core.{GlobalConfig, query}
+
+import filodb.core.{query, GlobalConfig}
 import filodb.core.query.{ColumnFilter, RangeParams}
 import filodb.prometheus.parse.Parser
 import filodb.query._
@@ -11,7 +12,6 @@ object Vectors {
   val TypeLabel       = "_type_"
   val BucketFilterLabel = "_bucket_"
 }
-
 
 object WindowConstants {
   val conf = GlobalConfig.systemConfig
