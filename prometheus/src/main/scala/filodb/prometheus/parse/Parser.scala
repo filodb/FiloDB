@@ -96,7 +96,7 @@ object Parser extends StrictLogging {
   }
 
   def parseFilter(query: String): InstantExpression = {
-    val expr = parseQuery(query).requireMetricNames()
+    val expr = parseQuery(query)
     if (expr.isInstanceOf[InstantExpression]) {
       expr.asInstanceOf[InstantExpression]
     } else {
@@ -125,11 +125,13 @@ object Parser extends StrictLogging {
     }
   }
 
-  def labelCardinalityToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan =
-    parseQuery(query) match {
+  def labelCardinalityToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
+    val expression = parseQuery(query)
+    expression match {
       case p: InstantExpression => p.toLabelCardinalityPlan(timeParams)
       case _ => throw new UnsupportedOperationException()
     }
+  }
 
   // Only called by tests.
   def labelValuesQueryToLogicalPlan(labelNames: Seq[String], filterQuery: Option[String],
