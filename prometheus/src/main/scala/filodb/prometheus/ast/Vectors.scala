@@ -139,7 +139,7 @@ sealed trait Vector extends Expression {
   val regexColumnName: String = "::(?=[^::]+$)" //regex pattern to extract ::columnName at the end
 
   // Convert metricName{labels} -> {labels, __name__="metricName"} so it's uniform
-  lazy val mergeNameToLabels: Seq[LabelMatch] = {
+  val mergeNameToLabels: Seq[LabelMatch] = {
     val nameLabel = labelSelection.find(_.label == PromMetricLabel)
     if (metricName.nonEmpty) {
       if (nameLabel.nonEmpty) throw new IllegalArgumentException("Metric name should not be set twice")
