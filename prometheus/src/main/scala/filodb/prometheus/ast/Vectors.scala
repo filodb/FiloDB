@@ -142,6 +142,7 @@ sealed trait Vector extends Expression {
   lazy val mergeNameToLabels: Seq[LabelMatch] = {
     val nameLabel = labelSelection.find(_.label == PromMetricLabel)
     if (metricName.nonEmpty) {
+      if (nameLabel.nonEmpty) throw new IllegalArgumentException("Metric name should not be set twice")
       // metric name specified but no __name__ label.  Add it
       labelSelection :+ LabelMatch(PromMetricLabel, EqualMatch, metricName.get)
     } else {
@@ -149,13 +150,10 @@ sealed trait Vector extends Expression {
     }
   }
 
-  override def validateNames() : Expression = {
+  override def requireMetricNames() : Expression = {
     val nameLabel = labelSelection.find(_.label == PromMetricLabel)
     if (nameLabel.isEmpty && metricName.isEmpty)
       throw new IllegalArgumentException("Metric name is not present")
-    if (metricName.nonEmpty) {
-      if (nameLabel.nonEmpty) throw new IllegalArgumentException("Metric name should not be set twice")
-    }
     this
   }
 
@@ -259,6 +257,17 @@ case class InstantExpression(metricName: Option[String],
       offsetMs)
   }
 
+  /**
+   * Returns a mapping from selector labels (including an explicit/implicit __name__) to values.
+   *
+   * Note: this InstantExpression does not require a metric name in order
+   *   for this method to run to completion.
+   */
+  def toLabelMap() : Map[String, String] = {
+    mergeNameToLabels.map{ labelMatch =>
+      labelMatch.label -> labelMatch.value
+    }.toMap
+  }
 }
 
 /**

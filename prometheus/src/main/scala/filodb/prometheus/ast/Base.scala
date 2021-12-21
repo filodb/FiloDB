@@ -24,13 +24,13 @@ final case class WriteBuffersParam(step: Long) extends TimeRangeParams {
 
 trait Expression {
   /**
-   * Validates the metric names of an expression (if they exist).
+   * Validates that a metric name exists for all selectors within the Expression.
    * Specifically, exactly one of
    *   (1) the __name__ label
    *   (2) the de-facto metric name (as in foo{~})
-   * must exist.
+   * must exist for each selector.
    */
-  def validateNames() : Expression = this
+  def requireMetricNames() : Expression = this
 }
 
 trait Series

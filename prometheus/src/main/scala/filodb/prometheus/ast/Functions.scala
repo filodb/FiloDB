@@ -83,8 +83,8 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
     }
   }
 
-  override def validateNames(): Expression = {
-    allParams.foreach(_.validateNames())
+  override def requireMetricNames(): Expression = {
+    allParams.foreach(_.requireMetricNames())
     this
   }
 
