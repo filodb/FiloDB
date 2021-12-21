@@ -31,8 +31,7 @@ object Parser extends StrictLogging {
     }
   }
 
-  // Only called directly by tests.
-  def parseQueryWithoutMetricNameRequirement(query: String): Expression = {
+  private def parseQueryWithoutMetricNameRequirement(query: String): Expression = {
     mode match {
       case Antlr => AntlrParser.parseQuery(query)
       case Legacy => LegacyParser.parseQuery(query)
