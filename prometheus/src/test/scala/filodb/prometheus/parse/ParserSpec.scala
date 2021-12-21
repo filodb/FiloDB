@@ -741,11 +741,11 @@ class ParserSpec extends AnyFunSpec with Matchers {
     )
 
     queryMapPairs.foreach{case (query, expectedMap) =>
-      Parser.queryToLabelMap(query) shouldEqual expectedMap
+      Parser.queryToEqualLabelMap(query) shouldEqual expectedMap
     }
 
     queriesShouldFail.foreach{query =>
-      assertThrows[IllegalArgumentException](Parser.queryToLabelMap(query))
+      assertThrows[IllegalArgumentException](Parser.queryToEqualLabelMap(query))
     }
   }
 
