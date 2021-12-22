@@ -39,12 +39,10 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
 
   private val _tenantIngestionMeteringOpt =
     if (settings.config.getBoolean("shard-key-level-ingestion-metrics-enabled")) {
-      val inst = new TenantIngestionMetering(
+      Some(new TenantIngestionMetering(
                    settings,
                    () => { _datasetInfo.map{ case (dsRef, _) => dsRef}.toIterator },
-                   () => { _coordinators.head._2 })
-      inst.schedulePeriodicPublishJob()
-      Some(inst)
+                   () => { _coordinators.head._2 }))
     } else None
 
   val shardReassignmentMinInterval = settings.config.getDuration("shard-manager.reassignment-min-interval")

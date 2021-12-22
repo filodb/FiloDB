@@ -18,23 +18,28 @@ import filodb.core.DatasetRef
 import filodb.query.{QueryError, QueryResult, TsCardinalities}
 
 object QueryThrottle {
-  // currently just add this diff to the delay if the timeout rate exceeds THRESHOLD
-  val DELAY_DIFF = FiniteDuration(5L, TimeUnit.MINUTES)
+  // currently just add this diff to the interval if the timeout rate exceeds THRESHOLD
+  protected val INTERVAL_DIFF = FiniteDuration(5L, TimeUnit.MINUTES)
   // number of past query timeouts/non-timeouts to consider
-  val LOOKBACK = 10
-  // {non-timeouts-in-lookback-window} / LOOKBACK < THRESHOLD will adjust the delay
-  val THRESHOLD = 0.85
+  protected val LOOKBACK = 10
+  // {non-timeouts-in-lookback-window} / LOOKBACK < THRESHOLD will adjust the interval
+  protected val THRESHOLD = 0.85
+}
+
+object TenantIngestionMetering {
+  protected val METRIC_ACTIVE = "active_timeseries_by_tenant"
+  protected val METRIC_TOTAL = "total_timeseries_by_tenant"
 }
 
 /**
  * Throttles the TenantIngestionMetering query rate according to the ratio of timeouts to non-timeouts.
  *
- * @param queryDelay the initial delay between each query. This is the duration to be adjusted.
+ * @param queryInterval the initial delay between each query. This is the duration to be adjusted.
  */
-class QueryThrottle(queryDelay: FiniteDuration) extends StrictLogging {
+class QueryThrottle(queryInterval: FiniteDuration) extends StrictLogging {
   import QueryThrottle._
 
-  private var delay: FiniteDuration = queryDelay.copy()
+  private var interval: FiniteDuration = queryInterval.copy()
   private val lock = new ReentrantReadWriteLock()
 
   // these track timeouts for the past LOOKBACK queries
@@ -55,13 +60,13 @@ class QueryThrottle(queryDelay: FiniteDuration) extends StrictLogging {
   }
 
   /**
-   * Updates the delay according to the timeout:non-timeoout ratio.
+   * Updates the interval according to the timeout:non-timeout ratio.
    */
-  private def updateDelay(): Unit = {
+  private def updateInterval(): Unit = {
     val successRate = Integer.bitCount(bits).toDouble / LOOKBACK
     if (successRate < THRESHOLD) {
-      delay = delay + DELAY_DIFF
-      logger.info("too many timeouts; query delay extended to " + delay.toString())
+      interval = interval + INTERVAL_DIFF
+      logger.info("too many timeouts; query interval extended to " + interval.toString())
       // reset the bits
       bits = (1 << LOOKBACK) - 1
     }
@@ -73,7 +78,7 @@ class QueryThrottle(queryDelay: FiniteDuration) extends StrictLogging {
   def recordTimeout(): Unit = {
     lock.writeLock().lock()
     setNextBit(false)
-    updateDelay()
+    updateInterval()
     lock.writeLock().unlock()
   }
 
@@ -83,18 +88,18 @@ class QueryThrottle(queryDelay: FiniteDuration) extends StrictLogging {
   def recordOnTime(): Unit = {
     lock.writeLock().lock()
     setNextBit(true)
-    updateDelay()
+    updateInterval()
     lock.writeLock().unlock()
   }
 
   /**
-   * Returns the current query delay.
+   * Returns the current query interval.
    */
-  def getDelay(): FiniteDuration = {
+  def getInterval(): FiniteDuration = {
     lock.readLock().lock()
-    val currDelay = delay.copy()
+    val currInterval = interval.copy()
     lock.readLock().unlock()
-    return currDelay
+    currInterval
   }
 }
 
@@ -110,31 +115,20 @@ class QueryThrottle(queryDelay: FiniteDuration) extends StrictLogging {
  *          queried in the order they're returned from this function.
  */
 class TenantIngestionMetering(settings: FilodbSettings,
-                                   dsIterProducer: () => Iterator[DatasetRef],
-                                   coordActorProducer: () => ActorRef) extends StrictLogging{
+                              dsIterProducer: () => Iterator[DatasetRef],
+                              coordActorProducer: () => ActorRef) extends StrictLogging{
+  import TenantIngestionMetering._
 
-  // time until first query executes
-  private val SCHED_INIT_DELAY = FiniteDuration(
+  private val clusterType = settings.config.getString("cluster-type")
+  private var queryAskTimeSec = -1L  // unix time of the most recent query ask
+  private val queryThrottle = new QueryThrottle(FiniteDuration(
     settings.config.getDuration("metering-query-interval").toSeconds,
-    TimeUnit.SECONDS)
+    TimeUnit.SECONDS))
 
-  private val CLUSTER_TYPE = settings.config.getString("cluster-type")
+  // immediately begin periodically querying for / publishing cardinality data
+  queryAndSchedule()
 
-  private val METRIC_ACTIVE = "active_timeseries_by_tenant"
-  private val METRIC_TOTAL = "total_timeseries_by_tenant"
-
-  private val queryLimiter = new QueryThrottle(SCHED_INIT_DELAY)
-
-  def schedulePeriodicPublishJob() : Unit = {
-    // NOTE: the FiniteDuration overload of scheduleWithFixedDelay
-    //  does not work. Unsure why, but that's why these FiniteDurations are
-    //  awkwardly parsed into seconds.
-    scheduler.scheduleOnce(
-      SCHED_INIT_DELAY.toSeconds,
-      TimeUnit.SECONDS,
-      () => queryAndSchedule())
-  }
-
+  // scalastyle:off method.length
   /**
    * For each dataset, ask a Coordinator with a TsCardinalities LogicalPlan.
    * Schedules:
@@ -145,45 +139,55 @@ class TenantIngestionMetering(settings: FilodbSettings,
     import filodb.query.exec.TsCardExec._
     val numGroupByFields = 2  // group cardinalities at the second level (i.e. ws & ns)
     val prefix = Nil  // query for cardinalities regardless of first-level name (i.e. ws name)
+
+    // use this later to find total elapsed time
+    queryAskTimeSec = java.time.Clock.systemUTC().instant().getEpochSecond
+
     dsIterProducer().foreach { dsRef =>
       val fut = Client.asyncAsk(
         coordActorProducer(),
         LogicalPlan2Query(dsRef, TsCardinalities(prefix, numGroupByFields)),
-        queryLimiter.getDelay())
-      fut.onComplete {
-        case Success(qresp) =>
-          queryLimiter.recordOnTime()
-          qresp match {
-            case QueryResult(_, _, rv, _, _, _) =>
-              rv.foreach(_.rows().foreach{ rr =>
-                // publish a cardinality metric for each namespace
-                val data = RowData.fromRowReader(rr)
-                val prefix = data.group.toString.split(PREFIX_DELIM)
-                val tags = Map("metric_ws" -> prefix(0),
-                  "metric_ns" -> prefix(1),
-                  "dataset" -> dsRef.dataset,
-                  "cluster_type" -> CLUSTER_TYPE)
-                Kamon.gauge(METRIC_ACTIVE).withTags(TagSet.from(tags)).update(data.counts.active.toDouble)
-                Kamon.gauge(METRIC_TOTAL).withTags(TagSet.from(tags)).update(data.counts.total.toDouble)
-              })
-            case QueryError(_, _, t) => logger.warn("QueryError: " + t.getMessage)
-          }
-        case Failure(t) =>
-          logger.warn("Failure: " + t.getMessage)
-          if (t.isInstanceOf[TimeoutException]) {
-            queryLimiter.recordTimeout()
-          } else {
-            queryLimiter.recordOnTime()
-          }
-        // required to compile
-        case _ => throw new IllegalArgumentException("should never reach here; attempted to match: " + fut)
+        queryThrottle.getInterval())
+
+      fut.onComplete { tryRes =>
+        tryRes match {
+          case Success(qresp) =>
+            queryThrottle.recordOnTime()
+            qresp match {
+              case QueryResult(_, _, rv, _, _, _) =>
+                rv.foreach(_.rows().foreach{ rr =>
+                  // publish a cardinality metric for each namespace
+                  val data = RowData.fromRowReader(rr)
+                  val prefix = data.group.toString.split(PREFIX_DELIM)
+                  val tags = Map(
+                    "metric_ws" -> prefix(0),
+                    "metric_ns" -> prefix(1),
+                    "dataset" -> dsRef.dataset,
+                    "cluster_type" -> clusterType)
+                  Kamon.gauge(METRIC_ACTIVE).withTags(TagSet.from(tags)).update(data.counts.active.toDouble)
+                  Kamon.gauge(METRIC_TOTAL).withTags(TagSet.from(tags)).update(data.counts.total.toDouble)
+                })
+              case QueryError(_, _, t) => logger.warn("QueryError: " + t.getMessage)
+            }
+          case Failure(t) =>
+            logger.warn("Failure: " + t.getMessage)
+            if (t.isInstanceOf[TimeoutException]) {
+              queryThrottle.recordTimeout()
+            } else {
+              queryThrottle.recordOnTime()
+            }
+          // required to compile
+          case _ => throw new IllegalArgumentException("should never reach here; attempted to match: " + fut)
+        }
+
+        // Delay the next query until the beginning of the next interval.
+        val elapsedSec = java.time.Clock.systemUTC().instant().getEpochSecond - queryAskTimeSec
+        scheduler.scheduleOnce(
+          math.max(0, queryThrottle.getInterval().toSeconds - elapsedSec),
+          TimeUnit.SECONDS,
+          () => queryAndSchedule())
       }
     }
-
-    // schedule the next query
-    scheduler.scheduleOnce(
-      queryLimiter.getDelay().toSeconds,
-      TimeUnit.SECONDS,
-      () => queryAndSchedule())
   }
+  // scalastyle:on method.length
 }
