@@ -685,8 +685,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     val lp = TsCardinalities(Seq("a", "b"), 3)
-    val promQlQueryParams = PromQlQueryParams("", startSeconds, step, endSeconds, Some("/api/v1/tscard"))
-    val expectedUrlParams = Map("shardKeyPrefix" -> s"a${TsCardExec.PREFIX_DELIM}b", "numGroupByFields" -> "3")
+    val promQlQueryParams = PromQlQueryParams("", startSeconds, step, endSeconds, Some("/api/v1/metering/cardinality/timeseries"))
+    val expectedUrlParams = Map("match[]" -> """{_ws_="a",_ns_="b"}""", "numGroupByFields" -> "3")
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
       PlannerParams(processMultiPartition = true)))

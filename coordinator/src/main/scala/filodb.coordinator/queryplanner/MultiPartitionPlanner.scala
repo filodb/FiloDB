@@ -438,18 +438,27 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   }
 
   def materializeTsCardinalities(lp: TsCardinalities, qContext: QueryContext): PlanResult = {
-    // This code is nearly identical to materializeMetadataQueryPlan, but it prevents some
-    //   boilerplate code clutter that results when TsCardinalities extends MetadataQueryPlan.
-    //   If this code's maintenance isn't worth some extra stand-in lines of code (i.e. at matchers that
-    //   take MetadataQueryPlan instances), then just extend TsCardinalities from MetadataQueryPlan.
 
-    import filodb.query.exec.TsCardExec.PREFIX_DELIM
+    def prefixToMatcher(prefix: Seq[String]): String = {
+      val builder = new StringBuilder("{")
+      if (prefix.size > 0) {
+        builder.append(s"""_ws_="${prefix(0)}"""")
+      }
+      if (prefix.size > 1) {
+        builder.append(s""",_ns_="${prefix(1)}"""")
+      }
+      if (prefix.size > 2) {
+        builder.append(s""",__name__="${prefix(2)}"""")
+      }
+      builder.append("}")
+      builder.mkString
+    }
 
+    val timeRange = TimeRange(0, Long.MaxValue)
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val partitions = partitionLocationProvider.getAuthorizedPartitions(
-      TimeRange(0, Long.MaxValue))
+    val partitions = partitionLocationProvider.getAuthorizedPartitions(timeRange)
     val execPlan = if (partitions.isEmpty) {
-      logger.warn(s"No partitions found for ${queryParams.startSecs}, ${queryParams.endSecs}")
+      logger.warn(s"No partitions found for ${timeRange.startMs/1000}, ${timeRange.endMs/1000}")
       localPartitionPlanner.materialize(lp, qContext)
     } else {
       val execPlans = partitions.map { p =>
@@ -458,7 +467,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           localPartitionPlanner.materialize(lp, qContext)
         else {
           val params = Map(
-            "shardKeyPrefix" -> lp.shardKeyPrefix.mkString(PREFIX_DELIM),
+            "match[]" -> prefixToMatcher(lp.shardKeyPrefix),
             "numGroupByFields" -> lp.numGroupByFields.toString)
           createMetadataRemoteExec(qContext, p, params)
         }
