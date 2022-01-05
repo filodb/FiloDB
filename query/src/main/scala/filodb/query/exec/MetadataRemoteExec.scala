@@ -95,8 +95,9 @@ case class MetadataRemoteExec(queryEndpoint: String,
     val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, recordSchema,
       queryWithPlanName(queryContext)))
 
+    val schema = if (data.isEmpty) ResultSchema.empty else resultSchema
     // FIXME need to send and parse query stats in remote calls
-    QueryResult(id, resultSchema, srvSeq, QueryStats(),
+    QueryResult(id, schema, srvSeq, QueryStats(),
       if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 
@@ -111,8 +112,9 @@ case class MetadataRemoteExec(queryEndpoint: String,
     val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, labelsRecordSchema,
       queryWithPlanName(queryContext)))
 
+    val schema = if (data.isEmpty) ResultSchema.empty else labelsResultSchema
     // FIXME need to send and parse query stats in remote calls
-    QueryResult(id, labelsResultSchema, srvSeq, QueryStats(),
+    QueryResult(id, schema, srvSeq, QueryStats(),
       if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 }

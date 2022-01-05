@@ -62,7 +62,7 @@ object PromCirceSupport {
     }
   }
 
-  implicit val decodeFoo: Decoder[DataSampl] = new Decoder[DataSampl] {
+  implicit val decodeDataSampl: Decoder[DataSampl] = new Decoder[DataSampl] {
     final def apply(c: HCursor): Decoder.Result[DataSampl] = {
       val tsResult = c.downArray.as[Long]
       val rightCurs = c.downArray.right
