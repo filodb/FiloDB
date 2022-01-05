@@ -738,6 +738,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
     val queriesShouldFail = Seq(
       """foo{__name__="bar"}""",
       """foo{__name__="bar", bog="baz"}""",
+      """{}"""
     )
 
     queryMapPairs.foreach{case (query, expectedMap) =>

@@ -141,6 +141,28 @@ sealed trait Vector extends Expression {
   // Note: see makeMergeNameToLabels before changing the laziness.
   lazy val mergeNameToLabels: Seq[LabelMatch] = makeMergeNameToLabels()
 
+  // These constraints are also applied within makeMergeNameToLabels, but they are
+  //   *immediately* applied here (i.e. not lazily as with mergeNameToLabels).
+  applyPromqlConstraints()
+
+  /**
+   * Apply PromQL-scope constraints to the vector selector:
+   *   (1) only one __name__ specifier (implicit or otherwise) exists.
+   *   (2) at least one label matcher exists.
+   */
+  def applyPromqlConstraints(): Unit = {
+    val nameLabel = labelSelection.find(_.label == PromMetricLabel)
+    if (metricName.nonEmpty) {
+      if (nameLabel.nonEmpty) {
+        throw new IllegalArgumentException(
+          "Metric name should not be set twice")
+      }
+    } else if (labelSelection.size == 0) {
+      throw new IllegalArgumentException(
+        "At least one label matcher is required")
+    }
+  }
+
   /**
    * Constructs the mergeNameToLabels member.
    *
@@ -160,11 +182,13 @@ sealed trait Vector extends Expression {
    * This method exists only to consolidate code for the initialization of these values.
    */
   def makeMergeNameToLabels(requireName: Boolean = true): Seq[LabelMatch] = {
+    applyPromqlConstraints()
     val nameLabel = labelSelection.find(_.label == PromMetricLabel)
-    if (requireName && nameLabel.isEmpty && metricName.isEmpty)
+    if (requireName && nameLabel.isEmpty && metricName.isEmpty) {
+      // not included in applyPromqlConstraints
       throw new IllegalArgumentException("Metric name is not present")
+    }
     if (metricName.nonEmpty) {
-      if (nameLabel.nonEmpty) throw new IllegalArgumentException("Metric name should not be set twice")
       // metric name specified but no __name__ label.  Add it
       labelSelection :+ LabelMatch(PromMetricLabel, EqualMatch, metricName.get)
     } else {
@@ -241,7 +265,7 @@ case class InstantExpression(metricName: Option[String],
   // TODO: mergeNameToLabels requires a metric name at its initialization, but a valid PromQL
   //   instant selector does not necessarily contain a metric name. This name requirement should
   //   be moved elsewhere. For now, this (and mergeNameToLabels) must remain lazy in order
-  //   to allow nameless instant selectors (see toOptionalNameMetadataPlan).
+  //   to allow nameless instant selectors (see toLabelMap() as an example).
   lazy val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
