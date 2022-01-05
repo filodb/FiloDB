@@ -184,10 +184,6 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("foo::b{gibberish}")
     parseError("foo{1}")
     parseError("{}")
-    parseError("{x=\"\"}")
-    parseError("{x=~\".*\"}")
-    parseError("{x!~\".+\"}")
-    parseError("{x!=\"a\"}")
     parseError("foo{__name__=\"bar\"}")
 
     parseSuccessfully("test{a=\"b\"}[5y] OFFSET 3d")
