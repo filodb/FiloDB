@@ -1,6 +1,6 @@
 package filodb.prometheus.parse
 
-import filodb.prometheus.ast.{PeriodicSeries, SimpleSeries, TimeStepParams}
+import filodb.prometheus.ast.{PeriodicSeries, SimpleSeries, TimeStepParams, FilodbExpressionValidatorVisitor}
 import filodb.prometheus.parse.Parser.{Antlr, Shadow}
 import filodb.query.{BinaryJoin, LogicalPlan}
 import org.scalatest.funspec.AnyFunSpec
@@ -768,14 +768,14 @@ class ParserSpec extends AnyFunSpec with Matchers {
   }
 
   private def parseSuccessfully(query: String) = {
-    val result = LegacyParser.parseQuery(query).requireMetricNames()
+    val result = LegacyParser.parseQuery(query).acceptVisitor(new FilodbExpressionValidatorVisitor)
     info(String.valueOf(result))
     antlrParseSuccessfully(query)
   }
 
   private def parseSubquery(query: String) = {
     try {
-      val result = AntlrParser.parseQuery(query).requireMetricNames()
+      val result = AntlrParser.parseQuery(query).acceptVisitor(new FilodbExpressionValidatorVisitor)
     } catch {
       case e: Exception => {
         // FIXME: don't catch any exception when subquery support is finished
@@ -791,7 +791,7 @@ class ParserSpec extends AnyFunSpec with Matchers {
     val qts: Long = 1524855988L
     val step = 1000
     val defaultQueryParams = TimeStepParams(qts, step, qts)
-    val result = AntlrParser.parseQuery(query).requireMetricNames()
+    val result = AntlrParser.parseQuery(query).acceptVisitor(new FilodbExpressionValidatorVisitor)
     val lp: LogicalPlan = result match {
       case p: PeriodicSeries => p.toSeriesPlan(defaultQueryParams)
       case r: SimpleSeries   => r.toSeriesPlan(defaultQueryParams, isRoot = true)
@@ -803,25 +803,25 @@ class ParserSpec extends AnyFunSpec with Matchers {
 
   private def parseSubqueryError(query: String) = {
     intercept[IllegalArgumentException] {
-      AntlrParser.parseQuery(query).requireMetricNames()
+      AntlrParser.parseQuery(query).acceptVisitor(new FilodbExpressionValidatorVisitor)
     }
   }
 
   private def antlrParseSuccessfully(query: String) = {
-    val result = AntlrParser.parseQuery(query).requireMetricNames()
+    val result = AntlrParser.parseQuery(query).acceptVisitor(new FilodbExpressionValidatorVisitor)
     info(String.valueOf(result))
   }
 
   private def parseError(query: String) = {
     intercept[IllegalArgumentException] {
-      LegacyParser.parseQuery(query).requireMetricNames()
+      LegacyParser.parseQuery(query).acceptVisitor(new FilodbExpressionValidatorVisitor)
     }
     antlrParseError(query)
   }
 
   private def antlrParseError(query: String) = {
     intercept[IllegalArgumentException] {
-      AntlrParser.parseQuery(query).requireMetricNames()
+      AntlrParser.parseQuery(query).acceptVisitor(new FilodbExpressionValidatorVisitor)
       try {
         Parser.queryToLogicalPlan(query, 1524855988L, 0)
       } catch {

@@ -93,6 +93,10 @@ case class SubqueryExpression(
     subquery: PeriodicSeries, sqcl: SubqueryClause, offset: Option[Duration], limit: Option[Int]
 ) extends Expression with PeriodicSeries {
 
+  override def acceptVisitor(vis: FilodbExpressionValidatorVisitor): Expression = {
+    vis.visit(this)
+  }
+
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     // There are only two places for the subquery to be defined in the abstract syntax tree:
     // a) top level expression (equivalent of query_range API)
@@ -148,13 +152,6 @@ sealed trait Vector extends Expression {
     } else {
       labelSelection
     }
-  }
-
-  override def requireMetricNames() : Expression = {
-    val nameLabel = labelSelection.find(_.label == PromMetricLabel)
-    if (nameLabel.isEmpty && metricName.isEmpty)
-      throw new IllegalArgumentException("Metric name is not present")
-    this
   }
 
   def realMetricName: String = mergeNameToLabels.find(_.label == PromMetricLabel).get.value
@@ -225,6 +222,10 @@ case class InstantExpression(metricName: Option[String],
 
   val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
+  override def acceptVisitor(vis: FilodbExpressionValidatorVisitor): Expression = {
+    vis.visit(this)
+  }
+
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     // we start from 5 minutes earlier that provided start time in order to include last sample for the
     // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
@@ -288,6 +289,10 @@ case class RangeExpression(metricName: Option[String],
                            offset: Option[Duration]) extends Vector with SimpleSeries {
 
   private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
+
+  override def acceptVisitor(vis: FilodbExpressionValidatorVisitor): Expression = {
+    vis.visit(this)
+  }
 
   def toSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): RawSeriesLikePlan = {
     if (isRoot && timeParams.start != timeParams.end) {

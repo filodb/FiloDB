@@ -5,17 +5,14 @@ import filodb.query._
 
 case class UnaryExpression(operator: Operator, operand: Expression) extends Expression {
   //TODO Need to pass an operator to a series
-
-  override def requireMetricNames(): Expression = {
-    operand.requireMetricNames()
-    this
+  override def acceptVisitor(vis: FilodbExpressionValidatorVisitor): Expression = {
+    vis.visit(this)
   }
 }
 
 case class PrecedenceExpression(expression: Expression) extends Expression {
-  override def requireMetricNames(): Expression = {
-    expression.requireMetricNames()
-    this
+  override def acceptVisitor(vis: FilodbExpressionValidatorVisitor): Expression = {
+    vis.visit(this)
   }
 }
 
@@ -23,13 +20,9 @@ case class BinaryExpression(lhs: Expression,
                             operator: Operator,
                             vectorMatch: Option[VectorMatch],
                             rhs: Expression) extends Expression with PeriodicSeries {
-
-  override def requireMetricNames(): Expression = {
-    lhs.requireMetricNames()
-    rhs.requireMetricNames()
-    this
+  override def acceptVisitor(vis: FilodbExpressionValidatorVisitor): Expression = {
+    vis.visit(this)
   }
-
   def validate(): Unit = {
     operator match {
       case setOp: SetOp =>

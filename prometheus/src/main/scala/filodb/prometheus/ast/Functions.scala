@@ -83,9 +83,8 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
     }
   }
 
-  override def requireMetricNames(): Expression = {
-    allParams.foreach(_.requireMetricNames())
-    this
+  override def acceptVisitor(vis: FilodbExpressionValidatorVisitor): Expression = {
+    vis.visit(this)
   }
 
   /**

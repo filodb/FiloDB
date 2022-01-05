@@ -30,7 +30,7 @@ trait Expression {
    *   (2) the de-facto metric name (as in foo{~})
    * must exist for each selector.
    */
-  def requireMetricNames() : Expression = this
+  def acceptVisitor(vis: FilodbExpressionValidatorVisitor) : Expression
 }
 
 trait Series
@@ -63,9 +63,17 @@ object Base {
 /**
   * An identifier is an unquoted string
   */
-case class Identifier(str: String) extends Expression
+case class Identifier(str: String) extends Expression {
+  override def acceptVisitor(vis: FilodbExpressionValidatorVisitor): Expression = {
+    vis.visit(this)
+  }
+}
 
 /**
   * A literal is quoted string originally, but the quotes are removed by the parser.
   */
-case class StringLiteral(str: String) extends Expression
+case class StringLiteral(str: String) extends Expression {
+  override def acceptVisitor(vis: FilodbExpressionValidatorVisitor): Expression = {
+    vis.visit(this)
+  }
+}

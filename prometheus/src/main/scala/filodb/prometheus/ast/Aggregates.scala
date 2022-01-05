@@ -65,6 +65,10 @@ case class AggregateExpression(name: String, params: Seq[Expression],
       )
   }
 
+  override def acceptVisitor(vis: FilodbExpressionValidatorVisitor): Expression = {
+    vis.visit(this)
+  }
+
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     val periodicSeriesPlan = series.toSeriesPlan(timeParams)
 
@@ -91,10 +95,5 @@ case class AggregateExpression(name: String, params: Seq[Expression],
           Nil
         )
     }
-  }
-
-  override def requireMetricNames(): Expression = {
-    allParams.foreach(_.requireMetricNames())
-    this
   }
 }

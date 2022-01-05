@@ -51,7 +51,7 @@ object Parser extends StrictLogging {
 
   // Only called directly by tests.
   def parseQuery(query: String): Expression = {
-    parseQueryWithoutMetricNameRequirement(query).requireMetricNames()
+    parseQueryWithoutMetricNameRequirement(query).acceptVisitor(new FilodbExpressionValidatorVisitor)
   }
 
   // TODO: Once fully switched to AntlrParser, get rid of the special precedence methods.
@@ -73,7 +73,7 @@ object Parser extends StrictLogging {
         expr
       }
     }
-    expr.requireMetricNames()
+    expr.acceptVisitor(new FilodbExpressionValidatorVisitor)
   }
 
   // Only called by tests.
