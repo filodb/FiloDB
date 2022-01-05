@@ -301,16 +301,20 @@ case class InstantExpression(metricName: Option[String],
   }
 
   /**
-   * Returns a mapping of labels to values.
+   * Returns a mapping from selector labels (including an explicit/implicit __name__) to values.
+   * Throws an IllegalArgumentException if any of the values are not matched by equality without a regex.
    *
    * Note: this InstantExpression does not require a metric name in order
    *   for this method to run to completion.
    */
-  def toLabelMap() : Map[String, String] = {
+  def toEqualLabelMap() : Map[String, String] = {
     // See Vector::mergeNameToLabels for details about why we're ignoring the member variable.
-    val requireName = false
-    val mergeNameToLabelsLocal = makeMergeNameToLabels(requireName)
+    val mergeNameToLabelsLocal = makeMergeNameToLabels(requireName = false)
     mergeNameToLabelsLocal.map{ labelMatch =>
+      if (labelMatch.labelMatchOp != EqualMatch) {
+        throw new IllegalArgumentException(
+          "cannot convert to label map if any values aren't matched by equality")
+      }
       labelMatch.label -> labelMatch.value
     }.toMap
   }
