@@ -351,21 +351,32 @@ final case class LabelValuesExec(queryContext: QueryContext,
             queryContext.plannerParams.sampleLimit).map(_.term.toString)
           val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
             NoCloseCursor(StringArrayRowReader(labels)), None))
-          val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.StringColumn)), 1)
+          val sch = if (labels.isEmpty) ResultSchema.empty
+                    else ResultSchema(Seq(ColumnInfo("Labels", ColumnType.StringColumn)), 1)
           ExecResult(resp, Task.eval(sch))
         case true => throw new BadQueryException("either label name is missing " +
           "or there are multiple label names without filter")
+        case false if (columns.size == 1) =>
+          val metadataMap = memStore.labelValuesWithFilters(dataset, shard, filters, columns, endMs, startMs,
+            queryContext.plannerParams.sampleLimit)
+          val labels = metadataMap.map(_.head._1.toString).toSeq
+          val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
+            NoCloseCursor(StringArrayRowReader(labels)), None))
+          val sch = if (labels.isEmpty) ResultSchema.empty
+                    else ResultSchema(Seq(ColumnInfo("Labels", ColumnType.StringColumn)), 1)
+          ExecResult(resp, Task.eval(sch))
         case false =>
           val metadataMap = memStore.labelValuesWithFilters(dataset, shard, filters, columns, endMs, startMs,
           queryContext.plannerParams.sampleLimit)
           val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
             UTF8MapIteratorRowReader(metadataMap), None))
-          val sch = ResultSchema(Seq(ColumnInfo("metadataMap", ColumnType.MapColumn)), 1)
+          val sch = if (metadataMap.isEmpty) ResultSchema.empty
+                    else ResultSchema(Seq(ColumnInfo("metadataMap", ColumnType.MapColumn)), 1)
           ExecResult(resp, Task.eval(sch))
       }
     } else {
       val resp = Observable.empty
-      val sch = ResultSchema(Seq(ColumnInfo("metadataMap", ColumnType.MapColumn)), 1)
+      val sch = ResultSchema.empty
       ExecResult(resp, Task.eval(sch))
     }
     execResult

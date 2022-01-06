@@ -63,7 +63,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
   def toQueryResponse(response: MetadataSuccessResponse, id: String, parentSpan: kamon.trace.Span): QueryResponse = {
       if (response.data.isEmpty) mapTypeQueryResponse(response, id)
       else response.data.head match {
-        case _: MetadataSampl            => mapTypeQueryResponse(response, id)
+        case _: MetadataMapSampl         => mapTypeQueryResponse(response, id)
         case _: LabelCardinalitySampl    => mapLabelCardinalityResponse(response, id)
         case _                           => labelsQueryResponse(response, id)
       }
@@ -85,8 +85,8 @@ case class MetadataRemoteExec(queryEndpoint: String,
   }
 
   def mapTypeQueryResponse(response: MetadataSuccessResponse, id: String): QueryResponse = {
-    val data = response.data.asInstanceOf[Seq[MetadataSampl]]
-    val iteratorMap = data.map { r => r.values.map { v => (v._1.utf8, v._2.utf8) }}
+    val data = response.data.asInstanceOf[Seq[MetadataMapSampl]]
+    val iteratorMap = data.map { r => r.value.map { v => (v._1.utf8, v._2.utf8) }}
 
     import NoCloseCursor._
     val rangeVector = IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
@@ -95,14 +95,15 @@ case class MetadataRemoteExec(queryEndpoint: String,
     val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, recordSchema,
       queryWithPlanName(queryContext)))
 
+    val schema = if (data.isEmpty) ResultSchema.empty else resultSchema
     // FIXME need to send and parse query stats in remote calls
-    QueryResult(id, resultSchema, srvSeq, QueryStats(),
+    QueryResult(id, schema, srvSeq, QueryStats(),
       if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 
   def labelsQueryResponse(response: MetadataSuccessResponse, id: String): QueryResponse = {
     val data = response.data.asInstanceOf[Seq[LabelSampl]]
-    val iteratorMap = data.flatMap { r => r.values}
+    val iteratorMap = data.map { r => r.value}
 
     import NoCloseCursor._
     val rangeVector = IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
@@ -111,8 +112,9 @@ case class MetadataRemoteExec(queryEndpoint: String,
     val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, labelsRecordSchema,
       queryWithPlanName(queryContext)))
 
+    val schema = if (data.isEmpty) ResultSchema.empty else labelsResultSchema
     // FIXME need to send and parse query stats in remote calls
-    QueryResult(id, labelsResultSchema, srvSeq, QueryStats(),
+    QueryResult(id, schema, srvSeq, QueryStats(),
       if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 }
