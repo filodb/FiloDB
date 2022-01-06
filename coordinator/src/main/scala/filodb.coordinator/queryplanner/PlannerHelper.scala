@@ -121,11 +121,9 @@ trait  PlannerHelper {
       vectors
     }
 
-   def addAggregator(lp: Aggregate, qContext: QueryContext, toReduceLevel: PlanResult,
-                     extraOnByKeysTimeRanges: Seq[Seq[Long]]):
+   def addAggregator(lp: Aggregate, qContext: QueryContext, toReduceLevel: PlanResult):
    LocalPartitionReduceAggregateExec = {
 
-    val byKeysReal = ExtraOnByKeysUtil.getRealByLabels(lp, extraOnByKeysTimeRanges)
     // Now we have one exec plan per shard
     /*
      * Note that in order for same overlapping RVs to not be double counted when spread is increased,
@@ -141,7 +139,7 @@ trait  PlannerHelper {
     toReduceLevel.plans.foreach {
       _.addRangeVectorTransformer(AggregateMapReduce(lp.operator, lp.params,
         LogicalPlanUtils.renameLabels(lp.without, dsOptions.metricColumn),
-        LogicalPlanUtils.renameLabels(byKeysReal, dsOptions.metricColumn)))
+        LogicalPlanUtils.renameLabels(lp.by, dsOptions.metricColumn)))
     }
 
     val toReduceLevel2 =
@@ -171,7 +169,7 @@ trait  PlannerHelper {
     // Add sum to aggregate all child responses
     // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
     val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
-      qContext.plannerParams.copy(skipAggregatePresent = true)), vectors, Seq.empty))) // No need for present for sum
+      qContext.plannerParams.copy(skipAggregatePresent = true)), vectors))) // No need for present for sum
     addAbsentFunctionMapper(aggregatePlanResult, lp.columnFilters,
       RangeParams(lp.startMs / 1000, lp.stepMs / 1000, lp.endMs / 1000), qContext)
   }
@@ -193,7 +191,7 @@ trait  PlannerHelper {
    def materializeAggregate(qContext: QueryContext,
                                    lp: Aggregate): PlanResult = {
     val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, qContext)
-    val reducer = addAggregator(lp, qContext, toReduceLevel1, queryConfig.addExtraOnByKeysTimeRanges)
+    val reducer = addAggregator(lp, qContext, toReduceLevel1)
     PlanResult(Seq(reducer), false) // since we have aggregated, no stitching
   }
 
@@ -276,9 +274,7 @@ trait  PlannerHelper {
         addAggregator(
           aggregate,
           qContext.copy(plannerParams = qContext.plannerParams.copy(skipAggregatePresent = true)),
-          innerExecPlan,
-          Seq.empty
-        )
+          innerExecPlan)
       )
     )
     addAbsentFunctionMapper(
@@ -334,8 +330,6 @@ trait  PlannerHelper {
     val lhs = walkLogicalPlanTree(logicalPlan.lhs, lhsQueryContext)
     val rhs = walkLogicalPlanTree(logicalPlan.rhs, rhsQueryContext)
 
-    val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
-
     val dispatcher = if (!lhs.plans.head.dispatcher.isLocalCall && !rhs.plans.head.dispatcher.isLocalCall) {
       val lhsCluster = lhs.plans.head.dispatcher.clusterName
       val rhsCluster = rhs.plans.head.dispatcher.clusterName
@@ -354,11 +348,11 @@ trait  PlannerHelper {
     val execPlan =
       if (logicalPlan.operator.isInstanceOf[SetOperator])
         SetOperatorExec(qContext, dispatcher, stitchedLhs, stitchedRhs, logicalPlan.operator,
-          LogicalPlanUtils.renameLabels(onKeysReal, dsOptions.metricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.on, dsOptions.metricColumn),
           LogicalPlanUtils.renameLabels(logicalPlan.ignoring, dsOptions.metricColumn), dsOptions.metricColumn)
       else
         BinaryJoinExec(qContext, dispatcher, stitchedLhs, stitchedRhs, logicalPlan.operator,
-          logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, dsOptions.metricColumn),
+          logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, dsOptions.metricColumn),
           LogicalPlanUtils.renameLabels(logicalPlan.ignoring, dsOptions.metricColumn), logicalPlan.include,
           dsOptions.metricColumn)
 
