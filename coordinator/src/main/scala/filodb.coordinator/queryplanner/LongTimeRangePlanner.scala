@@ -40,6 +40,7 @@ import filodb.query.exec._
 
   // scalastyle:off method.length
   private def materializePeriodicSeriesPlan(qContext: QueryContext, periodicSeriesPlan: PeriodicSeriesPlan) = {
+    import LogicalPlan._
     val earliestRawTime = earliestRawTimestampFn
     lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(periodicSeriesPlan)
     lazy val lookbackMs = LogicalPlanUtils.getLookBackMillis(periodicSeriesPlan).max
@@ -96,7 +97,8 @@ import filodb.query.exec._
       val rawLp = copyLogicalPlanWithUpdatedTimeRange(periodicSeriesPlan, TimeRange(firstInstantInRaw,
         periodicSeriesPlan.endMs))
       val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
-      StitchRvsExec(qContext, stitchDispatcher, Seq(rawEp, downsampleEp))
+      StitchRvsExec(qContext, stitchDispatcher, rvRangeFromPlan(periodicSeriesPlan),
+        Seq(rawEp, downsampleEp))
     }
     PlanResult(Seq(execPlan))
   }

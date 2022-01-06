@@ -66,6 +66,7 @@ object StitchRvsExec {
   */
 final case class StitchRvsExec(queryContext: QueryContext,
                                dispatcher: PlanDispatcher,
+                               outputRvRange: Option[RvRange],
                                children: Seq[ExecPlan]) extends NonLeafExecPlan {
   require(children.nonEmpty)
 
@@ -83,10 +84,7 @@ final case class StitchRvsExec(queryContext: QueryContext,
       groups.mapValues { toMerge =>
         val rows = StitchRvsExec.merge(toMerge.map(_.rows()))
         val key = toMerge.head.key
-        val outputRange = toMerge.map(_.outputRange).reduce { (rv1Range, rv2Range) =>
-          RvRange.union(rv1Range, rv2Range)
-        }
-        IteratorBackedRangeVector(key, rows, outputRange)
+        IteratorBackedRangeVector(key, rows, outputRvRange)
       }.values
     }.map(Observable.fromIterable)
     Observable.fromTask(stitched).flatten

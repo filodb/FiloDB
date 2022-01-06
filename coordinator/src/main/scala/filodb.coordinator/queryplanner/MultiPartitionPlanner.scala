@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
-import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext, RvRange}
 import filodb.query.{MetadataQueryPlan, _}
 import filodb.query.exec._
 
@@ -279,6 +279,15 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     (partitions, routingKeys)
   }
 
+  private def rvRangeFromLogicalPlan(logicalPlan: LogicalPlan, queryParams: PromQlQueryParams): Some[RvRange] = {
+    import LogicalPlan._
+    rvRangeFromPlan(logicalPlan) match {
+      case x @ Some(_)    =>  x
+      case None           => Some(RvRange(startMs = queryParams.startSecs * 1000L,
+        endMs = queryParams.endSecs * 1000L,
+        stepMs = queryParams.stepSecs * 1000L))
+    }
+  }
   /**
     * Materialize all queries except Binary Join and Metadata
     */
@@ -318,8 +327,12 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         }
       }
       if (execPlans.size == 1) execPlans.head
-      else StitchRvsExec(qContext, inProcessPlanDispatcher,
-        execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]))
+      else {
+        // TODO: Do we pass in QueryContext in LogicalPlan's helper rvRangeForPlan?
+
+        StitchRvsExec(qContext, inProcessPlanDispatcher, rvRangeFromLogicalPlan(logicalPlan, queryParams),
+          execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]))
+      }
       // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
       // Sort to move RemoteExec in end as it does not have schema
     }
@@ -360,7 +373,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       } else {
         StitchRvsExec(
           qContext,
-          inProcessPlanDispatcher,
+          inProcessPlanDispatcher, rvRangeFromLogicalPlan(logicalPlan, queryParams),
           execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
         )
       }

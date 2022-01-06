@@ -172,7 +172,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       )
 
     // null needed below since there is a require in code that prevents empty children
-    val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(EmptyQueryConfig),
+    val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(EmptyQueryConfig), Some(RvRange(0, 10, 150)),
       Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
     val rs = ResultSchema(List(ColumnInfo("timestamp",
       TimestampColumn), ColumnInfo("value", DoubleColumn)), 1)
@@ -185,14 +185,16 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       .toListL.runAsync.futureValue
     output.size shouldEqual 1
     output.head.rows().map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual expected
-    output.head.outputRange shouldEqual Some(RvRange(10, 10, 100))
+
+    // Notice how the output RVRange is same as the one passed during initialition of the StitchRvsExec
+    output.head.outputRange shouldEqual Some(RvRange(0, 10, 150))
   }
 
   it ("should reduce result schemas with different fixedVecLengths without error") {
 
     // null needed below since there is a require in code that prevents empty children
     val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(EmptyQueryConfig),
-                             Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
+                             None, Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
 
     val rs1 = ResultSchema(List(ColumnInfo("timestamp",
       TimestampColumn), ColumnInfo("value", DoubleColumn)), 1, Map(), Some(430), List(0, 1))
@@ -339,6 +341,5 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     }
 
   }
-
 }
 

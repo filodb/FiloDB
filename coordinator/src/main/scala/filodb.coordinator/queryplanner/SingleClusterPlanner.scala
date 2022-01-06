@@ -18,6 +18,7 @@ import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
 import filodb.query.{exec, _}
 import filodb.query.InstantFunctionId.HistogramBucket
+import filodb.query.LogicalPlan._
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
 import filodb.query.exec.InternalRangeFunction.Last
 
@@ -259,11 +260,11 @@ class SingleClusterPlanner(val dataset: Dataset,
                                      lp: BinaryJoin): PlanResult = {
     val lhs = walkLogicalPlanTree(lp.lhs, qContext)
     val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext,
-      PlannerUtil.pickDispatcher(lhs.plans), lhs.plans))
+      PlannerUtil.pickDispatcher(lhs.plans), rvRangeFromPlan(lp), lhs.plans))
     else lhs.plans
     val rhs = walkLogicalPlanTree(lp.rhs, qContext)
     val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext,
-      PlannerUtil.pickDispatcher(rhs.plans), rhs.plans))
+      PlannerUtil.pickDispatcher(rhs.plans), rvRangeFromPlan(lp), rhs.plans))
     else rhs.plans
 
     // TODO Currently we create separate exec plan node for stitching.

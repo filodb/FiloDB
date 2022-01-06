@@ -1,6 +1,6 @@
 package filodb.query
 
-import filodb.core.query.{ColumnFilter, RangeParams}
+import filodb.core.query.{ColumnFilter, RangeParams, RvRange}
 import filodb.core.query.Filter.Equals
 
 //scalastyle:off number.of.types
@@ -707,5 +707,21 @@ object LogicalPlan {
     getNonMetricShardKeyFilters(logicalPlan: LogicalPlan, nonMetricShardColumns: Seq[String]).
       forall(_.forall(f => f.filter.isInstanceOf[filodb.core.query.Filter.Equals]))
 
+  /**
+   *  Given a Logical Plan, the method returns a RVRange, there are two cases possible
+   *  1. The given plan is a PeriodicPlan in which case the start, end and step are retrieved from the plan instance
+   *  2. If plan is not a PeriodicPlan then start step and end are irrelevant for the plan and None is returned
+   *
+   * @param plan: The Logical Plan instance
+   * @param qContext: The query context
+   * @return: Option of the RVRange instance
+   */
+  def rvRangeFromPlan(plan: LogicalPlan): Option[RvRange] = {
+    plan match {
+      case p: PeriodicSeriesPlan   => Some(RvRange(startMs = p.startMs, endMs = p.endMs, stepMs = p.stepMs))
+      case _                   => None  //TODO: Do we infer RVRange from queryContext?
+    }
+  }
 }
+
 //scalastyle:on number.of.types

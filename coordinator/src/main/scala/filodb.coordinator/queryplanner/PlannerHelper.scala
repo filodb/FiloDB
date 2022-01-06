@@ -7,6 +7,7 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
 import filodb.query._
+import filodb.query.LogicalPlan._
 import filodb.query.exec._
 
 /**
@@ -338,11 +339,11 @@ trait  PlannerHelper {
     } else inProcessPlanDispatcher
 
     val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext,
-      dispatcher, lhs.plans))
+      dispatcher, rvRangeFromPlan(logicalPlan), lhs.plans))
     else lhs.plans
 
     val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext,
-      dispatcher, rhs.plans))
+      dispatcher, rvRangeFromPlan(logicalPlan), rhs.plans))
     else rhs.plans
 
     val execPlan =
