@@ -266,8 +266,6 @@ class SingleClusterPlanner(val dataset: Dataset,
       PlannerUtil.pickDispatcher(rhs.plans), rhs.plans))
     else rhs.plans
 
-    val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(lp, queryConfig.addExtraOnByKeysTimeRanges)
-
     // TODO Currently we create separate exec plan node for stitching.
     // Ideally, we can go one step further and add capability to NonLeafNode plans to pre-process
     // and transform child results individually before composing child results together.
@@ -277,11 +275,11 @@ class SingleClusterPlanner(val dataset: Dataset,
     val targetActor = PlannerUtil.pickDispatcher(stitchedLhs ++ stitchedRhs)
     val joined = if (lp.operator.isInstanceOf[SetOperator])
       Seq(exec.SetOperatorExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator,
-        LogicalPlanUtils.renameLabels(onKeysReal, dsOptions.metricColumn),
+        LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
         LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn), dsOptions.metricColumn))
     else
       Seq(BinaryJoinExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
-        LogicalPlanUtils.renameLabels(onKeysReal, dsOptions.metricColumn),
+        LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
         LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
         LogicalPlanUtils.renameLabels(lp.include, dsOptions.metricColumn), dsOptions.metricColumn))
     PlanResult(joined, false)
@@ -313,7 +311,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       // Add sum to aggregate all child responses
       // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
       val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
-        qContext.plannerParams.copy(skipAggregatePresent = true)), series, Seq.empty)))
+        qContext.plannerParams.copy(skipAggregatePresent = true)), series)))
       addAbsentFunctionMapper(aggregatePlanResult, logicalPlanWithoutBucket.columnFilters,
         RangeParams(logicalPlanWithoutBucket.startMs / 1000, logicalPlanWithoutBucket.stepMs / 1000,
           logicalPlanWithoutBucket.endMs / 1000), qContext)

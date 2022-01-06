@@ -90,15 +90,13 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
         case _             => getPlanner(logicalPlan.rhs).materialize(logicalPlan.rhs, rhsQueryContext)
       }
 
-      val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
-
       if (logicalPlan.operator.isInstanceOf[SetOperator])
         SetOperatorExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-          LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
           LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
       else
         BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-          logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
+          logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
           LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
           LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn)
     }

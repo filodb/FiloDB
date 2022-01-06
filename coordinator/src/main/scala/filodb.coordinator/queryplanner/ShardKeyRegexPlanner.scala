@@ -121,15 +121,13 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     val lhsExec = materialize(logicalPlan.lhs, lhsQueryContext)
     val rhsExec = materialize(logicalPlan.rhs, rhsQueryContext)
 
-    val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
-
     val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
       SetOperatorExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-        LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
+        LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
     else
       BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-        logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
+        logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn)
     PlanResult(Seq(execPlan))
@@ -154,7 +152,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
         // be InProcessPlanDispatcher and adding the current aggregate using addAggregate will use the same dispatcher
         // If the underlying plan however is not multi partition, adding the aggregator using addAggregator will
         // use the same dispatcher
-        addAggregator(aggregate, queryContext, PlanResult(Seq(childPlan)), Seq.empty)
+        addAggregator(aggregate, queryContext, PlanResult(Seq(childPlan)))
     } else {
       val execPlans = generateExecWithoutRegex(aggregate,
         LogicalPlan.getNonMetricShardKeyFilters(aggregate, dataset.options.nonMetricShardColumns).head, queryContext)
