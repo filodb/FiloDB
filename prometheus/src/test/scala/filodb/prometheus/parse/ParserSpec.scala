@@ -184,10 +184,6 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("foo::b{gibberish}")
     parseError("foo{1}")
     parseError("{}")
-    parseError("{x=\"\"}")
-    parseError("{x=~\".*\"}")
-    parseError("{x!~\".+\"}")
-    parseError("{x!=\"a\"}")
     parseError("foo{__name__=\"bar\"}")
 
     parseSuccessfully("test{a=\"b\"}[5y] OFFSET 3d")
@@ -724,6 +720,30 @@ class ParserSpec extends AnyFunSpec with Matchers {
     val step = 0
     info(s"Parsing $q")
     Parser.queryToLogicalPlan(q, qts, step)
+  }
+
+  it("should correctly build a label map") {
+    val queryMapPairs = Seq(
+      ("foo", Map("__name__" -> "foo")),
+      ("""{__name__="foo"}""" -> Map("__name__" -> "foo")),
+      ("""{__name__="foo", bar="baz"}""" -> Map("__name__" -> "foo", "bar" -> "baz")),
+      ("""{bar="baz"}""" -> Map("bar" -> "baz")),
+      ("""foo{bar="baz", bog="bah"}""" -> Map("__name__" -> "foo", "bar" -> "baz", "bog" -> "bah")),
+    )
+
+    val queriesShouldFail = Seq(
+      """foo{__name__="bar"}""",
+      """foo{__name__="bar", bog="baz"}""",
+      """{}"""
+    )
+
+    queryMapPairs.foreach{case (query, expectedMap) =>
+      Parser.queryToEqualLabelMap(query) shouldEqual expectedMap
+    }
+
+    queriesShouldFail.foreach{query =>
+      assertThrows[IllegalArgumentException](Parser.queryToEqualLabelMap(query))
+    }
   }
 
   private def printBinaryJoin( lp: LogicalPlan, level: Int = 0) : scala.Unit =  {

@@ -108,6 +108,20 @@ object Parser extends StrictLogging {
     }
   }
 
+  /**
+   * Returns a mapping from selector labels (including an explicit/implicit __name__) to values.
+   * A metric name need not be present in the query.
+   *
+   * @param query: must specify label values by equality without a regex
+   */
+  def queryToEqualLabelMap(query: String): Map[String, String] = {
+    val expression = parseQuery(query)
+    expression match {
+      case p: InstantExpression => p.toEqualLabelMap()
+      case _ => throw new UnsupportedOperationException()
+    }
+  }
+
   def labelCardinalityToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = parseQuery(query) match {
       case p: InstantExpression => p.toLabelCardinalityPlan(timeParams)
       case _ => throw new UnsupportedOperationException()
