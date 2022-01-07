@@ -12,41 +12,47 @@ import filodb.query.Query.qLogger
 
 object StitchRvsExec {
 
-  def stitch(v1: RangeVector, v2: RangeVector): RangeVector = {
-    val rows = StitchRvsExec.merge(Seq(v1.rows(), v2.rows()))
-    IteratorBackedRangeVector(v1.key, rows, RvRange.union(v1.outputRange, v2.outputRange))
-  }
+  private class RVCursorImpl(vectors: Iterable[RangeVectorCursor], outputRange: Option[RvRange])
+    extends RangeVectorCursor {
+    private val bVectors = vectors.map(_.buffered)
+    val mins = new mutable.ArrayBuffer[BufferedIterator[RowReader]](2)
+    val nanResult = new TransientRow(0, Double.NaN)
+    val tsIter: BufferedIterator[Long] = outputRange match {
+      case Some(RvRange(startMs, stepMs, endMs)) =>
+        Iterator.iterate(startMs){_ + stepMs}.takeWhile( _ <= endMs).buffered
+      case None                                  => Iterator.iterate(Long.MaxValue)(_ =>Long.MaxValue).buffered
+    }
+    override def hasNext: Boolean = tsIter.hasNext
 
-  def merge(vectors: Iterable[RangeVectorCursor]): RangeVectorCursor = {
-    // This is an n-way merge without using a heap.
-    // Heap is not used since n is expected to be very small (almost always just 1 or 2)
-    new RangeVectorCursor {
-      val bVectors = vectors.map(_.buffered)
-      val mins = new mutable.ArrayBuffer[BufferedIterator[RowReader]](2)
-      val nanResult = new TransientRow(0, Double.NaN)
-      override def hasNext: Boolean = bVectors.exists(_.hasNext)
+    override def next(): RowReader = {
 
-      override def next(): RowReader = {
-        mins.clear()
-        var minTime = Long.MaxValue
-        bVectors.foreach { r =>
-          if (r.hasNext) {
-            val t = r.head.getLong(0)
-            if (mins.isEmpty) {
-              minTime = t
-              mins += r
-            }
-            else if (t < minTime) {
-              mins.clear()
-              mins += r
-              minTime = t
-            } else if (t == minTime) {
-              mins += r
-            }
+      mins.clear()
+      var minTime = Long.MaxValue
+      bVectors.foreach { r =>
+        if (r.hasNext) {
+          val t = r.head.getLong(0)
+          if (mins.isEmpty) {
+            minTime = t
+            mins += r
+          }
+          else if (t < minTime) {
+            mins.clear()
+            mins += r
+            minTime = t
+          } else if (t == minTime) {
+            mins += r
           }
         }
+      }
+      if (mins.isEmpty && tsIter.isEmpty) throw new IllegalStateException("next was called when no element")
+      if (minTime > tsIter.head) {
+        nanResult.timestamp = tsIter.next()
+        nanResult
+      } else {
+        if (minTime == tsIter.head)
+          tsIter.next()
+
         if (mins.size == 1) mins.head.next()
-        else if (mins.isEmpty) throw new IllegalStateException("next was called when no element")
         else {
           nanResult.timestamp = minTime
           // until we have a different indicator for "unable-to-calculate", use NaN when multiple values seen
@@ -56,10 +62,23 @@ object StitchRvsExec {
         }
       }
 
-      override def close(): Unit = vectors.foreach(_.close())
     }
+
+    override def close(): Unit = vectors.foreach(_.close())
+  }
+
+  def stitch(v1: RangeVector, v2: RangeVector, outputRvRange: Option[RvRange]): RangeVector = {
+    val rows = StitchRvsExec.merge(Seq(v1.rows(), v2.rows()), outputRvRange)
+    IteratorBackedRangeVector(v1.key, rows, outputRvRange)
+  }
+
+  def merge(vectors: Iterable[RangeVectorCursor], outputRange: Option[RvRange]): RangeVectorCursor = {
+    // This is an n-way merge without using a heap.
+    // Heap is not used since n is expected to be very small (almost always just 1 or 2)
+    new RVCursorImpl(vectors, outputRange)
   }
 }
+
 
 /**
   * Use when data for same time series spans multiple shards, or clusters.
@@ -82,7 +101,7 @@ final case class StitchRvsExec(queryContext: QueryContext,
     }.toListL.map(_.flatten).map { srvs =>
       val groups = srvs.groupBy(_.key.labelValues)
       groups.mapValues { toMerge =>
-        val rows = StitchRvsExec.merge(toMerge.map(_.rows()))
+        val rows = StitchRvsExec.merge(toMerge.map(_.rows()), outputRvRange)
         val key = toMerge.head.key
         IteratorBackedRangeVector(key, rows, outputRvRange)
       }.values
@@ -98,7 +117,7 @@ final case class StitchRvsExec(queryContext: QueryContext,
 /**
   * Range Vector Transformer version of StitchRvsExec
   */
-final case class StitchRvsMapper() extends RangeVectorTransformer {
+final case class StitchRvsMapper(outputRvRange: Option[RvRange]) extends RangeVectorTransformer {
 
   def apply(source: Observable[RangeVector],
             querySession: QuerySession,
@@ -108,12 +127,9 @@ final case class StitchRvsMapper() extends RangeVectorTransformer {
     val stitched = source.toListL.map { rvs =>
       val groups = rvs.groupBy(_.key)
       groups.mapValues { toMerge =>
-        val rows = StitchRvsExec.merge(toMerge.map(_.rows))
+        val rows = StitchRvsExec.merge(toMerge.map(_.rows()), outputRvRange)
         val key = toMerge.head.key
-        val outputRange = toMerge.map(_.outputRange).reduce { (rv1Range, rv2Range) =>
-          RvRange.union(rv1Range, rv2Range)
-        }
-        IteratorBackedRangeVector(key, rows, outputRange)
+        IteratorBackedRangeVector(key, rows, outputRvRange)
       }.values
     }.map(Observable.fromIterable)
     Observable.fromTask(stitched).flatten

@@ -141,7 +141,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     mergeAndValidate(rvs, expected)
   }
 
-  it ("should reduce output range") {
+  it ("should output range passed in to StitchRvsExec") {
 
     val rvsData = Seq (
       Seq(  (10L, 3d),
@@ -159,7 +159,9 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       )
     )
     val expected =
-      Seq(  (10L, 3d),
+      Seq(
+        (0L, Double.NaN),
+        (10L, 3d),
         (20L, 3d),
         (30L, 3d),
         (40L, 3d),
@@ -168,7 +170,12 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
         (70L, 3d),
         (80L, 3d),
         (90L, 3d),
-        (100L, 3d)
+        (100L, 3d),
+        (110L, Double.NaN),
+        (120L, Double.NaN),
+        (130L, Double.NaN),
+        (140L, Double.NaN),
+        (150L, Double.NaN)
       )
 
     // null needed below since there is a require in code that prevents empty children
@@ -184,11 +191,64 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val output = exec.compose(Observable.fromIterable(inputRes), Task.now(null), QuerySession.makeForTestingOnly())
       .toListL.runAsync.futureValue
     output.size shouldEqual 1
-    output.head.rows().map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual expected
 
-    // Notice how the output RVRange is same as the one passed during initialition of the StitchRvsExec
+    // Notice how the output RVRange is same as the one passed during initialization of the StitchRvsExec
     output.head.outputRange shouldEqual Some(RvRange(0, 10, 150))
+    compareIter(output.head.rows().map(r => (r.getLong(0), r.getDouble(1))) , expected.toIterator)
   }
+
+
+  it ("should output range passed in to StitchRvsExec") {
+
+    val rvsData = Seq (
+      Seq(  (10L, 3d),
+        (20L, 3d),
+        (30L, 3d),
+        (40L, 3d),
+        (50L, 3d)
+      ),
+      Seq(
+        (60L, 3d),
+        (70L, 3d),
+        (80L, 3d),
+        (90L, 3d),
+        (100L, 3d)
+      )
+    )
+    val expected =
+      Seq(
+        (10L, 3d),
+        (20L, 3d),
+        (30L, 3d),
+        (40L, 3d),
+        (50L, 3d),
+        (60L, 3d),
+        (70L, 3d),
+        (80L, 3d),
+        (90L, 3d),
+        (100L, 3d)
+      )
+
+    // null needed below since there is a require in code that prevents empty children
+    val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(EmptyQueryConfig), None,
+      Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
+    val rs = ResultSchema(List(ColumnInfo("timestamp",
+      TimestampColumn), ColumnInfo("value", DoubleColumn)), 1)
+
+    val res0 = QueryResult("id", rs, Seq(MetricsTestData.makeRv(CustomRangeVectorKey.empty, rvsData(0), RvRange(10, 10, 50))))
+    val res1 = QueryResult("id", rs, Seq(MetricsTestData.makeRv(CustomRangeVectorKey.empty, rvsData(1), RvRange(30, 10, 100))))
+
+    val inputRes = Seq(res0, res1).zipWithIndex
+    val output = exec.compose(Observable.fromIterable(inputRes), Task.now(null), QuerySession.makeForTestingOnly())
+      .toListL.runAsync.futureValue
+    output.size shouldEqual 1
+
+    // Notice how the output RVRange is same as the one passed during initialization of the StitchRvsExec
+    output.head.outputRange shouldEqual Some(RvRange(0, 10, 150))
+    compareIter(output.head.rows().map(r => (r.getLong(0), r.getDouble(1))) , expected.toIterator)
+  }
+
+
 
   it ("should reduce result schemas with different fixedVecLengths without error") {
 
@@ -240,6 +300,32 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     mergeAndValidate(rvs, expected)
   }
 
+  it ("should cap results honoring RVRange despite rvs having data") {
+    val rvs = Seq (
+      Seq(
+        (60L, 3d),
+        (70L, 3d),
+        (80L, 3d),
+        (90L, 3d),
+        (100L, 3d)
+      ),
+      Seq(  (10L, 3d),
+        (20L, 3d),
+        (30L, 3d),
+        (40L, 3d),
+        (50L, 3d)
+      )
+    )
+    val expected =
+      Seq(
+        (0L, Double.NaN),
+        (10L, 3d),
+        (20L, 3d),
+        (30L, 3d)
+      )
+    mergeAndValidate(rvs, expected)
+  }
+
 
   it ("should merge with one empty rv correctly") {
     val rvs = Seq (
@@ -263,11 +349,43 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     mergeAndValidate(rvs, expected)
   }
 
+
+
+
+  it ("should honor the passed RvRange from planner when generating rows") {
+    // The test relies on mergeAndValidate to generate the expected RvRange to (40, 10, 90)
+    // The merge functionality should honor the passed RvRange and accordingly generate the rows
+    val rvs = Seq (
+      Seq(
+        (60L, 3d),
+        (70L, 3d)
+      ),
+      Seq()
+    )
+    val expected =
+      Seq(
+        (40L, Double.NaN),
+        (50L, Double.NaN),
+        (60L, 3d),
+        (70L, 3d),
+        (80L, Double.NaN),
+        (90L, Double.NaN)
+      )
+    mergeAndValidate(rvs, expected)
+  }
+
   def mergeAndValidate(rvs: Seq[Seq[(Long, Double)]], expected: Seq[(Long, Double)]): Unit = {
     val inputSeq = rvs.map { rows =>
       new NoCloseCursor(rows.iterator.map(r => new TransientRow(r._1, r._2)))
     }
-    val result = StitchRvsExec.merge(inputSeq).map(r => (r.getLong(0), r.getDouble(1)))
+    val (minTs, maxTs) = expected.foldLeft((Long.MaxValue, Long.MinValue))
+      {case ((allMin, allMax), (thisTs, _)) => (allMin.min(thisTs), allMax.max(thisTs))}
+    val expectedStep = expected match {
+      case (t1, _) :: (t2, _) :: _ => t2 - t1
+      case _                       => 1
+    }
+    val result = StitchRvsExec.merge(inputSeq, Some(RvRange(startMs = minTs, endMs = maxTs, stepMs = expectedStep)))
+      .map(r => (r.getLong(0), r.getDouble(1)))
     compareIter(result, expected.toIterator)
   }
 
@@ -299,47 +417,48 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       override def outputRange: Option[RvRange] = Some(RvRange(90, 10, 200))
     }
 
-    val r = StitchRvsExec.stitch(r1, r2)
+    val r = StitchRvsExec.stitch(r1, r2, Some(RvRange(10, 10, 200)))
     r.outputRange shouldEqual Some(RvRange(10, 10, 200))
 
   }
 
-  it ("should error when RVs have different steps") {
-    val r1 = new RangeVector {
-      override def key: RangeVectorKey = CustomRangeVectorKey.empty
-      override def rows(): RangeVectorCursor = Iterator.empty
-      override def outputRange: Option[RvRange] = Some(RvRange(10, 10, 100))
-    }
-
-    val r2 = new RangeVector {
-      override def key: RangeVectorKey = CustomRangeVectorKey.empty
-      override def rows(): RangeVectorCursor = Iterator.empty
-      override def outputRange: Option[RvRange] = Some(RvRange(90, 20, 200))
-    }
-
-    intercept[IllegalArgumentException] {
-      StitchRvsExec.stitch(r1, r2)
-    }
-
-  }
-
-  it ("should error when one of the RVs doesn't have step") {
-    val r1 = new RangeVector {
-      override def key: RangeVectorKey = CustomRangeVectorKey.empty
-      override def rows(): RangeVectorCursor = Iterator.empty
-      override def outputRange: Option[RvRange] = Some(RvRange(10, 10, 100))
-    }
-
-    val r2 = new RangeVector {
-      override def key: RangeVectorKey = CustomRangeVectorKey.empty
-      override def rows(): RangeVectorCursor = Iterator.empty
-      override def outputRange: Option[RvRange] = None
-    }
-
-    intercept[IllegalArgumentException] {
-      StitchRvsExec.stitch(r1, r2)
-    }
-
-  }
+// No more required as union is not invoked and we expect to see the RvRange passed by planner
+//  it ("should error when RVs have different steps") {
+//    val r1 = new RangeVector {
+//      override def key: RangeVectorKey = CustomRangeVectorKey.empty
+//      override def rows(): RangeVectorCursor = Iterator.empty
+//      override def outputRange: Option[RvRange] = Some(RvRange(10, 10, 100))
+//    }
+//
+//    val r2 = new RangeVector {
+//      override def key: RangeVectorKey = CustomRangeVectorKey.empty
+//      override def rows(): RangeVectorCursor = Iterator.empty
+//      override def outputRange: Option[RvRange] = Some(RvRange(90, 20, 200))
+//    }
+//
+//    intercept[IllegalArgumentException] {
+//      StitchRvsExec.stitch(r1, r2)
+//    }
+//
+//  }
+//
+//  it ("should error when one of the RVs doesn't have step") {
+//    val r1 = new RangeVector {
+//      override def key: RangeVectorKey = CustomRangeVectorKey.empty
+//      override def rows(): RangeVectorCursor = Iterator.empty
+//      override def outputRange: Option[RvRange] = Some(RvRange(10, 10, 100))
+//    }
+//
+//    val r2 = new RangeVector {
+//      override def key: RangeVectorKey = CustomRangeVectorKey.empty
+//      override def rows(): RangeVectorCursor = Iterator.empty
+//      override def outputRange: Option[RvRange] = None
+//    }
+//
+//    intercept[IllegalArgumentException] {
+//      StitchRvsExec.stitch(r1, r2)
+//    }
+//
+//  }
 }
 

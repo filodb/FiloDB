@@ -719,7 +719,7 @@ object LogicalPlan {
   def rvRangeFromPlan(plan: LogicalPlan): Option[RvRange] = {
     plan match {
       case p: PeriodicSeriesPlan   => Some(RvRange(startMs = p.startMs, endMs = p.endMs, stepMs = p.stepMs))
-      case _                   => None  //TODO: Do we infer RVRange from queryContext?
+      case _                       => None
     }
   }
 }

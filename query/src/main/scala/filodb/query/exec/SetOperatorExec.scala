@@ -37,7 +37,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
                                  binaryOp: BinaryOperator,
                                  on: Seq[String],
                                  ignoring: Seq[String],
-                                 metricColumn: String) extends NonLeafExecPlan {
+                                 metricColumn: String,
+                                 outputRvRange: Option[RvRange]) extends NonLeafExecPlan {
   require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
   require(!on.contains(metricColumn), "On cannot contain metric name")
 
@@ -121,7 +122,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
         if (rhsMap.contains(jk)) {
           val resVal = rhsMap(jk)
           if (resVal.key.labelValues == rv.key.labelValues) {
-            rhsMap.put(jk, StitchRvsExec.stitch(rv, resVal) )
+            rhsMap.put(jk, StitchRvsExec.stitch(rv, resVal, outputRvRange) )
           } else {
             rhsMap.put(jk, rv)
           }
@@ -139,7 +140,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
           // If LHS keys exist in result, stitch if it is a duplicate
           index = resVal.indexWhere(r => r.key.labelValues == lhs.key.labelValues)
           if (index >= 0) {
-             StitchRvsExec.stitch(lhs, resVal(index))
+             StitchRvsExec.stitch(lhs, resVal(index), outputRvRange)
           } else {
             lhs
           }
@@ -196,7 +197,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
         val resVal = lhsResult(jk)
         val index = resVal.indexWhere(r => r.key.labelValues == rv.key.labelValues)
         if (index >= 0) {
-          val stitched = StitchRvsExec.stitch(rv, resVal(index))
+          val stitched = StitchRvsExec.stitch(rv, resVal(index), outputRvRange)
           resVal.update(index, stitched)
         } else {
           lhsResult(jk).append(rv)
@@ -215,7 +216,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
           val resVal = rhsResult(jk)
           val index = resVal.indexWhere(r => r.key.labelValues == rhs.key.labelValues)
           if (index >= 0) {
-            val stitched = StitchRvsExec.stitch(rhs, resVal(index))
+            val stitched = StitchRvsExec.stitch(rhs, resVal(index), outputRvRange)
             resVal.update(index, stitched)
           } else {
             resVal.append(rhs)
@@ -250,7 +251,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
 
           val index = resVal.indexWhere(r => r.key.labelValues == lhs.key.labelValues)
           if (index >= 0) {
-            val stitched = StitchRvsExec.stitch(lhs, resVal(index))
+            val stitched = StitchRvsExec.stitch(lhs, resVal(index), outputRvRange)
             resVal.update(index, stitched)
           } else {
             resVal.append(lhs)
