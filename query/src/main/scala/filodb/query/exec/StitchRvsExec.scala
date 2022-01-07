@@ -22,7 +22,15 @@ object StitchRvsExec {
         Iterator.iterate(startMs){_ + stepMs}.takeWhile( _ <= endMs).buffered
       case None                                  => Iterator.iterate(Long.MaxValue)(_ =>Long.MaxValue).buffered
     }
-    override def hasNext: Boolean = tsIter.hasNext
+    override def hasNext: Boolean = outputRange match {
+                // In case outputRange is provided, the merging will honor the provided range, that is, the
+                // result of metrging will have a range provided by outputRange. In case outputRange is not provided
+                // i.e. None, then hasNext should be determined by the vectors it merges. The none handling is just done
+                // for matching both possibilities and in reality for a given periodic series with a range, the
+                // outputRange should never be none
+                case Some(_)      => tsIter.hasNext
+                case None         => bVectors.exists(_.hasNext)
+    }
 
     override def next(): RowReader = {
 

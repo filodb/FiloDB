@@ -198,7 +198,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
   }
 
 
-  it ("should output range passed in to StitchRvsExec") {
+  it ("should merge RVs despite passing None for RvRange to StitchRvsExec") {
 
     val rvsData = Seq (
       Seq(  (10L, 3d),
@@ -244,7 +244,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     output.size shouldEqual 1
 
     // Notice how the output RVRange is same as the one passed during initialization of the StitchRvsExec
-    output.head.outputRange shouldEqual Some(RvRange(0, 10, 150))
+    output.head.outputRange shouldEqual None
     compareIter(output.head.rows().map(r => (r.getLong(0), r.getDouble(1))) , expected.toIterator)
   }
 
