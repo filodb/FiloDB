@@ -150,6 +150,61 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
     }
   }
 
+  it("should parse TsCardinalitiesSampl") {
+    val expected = Seq(
+      TsCardinalitiesSampl(
+        Map("_ws_" -> "demo", "_ns_" -> "App-0", "_metric_" -> "heap_usage"),
+        Map("active" -> 2, "total" -> 3)),
+      TsCardinalitiesSampl(
+        Map("_ws_" -> "demo", "_ns_" -> "App-1"),
+        Map("active" -> 6, "total" -> 8)),
+      TsCardinalitiesSampl(
+        Map("_ws_" -> "demo"),
+        Map("active" -> 7, "total" -> 10))
+    )
+    val inputString =
+      """{
+        |  "status": "success",
+        |  "data": [
+        |    {
+        |	     "group": {
+        |         "_ws_": "demo",
+        |	       "_ns_": "App-0",
+        |	       "_metric_": "heap_usage"
+        |      },
+        |      "cardinality": {
+        |        "active": 2,
+        |        "total": 3
+        |      }
+        |    },
+        |    {
+        |	     "group": {
+        |        "_ws_": "demo",
+        |	       "_ns_": "App-1"
+        |      },
+        |      "cardinality": {
+        |        "active": 6,
+        |        "total": 8
+        |      }
+        |    },
+        |    {
+        |      "group": {
+        |        "_ws_": "demo"
+        |      },
+        |      "cardinality": {
+        |        "active": 7,
+        |        "total": 10
+        |      }
+        |    }
+        |  ]
+        |}""".stripMargin
+
+    parser.decode[MetadataSuccessResponse](inputString) match {
+      case Right(response) => response shouldEqual MetadataSuccessResponse(expected)
+      case Left(ex) => throw ex
+    }
+  }
+
   it("should parse aggregateResponse") {
     val input = """[{
                   |	"status": "success",

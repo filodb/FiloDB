@@ -75,16 +75,16 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       // }
     val tsdbQueryParams = qContext.origQueryParams
 
-    if(!tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
+    if (!tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
       (tsdbQueryParams.isInstanceOf[PromQlQueryParams]
         && !qContext.plannerParams.processMultiPartition)) { // Query was part of routing
       localPartitionPlanner.materialize(logicalPlan, qContext)
-    }  else if (LogicalPlan.hasSubqueryWithWindowing(logicalPlan) || logicalPlan.isInstanceOf[TopLevelSubquery]) {
+    } else if (LogicalPlan.hasSubqueryWithWindowing(logicalPlan) || logicalPlan.isInstanceOf[TopLevelSubquery]) {
       materializeSubquery(logicalPlan, qContext)
     } else logicalPlan match {
-      case mqp: MetadataQueryPlan               => materializeMetadataQueryPlan(mqp, qContext).plans.head
-      case lp: TsCardinalities                  => materializeTsCardinalities(lp, qContext).plans.head
-      case _                                    => walkLogicalPlanTree(logicalPlan, qContext).plans.head
+      case mqp: MetadataQueryPlan => materializeMetadataQueryPlan(mqp, qContext).plans.head
+      case lp: TsCardinalities => materializeTsCardinalities(lp, qContext).plans.head
+      case _ => walkLogicalPlanTree(logicalPlan, qContext).plans.head
     }
   }
 
@@ -439,35 +439,23 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   def materializeTsCardinalities(lp: TsCardinalities, qContext: QueryContext): PlanResult = {
 
-    def prefixToMatcher(prefix: Seq[String]): String = {
-      val builder = new StringBuilder("{")
-      if (prefix.size > 0) {
-        builder.append(s"""_ws_="${prefix(0)}"""")
-      }
-      if (prefix.size > 1) {
-        builder.append(s""",_ns_="${prefix(1)}"""")
-      }
-      if (prefix.size > 2) {
-        builder.append(s""",__name__="${prefix(2)}"""")
-      }
-      builder.append("}")
-      builder.mkString
-    }
+    import TsCardinalities._
 
-    val timeRange = TimeRange(0, Long.MaxValue)
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val partitions = partitionLocationProvider.getAuthorizedPartitions(timeRange)
+    val partitions = getPartitions(lp, queryParams)
     val execPlan = if (partitions.isEmpty) {
-      logger.warn(s"No partitions found for ${timeRange.startMs/1000}, ${timeRange.endMs/1000}")
+      logger.warn(s"no partitions found for $lp; defaulting to local planner")
       localPartitionPlanner.materialize(lp, qContext)
     } else {
       val execPlans = partitions.map { p =>
-        logger.debug(s"partitionInfo=$p; queryParams=$queryParams")
+        logger.debug(s"partition=$p; plan=$lp")
         if (p.partitionName.equals(localPartitionName))
           localPartitionPlanner.materialize(lp, qContext)
         else {
           val params = Map(
-            "match[]" -> prefixToMatcher(lp.shardKeyPrefix),
+            "match[]" -> ("{" + SHARD_KEY_LABELS.zip(lp.shardKeyPrefix)
+                           .map{ case (label, value) => s"""$label="$value""""}
+                           .mkString(",") + "}"),
             "numGroupByFields" -> lp.numGroupByFields.toString)
           createMetadataRemoteExec(qContext, p, params)
         }

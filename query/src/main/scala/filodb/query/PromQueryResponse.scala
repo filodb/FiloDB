@@ -54,5 +54,8 @@ final case class AvgSampl(timestamp: Long, value: Double, count: Long) extends A
 
 final case class StdValSampl(timestamp: Long, stddev: Double, mean: Double, count: Long) extends AggregateSampl
 
-  final case class LabelCardinalitySampl(metric: Map[String, String],
+final case class LabelCardinalitySampl(metric: Map[String, String],
                                        cardinality: Seq[Map[String, String]]) extends MetadataSampl
+
+final case class TsCardinalitiesSampl(group: Map[String, String],
+                                      cardinality: Map[String, Int]) extends MetadataSampl
