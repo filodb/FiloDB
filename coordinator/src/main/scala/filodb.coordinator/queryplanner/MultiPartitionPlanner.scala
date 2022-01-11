@@ -175,7 +175,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   /**
    * Gets the partition Assignment for the given plan
    */
-  private def getPartitions(logicalPlan: LogicalPlan, queryParams: PromQlQueryParams) : Seq[PartitionAssignment] = {
+  private def getPartitions(logicalPlan: LogicalPlan,
+                            queryParams: PromQlQueryParams,
+                            infiniteTimeRange: Boolean = false) : Seq[PartitionAssignment] = {
 
     //1.  Get a Seq of all Leaf node filters
     val leafFilters = LogicalPlan.getColumnFilterGroup(logicalPlan)
@@ -185,21 +187,27 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       cf.filter(col => nonMetricColumnSet.contains(col.column)).map(
         x => (x.column, x.filter.valuesStrings.head.toString)).toMap
     })
-    // 3. Get the start and end time is ms based on the lookback, offset and the user provided start and end time
-    val (maxOffsetMs, minOffsetMs) = LogicalPlanUtils.getOffsetMillis(logicalPlan)
-      .foldLeft((Long.MinValue, Long.MaxValue)) {
-        case ((accMax, accMin), currValue) => (accMax.max(currValue), accMin.min(currValue))
-      }
 
-    val periodicSeriesTimeWithOffset = TimeRange((queryParams.startSecs * 1000) - maxOffsetMs,
-      (queryParams.endSecs * 1000) - minOffsetMs)
-    val lookBackMs = getLookBackMillis(logicalPlan).max
+    // 3. Determine the query time range
+    val queryTimeRange = if (infiniteTimeRange) {
+      TimeRange(0, Long.MaxValue)
+    } else {
+      // 3a. Get the start and end time is ms based on the lookback, offset and the user provided start and end time
+      val (maxOffsetMs, minOffsetMs) = LogicalPlanUtils.getOffsetMillis(logicalPlan)
+        .foldLeft((Long.MinValue, Long.MaxValue)) {
+          case ((accMax, accMin), currValue) => (accMax.max(currValue), accMin.min(currValue))
+        }
 
-    //4. Get the Query time range based on user provided range, offsets in previous steps and lookback
-    val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackMs,
-      periodicSeriesTimeWithOffset.endMs)
+      val periodicSeriesTimeWithOffset = TimeRange((queryParams.startSecs * 1000) - maxOffsetMs,
+        (queryParams.endSecs * 1000) - minOffsetMs)
+      val lookBackMs = getLookBackMillis(logicalPlan).max
 
-    //5. Based on the map in 2 and time range in 5, get the partitions to query
+      //3b Get the Query time range based on user provided range, offsets in previous steps and lookback
+      TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackMs,
+        periodicSeriesTimeWithOffset.endMs)
+    }
+
+    //4. Based on the map in 2 and time range in 5, get the partitions to query
     routingKeyMap.flatMap(metricMap =>
       partitionLocationProvider.getPartitions(metricMap, queryTimeRange))
   }
@@ -442,7 +450,14 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     import TsCardinalities._
 
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val partitions = getPartitions(lp, queryParams)
+    val partitions = if (lp.shardKeyPrefix.size >= 2) {
+      // At least a ws/ns pair is required to select specific partitions.
+      getPartitions(lp, queryParams, infiniteTimeRange = true)
+    } else {
+      logger.warn(s"(ws, ns) pair not provided in prefix=${lp.shardKeyPrefix};" +
+                  s"dispatching to all authorized partitions")
+      partitionLocationProvider.getAuthorizedPartitions(TimeRange(0, Long.MaxValue))
+    }
     val execPlan = if (partitions.isEmpty) {
       logger.warn(s"no partitions found for $lp; defaulting to local planner")
       localPartitionPlanner.materialize(lp, qContext)
