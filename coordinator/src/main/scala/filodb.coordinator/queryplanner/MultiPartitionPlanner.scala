@@ -454,7 +454,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       // At least a ws/ns pair is required to select specific partitions.
       getPartitions(lp, queryParams, infiniteTimeRange = true)
     } else {
-      logger.warn(s"(ws, ns) pair not provided in prefix=${lp.shardKeyPrefix};" +
+      logger.info(s"(ws, ns) pair not provided in prefix=${lp.shardKeyPrefix};" +
                   s"dispatching to all authorized partitions")
       partitionLocationProvider.getAuthorizedPartitions(TimeRange(0, Long.MaxValue))
     }
