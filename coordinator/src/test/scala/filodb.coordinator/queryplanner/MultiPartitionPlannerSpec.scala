@@ -167,124 +167,124 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   // not supported in production
   // returns incomplete results
   // 12/07/21
-  it ("should generate time split PromQlRemoteExec plans for TopLevelSubquery") {
-    val p1StartSecs = 1000
-    val p1EndSecs = 6999
-    val p2StartSecs = 7000
-    val p2EndSecs = 15000
-    val stepSecs = 100
-    val queryStartSecs = 12000
-    val subqueryLookbackSecs = 9000
-
-    def twoPartitions(): List[PartitionAssignment] = List(
-      PartitionAssignment("remote", "remote-url", TimeRange(p1StartSecs * 1000, p1EndSecs * 1000)),
-      PartitionAssignment("remote2", "remote-url2", TimeRange(p2StartSecs * 1000, p2EndSecs * 1000))
-    )
-
-    val partitionLocationProvider = new PartitionLocationProvider {
-      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
-        if (routingKey.equals(Map("job" -> "app"))) twoPartitions().filter(
-          (p: PartitionAssignment) => {
-            val startWithinPartition = (p.timeRange.startMs <= timeRange.startMs) && (p.timeRange.endMs > timeRange.startMs)
-            val endWithinPartition = (p.timeRange.startMs <= timeRange.endMs) && (p.timeRange.endMs > timeRange.endMs)
-            val partitionWithinInterval = (p.timeRange.startMs >= timeRange.startMs) && (p.timeRange.endMs < timeRange.endMs)
-            startWithinPartition || endWithinPartition || partitionWithinInterval
-          })
-        else Nil
-      }
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = twoPartitions()
-    }
-    val engine = new MultiPartitionPlanner(
-      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
-    )
-    val lp = Parser.queryRangeToLogicalPlan(
-      """test{job = "app"}[9000s:100s]""", TimeStepParams(queryStartSecs, 0, queryStartSecs)
-    )
-    val promQlQueryParams = PromQlQueryParams("""test{job = "app"}[9000s:100s]""", queryStartSecs, 0, queryStartSecs)
-    val execPlan = engine.materialize(
-      lp,
-      QueryContext(origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true))
-    )
-    // note that start of the second partition is 7400, not 7000 that we would logically expect
-    // this comes  from the logic in MultiPartitionPlannerSpec.materializePeriodicAndRawSeries()
-    // val numStepsInPrevPartition = (p.timeRange.startMs - prevPartitionStart + lookBackMs) / stepMs
-    // (7000 - 3000 +300) / 100 = 43
-    // val lastPartitionInstant = prevPartitionStart + numStepsInPrevPartition * stepMs
-    //  3000 + 43*100 = 7300
-    // val start = lastPartitionInstant + stepMs
-    // 7300+100=7400
-    // overall the above is broken, in this particular query, we don't even have a lookback technically, it
-    // comes from the stalesness interval that is infused into the periodic series logical plan in the
-    // constructor when we create PeriodicSeries in Vector.
-    // Even if we did not have stale interval baked in the PeriodicSeries, it would be added by method
-    // LogicalPlanUtils.getLookBackMillis()
-    // ie if logical plan does not return lookback, default stale interval would be used instead
-    val expectedPlan =
-      """E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.QueryConfig@5ae1c281)
-      |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},3000,100,6999,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@5ae1c281)
-      |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},7400,100,15000,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url2, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@5ae1c281)""".stripMargin
-    validatePlan(execPlan, expectedPlan)
-  }
+  //  it ("should generate time split PromQlRemoteExec plans for TopLevelSubquery") {
+  //    val p1StartSecs = 1000
+  //    val p1EndSecs = 6999
+  //    val p2StartSecs = 7000
+  //    val p2EndSecs = 15000
+  //    val stepSecs = 100
+  //    val queryStartSecs = 12000
+  //    val subqueryLookbackSecs = 9000
+  //
+  //    def twoPartitions(): List[PartitionAssignment] = List(
+  //      PartitionAssignment("remote", "remote-url", TimeRange(p1StartSecs * 1000, p1EndSecs * 1000)),
+  //      PartitionAssignment("remote2", "remote-url2", TimeRange(p2StartSecs * 1000, p2EndSecs * 1000))
+  //    )
+  //
+  //    val partitionLocationProvider = new PartitionLocationProvider {
+  //      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+  //        if (routingKey.equals(Map("job" -> "app"))) twoPartitions().filter(
+  //          (p: PartitionAssignment) => {
+  //            val startWithinPartition = (p.timeRange.startMs <= timeRange.startMs) && (p.timeRange.endMs > timeRange.startMs)
+  //            val endWithinPartition = (p.timeRange.startMs <= timeRange.endMs) && (p.timeRange.endMs > timeRange.endMs)
+  //            val partitionWithinInterval = (p.timeRange.startMs >= timeRange.startMs) && (p.timeRange.endMs < timeRange.endMs)
+  //            startWithinPartition || endWithinPartition || partitionWithinInterval
+  //          })
+  //        else Nil
+  //      }
+  //      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = twoPartitions()
+  //    }
+  //    val engine = new MultiPartitionPlanner(
+  //      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
+  //    )
+  //    val lp = Parser.queryRangeToLogicalPlan(
+  //      """test{job = "app"}[9000s:100s]""", TimeStepParams(queryStartSecs, 0, queryStartSecs)
+  //    )
+  //    val promQlQueryParams = PromQlQueryParams("""test{job = "app"}[9000s:100s]""", queryStartSecs, 0, queryStartSecs)
+  //    val execPlan = engine.materialize(
+  //      lp,
+  //      QueryContext(origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true))
+  //    )
+  //    // note that start of the second partition is 7400, not 7000 that we would logically expect
+  //    // this comes  from the logic in MultiPartitionPlannerSpec.materializePeriodicAndRawSeries()
+  //    // val numStepsInPrevPartition = (p.timeRange.startMs - prevPartitionStart + lookBackMs) / stepMs
+  //    // (7000 - 3000 +300) / 100 = 43
+  //    // val lastPartitionInstant = prevPartitionStart + numStepsInPrevPartition * stepMs
+  //    //  3000 + 43*100 = 7300
+  //    // val start = lastPartitionInstant + stepMs
+  //    // 7300+100=7400
+  //    // overall the above is broken, in this particular query, we don't even have a lookback technically, it
+  //    // comes from the stalesness interval that is infused into the periodic series logical plan in the
+  //    // constructor when we create PeriodicSeries in Vector.
+  //    // Even if we did not have stale interval baked in the PeriodicSeries, it would be added by method
+  //    // LogicalPlanUtils.getLookBackMillis()
+  //    // ie if logical plan does not return lookback, default stale interval would be used instead
+  //    val expectedPlan =
+  //      """E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.QueryConfig@5ae1c281)
+  //      |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},3000,100,6999,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@5ae1c281)
+  //      |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},7400,100,15000,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url2, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@5ae1c281)""".stripMargin
+  //    validatePlan(execPlan, expectedPlan)
+  //  }
 
   // not supported in production
   // currently returns incomplete results
   // 12/07/21
-  it ("should generate timesplit local and PromQlRemoteExec plan for TopLevelSubquery") {
-    val p1StartSecs = 1000
-    val p1EndSecs = 6999
-    val p2StartSecs = 7000
-    val p2EndSecs = 15000
-    val stepSecs = 100
-    val queryStartSecs = 12000
-    val subqueryLookbackSecs = 9000
-
-    def twoPartitions(): List[PartitionAssignment] = List(
-      PartitionAssignment("remote", "remote-url", TimeRange(p1StartSecs * 1000, p1EndSecs * 1000)),
-      PartitionAssignment("local", "local-url", TimeRange(p2StartSecs * 1000, p2EndSecs * 1000))
-    )
-
-    val partitionLocationProvider = new PartitionLocationProvider {
-      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
-        if (routingKey.equals(Map("job" -> "app"))) twoPartitions().filter(
-          (p: PartitionAssignment) => {
-            val startWithinPartition = (p.timeRange.startMs <= timeRange.startMs) && (p.timeRange.endMs > timeRange.startMs)
-            val endWithinPartition = (p.timeRange.startMs <= timeRange.endMs) && (p.timeRange.endMs > timeRange.endMs)
-            val partitionWithinInterval = (p.timeRange.startMs >= timeRange.startMs) && (p.timeRange.endMs < timeRange.endMs)
-            startWithinPartition || endWithinPartition || partitionWithinInterval
-          })
-        else Nil
-      }
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = twoPartitions()
-    }
-    val engine = new MultiPartitionPlanner(
-      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
-    )
-    val lp = Parser.queryRangeToLogicalPlan(
-      """test{job = "app"}[9000s:100s]""", TimeStepParams(queryStartSecs, 0, queryStartSecs)
-    )
-    val promQlQueryParams = PromQlQueryParams("""test{job = "app"}[9000s:100s]""", queryStartSecs, 0, queryStartSecs)
-    val execPlan = engine.materialize(
-      lp,
-      QueryContext(origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true))
-    )
-    // same as in "should generate timesplit PromQlRemoteExec plans for TopLevelSubquery"
-    // start  of 7400 does not make sense, instead we should have done:
-    // E~StitchRvsExec
-    // |-T~PeriodicSamplesMapper
-    // |--E~MultiSchemaParitionsExec //essentially raw data
-    // |--E~PromQLRemoteExec //essentially raw data
-    // if extracting raw data to some node above is too expensive
-    // we could have extracted raw data only for the overlap though it's going to be considerably more complex
-    val expectedPlan =
-      """E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.QueryConfig@62b57479)
-         |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2031724201],raw)
-         |--T~PeriodicSamplesMapper(start=7400000, step=100000, end=15000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-         |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(7100000,15000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2031724201],raw)
-         |--T~PeriodicSamplesMapper(start=7400000, step=100000, end=15000000, window=None, functionId=None, rawSource=true, offsetMs=None)
-         |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(7100000,15000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2031724201],raw)
-         |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},3000,100,6999,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@62b57479)""".stripMargin
-    validatePlan(execPlan, expectedPlan)
-  }
+  //  it ("should generate timesplit local and PromQlRemoteExec plan for TopLevelSubquery") {
+  //    val p1StartSecs = 1000
+  //    val p1EndSecs = 6999
+  //    val p2StartSecs = 7000
+  //    val p2EndSecs = 15000
+  //    val stepSecs = 100
+  //    val queryStartSecs = 12000
+  //    val subqueryLookbackSecs = 9000
+  //
+  //    def twoPartitions(): List[PartitionAssignment] = List(
+  //      PartitionAssignment("remote", "remote-url", TimeRange(p1StartSecs * 1000, p1EndSecs * 1000)),
+  //      PartitionAssignment("local", "local-url", TimeRange(p2StartSecs * 1000, p2EndSecs * 1000))
+  //    )
+  //
+  //    val partitionLocationProvider = new PartitionLocationProvider {
+  //      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+  //        if (routingKey.equals(Map("job" -> "app"))) twoPartitions().filter(
+  //          (p: PartitionAssignment) => {
+  //            val startWithinPartition = (p.timeRange.startMs <= timeRange.startMs) && (p.timeRange.endMs > timeRange.startMs)
+  //            val endWithinPartition = (p.timeRange.startMs <= timeRange.endMs) && (p.timeRange.endMs > timeRange.endMs)
+  //            val partitionWithinInterval = (p.timeRange.startMs >= timeRange.startMs) && (p.timeRange.endMs < timeRange.endMs)
+  //            startWithinPartition || endWithinPartition || partitionWithinInterval
+  //          })
+  //        else Nil
+  //      }
+  //      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = twoPartitions()
+  //    }
+  //    val engine = new MultiPartitionPlanner(
+  //      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
+  //    )
+  //    val lp = Parser.queryRangeToLogicalPlan(
+  //      """test{job = "app"}[9000s:100s]""", TimeStepParams(queryStartSecs, 0, queryStartSecs)
+  //    )
+  //    val promQlQueryParams = PromQlQueryParams("""test{job = "app"}[9000s:100s]""", queryStartSecs, 0, queryStartSecs)
+  //    val execPlan = engine.materialize(
+  //      lp,
+  //      QueryContext(origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true))
+  //    )
+  //    // same as in "should generate timesplit PromQlRemoteExec plans for TopLevelSubquery"
+  //    // start  of 7400 does not make sense, instead we should have done:
+  //    // E~StitchRvsExec
+  //    // |-T~PeriodicSamplesMapper
+  //    // |--E~MultiSchemaParitionsExec //essentially raw data
+  //    // |--E~PromQLRemoteExec //essentially raw data
+  //    // if extracting raw data to some node above is too expensive
+  //    // we could have extracted raw data only for the overlap though it's going to be considerably more complex
+  //    val expectedPlan =
+  //      """E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.QueryConfig@62b57479)
+  //         |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2031724201],raw)
+  //         |--T~PeriodicSamplesMapper(start=7400000, step=100000, end=15000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+  //         |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(7100000,15000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2031724201],raw)
+  //         |--T~PeriodicSamplesMapper(start=7400000, step=100000, end=15000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+  //         |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(7100000,15000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2031724201],raw)
+  //         |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},3000,100,6999,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@62b57479)""".stripMargin
+  //    validatePlan(execPlan, expectedPlan)
+  //  }
 
   // the only way we might hit two partitions that are not time split is if we have a binary join, ie one time series
   // lives in one partition, and another one lives in another.

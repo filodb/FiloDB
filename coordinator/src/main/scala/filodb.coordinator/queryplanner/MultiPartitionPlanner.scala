@@ -101,11 +101,13 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     // The notion of lookback that getPartitions() understands, is not applicable to TopLevelSubquery, hence, special
     // treatment here. The parameters produced, however, are used exclusively to see if we have multiple
     // partitions.
-    val updatedQueryContext = logicalPlan match {
-      case tlsq: TopLevelSubquery => topLevelSubqueryContext(tlsq, qContext)
-      case _ => qContext
-    }
-    val paramToCheckPartitions = updatedQueryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+//    val updatedQueryContext = logicalPlan match {
+//      case tlsq: TopLevelSubquery => topLevelSubqueryContext(tlsq, qContext)
+//      case _ => qContext
+//    }
+//    val paramToCheckPartitions = updatedQueryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+//    val partitions = getPartitions(logicalPlan, paramToCheckPartitions)
+    val paramToCheckPartitions = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val partitions = getPartitions(logicalPlan, paramToCheckPartitions)
 
     if (isSinglePartition(partitions)) {
@@ -122,9 +124,18 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           // Single partition but remote, send the entire plan remotely
           val remotePartitionEndpoint = partitions.head.endPoint
           val httpEndpoint = remotePartitionEndpoint + params.remoteQueryPath.getOrElse("")
-          PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-            generateRemoteExecParams(qContext, startMs, endMs),
-            inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
+          val remoteContext = if (logicalPlan.isInstanceOf[PeriodicSeriesPlan]) {
+            val psp : PeriodicSeriesPlan = logicalPlan.asInstanceOf[PeriodicSeriesPlan]
+            val startSecs = psp.startMs / 1000
+            val stepSecs = psp.stepMs / 1000
+            val endSecs = psp.endMs / 1000
+            generateRemoteExecParamsWithStep(qContext, startSecs, stepSecs, endSecs)
+          } else {
+            generateRemoteExecParams(qContext, startMs, endMs)
+          }
+          PromQlRemoteExec(
+            httpEndpoint, remoteHttpTimeoutMs, remoteContext, inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient
+          )
         }
         PlanResult(Seq(execPlan))
     } else walkMultiPartitionPlan(logicalPlan, qContext)
@@ -176,6 +187,16 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     queryContext.copy(origQueryParams = queryParams.copy(startSecs = startMs/1000, endSecs = endMs / 1000),
       plannerParams = queryContext.plannerParams.copy(processMultiPartition = false))
+  }
+
+  private def generateRemoteExecParamsWithStep(
+    queryContext: QueryContext, startSecs: Long, stepSecs: Long, endSecs: Long
+  ) = {
+    val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    queryContext.copy(
+      origQueryParams = queryParams.copy(startSecs = startSecs, stepSecs = stepSecs, endSecs = endSecs),
+      plannerParams = queryContext.plannerParams.copy(processMultiPartition = false)
+    )
   }
 
   /**
