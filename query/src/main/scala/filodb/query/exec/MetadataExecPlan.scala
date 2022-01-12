@@ -456,6 +456,10 @@ final case object TsCardExec {
 
   val PREFIX_DELIM = ","
 
+  val RESULT_SCHEMA = ResultSchema(Seq(ColumnInfo("group", ColumnType.StringColumn),
+                                       ColumnInfo("active", ColumnType.IntColumn),
+                                       ColumnInfo("total", ColumnType.IntColumn)), 1)
+
   /**
    * Convert a shard key prefix to a row's group name.
    */
@@ -552,11 +556,7 @@ final case class TsCardExec(queryContext: QueryContext,
       case other =>
         Observable.empty
     }
-    val sch = ResultSchema(
-      Seq(ColumnInfo("group", ColumnType.StringColumn),
-          ColumnInfo("active", ColumnType.IntColumn),
-          ColumnInfo("total", ColumnType.IntColumn)), 1)
-    ExecResult(rvs, Task.eval(sch))
+    ExecResult(rvs, Task.eval(RESULT_SCHEMA))
   }
   // scalastyle:on method.length
 

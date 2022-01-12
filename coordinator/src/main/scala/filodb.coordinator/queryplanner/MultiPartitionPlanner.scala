@@ -75,15 +75,16 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       // }
     val tsdbQueryParams = qContext.origQueryParams
 
-    if(!tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
+    if (!tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
       (tsdbQueryParams.isInstanceOf[PromQlQueryParams]
         && !qContext.plannerParams.processMultiPartition)) { // Query was part of routing
       localPartitionPlanner.materialize(logicalPlan, qContext)
-    }  else if (LogicalPlan.hasSubqueryWithWindowing(logicalPlan) || logicalPlan.isInstanceOf[TopLevelSubquery]) {
+    } else if (LogicalPlan.hasSubqueryWithWindowing(logicalPlan) || logicalPlan.isInstanceOf[TopLevelSubquery]) {
       materializeSubquery(logicalPlan, qContext)
     } else logicalPlan match {
-      case mqp: MetadataQueryPlan               => materializeMetadataQueryPlan(mqp, qContext).plans.head
-      case _                                    => walkLogicalPlanTree(logicalPlan, qContext).plans.head
+      case mqp: MetadataQueryPlan => materializeMetadataQueryPlan(mqp, qContext).plans.head
+      case lp: TsCardinalities    => materializeTsCardinalities(lp, qContext).plans.head
+      case _                      => walkLogicalPlanTree(logicalPlan, qContext).plans.head
     }
   }
 
@@ -140,7 +141,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case lp: ApplyAbsentFunction        => super.materializeAbsentFunction(qContext, lp)
       case lp: ScalarBinaryOperation      => super.materializeScalarBinaryOperation(qContext, lp)
       case lp: ApplyLimitFunction         => super.materializeLimitFunction(qContext, lp)
-      case _: TsCardinalities             => throw new IllegalArgumentException("TsCardinalities unexpected here")
+      case lp: TsCardinalities            => materializeTsCardinalities(lp, qContext)
 
       // Imp: At the moment, these two cases for subquery will not get executed, materialize is already
       // Checking if the plan is a TopLevelSubQuery or any of the descendant is a SubqueryWithWindowing and
@@ -174,7 +175,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   /**
    * Gets the partition Assignment for the given plan
    */
-  private def getPartitions(logicalPlan: LogicalPlan, queryParams: PromQlQueryParams) : Seq[PartitionAssignment] = {
+  private def getPartitions(logicalPlan: LogicalPlan,
+                            queryParams: PromQlQueryParams,
+                            infiniteTimeRange: Boolean = false) : Seq[PartitionAssignment] = {
 
     //1.  Get a Seq of all Leaf node filters
     val leafFilters = LogicalPlan.getColumnFilterGroup(logicalPlan)
@@ -184,21 +187,27 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       cf.filter(col => nonMetricColumnSet.contains(col.column)).map(
         x => (x.column, x.filter.valuesStrings.head.toString)).toMap
     })
-    // 3. Get the start and end time is ms based on the lookback, offset and the user provided start and end time
-    val (maxOffsetMs, minOffsetMs) = LogicalPlanUtils.getOffsetMillis(logicalPlan)
-      .foldLeft((Long.MinValue, Long.MaxValue)) {
-        case ((accMax, accMin), currValue) => (accMax.max(currValue), accMin.min(currValue))
-      }
 
-    val periodicSeriesTimeWithOffset = TimeRange((queryParams.startSecs * 1000) - maxOffsetMs,
-      (queryParams.endSecs * 1000) - minOffsetMs)
-    val lookBackMs = getLookBackMillis(logicalPlan).max
+    // 3. Determine the query time range
+    val queryTimeRange = if (infiniteTimeRange) {
+      TimeRange(0, Long.MaxValue)
+    } else {
+      // 3a. Get the start and end time is ms based on the lookback, offset and the user provided start and end time
+      val (maxOffsetMs, minOffsetMs) = LogicalPlanUtils.getOffsetMillis(logicalPlan)
+        .foldLeft((Long.MinValue, Long.MaxValue)) {
+          case ((accMax, accMin), currValue) => (accMax.max(currValue), accMin.min(currValue))
+        }
 
-    //4. Get the Query time range based on user provided range, offsets in previous steps and lookback
-    val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackMs,
-      periodicSeriesTimeWithOffset.endMs)
+      val periodicSeriesTimeWithOffset = TimeRange((queryParams.startSecs * 1000) - maxOffsetMs,
+        (queryParams.endSecs * 1000) - minOffsetMs)
+      val lookBackMs = getLookBackMillis(logicalPlan).max
 
-    //5. Based on the map in 2 and time range in 5, get the partitions to query
+      //3b Get the Query time range based on user provided range, offsets in previous steps and lookback
+      TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackMs,
+        periodicSeriesTimeWithOffset.endMs)
+    }
+
+    //4. Based on the map in 2 and time range in 5, get the partitions to query
     routingKeyMap.flatMap(metricMap =>
       partitionLocationProvider.getPartitions(metricMap, queryTimeRange))
   }
@@ -430,6 +439,46 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         case _: LabelNames => LabelNamesDistConcatExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
         case _: LabelCardinality => LabelCardinalityReduceExec(qContext, inProcessPlanDispatcher,
+          execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
+      }
+    }
+    PlanResult(execPlan::Nil)
+  }
+
+  def materializeTsCardinalities(lp: TsCardinalities, qContext: QueryContext): PlanResult = {
+
+    import TsCardinalities._
+
+    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val partitions = if (lp.shardKeyPrefix.size >= 2) {
+      // At least a ws/ns pair is required to select specific partitions.
+      getPartitions(lp, queryParams, infiniteTimeRange = true)
+    } else {
+      logger.info(s"(ws, ns) pair not provided in prefix=${lp.shardKeyPrefix};" +
+                  s"dispatching to all authorized partitions")
+      partitionLocationProvider.getAuthorizedPartitions(TimeRange(0, Long.MaxValue))
+    }
+    val execPlan = if (partitions.isEmpty) {
+      logger.warn(s"no partitions found for $lp; defaulting to local planner")
+      localPartitionPlanner.materialize(lp, qContext)
+    } else {
+      val execPlans = partitions.map { p =>
+        logger.debug(s"partition=$p; plan=$lp")
+        if (p.partitionName.equals(localPartitionName))
+          localPartitionPlanner.materialize(lp, qContext)
+        else {
+          val params = Map(
+            "match[]" -> ("{" + SHARD_KEY_LABELS.zip(lp.shardKeyPrefix)
+                           .map{ case (label, value) => s"""$label="$value""""}
+                           .mkString(",") + "}"),
+            "numGroupByFields" -> lp.numGroupByFields.toString)
+          createMetadataRemoteExec(qContext, p, params)
+        }
+      }
+      if (execPlans.size == 1) {
+        execPlans.head
+      } else {
+        TsCardReduceExec(qContext, inProcessPlanDispatcher,
           execPlans.sortWith((x, _) => !x.isInstanceOf[MetadataRemoteExec]))
       }
     }

@@ -1,6 +1,7 @@
 package filodb.query
 
 import filodb.core.query.{ColumnFilter, RangeParams}
+import filodb.core.query.Filter.Equals
 
 //scalastyle:off number.of.types
 sealed trait LogicalPlan {
@@ -125,6 +126,10 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
                                startMs: Long,
                                endMs: Long) extends MetadataQueryPlan
 
+object TsCardinalities {
+  val SHARD_KEY_LABELS = Seq("_ws_", "_ns_", "__name__")
+}
+
 /**
  * Plan to answer queries of the abstract form:
  *
@@ -161,6 +166,8 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
  *     [ws, ns, metric]   { 3 }
  */
 case class TsCardinalities(shardKeyPrefix: Seq[String], numGroupByFields: Int) extends LogicalPlan {
+  import TsCardinalities._
+
   require(numGroupByFields >= 1 && numGroupByFields <= 3,
     "numGroupByFields must lie on [1, 3]")
   require(numGroupByFields >= shardKeyPrefix.size,
@@ -170,6 +177,9 @@ case class TsCardinalities(shardKeyPrefix: Seq[String], numGroupByFields: Int) e
 
   // TODO: this should eventually be "true" to enable HAP/LTRP routing
   override def isRoutable: Boolean = false
+
+  def filters(): Seq[ColumnFilter] = SHARD_KEY_LABELS.zip(shardKeyPrefix).map{ case (label, value) =>
+    ColumnFilter(label, Equals(value))}
 }
 
 /**
@@ -659,6 +669,7 @@ object LogicalPlan {
         case lp: RawChunkMeta          => lp.filters toSet
         case lp: SeriesKeysByFilters   => lp.filters toSet
         case lp: LabelCardinality      => lp.filters.toSet
+        case lp: TsCardinalities       => lp.filters.toSet
         case _: ScalarTimeBasedPlan    => Set.empty[ColumnFilter] // Plan does not have labels
         case _: ScalarFixedDoublePlan  => Set.empty[ColumnFilter]
         case _: ScalarBinaryOperation  => Set.empty[ColumnFilter]

@@ -17,7 +17,10 @@ object PromCirceSupport {
     case m @ MetadataMapSampl(v) => Json.fromValues(Seq(v.asJson))
     case l @ LabelSampl(v) => Json.fromValues(Seq(v.asJson))
     // Where are these used? added to make compiler happy
-    case l @ LabelCardinalitySampl(group, cardinality)  => Json.fromValues(Seq(group.asJson, cardinality.asJson))
+    case l @ LabelCardinalitySampl(group, cardinality)  =>
+      Json.fromValues(Seq(group.asJson, cardinality.asJson))
+    case t @ TsCardinalitiesSampl(group, cardinality) =>
+      Json.fromValues(Seq(group.asJson, cardinality.asJson))
   }
 
   implicit val decodeAvgSample: Decoder[AvgSampl] = new Decoder[AvgSampl] {
@@ -45,19 +48,26 @@ object PromCirceSupport {
 
   implicit val decodeMetadataSampl: Decoder[MetadataSampl] = new Decoder[MetadataSampl] {
     def apply(c: HCursor): Decoder.Result[MetadataSampl] = {
-      c.downField("cardinality").focus match {
-        case Some(_) =>
-          // TODO: Not the best way to find if this is a label cardinality response, is there a better way?
+      // TODO: Not the best way to find if this is a cardinality response, is there a better way?
+      if (c.downField("cardinality").focus.nonEmpty) {
+        // LabelCardinality has "metric" map; TsCardinalities has "group" map
+        if (c.downField("metric").focus.nonEmpty) {
           for {
             metric <- c.get[Map[String, String]]("metric")
             card <- c.get[Seq[Map[String, String]]]("cardinality")
           } yield LabelCardinalitySampl(metric, card)
-
-        case None =>
-          if (c.value.isString)
-            for { label <- c.as[String] } yield LabelSampl(label)
-          else
-            for { metadataMap <- c.as[Map[String, String]] } yield MetadataMapSampl(metadataMap)
+        } else if (c.downField("group").focus.nonEmpty) {
+          for {
+            group <- c.get[Map[String, String]]("group")
+            card <- c.get[Map[String, Int]]("cardinality")
+          } yield TsCardinalitiesSampl(group, card)
+        } else {
+          throw new IllegalArgumentException("could not decode any expected cardinality-related field")
+        }
+      } else if (c.value.isString) {
+        for { label <- c.as[String] } yield LabelSampl(label)
+      } else {
+        for { metadataMap <- c.as[Map[String, String]] } yield MetadataMapSampl(metadataMap)
       }
     }
   }
