@@ -178,7 +178,7 @@ case class TsCardinalities(shardKeyPrefix: Seq[String], numGroupByFields: Int) e
   // TODO: this should eventually be "true" to enable HAP/LTRP routing
   override def isRoutable: Boolean = false
 
-  lazy val prefixFilters = SHARD_KEY_LABELS.zip(shardKeyPrefix).map{ case (label, value) =>
+  def filters(): Seq[ColumnFilter] = SHARD_KEY_LABELS.zip(shardKeyPrefix).map{ case (label, value) =>
     ColumnFilter(label, Equals(value))}
 }
 
@@ -669,7 +669,7 @@ object LogicalPlan {
         case lp: RawChunkMeta          => lp.filters toSet
         case lp: SeriesKeysByFilters   => lp.filters toSet
         case lp: LabelCardinality      => lp.filters.toSet
-        case lp: TsCardinalities        => lp.prefixFilters.toSet
+        case lp: TsCardinalities       => lp.filters.toSet
         case _: ScalarTimeBasedPlan    => Set.empty[ColumnFilter] // Plan does not have labels
         case _: ScalarFixedDoublePlan  => Set.empty[ColumnFilter]
         case _: ScalarBinaryOperation  => Set.empty[ColumnFilter]

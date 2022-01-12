@@ -83,8 +83,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       materializeSubquery(logicalPlan, qContext)
     } else logicalPlan match {
       case mqp: MetadataQueryPlan => materializeMetadataQueryPlan(mqp, qContext).plans.head
-      case lp: TsCardinalities => materializeTsCardinalities(lp, qContext).plans.head
-      case _ => walkLogicalPlanTree(logicalPlan, qContext).plans.head
+      case lp: TsCardinalities    => materializeTsCardinalities(lp, qContext).plans.head
+      case _                      => walkLogicalPlanTree(logicalPlan, qContext).plans.head
     }
   }
 
