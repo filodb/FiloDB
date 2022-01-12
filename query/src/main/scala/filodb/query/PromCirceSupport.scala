@@ -48,22 +48,26 @@ object PromCirceSupport {
 
   implicit val decodeMetadataSampl: Decoder[MetadataSampl] = new Decoder[MetadataSampl] {
     def apply(c: HCursor): Decoder.Result[MetadataSampl] = {
-      // TODO: Not the best way to find if this is a LabelCardinality/TsCardinalities response, is there a better way?
-      if (c.downField("metric").focus.nonEmpty) {
-        for {
-          metric <- c.get[Map[String, String]]("metric")
-          card <- c.get[Seq[Map[String, String]]]("cardinality")
-        } yield LabelCardinalitySampl(metric, card)
-      } else if (c.downField("group").focus.nonEmpty) {
-        for {
-          group <- c.get[Map[String, String]]("group")
-          card <- c.get[Map[String, Int]]("cardinality")
-        } yield TsCardinalitiesSampl(group, card)
+      // TODO: Not the best way to find if this is a cardinality response, is there a better way?
+      if (c.downField("cardinality").focus.nonEmpty) {
+        // LabelCardinality has "metric" map; TsCardinalities has "group" map
+        if (c.downField("metric").focus.nonEmpty) {
+          for {
+            metric <- c.get[Map[String, String]]("metric")
+            card <- c.get[Seq[Map[String, String]]]("cardinality")
+          } yield LabelCardinalitySampl(metric, card)
+        } else if (c.downField("group").focus.nonEmpty) {
+          for {
+            group <- c.get[Map[String, String]]("group")
+            card <- c.get[Map[String, Int]]("cardinality")
+          } yield TsCardinalitiesSampl(group, card)
+        } else {
+          throw new IllegalArgumentException("could not decode any expected cardinality-related field")
+        }
+      } else if (c.value.isString) {
+        for { label <- c.as[String] } yield LabelSampl(label)
       } else {
-        if (c.value.isString)
-          for { label <- c.as[String] } yield LabelSampl(label)
-        else
-          for { metadataMap <- c.as[Map[String, String]] } yield MetadataMapSampl(metadataMap)
+        for { metadataMap <- c.as[Map[String, String]] } yield MetadataMapSampl(metadataMap)
       }
     }
   }
