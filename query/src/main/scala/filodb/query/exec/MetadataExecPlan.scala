@@ -359,7 +359,7 @@ final case class LabelValuesExec(queryContext: QueryContext,
         case false if (columns.size == 1) =>
           val metadataMap = memStore.labelValuesWithFilters(dataset, shard, filters, columns, endMs, startMs,
             queryContext.plannerParams.sampleLimit)
-          val labels = metadataMap.map(_.head._1.toString).toSeq
+          val labels = metadataMap.map(_.head._2.toString).toSeq
           val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
             NoCloseCursor(StringArrayRowReader(labels)), None))
           val sch = if (labels.isEmpty) ResultSchema.empty
