@@ -246,7 +246,8 @@ trait  PlannerHelper {
 
       // repeat the same timestep if '@' is specified
       if (sqww.atMs.nonEmpty) {
-        innerExecPlan.plans.foreach(_.addRangeVectorTransformer(RepeatTransformer(sqww.startMs, sqww.stepMs, sqww.endMs)))
+        innerExecPlan.plans.foreach(
+          _.addRangeVectorTransformer(RepeatTransformer(sqww.startMs, sqww.stepMs, sqww.endMs)))
       }
 
       innerExecPlan

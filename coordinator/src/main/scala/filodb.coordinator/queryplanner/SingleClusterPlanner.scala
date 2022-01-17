@@ -17,7 +17,7 @@ import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, Time
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
 import filodb.query.{exec, _}
-// import filodb.query.InstantFunctionId.HistogramBucket  // TODO(a_theimer)
+import filodb.query.InstantFunctionId.HistogramBucket
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
 import filodb.query.exec.InternalRangeFunction.Last
 
@@ -312,17 +312,16 @@ class SingleClusterPlanner(val dataset: Dataset,
       series.plans.foreach(_.addRangeVectorTransformer(RepeatTransformer(lp.startMs, lp.stepMs, lp.endMs)))
     }
 
-    // TODO(a_theimer)
+    // TODO(a_theimer): test this
     if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
-        ???
-//      val aggregate = Aggregate(AggregationOperator.Sum, logicalPlanWithoutBucket, Nil, Seq("job"))
-//      // Add sum to aggregate all child responses
-//      // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
-//      val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
-//        qContext.plannerParams.copy(skipAggregatePresent = true)), series)))
-//      addAbsentFunctionMapper(aggregatePlanResult, logicalPlanWithoutBucket.columnFilters,
-//        RangeParams(logicalPlanWithoutBucket.startMs / 1000, logicalPlanWithoutBucket.stepMs / 1000,
-//          logicalPlanWithoutBucket.endMs / 1000), qContext)
+      val aggregate = Aggregate(AggregationOperator.Sum, logicalPlanWithoutBucket, Nil, Seq("job"))
+      // Add sum to aggregate all child responses
+      // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
+      val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
+        qContext.plannerParams.copy(skipAggregatePresent = true)), series)))
+      addAbsentFunctionMapper(aggregatePlanResult, logicalPlanWithoutBucket.columnFilters,
+        RangeParams(logicalPlanWithoutBucket.startMs / 1000, logicalPlanWithoutBucket.stepMs / 1000,
+          logicalPlanWithoutBucket.endMs / 1000), qContext)
     } else series
   }
 
@@ -372,13 +371,12 @@ class SingleClusterPlanner(val dataset: Dataset,
       rawSeries.plans.foreach(_.addRangeVectorTransformer(RepeatTransformer(lp.startMs, lp.stepMs, lp.endMs)))
     }
 
-    // TODO(a_theimer)
+    // TODO(a_theimer): test this
     if (nameFilter.isDefined && nameFilter.head.endsWith("_bucket") && leFilter.isDefined) {
-      ???
-//      val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(lp.startMs/1000, lp.stepMs/1000,
-//        lp.endMs/1000))
-//      rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
-//        Seq(paramsExec))))
+      val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(lp.startMs/1000, lp.stepMs/1000,
+        lp.endMs/1000))
+      rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
+        Seq(paramsExec))))
     }
    rawSeries
   }
