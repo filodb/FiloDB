@@ -77,20 +77,33 @@ final case class RepeatTransformer(startMs: Long, stepMs: Long, endMs: Long) ext
                      querySession: QuerySession,
                      limit: Int, sourceSchema: ResultSchema,
                      paramsResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
+    import scala.language.reflectiveCalls
     require(sourceSchema.isTimeSeries, "RepeatTransformer only operates on timeseries data")
     val nrows = (endMs - startMs) / math.max(1, stepMs)
     source.map { rv =>
-      val value = rv.rows().toList.last.getDouble(1)
+      val lastRow = rv.rows().toList.last
       new RangeVector {
-        val row = new TransientRow()
+        // always returns the contents of lastRow except for the timestamp
+        val row = new RowReader {
+          var timestamp: Long = -1
+          override def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp else lastRow.getLong(columnNo)
+          override def notNull(columnNo: Int): Boolean = lastRow.notNull(columnNo)
+          override def getBoolean(columnNo: Int): Boolean = lastRow.getBoolean(columnNo)
+          override def getInt(columnNo: Int): Int = lastRow.getInt(columnNo)
+          override def getDouble(columnNo: Int): Double = lastRow.getDouble(columnNo)
+          override def getFloat(columnNo: Int): Float = lastRow.getFloat(columnNo)
+          override def getString(columnNo: Int): String = lastRow.getString(columnNo)
+          override def getAny(columnNo: Int): Any = lastRow.getAny(columnNo)
+          override def getBlobBase(columnNo: Int): Any = lastRow.getBlobBase(columnNo)
+          override def getBlobOffset(columnNo: Int): Long = lastRow.getBlobOffset(columnNo)
+          override def getBlobNumBytes(columnNo: Int): Int = lastRow.getBlobNumBytes(columnNo)
+        }
         override def outputRange: Option[RvRange] = Some(RvRange(startMs, stepMs, endMs))
         override def key: RangeVectorKey = rv.key
         override def rows(): RangeVectorCursor = {
           new NoCloseCursor(
             (0L to nrows).iterator.map { i =>
-              val tstamp = startMs + (i * stepMs)
-              row.setLong(0, tstamp)
-              row.setDouble(1, value)
+              row.timestamp = startMs + (i * stepMs)
               row
             })
         }
