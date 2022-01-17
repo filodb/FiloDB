@@ -291,7 +291,7 @@ class SingleClusterPlanner(val dataset: Dataset,
        removeBucket(Right(lp))._3.right.get
     } else lp
 
-    var series = walkLogicalPlanTree(logicalPlanWithoutBucket.series, qContext)
+    val series = walkLogicalPlanTree(logicalPlanWithoutBucket.series, qContext)
     val rawSource = logicalPlanWithoutBucket.series.isRaw
 
     /* Last function is used to get the latest value in the window for absent_over_time
@@ -362,7 +362,7 @@ class SingleClusterPlanner(val dataset: Dataset,
 
     } else (None, None, lp)
 
-    var rawSeries = walkLogicalPlanTree(lpWithoutBucket.rawSeries, qContext)
+    val rawSeries = walkLogicalPlanTree(lpWithoutBucket.rawSeries, qContext)
 
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
       None, None, qContext, false, Nil, lp.offsetMs, lp.atMs)))
@@ -436,6 +436,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     val spreadChanges = spreadProvToUse.spreadFunc(renamedFilters)
     val rangeSelectorWithModifiers = lp.rangeSelector match {
       case IntervalSelector(fromMs, toMs) => {
+        // find the "real" timestamps where at/offset are accounted for
         val toRealMs = lp.atMs.getOrElse(toMs) - offsetMillis
         val fromRealMs = {
           val windowStartMs = toRealMs - lp.lookbackMs.getOrElse(queryConfig.staleSampleAfterMs)

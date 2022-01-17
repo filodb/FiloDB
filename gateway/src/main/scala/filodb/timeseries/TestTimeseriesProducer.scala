@@ -117,9 +117,9 @@ object TestTimeseriesProducer extends StrictLogging {
       val instance = n % numTimeSeries
       val dc = instance & oneBitMask
       val partition = (instance >> 1) & twoBitMask
-      val app = 0
+      val app = (instance >> 3) & twoBitMask
       val host = (instance >> 4) & twoBitMask
-      val timestamp = startTime - (n.toLong / numTimeSeries) * 10000 // generate 1 sample every 10s for each instance
+      val timestamp = startTime + (n.toLong / numTimeSeries) * 10000 // generate 1 sample every 10s for each instance
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
 
       val tags = Map("dc"       -> s"DC$dc",
