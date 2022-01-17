@@ -861,6 +861,14 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
           |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1100932725],raw)""".stripMargin),
+      ("""sgn(foo{job="app"} offset 1m @ 12345)""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#224112687],raw)
+          |-T~InstantVectorFunctionMapper(function=Sgn)
+          |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#224112687],raw)
+          |-T~InstantVectorFunctionMapper(function=Sgn)
+          |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#224112687],raw)""".stripMargin),
       // TODO: these are supported by Prometheus
       // "foo @ +12345.67",
       //   "aaa",
@@ -1021,6 +1029,16 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |---T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
           |----T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#963964011],raw)""".stripMargin),
+      ("""sgn(foo{job="app"} offset 1m @ 12345)""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-191502193],raw)
+          |-T~InstantVectorFunctionMapper(function=Sgn)
+          |--T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |---T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-191502193],raw)
+          |-T~InstantVectorFunctionMapper(function=Sgn)
+          |--T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |---T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-191502193],raw)""".stripMargin),
       // TODO: these are supported by Prometheus
       // "foo @ +12345.67",
       //   "aaa",
