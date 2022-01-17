@@ -243,18 +243,17 @@ trait  PlannerHelper {
           true
         )
       innerExecPlan.plans.foreach { p => p.addRangeVectorTransformer(rangeVectorTransformer)}
-
-      // repeat the same timestep if '@' is specified
-      if (sqww.atMs.nonEmpty) {
-        innerExecPlan.plans.foreach(
-          _.addRangeVectorTransformer(RepeatTransformer(sqww.startMs, sqww.stepMs, sqww.endMs)))
-      }
-
-      innerExecPlan
     } else {
-      ???  // TODO(a_theimer)
-//      createAbsentOverTimePlan(innerExecPlan, innerPlan, qContext, window, sqww.offsetMs, sqww)
+      createAbsentOverTimePlan(innerExecPlan, innerPlan, qContext, window, sqww.offsetMs, sqww)
     }
+
+    // repeat the same timestep if '@' is specified
+    if (sqww.atMs.nonEmpty) {
+      innerExecPlan.plans.foreach(
+        _.addRangeVectorTransformer(RepeatTransformer(sqww.startMs, sqww.stepMs, sqww.endMs)))
+    }
+
+    innerExecPlan
   }
 
    def createAbsentOverTimePlan( innerExecPlan: PlanResult,

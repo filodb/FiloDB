@@ -307,13 +307,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       logicalPlanWithoutBucket.stepMultipleNotationUsed,
       paramsExec, logicalPlanWithoutBucket.offsetMs, logicalPlanWithoutBucket.atMs, rawSource)))
 
-    // repeat the same timestep if '@' is specified
-    if (lp.atMs.nonEmpty) {
-      series.plans.foreach(_.addRangeVectorTransformer(RepeatTransformer(lp.startMs, lp.stepMs, lp.endMs)))
-    }
-
-    // TODO(a_theimer): test this
-    if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
+    val result = if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
       val aggregate = Aggregate(AggregationOperator.Sum, logicalPlanWithoutBucket, Nil, Seq("job"))
       // Add sum to aggregate all child responses
       // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
@@ -323,6 +317,13 @@ class SingleClusterPlanner(val dataset: Dataset,
         RangeParams(logicalPlanWithoutBucket.startMs / 1000, logicalPlanWithoutBucket.stepMs / 1000,
           logicalPlanWithoutBucket.endMs / 1000), qContext)
     } else series
+
+    // repeat the same timestep if '@' is specified
+    if (lp.atMs.nonEmpty) {
+      result.plans.foreach(_.addRangeVectorTransformer(RepeatTransformer(lp.startMs, lp.stepMs, lp.endMs)))
+    }
+
+    result
   }
 
   private def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]) = {
@@ -366,19 +367,19 @@ class SingleClusterPlanner(val dataset: Dataset,
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
       None, None, qContext, false, Nil, lp.offsetMs, lp.atMs)))
 
-    // repeat the same timestep if '@' is specified
-    if (lp.atMs.nonEmpty) {
-      rawSeries.plans.foreach(_.addRangeVectorTransformer(RepeatTransformer(lp.startMs, lp.stepMs, lp.endMs)))
-    }
-
-    // TODO(a_theimer): test this
     if (nameFilter.isDefined && nameFilter.head.endsWith("_bucket") && leFilter.isDefined) {
       val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(lp.startMs/1000, lp.stepMs/1000,
         lp.endMs/1000))
       rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
         Seq(paramsExec))))
     }
-   rawSeries
+
+    // repeat the same timestep if '@' is specified
+    if (lp.atMs.nonEmpty) {
+      rawSeries.plans.foreach(_.addRangeVectorTransformer(RepeatTransformer(lp.startMs, lp.stepMs, lp.endMs)))
+    }
+
+    rawSeries
   }
 
   /**

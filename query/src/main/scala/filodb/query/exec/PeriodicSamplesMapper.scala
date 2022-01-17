@@ -37,21 +37,15 @@ final case class PeriodicSamplesMapper(startMs: Long,
                                        rawSource: Boolean = true,
                                        leftInclusiveWindow: Boolean = false
 ) extends RangeVectorTransformer {
-  val windowToUse =
-    window.map(windowLengthMs => if (leftInclusiveWindow) (windowLengthMs + 1) else windowLengthMs)
   require(startMs <= endMs, s"start $startMs should be <= end $endMs")
   require(startMs == endMs || stepMs > 0, s"step $stepMs should be > 0 for range query")
+
+  val windowToUse =
+    window.map(windowLengthMs => if (leftInclusiveWindow) (windowLengthMs + 1) else windowLengthMs)
   val adjustedStep = if (stepMs > 0) stepMs else stepMs + 1 // needed for iterators to terminate when start == end
-
-//  val startWithOffset = startMs - offsetMs.getOrElse(0L)
-//  val endWithOffset = endMs - offsetMs.getOrElse(0L)
-//  val outputRvRange = Some(RvRange(startMs, stepMs, endMs))
-
-  // TODO(a_theimer): rename stuff, also unsure if correct, also outputRvRange
   val endWithOffset = atMs.getOrElse(endMs) - offsetMs.getOrElse(0L)
   val startWithOffset = endWithOffset - {if (atMs.isEmpty) endMs - startMs else 0L}
   val outputRvRange = Some(RvRange(startWithOffset, stepMs, endWithOffset))
-
   val isLastFn = functionId.isEmpty || functionId.contains(InternalRangeFunction.LastSampleHistMax) ||
     functionId.contains(InternalRangeFunction.Timestamp)
 

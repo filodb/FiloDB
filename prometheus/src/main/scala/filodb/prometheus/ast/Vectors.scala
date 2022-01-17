@@ -133,31 +133,29 @@ case class SubqueryExpression(subquery: PeriodicSeries,
     // when start and end parameters are not the same.
     require(timeParams.start == timeParams.end, "Subquery is not allowed as a top level expression for query_range")
 
-    // NOTE(a_theimer): below is setup with the above requirement in mind
-
-    // TODO(a_theimer): confirm
     val offsetOptMs = offset.map(_.millis(timeParams.step * 1000))
     val atOptMs = at.map(_.getUnix(timeParams) * 1000)
 
-    // TODO(a_theimer): make sure nothing borked
     var endS = atOptMs.map(_ / 1000).getOrElse(timeParams.end) - offsetOptMs.getOrElse(0L) / 1000
     val stepToUseMs = SubqueryUtils.getSubqueryStepMs(sqcl.step);
     var startS = endS - (sqcl.window.millis(1L) / 1000)
+
     startS = SubqueryUtils.getStartForFastSubquery(startS, stepToUseMs/1000 )
     endS = SubqueryUtils.getEndForFastSubquery(endS, stepToUseMs/1000 )
+
     val timeParamsToUse = TimeStepParams(
       startS,
       stepToUseMs/1000,
       endS
     )
+
     TopLevelSubquery(
       subquery.toSeriesPlan(timeParamsToUse),
       startS * 1000,
       stepToUseMs,
       endS * 1000,
       sqcl.window.millis(1L),
-      offsetOptMs,  // TODO(a_theimer): double-check this should be
-                    //   included in start/end (as it currently is)
+      offsetOptMs,
       atOptMs
     )
   }
@@ -305,7 +303,7 @@ case class InstantExpression(metricName: Option[String],
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     // we start from 5 minutes earlier that provided start time in order to include last sample for the
     // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
-    val offsetOptMs = offset.map(_.millis(timeParams.step * 1000))  // TODO(a_theimer): confirm
+    val offsetOptMs = offset.map(_.millis(timeParams.step * 1000))
     val atOptMs = at.map(_.getUnix(timeParams) * 1000)
     val ps = PeriodicSeries(
                RawSeries(
@@ -339,9 +337,7 @@ case class InstantExpression(metricName: Option[String],
     LabelCardinality(columnFilters, timeParams.start * 1000, timeParams.end * 1000)
 
   def toRawSeriesPlan(timeParams: TimeRangeParams, offsetMs: Option[Long] = None): RawSeries = {
-    require(offsetMs.isEmpty)  // TODO(a_theimer): offsetMs is never passed a non-default argument. What is it for?
-
-    val offsetOptMs = offset.map(_.millis(timeParams.step * 1000))  // TODO(a_theimer): confirm
+    val offsetOptMs = offset.map(_.millis(timeParams.step * 1000))
     val atOptMs = at.map(_.getUnix(timeParams) * 1000)
     RawSeries(Base.timeParamToSelector(timeParams),
               columnFilters,
@@ -391,17 +387,8 @@ case class RangeExpression(metricName: Option[String],
       throw new UnsupportedOperationException("Range expression is not allowed in query_range")
     }
 
-    // TODO(a_theimer): rename/move
-    def applyBucketThing(rs: RawSeries): RawSeries = {
-      bucketOpt.map { bOpt =>
-        // It's a fixed value, the range params don't matter at all
-        val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
-        ApplyInstantFunctionRaw(rs, InstantFunctionId.HistogramBucket, Seq(param))
-      }.getOrElse(rs).asInstanceOf[RawSeries]  // TODO(a_theimer): this cast?? make sure rtn unchanged.
-    }
-
     // multiply by 1000 to convert unix timestamp in seconds to millis
-    val offsetOptMs = offset.map(_.millis(timeParams.step * 1000))  // TODO(a_theimer): confirm
+    val offsetOptMs = offset.map(_.millis(timeParams.step * 1000))
     val atOptMs = at.map(_.getUnix(timeParams) * 1000)
     val rs = RawSeries(Base.timeParamToSelector(timeParams),
                        columnFilters,
