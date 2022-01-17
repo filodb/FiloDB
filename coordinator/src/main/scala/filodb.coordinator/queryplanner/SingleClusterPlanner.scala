@@ -319,7 +319,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     } else series
 
     // repeat the same timestep if '@' is specified
-    if (lp.atMs.nonEmpty) {
+    if (lp.atMs.nonEmpty && (lp.startMs != lp.endMs)) {
       result.plans.foreach(_.addRangeVectorTransformer(RepeatTransformer(lp.startMs, lp.stepMs, lp.endMs)))
     }
 
@@ -375,7 +375,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     }
 
     // repeat the same timestep if '@' is specified
-    if (lp.atMs.nonEmpty) {
+    if (lp.atMs.nonEmpty && (lp.startMs != lp.endMs)) {
       rawSeries.plans.foreach(_.addRangeVectorTransformer(RepeatTransformer(lp.startMs, lp.stepMs, lp.endMs)))
     }
 
