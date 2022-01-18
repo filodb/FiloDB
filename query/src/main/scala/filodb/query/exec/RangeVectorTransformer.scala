@@ -2,16 +2,14 @@ package filodb.query.exec
 
 import scala.collection.Iterator
 import scala.collection.mutable.ListBuffer
-
 import monix.reactive.Observable
 import spire.syntax.cfor._
-
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
 import filodb.core.query.NoCloseCursor.NoCloseCursor
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.{CopycatRowReader, RowReader, ZeroCopyUTF8String}
 import filodb.memory.format.vectors.{HistogramBuckets, HistogramWithBuckets}
 import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, SortFunctionId, _}
 import filodb.query.InstantFunctionId.HistogramQuantile
@@ -83,27 +81,16 @@ final case class RepeatTransformer(startMs: Long, stepMs: Long, endMs: Long) ext
     source.map { rv =>
       val lastRow = rv.rows().toList.last
       new RangeVector {
-        // always returns the contents of lastRow except for the timestamp
-        val row = new RowReader {
-          var timestamp: Long = -1
-          override def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp else lastRow.getLong(columnNo)
-          override def notNull(columnNo: Int): Boolean = lastRow.notNull(columnNo)
-          override def getBoolean(columnNo: Int): Boolean = lastRow.getBoolean(columnNo)
-          override def getInt(columnNo: Int): Int = lastRow.getInt(columnNo)
-          override def getDouble(columnNo: Int): Double = lastRow.getDouble(columnNo)
-          override def getFloat(columnNo: Int): Float = lastRow.getFloat(columnNo)
-          override def getString(columnNo: Int): String = lastRow.getString(columnNo)
-          override def getAny(columnNo: Int): Any = lastRow.getAny(columnNo)
-          override def getBlobBase(columnNo: Int): Any = lastRow.getBlobBase(columnNo)
-          override def getBlobOffset(columnNo: Int): Long = lastRow.getBlobOffset(columnNo)
-          override def getBlobNumBytes(columnNo: Int): Int = lastRow.getBlobNumBytes(columnNo)
+        val row = new CopycatRowReader(lastRow) {
+          var timetamp: Long = -1
+          override def getLong(columnNo: Int): Long = if (columnNo == 0) timetamp else super.getLong(columnNo)
         }
         override def outputRange: Option[RvRange] = Some(RvRange(startMs, stepMs, endMs))
         override def key: RangeVectorKey = rv.key
         override def rows(): RangeVectorCursor = {
           new NoCloseCursor(
             (0L to nrows).iterator.map { i =>
-              row.timestamp = startMs + (i * stepMs)
+              row.timetamp = startMs + (i * stepMs)
               row
             })
         }

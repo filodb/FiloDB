@@ -106,6 +106,25 @@ trait SchemaRowReader extends RowReader {
 }
 
 /**
+ * Imitates another row except for overridden methods.
+ * @param refRow the reference row to imitate.
+ */
+case class CopycatRowReader(refRow: RowReader) extends RowReader {
+  override def notNull(columnNo: Int): Boolean = refRow.notNull(columnNo)
+  override def getBoolean(columnNo: Int): Boolean = refRow.getBoolean(columnNo)
+  override def getInt(columnNo: Int): Int = refRow.getInt(columnNo)
+  override def getLong(columnNo: Int): Long = refRow.getLong(columnNo)
+  override def getDouble(columnNo: Int): Double = refRow.getDouble(columnNo)
+  override def getFloat(columnNo: Int): Float = refRow.getFloat(columnNo)
+  override def getString(columnNo: Int): String = refRow.getString(columnNo)
+  override def getAny(columnNo: Int): Any = refRow.getAny(columnNo)
+  override def getBlobBase(columnNo: Int): Any = refRow.getBlobBase(columnNo)
+  override def getBlobOffset(columnNo: Int): Long = refRow.getBlobOffset(columnNo)
+  override def getBlobNumBytes(columnNo: Int): Int = refRow.getBlobNumBytes(columnNo)
+  override def getHistogram(columnNo: Int): Histogram = refRow.getHistogram(columnNo)
+}
+
+/**
  * An example of a RowReader that can read from Scala tuples containing Option[_]
  */
 final case class TupleRowReader(tuple: Product) extends RowReader {
