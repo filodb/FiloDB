@@ -221,7 +221,7 @@ trait  PlannerHelper {
     // is optimal, if there is no overlap and even worse significant gap between the individual subqueries, retrieving
     // the entire range might be suboptimal, this still might be a better option than issuing and concatenating numerous
     // subqueries separately
-    var innerPlan = sqww.innerPeriodicSeries
+    val innerPlan = sqww.innerPeriodicSeries
     val window = Some(sqww.subqueryWindowMs)
     // Here the inner periodic series already has start/end/step populated
     // in Function's toSeriesPlan(), Functions.scala subqqueryArgument() method.
@@ -238,14 +238,22 @@ trait  PlannerHelper {
           false,
           paramsExec,
           sqww.offsetMs,
+          sqww.atMs,
           false,
           true
         )
       innerExecPlan.plans.foreach { p => p.addRangeVectorTransformer(rangeVectorTransformer)}
-      innerExecPlan
     } else {
       createAbsentOverTimePlan(innerExecPlan, innerPlan, qContext, window, sqww.offsetMs, sqww)
     }
+
+    // repeat the same timestep if '@' is specified
+    if (sqww.atMs.nonEmpty && (sqww.startMs != sqww.endMs)) {
+      innerExecPlan.plans.foreach(
+        _.addRangeVectorTransformer(RepeatTransformer(sqww.startMs, sqww.stepMs, sqww.endMs)))
+    }
+
+    innerExecPlan
   }
 
    def createAbsentOverTimePlan( innerExecPlan: PlanResult,
@@ -265,6 +273,7 @@ trait  PlannerHelper {
         false,
         Seq(),
         offsetMs,
+        sqww.atMs,
         false
       ))
     )

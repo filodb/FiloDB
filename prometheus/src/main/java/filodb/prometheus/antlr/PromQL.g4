@@ -20,7 +20,7 @@ vectorExpression
     | vectorExpression compareOp grouping? vectorExpression            #binaryOperation
     | vectorExpression andUnlessOp grouping? vectorExpression          #binaryOperation
     | vectorExpression orOp grouping? vectorExpression                 #binaryOperation
-    | vectorExpression subquery offset?                                #subqueryOperation
+    | vectorExpression subquery vectorShift?                           #subqueryOperation
     | vectorExpression limit                                           #limitOperation
     | vector                                                           #vectorOperation
     ;
@@ -44,16 +44,24 @@ vector
 parens: '(' vectorExpression ')';
 
 // TODO: Make offset applicable to any expression.
-instantOrRangeSelector: instantSelector window? offset?;
+instantOrRangeSelector: instantSelector window? vectorShift?;
 
 instantSelector
     : metricName ('{' labelMatcherList? '}')?
     | '{' labelMatcherList '}'
     ;
 
+vectorShift
+    : offset
+    | at
+    | offset at
+    | at offset
+    ;
+
 window: '[' DURATION ']';
 
 offset: OFFSET DURATION;
+at: AT (NUMBER | START | END);
 
 limit: LIMIT NUMBER;
 
@@ -149,6 +157,8 @@ LE:  '<=';
 RE:  '=~';
 NRE: '!~';
 
+AT: '@';
+
 // See section below: "Magic for case-insensitive matching."
 AND:         A N D;
 OR:          O R;
@@ -162,6 +172,8 @@ GROUP_RIGHT: G R O U P '_' R I G H T;
 OFFSET:      O F F S E T;
 LIMIT:       L I M I T;
 BOOL:        B O O L;
+START:       S T A R T '(' ')';
+END:         E N D '(' ')';
 
 // See section below: "Magic for case-insensitive matching."
 AGGREGATION_OP

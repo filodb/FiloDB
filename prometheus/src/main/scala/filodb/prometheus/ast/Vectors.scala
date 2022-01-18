@@ -23,6 +23,33 @@ sealed trait JoinMatching {
   def labels: Seq[String]
 }
 
+/**
+ * Represents the timestamp of a PromQL '@' modifier.
+ */
+sealed trait AtTimestamp {
+  def getUnix(timeParams: TimeRangeParams) : Long
+}
+
+case class AtUnix(time: Long) extends AtTimestamp {
+  override def getUnix(timeParams: TimeRangeParams): Long = {
+    time
+  }
+}
+
+case class AtStart() extends AtTimestamp {
+  override def getUnix(timeParams: TimeRangeParams): Long = {
+    timeParams.start
+  }
+}
+
+case class AtEnd() extends AtTimestamp {
+  override def getUnix(timeParams: TimeRangeParams): Long = {
+    timeParams.end
+  }
+}
+
+case class VectorShift(offset: Option[Duration], at: Option[AtTimestamp])
+
 case class Ignoring(labels: Seq[String]) extends JoinMatching
 
 case class On(labels: Seq[String]) extends JoinMatching
@@ -88,9 +115,11 @@ case class VectorMatch(matching: Option[JoinMatching],
   }
 }
 
-case class SubqueryExpression(
-    subquery: PeriodicSeries, sqcl: SubqueryClause, offset: Option[Duration], limit: Option[Int]
-) extends Expression with PeriodicSeries {
+case class SubqueryExpression(subquery: PeriodicSeries,
+                              sqcl: SubqueryClause,
+                              offset: Option[Duration],
+                              at: Option[AtTimestamp],
+                              limit: Option[Int]) extends Expression with PeriodicSeries {
 
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     // There are only two places for the subquery to be defined in the abstract syntax tree:
@@ -103,31 +132,33 @@ case class SubqueryExpression(
     // It's illegal to have a top level subquery expression to be called from query_range API
     // when start and end parameters are not the same.
     require(timeParams.start == timeParams.end, "Subquery is not allowed as a top level expression for query_range")
-    val offsetSec : Long = offset match {
-      case None => 0
-      case Some(duration) => duration.millis(1L) / 1000
-    }
+
+    val offsetOptMs = offset.map(_.millis(timeParams.step * 1000))
+    val atOptMs = at.map(_.getUnix(timeParams) * 1000)
+
+    var endS = atOptMs.map(_ / 1000).getOrElse(timeParams.end) - offsetOptMs.getOrElse(0L) / 1000
     val stepToUseMs = SubqueryUtils.getSubqueryStepMs(sqcl.step);
-    var startS = timeParams.start - (sqcl.window.millis(1L) / 1000) - offsetSec
-    var endS = timeParams.start - offsetSec
+    var startS = endS - (sqcl.window.millis(1L) / 1000)
+
     startS = SubqueryUtils.getStartForFastSubquery(startS, stepToUseMs/1000 )
     endS = SubqueryUtils.getEndForFastSubquery(endS, stepToUseMs/1000 )
+
     val timeParamsToUse = TimeStepParams(
       startS,
       stepToUseMs/1000,
       endS
     )
+
     TopLevelSubquery(
       subquery.toSeriesPlan(timeParamsToUse),
       startS * 1000,
       stepToUseMs,
       endS * 1000,
       sqcl.window.millis(1L),
-      offset.map(duration => duration.millis(1L))
+      offsetOptMs,
+      atOptMs
     )
-
   }
-
 }
 
 sealed trait Vector extends Expression {
@@ -258,7 +289,8 @@ sealed trait Vector extends Expression {
   */
 case class InstantExpression(metricName: Option[String],
                              labelSelection: Seq[LabelMatch],
-                             offset: Option[Duration]) extends Vector with PeriodicSeries {
+                             offset: Option[Duration],
+                             at: Option[AtTimestamp]) extends Vector with PeriodicSeries {
 
   import WindowConstants._
 
@@ -271,12 +303,21 @@ case class InstantExpression(metricName: Option[String],
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     // we start from 5 minutes earlier that provided start time in order to include last sample for the
     // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
+    val offsetOptMs = offset.map(_.millis(timeParams.step * 1000))
+    val atOptMs = at.map(_.getUnix(timeParams) * 1000)
     val ps = PeriodicSeries(
-      RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
-        offset.map(_.millis(timeParams.step * 1000))),
-      timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
-      offset.map(_.millis(timeParams.step * 1000))
-    )
+               RawSeries(
+                 Base.timeParamToSelector(timeParams),
+                 columnFilters,
+                 column.toSeq,
+                 Some(staleDataLookbackMillis),
+                 offsetOptMs,
+                 atOptMs),
+               timeParams.start * 1000,
+               timeParams.step * 1000,
+               timeParams.end * 1000,
+               offsetOptMs,
+               atOptMs)
     bucketOpt.map { bOpt =>
       // It's a fixed value, the range params don't matter at all
       val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
@@ -296,8 +337,14 @@ case class InstantExpression(metricName: Option[String],
     LabelCardinality(columnFilters, timeParams.start * 1000, timeParams.end * 1000)
 
   def toRawSeriesPlan(timeParams: TimeRangeParams, offsetMs: Option[Long] = None): RawSeries = {
-    RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
-      offsetMs)
+    val offsetOptMs = offset.map(_.millis(timeParams.step * 1000))
+    val atOptMs = at.map(_.getUnix(timeParams) * 1000)
+    RawSeries(Base.timeParamToSelector(timeParams),
+              columnFilters,
+              column.toSeq,
+              Some(staleDataLookbackMillis),
+              offsetOptMs,
+              atOptMs)
   }
 
   /**
@@ -330,7 +377,8 @@ case class InstantExpression(metricName: Option[String],
 case class RangeExpression(metricName: Option[String],
                            labelSelection: Seq[LabelMatch],
                            window: Duration,
-                           offset: Option[Duration]) extends Vector with SimpleSeries {
+                           offset: Option[Duration],
+                           at: Option[AtTimestamp]) extends Vector with SimpleSeries {
 
   private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
@@ -338,11 +386,16 @@ case class RangeExpression(metricName: Option[String],
     if (isRoot && timeParams.start != timeParams.end) {
       throw new UnsupportedOperationException("Range expression is not allowed in query_range")
     }
+
     // multiply by 1000 to convert unix timestamp in seconds to millis
-    val rs = RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq,
-      Some(window.millis(timeParams.step * 1000)),
-      offset.map(_.millis(timeParams.step * 1000))
-    )
+    val offsetOptMs = offset.map(_.millis(timeParams.step * 1000))
+    val atOptMs = at.map(_.getUnix(timeParams) * 1000)
+    val rs = RawSeries(Base.timeParamToSelector(timeParams),
+                       columnFilters,
+                       column.toSeq,
+                       Some(window.millis(timeParams.step * 1000)),
+                       offsetOptMs,
+                       atOptMs)
     bucketOpt.map { bOpt =>
       // It's a fixed value, the range params don't matter at all
       val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
@@ -350,6 +403,3 @@ case class RangeExpression(metricName: Option[String],
     }.getOrElse(rs)
   }
 }
-
-
-

@@ -33,19 +33,19 @@ final case class PeriodicSamplesMapper(startMs: Long,
                                        stepMultipleNotationUsed: Boolean = false,
                                        funcParams: Seq[FuncArgs] = Nil,
                                        offsetMs: Option[Long] = None,
+                                       atMs: Option[Long] = None,
                                        rawSource: Boolean = true,
                                        leftInclusiveWindow: Boolean = false
 ) extends RangeVectorTransformer {
-  val windowToUse =
-    window.map(windowLengthMs => if (leftInclusiveWindow) (windowLengthMs + 1) else windowLengthMs)
   require(startMs <= endMs, s"start $startMs should be <= end $endMs")
   require(startMs == endMs || stepMs > 0, s"step $stepMs should be > 0 for range query")
+
+  val windowToUse =
+    window.map(windowLengthMs => if (leftInclusiveWindow) (windowLengthMs + 1) else windowLengthMs)
   val adjustedStep = if (stepMs > 0) stepMs else stepMs + 1 // needed for iterators to terminate when start == end
-
-  val startWithOffset = startMs - offsetMs.getOrElse(0L)
-  val endWithOffset = endMs - offsetMs.getOrElse(0L)
-  val outputRvRange = Some(RvRange(startMs, stepMs, endMs))
-
+  val endWithOffset = atMs.getOrElse(endMs) - offsetMs.getOrElse(0L)
+  val startWithOffset = endWithOffset - {if (atMs.isEmpty) endMs - startMs else 0L}
+  val outputRvRange = Some(RvRange(startWithOffset, stepMs, endWithOffset))
   val isLastFn = functionId.isEmpty || functionId.contains(InternalRangeFunction.LastSampleHistMax) ||
     functionId.contains(InternalRangeFunction.Timestamp)
 
@@ -54,7 +54,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
   else require(windowToUse.isEmpty, "Should not specify window length when not applying windowing function")
 
   protected[exec] def args: String = s"start=$startMs, step=$stepMs, end=$endMs," +
-    s" window=$window, functionId=$functionId, rawSource=$rawSource, offsetMs=$offsetMs"
+    s" window=$window, functionId=$functionId, rawSource=$rawSource, offsetMs=$offsetMs, atMs=$atMs"
 
  //scalastyle:off method.length
   def apply(source: Observable[RangeVector],
@@ -138,9 +138,10 @@ final case class PeriodicSamplesMapper(startMs: Long,
         val row = new TransientRow()
         override def key: RangeVectorKey = rv.key
         override def rows(): RangeVectorCursor = rv.rows.mapRow { r =>
-          row.setLong(0, r.getLong(0) + o)
-          row.setDouble(1, r.getDouble(1))
-          row
+          new MimicRowReaderAbs(r) {
+            override def getLong(columnNo: Int): Long =
+              if (columnNo == 0) r.getLong(0) + o else super.getLong(columnNo)
+          }
         }
         override def outputRange: Option[RvRange] = outputRvRange
       }

@@ -10,7 +10,8 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import filodb.core.query.NoCloseCursor.NoCloseCursor
+import filodb.memory.format.{MimicRowReaderAbs, RowReader, ZeroCopyUTF8String}
 import filodb.memory.format.vectors.{HistogramBuckets, HistogramWithBuckets}
 import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, SortFunctionId, _}
 import filodb.query.InstantFunctionId.HistogramQuantile
@@ -52,6 +53,52 @@ trait RangeVectorTransformer extends java.io.Serializable {
     */
   protected[exec] def args: String
   def canHandleEmptySchemas: Boolean = false
+}
+
+/**
+ * For every step between startMs and endMs, repeats the final row of
+ *   the RangeVector at the step's timestamp.
+ *
+ * Example:
+ *   RV = [ Row(time=1, val=1.1),
+ *          Row(time=2, val=2.2) ]
+ *   startMs = 10
+ *   stepMs = 1
+ *   endMs = 13
+ *
+ *   --> [ Row(time=10, val=2.2),
+ *         Row(time=11, val=2.2),
+ *         Row(time=12, val=2.2) ]
+ */
+final case class RepeatTransformer(startMs: Long, stepMs: Long, endMs: Long) extends RangeVectorTransformer {
+  override def funcParams: Seq[FuncArgs] = Nil
+  override protected[exec] def args: String = s"startMs=$startMs, stepMs=$stepMs, endMs=$endMs"
+  override def apply(source: Observable[RangeVector],
+                     querySession: QuerySession,
+                     limit: Int, sourceSchema: ResultSchema,
+                     paramsResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
+    import scala.language.reflectiveCalls
+    require(sourceSchema.isTimeSeries, "RepeatTransformer only operates on timeseries data")
+    val nrows = (endMs - startMs) / math.max(1, stepMs)
+    source.map { rv =>
+      val lastRow = rv.rows().toList.last
+      new RangeVector {
+        val row = new MimicRowReaderAbs(lastRow) {
+          var timetamp: Long = -1
+          override def getLong(columnNo: Int): Long = if (columnNo == 0) timetamp else super.getLong(columnNo)
+        }
+        override def outputRange: Option[RvRange] = Some(RvRange(startMs, stepMs, endMs))
+        override def key: RangeVectorKey = rv.key
+        override def rows(): RangeVectorCursor = {
+          new NoCloseCursor(
+            (0L to nrows).iterator.map { i =>
+              row.timetamp = startMs + (i * stepMs)
+              row
+            })
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -390,7 +437,6 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
       new RangeVector {
         override def key: RangeVectorKey = if (rowList.isEmpty) CustomRangeVectorKey.empty else keysFromFilter
         override def rows(): RangeVectorCursor = {
-          import NoCloseCursor._
           rowList.iterator
         }
         override def outputRange: Option[RvRange] = Some(RvRange(rangeParams.startSecs * 1000,

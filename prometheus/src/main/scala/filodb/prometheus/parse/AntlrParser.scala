@@ -92,13 +92,14 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
       throw new IllegalArgumentException("Subquery can only be applied to instant queries")
     }
     val sqcl = build[SubqueryClause](ctx.subquery())
-    val offset: Option[Duration] = if (ctx.offset == null) {
-      None
+    val vecShift = if (ctx.vectorShift == null) {
+      VectorShift(None, None)
     } else {
-      Some(build[Duration](ctx.offset))
+      build[VectorShift](ctx.vectorShift())
     }
     val limit: Option[Scalar] = None
-    SubqueryExpression(lhs.asInstanceOf[PeriodicSeries], sqcl, offset, limit.map(_.toScalar.toInt))
+    SubqueryExpression(lhs.asInstanceOf[PeriodicSeries], sqcl, vecShift.offset,
+                       vecShift.at, limit.map(_.toScalar.toInt))
   }
 
   override def visitSubquery(ctx: PromQLParser.SubqueryContext): SubqueryClause = {
@@ -192,19 +193,19 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
       build[Seq[LabelMatch]](matcherList)
     }
 
-    val offset: Option[Duration] = if (ctx.offset == null) {
-      None
+    val vecShift = if (ctx.vectorShift == null) {
+      VectorShift(None, None)
     } else {
-      Some(build[Duration](ctx.offset))
+      build[VectorShift](ctx.vectorShift())
     }
 
     val limit: Option[Scalar] = None
 
     if (ctx.window == null) {
-      InstantExpression(metricName, labelSelection, offset)
+      InstantExpression(metricName, labelSelection, vecShift.offset, vecShift.at)
     } else {
       val window = build[Duration](ctx.window)
-      RangeExpression(metricName, labelSelection, window, offset)
+      RangeExpression(metricName, labelSelection, window, vecShift.offset, vecShift.at)
     }
   }
 
@@ -212,8 +213,32 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
     parseDuration(ctx.DURATION)
   }
 
+  override def visitVectorShift(ctx: PromQLParser.VectorShiftContext): VectorShift = {
+    val offset: Option[Duration] = if (ctx.offset == null) {
+      None
+    } else {
+      Some(build[Duration](ctx.offset))
+    }
+    val at: Option[AtTimestamp] = if (ctx.at == null) {
+      None
+    } else {
+      Some(build[AtTimestamp](ctx.at))
+    }
+    VectorShift(offset, at)
+  }
+
   override def visitOffset(ctx: PromQLParser.OffsetContext): Duration = {
     parseDuration(ctx.DURATION)
+  }
+
+  override def visitAt(ctx: PromQLParser.AtContext): AtTimestamp = {
+    if (ctx.NUMBER() != null) {
+      AtUnix(ctx.NUMBER().getText.toLong)
+    } else if (ctx.START() != null) {
+      AtStart()
+    } else {  // ctx.END() != null
+      AtEnd()
+    }
   }
 
   override def visitLimitOperation(ctx: PromQLParser.LimitOperationContext) = {

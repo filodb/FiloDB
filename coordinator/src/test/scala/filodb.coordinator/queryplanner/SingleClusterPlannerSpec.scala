@@ -824,4 +824,296 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       leaf.numGroupByFields shouldEqual numGroupByFields
     }
   }
+
+  it("""should correctly materialize instant queries with "at" modifier""") {
+    val tests = Seq(
+      ("""foo{job="app"} @ 0""",
+        """T~StitchRvsMapper()
+          |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1135904782],raw)
+          |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=Some(0))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(-300000,0), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1135904782],raw)
+          |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=Some(0))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(-300000,0), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1135904782],raw)""".stripMargin),
+      ("""foo{job="app"} @ 1524855988""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2028684086],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=Some(1524855988000))
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1524855688000,1524855988000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2028684086],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=Some(1524855988000))
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1524855688000,1524855988000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2028684086],raw)""".stripMargin),
+      ("""foo{job="app"} @ 12345 offset 1m""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#104684896],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#104684896],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#104684896],raw)""".stripMargin),
+      ("""foo{job="app"} offset 1m @ 12345""",  // same as above
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1028563313],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1028563313],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1028563313],raw)""".stripMargin),
+      ("""sum(foo{job="app"} offset 1m @ 12345)""",
+        """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1000,1000,1000))
+          |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1100932725],raw)
+          |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+          |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1100932725],raw)
+          |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+          |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1100932725],raw)""".stripMargin),
+      ("""sgn(foo{job="app"} offset 1m @ 12345)""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#224112687],raw)
+          |-T~InstantVectorFunctionMapper(function=Sgn)
+          |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#224112687],raw)
+          |-T~InstantVectorFunctionMapper(function=Sgn)
+          |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#224112687],raw)""".stripMargin),
+      // TODO: these are supported by Prometheus
+      // "foo @ +12345.67",
+      //   "aaa",
+      // "foo @ -12345.67",
+      //   "bbb",
+      // "foo @ 0xaBcD123",
+      //   "ccc",
+      // "foo @ 123.4e-5",
+      //   "ddd",
+      ("""foo{job="app"}[1m] @ 1524855988""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-250254031],raw)
+          |-E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1524855928000,1524855988000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-250254031],raw)
+          |-E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1524855928000,1524855988000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-250254031],raw)""".stripMargin),
+      ("""foo{job="app"}[1m] @ 1524855988 offset 1s""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#19556715],raw)
+          |-E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1524855927000,1524855987000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#19556715],raw)
+          |-E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1524855927000,1524855987000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#19556715],raw)""".stripMargin),
+      ("""foo{job="app"}[1m] offset 1s @ 1524855988""",  // same as above
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-381295210],raw)
+          |-E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1524855927000,1524855987000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-381295210],raw)
+          |-E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1524855927000,1524855987000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-381295210],raw)""".stripMargin),
+      ("""rate(foo{job="app"}[1m] offset 1m @ 12345)""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#85430719],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(12225000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#85430719],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(12225000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#85430719],raw)""".stripMargin),
+      ("""foo{job="app"}[5m:10s] @ 1524855988""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1260420458],raw)
+          |-T~PeriodicSamplesMapper(start=1524855690000, step=10000, end=1524855980000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1524855390000,1524855980000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1260420458],raw)
+          |-T~PeriodicSamplesMapper(start=1524855690000, step=10000, end=1524855980000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1524855390000,1524855980000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1260420458],raw)""".stripMargin),
+      ("""foo{job="app"}[5m:10s] offset 1s @ 12345""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1192257271],raw)
+          |-T~PeriodicSamplesMapper(start=12050000, step=10000, end=12340000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(11750000,12340000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1192257271],raw)
+          |-T~PeriodicSamplesMapper(start=12050000, step=10000, end=12340000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(11750000,12340000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1192257271],raw)""".stripMargin),
+      ("""foo{job="app"}[5m:10s] @ 12345 offset 1s""",  // same as above
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1132655224],raw)
+          |-T~PeriodicSamplesMapper(start=12050000, step=10000, end=12340000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(11750000,12340000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1132655224],raw)
+          |-T~PeriodicSamplesMapper(start=12050000, step=10000, end=12340000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(11750000,12340000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1132655224],raw)""".stripMargin),
+      ("""rate(foo{job="app"}[5m:10s] @ 12345 offset 1m)""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-44458325],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=0, end=1000000, window=Some(300000), functionId=Some(Rate), rawSource=false, offsetMs=Some(60000), atMs=Some(12345000))
+          |--T~PeriodicSamplesMapper(start=11990000, step=10000, end=12280000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(11690000,12280000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-44458325],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=0, end=1000000, window=Some(300000), functionId=Some(Rate), rawSource=false, offsetMs=Some(60000), atMs=Some(12345000))
+          |--T~PeriodicSamplesMapper(start=11990000, step=10000, end=12280000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(11690000,12280000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-44458325],raw)""".stripMargin),
+      ("""foo{job="app"} @ start()""",  // same as "foo @ 1524855988"
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1922430062],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=Some(1000000))
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1922430062],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=Some(1000000))
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1922430062],raw)""".stripMargin),
+      ("""foo{job="app"} @ end()""",  // same as above (no effect on instant queries)
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-174731771],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=Some(1000000))
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-174731771],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=Some(1000000))
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-174731771],raw)""".stripMargin),
+      ("""foo{job="app"} @ start() offset 1m""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-889821847],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(1000000))
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(640000,940000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-889821847],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(1000000))
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(640000,940000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-889821847],raw)""".stripMargin),
+      ("""foo{job="app"} offset 1m @ end()""",  // same as above
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#203376594],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(1000000))
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(640000,940000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#203376594],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(1000000))
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(640000,940000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#203376594],raw)""".stripMargin),
+      ("""foo{job="app"}[1m] offset 1s @ end()""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1107224867],raw)
+          |-E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(939000,999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1107224867],raw)
+          |-E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(939000,999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1107224867],raw)""".stripMargin),
+      ("""foo{job="app"}[1m] offset 1s @ start()""",  // same as above (no effect on instant queries)
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#56509108],raw)
+          |-E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(939000,999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#56509108],raw)
+          |-E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(939000,999000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#56509108],raw)""".stripMargin),
+      ("""foo{job="app"}[5m:10s] @ start() offset 1m""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-968462978],raw)
+          |-T~PeriodicSamplesMapper(start=640000, step=10000, end=940000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(340000,940000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-968462978],raw)
+          |-T~PeriodicSamplesMapper(start=640000, step=10000, end=940000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(340000,940000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-968462978],raw)""".stripMargin),
+      ("""foo{job="app"}[5m:10s] offset 1m @ end()""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1992222277],raw)
+          |-T~PeriodicSamplesMapper(start=640000, step=10000, end=940000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(340000,940000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1992222277],raw)
+          |-T~PeriodicSamplesMapper(start=640000, step=10000, end=940000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(340000,940000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1992222277],raw)""".stripMargin),
+      ("""rate(foo{job="app"}[5m:10s] offset 1m @ end())""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1595023978],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=0, end=1000000, window=Some(300000), functionId=Some(Rate), rawSource=false, offsetMs=Some(60000), atMs=Some(1000000))
+          |--T~PeriodicSamplesMapper(start=640000, step=10000, end=940000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(340000,940000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1595023978],raw)
+          |-T~PeriodicSamplesMapper(start=1000000, step=0, end=1000000, window=Some(300000), functionId=Some(Rate), rawSource=false, offsetMs=Some(60000), atMs=Some(1000000))
+          |--T~PeriodicSamplesMapper(start=640000, step=10000, end=940000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(340000,940000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1595023978],raw)""".stripMargin),
+    )
+
+    for ((query, expected) <- tests) {
+      val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+      validatePlan(execPlan, expected)
+    }
+  }
+
+  it("""should correctly materialize range queries with "at" modifier""") {
+    val tests = Seq(
+      ("""foo{job="app"} @ 0""",
+        """T~StitchRvsMapper()
+          |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1026890544],raw)
+          |--T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |---T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=Some(0))
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(-300000,0), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1026890544],raw)
+          |--T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |---T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=Some(0))
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(-300000,0), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1026890544],raw)""".stripMargin),
+      ("""foo{job="app"} @ 1524855988""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1318984965],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=Some(1524855988000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1524855688000,1524855988000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1318984965],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=Some(1524855988000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1524855688000,1524855988000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1318984965],raw)""".stripMargin),
+      ("""foo{job="app"} @ 12345 offset 1m""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#963964011],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#963964011],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#963964011],raw)""".stripMargin),
+      ("""foo{job="app"} offset 1m @ 12345""",  // same as above
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#963964011],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#963964011],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#963964011],raw)""".stripMargin),
+      ("""sum(foo{job="app"} offset 1m @ 12345)""",
+        """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1234,55,5678))
+          |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#963964011],raw)
+          |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+          |---T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |----T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#963964011],raw)
+          |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+          |---T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |----T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#963964011],raw)""".stripMargin),
+      ("""sgn(foo{job="app"} offset 1m @ 12345)""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-191502193],raw)
+          |-T~InstantVectorFunctionMapper(function=Sgn)
+          |--T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |---T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-191502193],raw)
+          |-T~InstantVectorFunctionMapper(function=Sgn)
+          |--T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |---T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(11985000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-191502193],raw)""".stripMargin),
+      // TODO: these are supported by Prometheus
+      // "foo @ +12345.67",
+      //   "aaa",
+      // "foo @ -12345.67",
+      //   "bbb",
+      // "foo @ 0xaBcD123",
+      //   "ccc",
+      // "foo @ 123.4e-5",
+      //   "ddd",
+      ("""rate(foo{job="app"}[1m] offset 1m @ 12345)""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1480816672],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(12225000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1480816672],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=Some(60000), functionId=Some(Rate), rawSource=true, offsetMs=Some(60000), atMs=Some(12345000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(12225000,12285000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1480816672],raw)""".stripMargin),
+      ("""rate(foo{job="app"}[5m:10s] @ 12345 offset 1m)""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=Some(300000), functionId=Some(Rate), rawSource=false, offsetMs=Some(60000), atMs=Some(12345000))
+          |---T~PeriodicSamplesMapper(start=11990000, step=10000, end=12280000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(11690000,12280000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=Some(300000), functionId=Some(Rate), rawSource=false, offsetMs=Some(60000), atMs=Some(12345000))
+          |---T~PeriodicSamplesMapper(start=11990000, step=10000, end=12280000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(11690000,12280000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)""".stripMargin),
+      ("""foo{job="app"} @ start()""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=Some(1234000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(934000,1234000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=Some(1234000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(934000,1234000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)""".stripMargin),
+      ("""foo{job="app"} @ end()""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=Some(5678000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(5378000,5678000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=Some(5678000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(5378000,5678000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)""".stripMargin),
+      ("""foo{job="app"} @ start() offset 1m""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(1234000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(874000,1174000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(1234000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(874000,1174000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)""".stripMargin),
+      ("""foo{job="app"} offset 1m @ end()""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(5678000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(5318000,5618000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=None, functionId=None, rawSource=true, offsetMs=Some(60000), atMs=Some(5678000))
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(5318000,5618000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)""".stripMargin),
+      ("""rate(foo{job="app"}[5m:10s] offset 1m @ end())""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=Some(300000), functionId=Some(Rate), rawSource=false, offsetMs=Some(60000), atMs=Some(5678000))
+          |---T~PeriodicSamplesMapper(start=5320000, step=10000, end=5610000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(5020000,5610000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)
+          |-T~RepeatTransformer(startMs=1234000, stepMs=55000, endMs=5678000)
+          |--T~PeriodicSamplesMapper(start=1234000, step=55000, end=5678000, window=Some(300000), functionId=Some(Rate), rawSource=false, offsetMs=Some(60000), atMs=Some(5678000))
+          |---T~PeriodicSamplesMapper(start=5320000, step=10000, end=5610000, window=None, functionId=None, rawSource=true, offsetMs=None, atMs=None)
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(5020000,5610000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#741228966],raw)""".stripMargin),
+    )
+
+    for ((query, expected) <- tests) {
+      val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(1234, 55, 5678))
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+      validatePlan(execPlan, expected)
+    }
+  }
 }

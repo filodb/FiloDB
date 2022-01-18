@@ -305,8 +305,9 @@ class SingleClusterPlanner(val dataset: Dataset,
     series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(logicalPlanWithoutBucket.startMs,
       logicalPlanWithoutBucket.stepMs, logicalPlanWithoutBucket.endMs, window, Some(execRangeFn), qContext,
       logicalPlanWithoutBucket.stepMultipleNotationUsed,
-      paramsExec, logicalPlanWithoutBucket.offsetMs, rawSource)))
-    if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
+      paramsExec, logicalPlanWithoutBucket.offsetMs, logicalPlanWithoutBucket.atMs, rawSource)))
+
+    val result = if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
       val aggregate = Aggregate(AggregationOperator.Sum, logicalPlanWithoutBucket, Nil, Seq("job"))
       // Add sum to aggregate all child responses
       // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
@@ -316,6 +317,13 @@ class SingleClusterPlanner(val dataset: Dataset,
         RangeParams(logicalPlanWithoutBucket.startMs / 1000, logicalPlanWithoutBucket.stepMs / 1000,
           logicalPlanWithoutBucket.endMs / 1000), qContext)
     } else series
+
+    // repeat the same timestep if '@' is specified
+    if (lp.atMs.nonEmpty && (lp.startMs != lp.endMs)) {
+      result.plans.foreach(_.addRangeVectorTransformer(RepeatTransformer(lp.startMs, lp.stepMs, lp.endMs)))
+    }
+
+    result
   }
 
   private def removeBucket(lp: Either[PeriodicSeries, PeriodicSeriesWithWindowing]) = {
@@ -344,7 +352,6 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
   private def materializePeriodicSeries(qContext: QueryContext,
                                         lp: PeriodicSeries): PlanResult = {
-
    // Convert to FiloDB histogram by removing le label and bucket prefix
    // _sum and _count are removed in MultiSchemaPartitionsExec since we need to check whether there is a metric name
    // with _sum/_count as suffix
@@ -356,8 +363,9 @@ class SingleClusterPlanner(val dataset: Dataset,
     } else (None, None, lp)
 
     val rawSeries = walkLogicalPlanTree(lpWithoutBucket.rawSeries, qContext)
+
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
-      None, None, qContext, false, Nil, lp.offsetMs)))
+      None, None, qContext, false, Nil, lp.offsetMs, lp.atMs)))
 
     if (nameFilter.isDefined && nameFilter.head.endsWith("_bucket") && leFilter.isDefined) {
       val paramsExec = StaticFuncArgs(leFilter.head.toDouble, RangeParams(lp.startMs/1000, lp.stepMs/1000,
@@ -365,7 +373,13 @@ class SingleClusterPlanner(val dataset: Dataset,
       rawSeries.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(HistogramBucket,
         Seq(paramsExec))))
     }
-   rawSeries
+
+    // repeat the same timestep if '@' is specified
+    if (lp.atMs.nonEmpty && (lp.startMs != lp.endMs)) {
+      rawSeries.plans.foreach(_.addRangeVectorTransformer(RepeatTransformer(lp.startMs, lp.stepMs, lp.endMs)))
+    }
+
+    rawSeries
   }
 
   /**
@@ -420,19 +434,27 @@ class SingleClusterPlanner(val dataset: Dataset,
     val colName = lp.columns.headOption
     val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))
     val spreadChanges = spreadProvToUse.spreadFunc(renamedFilters)
-    val rangeSelectorWithOffset = lp.rangeSelector match {
-      case IntervalSelector(fromMs, toMs) => IntervalSelector(fromMs - offsetMillis - lp.lookbackMs.getOrElse(
-                                             queryConfig.staleSampleAfterMs), toMs - offsetMillis)
-      case _                              => lp.rangeSelector
+    val rangeSelectorWithModifiers = lp.rangeSelector match {
+      case IntervalSelector(fromMs, toMs) => {
+        // find the "real" timestamps where at/offset are accounted for
+        val toRealMs = lp.atMs.getOrElse(toMs) - offsetMillis
+        val fromRealMs = {
+          val windowStartMs = toRealMs - lp.lookbackMs.getOrElse(queryConfig.staleSampleAfterMs)
+          val rangeMs = if (lp.atMs.isEmpty) toMs - fromMs else 0
+          windowStartMs - rangeMs
+        }
+        IntervalSelector(fromRealMs, toRealMs)
+      }
+      case _                          => lp.rangeSelector
     }
-    val needsStitch = rangeSelectorWithOffset match {
+    val needsStitch = rangeSelectorWithModifiers match {
       case IntervalSelector(from, to) => spreadChanges.exists(c => c.time >= from && c.time <= to)
       case _                          => false
     }
     val execPlans = shardsFromFilters(renamedFilters, qContext).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       MultiSchemaPartitionsExec(qContext, dispatcher, dsRef, shard, renamedFilters,
-        toChunkScanMethod(rangeSelectorWithOffset), dsOptions.metricColumn, schemaOpt, colName)
+        toChunkScanMethod(rangeSelectorWithModifiers), dsOptions.metricColumn, schemaOpt, colName)
     }
     PlanResult(execPlans, needsStitch)
   }

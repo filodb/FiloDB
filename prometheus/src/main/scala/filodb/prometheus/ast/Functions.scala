@@ -213,6 +213,7 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
       rangeExpression.window.timeUnit == IntervalMultiple,
       otherParams,
       rangeExpression.offset.map(_.millis(timeParams.step * 1000)),
+      rangeExpression.at.map(_.getUnix(timeParams) * 1000),
       rangeExpression.columnFilters
     )
   }
@@ -231,14 +232,17 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
     }
     val stepForInnerMs = subqueryStepToUseMs
     val offsetMs = sqe.offset.map { _.millis(1L) }
+    val atMs = sqe.at.map(_.getUnix(timeParams) * 1000)
     val offsetSecForInner = offsetMs match {
       case None => 0
       case Some(ofMs) => ofMs / 1000
     }
-    val preciseStartForInnerS = timeParams.start - (sqe.sqcl.window.millis(1L) / 1000) - offsetSecForInner
+
+    val preciseStartForInnerS = atMs.map(_ / 1000).getOrElse(timeParams.start) -
+      (sqe.sqcl.window.millis(1L) / 1000) - offsetSecForInner
     val startForInnerS = SubqueryUtils.getStartForFastSubquery(preciseStartForInnerS, subqueryStepToUseMs/1000)
 
-    val preciseEndForInnerS = timeParams.end - offsetSecForInner
+    val preciseEndForInnerS = atMs.map(_ / 1000).getOrElse(timeParams.end) - offsetSecForInner
     val endForInnerS =
       SubqueryUtils.getEndForFastSubquery(preciseEndForInnerS, subqueryStepToUseMs/1000)
 
@@ -260,8 +264,8 @@ case class Function(name: String, allParams: Seq[Expression]) extends Expression
       otherParams,
       sqe.sqcl.window.millis(1L),
       subqueryStepToUseMs,
-      offsetMs
-    )
+      offsetMs,
+      atMs)
   }
   // scalastyle:on method.length
 }
