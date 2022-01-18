@@ -28,6 +28,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   import net.ceedubs.ficus.Ficus._
   import LogicalPlanUtils._
   import QueryFailureRoutingStrategy._
+  import LogicalPlan._
 
   val remoteHttpEndpoint: String = queryConfig.routingConfig.getString("remote.http.endpoint")
 
@@ -47,6 +48,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
         case lp: SeriesKeysByFilters => PartKeysDistConcatExec(queryContext, inProcessPlanDispatcher,
                                         execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
         case _                       => StitchRvsExec(queryContext, inProcessPlanDispatcher,
+                                         rvRangeFromPlan(rootLogicalPlan),
                                          execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
       // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
       // Sort to move RemoteExec in end as it does not have schema

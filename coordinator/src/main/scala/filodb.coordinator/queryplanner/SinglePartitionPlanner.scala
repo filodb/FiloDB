@@ -3,6 +3,7 @@ package filodb.coordinator.queryplanner
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.query.{BinaryJoin, LabelNames, LabelValues, LogicalPlan,
                      SeriesKeysByFilters, SetOperator, TsCardinalities}
+import filodb.query.LogicalPlan._
 import filodb.query.exec._
 
 /**
@@ -23,7 +24,7 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
                              queryConfig: QueryConfig)
   extends QueryPlanner {
 
-  val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
+  private val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
     logicalPlan match {
@@ -43,7 +44,7 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
     */
   private def getPlanner(logicalPlan: LogicalPlan): QueryPlanner = {
     val planner = LogicalPlanUtils.getMetricName(logicalPlan, datasetMetricColumn)
-      .map(x => planners.get(plannerSelector(x)).get)
+      .map(x => planners(plannerSelector(x)))
     if(planner.isEmpty)  planners.values.head else planner.head
   }
 
@@ -93,12 +94,14 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
       if (logicalPlan.operator.isInstanceOf[SetOperator])
         SetOperatorExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
           LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
-          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
+          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn,
+          rvRangeFromPlan(logicalPlan))
       else
         BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
           logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
           LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
-          LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn)
+          LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn,
+          rvRangeFromPlan(logicalPlan))
     }
   }
 

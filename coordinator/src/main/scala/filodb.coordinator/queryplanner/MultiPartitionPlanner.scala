@@ -5,7 +5,8 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
-import filodb.query.{MetadataQueryPlan, _}
+import filodb.query._
+import filodb.query.LogicalPlan._
 import filodb.query.exec._
 
 case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange)
@@ -318,8 +319,12 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         }
       }
       if (execPlans.size == 1) execPlans.head
-      else StitchRvsExec(qContext, inProcessPlanDispatcher,
-        execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]))
+      else {
+        // TODO: Do we pass in QueryContext in LogicalPlan's helper rvRangeForPlan?
+
+        StitchRvsExec(qContext, inProcessPlanDispatcher, rvRangeFromPlan(logicalPlan),
+          execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]))
+      }
       // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
       // Sort to move RemoteExec in end as it does not have schema
     }
@@ -360,7 +365,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       } else {
         StitchRvsExec(
           qContext,
-          inProcessPlanDispatcher,
+          inProcessPlanDispatcher, rvRangeFromPlan(logicalPlan),
           execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
         )
       }
@@ -381,12 +386,14 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
       SetOperatorExec(qContext, InProcessPlanDispatcher(queryConfig), Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
         LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
-        LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
+        LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn,
+        rvRangeFromPlan(logicalPlan))
     else
       BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
         logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
-        LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn)
+        LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn,
+        rvRangeFromPlan(logicalPlan))
     PlanResult(execPlan :: Nil)
   }
 
