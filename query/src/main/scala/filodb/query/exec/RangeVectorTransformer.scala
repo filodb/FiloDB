@@ -11,7 +11,7 @@ import filodb.core.metadata.PartitionSchema
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
 import filodb.core.query.NoCloseCursor.NoCloseCursor
-import filodb.memory.format.{CopycatRowReader, RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.{MimicRowReaderAbs, RowReader, ZeroCopyUTF8String}
 import filodb.memory.format.vectors.{HistogramBuckets, HistogramWithBuckets}
 import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, SortFunctionId, _}
 import filodb.query.InstantFunctionId.HistogramQuantile
@@ -83,7 +83,7 @@ final case class RepeatTransformer(startMs: Long, stepMs: Long, endMs: Long) ext
     source.map { rv =>
       val lastRow = rv.rows().toList.last
       new RangeVector {
-        val row = new CopycatRowReader(lastRow) {
+        val row = new MimicRowReaderAbs(lastRow) {
           var timetamp: Long = -1
           override def getLong(columnNo: Int): Long = if (columnNo == 0) timetamp else super.getLong(columnNo)
         }

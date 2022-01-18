@@ -106,10 +106,11 @@ trait SchemaRowReader extends RowReader {
 }
 
 /**
- * Imitates another row except for overridden methods.
- * @param refRow the reference row to imitate.
+ * Imitates another row except where methods are overridden.
+ *
+ * @param refRow the reference row to mimic.
  */
-case class CopycatRowReader(refRow: RowReader) extends RowReader {
+abstract case class MimicRowReaderAbs(refRow: RowReader) extends RowReader {
   override def notNull(columnNo: Int): Boolean = refRow.notNull(columnNo)
   override def getBoolean(columnNo: Int): Boolean = refRow.getBoolean(columnNo)
   override def getInt(columnNo: Int): Int = refRow.getInt(columnNo)

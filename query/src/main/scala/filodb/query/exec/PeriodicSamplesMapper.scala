@@ -138,7 +138,7 @@ final case class PeriodicSamplesMapper(startMs: Long,
         val row = new TransientRow()
         override def key: RangeVectorKey = rv.key
         override def rows(): RangeVectorCursor = rv.rows.mapRow { r =>
-          new CopycatRowReader(r) {
+          new MimicRowReaderAbs(r) {
             override def getLong(columnNo: Int): Long =
               if (columnNo == 0) r.getLong(0) + o else super.getLong(columnNo)
           }
