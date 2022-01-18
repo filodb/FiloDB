@@ -12,15 +12,25 @@ import filodb.query.Query.qLogger
 
 object StitchRvsExec {
 
-  private class RVCursorImpl(vectors: Iterable[RangeVectorCursor], outputRange: RvRange)
+  private class RVCursorImpl(vectors: Iterable[RangeVectorCursor], outputRange: Option[RvRange])
     extends RangeVectorCursor {
     private val bVectors = vectors.map(_.buffered)
     val mins = new mutable.ArrayBuffer[BufferedIterator[RowReader]](2)
     val nanResult = new TransientRow(0, Double.NaN)
-    val tsIter: BufferedIterator[Long] =
-        Iterator.iterate(outputRange.startMs){_ + outputRange.stepMs}.takeWhile( _ <= outputRange.endMs).buffered
-
-    override def hasNext: Boolean = tsIter.hasNext
+    val tsIter: BufferedIterator[Long] = outputRange match {
+      case Some(RvRange(startMs, stepMs, endMs)) =>
+        Iterator.iterate(startMs){_ + stepMs}.takeWhile( _ <= endMs).buffered
+      case None                                  => Iterator.iterate(Long.MaxValue)(_ =>Long.MaxValue).buffered
+    }
+    override def hasNext: Boolean = outputRange match {
+                // In case outputRange is provided, the merging will honor the provided range, that is, the
+                // result of metrging will have a range provided by outputRange. In case outputRange is not provided
+                // i.e. None, then hasNext should be determined by the vectors it merges. The none handling is just done
+                // for matching both possibilities and in reality for a given periodic series with a range, the
+                // outputRange should never be none
+                case Some(_)      => tsIter.hasNext
+                case None         => bVectors.exists(_.hasNext)
+    }
 
     override def next(): RowReader = {
       // This is an n-way merge without using a heap.
@@ -72,8 +82,7 @@ object StitchRvsExec {
   }
 
   def merge(vectors: Iterable[RangeVectorCursor], outputRange: Option[RvRange]): RangeVectorCursor = {
-    require(outputRange.isDefined, "outputRange not defined, have you used a non periodic plan with merge?")
-    new RVCursorImpl(vectors, outputRange.get)
+    new RVCursorImpl(vectors, outputRange)
   }
 }
 
@@ -87,12 +96,11 @@ final case class StitchRvsExec(queryContext: QueryContext,
                                children: Seq[ExecPlan]) extends NonLeafExecPlan {
   require(children.nonEmpty)
 
-  require(outputRvRange.isDefined, "outputRvRange not defined, have you used a non periodic plan with stitch?")
-  // get will work as we asserted its defined above
-  require(outputRvRange.get.startMs <= outputRvRange.get.endMs && outputRvRange.get.stepMs > 0,
-          "RvRange start <= end and step > 0")
-
-
+  outputRvRange match {
+    case Some(RvRange(startMs, stepMs, endMs)) =>
+                            require(startMs <= endMs && stepMs > 0, "RvRange start <= end and step > 0")
+    case None                                  =>
+  }
   protected def args: String = ""
 
   protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],

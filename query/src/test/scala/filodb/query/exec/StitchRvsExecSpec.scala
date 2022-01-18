@@ -189,7 +189,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val rs = ResultSchema(List(ColumnInfo("timestamp",
       TimestampColumn), ColumnInfo("value", DoubleColumn)), 1)
 
-    val res0 = QueryResult("id", rs, Seq(MetricsTestData.makeRv(CustomRangeVectorKey.empty, rvsData(0), RvRange(10, 10, 50))))
+    val res0 = QueryResult("id", rs, Seq(MetricsTestData.makeRv(CustomRangeVectorKey.empty, rvsData.head, RvRange(10, 10, 50))))
     val res1 = QueryResult("id", rs, Seq(MetricsTestData.makeRv(CustomRangeVectorKey.empty, rvsData(1), RvRange(30, 10, 100))))
 
     val inputRes = Seq(res0, res1).zipWithIndex
@@ -205,14 +205,51 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
   it ("should fail when None is passed as the output range") {
     // null needed below since there is a require in code that prevents empty children
-    try {
-      StitchRvsExec(QueryContext(), InProcessPlanDispatcher(EmptyQueryConfig), None,
-        Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
-    } catch {
-      case i: IllegalArgumentException =>
-                                          i.getMessage shouldEqual "requirement failed: outputRvRange not defined, have you used a non periodic plan with stitch?"
-      case _ : Throwable               => fail("Unexpected exception")
-    }
+
+      val rvsData = Seq (
+          Seq(  (10L, 3d),
+              (20L, 3d),
+              (30L, 3d),
+              (40L, 3d),
+              (50L, 3d)
+              ),
+          Seq(
+              (60L, 3d),
+              (70L, 3d),
+              (80L, 3d),
+              (90L, 3d),
+              (100L, 3d)
+              )
+          )
+      val expected =
+          Seq(
+              (10L, 3d),
+              (20L, 3d),
+              (30L, 3d),
+              (40L, 3d),
+              (50L, 3d),
+              (60L, 3d),
+              (70L, 3d),
+              (80L, 3d),
+              (90L, 3d),
+              (100L, 3d)
+              )
+
+    // rvRange is None, this is the case when stitch is called on raw series
+    val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(EmptyQueryConfig), None,
+            Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
+    val rs = ResultSchema(List(ColumnInfo("timestamp",
+        TimestampColumn), ColumnInfo("value", DoubleColumn)), 1)
+
+    val res0 = QueryResult("id", rs, Seq(MetricsTestData.makeRv(CustomRangeVectorKey.empty, rvsData.head, RvRange(10, 10, 50))))
+    val res1 = QueryResult("id", rs, Seq(MetricsTestData.makeRv(CustomRangeVectorKey.empty, rvsData(1), RvRange(30, 10, 100))))
+
+    val inputRes = Seq(res0, res1).zipWithIndex
+    val output = exec.compose(Observable.fromIterable(inputRes), Task.now(null), QuerySession.makeForTestingOnly())
+        .toListL.runAsync.futureValue
+        output.size shouldEqual 1
+        output.head.outputRange shouldEqual None
+        compareIter(output.head.rows().map(r => (r.getLong(0), r.getDouble(1))) , expected.toIterator)
   }
 
   it ("should reduce result schemas with different fixedVecLengths without error") {
@@ -388,27 +425,22 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
   }
 
   it("should fail if step is non positive number") {
-    try {
+    val caught = intercept[IllegalArgumentException] {
       StitchRvsExec(QueryContext(), InProcessPlanDispatcher(EmptyQueryConfig),
         Some(RvRange(startMs = 0, endMs = 100, stepMs = 0)),
         Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
-    } catch {
-      case i: IllegalArgumentException =>
-        i.getMessage shouldEqual "requirement failed: RvRange start <= end and step > 0"
-      case _ : Throwable               => fail("Unexpected exception")
     }
+    caught.getMessage shouldEqual "requirement failed: RvRange start <= end and step > 0"
+
   }
 
   it("should fail if start > end is non positive number") {
-    try {
+    val caught = intercept[IllegalArgumentException] {
       StitchRvsExec(QueryContext(), InProcessPlanDispatcher(EmptyQueryConfig),
         Some(RvRange(startMs = 110, endMs = 100, stepMs = 1)),
         Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
-    } catch {
-      case i: IllegalArgumentException =>
-        i.getMessage shouldEqual "requirement failed: RvRange start <= end and step > 0"
-      case _ : Throwable               => fail("Unexpected exception")
     }
+    caught.getMessage shouldEqual "requirement failed: RvRange start <= end and step > 0"
   }
 
   // Test with different step and no step not needed any more, refer to history of this file to see the removed tests
