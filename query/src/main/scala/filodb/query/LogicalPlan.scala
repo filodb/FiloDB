@@ -718,7 +718,9 @@ object LogicalPlan {
    */
   def rvRangeFromPlan(plan: LogicalPlan): Option[RvRange] = {
     plan match {
-      case p: PeriodicSeriesPlan   => Some(RvRange(startMs = p.startMs, endMs = p.endMs, stepMs = p.stepMs))
+      case p: PeriodicSeriesPlan   => Some(RvRange( startMs = p.startMs,
+                                                    endMs = p.endMs,
+                                                    stepMs = Math.max(p.stepMs, 1)))
       case _                       => None
     }
   }

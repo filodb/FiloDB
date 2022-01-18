@@ -196,7 +196,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       case AllChunksSelector          => AllChunkScan
       case WriteBufferSelector        => WriteBufferChunkScan
       case InMemoryChunksSelector     => InMemoryChunkScan
-      case _                          => throw new IllegalArgumentException("Unsupported range selector found")
+      case x @ _                      => throw new IllegalArgumentException(s"Unsupported range selector '$x' found")
     }
   }
 
