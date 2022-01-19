@@ -714,7 +714,7 @@ object LogicalPlan {
    *
    * @param plan: The Logical Plan instance
    * @param qContext: The query context
-   * @return: Option of the RVRange instance
+   * @return Option of the RVRange instance
    */
   def rvRangeFromPlan(plan: LogicalPlan): Option[RvRange] = {
     plan match {
