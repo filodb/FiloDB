@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.Dataset
-import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.query.{BinaryJoin, LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters, SetOperator}
 import filodb.query.TopLevelSubquery
 import filodb.query.exec._
@@ -14,7 +14,10 @@ case class PartitionAssignment(partitionName: String, endPoint: String, timeRang
 trait PartitionLocationProvider {
 
   def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment]
-  def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment]
+
+  def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                            timeRange: TimeRange): List[PartitionAssignment]
+
 }
 
 class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider,
@@ -57,7 +60,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val columnFilterGroup = LogicalPlan.getColumnFilterGroup(logicalPlan)
     val routingKeys = dataset.options.nonMetricShardColumns
       .map(x => (x, LogicalPlan.getColumnValues(columnFilterGroup, x)))
-    if (routingKeys.flatMap(_._2).isEmpty) Seq.empty else routingKeys
+    if (routingKeys.flatMap(_._2).isEmpty) Seq.empty else routingKeys.filter(x => x._2.nonEmpty)
   }
 
   private def generateRemoteExecParams(queryContext: QueryContext, startMs: Long, endMs: Long) = {
@@ -287,8 +290,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   def materializeSeriesKeysFilters(lp: SeriesKeysByFilters, qContext: QueryContext): ExecPlan = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val partitions = partitionLocationProvider.getAuthorizedPartitions(
-      TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
+    val partitions = getMetadataPartitions(lp.filters, queryParams)
     if (partitions.isEmpty) {
       logger.warn(s"No partitions found for ${queryParams.startSecs}, ${queryParams.endSecs}")
       localPartitionPlanner.materialize(lp, qContext)
@@ -310,8 +312,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   def materializeLabelValues(lp: LabelValues, qContext: QueryContext): ExecPlan = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val partitions = partitionLocationProvider.getAuthorizedPartitions(
-      TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
+    val partitions = getMetadataPartitions(lp.filters, queryParams)
     if (partitions.isEmpty) {
       logger.warn(s"No partitions found for ${queryParams.startSecs}, ${queryParams.endSecs} ")
       localPartitionPlanner.materialize(lp, qContext)
@@ -331,8 +332,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   def materializeLabelNames(lp: LabelNames, qContext: QueryContext): ExecPlan = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val partitions = partitionLocationProvider.getAuthorizedPartitions(
-      TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
+    val partitions = getMetadataPartitions(lp.filters, queryParams)
     if (partitions.isEmpty) {
       logger.warn(s"No partitions found for ${queryParams.startSecs}, ${queryParams.endSecs} ")
       localPartitionPlanner.materialize(lp, qContext)
@@ -349,6 +349,12 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       else LabelNamesDistConcatExec(qContext, inProcessPlanDispatcher,
         execPlans.sortWith((x, y) => !x.isInstanceOf[MetadataRemoteExec]))
     }
+  }
+
+  def getMetadataPartitions(filters: Seq[ColumnFilter], queryParams: PromQlQueryParams): List[PartitionAssignment] = {
+    val nonMetricShardKeyFilters = filters.filter(f => dataset.options.nonMetricShardColumns.contains(f.column))
+    partitionLocationProvider.getMetadataPartitions(nonMetricShardKeyFilters,
+      TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
   }
 
   private def createMetadataRemoteExec(qContext: QueryContext, queryParams: PromQlQueryParams,
