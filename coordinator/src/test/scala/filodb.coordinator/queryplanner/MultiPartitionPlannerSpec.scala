@@ -51,7 +51,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
     }
 
@@ -82,7 +82,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
        else Nil
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = twoPartitions(timeRange)
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = twoPartitions(timeRange)
 
     }
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
@@ -135,7 +135,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
         else Nil
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = twoPartitions(timeRange)
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = twoPartitions(timeRange)
 
     }
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
@@ -180,7 +180,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
     }
 
@@ -236,7 +236,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
           PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs, timeRange.endMs))
         )
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
     }
 
@@ -294,7 +294,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
         else Nil
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = onePartition(timeRange)
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = onePartition(timeRange)
 
     }
     val query = "avg_over_time(test{job = \"app\"}[10m:1m])"
@@ -323,7 +323,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -343,7 +343,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -387,7 +387,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -407,7 +407,93 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
     queryParams.endSecs shouldEqual 10000
   }
 
-  it ("should generate Exec plan for Metadata query") {
+  it ("should generate Exec plan for Metadata query without shardkey") {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] =
+      List(PartitionAssignment("remote", "remote-url",
+        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
+        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val dataset = MetricsTestData.timeseriesDatasetMultipleShardKeys
+    val schemas = Schemas(dataset.schema)
+    val localPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+      queryConfig, "raw")
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.metadataQueryToLogicalPlan("http_requests_total{method=\"GET\"}",
+      TimeStepParams(startSeconds, step, endSeconds))
+
+    val promQlQueryParams = PromQlQueryParams(
+      "http_requests_total{method=\"GET\"}", startSeconds, step, endSeconds)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[PartKeysDistConcatExec] shouldEqual (true)
+    execPlan.children(0).isInstanceOf[PartKeysDistConcatExec] shouldEqual(true)
+    execPlan.children(1).isInstanceOf[MetadataRemoteExec] shouldEqual(true)
+
+    val queryParams = execPlan.children(1).asInstanceOf[MetadataRemoteExec].queryContext.origQueryParams.
+      asInstanceOf[PromQlQueryParams]
+
+    queryParams.startSecs shouldEqual(startSeconds)
+    queryParams.endSecs shouldEqual(localPartitionStart - 1)
+    execPlan.children(0).asInstanceOf[PartKeysDistConcatExec].children(0).asInstanceOf[PartKeysExec].start shouldEqual
+      (localPartitionStart * 1000)
+    execPlan.children(0).asInstanceOf[PartKeysDistConcatExec].children(0).asInstanceOf[PartKeysExec].end shouldEqual
+      (endSeconds * 1000)
+  }
+
+  it ("should generate Exec plan for Metadata query with partial shardkey") {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] =
+      List(PartitionAssignment("remote", "remote-url",
+        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
+        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val dataset = MetricsTestData.timeseriesDatasetMultipleShardKeys
+    val schemas = Schemas(dataset.schema)
+    val localPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+      queryConfig, "raw")
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.metadataQueryToLogicalPlan("http_requests_total{_ws_=\"demo\", method=\"GET\"}",
+      TimeStepParams(startSeconds, step, endSeconds))
+
+    val promQlQueryParams = PromQlQueryParams(
+      "http_requests_total{_ws_=\"demo\", method=\"GET\"}", startSeconds, step, endSeconds)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[PartKeysDistConcatExec] shouldEqual (true)
+    execPlan.children(0).isInstanceOf[PartKeysDistConcatExec] shouldEqual(true)
+    execPlan.children(1).isInstanceOf[MetadataRemoteExec] shouldEqual(true)
+
+    val queryParams = execPlan.children(1).asInstanceOf[MetadataRemoteExec].queryContext.origQueryParams.
+      asInstanceOf[PromQlQueryParams]
+
+    queryParams.startSecs shouldEqual(startSeconds)
+    queryParams.endSecs shouldEqual(localPartitionStart - 1)
+    execPlan.children(0).asInstanceOf[PartKeysDistConcatExec].children(0).asInstanceOf[PartKeysExec].start shouldEqual
+      (localPartitionStart * 1000)
+    execPlan.children(0).asInstanceOf[PartKeysDistConcatExec].children(0).asInstanceOf[PartKeysExec].end shouldEqual
+      (endSeconds * 1000)
+  }
+
+  it ("should generate Exec plan for Metadata query with shardkey") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] =
       List(PartitionAssignment("remote", "remote-url",
       TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
@@ -417,7 +503,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -463,7 +549,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
             PartitionAssignment("remote3", "remote-url3", TimeRange(thirdPartitionStart * 1000, endSeconds * 1000)))
         else Nil
       }
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("remote1", "remote-url1", TimeRange(startSeconds * 1000 - lookbackMs,
           secondPartitionStart * 1000 - 1)),
           PartitionAssignment("remote2", "remote-url2", TimeRange(secondPartitionStart * 1000,
@@ -533,7 +619,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
         else Nil
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
           localPartitionStartSec * 1000 - 1)), PartitionAssignment("local", "local-url",
           TimeRange(localPartitionStartSec * 1000, endSeconds * 1000)))
@@ -590,7 +676,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
         else Nil
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = List(
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = List(
         PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
           localPartitionStartMs - 1)), PartitionAssignment("remote", "remote-url",
           TimeRange(localPartitionStartMs, endSeconds * 1000)))
@@ -639,7 +725,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -682,7 +768,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
             timeRange.endMs)))
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -711,7 +797,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         List.empty
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         List.empty
     }
 
@@ -735,7 +821,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         List.empty
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         List.empty
     }
 
@@ -756,7 +842,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         List.empty
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = List.empty
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = List.empty
     }
 
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
@@ -789,7 +875,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers {
         else Nil
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = List(
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = List(
         PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
           localPartitionStartMs - 1)), PartitionAssignment("remote", "remote-url",
           TimeRange(localPartitionStartMs, endSeconds * 1000)))
