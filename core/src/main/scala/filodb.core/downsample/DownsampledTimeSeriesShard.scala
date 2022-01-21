@@ -419,8 +419,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         val partId = partIds(partLoopIndx)
         //retrieve PartKey either from In-memory map or from PartKeyIndex
         val nextPart = partKeyFromPartId(partId)
-        val currVal = schemas.part.binSchema
-          .asZCUTF8Str(nextPart, UnsafeUtils.arayOffset, schemas.part.binSchema.colNames.indexOf(label))
+        schemas.part.binSchema
+          .singleColValues(nextPart, UnsafeUtils.arayOffset, label, rows)
         partLoopIndx += 1
       }
       rows.toIterator
