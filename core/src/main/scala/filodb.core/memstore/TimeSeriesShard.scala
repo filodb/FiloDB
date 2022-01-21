@@ -708,6 +708,24 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   /**
+   * This method is to apply column filters and fetch values for a label.
+   *
+   * @param filter column filter
+   * @param label label values to return in the response
+   * @param endTime end time
+   * @param startTime start time
+   * @param limit series limit
+   * @return returns an iterator of values of for a given label
+   */
+  def singleLabelValuesWithFilters(filter: Seq[ColumnFilter],
+                             label: String,
+                             endTime: Long,
+                             startTime: Long,
+                             limit: Int): Iterator[ZeroCopyUTF8String] = {
+    SingleLabelValuesResultIterator(partKeyIndex.partIdsFromFilters(filter, startTime, endTime), label, limit)
+  }
+
+  /**
     * This method is to apply column filters and fetch matching time series partitions.
     *
     * @param filter column filter
@@ -735,7 +753,35 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   /**
-   * Iterator for traversal of partIds, value for the given label will be extracted from the ParitionKey.
+   * Iterator for traversal of partIds, value for the given label will be extracted from the PartitionKey.
+   * This is specifically implemented to avoid building a Map for single label.
+   * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
+   */
+  case class SingleLabelValuesResultIterator(partIds: debox.Buffer[Int], label: String, limit: Int)
+    extends Iterator[ZeroCopyUTF8String] {
+    private val rows = labels
+
+    def labels: Iterator[ZeroCopyUTF8String] = {
+      var partLoopIndx = 0
+      val rows = new mutable.HashSet[ZeroCopyUTF8String]()
+      while(partLoopIndx < partIds.length && rows.size < limit) {
+        val partId = partIds(partLoopIndx)
+        //retrieve PartKey either from In-memory map or from PartKeyIndex
+        val nextPart = partKeyFromPartId(partId)
+        schemas.part.binSchema
+          .singleColValues(nextPart.base, nextPart.offset, label, rows)
+        partLoopIndx += 1
+      }
+      rows.toIterator
+    }
+
+    def hasNext: Boolean = rows.hasNext
+
+    def next(): ZeroCopyUTF8String = rows.next
+  }
+
+  /**
+   * Iterator for traversal of partIds, value for the given labels will be extracted from the PartitionKey.
    * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
    */
   case class LabelValueResultIterator(partIds: debox.Buffer[Int], labelNames: Seq[String], limit: Int)

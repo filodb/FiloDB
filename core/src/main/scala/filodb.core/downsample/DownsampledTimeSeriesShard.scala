@@ -99,6 +99,14 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     LabelValueResultIterator(partKeyIndex.partIdsFromFilters(filter, startTime, endTime), labelNames, limit)
   }
 
+  def singleLabelValuesWithFilters(filter: Seq[ColumnFilter],
+                                   label: String,
+                                   endTime: Long,
+                                   startTime: Long,
+                                   limit: Int): Iterator[ZeroCopyUTF8String] = {
+    SingleLabelValuesResultIterator(partKeyIndex.partIdsFromFilters(filter, startTime, endTime), label, limit)
+  }
+
   def labelNames(filter: Seq[ColumnFilter],
                  endTime: Long,
                  startTime: Long): Seq[String] =
@@ -398,6 +406,29 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     override def hasNext: Boolean = rows.hasNext
 
     override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = rows.next
+  }
+
+  case class SingleLabelValuesResultIterator(partIds: debox.Buffer[Int], label: String, limit: Int)
+    extends Iterator[ZeroCopyUTF8String] {
+    private val rows = labels
+
+    def labels: Iterator[ZeroCopyUTF8String] = {
+      var partLoopIndx = 0
+      val rows = new mutable.HashSet[ZeroCopyUTF8String]()
+      while(partLoopIndx < partIds.length && rows.size < limit) {
+        val partId = partIds(partLoopIndx)
+        //retrieve PartKey either from In-memory map or from PartKeyIndex
+        val nextPart = partKeyFromPartId(partId)
+        val currVal = schemas.part.binSchema
+          .asZCUTF8Str(nextPart, UnsafeUtils.arayOffset, schemas.part.binSchema.colNames.indexOf(label))
+        partLoopIndx += 1
+      }
+      rows.toIterator
+    }
+
+    def hasNext: Boolean = rows.hasNext
+
+    def next(): ZeroCopyUTF8String = rows.next
   }
 
   /**

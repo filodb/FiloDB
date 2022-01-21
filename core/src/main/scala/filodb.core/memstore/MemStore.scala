@@ -185,6 +185,16 @@ trait MemStore extends ChunkSource {
                              start: Long, limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
 
   /**
+   * Returns the values of a given label-name for the matching Column Filters
+   * that are indexed at the partition level, on the given
+   * shard on this node.
+   * @return an Iterator for the index values
+   */
+  def singleLabelValueWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                             label: String, end: Long,
+                             start: Long, limit: Int): Iterator[ZeroCopyUTF8String]
+
+  /**
     * Returns the indexed TimeSeriesPartitions matching the column filters,
     * on the given shard on this node.
     * @return an Iterator for the TimeSeriesPartition

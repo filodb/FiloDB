@@ -2,6 +2,7 @@ package filodb.core.binaryrecord2
 
 import java.nio.charset.StandardCharsets
 
+import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 import org.agrona.DirectBuffer
@@ -301,6 +302,21 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
     result
   }
 
+  def singleColValues(base: Any, offset: Long, col: String,
+                      buf: mutable.HashSet[ZeroCopyUTF8String]): mutable.HashSet[ZeroCopyUTF8String] = {
+    import Column.ColumnType._
+    columnTypes.zipWithIndex.foreach {
+      case (StringColumn, i) if colNames(i) == col =>
+        buf.add(asZCUTF8Str(base, offset, i))
+      case (MapColumn, i)    => val consumer = new SingleColDistinctMapItemConsumer(col, buf)
+        consumeMapItems(base, offset, i, consumer)
+      case (BinaryRecordColumn, i) => ???
+      case (HistogramColumn, i) => ???
+      case _ => // column not selected
+    }
+    buf
+  }
+
   def colValues(base: Any, offset: Long, cols: Seq[String]): Seq[String] = {
     import Column.ColumnType._
     val res = collection.mutable.ArrayBuffer.fill[String](cols.size)(UnsafeUtils.ZeroPointer.asInstanceOf[String])
@@ -466,6 +482,17 @@ class SelectColsMapItemConsumer(cols: Seq[String], buf: ArrayBuffer[String]) ext
   def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
     val key = UTF8StringShort.toString(keyBase, keyOffset)
     if (cols.contains(key)) buf(cols.indexOf(key)) = UTF8StringMedium.toString(valueBase, valueOffset)
+  }
+}
+
+/**
+ * A MapItemConsumer which collect distinct col values from map
+ */
+class SingleColDistinctMapItemConsumer(col: String, buf: mutable.HashSet[ZeroCopyUTF8String]) extends MapItemConsumer {
+  def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+    val key = UTF8StringShort.toString(keyBase, keyOffset)
+    if (key == col) buf.add(new ZeroCopyUTF8String(valueBase, valueOffset,
+      UTF8StringMedium.numBytes(valueBase, valueOffset)))
   }
 }
 
