@@ -4,6 +4,7 @@ import scala.util.Try
 
 import filodb.core.{query, GlobalConfig}
 import filodb.core.query.{ColumnFilter, RangeParams}
+import filodb.prometheus.parse.Parser
 import filodb.query._
 
 object Vectors {
@@ -11,7 +12,6 @@ object Vectors {
   val TypeLabel       = "_type_"
   val BucketFilterLabel = "_bucket_"
 }
-
 
 object WindowConstants {
   val conf = GlobalConfig.systemConfig
@@ -138,12 +138,57 @@ sealed trait Vector extends Expression {
   val regexColumnName: String = "::(?=[^::]+$)" //regex pattern to extract ::columnName at the end
 
   // Convert metricName{labels} -> {labels, __name__="metricName"} so it's uniform
-  lazy val mergeNameToLabels: Seq[LabelMatch] = {
+  // Note: see makeMergeNameToLabels before changing the laziness.
+  lazy val mergeNameToLabels: Seq[LabelMatch] = makeMergeNameToLabels()
+
+  // These constraints are also applied within makeMergeNameToLabels, but they are
+  //   *immediately* applied here (i.e. not lazily as with mergeNameToLabels).
+  applyPromqlConstraints()
+
+  /**
+   * Apply PromQL-scope constraints to the vector selector:
+   *   (1) only one __name__ specifier (implicit or otherwise) exists.
+   *   (2) at least one label matcher exists.
+   */
+  def applyPromqlConstraints(): Unit = {
     val nameLabel = labelSelection.find(_.label == PromMetricLabel)
-    if (nameLabel.isEmpty && metricName.isEmpty)
-      throw new IllegalArgumentException("Metric name is not present")
     if (metricName.nonEmpty) {
-      if (nameLabel.nonEmpty) throw new IllegalArgumentException("Metric name should not be set twice")
+      if (nameLabel.nonEmpty) {
+        throw new IllegalArgumentException(
+          "Metric name should not be set twice")
+      }
+    } else if (labelSelection.size == 0) {
+      throw new IllegalArgumentException(
+        "At least one label matcher is required")
+    }
+  }
+
+  /**
+   * Constructs the mergeNameToLabels member.
+   *
+   * Note:
+   * At present, FiloDB requires the existence of a metric name for all vector selectors, and
+   *   that requirement is enforced at the initialization of mergeNameToLabels. However,
+   *   this makes it impossible to initialize a Vector type with PromQL-valid label selectors
+   *   that lack an implicit/explicit __name__ label.
+   *
+   * If you need to make use of a name-optional Vector (i.e. as a temporary vessel for parsed PromQL),
+   *   the hacky workaround is as follows:
+   *     (1) lazily initialize mergeNameToLabels so a metric name is not explicitly required
+   *         at the Vector's initialization, and
+   *     (2) when needed, locally initialize a "mergeNameToLabels-like" value without
+   *         a name requirement.
+   *
+   * This method exists only to consolidate code for the initialization of these values.
+   */
+  def makeMergeNameToLabels(requireName: Boolean = true): Seq[LabelMatch] = {
+    applyPromqlConstraints()
+    val nameLabel = labelSelection.find(_.label == PromMetricLabel)
+    if (requireName && nameLabel.isEmpty && metricName.isEmpty) {
+      // not included in applyPromqlConstraints
+      throw new IllegalArgumentException("Metric name is not present")
+    }
+    if (metricName.nonEmpty) {
       // metric name specified but no __name__ label.  Add it
       labelSelection :+ LabelMatch(PromMetricLabel, EqualMatch, metricName.get)
     } else {
@@ -188,8 +233,12 @@ sealed trait Vector extends Expression {
       } else { labelVal }
       labelMatch.labelMatchOp match {
         case EqualMatch      => ColumnFilter(labelMatch.label, query.Filter.Equals(labelValue))
-        case NotRegexMatch   => ColumnFilter(labelMatch.label, query.Filter.NotEqualsRegex(labelValue))
-        case RegexMatch      => ColumnFilter(labelMatch.label, query.Filter.EqualsRegex(labelValue))
+        case NotRegexMatch   => require(labelValue.length <= Parser.REGEX_MAX_LEN,
+                                         s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters")
+                                ColumnFilter(labelMatch.label, query.Filter.NotEqualsRegex(labelValue))
+        case RegexMatch      => require(labelValue.length <= Parser.REGEX_MAX_LEN,
+                                         s"Regular expression filters should be <= ${Parser.REGEX_MAX_LEN} characters")
+                                ColumnFilter(labelMatch.label, query.Filter.EqualsRegex(labelValue))
         case NotEqual(false) => ColumnFilter(labelMatch.label, query.Filter.NotEquals(labelValue))
         case other: Any      => throw new IllegalArgumentException(s"Unknown match operator $other")
       }
@@ -213,7 +262,11 @@ case class InstantExpression(metricName: Option[String],
 
   import WindowConstants._
 
-  val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
+  // TODO: mergeNameToLabels requires a metric name at its initialization, but a valid PromQL
+  //   instant selector does not necessarily contain a metric name. This name requirement should
+  //   be moved elsewhere. For now, this (and mergeNameToLabels) must remain lazy in order
+  //   to allow nameless instant selectors (see toLabelMap() as an example).
+  lazy val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
   def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
     // we start from 5 minutes earlier that provided start time in order to include last sample for the
@@ -239,9 +292,31 @@ case class InstantExpression(metricName: Option[String],
     LabelNames(columnFilters, timeParams.start * 1000, timeParams.end * 1000)
   }
 
+  def toLabelCardinalityPlan(timeParams: TimeRangeParams): LabelCardinality =
+    LabelCardinality(columnFilters, timeParams.start * 1000, timeParams.end * 1000)
+
   def toRawSeriesPlan(timeParams: TimeRangeParams, offsetMs: Option[Long] = None): RawSeries = {
     RawSeries(Base.timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
       offsetMs)
+  }
+
+  /**
+   * Returns a mapping from selector labels (including an explicit/implicit __name__) to values.
+   * Throws an IllegalArgumentException if any of the values are not matched by equality without a regex.
+   *
+   * Note: this InstantExpression does not require a metric name in order
+   *   for this method to run to completion.
+   */
+  def toEqualLabelMap() : Map[String, String] = {
+    // See Vector::mergeNameToLabels for details about why we're ignoring the member variable.
+    val mergeNameToLabelsLocal = makeMergeNameToLabels(requireName = false)
+    mergeNameToLabelsLocal.map{ labelMatch =>
+      if (labelMatch.labelMatchOp != EqualMatch) {
+        throw new IllegalArgumentException(
+          "cannot convert to label map if any values aren't matched by equality")
+      }
+      labelMatch.label -> labelMatch.value
+    }.toMap
   }
 }
 

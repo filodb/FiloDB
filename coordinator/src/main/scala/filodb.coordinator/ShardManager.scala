@@ -37,6 +37,16 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
   private val _coordinators = new mutable.LinkedHashMap[Address, ActorRef]
   private val _errorShardReassignedAt = new mutable.HashMap[DatasetRef, mutable.HashMap[Int, Long]]
 
+  private val _tenantIngestionMeteringOpt =
+    if (settings.config.getBoolean("shard-key-level-ingestion-metrics-enabled")) {
+      val inst = TenantIngestionMetering(
+                   settings,
+                   () => { _datasetInfo.map{ case (dsRef, _) => dsRef}.toIterator },
+                   () => { _coordinators.head._2 })
+      inst.schedulePeriodicPublishJob()
+      Some(inst)
+    } else None
+
   val shardReassignmentMinInterval = settings.config.getDuration("shard-manager.reassignment-min-interval")
 
   /* These workloads were in an actor and exist now in an unprotected class.

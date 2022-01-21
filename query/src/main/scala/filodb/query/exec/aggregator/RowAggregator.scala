@@ -127,6 +127,7 @@ object RowAggregator {
       case Sum if valColType == ColumnType.HistogramColumn => HistSumRowAggregator
       case Count if valColType == ColumnType.DoubleColumn    => CountRowAggregator.double
       case Count if valColType == ColumnType.HistogramColumn => CountRowAggregator.hist
+      case Group    => GroupRowAggregator
       case Avg      => AvgRowAggregator
       case TopK     => new TopBottomKRowAggregator(params(0).asInstanceOf[Double].toInt, false)
       case BottomK  => new TopBottomKRowAggregator(params(0).asInstanceOf[Double].toInt, true)

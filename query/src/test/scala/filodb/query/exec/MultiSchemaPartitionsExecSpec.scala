@@ -486,6 +486,23 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     result.result.size shouldEqual 0
   }
 
+  it ("""should return range vectors with != condition on a label that does not exist and value is non empty""") {
+    import ZeroCopyUTF8String._
+    val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)),
+      ColumnFilter("host", Filter.NotEquals("host".utf8)),
+      ColumnFilter("dc", Filter.NotEquals("us-west".utf8)))  // This label does not exist
+    val startTime = now - numRawSamples * reportingInterval
+    val endTime   = now - (numRawSamples-10) * reportingInterval
+
+    val execPlan = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher,
+      dsRef, 0, filters, TimeRangeChunkScan(startTime, endTime), "_metric_")
+
+    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.result.size shouldEqual 1
+  }
+
   it ("""should return range vectors when it satisfies NotEquals condition""") {
     import ZeroCopyUTF8String._
     val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),

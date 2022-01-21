@@ -7,6 +7,7 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
 import filodb.query._
+import filodb.query.LogicalPlan._
 import filodb.query.exec._
 
 /**
@@ -22,7 +23,7 @@ trait  PlannerHelper {
     def dataset: Dataset
     def schemas: Schemas
     def dsOptions: DatasetOptions
-    val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
+    private[queryplanner] val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
     def materializeVectorPlan(qContext: QueryContext,
                               lp: VectorPlan): PlanResult = {
       val vectors = walkLogicalPlanTree(lp.scalars, qContext)
@@ -121,11 +122,9 @@ trait  PlannerHelper {
       vectors
     }
 
-   def addAggregator(lp: Aggregate, qContext: QueryContext, toReduceLevel: PlanResult,
-                     extraOnByKeysTimeRanges: Seq[Seq[Long]]):
+   def addAggregator(lp: Aggregate, qContext: QueryContext, toReduceLevel: PlanResult):
    LocalPartitionReduceAggregateExec = {
 
-    val byKeysReal = ExtraOnByKeysUtil.getRealByLabels(lp, extraOnByKeysTimeRanges)
     // Now we have one exec plan per shard
     /*
      * Note that in order for same overlapping RVs to not be double counted when spread is increased,
@@ -141,7 +140,7 @@ trait  PlannerHelper {
     toReduceLevel.plans.foreach {
       _.addRangeVectorTransformer(AggregateMapReduce(lp.operator, lp.params,
         LogicalPlanUtils.renameLabels(lp.without, dsOptions.metricColumn),
-        LogicalPlanUtils.renameLabels(byKeysReal, dsOptions.metricColumn)))
+        LogicalPlanUtils.renameLabels(lp.by, dsOptions.metricColumn)))
     }
 
     val toReduceLevel2 =
@@ -171,7 +170,7 @@ trait  PlannerHelper {
     // Add sum to aggregate all child responses
     // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
     val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
-      qContext.plannerParams.copy(skipAggregatePresent = true)), vectors, Seq.empty))) // No need for present for sum
+      qContext.plannerParams.copy(skipAggregatePresent = true)), vectors))) // No need for present for sum
     addAbsentFunctionMapper(aggregatePlanResult, lp.columnFilters,
       RangeParams(lp.startMs / 1000, lp.stepMs / 1000, lp.endMs / 1000), qContext)
   }
@@ -193,14 +192,14 @@ trait  PlannerHelper {
    def materializeAggregate(qContext: QueryContext,
                                    lp: Aggregate): PlanResult = {
     val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, qContext)
-    val reducer = addAggregator(lp, qContext, toReduceLevel1, queryConfig.addExtraOnByKeysTimeRanges)
-    PlanResult(Seq(reducer), false) // since we have aggregated, no stitching
+    val reducer = addAggregator(lp, qContext, toReduceLevel1)
+    PlanResult(Seq(reducer)) // since we have aggregated, no stitching
   }
 
    def materializeFixedScalar(qContext: QueryContext,
                                      lp: ScalarFixedDoublePlan): PlanResult = {
     val scalarFixedDoubleExec = ScalarFixedDoubleExec(qContext, dataset = dataset.ref, lp.timeStepParams, lp.scalar)
-    PlanResult(Seq(scalarFixedDoubleExec), false)
+    PlanResult(Seq(scalarFixedDoubleExec))
   }
 
   /**
@@ -223,7 +222,7 @@ trait  PlannerHelper {
     // is optimal, if there is no overlap and even worse significant gap between the individual subqueries, retrieving
     // the entire range might be suboptimal, this still might be a better option than issuing and concatenating numerous
     // subqueries separately
-    var innerPlan = sqww.innerPeriodicSeries
+    val innerPlan = sqww.innerPeriodicSeries
     val window = Some(sqww.subqueryWindowMs)
     // Here the inner periodic series already has start/end/step populated
     // in Function's toSeriesPlan(), Functions.scala subqqueryArgument() method.
@@ -237,11 +236,11 @@ trait  PlannerHelper {
           window,
           Some(rangeFn),
           qContext,
-          false,
+          stepMultipleNotationUsed = false,
           paramsExec,
           sqww.offsetMs,
-          false,
-          true
+          rawSource = false,
+          leftInclusiveWindow = true
         )
       innerExecPlan.plans.foreach { p => p.addRangeVectorTransformer(rangeVectorTransformer)}
       innerExecPlan
@@ -264,10 +263,10 @@ trait  PlannerHelper {
         window,
         Some(InternalRangeFunction.lpToInternalFunc(RangeFunctionId.Last)),
         qContext,
-        false,
+        stepMultipleNotationUsed = false,
         Seq(),
         offsetMs,
-        false
+        rawSource = false
       ))
     )
     val aggregate = Aggregate(AggregationOperator.Sum, innerPlan, Nil, Seq("job"))
@@ -276,9 +275,7 @@ trait  PlannerHelper {
         addAggregator(
           aggregate,
           qContext.copy(plannerParams = qContext.plannerParams.copy(skipAggregatePresent = true)),
-          innerExecPlan,
-          Seq.empty
-        )
+          innerExecPlan)
       )
     )
     addAbsentFunctionMapper(
@@ -304,7 +301,7 @@ trait  PlannerHelper {
   def materializeScalarTimeBased(qContext: QueryContext,
                                   lp: ScalarTimeBasedPlan): PlanResult = {
     val scalarTimeBasedExec = TimeScalarGeneratorExec(qContext, dataset.ref, lp.rangeParams, lp.function)
-    PlanResult(Seq(scalarTimeBasedExec), false)
+    PlanResult(Seq(scalarTimeBasedExec))
   }
 
    def materializeScalarBinaryOperation(qContext: QueryContext,
@@ -321,7 +318,7 @@ trait  PlannerHelper {
     } else Left(lp.rhs.left.get)
 
     val scalarBinaryExec = ScalarBinaryOperationExec(qContext, dataset.ref, lp.rangeParams, lhs, rhs, lp.operator)
-    PlanResult(Seq(scalarBinaryExec), false)
+    PlanResult(Seq(scalarBinaryExec))
   }
 
   def materializeBinaryJoin(qContext: QueryContext, logicalPlan: BinaryJoin): PlanResult = {
@@ -334,8 +331,6 @@ trait  PlannerHelper {
     val lhs = walkLogicalPlanTree(logicalPlan.lhs, lhsQueryContext)
     val rhs = walkLogicalPlanTree(logicalPlan.rhs, rhsQueryContext)
 
-    val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
-
     val dispatcher = if (!lhs.plans.head.dispatcher.isLocalCall && !rhs.plans.head.dispatcher.isLocalCall) {
       val lhsCluster = lhs.plans.head.dispatcher.clusterName
       val rhsCluster = rhs.plans.head.dispatcher.clusterName
@@ -344,25 +339,26 @@ trait  PlannerHelper {
     } else inProcessPlanDispatcher
 
     val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext,
-      dispatcher, lhs.plans))
+      dispatcher, rvRangeFromPlan(logicalPlan), lhs.plans))
     else lhs.plans
 
     val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext,
-      dispatcher, rhs.plans))
+      dispatcher, rvRangeFromPlan(logicalPlan), rhs.plans))
     else rhs.plans
 
     val execPlan =
       if (logicalPlan.operator.isInstanceOf[SetOperator])
         SetOperatorExec(qContext, dispatcher, stitchedLhs, stitchedRhs, logicalPlan.operator,
-          LogicalPlanUtils.renameLabels(onKeysReal, dsOptions.metricColumn),
-          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, dsOptions.metricColumn), dsOptions.metricColumn)
+          LogicalPlanUtils.renameLabels(logicalPlan.on, dsOptions.metricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, dsOptions.metricColumn), dsOptions.metricColumn,
+          rvRangeFromPlan(logicalPlan))
       else
         BinaryJoinExec(qContext, dispatcher, stitchedLhs, stitchedRhs, logicalPlan.operator,
-          logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, dsOptions.metricColumn),
+          logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, dsOptions.metricColumn),
           LogicalPlanUtils.renameLabels(logicalPlan.ignoring, dsOptions.metricColumn), logicalPlan.include,
-          dsOptions.metricColumn)
+          dsOptions.metricColumn, rvRangeFromPlan(logicalPlan))
 
-    PlanResult(Seq(execPlan), false)
+    PlanResult(Seq(execPlan))
   }
 
 }

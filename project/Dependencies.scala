@@ -93,11 +93,12 @@ object Dependencies {
   )
 
   lazy val queryDeps = commonDeps ++ Seq(
-    "com.typesafe.akka"     %% "akka-actor"                           % akkaVersion,
-    "com.tdunning"          % "t-digest"                              % "3.1",
-    "com.softwaremill.sttp" %% "circe"                                % sttpVersion ,
-    "com.softwaremill.sttp" %% "async-http-client-backend-future"     % sttpVersion,
-    "com.softwaremill.sttp" %% "core"                                 % sttpVersion,
+    "com.typesafe.akka"       %% "akka-actor"                           % akkaVersion,
+    "com.tdunning"            % "t-digest"                              % "3.1",
+    "com.softwaremill.sttp"   %% "circe"                                % sttpVersion ,
+    "com.softwaremill.sttp"   %% "async-http-client-backend-future"     % sttpVersion,
+    "com.softwaremill.sttp"   %% "core"                                 % sttpVersion,
+    "org.apache.datasketches" % "datasketches-java"                     % "3.0.0",
     circeGeneric
   )
 

@@ -157,10 +157,15 @@ object ChunkMap extends StrictLogging {
 }
 
 /**
- * @param memFactory a THREAD-SAFE factory for allocating offheap space
  * @param capacity initial capacity of the map; must be more than 0
  */
-class ChunkMap(val memFactory: NativeMemoryManager, var capacity: Int) {
+abstract class ChunkMap(var capacity: Int) {
+
+  /**
+   * A THREAD-SAFE factory for allocating offheap space
+   */
+  def memFactory: NativeMemoryManager
+
   require(capacity > 0)
 
   private var lockState: Int = 0

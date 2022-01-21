@@ -21,7 +21,7 @@ final case class QueryStatistics(group: Seq[String], timeSeriesScanned: Long,
 
 final case class Data(resultType: String, result: Seq[Result])
 
-final case class MetadataSuccessResponse(data: Seq[Map[String, String]],
+final case class MetadataSuccessResponse(data: Seq[MetadataSampl],
                                          status: String = "success",
                                          partial: Option[Boolean]= None,
                                          message: Option[String]= None) extends PromQueryResponse
@@ -30,6 +30,8 @@ final case class Result(metric: Map[String, String], values: Option[Seq[DataSamp
                         aggregateResponse: Option[AggregateResponse] = None)
 
 sealed trait DataSampl
+
+sealed trait MetadataSampl
 
 sealed trait AggregateSampl
 
@@ -44,10 +46,16 @@ final case class Sampl(timestamp: Long, value: Double) extends DataSampl
 
 final case class HistSampl(timestamp: Long, buckets: Map[String, Double]) extends DataSampl
 
-final case class MetadataSampl(values: Map[String, String]) extends DataSampl
+final case class MetadataMapSampl(value: Map[String, String]) extends MetadataSampl
 
-final case class LabelSampl(values: Seq[String]) extends DataSampl
+final case class LabelSampl(value: String) extends MetadataSampl
 
 final case class AvgSampl(timestamp: Long, value: Double, count: Long) extends AggregateSampl
 
 final case class StdValSampl(timestamp: Long, stddev: Double, mean: Double, count: Long) extends AggregateSampl
+
+final case class LabelCardinalitySampl(metric: Map[String, String],
+                                       cardinality: Seq[Map[String, String]]) extends MetadataSampl
+
+final case class TsCardinalitiesSampl(group: Map[String, String],
+                                      cardinality: Map[String, Int]) extends MetadataSampl

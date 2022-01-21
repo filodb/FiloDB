@@ -3,10 +3,11 @@ package filodb.prometheus.query
 import remote.RemoteStorage._
 
 import filodb.core.GlobalConfig
-import filodb.core.binaryrecord2.BinaryRecordRowReader
+import filodb.core.binaryrecord2.{BinaryRecordRowReader, StringifyMapItemConsumer}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query.{Result => _, _}
+import filodb.prometheus.parse.Parser.REGEX_MAX_LEN
 import filodb.query.{QueryResult => FiloQueryResult, _}
 import filodb.query.AggregationOperator.Avg
 import filodb.query.exec.{ExecPlan, HistToPromSeriesMapper}
@@ -40,8 +41,14 @@ object PrometheusModel {
         val filter = m.getType match {
           case MatchType.EQUAL => Filter.Equals(m.getValue)
           case MatchType.NOT_EQUAL => Filter.NotEquals(m.getValue)
-          case MatchType.REGEX_MATCH => Filter.EqualsRegex(m.getValue)
-          case MatchType.REGEX_NO_MATCH => Filter.NotEqualsRegex(m.getValue)
+          case MatchType.REGEX_MATCH =>
+                            require(m.getValue.length <= REGEX_MAX_LEN, s"Regular expression filters should " +
+                              s"be <= ${REGEX_MAX_LEN} characters")
+                            Filter.EqualsRegex(m.getValue)
+          case MatchType.REGEX_NO_MATCH =>
+                            require(m.getValue.length <= REGEX_MAX_LEN, s"Regular expression filters should " +
+                              s"be <= ${REGEX_MAX_LEN} characters")
+                            Filter.NotEqualsRegex(m.getValue)
         }
         ColumnFilter(m.getName, filter)
       }
@@ -83,8 +90,6 @@ object PrometheusModel {
     val results = if (qr.resultSchema.columns.nonEmpty && qr.resultSchema.columns.length > 1 &&
                       qr.resultSchema.columns(1).colType == ColumnType.HistogramColumn)
                     qr.result.map(toHistResult(_, verbose, qr.resultType))
-                  else if (qr.resultSchema.columns.length == 1)
-                    qr.result.map(toMetadataResult(_, verbose, qr.resultType))
                   else
                     qr.result.map(toPromResult(_, verbose, qr.resultType))
     SuccessResponse(Data(toPromResultType(qr.resultType), results.filter(r => r.values.nonEmpty || r.value.isDefined)),
@@ -103,15 +108,24 @@ object PrometheusModel {
     }
   }
 
-  def toMetadataResult(srv: RangeVector, verbose: Boolean, typ: QueryResultType): Result = {
-    val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
-      (if (verbose) makeVerboseLabels(srv.key)
-      else Map.empty)
-    val values = srv.rows.map(row => {
+  def toLabelValuesResponse(qr: FiloQueryResult, verbose: Boolean, typ: QueryResultType,
+                         mayBePartial: Option[Boolean]): MetadataSuccessResponse = {
+    val values = qr.result.flatMap(srv => srv.rows.map(row => {
       val br = row.asInstanceOf[BinaryRecordRowReader]
-      br.schema.colValues(br.recordBase, br.recordOffset, br.schema.colNames).head
-    })
-    Result(tags, Option(Seq(LabelSampl(values.toSeq))), None)
+      LabelSampl(br.schema.colValues(br.recordBase, br.recordOffset, br.schema.colNames).head)
+    }))
+    MetadataSuccessResponse(values, "success", mayBePartial)
+  }
+
+  def toMetadataMapResponse(qr: FiloQueryResult, verbose: Boolean, typ: QueryResultType,
+                         mayBePartial: Option[Boolean]): MetadataSuccessResponse = {
+    val values = qr.result.flatMap(srv => srv.rows.map(row => {
+      val br = row.asInstanceOf[BinaryRecordRowReader]
+      val consumer = new StringifyMapItemConsumer
+      br.schema.consumeMapItems(br.recordBase, br.recordOffset, 0, consumer)
+      MetadataMapSampl(consumer.stringPairs.toMap)
+    }))
+    MetadataSuccessResponse(values, "success", mayBePartial)
   }
 
   /**

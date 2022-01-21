@@ -37,10 +37,10 @@ final case class LocalPartitionDistConcatExec(queryContext: QueryContext,
   */
 final case class SplitLocalPartitionDistConcatExec(queryContext: QueryContext,
                                      dispatcher: PlanDispatcher,
-                                     children: Seq[ExecPlan],
+                                     children: Seq[ExecPlan], outputRvRange: Option[RvRange],
                                     override val parallelChildTasks: Boolean = false) extends DistConcatExec {
 
-  addRangeVectorTransformer(StitchRvsMapper())
+  addRangeVectorTransformer(StitchRvsMapper(outputRvRange))
 
   // overriden since it can reduce schemas with different vector lengths as long as the columns are same
   override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema =

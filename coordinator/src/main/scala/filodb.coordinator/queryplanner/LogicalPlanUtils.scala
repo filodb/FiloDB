@@ -4,7 +4,6 @@ import scala.collection.mutable.ArrayBuffer
 
 import com.typesafe.scalalogging.StrictLogging
 
-import filodb.coordinator.queryplanner.LogicalPlanUtils.{getLookBackMillis, getTimeFromLogicalPlan}
 import filodb.core.query.{QueryContext, RangeParams}
 import filodb.prometheus.ast.SubqueryUtils
 import filodb.prometheus.ast.Vectors.PromMetricLabel
@@ -64,7 +63,10 @@ object LogicalPlanUtils extends StrictLogging {
                                                 case _ => throw new BadQueryException(s"Invalid logical plan")
                                               }
       case lp: LabelValues                 => TimeRange(lp.startMs, lp.endMs)
+      case lp: LabelCardinality            => TimeRange(lp.startMs, lp.endMs)
       case lp: LabelNames                  => TimeRange(lp.startMs, lp.endMs)
+      case lp: TsCardinalities             => throw new UnsupportedOperationException(
+                                                          "TsCardinalities does not have times")
       case lp: SeriesKeysByFilters         => TimeRange(lp.startMs, lp.endMs)
       case lp: ApplyInstantFunctionRaw     => getTimeFromLogicalPlan(lp.vectors)
       case lp: ScalarBinaryOperation       => TimeRange(lp.rangeParams.startSecs * 1000, lp.rangeParams.endSecs * 1000)
@@ -72,8 +74,8 @@ object LogicalPlanUtils extends StrictLogging {
                                               lp.timeStepParams.endSecs * 1000)
       case sq: SubqueryWithWindowing       => TimeRange(sq.startMs, sq.endMs)
       case tlsq: TopLevelSubquery          => TimeRange(tlsq.startMs, tlsq.endMs)
-      case lp: RawChunkMeta                => throw new UnsupportedOperationException(s"RawChunkMeta does not have " +
-                                              s"time")
+      case lp: RawChunkMeta                => throw new UnsupportedOperationException(
+                                                          "RawChunkMeta does not have times")
     }
   }
   // scalastyle:on cyclomatic.complexity
@@ -85,11 +87,13 @@ object LogicalPlanUtils extends StrictLogging {
   def copyLogicalPlanWithUpdatedTimeRange(logicalPlan: LogicalPlan,
                                           timeRange: TimeRange): LogicalPlan = {
     logicalPlan match {
-      case lp: PeriodicSeriesPlan  => copyWithUpdatedTimeRange(lp, timeRange)
-      case lp: RawSeriesLikePlan   => copyNonPeriodicWithUpdatedTimeRange(lp, timeRange)
-      case lp: LabelValues         => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
-      case lp: LabelNames          => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
-      case lp: SeriesKeysByFilters => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: PeriodicSeriesPlan       => copyWithUpdatedTimeRange(lp, timeRange)
+      case lp: RawSeriesLikePlan        => copyNonPeriodicWithUpdatedTimeRange(lp, timeRange)
+      case lp: LabelValues              => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: LabelNames               => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: LabelCardinality         => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
+      case lp: TsCardinalities          => lp  // immutable & no members need to be updated
+      case lp: SeriesKeysByFilters      => lp.copy(startMs = timeRange.startMs, endMs = timeRange.endMs)
     }
   }
 
@@ -328,7 +332,8 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: ApplyLimitFunction          => getPeriodicSeriesPlan(lp.vectors)
       case lp: RawSeries                   => None
       case lp: LabelValues                 => None
-      case lp: LabelNames                 => None
+      case lp: LabelNames                  => None
+      case lp: LabelCardinality            => None
       case lp: SeriesKeysByFilters         => None
       case lp: ApplyInstantFunctionRaw     => getPeriodicSeriesPlan(lp.vectors)
       case lp: ScalarBinaryOperation       =>  if (lp.lhs.isRight) getPeriodicSeriesPlan(lp.lhs.right.get)
@@ -338,6 +343,7 @@ object LogicalPlanUtils extends StrictLogging {
       case lp: RawChunkMeta                => None
       case sq: SubqueryWithWindowing       => getPeriodicSeriesPlan(sq.innerPeriodicSeries)
       case tlsq: TopLevelSubquery          => getPeriodicSeriesPlan(tlsq.innerPeriodicSeries)
+      case lp: TsCardinalities             => None
     }
   }
 
@@ -349,53 +355,4 @@ object LogicalPlanUtils extends StrictLogging {
    }
   }
 
-}
-
-/**
- * Temporary utility to modify plan to add extra join-on keys or group-by keys
- * for specific time ranges.
- */
-object ExtraOnByKeysUtil {
-
-  def getRealOnLabels(lp: BinaryJoin, addStepKeyTimeRanges: Seq[Seq[Long]]): Seq[String] = {
-    if (shouldAddExtraKeys(lp.lhs, addStepKeyTimeRanges: Seq[Seq[Long]]) ||
-        shouldAddExtraKeys(lp.rhs, addStepKeyTimeRanges: Seq[Seq[Long]])) {
-      // add extra keys if ignoring clause is not specified and on is specified
-      if (lp.on.nonEmpty) lp.on ++ extraByOnKeys
-      else lp.on
-    } else {
-      lp.on
-    }
-  }
-
-  def getRealByLabels(lp: Aggregate, addStepKeyTimeRanges: Seq[Seq[Long]]): Seq[String] = {
-    if (shouldAddExtraKeys(lp, addStepKeyTimeRanges)) {
-      // add extra keys if without clause is not specified
-      if (lp.without.isEmpty) lp.by ++ extraByOnKeys
-      else lp.by
-    } else {
-      lp.by
-    }
-  }
-
-  private def shouldAddExtraKeys(lp: LogicalPlan, addStepKeyTimeRanges: Seq[Seq[Long]]): Boolean = {
-    // need to check if raw time range in query overlaps with configured addStepKeyTimeRanges
-    val range = getTimeFromLogicalPlan(lp)
-    val lookback = getLookBackMillis(lp).max
-    queryTimeRangeRequiresExtraKeys(range.startMs - lookback, range.endMs, addStepKeyTimeRanges)
-  }
-
-  val extraByOnKeys = Seq("_pi_", "_step_")
-  /**
-   * Returns true if two time ranges (x1, x2) and (y1, y2) overlap
-   */
-  private def rangeOverlaps(x1: Long, x2: Long, y1: Long, y2: Long): Boolean = {
-    Math.max(x1, y1) <= Math.min(x2, y2)
-  }
-
-  private def queryTimeRangeRequiresExtraKeys(rawStartMs: Long,
-                                              rawEndMs: Long,
-                                              addStepKeyTimeRanges: Seq[Seq[Long]]): Boolean = {
-    addStepKeyTimeRanges.exists { r => rangeOverlaps(rawStartMs, rawEndMs, r(0), r(1)) }
-  }
 }

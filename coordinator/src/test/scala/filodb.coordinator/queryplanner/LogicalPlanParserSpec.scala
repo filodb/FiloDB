@@ -3,7 +3,9 @@ package filodb.coordinator.queryplanner
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
+import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
+import filodb.query.SeriesKeysByFilters
 
 class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
 
@@ -120,6 +122,20 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
     val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
     val res = LogicalPlanParser.convertToQuery(lp)
     res shouldEqual "(1.0 / (2.0 + foo))"
+  }
+
+  it("should convert metadata series match query1") {
+    val query = """http_requests_total{job="app"}"""
+    val lp = Parser.metadataQueryToLogicalPlan(query, TimeStepParams(1000, 10, 2000))
+    val res = LogicalPlanParser.metatadataMatchToQuery(lp.asInstanceOf[SeriesKeysByFilters])
+    res shouldEqual "http_requests_total{job=\"app\"}"
+  }
+
+  it("should convert metadata series match query2") {
+    val query = """{__name__="http_requests_total", job=~"app|job"}"""
+    val lp = Parser.metadataQueryToLogicalPlan(query, TimeStepParams(1000, 10, 2000))
+    val res = LogicalPlanParser.metatadataMatchToQuery(lp.asInstanceOf[SeriesKeysByFilters])
+    res shouldEqual "http_requests_total{job=~\"app|job\"}"
   }
 
   it("should convert scalar vector operation query") {
