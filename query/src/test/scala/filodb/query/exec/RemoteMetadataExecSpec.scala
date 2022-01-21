@@ -208,7 +208,6 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val resp = rootDistConcatExec.execute(memStore, querySession).runAsync.futureValue
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _) => {
-        response.size shouldEqual 0
         response.flatMap(rv => {
           rv.rows.size shouldEqual 0
           rv.rows.map(row => {
