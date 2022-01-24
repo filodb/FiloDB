@@ -438,7 +438,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val pkTable = getOrCreatePartitionKeysTable(ref, shard)
     val pkByUTTable = getOrCreatePartitionKeysByUpdateTimeTable(ref)
     val start = System.currentTimeMillis()
-    val ret = partKeys.mapParallelOrdered(writeParallelism) { pk =>
+    val ret = partKeys.mapParallelUnordered(writeParallelism) { pk =>
       val ttl = if (pk.endTime == Long.MaxValue) -1 else diskTTLSeconds
       // caller needs to supply hash for partKey - cannot be None
       // Logical & MaxValue needed to make split positive by zeroing sign bit

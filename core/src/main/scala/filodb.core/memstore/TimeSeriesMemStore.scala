@@ -139,7 +139,7 @@ extends MemStore with StrictLogging {
         shard.ingest(d)
         Observable.fromIterable(tasks)
     }
-    .mapParallelOrdered(numParallelFlushes) {
+    .mapParallelUnordered(numParallelFlushes) {
       // asyncBoundary so subsequent computations in pipeline happen in default threadpool
       task => task.executeOn(flushSched).asyncBoundary
     }

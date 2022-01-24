@@ -104,7 +104,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
     val start = System.currentTimeMillis()
     Observable.fromIterable(fromHour to toHour).flatMap { hour =>
       colStore.getPartKeysByUpdateHour(ref, shardNum, hour)
-    }.mapParallelOrdered(parallelism) { pk => // preserve order so updates get applied correctly
+    }.mapParallelOrdered(parallelism) { pk => // preserve order so PK updates get applied in time order
       Task {
         val downsamplPartKey = RecordBuilder.buildDownsamplePartKey(pk.partKey, schemas)
         downsamplPartKey.foreach { dpk =>

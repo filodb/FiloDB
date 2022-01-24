@@ -3,7 +3,6 @@ package filodb.core.memstore
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext
 
-import cats.effect.IO
 import com.typesafe.config.Config
 import debox.Buffer
 import java.util
@@ -128,7 +127,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
               // In the future optimize this if needed.
               .mapEval { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
               .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
-              .guaranteeF(IO(span.finish()))
+              .guarantee(Task.now(span.finish()))
           } else { Observable.empty }
         }
       } else {
@@ -152,7 +151,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
                   .headL
                   // headL since we are fetching a SinglePartition above
               }
-              .guaranteeF(IO(span.finish()))
+              .guarantee(Task.now(span.finish()))
           } else {
             Observable.empty
           }

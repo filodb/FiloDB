@@ -246,7 +246,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     val inputRes = Seq(res0, res1).zipWithIndex
     val output = exec.compose(Observable.fromIterable(inputRes), Task.now(null), QuerySession.makeForTestingOnly())
-        .toListL.runAsync.futureValue
+        .toListL.runToFuture.futureValue
         output.size shouldEqual 1
         output.head.outputRange shouldEqual None
         compareIter(output.head.rows().map(r => (r.getLong(0), r.getDouble(1))) , expected.toIterator)
