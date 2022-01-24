@@ -207,7 +207,7 @@ final case class LabelNamesDistConcatExec(queryContext: QueryContext,
     childResponses.map {
       case (QueryResult(_, _, result, _, _, _), _) => result
       case (QueryError(_, _, ex), _)         => throw ex
-    }.filter(s => s.nonEmpty && s.head.numRows.getOrElse(1) > 0).headF.map(_.head)
+    }.filter(s => s.nonEmpty && s.head.numRows.getOrElse(1) > 0).head.map(_.head)
   }
 }
 

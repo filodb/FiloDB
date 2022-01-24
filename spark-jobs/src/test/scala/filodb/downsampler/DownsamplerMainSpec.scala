@@ -143,7 +143,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
-    rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+    rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(untypedPartKeyBytes, 74372801000L, currTime, Some(150))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
@@ -184,7 +184,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
-    rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+    rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(gaugePartKeyBytes, 74372801000L, currTime, Some(150))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
@@ -223,7 +223,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
-    rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+    rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(gaugeLowFreqPartKeyBytes, 74372801000L, currTime, Some(150))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
@@ -268,7 +268,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
-    rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+    rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(counterPartKeyBytes, 74372801000L, currTime, Some(1))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
@@ -314,7 +314,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
-    rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+    rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(histPartKeyBytes, 74372801000L, currTime, Some(199))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
@@ -364,7 +364,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
-    rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+    rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(histNaNPartKeyBytes, 74372801000L, currTime, Some(199))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
@@ -430,7 +430,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       (histName, Schemas.promHistogram.name),
       (histNameNaN, Schemas.promHistogram.name))
     val partKeys = downsampleColStore.scanPartKeys(batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")), 0)
-    val tsSchemaMetric = Await.result(partKeys.map(pkMetricSchemaReader).toListL.runAsync, 1 minutes)
+    val tsSchemaMetric = Await.result(partKeys.map(pkMetricSchemaReader).toListL.runToFuture, 1 minutes)
     tsSchemaMetric.filter(k => metricNames.contains(k._1)).toSet shouldEqual metrics
   }
 
@@ -443,7 +443,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val readKeys = (0 until 4).flatMap { shard =>
       val partKeys = downsampleColStore.scanPartKeys(batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
                                                      shard)
-      Await.result(partKeys.map(pkMetricName).toListL.runAsync, 1 minutes)
+      Await.result(partKeys.map(pkMetricName).toListL.runToFuture, 1 minutes)
     }.toSet
 
     // readKeys should not contain untyped part key - we dont downsample untyped
@@ -457,7 +457,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       batchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
       0,
       SinglePartitionScan(dsGaugePartKeyBytes))
-      .toListL.runAsync.futureValue.head
+      .toListL.runToFuture.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0,
       downsampledPartData1, 1.minute.toMillis.toInt)
@@ -494,7 +494,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       batchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
       0,
       SinglePartitionScan(dsGaugeLowFreqPartKeyBytes))
-      .toListL.runAsync.futureValue.head
+      .toListL.runToFuture.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0,
       downsampledPartData1, 1.minute.toMillis.toInt)
@@ -522,7 +522,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       batchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
       0,
       SinglePartitionScan(counterPartKeyBytes))
-      .toListL.runAsync.futureValue.head
+      .toListL.runToFuture.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.promCounter.downsample.get, 0, 0,
       downsampledPartData1, 1.minute.toMillis.toInt)
@@ -565,7 +565,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       batchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
       0,
       SinglePartitionScan(histPartKeyBytes))
-      .toListL.runAsync.futureValue.head
+      .toListL.runToFuture.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.promHistogram.downsample.get, 0, 0,
       downsampledPartData1, 5.minutes.toMillis.toInt)
@@ -611,7 +611,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       batchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
       0,
       SinglePartitionScan(histNaNPartKeyBytes))
-      .toListL.runAsync.futureValue.head
+      .toListL.runToFuture.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.promHistogram.downsample.get, 0, 0,
       downsampledPartData1, 5.minutes.toMillis.toInt)
@@ -667,7 +667,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
       0,
       SinglePartitionScan(dsGaugePartKeyBytes))
-      .toListL.runAsync.futureValue.head
+      .toListL.runToFuture.futureValue.head
 
     val downsampledPart2 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0,
       downsampledPartData2, 5.minutes.toMillis.toInt)
@@ -694,7 +694,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
       0,
       SinglePartitionScan(counterPartKeyBytes))
-      .toListL.runAsync.futureValue.head
+      .toListL.runToFuture.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.promCounter.downsample.get, 0, 0,
       downsampledPartData1, 5.minutes.toMillis.toInt)
@@ -735,7 +735,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
       0,
       SinglePartitionScan(histPartKeyBytes))
-      .toListL.runAsync.futureValue.head
+      .toListL.runToFuture.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.promHistogram.downsample.get, 0, 0,
       downsampledPartData1, 5.minutes.toMillis.toInt)
@@ -778,7 +778,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
       0,
       SinglePartitionScan(histNaNPartKeyBytes))
-      .toListL.runAsync.futureValue.head
+      .toListL.runToFuture.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.promHistogram.downsample.get, 0, 0,
       downsampledPartData1, 5.minutes.toMillis.toInt)
@@ -849,7 +849,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       val querySession = QuerySession(QueryContext(), queryConfig)
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
       val res = exec.execute(downsampleTSStore, querySession)(queryScheduler)
-        .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
+        .runToFuture(queryScheduler).futureValue.asInstanceOf[QueryResult]
       queryScheduler.shutdown()
 
       res.result.size shouldEqual 1
@@ -883,7 +883,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val querySession = QuerySession(QueryContext(), queryConfig)
     val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
     val res = exec.execute(downsampleTSStore, querySession)(queryScheduler)
-      .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
+      .runToFuture(queryScheduler).futureValue.asInstanceOf[QueryResult]
     queryScheduler.shutdown()
 
     res.result.size shouldEqual 1
@@ -916,7 +916,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val querySession = QuerySession(QueryContext(), queryConfig)
     val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
     val res = exec.execute(downsampleTSStore, querySession)(queryScheduler)
-      .runAsync(queryScheduler).futureValue.asInstanceOf[QueryError]
+      .runToFuture(queryScheduler).futureValue.asInstanceOf[QueryError]
     queryScheduler.shutdown()
 
     // exception thrown because lookback is < downsample data resolution of 5m
@@ -945,7 +945,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       val querySession = QuerySession(QueryContext(), queryConfig)
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
       val res = exec.execute(downsampleTSStore, querySession)(queryScheduler)
-        .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
+        .runToFuture(queryScheduler).futureValue.asInstanceOf[QueryResult]
       queryScheduler.shutdown()
 
       res.result.size shouldEqual 0
@@ -969,7 +969,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val querySession = QuerySession(QueryContext(), queryConfig)
     val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
     val res = exec.execute(downsampleTSStore, querySession)(queryScheduler)
-      .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
+      .runToFuture(queryScheduler).futureValue.asInstanceOf[QueryResult]
     queryScheduler.shutdown()
     res.result.size shouldEqual 1
     res.result.head.rows.map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual
@@ -1025,7 +1025,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val readKeys = (0 until 4).flatMap { shard =>
       val partKeys = downsampleColStore.scanPartKeys(batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
         shard)
-      Await.result(partKeys.map(pkMetricName).toListL.runAsync, 1 minutes)
+      Await.result(partKeys.map(pkMetricName).toListL.runToFuture, 1 minutes)
     }.toSet
 
     // downsample set should not have a few bulk metrics
@@ -1033,7 +1033,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     val readKeys2 = (0 until 4).flatMap { shard =>
       val partKeys = rawColStore.scanPartKeys(batchDownsampler.rawDatasetRef, shard)
-      Await.result(partKeys.map(pkMetricName).toListL.runAsync, 1 minutes)
+      Await.result(partKeys.map(pkMetricName).toListL.runToFuture, 1 minutes)
     }.toSet
 
     // raw set should remain same since inDownsampleTables=true in
@@ -1077,7 +1077,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val readKeys = (0 until 4).flatMap { shard =>
       val partKeys = downsampleColStore.scanPartKeys(batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
         shard)
-      Await.result(partKeys.map(pkMetricName).toListL.runAsync, 1 minutes)
+      Await.result(partKeys.map(pkMetricName).toListL.runToFuture, 1 minutes)
     }.toSet
 
     // readKeys should not contain bulk PK records
@@ -1085,7 +1085,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     val readKeys2 = (0 until 4).flatMap { shard =>
       val partKeys = rawColStore.scanPartKeys(batchDownsampler.rawDatasetRef, shard)
-      Await.result(partKeys.map(pkMetricName).toListL.runAsync, 1 minutes)
+      Await.result(partKeys.map(pkMetricName).toListL.runToFuture, 1 minutes)
     }.toSet
 
     // readKeys should not contain bulk PK records

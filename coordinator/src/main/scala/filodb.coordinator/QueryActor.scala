@@ -11,7 +11,7 @@ import akka.pattern.AskTimeoutException
 import kamon.Kamon
 import kamon.instrumentation.executor.ExecutorInstrumentation
 import kamon.tag.TagSet
-import monix.execution.Scheduler
+import monix.execution.{ExecutionModel, Scheduler}
 import monix.execution.schedulers.SchedulerService
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
@@ -116,7 +116,8 @@ final class QueryActor(memStore: MemStore,
       }
     }
     val executor = new ForkJoinPool( numSchedThreads, threadFactory, exceptionHandler, true)
-    Scheduler.apply(ExecutorInstrumentation.instrument(executor, schedName))
+    Scheduler.apply(ExecutorInstrumentation.instrument(executor, schedName),
+      ExecutionModel.AlwaysAsyncExecution)
   }
 
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
@@ -132,7 +133,7 @@ final class QueryActor(memStore: MemStore,
         val querySession = QuerySession(q.queryContext, queryConfig, catchMultipleLockSetErrors = true)
         queryExecuteSpan.mark("query-actor-received-execute-start")
         q.execute(memStore, querySession)(queryScheduler)
-          .foreach { res =>
+          .map { res =>
             FiloSchedulers.assertThreadName(QuerySchedName)
             querySession.close()
             replyTo ! res
@@ -159,7 +160,7 @@ final class QueryActor(memStore: MemStore,
                 }
             }
             queryExecuteSpan.finish()
-          }(queryScheduler).recover { case ex =>
+          }.runToFuture(queryScheduler).recover { case ex =>
             querySession.close()
             // Unhandled exception in query, should be rare
             logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error," +

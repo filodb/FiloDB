@@ -87,7 +87,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
     }
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
-    colStore.write(dataset.ref, Observable.fromIterator(chunks)).futureValue
+    colStore.write(dataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(gaugePartKeyBytes, firstSampleTime, firstSampleTime + numSamples, Some(150))
     colStore.writePartKeys(dataset.ref, 0, Observable.now(pk), 259200, 34).futureValue
   }
@@ -190,7 +190,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
         numSamples), "_metric_")
     val queryConfig = new QueryConfig(config.getConfig("query"))
     val querySession = QuerySession(QueryContext(), queryConfig)
-    exec.execute(memStore, querySession)(queryScheduler).runAsync(queryScheduler)
+    exec.execute(memStore, querySession)(queryScheduler).runToFuture(queryScheduler)
   }
 }
 

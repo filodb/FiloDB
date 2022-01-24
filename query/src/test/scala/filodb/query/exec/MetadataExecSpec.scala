@@ -127,7 +127,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val execPlan = LabelValuesDistConcatExec(QueryContext(), executeDispatcher, leaves)
 
-    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _) => {
         val rv = response(0)
@@ -151,7 +151,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val execPlan = PartKeysDistConcatExec(QueryContext(), executeDispatcher, leaves)
 
-    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     (resp: @unchecked) match {
       case QueryResult(_, _, results, _, _, _) => results.size shouldEqual 1
         results(0).rows.size shouldEqual 0
@@ -169,7 +169,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val execPlan = PartKeysDistConcatExec(QueryContext(), executeDispatcher, leaves)
 
-    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _) =>
         response.size shouldEqual 1
@@ -190,7 +190,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val execPlan = PartKeysExec(QueryContext(plannerParams = PlannerParams(sampleLimit = limit - 1)), executeDispatcher,
                                 timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now)
 
-    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _) => {
         response.size shouldEqual 1
@@ -215,7 +215,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val execPlan = LabelNamesDistConcatExec(QueryContext(), executeDispatcher, leaves)
 
-    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _) => {
         val rv = response(0)
@@ -239,7 +239,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val execPlan = LabelValuesDistConcatExec(QueryContext(), executeDispatcher, leaves)
 
-    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _) => {
         val rv = response(0)
@@ -265,7 +265,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val execPlan = LabelCardinalityReduceExec(qContext, dummyDispatcher, leaves)
     execPlan.addRangeVectorTransformer(new LabelCardinalityPresenter())
 
-    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _) => {
         response.size shouldEqual 2
@@ -344,7 +344,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
       val execPlan = TsCardReduceExec(QueryContext(), executeDispatcher, leaves)
 
-      val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+      val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
       val result = (resp: @unchecked) match {
         case QueryResult(id, _, response, _, _, _) =>
           // should only have a single RangeVector

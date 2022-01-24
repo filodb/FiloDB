@@ -152,7 +152,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         startStatsUpdateTask()
         logger.info(s"Shard now ready for query dataset=$indexDataset shard=$shardNum")
         isReadyForQuery = true
-      }.runAsync(housekeepingSched)
+      }.runToFuture(housekeepingSched)
   }
 
   private def startHousekeepingTask(): Unit = {
@@ -166,12 +166,12 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     logger.info(s"Starting housekeeping for downsample cluster of dataset=$rawDatasetRef shard=$shardNum " +
                 s"every ${rawStoreConfig.flushInterval}")
     houseKeepingFuture = Observable.intervalWithFixedDelay(rawStoreConfig.flushInterval,
-                                                           rawStoreConfig.flushInterval).mapAsync { _ =>
+                                                           rawStoreConfig.flushInterval).mapEval { _ =>
       purgeExpiredIndexEntries()
       indexRefresh()
     }.map { _ =>
       partKeyIndex.refreshReadersBlocking()
-    }.onErrorRestartUnlimited.completedL.runAsync(housekeepingSched)
+    }.onErrorRestartUnlimited.completedL.runToFuture(housekeepingSched)
   }
 
   private def purgeExpiredIndexEntries(): Unit = {
@@ -215,7 +215,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     logger.info(s"Starting Stats Update task from raw dataset=$rawDatasetRef shard=$shardNum every 1 minute")
     gaugeUpdateFuture = Observable.intervalWithFixedDelay(1.minute).map { _ =>
       updateGauges()
-    }.onErrorRestartUnlimited.completedL.runAsync(housekeepingSched)
+    }.onErrorRestartUnlimited.completedL.runToFuture(housekeepingSched)
   }
 
   private def updateGauges(): Unit = {
@@ -300,7 +300,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
     // when query is complete.
     Observable.fromIterable(lookup.pkRecords)
-      .mapAsync(downsampleStoreConfig.demandPagingParallelism) { partRec =>
+      .mapParallelUnordered(downsampleStoreConfig.demandPagingParallelism) { partRec =>
         val startExecute = System.currentTimeMillis()
         // TODO test multi-partition scan if latencies are high
         // IMPORTANT: The Raw partition reads need to honor the start time in the index. Suppose, the shards for the

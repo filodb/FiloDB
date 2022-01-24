@@ -65,7 +65,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
     val start = System.currentTimeMillis()
     colStore.scanPartKeys(ref, shardNum)
       .filter(_.endTime > start - ttlMs)
-      .mapAsync(Runtime.getRuntime.availableProcessors()) { pk =>
+      .mapParallelUnordered(Runtime.getRuntime.availableProcessors()) { pk =>
         Task {
           val partId = assignPartId(pk)
           index.addPartKey(pk.partKey, partId, pk.startTime, pk.endTime)()
@@ -104,7 +104,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
     val start = System.currentTimeMillis()
     Observable.fromIterable(fromHour to toHour).flatMap { hour =>
       colStore.getPartKeysByUpdateHour(ref, shardNum, hour)
-    }.mapAsync(parallelism) { pk =>
+    }.mapParallelOrdered(parallelism) { pk => // preserve order so updates get applied correctly
       Task {
         val downsamplPartKey = RecordBuilder.buildDownsamplePartKey(pk.partKey, schemas)
         downsamplPartKey.foreach { dpk =>

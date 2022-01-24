@@ -214,7 +214,7 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
     // verify data in index table.
     for (shard <- 0 until numOfShards) {
-      val partKeyRecords = Await.result(colStore.scanPartKeys(dataset.ref, shard).toListL.runAsync, Duration(1, "minutes"))
+      val partKeyRecords = Await.result(colStore.scanPartKeys(dataset.ref, shard).toListL.runToFuture, Duration(1, "minutes"))
       // because there will be 3 records that meets the copier time period.
       partKeyRecords.size shouldEqual 3
       for (pkr <- partKeyRecords) {
@@ -235,7 +235,7 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
       // verify data in pk_by_update_time table
       val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
       for (shard <- 0 until numOfShards) {
-        val partKeyRecords = Await.result(colStore.getPartKeysByUpdateHour(dataset.ref, shard, updateHour).toListL.runAsync, Duration(1, "minutes"))
+        val partKeyRecords = Await.result(colStore.getPartKeysByUpdateHour(dataset.ref, shard, updateHour).toListL.runToFuture, Duration(1, "minutes"))
         // because there will be 3 records that meets the copier time period.
         partKeyRecords.size shouldEqual 3
         for (pkr <- partKeyRecords) {
@@ -255,7 +255,7 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
     // verify workspace/namespace names in shard=0.
     val shard0 = 0
-    val partKeyRecordsShard0 = Await.result(colStore.scanPartKeys(dataset.ref, shard0).toListL.runAsync,
+    val partKeyRecordsShard0 = Await.result(colStore.scanPartKeys(dataset.ref, shard0).toListL.runToFuture,
       Duration(1, "minutes"))
     partKeyRecordsShard0.size shouldEqual 3
     for (pkr <- partKeyRecordsShard0) {
@@ -274,7 +274,7 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
     // verify workspace/namespace names in shard=2.
     val shard2 = 2
-    val partKeyRecordsShard2 = Await.result(colStore.scanPartKeys(dataset.ref, shard2).toListL.runAsync,
+    val partKeyRecordsShard2 = Await.result(colStore.scanPartKeys(dataset.ref, shard2).toListL.runToFuture,
       Duration(1, "minutes"))
     partKeyRecordsShard2.size shouldEqual 3
     for (pkr <- partKeyRecordsShard2) {

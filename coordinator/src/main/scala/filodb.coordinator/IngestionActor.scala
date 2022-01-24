@@ -314,7 +314,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
           off }
         .until(_ >= endOffset)
         // TODO: move this code to TimeSeriesShard itself.  Shard should control the thread
-        .lastOptionL.runAsync(shardInstance.ingestSched)
+        .lastOptionL.runToFuture(shardInstance.ingestSched)
       fut.onComplete {
         case Success(_) =>
           logger.info(s"Finished recovery for dataset=$ref shard=$shard")

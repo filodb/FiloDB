@@ -99,7 +99,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
                                           numSamples * numSeries, dataset, shardMapper, spread)
   val ingestTask = containerStream.groupBy(_._1)
                     // Asynchronously subcribe and ingest each shard
-                    .mapAsync(numShards) { groupedStream =>
+                    .mapParallelUnordered(numShards) { groupedStream =>
                       val shard = groupedStream.key
                       println(s"Starting ingest on shard $shard...")
                       val shardStream = groupedStream.zipWithIndex.flatMap { case ((_, bytes), idx) =>
@@ -108,7 +108,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
                         Observable.fromIterable(data)
                       }
                       Task.fromFuture(cluster.memStore.ingestStream(dataset.ref, shard, shardStream, global))
-                    }.countL.runAsync
+                    }.countL.runToFuture
   Await.result(producingFut, 30.seconds)
   Thread sleep 2000
   cluster.memStore.asInstanceOf[TimeSeriesMemStore].refreshIndexForTesting(dataset.ref) // commit lucene index
@@ -207,10 +207,10 @@ class QueryInMemoryBenchmark extends StrictLogging {
   def singleThreadedRawQuery(): Long = {
     val querySession = QuerySession(QueryContext(), queryConfig)
 
-    val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
+    val f = Observable.fromIterable(0 until numQueries).mapEval { n =>
       execPlan.execute(cluster.memStore, querySession)(querySched)
     }.executeOn(querySched)
-     .countL.runAsync
+     .countL.runToFuture
     Await.result(f, 60.seconds)
   }
 
@@ -223,11 +223,11 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(numQueries)
   def singleThreadedMinOverTimeQuery(): Long = {
-    val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
+    val f = Observable.fromIterable(0 until numQueries).mapEval { n =>
       val querySession = QuerySession(QueryContext(), queryConfig)
       minEP.execute(cluster.memStore, querySession)(querySched)
     }.executeOn(querySched)
-     .countL.runAsync
+     .countL.runToFuture
     Await.result(f, 60.seconds)
   }
 
@@ -240,11 +240,11 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(numQueries)
   def singleThreadedSumRateCCQuery(): Long = {
-    val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
+    val f = Observable.fromIterable(0 until numQueries).mapEval { n =>
       val querySession = QuerySession(QueryContext(), queryConfig)
       sumRateEP.execute(cluster.memStore, querySession)(querySched)
     }.executeOn(querySched)
-     .countL.runAsync
+     .countL.runToFuture
     Await.result(f, 60.seconds)
   }
 }

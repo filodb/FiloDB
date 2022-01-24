@@ -80,7 +80,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
         case _       => throw new IllegalArgumentException("requirement failed: Only and, or and unless are supported ")
       }
 
-      Observable.fromIterator(results)
+      Observable.fromIteratorUnsafe(results)
     }
     Observable.fromTask(taskOfResults).flatten
   }

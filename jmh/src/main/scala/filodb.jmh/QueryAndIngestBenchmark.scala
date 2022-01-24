@@ -87,7 +87,7 @@ class QueryAndIngestBenchmark extends StrictLogging {
 
   val ingestTask = containerStream.groupBy(_._1)
                     // Asynchronously subcribe and ingest each shard
-                    .mapAsync(numShards) { groupedStream =>
+                    .mapParallelUnordered(numShards) { groupedStream =>
                       val shard = groupedStream.key
                       println(s"Starting ingest on shard $shard...")
                       val shardStream = groupedStream.zipWithIndex.flatMap { case ((_, bytes), idx) =>
@@ -97,7 +97,7 @@ class QueryAndIngestBenchmark extends StrictLogging {
                       }
                       Task.fromFuture(
                         cluster.memStore.ingestStream(dataset.ref, shard, shardStream, global))
-                    }.countL.runAsync
+                    }.countL.runToFuture
 
   val memstore = cluster.memStore.asInstanceOf[TimeSeriesMemStore]
   val shards = (0 until numShards).map { s => memstore.getShardE(dataset.ref, s) }

@@ -39,7 +39,7 @@ class HistToPromSeriesMapperSpec extends AnyFunSpec with Matchers with ScalaFutu
                                                         ColumnInfo("value", ColumnType.DoubleColumn))
 
     val destObs = mapper.apply(sourceObs, querySession, 1000, sourceSchema, Nil)
-    val destRvs = destObs.toListL.runAsync.futureValue
+    val destRvs = destObs.toListL.runToFuture.futureValue
 
     // Should be 8 time series since there are 8 buckets
     destRvs.length shouldEqual 8
@@ -75,7 +75,7 @@ class HistToPromSeriesMapperSpec extends AnyFunSpec with Matchers with ScalaFutu
                                                         ColumnInfo("value", ColumnType.DoubleColumn))
 
     val destObs = mapper.apply(sourceObs, querySession, 1000, sourceSchema, Nil)
-    val destRvs = destObs.toListL.runAsync.futureValue
+    val destRvs = destObs.toListL.runToFuture.futureValue
 
     // Should be 10 time series since there are up to 10 buckets
     destRvs.length shouldEqual 10

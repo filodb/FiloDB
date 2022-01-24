@@ -188,7 +188,7 @@ trait ExecPlan extends QueryCommand {
     ): Task[QueryResult] = {
         @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
         val builder = SerializedRangeVector.newBuilder()
-        rv.doOnStart(_ => span.mark("before-first-materialized-result-rv"))
+        rv.doOnStart(_ => Task.now(span.mark("before-first-materialized-result-rv")))
           .map {
             case srv: SerializableRangeVector =>
               numResultSamples += srv.numRowsSerialized
@@ -212,12 +212,12 @@ trait ExecPlan extends QueryCommand {
                   sampleLimit} samples. Try applying more filters or reduce time range.")
               srv
           }
-          .doOnTerminate(_ => span.mark("after-last-materialized-result-rv"))
+          .guaranteeCase(_ => Task.now(span.mark("after-last-materialized-result-rv")))
           .toListL
           .map { r =>
             Kamon.histogram("query-execute-time-elapsed-step2-result-materialized",
                   MeasurementUnit.time.milliseconds)
-              .withTag("plan", getClass.getSimpleName)
+              .withTag("plan", this.getClass.getSimpleName)
               .record(Math.max(0, System.currentTimeMillis - startExecute))
             val numDataBytes = builder.allContainers.map(_.numBytes).sum
             val numKeyBytes = r.foldLeft(0)(_ + _.key.keySize)
@@ -227,7 +227,7 @@ trait ExecPlan extends QueryCommand {
             span.mark(s"resultBytes=$resultSize")
             span.mark(s"resultSamples=$numResultSamples")
             span.mark(s"numSrv=${r.size}")
-            span.mark(s"execute-step2-end-${getClass.getSimpleName}")
+            span.mark(s"execute-step2-end-${this.getClass.getSimpleName}")
             QueryResult(queryContext.queryId, resultSchema, r, querySession.queryStats,
               querySession.resultCouldBePartial, querySession.partialResultsReason)
           }
@@ -439,7 +439,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // Create tasks for all results.
     // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
     val childTasks = Observable.fromIterable(children.zipWithIndex)
-                               .mapAsync(parallelism) { case (plan, i) =>
+                               .mapParallelUnordered(parallelism) { case (plan, i) =>
                                  val task = dispatchRemotePlan(plan, querySession, span).map((_, i))
                                  span.mark(s"child-plan-$i-dispatched-${plan.getClass.getSimpleName}")
                                  task
@@ -449,8 +449,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // an empty schema.  Validate that the other schemas are the same.  Skip over empty schemas.
     var sch = ResultSchema.empty
     val processedTasks = childTasks
-      .doOnStart(_ => span.mark("first-child-result-received"))
-      .doOnTerminate(_ => span.mark("last-child-result-received"))
+      .doOnStart(_ => Task.now(span.mark("first-child-result-received")))
+      .guaranteeCase(_ => Task.now(span.mark("last-child-result-received")))
       .map {
         case (res @ QueryResult(_, _, _, qStats, isPartialResult, partialResultReason), i) =>
           if (isPartialResult) {
@@ -473,7 +473,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
       // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {
         val outputRvs = compose(processedTasks, outputSchema, querySession)
-          .doOnTerminate(_ => span.mark(s"execute-step1-child-result-composition-end-${getClass.getSimpleName}"))
+          .guaranteeCase { _ =>
+            Task.now(span.mark(s"execute-step1-child-result-composition-end-${this.getClass.getSimpleName}"))
+          }
         ExecResult(outputRvs, outputSchema)
       }
   }

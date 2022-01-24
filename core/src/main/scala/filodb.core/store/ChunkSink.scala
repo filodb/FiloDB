@@ -158,7 +158,7 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
   override def writePartKeys(ref: DatasetRef, shard: Int,
                              partKeys: Observable[PartKeyRecord], diskTTLSeconds: Long,
                              updateHour: Long, writeToPkUTTable: Boolean = true): Future[Response] = {
-    partKeys.countL.map(c => sinkStats.partKeysWrite(c.toInt)).runAsync.map(_ => Success)
+    partKeys.countL.map(c => sinkStats.partKeysWrite(c.toInt)).runToFuture.map(_ => Success)
   }
 
   override def getPartKeysByUpdateHour(ref: DatasetRef, shard: Int,
