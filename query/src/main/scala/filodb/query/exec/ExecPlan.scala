@@ -188,7 +188,7 @@ trait ExecPlan extends QueryCommand {
     ): Task[QueryResult] = {
         @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
         val builder = SerializedRangeVector.newBuilder()
-        rv.doOnStart(_ => Task.now(span.mark("before-first-materialized-result-rv")))
+        rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
           .map {
             case srv: SerializableRangeVector =>
               numResultSamples += srv.numRowsSerialized
@@ -212,7 +212,7 @@ trait ExecPlan extends QueryCommand {
                   sampleLimit} samples. Try applying more filters or reduce time range.")
               srv
           }
-          .guaranteeCase(_ => Task.now(span.mark("after-last-materialized-result-rv")))
+          .guarantee(Task.eval(span.mark("after-last-materialized-result-rv")))
           .toListL
           .map { r =>
             Kamon.histogram("query-execute-time-elapsed-step2-result-materialized",
@@ -449,8 +449,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // an empty schema.  Validate that the other schemas are the same.  Skip over empty schemas.
     var sch = ResultSchema.empty
     val processedTasks = childTasks
-      .doOnStart(_ => Task.now(span.mark("first-child-result-received")))
-      .guaranteeCase(_ => Task.now(span.mark("last-child-result-received")))
+      .doOnStart(_ => Task.eval(span.mark("first-child-result-received")))
+      .guaranteeCase(_ => Task.eval(span.mark("last-child-result-received")))
       .map {
         case (res @ QueryResult(_, _, _, qStats, isPartialResult, partialResultReason), i) =>
           if (isPartialResult) {
@@ -474,7 +474,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
       Kamon.runWithSpan(span, false) {
         val outputRvs = compose(processedTasks, outputSchema, querySession)
           .guaranteeCase { _ =>
-            Task.now(span.mark(s"execute-step1-child-result-composition-end-${this.getClass.getSimpleName}"))
+            Task.eval(span.mark(s"execute-step1-child-result-composition-end-${this.getClass.getSimpleName}"))
           }
         ExecResult(outputRvs, outputSchema)
       }

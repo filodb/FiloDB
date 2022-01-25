@@ -127,7 +127,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
               // In the future optimize this if needed.
               .mapEval { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
               .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
-              .guarantee(Task.now(span.finish()))
+              .guarantee(Task.eval(span.finish()))
           } else { Observable.empty }
         }
       } else {
@@ -151,7 +151,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
                   .headL
                   // headL since we are fetching a SinglePartition above
               }
-              .guarantee(Task.now(span.finish()))
+              .guarantee(Task.eval(span.finish()))
           } else {
             Observable.empty
           }
@@ -179,7 +179,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
     // as opposed to ingestSched
 
   // No need to execute the task on ingestion thread if it's empty / no ODP partitions
-  } else Task.now(Nil)
+  } else Task.eval(Nil)
 
   /**
    * Creates a Task which is meant ONLY TO RUN ON INGESTION THREAD

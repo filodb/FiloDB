@@ -30,7 +30,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     ColumnInfo("value", ColumnType.DoubleColumn)), 1)
   val schema = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
-  val tvSchemaTask = Task.now(tvSchema)
+  val tvSchemaTask = Task.eval(tvSchema)
 
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)

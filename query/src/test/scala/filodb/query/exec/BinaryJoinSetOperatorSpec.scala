@@ -45,7 +45,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     override def isLocalCall: Boolean = ???
   }
   val resultSchema = ResultSchema(MetricsTestData.timeseriesSchema.infosFromIDs(0 to 1), 1)
-  val resSchemaTask = Task.now(resultSchema)
+  val resSchemaTask = Task.eval(resultSchema)
 
   val sampleHttpRequests: Array[RangeVector] = Array(
     new RangeVector {

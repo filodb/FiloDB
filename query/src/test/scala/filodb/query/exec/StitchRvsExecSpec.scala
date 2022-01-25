@@ -193,7 +193,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val res1 = QueryResult("id", rs, Seq(MetricsTestData.makeRv(CustomRangeVectorKey.empty, rvsData(1), RvRange(30, 10, 100))))
 
     val inputRes = Seq(res0, res1).zipWithIndex
-    val output = exec.compose(Observable.fromIterable(inputRes), Task.now(null), QuerySession.makeForTestingOnly())
+    val output = exec.compose(Observable.fromIterable(inputRes), Task.eval(null), QuerySession.makeForTestingOnly())
       .toListL.runToFuture.futureValue
     output.size shouldEqual 1
 
@@ -245,7 +245,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val res1 = QueryResult("id", rs, Seq(MetricsTestData.makeRv(CustomRangeVectorKey.empty, rvsData(1), RvRange(30, 10, 100))))
 
     val inputRes = Seq(res0, res1).zipWithIndex
-    val output = exec.compose(Observable.fromIterable(inputRes), Task.now(null), QuerySession.makeForTestingOnly())
+    val output = exec.compose(Observable.fromIterable(inputRes), Task.eval(null), QuerySession.makeForTestingOnly())
         .toListL.runToFuture.futureValue
         output.size shouldEqual 1
         output.head.outputRange shouldEqual None
