@@ -322,7 +322,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
   }
 
   //TODO subquery does not push the aggregation down
-  it("should generate plan for SubqueryWithWindowing spanning multiple partitions with namespace regex, no push down aggregation") {
+  it("should push down aggregation in generated plan for SubqueryWithWindowing spanning multiple partitions with namespace regex") {
     val query ="""sum_over_time(foo{_ws_ = "demo", _ns_ =~ ".*Ns", instance = "Inst-1" }[5d:300s])"""
     val endSecs = 1634775000L
     val queryParams = PromQlQueryParams(query, endSecs, 0, endSecs)

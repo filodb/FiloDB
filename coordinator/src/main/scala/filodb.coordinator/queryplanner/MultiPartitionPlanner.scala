@@ -82,8 +82,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     ) { // Query was part of routing
       localPartitionPlanner.materialize(logicalPlan, qContext)
     } else logicalPlan match {
-//      case tlsq: TopLevelSubquery             => super.materializeTopLevelSubquery(qContext, tlsq).plans.head
-//      case sqww: SubqueryWithWindowing        => super.materializeSubqueryWithWindowing(qContext, sqww).plans.head
       case mqp: MetadataQueryPlan             => materializeMetadataQueryPlan(mqp, qContext).plans.head
       case lp: TsCardinalities                => materializeTsCardinalities(lp, qContext).plans.head
       case _                                  => walkLogicalPlanTree(logicalPlan, qContext).plans.head
@@ -93,20 +91,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
     // Should avoid this asInstanceOf, far many places where we do this now.
     val params = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    // MultiPartitionPlanner has capability to stitch across time partitions
-    // To see if we do have  across-time partitions
-    // (or just multiple partitions because of a binary join) we call getPartitions() function
-    // In case of TopLevelSubquery normal start-end of query it not enough as they might access the data beyond
-    // query start-end, hence, we "enhance" update params with the start-end that the queries will indeed cover.
-    // The notion of lookback that getPartitions() understands, is not applicable to TopLevelSubquery, hence, special
-    // treatment here. The parameters produced, however, are used exclusively to see if we have multiple
-    // partitions.
-//    val updatedQueryContext = logicalPlan match {
-//      case tlsq: TopLevelSubquery => topLevelSubqueryContext(tlsq, qContext)
-//      case _ => qContext
-//    }
-//    val paramToCheckPartitions = updatedQueryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-//    val partitions = getPartitions(logicalPlan, paramToCheckPartitions)
+    // MultiPartitionPlanner has capability to stitch across time partitions, however, the logic is mostly broken
+    // and not well tested. The logic below would not work well for any kind of subquery since their actual
+    // start and ends are different from the start/end parameter of the query context. If we are to implement
+    // stitching across time, we need to to pass proper parameters to getPartitions() call
     val paramToCheckPartitions = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val partitions = getPartitions(logicalPlan, paramToCheckPartitions)
 

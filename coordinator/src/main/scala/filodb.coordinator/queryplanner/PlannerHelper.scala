@@ -251,21 +251,6 @@ trait  PlannerHelper {
     }
   }
 
-//  def subqueryWithWindowingContext(sqww: SubqueryWithWindowing, qContext: QueryContext) : QueryContext = {
-//    var innerPlan = sqww.innerPeriodicSeries
-//    val qp = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-//    val newQp = qp.copy(
-//      promQl = LogicalPlanParser.convertToQuery(sqww.innerPeriodicSeries),
-//      startSecs = sqww.innerPeriodicSeries.startMs/1000,
-//      stepSecs = sqww.innerPeriodicSeries.stepMs/1000,
-//      endSecs = sqww.innerPeriodicSeries.endMs/1000
-//    )
-//    val updatedQueryContext = qContext.copy(
-//      origQueryParams = newQp
-//    )
-//    updatedQueryContext
-//  }
-
    def createAbsentOverTimePlan( innerExecPlan: PlanResult,
                                         innerPlan: PeriodicSeriesPlan,
                                         qContext: QueryContext,
@@ -316,20 +301,6 @@ trait  PlannerHelper {
     //walkLogicalPlanTree(tlsq.innerPeriodicSeries, updatedQueryContext)
     walkLogicalPlanTree(tlsq.innerPeriodicSeries, qContext)
   }
-
-//  def topLevelSubqueryContext(tlsq: TopLevelSubquery, qContext: QueryContext): QueryContext = {
-//    val qp = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-//    val newQp = qp.copy(
-//      promQl = LogicalPlanParser.convertToQuery(tlsq.innerPeriodicSeries),
-//      startSecs = tlsq.innerPeriodicSeries.startMs/1000,
-//      stepSecs = tlsq.innerPeriodicSeries.stepMs/1000,
-//      endSecs = tlsq.innerPeriodicSeries.endMs/1000
-//    )
-//    val updatedQueryContext = qContext.copy(
-//      origQueryParams = newQp
-//    )
-//    updatedQueryContext
-//  }
 
   def materializeScalarTimeBased(qContext: QueryContext,
                                   lp: ScalarTimeBasedPlan): PlanResult = {
