@@ -149,7 +149,7 @@ case class PrometheusInputRecord(tags: Map[String, String],
   // Get hashes and sort tags of the keys/values for shard calculation
   val hashes = RecordBuilder.sortAndComputeHashes(javaTags)
 
-  final def shardKeyHash: Int = RecordBuilder.shardKeyHash(nonMetricShardValues, trimmedMetric)
+  final def shardKeyHash: Int = RecordBuilder.shardKeyHash(nonMetricShardValues, metricCol, trimmedMetric)
   final def partitionKeyHash: Int = RecordBuilder.combineHashExcluding(javaTags, hashes, ignorePartKeyTags)
 
   val nonMetricShardValues: Seq[String] = nonMetricShardCols.flatMap(tags.get)
@@ -221,7 +221,7 @@ class MetricTagInputRecord(values: Seq[Any],
                            metric: String,
                            tags: Map[ZCUTF8, ZCUTF8],
                            schema: Schema) extends InputRecord {
-  final def shardKeyHash: Int = RecordBuilder.shardKeyHash(nonMetricShardValues, metric)
+  final def shardKeyHash: Int = RecordBuilder.shardKeyHash(nonMetricShardValues,schema.options.metricColumn, metric)
   // NOTE: this is probably not very performant right now.
   final def partitionKeyHash: Int = tags.hashCode
 

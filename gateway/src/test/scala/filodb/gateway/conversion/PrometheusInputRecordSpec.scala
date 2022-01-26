@@ -38,7 +38,7 @@ class PrometheusInputRecordSpec extends AnyFunSpec with Matchers {
     record1.getMetric shouldEqual "num_partitions"
     record1.nonMetricShardValues shouldEqual Seq("filodb", "demo")
 
-    record1.shardKeyHash shouldEqual RecordBuilder.shardKeyHash(Seq("filodb", "demo"), "num_partitions")
+    record1.shardKeyHash shouldEqual RecordBuilder.shardKeyHash(Seq("filodb", "demo"), "__name__", "num_partitions")
 
     record1.addToBuilder(builder)
     builder.allContainers.head.foreach { case (base, offset) =>
@@ -71,7 +71,7 @@ class PrometheusInputRecordSpec extends AnyFunSpec with Matchers {
     record1.getMetric shouldEqual "num_partitions"
     record1.nonMetricShardValues shouldEqual Seq("filodb", "demo")
 
-    record1.shardKeyHash shouldEqual RecordBuilder.shardKeyHash(Seq("filodb", "demo"), "num_partitions")
+    record1.shardKeyHash shouldEqual RecordBuilder.shardKeyHash(Seq("filodb", "demo"), "__name__","num_partitions")
 
     record1.addToBuilder(builder)
     builder.allContainers.head.foreach { case (base, offset) =>

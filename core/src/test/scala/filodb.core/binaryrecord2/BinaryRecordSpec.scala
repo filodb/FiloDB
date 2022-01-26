@@ -602,8 +602,8 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       val jobHash = BinaryRegion.hash32(labels("job").getBytes(StandardCharsets.UTF_8))
       val metricHash = BinaryRegion.hash32(labels("__name__").getBytes(StandardCharsets.UTF_8))
 
-      RecordBuilder.shardKeyHash(Nil, labels("__name__")) shouldEqual (7*31 + metricHash)
-      RecordBuilder.shardKeyHash(Seq(labels("job")), labels("__name__")) shouldEqual ((7*31 + jobHash)*31 + metricHash)
+      RecordBuilder.shardKeyHash(Nil, "__name__", labels("__name__")) shouldEqual (7*31 + metricHash)
+      RecordBuilder.shardKeyHash(Seq(labels("job")), "__name__", labels("__name__")) shouldEqual ((7*31 + jobHash)*31 + metricHash)
     }
 
     it("should combine hash excluding certain keys") {

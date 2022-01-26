@@ -96,7 +96,7 @@ object Utils extends StrictLogging {
     }.toMap
     val metricColumn = dataset.options.metricColumn
     val metric = shardValMap(metricColumn)
-    Some(RecordBuilder.shardKeyHash((shardValMap - metricColumn).values.toSeq, metric))
+    Some(RecordBuilder.shardKeyHash((shardValMap - metricColumn).values.toSeq, metricColumn, metric))
   }
 
   /**

@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration._
 
-import filodb.core.{SpreadChange, SpreadProvider}
+import filodb.core.{SpreadChange, SpreadProvider, TargetSchemaProvider}
 import filodb.memory.EvictionLock
 
 trait TsdbQueryParams
@@ -25,6 +25,7 @@ case class PlannerParams(applicationId: String = "filodb",
                          spread: Option[Int] = None,
                          spreadOverride: Option[SpreadProvider] = None,
                          shardOverrides: Option[Seq[Int]] = None,
+                         targetSchema: Option[TargetSchemaProvider] = None,
                          queryTimeoutMillis: Int = 30000,
                          sampleLimit: Int = 1000000,
                          groupByCardLimit: Int = 100000,
@@ -81,6 +82,39 @@ object QueryContext {
 
     simpleMapSpreadFunc(shardKeyNames.asScala, spreadAssignment, defaultSpread)
   }
+
+  /**
+   * A functional TargetSchemaProvider which takes a targetSchema config that has key as shardKey/values mapped to
+   * TargetSchema
+   * for e.g in the following config, first key has targetSchema as `_instanceId_`, All the metrics coming from
+   * a-service/a-client for an `_instanceId` will be routed to a single shard.
+   * {
+   *  {"_ws_" -> "a-service", "_ns_" ->"a-client" : ["_instanceId_"]},
+   *  {"_ws_" -> "b-service", "_ns_" ->"b-client" : ["_resourceId_"]}
+   * }
+   * @param shardKeyNames
+   * @param targetSchemaMap
+   * @return
+   */
+  def mapTargetSchemaFunc(shardKeyNames: Seq[String],
+                          targetSchemaMap: Map[Map[String, String], Seq[String]])
+          : Seq[ColumnFilter] => Seq[String] = {
+    filters: Seq[ColumnFilter] =>
+      val shardKeysInQuery = filters.collect {
+        case ColumnFilter(key, Filter.Equals(filtVal: String)) if shardKeyNames.contains(key) => key -> filtVal
+      }.toMap
+      targetSchemaMap.getOrElse(shardKeysInQuery, Seq.empty)
+  }
+
+  def mapTargetSchemaFunc(shardKeyNames: java.util.List[String],
+                          targetSchemaMap: java.util.Map[java.util.Map[String, String], java.util.List[String]])
+          : Seq[ColumnFilter] => Seq[String]= {
+    val targetSchema: Map[Map[String, String], Seq[String]] = targetSchemaMap.asScala.map {
+      case (d, v) => d.asScala.toMap -> v.asScala.toSeq
+    }.toMap
+    mapTargetSchemaFunc(shardKeyNames.asScala, targetSchema)
+  }
+
 }
 
 /**

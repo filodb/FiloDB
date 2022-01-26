@@ -8,7 +8,7 @@ import kamon.Kamon
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
-import filodb.core.SpreadProvider
+import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchemaProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
@@ -32,7 +32,7 @@ object SingleClusterPlanner {
   * @param spreadProvider  used to get spread
   * @param shardMapperFunc used to get shard locality
   * @param timeSplitEnabled split based on longer time range
-  * @param minTimeRangeForSplitMs if time range is longer than this, plan will be split into multiple plans
+  * @param minTimeRangeForSplitMs if time range is longer than this, zplan will be split into multiple plans
   * @param splitSizeMs time range for each split, if plan needed to be split
   */
 
@@ -43,6 +43,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                            val queryConfig: QueryConfig,
                            clusterName: String,
                            spreadProvider: SpreadProvider = StaticSpreadProvider(),
+                           targetSchemaProvider: TargetSchemaProvider = StaticTargetSchemaProvider(),
                            timeSplitEnabled: Boolean = false,
                            minTimeRangeForSplitMs: => Long = 1.day.toMillis,
                            splitSizeMs: => Long = 1.day.toMillis)
@@ -185,7 +186,8 @@ class SingleClusterPlanner(val dataset: Dataset,
         .getOrElse(throw new BadQueryException(s"Could not find metric value"))
       val shardValues = shardVals.filterNot(_._1 == dsOptions.metricColumn).map(_._2)
       logger.debug(s"For shardColumns $shardColumns, extracted metric $metric and shard values $shardValues")
-      val shardHash = RecordBuilder.shardKeyHash(shardValues, metric)
+      val targetSchema = qContext.plannerParams.targetSchema.getOrElse(targetSchemaProvider).targetSchemaFunc(filters)
+      val shardHash = RecordBuilder.shardKeyHash(shardValues, dsOptions.metricColumn, metric, targetSchema)
       shardMapperFunc.queryShards(shardHash, spreadProvToUse.spreadFunc(filters).last.spread)
     }
   }
