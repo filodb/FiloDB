@@ -11,7 +11,7 @@ import akka.pattern.AskTimeoutException
 import kamon.Kamon
 import kamon.instrumentation.executor.ExecutorInstrumentation
 import kamon.tag.TagSet
-import monix.execution.{ExecutionModel, Scheduler}
+import monix.execution.Scheduler
 import monix.execution.schedulers.SchedulerService
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
@@ -119,10 +119,10 @@ final class QueryActor(memStore: MemStore,
 
     // AlwaysAsync exec model is needed to have the query lambdas be executed consistently on query scheduler
     // otherwise it is possible that monix may schedule them for synchronous execution
-    Scheduler.apply(ExecutorInstrumentation.instrument(executor, schedName),
-      ExecutionModel.AlwaysAsyncExecution)
+    Scheduler.apply(ExecutorInstrumentation.instrument(executor, schedName))
   }
 
+  // scalastyle:off method.length
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
     if (checkTimeout(q.queryContext, replyTo)) {
       epRequests.increment()
@@ -135,7 +135,7 @@ final class QueryActor(memStore: MemStore,
         queryExecuteSpan.tag("query-id", q.queryContext.queryId)
         val querySession = QuerySession(q.queryContext, queryConfig, catchMultipleLockSetErrors = true)
         queryExecuteSpan.mark("query-actor-received-execute-start")
-        q.execute(memStore, querySession)(queryScheduler)
+        val execTask = q.execute(memStore, querySession)(queryScheduler)
           .map { res =>
             FiloSchedulers.assertThreadName(QuerySchedName)
             querySession.close()
@@ -163,7 +163,9 @@ final class QueryActor(memStore: MemStore,
                 }
             }
             queryExecuteSpan.finish()
-          }.runToFuture(queryScheduler).recover { case ex =>
+          }
+          logger.debug(s"Will now run query execution pipeline for $q")
+          execTask.runToFuture(queryScheduler).recover { case ex =>
             querySession.close()
             // Unhandled exception in query, should be rare
             logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error," +

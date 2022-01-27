@@ -113,7 +113,7 @@ trait ExecPlan extends QueryCommand {
     }
 
     // Step 1: initiate doExecute: make result schema and set up the async monix pipeline to create RVs
-    lazy val step1: Task[ExecResult] = Task {
+    lazy val step1: Task[ExecResult] = Task.evalAsync {
       // avoid any work when plan has waited in executor queue for long
       checkTimeout(s"step1-${this.getClass.getSimpleName}")
       span.mark(s"execute-step1-start-${getClass.getSimpleName}")
@@ -133,7 +133,7 @@ trait ExecPlan extends QueryCommand {
       }
     }
 
-    // Step 2: Run connect monix pipeline to transformers, materialize the result
+    // Step 2: Append transformer execution to step1 result, materialize the final result
     def step2(res: ExecResult): Task[QueryResponse] = res.schema.map { resSchema =>
       // avoid any work when plan has waited in executor queue for long
       checkTimeout(s"step2-${this.getClass.getSimpleName}")
@@ -159,13 +159,14 @@ trait ExecPlan extends QueryCommand {
           }
         }
         if (finalRes._2 == ResultSchema.empty) {
-          qLogger.debug(s"queryId: ${queryContext.queryId} Empty plan $this, returning empty results")
           span.mark("empty-plan")
           span.mark(s"execute-step2-end-${getClass.getSimpleName}")
-          Task.eval(QueryResult(
-            queryContext.queryId, resSchema, Nil, querySession.queryStats,
-            querySession.resultCouldBePartial, querySession.partialResultsReason
-          ))
+          Task.eval( {
+            qLogger.debug(s"Finished query execution pipeline with empty results for $this")
+            QueryResult(queryContext.queryId, resSchema, Nil, querySession.queryStats,
+              querySession.resultCouldBePartial, querySession.partialResultsReason
+            )
+          })
         } else {
           val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
           Kamon
@@ -217,7 +218,7 @@ trait ExecPlan extends QueryCommand {
           .map { r =>
             Kamon.histogram("query-execute-time-elapsed-step2-result-materialized",
                   MeasurementUnit.time.milliseconds)
-              .withTag("plan", this.getClass.getSimpleName)
+              .withTag("plan", getClass.getSimpleName)
               .record(Math.max(0, System.currentTimeMillis - startExecute))
             val numDataBytes = builder.allContainers.map(_.numBytes).sum
             val numKeyBytes = r.foldLeft(0)(_ + _.key.keySize)
@@ -228,6 +229,7 @@ trait ExecPlan extends QueryCommand {
             span.mark(s"resultSamples=$numResultSamples")
             span.mark(s"numSrv=${r.size}")
             span.mark(s"execute-step2-end-${this.getClass.getSimpleName}")
+            qLogger.debug(s"Finished query execution pipeline with ${r.size} RVs for $this")
             QueryResult(queryContext.queryId, resultSchema, r, querySession.queryStats,
               querySession.resultCouldBePartial, querySession.partialResultsReason)
           }
@@ -236,9 +238,11 @@ trait ExecPlan extends QueryCommand {
     val qresp = for { res <- step1
                     qResult <- step2(res) }
               yield { qResult }
-    qresp.onErrorRecover { case NonFatal(ex) =>
+    val ret = qresp.onErrorRecover { case NonFatal(ex) =>
       QueryError(queryContext.queryId, querySession.queryStats, ex)
     }
+    qLogger.debug(s"Constructed monix query execution pipeline for $this")
+    ret
   }
 
 
@@ -453,13 +457,14 @@ abstract class NonLeafExecPlan extends ExecPlan {
       .guaranteeCase(_ => Task.eval(span.mark("last-child-result-received")))
       .map {
         case (res @ QueryResult(_, _, _, qStats, isPartialResult, partialResultReason), i) =>
+          qLogger.debug(s"Child query result received for $this")
           if (isPartialResult) {
             querySession.resultCouldBePartial = true
             querySession.partialResultsReason = partialResultReason
           }
           querySession.queryStats.add(qStats)
           if (res.resultSchema != ResultSchema.empty) sch = reduceSchemas(sch, res)
-          (res, i.toInt)
+          (res, i)
         case (e: QueryError, _) =>
           querySession.queryStats.add(e.queryStats)
           throw e.t
@@ -468,7 +473,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
       .cache // cache caches results so that multiple subscribers can process
 
     val outputSchema = processedTasks.collect { // collect schema of first result that is nonEmpty
-      case (QueryResult(_, schema, _, qStats, _, _), _) if schema.columns.nonEmpty => schema
+      case (QueryResult(_, schema, _, _, _, _), _) if schema.columns.nonEmpty => schema
     }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
       // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {
