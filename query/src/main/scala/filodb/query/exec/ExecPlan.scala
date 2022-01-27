@@ -454,7 +454,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     var sch = ResultSchema.empty
     val processedTasks = childTasks
       .doOnStart(_ => Task.eval(span.mark("first-child-result-received")))
-      .guaranteeCase(_ => Task.eval(span.mark("last-child-result-received")))
+      .guarantee(Task.eval(span.mark("last-child-result-received")))
       .map {
         case (res @ QueryResult(_, _, _, qStats, isPartialResult, partialResultReason), i) =>
           qLogger.debug(s"Child query result received for $this")

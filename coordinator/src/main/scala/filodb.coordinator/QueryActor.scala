@@ -117,8 +117,6 @@ final class QueryActor(memStore: MemStore,
     }
     val executor = new ForkJoinPool( numSchedThreads, threadFactory, exceptionHandler, true)
 
-    // AlwaysAsync exec model is needed to have the query lambdas be executed consistently on query scheduler
-    // otherwise it is possible that monix may schedule them for synchronous execution
     Scheduler.apply(ExecutorInstrumentation.instrument(executor, schedName))
   }
 

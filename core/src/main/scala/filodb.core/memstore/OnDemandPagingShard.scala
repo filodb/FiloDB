@@ -127,7 +127,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
               // In the future optimize this if needed.
               .mapEval { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
               .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
-              .guarantee(Task.eval(span.finish())) // synchronous
+              .guarantee(Task.eval(span.finish())) // not async
           } else { Observable.empty }
         }
       } else {
@@ -151,7 +151,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
                   .headL
                   // headL since we are fetching a SinglePartition above
               }
-              .guarantee(Task.eval(span.finish())) // synchronous
+              .guarantee(Task.eval(span.finish())) // not async
           } else {
             Observable.empty
           }
