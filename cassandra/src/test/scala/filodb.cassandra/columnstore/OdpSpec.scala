@@ -1,12 +1,16 @@
 package filodb.cassandra.columnstore
 
 import scala.concurrent.Future
+
 import com.typesafe.config.ConfigFactory
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
+
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.core.{MachineMetricsData, TestData}
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder}
@@ -14,14 +18,12 @@ import filodb.core.downsample.OffHeapMemory
 import filodb.core.memstore._
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.metadata.{Dataset, Schemas}
-import filodb.core.query.{ColumnFilter, EmptyQueryConfig, PlannerParams, QueryConfig, QueryContext, QuerySession}
+import filodb.core.query._
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{InMemoryMetaStore, PartKeyRecord, StoreConfig, TimeRangeChunkScan}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query.{QueryResponse, QueryResult}
 import filodb.query.exec.{InProcessPlanDispatcher, MultiSchemaPartitionsExec}
-import org.scalatest.funspec.AnyFunSpec
-import org.scalatest.matchers.should.Matchers
 
 class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
 
@@ -69,9 +71,8 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val partKey = partBuilder.partKeyFromObjects(Schemas.gauge, gaugeName, seriesTags)
 
-    val part = new TimeSeriesPartition(0, Schemas.gauge, partKey,
-      0, offheapMem.bufferPools(Schemas.gauge.schemaHash), shardStats,
-      offheapMem.nativeMemoryManager, 1)
+    val shardInfo = TimeSeriesShardInfo(0, shardStats, offheapMem.bufferPools, offheapMem.nativeMemoryManager)
+    val part = new TimeSeriesPartition(0, Schemas.gauge, partKey, shardInfo, 1)
 
     gaugePartKeyBytes = part.partKeyBytes
 

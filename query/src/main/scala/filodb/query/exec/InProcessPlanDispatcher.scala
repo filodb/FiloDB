@@ -76,10 +76,8 @@ case class UnsupportedChunkSource() extends ChunkSource {
 
   override def isDownsampleStore: Boolean = false
 
-  override def topKCardinality(ref: DatasetRef,
-                               shards: Seq[Int],
-                               shardKeyPrefix: scala.Seq[String],
-                               k: Int): scala.Seq[CardinalityRecord] =
+  override def scanTsCardinalities(ref: DatasetRef, shards: Seq[Int],
+                                   shardKeyPrefix: Seq[String], depth: Int): scala.Seq[CardinalityRecord] =
     throw new UnsupportedOperationException("This operation is not supported")
 
   override def acquireSharedLock(ref: DatasetRef, shardNum: Int, querySession: QuerySession): Unit =

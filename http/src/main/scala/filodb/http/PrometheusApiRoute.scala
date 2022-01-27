@@ -15,6 +15,7 @@ import remote.RemoteStorage.ReadRequest
 import filodb.coordinator.client.IngestionCommands.UnknownDataset
 import filodb.coordinator.client.QueryCommands._
 import filodb.core.{DatasetRef, SpreadChange, SpreadProvider}
+import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
 import filodb.core.query.{PromQlQueryParams, QueryContext, TsdbQueryParams}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -146,7 +147,13 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
       LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryContext(tsdbQueryParams, spreadProvider))
     }
     onSuccess(asyncAsk(nodeCoord, command, settings.queryAskTimeout)) {
-      case qr: QueryResult => val translated = if (histMap || logicalPlan.isInstanceOf[MetadataQueryPlan])
+      case qr: QueryResult if logicalPlan.isInstanceOf[MetadataQueryPlan] =>
+        if (qr.resultSchema.columns.length == 1 && qr.resultSchema.columns(0).colType == StringColumn)
+          complete(toLabelValuesResponse(qr, verbose, qr.resultType, Option(qr.mayBePartial)))
+        else if (qr.resultSchema.columns.length == 1 && qr.resultSchema.columns(0).colType == MapColumn)
+          complete(toMetadataMapResponse(qr, verbose, qr.resultType, Option(qr.mayBePartial)))
+        else complete(toPromSuccessResponse(qr, verbose)) // not defined
+      case qr: QueryResult => val translated = if (histMap)
                                                 qr
                                                else convertHistToPromResult(qr, schemas.part)
                               complete(toPromSuccessResponse(translated, verbose))

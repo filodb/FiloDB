@@ -22,7 +22,7 @@ import filodb.core.GlobalScheduler._
 import filodb.core.MachineMetricsData
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder, RecordSchema}
 import filodb.core.downsample.{DownsampledTimeSeriesStore, OffHeapMemory}
-import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition}
+import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition, TimeSeriesShardInfo}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query._
@@ -65,6 +65,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
   val offheapMem = new OffHeapMemory(Seq(Schemas.gauge, Schemas.promCounter, Schemas.promHistogram, Schemas.untyped),
                                      Map.empty, 100, rawDataStoreConfig)
+  val shardInfo = TimeSeriesShardInfo(0, batchDownsampler.shardStats,
+    offheapMem.bufferPools, offheapMem.nativeMemoryManager)
 
   val untypedName = "my_untyped"
   var untypedPartKeyBytes: Array[Byte] = _
@@ -112,9 +114,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val partKey = partBuilder.partKeyFromObjects(Schemas.untyped, untypedName, seriesTags)
 
-    val part = new TimeSeriesPartition(0, Schemas.untyped, partKey,
-      0, offheapMem.bufferPools(Schemas.untyped.schemaHash), batchDownsampler.shardStats,
-      offheapMem.nativeMemoryManager, 1)
+    val part = new TimeSeriesPartition(0, Schemas.untyped, partKey, shardInfo, 1)
 
     untypedPartKeyBytes = part.partKeyBytes
 
@@ -155,9 +155,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val partKey = partBuilder.partKeyFromObjects(Schemas.gauge, gaugeName, seriesTags)
 
-    val part = new TimeSeriesPartition(0, Schemas.gauge, partKey,
-      0, offheapMem.bufferPools(Schemas.gauge.schemaHash), batchDownsampler.shardStats,
-      offheapMem.nativeMemoryManager, 1)
+    val part = new TimeSeriesPartition(0, Schemas.gauge, partKey, shardInfo,1)
 
     gaugePartKeyBytes = part.partKeyBytes
 
@@ -198,9 +196,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val partKey = partBuilder.partKeyFromObjects(Schemas.gauge, gaugeLowFreqName, seriesTags)
 
-    val part = new TimeSeriesPartition(0, Schemas.gauge, partKey,
-      0, offheapMem.bufferPools(Schemas.gauge.schemaHash), batchDownsampler.shardStats,
-      offheapMem.nativeMemoryManager, 1)
+    val part = new TimeSeriesPartition(0, Schemas.gauge, partKey, shardInfo, 1)
 
     gaugeLowFreqPartKeyBytes = part.partKeyBytes
 
@@ -239,9 +235,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val partKey = partBuilder.partKeyFromObjects(Schemas.promCounter, counterName, seriesTags)
 
-    val part = new TimeSeriesPartition(0, Schemas.promCounter, partKey,
-      0, offheapMem.bufferPools(Schemas.promCounter.schemaHash), batchDownsampler.shardStats,
-      offheapMem.nativeMemoryManager, 1)
+    val part = new TimeSeriesPartition(0, Schemas.promCounter, partKey, shardInfo, 1)
 
     counterPartKeyBytes = part.partKeyBytes
 
@@ -286,9 +280,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val partKey = partBuilder.partKeyFromObjects(Schemas.promHistogram, histName, seriesTags)
 
-    val part = new TimeSeriesPartition(0, Schemas.promHistogram, partKey,
-      0, offheapMem.bufferPools(Schemas.promHistogram.schemaHash), batchDownsampler.shardStats,
-      offheapMem.nativeMemoryManager, 1)
+    val part = new TimeSeriesPartition(0, Schemas.promHistogram, partKey, shardInfo, 1)
 
     histPartKeyBytes = part.partKeyBytes
 
@@ -334,9 +326,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val partKey = partBuilder.partKeyFromObjects(Schemas.promHistogram, histNameNaN, seriesTagsNaN)
 
-    val part = new TimeSeriesPartition(0, Schemas.promHistogram, partKey,
-      0, offheapMem.bufferPools(Schemas.promHistogram.schemaHash), batchDownsampler.shardStats,
-      offheapMem.nativeMemoryManager, 1)
+    val part = new TimeSeriesPartition(0, Schemas.promHistogram, partKey, shardInfo, 1)
 
     histNaNPartKeyBytes = part.partKeyBytes
 

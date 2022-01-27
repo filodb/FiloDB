@@ -2,6 +2,7 @@ package filodb.coordinator.queryplanner
 
 import org.apache.commons.text.StringEscapeUtils
 
+import filodb.core.query.ColumnFilter
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
 import filodb.query._
@@ -25,8 +26,12 @@ object QueryConstants {
 object LogicalPlanParser {
   import QueryConstants._
 
-  private def getFiltersFromRawSeries(lp: RawSeries)= lp.filters.map(f => (f.column, f.filter.operatorString,
-    Quotes + StringEscapeUtils.escapeJava(f.filter.valuesStrings.head.toString) + Quotes))
+  private def getFiltersFromRawSeries(lp: RawSeries)= getFiltersFromColumnFilters(lp.filters)
+
+  private def getFiltersFromColumnFilters(filters: Seq[ColumnFilter]) = {
+    filters.map(f => (f.column, f.filter.operatorString,
+      Quotes + StringEscapeUtils.escapeJava(f.filter.valuesStrings.head.toString) + Quotes))
+  }
 
   private def filtersToQuery(filters: Seq[(String, String, String)], columns: Seq[String],
                              lookback: Option[Long], offset: Option[Long], addWindow: Boolean): String = {
@@ -186,6 +191,18 @@ object LogicalPlanParser {
     val sqClause =
       s"${OpeningSquareBracket}${(tlsq.orginalLookbackMs)/1000}s:${tlsq.stepMs/1000}s$ClosingSquareBracket"
     s"${periodicSeriesQuery}${sqClause}${offset}"
+  }
+
+  def metatadataMatchToQuery(lp: MetadataQueryPlan): String = {
+    lp match {
+      case lp: SeriesKeysByFilters    => filtersToQuery(
+        getFiltersFromColumnFilters(lp.filters), Seq.empty, Option.empty, Option.empty, false)
+      case lp: LabelNames             => filtersToQuery(
+        getFiltersFromColumnFilters(lp.filters), Seq.empty, Option.empty, Option.empty, false)
+      case lp: LabelCardinality       => filtersToQuery(
+        getFiltersFromColumnFilters(lp.filters), Seq.empty, Option.empty, Option.empty, false)
+      case _                          => throw new UnsupportedOperationException(s"$lp can't be converted to Query")
+    }
   }
 
   def convertToQuery(logicalPlan: LogicalPlan): String = {

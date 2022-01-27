@@ -6,7 +6,7 @@ import scala.concurrent.Future
 import scala.concurrent.duration.FiniteDuration
 import scala.sys.ShutdownHookThread
 
-import com.softwaremill.sttp.{DeserializationError, Response, SttpBackendOptions}
+import com.softwaremill.sttp.{DeserializationError, Response, SttpBackend, SttpBackendOptions}
 import com.softwaremill.sttp.SttpBackendOptions.ProxyType.{Http, Socks}
 import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
 import com.softwaremill.sttp.circe.asJson
@@ -18,9 +18,9 @@ import monix.execution.Scheduler
 import org.asynchttpclient.{AsyncHttpClientConfig, DefaultAsyncHttpClientConfig}
 import org.asynchttpclient.proxy.ProxyServer
 
-import filodb.core.query.{PromQlQueryParams, QuerySession}
+import filodb.core.query.{PromQlQueryParams, QuerySession, QueryStats}
 import filodb.core.store.ChunkSource
-import filodb.query.{BadQueryException, MetadataSuccessResponse, PromCirceSupport, QueryResponse, SuccessResponse}
+import filodb.query._
 
 trait RemoteExec extends LeafExecPlan with StrictLogging {
 
@@ -84,6 +84,15 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     finalUrlParams
   }
 
+  def readQueryStats(queryStatsResponse: Option[Seq[QueryStatistics]]): QueryStats = {
+    val queryStats = QueryStats()
+    if (queryStatsResponse.isDefined && queryStatsResponse.get.nonEmpty) queryStatsResponse.get.foreach { stat =>
+      queryStats.getTimeSeriesScannedCounter(stat.group).addAndGet(stat.timeSeriesScanned)
+      queryStats.getDataBytesScannedCounter(stat.group).addAndGet(stat.dataBytesScanned)
+      queryStats.getResultBytesCounter(stat.group).addAndGet(stat.resultBytes)
+    }
+    queryStats
+  }
 }
 
 /**
@@ -104,15 +113,17 @@ trait RemoteExecHttpClient extends StrictLogging {
 
 }
 
-class RemoteHttpClient private(asyncHttpClientConfig: AsyncHttpClientConfig) extends RemoteExecHttpClient {
+// scalastyle:off
+import com.softwaremill.sttp._
+import io.circe.generic.auto._
 
-  import com.softwaremill.sttp._
-  import io.circe.generic.auto._
-
-  // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
-  // Needed to override Sampl case class Encoder.
-  import PromCirceSupport._
-  private implicit val backend = AsyncHttpClientFutureBackend.usingConfig(asyncHttpClientConfig)
+// DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
+// Needed to override Sampl case class Encoder.
+import PromCirceSupport._
+class RemoteHttpClient private(asyncHttpClientConfig: AsyncHttpClientConfig)
+                              (implicit backend: SttpBackend[Future, Nothing]
+                                = AsyncHttpClientFutureBackend.usingConfig(asyncHttpClientConfig))
+    extends RemoteExecHttpClient {
 
   ShutdownHookThread(shutdown())
 
@@ -191,5 +202,8 @@ object RemoteHttpClient {
 
   def apply(asyncHttpClientConfig: AsyncHttpClientConfig): RemoteHttpClient =
     new RemoteHttpClient(asyncHttpClientConfig)
+  def apply(asyncHttpClientConfig: AsyncHttpClientConfig,
+            sttpBackend: SttpBackend[Future, Nothing]): RemoteHttpClient =
+    new RemoteHttpClient(asyncHttpClientConfig)(sttpBackend)
 
 }

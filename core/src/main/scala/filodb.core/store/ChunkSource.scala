@@ -192,7 +192,8 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
     }
   }
 
-  def topKCardinality(ref: DatasetRef, shard: Seq[Int], shardKeyPrefix: Seq[String], k: Int): Seq[CardinalityRecord]
+  def scanTsCardinalities(ref: DatasetRef, shard: Seq[Int],
+                          shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord]
 
 }
 
