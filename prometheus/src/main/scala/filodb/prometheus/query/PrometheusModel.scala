@@ -221,7 +221,7 @@ object PrometheusModel {
 
   def toQueryStatistics(qs: QueryStats): Seq[QueryStatistics] = qs.stat.map(stat =>
     QueryStatistics(stat._1, stat._2.timeSeriesScanned.get(),
-      stat._2.dataBytesScanned.get(), stat._2.resultBytes.get(), stat._2.partKeysVisited.get())
+      stat._2.dataBytesScanned.get(), stat._2.resultBytes.get())
   ).toSeq
 
 }

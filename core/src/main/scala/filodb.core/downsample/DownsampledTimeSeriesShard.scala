@@ -418,6 +418,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         if (currVal.nonEmpty) rows.add(currVal)
         partLoopIndx += 1
       }
+      querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(partLoopIndx)
       rows.toIterator
     }
 
@@ -434,14 +435,18 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     def labels: Iterator[ZeroCopyUTF8String] = {
       var partLoopIndx = 0
       val rows = new mutable.HashSet[ZeroCopyUTF8String]()
+      val colIndex = schemas.part.binSchema.colNames.indexOf(label)
       while(partLoopIndx < partIds.length && rows.size < limit) {
         val partId = partIds(partLoopIndx)
         //retrieve PartKey either from In-memory map or from PartKeyIndex
         val nextPart = partKeyFromPartId(partId)
-        schemas.part.binSchema
-          .singleColValues(nextPart, UnsafeUtils.arayOffset, label, rows)
+        if (colIndex > -1)
+          rows.add(schemas.part.binSchema.asZCUTF8Str(nextPart, UnsafeUtils.arayOffset, colIndex))
+        else
+          schemas.part.binSchema.singleColValues(nextPart, UnsafeUtils.arayOffset, label, rows)
         partLoopIndx += 1
       }
+      querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(partLoopIndx)
       rows.toIterator
     }
 

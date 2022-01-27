@@ -66,7 +66,8 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val numDirtyPartKeysFlushed = Kamon.counter("memstore-index-num-dirty-keys-flushed").withTags(TagSet.from(tags))
   val indexRecoveryNumRecordsProcessed = Kamon.counter("memstore-index-recovery-partkeys-processed").
     withTags(TagSet.from(tags))
-  val indexPartkeyLookups = Kamon.counter("memstore-index-partkey-lookup").withTags(TagSet.from(tags))
+  val indexPartkeyLookups = Kamon.counter("memstore-index-partkey-lookups").withTags(TagSet.from(tags))
+  val partkeyLabelScans = Kamon.counter("memstore-labels-partkeys-scanned").withTags(TagSet.from(tags))
   val downsampleRecordsCreated = Kamon.counter("memstore-downsample-records-created").withTags(TagSet.from(tags))
 
   /**
@@ -775,15 +776,19 @@ class TimeSeriesShard(val ref: DatasetRef,
     def labels: Iterator[ZeroCopyUTF8String] = {
       var partLoopIndx = 0
       val rows = new mutable.HashSet[ZeroCopyUTF8String]()
+      val colIndex = schemas.part.binSchema.colNames.indexOf(label)
       while(partLoopIndx < partIds.length && rows.size < limit) {
         val partId = partIds(partLoopIndx)
         //retrieve PartKey either from In-memory map or from PartKeyIndex
         val nextPart = partKeyFromPartId(partId)
-        schemas.part.binSchema
-          .singleColValues(nextPart.base, nextPart.offset, label, rows)
+        if (colIndex > -1) //column value lookup (e.g metric), no need for map-consumer
+          rows.add(schemas.part.binSchema.asZCUTF8Str(nextPart.base, nextPart.offset, colIndex))
+        else
+          schemas.part.binSchema.singleColValues(nextPart.base, nextPart.offset, label, rows)
         partLoopIndx += 1
       }
-      querySession.queryStats.getPartKeysVisitedCounter(statsGroup).addAndGet(partLoopIndx)
+      shardStats.partkeyLabelScans.increment(partLoopIndx)
+      querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(partLoopIndx)
       rows.toIterator
     }
 
@@ -821,7 +826,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         if (currVal.nonEmpty) rows.add(currVal)
         partLoopIndx += 1
       }
-      querySession.queryStats.getPartKeysVisitedCounter(statsGroup).addAndGet(partLoopIndx)
+      querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(partLoopIndx)
       rows.toIterator
     }
 
