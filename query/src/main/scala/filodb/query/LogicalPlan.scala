@@ -72,7 +72,15 @@ sealed trait PeriodicSeriesPlan extends LogicalPlan {
 }
 
 sealed trait MetadataQueryPlan extends LogicalPlan {
+
   override def isTimeSplittable: Boolean = false
+
+  val filters: Seq[ColumnFilter]
+
+  val startMs: Long
+
+  val endMs: Long
+
 }
 
 /**

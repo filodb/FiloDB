@@ -77,7 +77,8 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       }
     }
 
-    override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+    override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                       timeRange: TimeRange): List[PartitionAssignment] =
       List(PartitionAssignment("localPartition", "localPartition-url", TimeRange(timeRange.startMs, timeRange.endMs)),
         PartitionAssignment("remotePartition", "remotePartition-url", TimeRange(timeRange.startMs, timeRange.endMs)))
   }
