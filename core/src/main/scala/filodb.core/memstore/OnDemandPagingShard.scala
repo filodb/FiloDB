@@ -127,7 +127,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
               // In the future optimize this if needed.
               .mapEval { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
               .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
-              .guarantee(Task.eval(span.finish()))
+              .guarantee(Task.eval(span.finish())) // synchronous
           } else { Observable.empty }
         }
       } else {
@@ -151,7 +151,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
                   .headL
                   // headL since we are fetching a SinglePartition above
               }
-              .guarantee(Task.eval(span.finish()))
+              .guarantee(Task.eval(span.finish())) // synchronous
           } else {
             Observable.empty
           }
@@ -187,7 +187,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
    * It runs in ingestion thread so it can correctly verify which ones to actually create or not
    */
   private def createODPPartitionsTask(partIDs: Buffer[Int], callback: (Int, Array[Byte]) => Unit):
-                                                                  Task[Seq[TimeSeriesPartition]] = Task {
+                                                                  Task[Seq[TimeSeriesPartition]] = Task.evalAsync {
     assertThreadName(IngestSchedName)
     require(partIDs.nonEmpty)
     partIDs.map { id =>

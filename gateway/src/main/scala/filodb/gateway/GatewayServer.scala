@@ -237,7 +237,7 @@ object GatewayServer extends StrictLogging {
   def buildShardContainers(shard: Int,
                            queue: MpscGrowableArrayQueue[InputRecord],
                            builder: RecordBuilder,
-                           sendTime: Array[Long]): Task[(Int, Seq[Array[Byte]])] = Task {
+                           sendTime: Array[Long]): Task[(Int, Seq[Array[Byte]])] = Task.evalAsync {
     // While there are still messages in the queue and there aren't containers to send, pull and build
     while (!queue.isEmpty && builder.allContainers.length <= 1) {
       queue.poll().addToBuilder(builder)

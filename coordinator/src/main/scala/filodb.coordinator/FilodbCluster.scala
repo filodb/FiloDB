@@ -197,7 +197,7 @@ final class FilodbCluster(val system: ExtendedActorSystem, overrideConfig: Confi
       memStore.shutdown()
       ioPool.shutdown()
     } catch {
-      case e: Exception =>
+      case _: Exception =>
         system.terminate()
         ioPool.shutdown()
     }
