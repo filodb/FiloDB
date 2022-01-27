@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
-import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.query._
 import filodb.query.LogicalPlan._
 import filodb.query.exec._
@@ -14,7 +14,8 @@ case class PartitionAssignment(partitionName: String, endPoint: String, timeRang
 trait PartitionLocationProvider {
 
   def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment]
-  def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment]
+  def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                            timeRange: TimeRange): List[PartitionAssignment]
 }
 
 /**
@@ -168,7 +169,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val columnFilterGroup = LogicalPlan.getColumnFilterGroup(logicalPlan)
     val routingKeys = dataset.options.nonMetricShardColumns
       .map(x => (x, LogicalPlan.getColumnValues(columnFilterGroup, x)))
-    if (routingKeys.flatMap(_._2).isEmpty) Seq.empty else routingKeys
+    if (routingKeys.flatMap(_._2).isEmpty) Seq.empty else routingKeys.filter(x => x._2.nonEmpty)
   }
 
   private def generateRemoteExecParams(queryContext: QueryContext, startMs: Long, endMs: Long) = {
@@ -365,7 +366,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     // is a metadata operation and shares common components with other metadata endpoints.
     val partitions = lp match {
       case lc: LabelCardinality       => getPartitions(lc, qContext.origQueryParams.asInstanceOf[PromQlQueryParams])
-      case _                          => partitionLocationProvider.getAuthorizedPartitions(
+      case _                          => getMetadataPartitions(lp.filters,
         TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
     }
 
@@ -415,7 +416,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     } else {
       logger.info(s"(ws, ns) pair not provided in prefix=${lp.shardKeyPrefix};" +
                   s"dispatching to all authorized partitions")
-      partitionLocationProvider.getAuthorizedPartitions(TimeRange(0, Long.MaxValue))
+      getMetadataPartitions(lp.filters(), TimeRange(0, Long.MaxValue))
     }
     val execPlan = if (partitions.isEmpty) {
       logger.warn(s"no partitions found for $lp; defaulting to local planner")
@@ -442,6 +443,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       }
     }
     PlanResult(execPlan::Nil)
+  }
+
+  def getMetadataPartitions(filters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = {
+    val nonMetricShardKeyFilters = filters.filter(f => dataset.options.nonMetricShardColumns.contains(f.column))
+    partitionLocationProvider.getMetadataPartitions(nonMetricShardKeyFilters, timeRange)
   }
 
   private def createMetadataRemoteExec(qContext: QueryContext, partitionAssignment: PartitionAssignment,
