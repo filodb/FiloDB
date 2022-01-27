@@ -114,12 +114,14 @@ case class Stat() {
   val timeSeriesScanned = new AtomicLong
   val dataBytesScanned = new AtomicLong
   val resultBytes = new AtomicLong
+  val partKeysVisited = new AtomicLong
   override def toString: String = s"(timeSeriesScanned=$timeSeriesScanned, " +
     s"dataBytesScanned=$dataBytesScanned, resultBytes=$resultBytes)"
   def add(s: Stat): Unit = {
     timeSeriesScanned.addAndGet(s.timeSeriesScanned.get())
     dataBytesScanned.addAndGet(s.dataBytesScanned.get())
     resultBytes.addAndGet(s.resultBytes.get())
+    partKeysVisited.addAndGet(s.partKeysVisited.get())
   }
 }
 
@@ -146,6 +148,17 @@ case class QueryStats() {
   def getTimeSeriesScannedCounter(group: Seq[String] = Nil): AtomicLong = {
     val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
     stat.getOrElseUpdate(theNs, Stat()).timeSeriesScanned
+  }
+
+  /**
+   * Counter for number of PartKeys looked up by metadata queries
+   * @param group typically a tuple of (clusterType, dataset, WS, NS, metricName),
+   *              and if tuple is not available, pass Nil. If Nil is passed,
+   *              then head group is used if it exists.
+   */
+  def getPartKeysVisitedCounter(group: Seq[String] = Nil): AtomicLong = {
+    val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
+    stat.getOrElseUpdate(theNs, Stat()).partKeysVisited
   }
 
   /**

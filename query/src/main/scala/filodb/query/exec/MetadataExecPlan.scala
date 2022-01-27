@@ -358,14 +358,14 @@ final case class LabelValuesExec(queryContext: QueryContext,
           "or there are multiple label names without filter")
         case false if (columns.size == 1) =>
           val labelsIter = memStore.singleLabelValueWithFilters(dataset, shard, filters, columns.head, endMs, startMs,
-            queryContext.plannerParams.sampleLimit)
+            querySession, queryContext.plannerParams.sampleLimit)
           val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
             UTF8StringRowReader(labelsIter), None))
           val sch = ResultSchema(Seq(ColumnInfo("Labels", ColumnType.StringColumn)), 1)
           ExecResult(resp, Task.eval(sch))
         case false =>
           val metadataMap = memStore.labelValuesWithFilters(dataset, shard, filters, columns, endMs, startMs,
-          queryContext.plannerParams.sampleLimit)
+            querySession, queryContext.plannerParams.sampleLimit)
           val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
             UTF8MapIteratorRowReader(metadataMap), None))
           val sch = if (metadataMap.isEmpty) ResultSchema.empty

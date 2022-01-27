@@ -19,7 +19,7 @@ import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.{Column, DataSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType._
-import filodb.core.query.ColumnFilter
+import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.format.{vectors => bv, _}
@@ -180,9 +180,11 @@ trait MemStore extends ChunkSource {
     * shard on this node.
     * @return an Iterator for the index values
     */
-  def labelValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+  def labelValuesWithFilters(dataset: DatasetRef, shard: Int,
+                             filters: Seq[ColumnFilter],
                              labelNames: Seq[String], end: Long,
-                             start: Long, limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+                             start: Long, querySession: QuerySession,
+                             limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
 
   /**
    * Returns the values of a given label-name for the matching Column Filters
@@ -191,8 +193,8 @@ trait MemStore extends ChunkSource {
    * @return an Iterator for the index values
    */
   def singleLabelValueWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
-                             label: String, end: Long,
-                             start: Long, limit: Int): Iterator[ZeroCopyUTF8String]
+                                  label: String, end: Long,
+                                  start: Long, querySession: QuerySession, limit: Int): Iterator[ZeroCopyUTF8String]
 
   /**
     * Returns the indexed TimeSeriesPartitions matching the column filters,

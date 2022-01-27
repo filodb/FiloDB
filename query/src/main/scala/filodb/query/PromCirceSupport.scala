@@ -116,8 +116,9 @@ object PromCirceSupport {
         timeSeriesScanned <- c.downField("timeSeriesScanned").as[Long]
         dataBytesScanned     <- c.downField("dataBytesScanned").as[Long]
         resultBytes     <- c.downField("resultBytes").as[Long]
+        partkeysVisited <- c.downField("partkeysVisited").as[Long]
       } yield {
-        QueryStatistics(group, timeSeriesScanned, dataBytesScanned, resultBytes)
+        QueryStatistics(group, timeSeriesScanned, dataBytesScanned, resultBytes, partkeysVisited)
       }
     }
   }

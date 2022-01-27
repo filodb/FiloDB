@@ -491,7 +491,7 @@ class SelectColsMapItemConsumer(cols: Seq[String], buf: ArrayBuffer[String]) ext
 class SingleColDistinctMapItemConsumer(col: String, buf: mutable.HashSet[ZeroCopyUTF8String]) extends MapItemConsumer {
   def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
     val key = UTF8StringShort.toString(keyBase, keyOffset)
-    if (key == col) buf.add(new ZeroCopyUTF8String(valueBase, valueOffset,
+    if (key == col) buf.add(new ZeroCopyUTF8String(valueBase, UTF8StringMedium.lenBytes + valueOffset,
       UTF8StringMedium.numBytes(valueBase, valueOffset)))
   }
 }

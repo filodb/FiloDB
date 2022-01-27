@@ -90,6 +90,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
       queryStats.getTimeSeriesScannedCounter(stat.group).addAndGet(stat.timeSeriesScanned)
       queryStats.getDataBytesScannedCounter(stat.group).addAndGet(stat.dataBytesScanned)
       queryStats.getResultBytesCounter(stat.group).addAndGet(stat.resultBytes)
+      queryStats.getPartKeysVisitedCounter(stat.group).addAndGet(stat.partkeysVisited)
     }
     queryStats
   }

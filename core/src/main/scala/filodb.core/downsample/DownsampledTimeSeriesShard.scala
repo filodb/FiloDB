@@ -91,20 +91,28 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   def labelValues(labelName: String, topK: Int): Seq[TermInfo] = partKeyIndex.indexValues(labelName, topK)
 
-  def labelValuesWithFilters(filter: Seq[ColumnFilter],
+  def labelValuesWithFilters(filters: Seq[ColumnFilter],
                              labelNames: Seq[String],
                              endTime: Long,
                              startTime: Long,
+                             querySession: QuerySession,
                              limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
-    LabelValueResultIterator(partKeyIndex.partIdsFromFilters(filter, startTime, endTime), labelNames, limit)
+    val metricShardKeys = schemas.part.options.shardKeyColumns
+    val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
+    LabelValueResultIterator(partKeyIndex.partIdsFromFilters(filters, startTime, endTime), labelNames,
+      querySession, metricGroupBy, limit)
   }
 
-  def singleLabelValuesWithFilters(filter: Seq[ColumnFilter],
+  def singleLabelValuesWithFilters(filters: Seq[ColumnFilter],
                                    label: String,
                                    endTime: Long,
                                    startTime: Long,
+                                   querySession: QuerySession,
                                    limit: Int): Iterator[ZeroCopyUTF8String] = {
-    SingleLabelValuesResultIterator(partKeyIndex.partIdsFromFilters(filter, startTime, endTime), label, limit)
+    val metricShardKeys = schemas.part.options.shardKeyColumns
+    val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
+    SingleLabelValuesResultIterator(partKeyIndex.partIdsFromFilters(filters, startTime, endTime),
+      label, querySession, metricGroupBy, limit)
   }
 
   def labelNames(filter: Seq[ColumnFilter],
@@ -373,13 +381,23 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     }
   }
 
+  private def shardKeyValuesFromFilter(shardKeyColumns: Seq[String], filters: Seq[ColumnFilter]): Seq[String] = {
+    shardKeyColumns.map { col =>
+      filters.collectFirst {
+        case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
+      }.getOrElse("unknown")
+    }.toList
+  }
+
   /**
     * Iterator for traversal of partIds, value for the given label will be extracted from the ParitionKey.
     * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
     */
-  case class LabelValueResultIterator(partIds: debox.Buffer[Int], labelNames: Seq[String], limit: Int)
-    extends Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] {
+  case class LabelValueResultIterator(partIds: debox.Buffer[Int], labelNames: Seq[String],
+                                      querySession: QuerySession, statsGroup: Seq[String], limit: Int)
+      extends Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] {
     private lazy val rows = labelValues
+    override def size: Int = rows.size
 
     def labelValues: Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
       var partLoopIndx = 0
@@ -408,8 +426,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = rows.next
   }
 
-  case class SingleLabelValuesResultIterator(partIds: debox.Buffer[Int], label: String, limit: Int)
-    extends Iterator[ZeroCopyUTF8String] {
+  case class SingleLabelValuesResultIterator(partIds: debox.Buffer[Int], label: String,
+                                             querySession: QuerySession, statsGroup: Seq[String], limit: Int)
+      extends Iterator[ZeroCopyUTF8String] {
     private val rows = labels
 
     def labels: Iterator[ZeroCopyUTF8String] = {
