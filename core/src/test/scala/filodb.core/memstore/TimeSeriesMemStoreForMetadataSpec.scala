@@ -15,7 +15,7 @@ import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
-class   TimeSeriesMemStoreForMetadataSpec extends AnyFunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
+class TimeSeriesMemStoreForMetadataSpec extends AnyFunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
   import ZeroCopyUTF8String._
 
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
