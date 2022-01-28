@@ -350,24 +350,23 @@ final case class LabelValuesExec(queryContext: QueryContext,
           val labels = memStore.labelValues(dataset, shard, columns.head,
             queryContext.plannerParams.sampleLimit).map(_.term.toString)
           val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-            NoCloseCursor(StringArrayRowReader(labels)), None))
+            StringArrayRowReader(labels), None))
           val sch = if (labels.isEmpty) ResultSchema.empty
                     else ResultSchema(Seq(ColumnInfo("Labels", ColumnType.StringColumn)), 1)
           ExecResult(resp, Task.eval(sch))
         case true => throw new BadQueryException("either label name is missing " +
           "or there are multiple label names without filter")
         case false if (columns.size == 1) =>
-          val metadataMap = memStore.labelValuesWithFilters(dataset, shard, filters, columns, endMs, startMs,
-            queryContext.plannerParams.sampleLimit)
-          val labels = metadataMap.map(_.head._2.toString).toSeq
+          val labelsIter = memStore.singleLabelValueWithFilters(dataset, shard, filters, columns.head, endMs, startMs,
+            querySession, queryContext.plannerParams.sampleLimit)
           val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-            NoCloseCursor(StringArrayRowReader(labels)), None))
-          val sch = if (labels.isEmpty) ResultSchema.empty
-                    else ResultSchema(Seq(ColumnInfo("Labels", ColumnType.StringColumn)), 1)
+            UTF8StringRowReader(labelsIter), None))
+          val sch = if (labelsIter.isEmpty) ResultSchema.empty
+            else ResultSchema(Seq(ColumnInfo("Labels", ColumnType.StringColumn)), 1)
           ExecResult(resp, Task.eval(sch))
         case false =>
           val metadataMap = memStore.labelValuesWithFilters(dataset, shard, filters, columns, endMs, startMs,
-          queryContext.plannerParams.sampleLimit)
+            querySession, queryContext.plannerParams.sampleLimit)
           val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
             UTF8MapIteratorRowReader(metadataMap), None))
           val sch = if (metadataMap.isEmpty) ResultSchema.empty
