@@ -1627,7 +1627,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     shardKeyColumns.map { col =>
       filters.collectFirst {
         case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
-      }.getOrElse("unknown")
+      }.getOrElse("multiple")
     }.toList
   }
   /**
