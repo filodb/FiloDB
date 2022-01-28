@@ -177,6 +177,7 @@ AGGREGATION_OP
     | B O T T O M K
     | T O P K
     | Q U A N T I L E
+    | G R O U P
     ;
 
 // The special 'i' form is for "Step Multiple Notation for PromQL Lookback (#821)"

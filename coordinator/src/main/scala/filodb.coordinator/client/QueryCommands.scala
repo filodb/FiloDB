@@ -35,7 +35,9 @@ object QueryCommands {
   final case class GetTopkCardinality(dataset: DatasetRef,
                                       shards: Seq[Int],
                                       shardKeyPrefix: Seq[String],
+                                      depth: Int,
                                       k: Int,
+                                      addInactive: Boolean,
                                       submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
   final case class StaticSpreadProvider(spreadChange: SpreadChange = SpreadChange()) extends SpreadProvider {
@@ -43,6 +45,7 @@ object QueryCommands {
       Seq(spreadChange)
     }
   }
+
   case class SpreadAssignment(shardKeysMap: collection.Map[String, String], spread: Int)
 
   /**

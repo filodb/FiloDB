@@ -1,11 +1,11 @@
 package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration._
+
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, StaticSpreadProvider}
 import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange}
@@ -20,7 +20,9 @@ import filodb.query.exec._
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
-class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures {
+import filodb.core.query.Filter.Equals
+
+class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures with PlanValidationSpec {
 
   implicit val system = ActorSystem()
   private val node = TestProbe().ref
@@ -512,7 +514,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan("""sum(foo{_ns_="bar", _ws_="test"}) by (__name__)""",
       TimeStepParams(1000, 20, 2000))
-    
+
     val execPlan1 = engine.materialize(logicalPlan1, QueryContext(origQueryParams = promQlQueryParams))
 
     execPlan1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
@@ -705,5 +707,121 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     // _bucket should be removed from name
     multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
       head.equals("my_hist") shouldEqual true
+  }
+
+  it("should generate correct execPlan for instant vector functions") {
+    // ensures:
+    //   (1) the execPlan tree has a LocalPartitionDistConcatExec root, and
+    //   (2) the tree has a max depth 1 where all children are MultiSchemaPartitionsExec nodes, and
+    //   (3) the final RangeVectorTransformer at each child is an InstantVectorFunctionMapper, and
+    //   (4) the InstantVectorFunctionMapper has the appropriate InstantFunctionId
+    val queryIdPairs = Seq(
+      ("""abs(metric{job="app"})""", InstantFunctionId.Abs),
+      ("""ceil(metric{job="app"})""", InstantFunctionId.Ceil),
+      ("""clamp_max(metric{job="app"}, 1)""", InstantFunctionId.ClampMax),
+      ("""clamp_min(metric{job="app"}, 1)""", InstantFunctionId.ClampMin),
+      ("""exp(metric{job="app"})""", InstantFunctionId.Exp),
+      ("""floor(metric{job="app"})""", InstantFunctionId.Floor),
+      ("""histogram_quantile(0.9, metric{job="app"})""", InstantFunctionId.HistogramQuantile),
+      ("""histogram_max_quantile(0.9, metric{job="app"})""", InstantFunctionId.HistogramMaxQuantile),
+      ("""histogram_bucket(0.1, metric{job="app"})""", InstantFunctionId.HistogramBucket),
+      ("""ln(metric{job="app"})""", InstantFunctionId.Ln),
+      ("""log10(metric{job="app"})""", InstantFunctionId.Log10),
+      ("""log2(metric{job="app"})""", InstantFunctionId.Log2),
+      ("""round(metric{job="app"})""", InstantFunctionId.Round),
+      ("""sgn(metric{job="app"})""", InstantFunctionId.Sgn),
+      ("""sqrt(metric{job="app"})""", InstantFunctionId.Sqrt),
+      ("""days_in_month(metric{job="app"})""", InstantFunctionId.DaysInMonth),
+      ("""day_of_month(metric{job="app"})""", InstantFunctionId.DayOfMonth),
+      ("""day_of_week(metric{job="app"})""", InstantFunctionId.DayOfWeek),
+      ("""hour(metric{job="app"})""", InstantFunctionId.Hour),
+      ("""minute(metric{job="app"})""", InstantFunctionId.Minute),
+      ("""month(metric{job="app"})""", InstantFunctionId.Month),
+      ("""year(metric{job="app"})""", InstantFunctionId.Year)
+    )
+    for ((query, funcId) <- queryIdPairs) {
+      val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+      execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
+      for (child <- execPlan.children) {
+        child.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
+        child.children.size shouldEqual 0
+        val finalTransformer = child.asInstanceOf[MultiSchemaPartitionsExec].rangeVectorTransformers.last
+        finalTransformer.isInstanceOf[InstantVectorFunctionMapper] shouldEqual true
+        finalTransformer.asInstanceOf[InstantVectorFunctionMapper].function shouldEqual funcId
+      }
+    }
+  }
+
+  it("should generate correct execPlan for simple aggregate queries") {
+    // ensures:
+    //   (1) the execPlan tree has a LocalPartitionReduceAggregateExec root, and
+    //   (2) the tree has a max depth 1 where all children are MultiSchemaPartitionsExec nodes, and
+    //   (3) the final RangeVectorTransformer at each child is an AggregateMapReduce, and
+    //   (4) the AggregateMapReduce has the appropriate InstantFunctionId
+    val queryIdPairs = Seq(
+      ("""avg(metric{job="app"})""", AggregationOperator.Avg),
+      ("""count(metric{job="app"})""", AggregationOperator.Count),
+      ("""group(metric{job="app"})""", AggregationOperator.Group),
+      ("""sum(metric{job="app"})""", AggregationOperator.Sum),
+      ("""min(metric{job="app"})""", AggregationOperator.Min),
+      ("""max(metric{job="app"})""", AggregationOperator.Max),
+      ("""stddev(metric{job="app"})""", AggregationOperator.Stddev),
+      ("""stdvar(metric{job="app"})""", AggregationOperator.Stdvar),
+      ("""topk(1, metric{job="app"})""", AggregationOperator.TopK),
+      ("""bottomk(1, metric{job="app"})""", AggregationOperator.BottomK),
+      ("""count_values(1, metric{job="app"})""", AggregationOperator.CountValues),
+      ("""quantile(0.9, metric{job="app"})""", AggregationOperator.Quantile)
+    )
+    for ((query, funcId) <- queryIdPairs) {
+      val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+      execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
+      execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].aggrOp shouldEqual funcId
+      for (child <- execPlan.children) {
+        child.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
+        child.children.size shouldEqual 0
+        val lastTransformer = child.asInstanceOf[MultiSchemaPartitionsExec].rangeVectorTransformers.last
+        lastTransformer.isInstanceOf[AggregateMapReduce] shouldEqual true
+        lastTransformer.asInstanceOf[AggregateMapReduce].aggrOp shouldEqual funcId
+      }
+    }
+  }
+
+  it("should materialize LabelCardinalityPlan") {
+    val filters = Seq(
+      ColumnFilter("job", Equals("job")),
+      ColumnFilter("__name__", Equals("metric"))
+    )
+    val lp = LabelCardinality(filters, 0 * 1000, 1634920729000L)
+
+    val queryContext = QueryContext(origQueryParams = promQlQueryParams)
+    val execPlan = engine.materialize(lp, queryContext)
+
+    val expected =
+      """T~LabelCardinalityPresenter(LabelCardinalityPresenter)
+        |-E~LabelCardinalityReduceExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
+        |--E~LabelCardinalityExec(shard=3, filters=List(ColumnFilter(job,Equals(job)), ColumnFilter(__name__,Equals(metric))), limit=1000000, startMs=0, endMs=1634920729000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
+        |--E~LabelCardinalityExec(shard=19, filters=List(ColumnFilter(job,Equals(job)), ColumnFilter(__name__,Equals(metric))), limit=1000000, startMs=0, endMs=1634920729000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)"""
+        .stripMargin
+    validatePlan(execPlan, expected)
+  }
+
+  it ("should correctly materialize TsCardExec") {
+    val shardKeyPrefix = Seq("foo", "bar")
+    val numGroupByFields = 3
+
+    val lp = TsCardinalities(shardKeyPrefix, numGroupByFields)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[TsCardReduceExec] shouldEqual true
+
+    val reducer = execPlan.asInstanceOf[TsCardReduceExec]
+    reducer.children.size shouldEqual mapper.numShards
+    reducer.children.foreach{ child =>
+      child.isInstanceOf[TsCardExec] shouldEqual true
+      val leaf = child.asInstanceOf[TsCardExec]
+      leaf.shardKeyPrefix shouldEqual shardKeyPrefix
+      leaf.numGroupByFields shouldEqual numGroupByFields
+    }
   }
 }

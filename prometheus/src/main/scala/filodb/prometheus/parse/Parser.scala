@@ -11,6 +11,9 @@ import filodb.query.{LabelValues, LogicalPlan}
   * Parser routes requests to LegacyParser or AntlrParser.
   */
 object Parser extends StrictLogging {
+
+  val REGEX_MAX_LEN = 1000
+
   sealed trait Mode
   case object Legacy extends Mode
   case object Antlr extends Mode
@@ -105,6 +108,25 @@ object Parser extends StrictLogging {
     }
   }
 
+  /**
+   * Returns a mapping from selector labels (including an explicit/implicit __name__) to values.
+   * A metric name need not be present in the query.
+   *
+   * @param query: must specify label values by equality without a regex
+   */
+  def queryToEqualLabelMap(query: String): Map[String, String] = {
+    val expression = parseQuery(query)
+    expression match {
+      case p: InstantExpression => p.toEqualLabelMap()
+      case _ => throw new UnsupportedOperationException()
+    }
+  }
+
+  def labelCardinalityToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = parseQuery(query) match {
+      case p: InstantExpression => p.toLabelCardinalityPlan(timeParams)
+      case _ => throw new UnsupportedOperationException()
+  }
+
   // Only called by tests.
   def labelValuesQueryToLogicalPlan(labelNames: Seq[String], filterQuery: Option[String],
                                     timeParams: TimeRangeParams): LogicalPlan = {
@@ -113,8 +135,12 @@ object Parser extends StrictLogging {
         val columnFilters = parseLabelValueFilter(filter).map { l =>
           l.labelMatchOp match {
             case EqualMatch => ColumnFilter(l.label, Filter.Equals(l.value))
-            case NotRegexMatch => ColumnFilter(l.label, Filter.NotEqualsRegex(l.value))
-            case RegexMatch => ColumnFilter(l.label, Filter.EqualsRegex(l.value))
+            case NotRegexMatch => require(l.value.length <= REGEX_MAX_LEN,
+                                   s"Regular expression filters should be <= $REGEX_MAX_LEN characters")
+                                  ColumnFilter(l.label, Filter.NotEqualsRegex(l.value))
+            case RegexMatch =>  require(l.value.length <= REGEX_MAX_LEN,
+                                   s"Regular expression filters should be <= $REGEX_MAX_LEN characters")
+                                ColumnFilter(l.label, Filter.EqualsRegex(l.value))
             case NotEqual(false) => ColumnFilter(l.label, Filter.NotEquals(l.value))
             case other: Any => throw new IllegalArgumentException(s"Unknown match operator $other")
           }

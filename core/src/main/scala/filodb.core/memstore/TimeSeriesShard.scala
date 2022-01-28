@@ -41,10 +41,8 @@ import filodb.memory.format.ZeroCopyUTF8String._
 class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
 
-  val timeseriesCount = Kamon.gauge("memstore-timeseries-count")
   val shardTotalRecoveryTime = Kamon.gauge("memstore-total-shard-recovery-time",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
-  val chunksQueried = Kamon.counter("memstore-chunks-queried").withTags(TagSet.from(tags))
   val tsCountBySchema = Kamon.gauge("memstore-timeseries-by-schema").withTags(TagSet.from(tags))
   val rowsIngested = Kamon.counter("memstore-rows-ingested").withTags(TagSet.from(tags))
   val partitionsCreated = Kamon.counter("memstore-partitions-created").withTags(TagSet.from(tags))
@@ -224,6 +222,11 @@ Exception(s"Multiple schemas found, please filter. Expected schema $expected, fo
 object SchemaMismatch {
   def apply(expected: Schema, found: Schema): SchemaMismatch = SchemaMismatch(expected.name, found.name)
 }
+
+case class TimeSeriesShardInfo(shardNum: Int,
+                               stats: TimeSeriesShardStats,
+                               bufferPools: debox.Map[Int, WriteBufferPool],
+                               nativeMemoryManager: NativeMemoryManager)
 
 // scalastyle:off number.of.methods
 // scalastyle:off file.size.limit
@@ -410,6 +413,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     DMap(pools.toSeq: _*)
   }
 
+  private val shardInfo = TimeSeriesShardInfo(shardNum, shardStats, bufferPools, bufferMemoryManager)
+
   private final val partitionGroups = Array.fill(numGroups)(new EWAHCompressedBitmap)
 
   /**
@@ -542,7 +547,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         if (ingestOffset < groupWatermark(group)) {
           shardStats.rowsSkipped.increment()
           try {
-            // Needed to update index with new partitions added during recovery with correct startTime.
+            // Need to add partition to update index with new partitions added during recovery with correct startTime.
             // This is important to do since the group designated for dirty part key persistence can
             // lag behind group the partition belongs to. Hence during recovery, we skip
             // ingesting the sample, but create the partition and mark it as dirty.
@@ -593,9 +598,12 @@ class TimeSeriesShard(val ref: DatasetRef,
     _offset
   }
 
-  def topKCardinality(k: Int, shardKeyPrefix: Seq[String]): Seq[CardinalityRecord] = {
-    if (storeConfig.meteringEnabled) cardTracker.topk(k, shardKeyPrefix)
-    else throw new IllegalArgumentException("Metering is not enabled")
+  def scanTsCardinalities(shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord] = {
+    if (storeConfig.meteringEnabled) {
+      cardTracker.scan(shardKeyPrefix, depth)
+    } else {
+      throw new IllegalArgumentException("Metering is not enabled")
+    }
   }
 
   def startFlushingIndex(): Unit =
@@ -668,25 +676,13 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
     shardStats.indexRecoveryNumRecordsProcessed.increment()
     if (schema != Schemas.UnknownSchema) {
-      val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset, schema.options.shardKeyColumns)
-      captureTimeseriesCount(schema, shardKey, 1)
       if (storeConfig.meteringEnabled) {
-        cardTracker.incrementCount(shardKey)
+        val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset,
+                                                      schema.options.shardKeyColumns)
+        cardTracker.modifyCount(shardKey, 1, if (pk.endTime == Long.MaxValue) 1 else 0)
       }
     }
     partId
-  }
-
-  private def captureTimeseriesCount(schema: Schema, shardKey: Seq[String], times: Double) = {
-    // Assuming that the last element in the shardKeyColumn is always a metric name, we are making sure the
-    // shardKeyColumn.length is > 1 and dropping the last element in shardKeyColumn.
-    if (shardKeyLevelIngestionMetricsEnabled &&
-        schema.options.shardKeyColumns.length > 1 &&
-        shardKey.length == schema.options.shardKeyColumns.length) {
-      val tagSetMap = (schema.options.shardKeyColumns.map(c => s"metric${c}tag") zip shardKey).dropRight(1).toMap
-      shardStats.timeseriesCount.withTags(TagSet.from(tagSetMap)).increment(times)
-    }
-    shardStats.tsCountBySchema.withTag("schema", schema.name).increment(times)
   }
 
   def indexNames(limit: Int): Seq[String] = partKeyIndex.indexNames(limit)
@@ -715,10 +711,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     * This method is to apply column filters and fetch matching time series partitions.
     *
     * @param filter column filter
-    * @param labelNames labels to return in the response
     * @param endTime end time
     * @param startTime start time
-    * @param limit series limit
     * @return returns an iterator of map of label key value pairs of each matching time series
     */
   def labelNames(filter: Seq[ColumnFilter],
@@ -884,7 +878,6 @@ class TimeSeriesShard(val ref: DatasetRef,
           s"memory in dataset=$ref shard=$shardNum")
         val schema = p.schema
         val shardKey = schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset, schema.options.shardKeyColumns)
-        captureTimeseriesCount(schema, shardKey, -1)
         if (storeConfig.meteringEnabled) {
           try {
             cardTracker.decrementCount(shardKey)
@@ -909,7 +902,6 @@ class TimeSeriesShard(val ref: DatasetRef,
             logger.error("Got exception when reducing cardinality in tracker", e)
           }
         }
-        captureTimeseriesCount(schema, shardKey, -1)
       }
     }
     partKeyIndex.removePartKeys(partIter.skippedPartIDs)
@@ -1157,6 +1149,11 @@ class TimeSeriesShard(val ref: DatasetRef,
         dirtyParts += p.partID
         activelyIngesting -= p.partID
         markPartAsNotIngesting(p, odp = false)
+        val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
+                                                        p.schema.options.shardKeyColumns)
+        if (storeConfig.meteringEnabled) {
+          cardTracker.modifyCount(shardKey, 0, -1)
+        }
       }
     }
   }
@@ -1201,7 +1198,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private[memstore] val addPartitionsDisabled = AtomicBoolean(false)
 
   // scalastyle:off null
-  private[filodb] def getOrAddPartitionForIngestion(recordBase: Any, recordOff: Long,
+  private def getOrAddPartitionForIngestion(recordBase: Any, recordOff: Long,
                                                     group: Int, schema: Schema) = {
     var part = partSet.getWithIngestBR(recordBase, recordOff, schema)
     if (part == null) {
@@ -1255,15 +1252,14 @@ class TimeSeriesShard(val ref: DatasetRef,
     if (newPart != OutOfMemPartition) {
       val partId = newPart.partID
       val startTime = schema.ingestionSchema.getLong(recordBase, recordOff, 0)
+      val shardKey = schema.partKeySchema.colValues(newPart.partKeyBase, newPart.partKeyOffset,
+        schema.options.shardKeyColumns)
       if (previousPartId == CREATE_NEW_PARTID) {
         // add new lucene entry if this partKey was never seen before
         // causes endTime to be set to Long.MaxValue
         partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
-        val shardKey = schema.partKeySchema.colValues(newPart.partKeyBase, newPart.partKeyOffset,
-          schema.options.shardKeyColumns)
-        captureTimeseriesCount(schema, shardKey, 1)
         if (storeConfig.meteringEnabled) {
-          cardTracker.incrementCount(shardKey)
+          cardTracker.modifyCount(shardKey, 1, 1)
         }
       } else {
         // newly created partition is re-ingesting now, so update endTime
@@ -1308,17 +1304,25 @@ class TimeSeriesShard(val ref: DatasetRef,
         brRowReader.recordOffset = recordOff
         tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.checkoutForOverflow(group),
           storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, acceptDuplicateSamples, maxChunkTime)
-        // Below is coded to work concurrently with logic in updateIndexWithEndTime
-        // where we try to de-activate an active time series
+        // time series was inactive and has just started re-ingesting
         if (!tsp.ingesting) {
           // DO NOT use activelyIngesting to check above condition since it is slow and is called for every sample
           activelyIngesting.synchronized {
             if (!tsp.ingesting) {
-              // time series was inactive and has just started re-ingesting
+              // This is coded to work concurrently with logic in updateIndexWithEndTime
+              // where we try to de-activate an active time series.
+              // Checking ts.ingesting second time needed since the time series may have ended
+              // ingestion in updateIndexWithEndTime during the wait time of lock acquisition.
+              // DO NOT remove the second tsp.ingesting check without understanding this fully.
               updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
               dirtyPartitionsForIndexFlush += part.partID
               activelyIngesting += part.partID
               tsp.ingesting = true
+              val shardKey = tsp.schema.partKeySchema.colValues(tsp.partKeyBase, tsp.partKeyOffset,
+                tsp.schema.options.shardKeyColumns)
+              if (storeConfig.meteringEnabled) {
+                cardTracker.modifyCount(shardKey, 0, 1)
+              }
             }
           }
         }
@@ -1364,14 +1368,11 @@ class TimeSeriesShard(val ref: DatasetRef,
       // that min-write-buffers-free setting is large enough to accommodate the below use cases ALWAYS
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, bufferMemoryManager)
       val partId = if (usePartId == CREATE_NEW_PARTID) createPartitionID() else usePartId
-      val pool = bufferPools(schema.schemaHash)
       val newPart = if (shouldTrace(partKeyAddr)) {
         logger.debug(s"Adding tracing TSPartition dataset=$ref shard=$shardNum group=$group partId=$partId")
-        new TracingTimeSeriesPartition(
-          partId, ref, schema, partKeyAddr, shardNum, pool, shardStats, bufferMemoryManager, initMapSize)
+        new TracingTimeSeriesPartition(partId, ref, schema, partKeyAddr, shardInfo, initMapSize)
       } else {
-        new TimeSeriesPartition(
-          partId, schema, partKeyAddr, shardNum, pool, shardStats, bufferMemoryManager, initMapSize)
+        new TimeSeriesPartition(partId, schema, partKeyAddr, shardInfo, initMapSize)
       }
       partitions.put(partId, newPart)
       shardStats.partitionsCreated.increment()

@@ -103,6 +103,54 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     result.map( p => (p.startTime, p.endTime)) shouldEqual expected.map( p => (p.startTime, p.endTime))
   }
 
+  it("should fetch records from filters correctly with a missing label != with a non empty value") {
+    // Weird case in prometheus where if a non existent label is used with != check with an empty value,
+    // the returned result includes all results where the label is missing and those where the label exists
+    // and the value is not equal to the provided value.
+    // Check next test case for the check for empty value
+
+    // Add the first ten keys and row numbers
+    val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val pk = partKeyOnHeap(dataset6, ZeroPointer, addr)
+      keyIndex.addPartKey(pk, i, i, i + 10)()
+      PartKeyLuceneIndexRecord(pk, i, i + 10)
+    }
+    keyIndex.refreshReadersBlocking()
+
+    // Filter != condition on a field that doesn't exist must not affect the result
+
+    val filter1 = ColumnFilter("some", NotEquals("t".utf8))
+    val filter2 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
+    val result = keyIndex.partKeyRecordsFromFilters(Seq(filter1, filter2), 0, Long.MaxValue)
+    val expected = Seq(pkrs(7), pkrs(8), pkrs(9))
+
+    result.map(_.partKey.toSeq) shouldEqual expected.map(_.partKey.toSeq)
+    result.map( p => (p.startTime, p.endTime)) shouldEqual expected.map( p => (p.startTime, p.endTime))
+  }
+
+  it("should not fetch records from filters correctly with a missing label != with an empty value") {
+
+    // Weird case in prometheus where if a non existent label is used with != check with an empty value,
+    // the returned result is empty
+
+    // Add the first ten keys and row numbers
+    val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val pk = partKeyOnHeap(dataset6, ZeroPointer, addr)
+      keyIndex.addPartKey(pk, i, i, i + 10)()
+      PartKeyLuceneIndexRecord(pk, i, i + 10)
+    }
+    keyIndex.refreshReadersBlocking()
+
+    // Filter != condition on a field that doesn't exist must not affect the result
+
+    val filter1 = ColumnFilter("some", NotEquals("".utf8))
+    val filter2 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
+    val result = keyIndex.partKeyRecordsFromFilters(Seq(filter1, filter2), 0, Long.MaxValue)
+    result.isEmpty shouldBe true
+  }
+
     it("should upsert part keys with endtime and foreachPartKeyStillIngesting should work") {
     // Add the first ten keys and row numbers
     partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))

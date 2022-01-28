@@ -79,15 +79,16 @@ extends MemStore with StrictLogging {
     }
   }
 
-  def topKCardinality(ref: DatasetRef, shards: Seq[Int],
-                      shardKeyPrefix: Seq[String], k: Int): Seq[CardinalityRecord] = {
+  def scanTsCardinalities(ref: DatasetRef, shards: Seq[Int],
+                          shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord] = {
     datasets.get(ref).toSeq
       .flatMap { ts =>
         ts.values().asScala
           .filter(s => shards.isEmpty || shards.contains(s.shardNum))
-          .flatMap(_.topKCardinality(k, shardKeyPrefix))
+          .flatMap(_.scanTsCardinalities(shardKeyPrefix, depth))
       }
   }
+
   /**
     * WARNING: use only for testing. Not performant
     */

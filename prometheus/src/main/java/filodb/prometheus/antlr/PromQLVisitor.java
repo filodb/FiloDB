@@ -1,4 +1,4 @@
-// Generated from PromQL.g4 by ANTLR 4.9.2
+// Generated from PromQL.g4 by ANTLR 4.9
 package filodb.prometheus.antlr;
 import org.antlr.v4.runtime.tree.ParseTreeVisitor;
 

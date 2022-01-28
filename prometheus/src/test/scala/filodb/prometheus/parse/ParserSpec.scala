@@ -184,10 +184,6 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("foo::b{gibberish}")
     parseError("foo{1}")
     parseError("{}")
-    parseError("{x=\"\"}")
-    parseError("{x=~\".*\"}")
-    parseError("{x!~\".+\"}")
-    parseError("{x!=\"a\"}")
     parseError("foo{__name__=\"bar\"}")
 
     parseSuccessfully("test{a=\"b\"}[5y] OFFSET 3d")
@@ -224,6 +220,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("stdvar by (foo)(some_metric)")
     parseSuccessfully("sum by ()(some_metric)")
     parseSuccessfully("topk(5, some_metric)")
+    parseSuccessfully("group(some_metric)")
+    parseSuccessfully("group by(foo)(some_metric)")
     parseSuccessfully("count_values(\"value\",some_metric)")
     parseSuccessfully("sum without(and, by, avg, count, alert, annotations)(some_metric)")
     parseSuccessfully("sum:some_metric:dataset:1m{_ws_=\"some_workspace\", _ns_=\"some_namespace\"}")
@@ -256,6 +254,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("round(some_metric)")
     parseSuccessfully("round(some_metric, 5)")
     parseSuccessfully("log2(some_metric, 5)")
+    parseSuccessfully("sgn(some_metric)")
+
 
     //        parseError(  "floor()")
     //        parseError(  "floor(some_metric, other_metric)")
@@ -414,6 +414,10 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("sum_over_time(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
     parseError("sum_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
 
+    // regexp length
+    parseError(s"sum_over_time(some_metric{longregex~='${"f"*1001}'})") // reason : Regex len > 1000
+    parseError(s"sum_over_time(some_metric{longregex~!'${"f"*1001}'})") // reason : Regex len > 1000
+
     //  Timestamp
     parseSuccessfully("timestamp(some_metric)")
     parseError("timestamp(some_metric[5m])") // reason : Expected instant vector, got range vector
@@ -444,17 +448,21 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSubquery("max_over_time(rate(foo[5m])[5m:1m])")
     parseSubquery("max_over_time(sum(foo)[5m:1m])")
     parseSubquery("sum(foo)[5m:1m]")
+    parseSubquery("group(foo)[5m:1m]")
     parseSubquery("log2(foo)[5m:1m]")
     parseSubquery("log2(foo)[5m:]")
+    parseSubquery("sgn(foo)[5m:]")
     parseSubquery("(foo + bar)[5m:1m]")
     parseSubquery("sum_over_time((foo + bar)[5m:1m])")
     parseSubquery("avg_over_time(max_over_time(rate(foo[5m])[5m:1m])[10m:2m])")
     parseSubquery("sum(rate(foo[5m])[5m:1m])")
     parseSubquery("log2(rate(foo[5m])[5m:1m])")
+    parseSubquery("sgn(rate(foo[5m])[5m:1m])")
 
     parseSubqueryError("log2(foo)[5m][5m:1m]")
     parseSubqueryError("sum(foo)[5m]")
     parseSubqueryError("log2(foo)[5m:1m][5m:1m]")
+    parseSubqueryError("sgn(foo)[5m:1m][5m:1m]")
   }
 
   // TODO
@@ -517,6 +525,8 @@ class ParserSpec extends AnyFunSpec with Matchers {
         "Aggregate(Stdvar,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List())",
       "stddev(http_requests_total)" ->
         "Aggregate(Stddev,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List())",
+      "group(http_requests_total)" ->
+        "Aggregate(Group,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List())",
       "irate(http_requests_total{job=\"api-server\"}[5m])" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,300000,Irate,false,List(),None,List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))))",
       "idelta(http_requests_total{job=\"api-server\"}[5m])" ->
@@ -710,6 +720,30 @@ class ParserSpec extends AnyFunSpec with Matchers {
     val step = 0
     info(s"Parsing $q")
     Parser.queryToLogicalPlan(q, qts, step)
+  }
+
+  it("should correctly build a label map") {
+    val queryMapPairs = Seq(
+      ("foo", Map("__name__" -> "foo")),
+      ("""{__name__="foo"}""" -> Map("__name__" -> "foo")),
+      ("""{__name__="foo", bar="baz"}""" -> Map("__name__" -> "foo", "bar" -> "baz")),
+      ("""{bar="baz"}""" -> Map("bar" -> "baz")),
+      ("""foo{bar="baz", bog="bah"}""" -> Map("__name__" -> "foo", "bar" -> "baz", "bog" -> "bah")),
+    )
+
+    val queriesShouldFail = Seq(
+      """foo{__name__="bar"}""",
+      """foo{__name__="bar", bog="baz"}""",
+      """{}"""
+    )
+
+    queryMapPairs.foreach{case (query, expectedMap) =>
+      Parser.queryToEqualLabelMap(query) shouldEqual expectedMap
+    }
+
+    queriesShouldFail.foreach{query =>
+      assertThrows[IllegalArgumentException](Parser.queryToEqualLabelMap(query))
+    }
   }
 
   private def printBinaryJoin( lp: LogicalPlan, level: Int = 0) : scala.Unit =  {

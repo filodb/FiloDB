@@ -55,12 +55,12 @@ case class PromQlRemoteExec(queryEndpoint: String,
         // as response status code is not 2xx
         if (response.body.isLeft) {
           parser.decode[ErrorResponse](response.body.left.get) match {
-              case Right(errorResponse) =>
-                QueryError(queryContext.queryId, readQueryStats(errorResponse.queryStats),
-                RemoteQueryFailureException(response.code.toInt, errorResponse.status, errorResponse.errorType,
-                  errorResponse.error))
-              case Left(ex)             => QueryError(queryContext.queryId, QueryStats(), ex)
-            }
+            case Right(errorResponse) =>
+              QueryError(queryContext.queryId, readQueryStats(errorResponse.queryStats),
+              RemoteQueryFailureException(response.code.toInt, errorResponse.status, errorResponse.errorType,
+                errorResponse.error))
+            case Left(ex)             => QueryError(queryContext.queryId, QueryStats(), ex)
+          }
         }
         else {
           response.unsafeBody match {
@@ -246,13 +246,4 @@ case class PromQlRemoteExec(queryEndpoint: String,
       if (response.partial.isDefined) response.partial.get else false, response.message)
   }
 
-  def readQueryStats(queryStatsResponse: Option[Seq[QueryStatistics]]): QueryStats = {
-    val queryStats = QueryStats()
-    if (queryStatsResponse.isDefined && queryStatsResponse.get.nonEmpty) queryStatsResponse.get.foreach { stat =>
-      queryStats.getTimeSeriesScannedCounter(stat.group).addAndGet(stat.timeSeriesScanned)
-      queryStats.getDataBytesScannedCounter(stat.group).addAndGet(stat.dataBytesScanned)
-      queryStats.getResultBytesCounter(stat.group).addAndGet(stat.resultBytes)
-    }
-    queryStats
-  }
 }

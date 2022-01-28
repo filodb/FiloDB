@@ -18,25 +18,51 @@ import org.rocksdb._
 import spire.syntax.cfor._
 
 import filodb.core.{DatasetRef, GlobalScheduler}
+import filodb.core.memstore.ratelimit.CardinalityStore._
 import filodb.memory.format.UnsafeUtils
 
-class CardinalitySerializer extends Serializer[Cardinality] {
-  def write(kryo: Kryo, output: Output, card: Cardinality): Unit = {
+/**
+ * Stored as values in the RocksDb database.
+ * Identical to CardinalityRecord, except that:
+ *   (1) only the least-significant prefix name is stored.
+ *   (2) no shard ID is store
+ */
+case class CardinalityValue(name: String, tsCount: Int, activeTsCount: Int,
+                            childrenCount: Int, childrenQuota: Int)
+
+case object CardinalityValue {
+  def fromCardinalityRecord(card: CardinalityRecord): CardinalityValue = {
+    CardinalityValue(if (card.prefix.nonEmpty) card.prefix.last else "",
+                    card.tsCount, card.activeTsCount,
+                    card.childrenCount, card.childrenQuota)
+  }
+
+  def toCardinalityRecord(card: CardinalityValue,
+                          prefix: Seq[String],
+                          shard: Int): CardinalityRecord = {
+    CardinalityRecord(shard, prefix, card.tsCount, card.activeTsCount,
+                      card.childrenCount, card.childrenQuota)
+  }
+}
+
+class CardinalityNodeSerializer extends Serializer[CardinalityValue] {
+  def write(kryo: Kryo, output: Output, card: CardinalityValue): Unit = {
     output.writeString(card.name)
-    output.writeInt(card.timeSeriesCount, true)
+    output.writeInt(card.tsCount, true)
+    output.writeInt(card.activeTsCount, true)
     output.writeInt(card.childrenCount, true)
     output.writeInt(card.childrenQuota, true)
   }
 
-  def read(kryo: Kryo, input: Input, t: Class[Cardinality]): Cardinality = {
-    Cardinality(input.readString(), input.readInt(true), input.readInt(true), input.readInt(true))
+  def read(kryo: Kryo, input: Input, t: Class[CardinalityValue]): CardinalityValue = {
+    CardinalityValue(input.readString(), input.readInt(true), input.readInt(true),
+                    input.readInt(true), input.readInt(true))
   }
 }
 
 object RocksDbCardinalityStore {
   private lazy val loadRocksDbLibrary = RocksDB.loadLibrary()
-  private val LastKeySeparator: Char = 0x1E
-  private val NotLastKeySeparator: Char = 0x1D
+  private val KeySeparator: Char = 0x1E
   private val NotFound = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]
 
   // ======= DB Tuning ===========
@@ -86,7 +112,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   private val kryo = new ThreadLocal[Kryo]() {
     override def initialValue(): Kryo = {
       val k = new Kryo()
-      k.addDefaultSerializer(classOf[Cardinality], classOf[CardinalitySerializer])
+      k.addDefaultSerializer(classOf[CardinalityValue], classOf[CardinalityNodeSerializer])
       k
     }
   }
@@ -142,109 +168,163 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
    * In order to enable quick prefix search, we formulate string based keys to the RocksDB
    * key-value store.
    *
-   * For example, here is the list of rocksDb keys for a few shard keys. {LastKeySeparator} and
-   * {NotLastKeySeparator} are special characters chosen as separator char between shard key elements.
-   * {LastKeySeparator} is used just prior to last shard key element. {NotLastKeySeparator} is used otherwise.
+   * For example, here is the list of rocksDb keys for a few shard keys. {KeySeparator} is a
+   * special character chosen as the separator char between shard key elements. The value
+   * at the beginning of each key indicates the size of the prefix it represents.
+   *
    * This model helps with fast prefix searches to do top-k scans.
    *
    * BTW, Remove quote chars from actual string key.
-   * They are there just to emphasize the shard key element in the string. "" represents the root.
+   * They are there just to emphasize the shard key element in the string. "0" represents the root.
    *
    * <pre>
-   * ""
-   * ""{LastKeySeparator}"myWs1"
-   * ""{LastKeySeparator}"myWs2"
-   * ""{NotLastKeySeparator}"myWs1"{LastKeySeparator}"myNs11"
-   * ""{NotLastKeySeparator}"myWs1"{LastKeySeparator}"myNs12"
-   * ""{NotLastKeySeparator}"myWs2"{LastKeySeparator}"myNs21"
-   * ""{NotLastKeySeparator}"myWs2"{LastKeySeparator}"myNs22"
-   * ""{NotLastKeySeparator}"myWs1"{NotLastKeySeparator}"myNs11"{LastKeySeparator}"heap_usage"
-   * ""{NotLastKeySeparator}"myWs1"{NotLastKeySeparator}"myNs11"{LastKeySeparator}"cpu_usage"
-   * ""{NotLastKeySeparator}"myWs1"{NotLastKeySeparator}"myNs11"{LastKeySeparator}"network_usage"
+   * 0
+   * 1{KeySeparator}"myWs1"
+   * 1{KeySeparator}"myWs2"
+   * 2{KeySeparator}"myWs1"{KeySeparator}"myNs11"
+   * 2{KeySeparator}"myWs1"{KeySeparator}"myNs12"
+   * 2{KeySeparator}"myWs2"{KeySeparator}"myNs21"
+   * 2{KeySeparator}"myWs2"{KeySeparator}"myNs22"
+   * 3{KeySeparator}"myWs1"{KeySeparator}"myNs11"{KeySeparator}"heap_usage"
+   * 3{KeySeparator}"myWs1"{KeySeparator}"myNs11"{KeySeparator}"cpu_usage"
+   * 3{KeySeparator}"myWs2"{KeySeparator}"myNs21"{KeySeparator}"network_usage"
    * </pre>
    *
-   * In the above tree, we simply do a prefix search on <pre> ""{NotLastKeySeparator}"myWs1"{LastKeySeparator} </pre>
+   * In the above tree, we simply do a prefix search on <pre> 2{KeySeparator}"myWs1"{KeySeparator} </pre>
    * to get namespaces under workspace myWs1.
    *
    * @param shardKeyPrefix Zero or more elements that make up shard key prefix
-   * @param prefixSearch If true, returns key that can be used to perform prefix search to
-   *                     fetch immediate children in trie. Use false to fetch one specific node.
+   * @param keyDepth size to append at the beginning of the key
+   *   Note: When keyDepth > shardKeyPrefix.size, builds keys as:
+   *         <keyDepth>{KeySeparator}<name-1>{KeySeparator}<name-2> ... <name-n>{KeySeparator}
+   *         The result key should be used for a prefix search.
+   *   Note: When keyDepth == shardKeyPrefix.size, the final KeySeparator is omitted.
+   *         In this case, the result key cannot be used for a prefix search.
+   *
    * @return string key to use to perform reads and writes of entries into RocksDB
    */
-  private def toStringKey(shardKeyPrefix: Seq[String], prefixSearch: Boolean): String = {
+  private def toStringKey(shardKeyPrefix: Seq[String], keyDepth: Int): String = {
     import RocksDbCardinalityStore._
-    if (shardKeyPrefix.isEmpty) {
-      if (prefixSearch) LastKeySeparator.toString else ""
-    } else {
-      val b = new StringBuilder
-      cforRange { 0 until shardKeyPrefix.length - 1 } { i =>
-        b.append(NotLastKeySeparator)
-        b.append(shardKeyPrefix(i))
-      }
-      if (prefixSearch) {
-        b.append(NotLastKeySeparator)
-        b.append(shardKeyPrefix.last)
-        b.append(LastKeySeparator)
-      } else {
-        b.append(LastKeySeparator)
-        b.append(shardKeyPrefix.last)
-      }
-      b.toString()
+
+    val b = new StringBuilder
+    b.append(keyDepth)
+    cforRange { 0 until shardKeyPrefix.length } { i =>
+      b.append(KeySeparator)
+      b.append(shardKeyPrefix(i))
     }
+    if (keyDepth > shardKeyPrefix.size) {
+      b.append(KeySeparator)
+    }
+    b.toString()
   }
 
-  private def cardinalityToBytes(card: Cardinality): Array[Byte] = {
+  /**
+   * Builds a fully-specified search key as:
+   *   <keyDepth>{KeySeparator}<name-1>{KeySeparator}<name-2> ... <name-n>
+   * Keys returned from this function can only be used to lookup a single value.
+   * They cannot be used for a prefix search.
+   *
+   * @param shardKey must be a complete (non-prefix) shard key.
+   */
+  private def toCompleteStringKey(shardKey: Seq[String]): String = {
+    // When the keyDepth argument equals shardKey.size, the final {KeySeparator}
+    //   normally attached to a prefix key is omitted.
+    toStringKey(shardKey, shardKey.size)
+  }
+
+  private def cardinalityValueToBytes(card: CardinalityValue): Array[Byte] = {
     val out = new Output(500)
     kryo.get().writeObject(out, card)
     out.close()
     out.toBytes
   }
 
-  private def bytesToCardinality(bytes: Array[Byte]): Cardinality = {
+  private def bytesToCardinalityValue(bytes: Array[Byte]): CardinalityValue = {
     val inp = new Input(bytes)
-    val c = kryo.get().readObject(inp, classOf[Cardinality])
+    val c = kryo.get().readObject(inp, classOf[CardinalityValue])
     inp.close()
     c
   }
 
-  override def store(shardKeyPrefix: Seq[String], card: Cardinality): Unit = {
-    val key = toStringKey(shardKeyPrefix, false).getBytes(StandardCharsets.UTF_8)
+  override def store(card: CardinalityRecord): Unit = {
+    val key = toCompleteStringKey(card.prefix).getBytes(StandardCharsets.UTF_8)
     logger.debug(s"Storing shard=$shard dataset=$ref ${new String(key)} with $card")
-    db.put(key, cardinalityToBytes(card))
+    db.put(key, cardinalityValueToBytes(CardinalityValue.fromCardinalityRecord(card)))
   }
 
-  def getOrZero(shardKeyPrefix: Seq[String], zero: Cardinality): Cardinality = {
-    val value = db.get(toStringKey(shardKeyPrefix, false).getBytes(StandardCharsets.UTF_8))
-    if (value == NotFound) zero else bytesToCardinality(value)
+  def getOrZero(shardKeyPrefix: Seq[String], zero: CardinalityRecord): CardinalityRecord = {
+    val value = db.get(toCompleteStringKey(shardKeyPrefix).getBytes(StandardCharsets.UTF_8))
+    if (value == NotFound) zero
+    else CardinalityValue.toCardinalityRecord(bytesToCardinalityValue(value), shardKeyPrefix, shard)
   }
 
   override def remove(shardKeyPrefix: Seq[String]): Unit = {
-    db.delete(toStringKey(shardKeyPrefix, false).getBytes(StandardCharsets.UTF_8))
+    db.delete(toCompleteStringKey(shardKeyPrefix).getBytes(StandardCharsets.UTF_8))
   }
 
-  override def scanChildren(shardKeyPrefix: Seq[String]): Seq[Cardinality] = {
+  // scalastyle:off method.length
+  override def scanChildren(shardKeyPrefix: Seq[String],
+                            depth: Int): Seq[CardinalityRecord] = {
+
+    require(depth > shardKeyPrefix.size,
+      s"scan depth $depth must be greater than the size of the prefix ${shardKeyPrefix.size}")
+
     val it = db.newIterator()
-    val buf = ArrayBuffer[Cardinality]()
+    val buf = new ArrayBuffer[CardinalityRecord]()
     try {
-      val searchPrefix = toStringKey(shardKeyPrefix, true)
+      val searchPrefix = toStringKey(shardKeyPrefix, depth)
       logger.debug(s"Scanning shard=$shard dataset=$ref ${new String(searchPrefix)}")
       it.seek(searchPrefix.getBytes(StandardCharsets.UTF_8))
       import scala.util.control.Breaks._
 
+      var complete = false
       breakable {
-        while (it.isValid()) {
+        while (it.isValid() && (buf.size < MAX_RESULT_SIZE)) {
           val key = new String(it.key(), StandardCharsets.UTF_8)
           if (key.startsWith(searchPrefix)) {
-            buf += bytesToCardinality(it.value())
-          } else break // dont continue beyond valid results
+            val node = bytesToCardinalityValue(it.value())
+            // Drop the first element, since it's just the size of the prefix.
+            // Ex: 2{KeySeparator}A{KeySeparator}B ==(split)==> [2, A, B] ==(drop)==> [A, B]
+            val prefix = key.split(KeySeparator).drop(1)
+            buf += CardinalityValue.toCardinalityRecord(node, prefix, shard)
+          } else {
+            // no matching prefixes remain
+            complete = true
+            break
+          }
           it.next()
         }
+      }
+
+      // result reached MAX_RESULT_SIZE, but still more cardinalities
+      if (it.isValid() && !complete) {
+        // sum the remaining counts into these values
+        var tsCount, activeTsCount, childrenCount, childrenQuota = 0
+        breakable {
+          do {
+            // note: the iterator is valid here on the first iteration
+            val key = new String(it.key(), StandardCharsets.UTF_8)
+            if (key.startsWith(searchPrefix)) {
+              val node = bytesToCardinalityValue(it.value())
+              tsCount = tsCount + node.tsCount
+              activeTsCount = activeTsCount + node.activeTsCount
+              childrenCount = childrenCount + node.childrenCount
+              childrenQuota = childrenQuota + node.childrenQuota
+            } else {
+              break  // don't continue beyond valid results
+            }
+            it.next()
+          } while (it.isValid())
+        }
+        buf.append(CardinalityRecord(shard, OVERFLOW_PREFIX,
+          tsCount, activeTsCount, childrenCount, childrenQuota))
       }
     } finally {
       it.close();
     }
     buf
   }
+  // scalastyle:on method.length
 
   def close(): Unit = {
     closed = true
