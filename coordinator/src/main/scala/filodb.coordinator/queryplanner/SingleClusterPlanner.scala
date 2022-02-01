@@ -188,9 +188,28 @@ class SingleClusterPlanner(val dataset: Dataset,
       logger.debug(s"For shardColumns $shardColumns, extracted metric $metric and shard values $shardValues")
       val targetSchema = qContext.plannerParams.targetSchema.getOrElse(targetSchemaProvider).targetSchemaFunc(filters)
       val shardHash = RecordBuilder.shardKeyHash(shardValues, dsOptions.metricColumn, metric, targetSchema)
-      shardMapperFunc.queryShards(shardHash, spreadProvToUse.spreadFunc(filters).last.spread)
+      if(useTargetSchemaForShards(filters, targetSchema)) {
+        val nonShardKeyLabelPairs = filters.filter(f => !shardColumns.contains(f.column))
+                                            .map(cf => cf.column -> cf.asInstanceOf[Filter.Equals].value.toString).toMap
+        val partitionHash = RecordBuilder.partitionKeyHash(nonShardKeyLabelPairs, shardVals.toMap, targetSchema,
+          dsOptions.metricColumn, metric)
+        Seq(shardMapperFunc.ingestionShard(shardHash, partitionHash, spreadProvToUse.spreadFunc(filters).last.spread))
+      } else {
+        shardMapperFunc.queryShards(shardHash, spreadProvToUse.spreadFunc(filters).last.spread)
+      }
     }
   }
+
+  /**
+   * If TargetSchema exists and all of the target-schema label filters (equals) are provided in the query,
+   * then return true.
+   * @param filters Query Column Filters
+   * @param targetSchema TargetSchema
+   * @return useTargetSchema - use target-schema to calculate query shards
+   */
+  private def useTargetSchemaForShards(filters: Seq[ColumnFilter], targetSchema: Seq[String]): Boolean =
+    targetSchema.nonEmpty &&
+      targetSchema.forall(s => filters.exists(cf => cf.column == s && cf.filter.isInstanceOf[Filter.Equals]))
 
   private def toChunkScanMethod(rangeSelector: RangeSelector): ChunkScanMethod = {
     rangeSelector match {

@@ -221,7 +221,7 @@ class MetricTagInputRecord(values: Seq[Any],
                            metric: String,
                            tags: Map[ZCUTF8, ZCUTF8],
                            schema: Schema) extends InputRecord {
-  final def shardKeyHash: Int = RecordBuilder.shardKeyHash(nonMetricShardValues,schema.options.metricColumn, metric)
+  final def shardKeyHash: Int = RecordBuilder.shardKeyHash(nonMetricShardValues, schema.options.metricColumn, metric)
   // NOTE: this is probably not very performant right now.
   final def partitionKeyHash: Int = tags.hashCode
 

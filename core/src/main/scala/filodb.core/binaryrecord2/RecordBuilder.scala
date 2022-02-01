@@ -686,29 +686,31 @@ object RecordBuilder {
   /**
    * Calculate partition key hash from non-shard-key columns. This is used for calculating the ingestionShard.
    * If a target-schema is provided, use the labels configured in target-schema.
-   * @param nonShardKeysLabelMap non-shard-key label pair
-   * @param targetSchema target-schema list of label that uniquely identify the source of data and used
+   * @param nonShardKeyLabelPair non-shard-key label pair
+   * @param targetSchema target-schema list of sorted labels that uniquely identify the source of data and used
    *                     exclusively for determining target ingestion shard.
    * @param metricShardkey metric shardKey (e.g __name__)
    * @param metric metric name
    * @return
    */
-  final def partitionKeyHash(nonShardKeysLabelMap: Map[String, String],
-                          targetSchema: Seq[String],
-                          metricShardkey: String,
-                          metric: String): Int = {
+  final def partitionKeyHash(nonShardKeyLabelPair: Map[String, String],
+                             shardKeyLabelPair: Map[String, String],
+                             targetSchema: Seq[String],
+                             metricShardkey: String,
+                             metric: String): Int = {
     var hash = 7
     val labelValues = if (targetSchema.nonEmpty) {
       targetSchema.map { l =>
         if (l == metricShardkey) metric
-        else nonShardKeysLabelMap(l) }
-    } else nonShardKeysLabelMap.values
+        else if (nonShardKeyLabelPair.get(l).nonEmpty) nonShardKeyLabelPair(l)
+        else shardKeyLabelPair(l)
+      }
+    } else nonShardKeyLabelPair.values
     labelValues.foreach { v => {
         hash = RecordBuilder
           .combineHash(hash, BinaryRegion.hash32(v.getBytes(StandardCharsets.UTF_8)))
       }
     }
-    println("targetSchema::" + labelValues + " hash::" + hash)
     hash
   }
 
