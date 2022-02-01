@@ -23,7 +23,6 @@ object Submodules {
     .dependsOn(memory % "compile->compile; test->test")
     .settings(
       commonSettings,
-      assemblySettings,
       name := "filodb-core",
       scalacOptions += "-language:postfixOps",
       libraryDependencies ++= coreDeps
@@ -37,7 +36,6 @@ object Submodules {
     .settings(
       commonSettings,
       multiJvmSettings,
-      assemblySettings,
       testMultiJvmToo,
       name := "filodb-coordinator",
       libraryDependencies ++= coordDeps,
@@ -52,7 +50,6 @@ object Submodules {
     .settings(
       commonSettings,
       name := "filodb-prometheus",
-      assemblySettings,
       publishArtifact in (Compile, packageDoc) := false,
       publishArtifact in packageDoc := false,
       sources in (Compile,doc) := Seq.empty,
@@ -64,7 +61,6 @@ object Submodules {
     .settings(
       libraryDependencies ++= queryDeps,
       commonSettings,
-      assemblySettings,
       scalacOptions += "-language:postfixOps",
       name := "filodb-query"
     )

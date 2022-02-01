@@ -85,12 +85,12 @@ object QueryContext {
 
   /**
    * A functional TargetSchemaProvider which takes a targetSchema config that has key as shardKey/values mapped to
-   * TargetSchema
-   * for e.g in the following config, first key has targetSchema as `_instanceId_`, All the metrics coming from
-   * a-service/a-client for an `_instanceId` will be routed to a single shard.
+   * TargetSchema.
+   * for e.g in the following config, first key has targetSchema as `_ws_,_ns_,_instanceId_`, All the metrics coming
+   * from a-service/a-client for an `_instanceId` will be routed to a single shard.
    * {
-   *  {"_ws_" -> "a-service", "_ns_" ->"a-client" : ["_instanceId_"]},
-   *  {"_ws_" -> "b-service", "_ns_" ->"b-client" : ["_resourceId_"]}
+   *  {"_ws_" -> "a-service", "_ns_" ->"a-client" : ["_ws_","_ns_",_instanceId_"]},
+   *  {"_ws_" -> "b-service", "_ns_" ->"b-client" : ["_ws_","_ns_","_resourceId_"]}
    * }
    * @param shardKeyNames
    * @param targetSchemaMap
