@@ -8,9 +8,10 @@ import filodb.prometheus.parse.Parser
 import filodb.query._
 
 object Vectors {
-  val PromMetricLabel = "__name__"
-  val TypeLabel       = "_type_"
-  val BucketFilterLabel = "_bucket_"
+  val PromMetricLabel         = "__name__"
+  val PromInternalMetricLabel = "_metric_"
+  val TypeLabel               = "_type_"
+  val BucketFilterLabel       = "_bucket_"
 }
 
 object WindowConstants {
@@ -151,7 +152,7 @@ sealed trait Vector extends Expression {
    *   (2) at least one label matcher exists.
    */
   def applyPromqlConstraints(): Unit = {
-    val nameLabel = labelSelection.find(_.label == PromMetricLabel)
+    val nameLabel = labelSelection.find(lm => lm.label == PromMetricLabel || lm.label == PromInternalMetricLabel)
     if (metricName.nonEmpty) {
       if (nameLabel.nonEmpty) {
         throw new IllegalArgumentException(

@@ -185,6 +185,9 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseError("foo{1}")
     parseError("{}")
     parseError("foo{__name__=\"bar\"}")
+    parseError("foo{__name__=\"foo\"}")
+    parseError("foo{_metric_=\"bar\"}")
+    parseError("foo{_metric_=\"foo\"}")
 
     parseSuccessfully("test{a=\"b\"}[5y] OFFSET 3d")
     parseSuccessfully("test{a=\"b\"}[5y] LIMIT 3")
