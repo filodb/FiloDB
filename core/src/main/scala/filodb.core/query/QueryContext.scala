@@ -87,32 +87,42 @@ object QueryContext {
    * A functional TargetSchemaProvider which takes a targetSchema config that has key as shardKey/values mapped to
    * TargetSchema.
    * for e.g in the following config, first key has targetSchema as `_ws_,_ns_,_instanceId_`, All the metrics coming
-   * from a-service/a-client for an `_instanceId` will be routed to a single shard.
+   * from aService/aClient for an `_instanceId_` will be routed to a single shard.
    * {
-   *  {"_ws_" -> "a-service", "_ns_" ->"a-client" : ["_ws_","_ns_",_instanceId_"]},
-   *  {"_ws_" -> "b-service", "_ns_" ->"b-client" : ["_ws_","_ns_","_resourceId_"]}
+   *  {"_ws_" -> "aService", "_ns_" ->"aClient" : ["_ws_","_ns_",_instanceId_"]},
+   *  {"_ws_" -> "bService", "_ns_" ->"bClient" : ["_ws_","_ns_","_resourceId_"]}
    * }
    * @param shardKeyNames
    * @param targetSchemaMap
+   * @param optionalShardKey look up targetSchemaMap excluding this filter (for e.g target-schema is defined at
+   *                         _ws_ = "cService", then all the timeseries published from cService will use same
+   *                         target-schema irrespective of the namespace.
    * @return
    */
   def mapTargetSchemaFunc(shardKeyNames: Seq[String],
-                          targetSchemaMap: Map[Map[String, String], Seq[String]])
+                          targetSchemaMap: Map[Map[String, String], Seq[String]],
+                          optionalShardKey: String)
           : Seq[ColumnFilter] => Seq[String] = {
     filters: Seq[ColumnFilter] =>
       val shardKeysInQuery = filters.collect {
         case ColumnFilter(key, Filter.Equals(filtVal: String)) if shardKeyNames.contains(key) => key -> filtVal
       }.toMap
-      targetSchemaMap.getOrElse(shardKeysInQuery, Seq.empty)
+      val nonOptShardKeys = filters.collect {
+        case ColumnFilter(key, Filter.Equals(filtVal: String))
+          if key != optionalShardKey && shardKeyNames.contains(key) => key -> filtVal
+      }.toMap
+      val defaultSchema = targetSchemaMap.getOrElse(nonOptShardKeys, Seq.empty)
+      targetSchemaMap.getOrElse(shardKeysInQuery, defaultSchema)
   }
 
   def mapTargetSchemaFunc(shardKeyNames: java.util.List[String],
-                          targetSchemaMap: java.util.Map[java.util.Map[String, String], java.util.List[String]])
+                          targetSchemaMap: java.util.Map[java.util.Map[String, String], java.util.List[String]],
+                          optionalShardKey: String)
           : Seq[ColumnFilter] => Seq[String]= {
     val targetSchema: Map[Map[String, String], Seq[String]] = targetSchemaMap.asScala.map {
       case (d, v) => d.asScala.toMap -> v.asScala.toSeq
     }.toMap
-    mapTargetSchemaFunc(shardKeyNames.asScala, targetSchema)
+    mapTargetSchemaFunc(shardKeyNames.asScala, targetSchema, optionalShardKey)
   }
 
 }
