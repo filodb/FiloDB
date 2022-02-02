@@ -1428,6 +1428,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     ))
 
     val map = exec.setOpUnless(lhsRv, rhsRv).map( rv => rv.key.labelValues -> rvRowsToListOfTuples(rv)).toMap
+    map.size shouldEqual 2
     map.get(Map("label2".utf8 -> "value2".utf8, "onLabel".utf8 -> "onValue1".utf8)) match {
       case Some(matched)  => assertListEquals(matched, List((0,1.0), (10,Double.NaN), (20,Double.NaN), (30,3.0)))
       case None           => fail("Expected to find a matching RV for key Map(label2 -> value2, onLabel -> onValue1)")
@@ -1454,6 +1455,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     ))
 
     val map = exec.setOpUnless(lhsRv, rhsRv).map( rv => rv.key.labelValues -> rvRowsToListOfTuples(rv)).toMap
+    map.size shouldBe 2
     map.get(Map("label2".utf8 -> "value2".utf8, "onLabel".utf8 -> "onValue1".utf8)) match {
       case Some(matched)  => assertListEquals(matched, List((0,1.0), (10,Double.NaN), (20,Double.NaN), (30,3.0)))
       case None           => fail("Expected to find a matching RV for key Map(label2 -> value2, onLabel -> onValue1)")
@@ -1467,7 +1469,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
   }
 
 
-  it("should perform A - B correctly when on and ignoring is provided is given") {
+  it("should perform A - B correctly only  ignoring is provided") {
     val exec = SetOperatorExec(QueryContext(), dummyDispatcher, Nil, Nil, BinaryOperator.LUnless, Nil, Seq("label1", "label2"), "_metric_", None)
     // This is same as using only onLabel for joining
 
@@ -1483,6 +1485,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     ))
 
     val map = exec.setOpUnless(lhsRv, rhsRv).map( rv => rv.key.labelValues -> rvRowsToListOfTuples(rv)).toMap
+    map.size shouldBe 2
     map.get(Map("label2".utf8 -> "value2".utf8, "onLabel".utf8 -> "onValue1".utf8)) match {
       case Some(matched)  => assertListEquals(matched, List((0,1.0), (10,Double.NaN), (20,Double.NaN), (30,3.0)))
       case None           => fail("Expected to find a matching RV for key Map(label2 -> value2, onLabel -> onValue1)")
@@ -1508,7 +1511,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     ))
 
     val map = exec.setOpAnd(lhsRv, rhsRv, resultSchema).map( rv => rv.key.labelValues -> rvRowsToListOfTuples(rv)).toMap
-    map.size shouldEqual 1
+    map.size shouldBe 1
     map.get(Map("label1".utf8 -> "value1".utf8)) match {
       case Some(matched)  => assertListEquals(matched, List((0, Double.NaN), (10, 1.0), (20,Double.NaN)))
       case None           => fail("Expected to find a matching RV for key Map(label1 -> value1)")

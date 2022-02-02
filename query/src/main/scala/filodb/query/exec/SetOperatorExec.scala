@@ -94,7 +94,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
     * Returns true when range vector does not have any values
     */
   private[exec] def isEmpty(rv: RangeVector, schema: ResultSchema) = {
-    if (schema.isHistogram) rv.rows().map(_.getHistogram(1)).filter(_.numBuckets > 0).isEmpty
+    if (schema.isHistogram) rv.rows().forall(_.getHistogram(1).numBuckets == 0)
     else rv.rows().forall(_.getDouble(1).isNaN)
   }
 
