@@ -84,8 +84,8 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val funcParams = Seq("instance", "$1 new Label Value $2", "instance", "(.*):90(.*)")
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(sampleWithKey), querySession, 1000, resultSchema, Nil)
-    val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
@@ -134,8 +134,8 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(sampleWithKey), querySession, 1000, resultSchema, Nil)
-    val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
@@ -179,8 +179,8 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(sampleWithKey), querySession, 1000, resultSchema, Nil)
-    val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
@@ -230,8 +230,8 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
-    val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
@@ -256,8 +256,8 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
-    val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
@@ -282,8 +282,8 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
-    val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
@@ -308,8 +308,8 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
-    val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
@@ -334,8 +334,8 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
-    val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
@@ -360,8 +360,8 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
-    val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
@@ -384,8 +384,8 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
-    val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
@@ -408,8 +408,8 @@ class LabelReplaceSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
-    val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 

@@ -620,7 +620,7 @@ class TimeSeriesShard(val ref: DatasetRef,
                      .map { count =>
                         startFlushingIndex()
                        logger.info(s"Bootstrapped index for dataset=$ref shard=$shardNum with $count records")
-                     }.runAsync(ingestSched)
+                     }.runToFuture(ingestSched)
   }
 
   /**
@@ -1155,7 +1155,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     val partKeyRecords = InMemPartitionIterator2(flushGroup.dirtyPartsToFlush).map(toPartKeyRecord)
     val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
     colStore.writePartKeys(ref, shardNum,
-                           Observable.fromIterator(partKeyRecords),
+                           Observable.fromIteratorUnsafe(partKeyRecords),
                            storeConfig.diskTTLSeconds, updateHour).map { resp =>
       if (flushGroup.dirtyPartsToFlush.length > 0) {
         logger.info(s"Finished flush of partKeys numPartKeys=${flushGroup.dirtyPartsToFlush.length}" +
@@ -1177,7 +1177,7 @@ class TimeSeriesShard(val ref: DatasetRef,
                           blockHolder: BlockMemFactory): Future[Response] = {
     assertThreadName(IngestSchedName)
 
-    val chunkSetStream = Observable.fromIterator(chunkSetIt)
+    val chunkSetStream = Observable.fromIteratorUnsafe(chunkSetIt)
     logger.debug(s"Created flush ChunkSets stream for group ${flushGroup.groupNum} in " +
       s"dataset=$ref shard=$shardNum")
 
@@ -1692,7 +1692,7 @@ class TimeSeriesShard(val ref: DatasetRef,
                      querySession: QuerySession): Observable[ReadablePartition] = {
 
     val partIter = new InMemPartitionIterator2(iterResult.partsInMemory)
-    Observable.fromIterator(partIter.map { p =>
+    Observable.fromIteratorUnsafe(partIter.map { p =>
       shardStats.partitionsQueried.increment()
       p
     })

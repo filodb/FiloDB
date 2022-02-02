@@ -51,8 +51,8 @@ class DemandPagedChunkStoreSpec extends AnyFunSpec with AsyncTest {
     // Now try paging RawPartDatas in, and see that DemandPaging can load blocks into the right partitions
     for { partNo <- 0 to 9 } {
       val chunkStream = filterByPartAndMakeStream(rawData, partNo)
-      val rawPartition = TestData.toRawPartData(chunkStream).runAsync.futureValue
-      val tsPartition = onDemandPartMaker.populateRawChunks(rawPartition).runAsync.futureValue
+      val rawPartition = TestData.toRawPartData(chunkStream).runToFuture.futureValue
+      val tsPartition = onDemandPartMaker.populateRawChunks(rawPartition).runToFuture.futureValue
 
       tsPartition.appendingChunkLen shouldEqual 2   // 2 samples ingested into write buffers
       tsPartition.numChunks shouldEqual 10          // write buffers + 9 chunks above
@@ -63,7 +63,7 @@ class DemandPagedChunkStoreSpec extends AnyFunSpec with AsyncTest {
     // try and ODP more data.  Load older data than chunk retention, should still be able to load
     val data2 = linearMultiSeries(start - 2.hours.toMillis, timeStep=100000).take(20)
     val stream2 = filterByPartAndMakeStream(data2, 0)
-    val rawPart2 = TestData.toRawPartData(stream2).runAsync.futureValue
-    val tsPart2 = onDemandPartMaker.populateRawChunks(rawPart2).runAsync.futureValue
+    val rawPart2 = TestData.toRawPartData(stream2).runToFuture.futureValue
+    val tsPart2 = onDemandPartMaker.populateRawChunks(rawPart2).runToFuture.futureValue
   }
 }

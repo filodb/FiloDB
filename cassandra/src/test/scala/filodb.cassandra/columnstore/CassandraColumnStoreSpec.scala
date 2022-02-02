@@ -75,15 +75,15 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
 
     val expectedKeys = pks.map(pk => new String(pk.partKey, StandardCharsets.UTF_8).toInt)
 
-    val readData = colStore.getPartKeysByUpdateHour(dataset, 0, updateHour).toListL.runAsync.futureValue.toSet
+    val readData = colStore.getPartKeysByUpdateHour(dataset, 0, updateHour).toListL.runToFuture.futureValue.toSet
     readData.map(pk => new String(pk.partKey, StandardCharsets.UTF_8).toInt) shouldEqual expectedKeys
 
-    val readData2 = colStore.scanPartKeys(dataset, 0).toListL.runAsync.futureValue.toSet
+    val readData2 = colStore.scanPartKeys(dataset, 0).toListL.runToFuture.futureValue.toSet
     readData2.map(pk => new String(pk.partKey, StandardCharsets.UTF_8).toInt) shouldEqual expectedKeys
 
     readData2.map(_.partKey).foreach(pk => colStore.deletePartKeyNoAsync(dataset, 0, pk))
 
-    val readData3 = colStore.scanPartKeys(dataset, 0).toListL.runAsync.futureValue
+    val readData3 = colStore.scanPartKeys(dataset, 0).toListL.runToFuture.futureValue
     readData3.isEmpty shouldEqual true
   }
 
@@ -233,9 +233,9 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
       response should equal (Success)
     }
 
-    val sourceChunks = chunkSetStream(names take 3).toListL.runAsync.futureValue
+    val sourceChunks = chunkSetStream(names take 3).toListL.runToFuture.futureValue
 
-    val parts = lz4ColStore.readRawPartitions(dataset.ref, 0.millis.toMillis, partScan).toListL.runAsync.futureValue
+    val parts = lz4ColStore.readRawPartitions(dataset.ref, 0.millis.toMillis, partScan).toListL.runToFuture.futureValue
     parts should have length (1)
     parts(0).chunkSetsTimeOrdered should have length (1)
     parts(0).chunkSetsTimeOrdered(0).vectors.toSeq shouldEqual sourceChunks.head.chunks

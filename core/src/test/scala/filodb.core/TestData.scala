@@ -26,7 +26,7 @@ object TestData {
                        part: PartitionKey,
                        rows: Seq[RowReader],
                        rowsPerChunk: Int = 10): Observable[ChunkSet] =
-    Observable.fromIterator(rows.grouped(rowsPerChunk).map {
+    Observable.fromIteratorUnsafe(rows.grouped(rowsPerChunk).map {
       chunkRows => ChunkSet(s.data, part, 0, chunkRows, nativeMem) })
 
   def toRawPartData(chunkSetStream: Observable[ChunkSet]): Task[RawPartData] = {

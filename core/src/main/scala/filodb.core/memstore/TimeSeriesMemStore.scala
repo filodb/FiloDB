@@ -139,13 +139,13 @@ extends MemStore with StrictLogging {
         shard.ingest(d)
         Observable.fromIterable(tasks)
     }
-    .mapAsync(numParallelFlushes) {
+    .mapParallelUnordered(numParallelFlushes) {
       // asyncBoundary so subsequent computations in pipeline happen in default threadpool
       task => task.executeOn(flushSched).asyncBoundary
     }
     .completedL
     .doOnCancel(cancelTask)
-    .runAsync(shard.ingestSched)
+    .runToFuture(shard.ingestSched)
   }
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =

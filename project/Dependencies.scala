@@ -20,7 +20,7 @@ object Dependencies {
   val cassDriverVersion = "3.7.1"
   val ficusVersion      = "1.3.4"
   val kamonBundleVersion = "2.2.2"
-  val monixKafkaVersion = "0.15"
+  val monixKafkaVersion = "1.0.0-RC6"
   val sparkVersion      = "2.4.8"
   val sttpVersion       = "1.3.3"
 
@@ -64,7 +64,7 @@ object Dependencies {
     "io.kamon"                     %% "kamon-opentelemetry" % kamonBundleVersion,
     "org.slf4j"                    % "slf4j-api"          % "1.7.10",
     "com.beachape"                 %% "enumeratum"        % "1.5.10",
-    "io.monix"                     %% "monix"             % "2.3.3",
+    "io.monix"                     %% "monix"             % "3.4.0",
     "com.googlecode.concurrentlinkedhashmap"              % "concurrentlinkedhashmap-lru" % "1.4",
     "com.iheart"                   %% "ficus"             % ficusVersion,
     "io.fastjson"                  % "boon"               % "0.33",

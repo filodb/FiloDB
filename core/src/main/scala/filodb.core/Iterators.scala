@@ -11,7 +11,7 @@ import com.googlecode.javaewah.IntIterator
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.{Ack, Scheduler, UncaughtExceptionReporter}
 import monix.reactive.{Notification, Observable}
-import monix.reactive.observables.ObservableLike.Operator
+import monix.reactive.Observable.Operator
 import monix.reactive.observers.Subscriber
 
 import filodb.core.GlobalScheduler._

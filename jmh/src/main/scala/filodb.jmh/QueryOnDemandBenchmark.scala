@@ -101,7 +101,7 @@ class QueryOnDemandBenchmark extends StrictLogging {
                                           numSamples * numSeries, dataset, shardMapper, spread)
   val ingestTask = containerStream.groupBy(_._1)
                     // Asynchronously subcribe and ingest each shard
-                    .mapAsync(numShards) { groupedStream =>
+                    .mapParallelUnordered(numShards) { groupedStream =>
                       val shard = groupedStream.key
                       println(s"Starting ingest on shard $shard...")
                       val shardStream = groupedStream.zipWithIndex.flatMap { case ((_, bytes), idx) =>
@@ -111,7 +111,7 @@ class QueryOnDemandBenchmark extends StrictLogging {
                       }
                       Task.fromFuture(memStore.ingestStream
                         (dataset.ref, shard, shardStream, global, Task {}))
-                    }.countL.runAsync
+                    }.countL.runToFuture
   Await.result(producingFut, 30.seconds)
   Thread sleep 2000
   memStore.refreshIndexForTesting(dataset.ref) // commit lucene index
