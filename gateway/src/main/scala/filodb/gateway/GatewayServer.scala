@@ -11,6 +11,7 @@ import scala.util.control.NonFatal
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+import kamon.tag.TagSet
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.kafka._
@@ -58,6 +59,9 @@ import filodb.timeseries.TestTimeseriesProducer
 object GatewayServer extends StrictLogging {
   Kamon.init
 
+  val MAX_RECORD_TAG_VALUE_SIZE_BYTES = 16384  // 2^14; 2^15 is lucene limit
+  val RECORD_TAG_VALUE_BYTES_PER_CHAR = 2;
+
   // Get global configuration using universal FiloDB/Akka-based config
   val settings = new FilodbSettings()
   val config = settings.allConfig
@@ -67,6 +71,7 @@ object GatewayServer extends StrictLogging {
   val numInfluxMessages = Kamon.counter("num-influx-messages").withoutTags
   val numInfluxParseErrors = Kamon.counter("num-influx-parse-errors").withoutTags
   val numDroppedMessages = Kamon.counter("num-dropped-messages").withoutTags
+  val numInvalidRecords = Kamon.counter("num-invalid-records").withoutTags
   val numContainersSent = Kamon.counter("num-containers-sent").withoutTags
   val containersSize = Kamon.histogram("containers-size-bytes").withoutTags
 
@@ -234,14 +239,37 @@ object GatewayServer extends StrictLogging {
     (shardQueues, containerStream)
   }
 
+  private def validateRecord(rec: InputRecord): Boolean = {
+    for ((label, value) <- rec.tags) {
+      val labelSizeBytes = value.size * RECORD_TAG_VALUE_BYTES_PER_CHAR
+      if (labelSizeBytes > MAX_RECORD_TAG_VALUE_SIZE_BYTES) {
+        logger.warn(
+          s"label value size ($labelSizeBytes bytes) exceeds limit ($MAX_RECORD_TAG_VALUE_SIZE_BYTES bytes)\n" +
+          s"label: $label\n" +
+          s"value: $value")
+        return false;
+      }
+    }
+    true;
+  }
+
   def buildShardContainers(shard: Int,
                            queue: MpscGrowableArrayQueue[InputRecord],
                            builder: RecordBuilder,
                            sendTime: Array[Long]): Task[(Int, Seq[Array[Byte]])] = Task {
     // While there are still messages in the queue and there aren't containers to send, pull and build
     while (!queue.isEmpty && builder.allContainers.length <= 1) {
-      queue.poll().addToBuilder(builder)
-      // TODO: add metrics
+      val rec = queue.poll();
+      if (!validateRecord(rec)) {
+        logger.warn("record validation failed-- dropping invalid record")
+        numInvalidRecords.withTags(TagSet.from(Map(
+          "_ws_" -> rec.tags("_ws_"),
+          "_ns_" -> rec.tags("_ns_")
+        ))).increment()
+      } else {
+        rec.addToBuilder(builder)
+        // TODO: add metrics
+      }
     }
     // Is there a container to send?  Or has the time since the last send been more than a second?
     // Send only full containers or if time has elapsed, send and reset current container

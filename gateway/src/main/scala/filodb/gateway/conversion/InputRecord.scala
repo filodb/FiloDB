@@ -19,6 +19,9 @@ trait InputRecord {
   def shardKeyHash: Int
   def partitionKeyHash: Int
 
+  // tags are needed for validation (i.e. that label values do not exceed a size limit)
+  val tags: Map[String, String]
+
   /**
    * The values for each of the tag keys found in DatasetOptions.nonMetricShardColumns
    * @return the nonMetricShardColumns tag values, in the same order as nonMetricShardColumns
