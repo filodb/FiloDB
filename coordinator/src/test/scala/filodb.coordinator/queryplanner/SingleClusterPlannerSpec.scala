@@ -1,26 +1,25 @@
 package filodb.coordinator.queryplanner
 
-import scala.concurrent.duration._
-
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
-import org.scalatest.concurrent.ScalaFutures
 import filodb.coordinator.ShardMapper
-import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, StaticSpreadProvider}
+import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, FunctionalTargetSchemaProvider, StaticSpreadProvider}
 import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query._
+import filodb.core.query.Filter.Equals
 import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
 import filodb.query._
-import filodb.query.exec.InternalRangeFunction.Last
 import filodb.query.exec._
+import filodb.query.exec.InternalRangeFunction.Last
+import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
-import filodb.core.query.Filter.Equals
+import scala.concurrent.duration._
 
 class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures with PlanValidationSpec {
 
@@ -69,6 +68,14 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
   val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
   val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000)
+
+
+  val f3 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_total")),
+    ColumnFilter("job", Filter.Equals("myService")),
+    ColumnFilter("instance", Filter.Equals("akgH34")))
+  val raw3 = RawSeries(rangeSelector = intervalSelector, filters= f3, columns = Seq("value"))
+  val windowed3 = PeriodicSeriesWithWindowing(raw3, from, 1000, to, 5000, RangeFunctionId.Rate)
+  val summed3 = Aggregate(AggregationOperator.Sum, windowed3, Nil, Seq("job"))
 
   it ("should generate ExecPlan for LogicalPlan") {
     // final logical plan
@@ -175,6 +182,35 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
       val rpExec = l1.asInstanceOf[MultiSchemaPartitionsExec]
       rpExec.filters.map(_.column).toSet shouldEqual Set("kpi", "job")
+    }
+  }
+
+  it("should use target-schema and generate ExecPlan with appropriate shards") {
+    val targetSchema = Map(Map("job" -> "myService") -> Seq("job", "instance"))
+
+    val filodbSpreadMap = new collection.mutable.HashMap[collection.Map[String, String], Int]
+    filodbSpreadMap.put(collection.Map(("job" -> "myService")), 2)
+    val spreadFunc = QueryContext.simpleMapSpreadFunc(Seq("job"), filodbSpreadMap, 1)
+    val targetSchemaFunc = QueryContext.mapTargetSchemaFunc(Seq("job"), targetSchema, "client")
+
+    // final logical plan
+    // LHS has all the targetSchema label filters (1 shard), second one doesn't (spread - 4 shards)
+    val logicalPlan = BinaryJoin(summed3, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
+
+    // materialized exec plan
+    val execPlan = engine.materialize(logicalPlan, QueryContext(promQlQueryParams, plannerParams = PlannerParams
+    (spreadOverride = Some(FunctionalSpreadProvider(spreadFunc)),
+      targetSchema = Some(FunctionalTargetSchemaProvider(targetSchemaFunc)), queryTimeoutMillis =1000000)))
+    execPlan.printTree()
+
+    // LHS column filters includes all target-schema labels, so query will be routed to single shard.
+    val expectedShards = Array(1, 4) // target-schema vs default spread
+
+    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
+    execPlan.children should have length (2)
+    execPlan.children.zipWithIndex.foreach { case(reduceAggPlan, i) =>
+      reduceAggPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
+      reduceAggPlan.children should have length expectedShards(i)
     }
   }
 

@@ -189,8 +189,10 @@ class SingleClusterPlanner(val dataset: Dataset,
       val targetSchema = qContext.plannerParams.targetSchema.getOrElse(targetSchemaProvider).targetSchemaFunc(filters)
       val shardHash = RecordBuilder.shardKeyHash(shardValues, dsOptions.metricColumn, metric, targetSchema)
       if(useTargetSchemaForShards(filters, targetSchema)) {
-        val nonShardKeyLabelPairs = filters.filter(f => !shardColumns.contains(f.column))
-                                            .map(cf => cf.column -> cf.asInstanceOf[Filter.Equals].value.toString).toMap
+        val nonShardKeyLabelPairs = filters.filter(f => !shardColumns.contains(f.column)
+                                                          && f.filter.isInstanceOf[Filter.Equals])
+                                            .map(cf => cf.column ->
+                                              cf.filter.asInstanceOf[Filter.Equals].value.toString).toMap
         val partitionHash = RecordBuilder.partitionKeyHash(nonShardKeyLabelPairs, shardVals.toMap, targetSchema,
           dsOptions.metricColumn, metric)
         Seq(shardMapperFunc.ingestionShard(shardHash, partitionHash, spreadProvToUse.spreadFunc(filters).last.spread))

@@ -699,12 +699,10 @@ object RecordBuilder {
                              metricShardkey: String,
                              metric: String): Int = {
     var hash = 7
-    val labelValues = if (targetSchema.nonEmpty) {
-      targetSchema.map { l =>
-        if (l == metricShardkey) metric
-        else if (nonShardKeyLabelPair.get(l).nonEmpty) nonShardKeyLabelPair(l)
-        else shardKeyLabelPair(l)
-      }
+    val labelPairs = nonShardKeyLabelPair ++ shardKeyLabelPair + (metricShardkey -> metric)
+    val tags = labelPairs.keys
+    val labelValues = if (targetSchema.nonEmpty && targetSchema.diff(tags.toSeq).isEmpty) {
+      targetSchema.map(labelPairs(_))
     } else nonShardKeyLabelPair.values
     labelValues.foreach { v => {
         hash = RecordBuilder
