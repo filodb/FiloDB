@@ -20,7 +20,7 @@ import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{QueryConfig, QueryContext, QuerySession}
+import filodb.core.query.{PlannerParams, QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -192,7 +192,10 @@ class QueryInMemoryBenchmark extends StrictLogging {
   }
 
   // Single-threaded query test
-  val qContext = QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 10000)
+  val qContext = QueryContext(plannerParams =
+    new PlannerParams(spreadOverride = Some(StaticSpreadProvider(SpreadChange(0, spread))),
+      sampleLimit = 10000,
+      queryTimeoutMillis = 2.hours.toMillis.toInt)) // high timeout since we are using same context for all queries
   val logicalPlan = Parser.queryRangeToLogicalPlan(rawQuery, qParams)
   // Pick the children nodes, not the LocalPartitionDistConcatExec.  Thus we can run in a single thread this way
   val execPlan = engine.materialize(logicalPlan, qContext).children.head
@@ -205,7 +208,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(numQueries)
   def singleThreadedRawQuery(): Long = {
-    val querySession = QuerySession(QueryContext(), queryConfig)
+    val querySession = QuerySession(qContext, queryConfig)
 
     val f = Observable.fromIterable(0 until numQueries).mapEval { n =>
       execPlan.execute(cluster.memStore, querySession)(querySched)
@@ -224,7 +227,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(numQueries)
   def singleThreadedMinOverTimeQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapEval { n =>
-      val querySession = QuerySession(QueryContext(), queryConfig)
+      val querySession = QuerySession(qContext, queryConfig)
       minEP.execute(cluster.memStore, querySession)(querySched)
     }.executeOn(querySched)
      .countL.runToFuture
@@ -241,7 +244,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(numQueries)
   def singleThreadedSumRateCCQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapEval { n =>
-      val querySession = QuerySession(QueryContext(), queryConfig)
+      val querySession = QuerySession(qContext, queryConfig)
       sumRateEP.execute(cluster.memStore, querySession)(querySched)
     }.executeOn(querySched)
      .countL.runToFuture
