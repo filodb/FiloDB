@@ -24,7 +24,7 @@ trait InfluxRecord extends InputRecord {
   def ts: Long
 
   import InfluxProtocolParser._
-  protected def endOfTags: Int = keyOffset(fieldDelims(0)) - 1
+  def endOfTags: Int = keyOffset(fieldDelims(0)) - 1
 
   // Iterate through the tags for shard keys, extract values and calculate shard hash
   private var tagsShardHash = 7
@@ -73,6 +73,10 @@ trait InfluxRecord extends InputRecord {
   val partitionKeyHash = {
     val firstTagIndex = keyOffset(tagDelims(0))
     BinaryRegion.hasher32.hash(bytes, firstTagIndex, endOfTags - firstTagIndex, BinaryRegion.Seed)
+  }
+
+  final def acceptValidator(validator: RecordValidatorVisitor): Boolean = {
+    validator.visit(this)
   }
 }
 

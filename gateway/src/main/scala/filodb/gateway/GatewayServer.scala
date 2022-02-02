@@ -59,9 +59,6 @@ import filodb.timeseries.TestTimeseriesProducer
 object GatewayServer extends StrictLogging {
   Kamon.init
 
-  val MAX_RECORD_TAG_VALUE_SIZE_BYTES = 16384  // 2^14; 2^15 is lucene limit
-  val RECORD_TAG_VALUE_BYTES_PER_CHAR = 2;
-
   // Get global configuration using universal FiloDB/Akka-based config
   val settings = new FilodbSettings()
   val config = settings.allConfig
@@ -239,6 +236,7 @@ object GatewayServer extends StrictLogging {
     (shardQueues, containerStream)
   }
 
+  private val labelSizeValidator = new LabelSizeValidatorVisitor()
   private def validateRecord(rec: InputRecord): Boolean = {
     for ((label, value) <- rec.tags) {
       val labelSizeBytes = value.size * RECORD_TAG_VALUE_BYTES_PER_CHAR

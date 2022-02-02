@@ -19,8 +19,7 @@ trait InputRecord {
   def shardKeyHash: Int
   def partitionKeyHash: Int
 
-  // tags are needed for validation (i.e. that label values do not exceed a size limit)
-  val tags: Map[String, String]
+  def acceptValidator(validator: RecordValidatorVisitor): Boolean
 
   /**
    * The values for each of the tag keys found in DatasetOptions.nonMetricShardColumns
@@ -158,8 +157,14 @@ case class PrometheusInputRecord(tags: Map[String, String],
   val nonMetricShardValues: Seq[String] = nonMetricShardCols.flatMap(tags.get)
   final def getMetric: String = metric
 
+  final override def getTags: Map[String, String] = tags
+
   final def addToBuilder(builder: RecordBuilder): Unit =
     InputRecord.writeUntypedRecord(builder, metric, tags, timestamp, value)
+
+  final def acceptValidator(validator: RecordValidatorVisitor): Boolean = {
+    validator.visit(this)
+  }
 }
 
 object PrometheusInputRecord {
@@ -220,7 +225,7 @@ object PrometheusInputRecord {
  *
  * @param values the data column values, first one is probably timestamp
  */
-class MetricTagInputRecord(values: Seq[Any],
+case class MetricTagInputRecord(values: Seq[Any],
                            metric: String,
                            tags: Map[ZCUTF8, ZCUTF8],
                            schema: Schema) extends InputRecord {
@@ -235,5 +240,9 @@ class MetricTagInputRecord(values: Seq[Any],
   def addToBuilder(builder: RecordBuilder): Unit = {
     val reader = SeqRowReader(values :+ metric :+ tags)
     builder.addFromReader(reader, schema)
+  }
+
+  final def acceptValidator(validator: RecordValidatorVisitor): Boolean = {
+    validator.visit(this)
   }
 }
