@@ -120,7 +120,7 @@ class SplitLocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers wit
 
     val distConcatExec = SplitLocalPartitionDistConcatExec(QueryContext(), dispacher, Seq(execPlan1, execPlan2), None)
 
-    val resp = distConcatExec.execute(memStore, querySession).runAsync.futureValue
+    val resp = distConcatExec.execute(memStore, querySession).runToFuture.futureValue
     val result = resp.asInstanceOf[QueryResult]
     result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
     result.result.size shouldEqual 1

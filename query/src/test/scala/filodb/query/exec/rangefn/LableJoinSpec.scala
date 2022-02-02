@@ -111,8 +111,8 @@ class LableJoinSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val funcParams = Seq("dst", "-", "src", "src1", "src2")
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
-    val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
@@ -142,8 +142,8 @@ class LableJoinSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val funcParams = Seq("dst", "-", "src", "src3", "src1")
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
-    val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
@@ -172,8 +172,8 @@ class LableJoinSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val funcParams = Seq("dst", "", "emptysrc", "emptysrc1", "emptysrc2")
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
-    val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
@@ -203,8 +203,8 @@ class LableJoinSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val funcParams = Seq("dst", "-", "src", "src1", "src2")
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
-    val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
@@ -233,8 +233,8 @@ class LableJoinSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val funcParams = Seq("dst", "-")
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
-    val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val resultLabelValues = resultObs.toListL.runToFuture.futureValue.map(_.key.labelValues)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 

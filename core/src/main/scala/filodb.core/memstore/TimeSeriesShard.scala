@@ -66,6 +66,8 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val numDirtyPartKeysFlushed = Kamon.counter("memstore-index-num-dirty-keys-flushed").withTags(TagSet.from(tags))
   val indexRecoveryNumRecordsProcessed = Kamon.counter("memstore-index-recovery-partkeys-processed").
     withTags(TagSet.from(tags))
+  val indexPartkeyLookups = Kamon.counter("memstore-index-partkey-lookups").withTags(TagSet.from(tags))
+  val partkeyLabelScans = Kamon.counter("memstore-labels-partkeys-scanned").withTags(TagSet.from(tags))
   val downsampleRecordsCreated = Kamon.counter("memstore-downsample-records-created").withTags(TagSet.from(tags))
 
   /**
@@ -618,7 +620,7 @@ class TimeSeriesShard(val ref: DatasetRef,
                      .map { count =>
                         startFlushingIndex()
                        logger.info(s"Bootstrapped index for dataset=$ref shard=$shardNum with $count records")
-                     }.runAsync(ingestSched)
+                     }.runToFuture(ingestSched)
   }
 
   /**
@@ -692,19 +694,45 @@ class TimeSeriesShard(val ref: DatasetRef,
   /**
    * This method is to apply column filters and fetch matching time series partitions.
    *
-   * @param filter column filter
+   * @param filters column filter
    * @param labelNames labels to return in the response
    * @param endTime end time
    * @param startTime start time
    * @param limit series limit
    * @return returns an iterator of map of label key value pairs of each matching time series
    */
-  def labelValuesWithFilters(filter: Seq[ColumnFilter],
+  def labelValuesWithFilters(filters: Seq[ColumnFilter],
                              labelNames: Seq[String],
                              endTime: Long,
                              startTime: Long,
+                             querySession: QuerySession,
                              limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
-    LabelValueResultIterator(partKeyIndex.partIdsFromFilters(filter, startTime, endTime), labelNames, limit)
+    val metricShardKeys = schemas.part.options.shardKeyColumns
+    val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
+    LabelValueResultIterator(partKeyIndex.partIdsFromFilters(filters, startTime, endTime),
+                             labelNames, querySession, metricGroupBy, limit)
+  }
+
+  /**
+   * This method is to apply column filters and fetch values for a label.
+   *
+   * @param filters column filter
+   * @param label label values to return in the response
+   * @param endTime end time
+   * @param startTime start time
+   * @param limit series limit
+   * @return returns an iterator of values of for a given label
+   */
+  def singleLabelValuesWithFilters(filters: Seq[ColumnFilter],
+                                   label: String,
+                                   endTime: Long,
+                                   startTime: Long,
+                                   querySession: QuerySession,
+                                   limit: Int): Iterator[ZeroCopyUTF8String] = {
+    val metricShardKeys = schemas.part.options.shardKeyColumns
+    val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
+    SingleLabelValuesResultIterator(partKeyIndex.partIdsFromFilters(filters, startTime, endTime),
+                                    label, querySession, metricGroupBy, limit)
   }
 
   /**
@@ -735,12 +763,49 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   /**
-   * Iterator for traversal of partIds, value for the given label will be extracted from the ParitionKey.
+   * Iterator for traversal of partIds, value for the given label will be extracted from the PartitionKey.
+   * This is specifically implemented to avoid building a Map for single label.
    * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
    */
-  case class LabelValueResultIterator(partIds: debox.Buffer[Int], labelNames: Seq[String], limit: Int)
+  case class SingleLabelValuesResultIterator(partIds: debox.Buffer[Int], label: String,
+                                             querySession: QuerySession, statsGroup: Seq[String], limit: Int)
+    extends Iterator[ZeroCopyUTF8String] {
+    private val rows = labels
+    override def size: Int = labels.size
+
+    def labels: Iterator[ZeroCopyUTF8String] = {
+      var partLoopIndx = 0
+      val rows = new mutable.HashSet[ZeroCopyUTF8String]()
+      val colIndex = schemas.part.binSchema.colNames.indexOf(label)
+      while(partLoopIndx < partIds.length && rows.size < limit) {
+        val partId = partIds(partLoopIndx)
+        //retrieve PartKey either from In-memory map or from PartKeyIndex
+        val nextPart = partKeyFromPartId(partId)
+        if (colIndex > -1) //column value lookup (e.g metric), no need for map-consumer
+          rows.add(schemas.part.binSchema.asZCUTF8Str(nextPart.base, nextPart.offset, colIndex))
+        else
+          schemas.part.binSchema.singleColValues(nextPart.base, nextPart.offset, label, rows)
+        partLoopIndx += 1
+      }
+      shardStats.partkeyLabelScans.increment(partLoopIndx)
+      querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(partLoopIndx)
+      rows.toIterator
+    }
+
+    def hasNext: Boolean = rows.hasNext
+
+    def next(): ZeroCopyUTF8String = rows.next
+  }
+
+  /**
+   * Iterator for traversal of partIds, value for the given labels will be extracted from the PartitionKey.
+   * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
+   */
+  case class LabelValueResultIterator(partIds: debox.Buffer[Int], labelNames: Seq[String],
+                                      querySession: QuerySession, statsGroup: Seq[String], limit: Int)
     extends Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] {
     private lazy val rows = labelValues
+    override def size: Int = rows.size
 
     def labelValues: Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
       var partLoopIndx = 0
@@ -761,6 +826,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         if (currVal.nonEmpty) rows.add(currVal)
         partLoopIndx += 1
       }
+      querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(partLoopIndx)
       rows.toIterator
     }
 
@@ -811,6 +877,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     if (nextPart != UnsafeUtils.ZeroPointer)
       PartKeyWithTimes(nextPart.partKeyBase, nextPart.partKeyOffset, -1, -1)
     else { //retrieving PartKey from lucene index
+      shardStats.indexPartkeyLookups.increment()
       val partKeyByteBuf = partKeyIndex.partKeyFromPartId(partId)
       if (partKeyByteBuf.isDefined) PartKeyWithTimes(partKeyByteBuf.get.bytes, UnsafeUtils.arayOffset, -1, -1)
       else throw new IllegalStateException("This is not an expected behavior." +
@@ -1088,7 +1155,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     val partKeyRecords = InMemPartitionIterator2(flushGroup.dirtyPartsToFlush).map(toPartKeyRecord)
     val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
     colStore.writePartKeys(ref, shardNum,
-                           Observable.fromIterator(partKeyRecords),
+                           Observable.fromIteratorUnsafe(partKeyRecords),
                            storeConfig.diskTTLSeconds, updateHour).map { resp =>
       if (flushGroup.dirtyPartsToFlush.length > 0) {
         logger.info(s"Finished flush of partKeys numPartKeys=${flushGroup.dirtyPartsToFlush.length}" +
@@ -1110,7 +1177,7 @@ class TimeSeriesShard(val ref: DatasetRef,
                           blockHolder: BlockMemFactory): Future[Response] = {
     assertThreadName(IngestSchedName)
 
-    val chunkSetStream = Observable.fromIterator(chunkSetIt)
+    val chunkSetStream = Observable.fromIteratorUnsafe(chunkSetIt)
     logger.debug(s"Created flush ChunkSets stream for group ${flushGroup.groupNum} in " +
       s"dataset=$ref shard=$shardNum")
 
@@ -1556,6 +1623,13 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
+  private def shardKeyValuesFromFilter(shardKeyColumns: Seq[String], filters: Seq[ColumnFilter]): Seq[String] = {
+    shardKeyColumns.map { col =>
+      filters.collectFirst {
+        case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
+      }.getOrElse("multiple")
+    }.toList
+  }
   /**
     * Looks up partitions and schema info from ScanMethods, usually by doing a Lucene search.
     * Also returns detailed information about what is in memory and not, and does schema discovery.
@@ -1578,11 +1652,7 @@ class TimeSeriesShard(val ref: DatasetRef,
           dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter())
       case FilteredPartitionScan(_, filters) =>
         val metricShardKeys = schemas.part.options.shardKeyColumns
-        val metricGroupBy = deploymentPartitionName +: clusterType +: metricShardKeys.map { col =>
-          filters.collectFirst {
-            case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
-          }.getOrElse("unknown")
-        }.toList
+        val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
         val chunksReadCounter = querySession.queryStats.getDataBytesScannedCounter(metricGroupBy)
         // No matter if there are filters or not, need to run things through Lucene so we can discover potential
         // TSPartitions to read back from disk
@@ -1622,7 +1692,7 @@ class TimeSeriesShard(val ref: DatasetRef,
                      querySession: QuerySession): Observable[ReadablePartition] = {
 
     val partIter = new InMemPartitionIterator2(iterResult.partsInMemory)
-    Observable.fromIterator(partIter.map { p =>
+    Observable.fromIteratorUnsafe(partIter.map { p =>
       shardStats.partitionsQueried.increment()
       p
     })

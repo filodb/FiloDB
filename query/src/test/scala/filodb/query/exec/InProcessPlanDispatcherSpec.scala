@@ -108,7 +108,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
       0, filters, AllChunkScan,"_metric_")
 
     val sep = StitchRvsExec(QueryContext(), dispatcher, None, Seq(execPlan1, execPlan2))
-    val result = dispatcher.dispatch(sep).runAsync.futureValue
+    val result = dispatcher.dispatch(sep).runToFuture.futureValue
 
     result match {
       case e: QueryError => throw e.t
@@ -136,7 +136,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
       0, emptyFilters, AllChunkScan, "_metric_")
 
     val sep = StitchRvsExec(QueryContext(), dispatcher, None, Seq(execPlan1, execPlan2))
-    val result = dispatcher.dispatch(sep).runAsync.futureValue
+    val result = dispatcher.dispatch(sep).runToFuture.futureValue
 
     result match {
       case e: QueryError => throw e.t
@@ -148,7 +148,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
 
     // Switch the order and make sure it's OK if the first result doesn't have any data
     val sep2 = StitchRvsExec(QueryContext(), dispatcher, None, Seq(execPlan2, execPlan1))
-    val result2 = dispatcher.dispatch(sep2).runAsync.futureValue
+    val result2 = dispatcher.dispatch(sep2).runToFuture.futureValue
 
     result2 match {
       case e: QueryError => throw e.t
@@ -160,7 +160,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
 
     // Two children none of which returns data
     val sep3 = StitchRvsExec(QueryContext(), dispatcher, None, Seq(execPlan2, execPlan2))
-    val result3 = dispatcher.dispatch(sep3).runAsync.futureValue
+    val result3 = dispatcher.dispatch(sep3).runToFuture.futureValue
 
     result3 match {
       case e: QueryError => throw e.t

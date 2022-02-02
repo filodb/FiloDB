@@ -6,7 +6,8 @@ import com.typesafe.config.ConfigFactory
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import filodb.coordinator.ShardMapper
-import filodb.core.MetricsTestData
+import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
+import filodb.core.{MetricsTestData, SpreadChange}
 import filodb.core.metadata.Schemas
 import filodb.core.query.Filter.Equals
 import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
@@ -37,7 +38,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   private val queryConfig = new QueryConfig(config)
 
   val localPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
-    queryConfig, "raw")
+    queryConfig, "raw", StaticSpreadProvider(SpreadChange(0, 1)))
 
   val startSeconds = 1000
   val endSeconds = 10000
@@ -53,7 +54,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
     }
 
@@ -71,6 +72,10 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     execPlan.children.head.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual true
   }
 
+  // this test case is NOT supported yet as we do not support partitions split
+  // across time. MultiPartitionPlanner has the API and some preliminary logic written but the plans
+  // generated are not correct. This test demonstrates this behavior and shows that the execution plans have
+  // a hole in them, ie the data returned will be incomplete
   it ("should generate all PromQlRemoteExec plan") {
 
     def twoPartitions(timeRange: TimeRange): List[PartitionAssignment] = List(
@@ -84,7 +89,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
        else Nil
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = twoPartitions(timeRange)
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = twoPartitions(timeRange)
 
     }
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
@@ -109,6 +114,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     remoteExec1.queryContext.plannerParams.processMultiPartition shouldEqual false
     remoteExec1.queryEndpoint shouldEqual "remote-url"
 
+    // expectedStarMs ends up to be 3 400 000, which does not look right to me, it is supposed to be 3 000 000
+    // kpetrov, 12/02/21
     val expectedStartMs = ((startSeconds*1000) to (endSeconds*1000) by (step*1000)).find { instant =>
       instant - lookbackMs > (localPartitionStart * 1000)
     }.get
@@ -124,200 +131,414 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
   }
 
-  it ("should generate all PromQlRemoteExec plan for TopLevelSubquery") {
+  it ("should generate simple plan for one local partition for TopLevelSubquery") {
+    val p1StartSecs = 1000
+    val p1EndSecs = 12000
+    val stepSecs = 100
+    val queryStartSecs = 12000
+    val subqueryLookbackSecs = 9000
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
 
-    def twoPartitions(timeRange: TimeRange): List[PartitionAssignment] = List(
-      PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
-        localPartitionStart * 1000 - 1)), PartitionAssignment("remote2", "remote-url2",
-        TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
+        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+    }
+    val engine = new MultiPartitionPlanner(
+      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
+    )
+    val lp = Parser.queryRangeToLogicalPlan(
+      """test{job = "app"}[9000s:100s]""", TimeStepParams(queryStartSecs, 0, queryStartSecs)
+    )
+    val promQlQueryParams = PromQlQueryParams("""test{job = "app"}[9000s:100s]""", queryStartSecs, 0, queryStartSecs)
+    val execPlan = engine.materialize(
+      lp,
+      QueryContext(origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true))
+    )
+    val expectedPlan =
+      """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1820520048],raw)
+         |-T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+         |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1820520048],raw)
+         |-T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+         |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1820520048],raw)""".stripMargin
+    validatePlan(execPlan, expectedPlan)
+  }
+
+  // not supported in production
+  // returns incomplete results
+  // 12/07/21
+  //  it ("should generate time split PromQlRemoteExec plans for TopLevelSubquery") {
+  //    val p1StartSecs = 1000
+  //    val p1EndSecs = 6999
+  //    val p2StartSecs = 7000
+  //    val p2EndSecs = 15000
+  //    val stepSecs = 100
+  //    val queryStartSecs = 12000
+  //    val subqueryLookbackSecs = 9000
+  //
+  //    def twoPartitions(): List[PartitionAssignment] = List(
+  //      PartitionAssignment("remote", "remote-url", TimeRange(p1StartSecs * 1000, p1EndSecs * 1000)),
+  //      PartitionAssignment("remote2", "remote-url2", TimeRange(p2StartSecs * 1000, p2EndSecs * 1000))
+  //    )
+  //
+  //    val partitionLocationProvider = new PartitionLocationProvider {
+  //      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+  //        if (routingKey.equals(Map("job" -> "app"))) twoPartitions().filter(
+  //          (p: PartitionAssignment) => {
+  //            val startWithinPartition = (p.timeRange.startMs <= timeRange.startMs) && (p.timeRange.endMs > timeRange.startMs)
+  //            val endWithinPartition = (p.timeRange.startMs <= timeRange.endMs) && (p.timeRange.endMs > timeRange.endMs)
+  //            val partitionWithinInterval = (p.timeRange.startMs >= timeRange.startMs) && (p.timeRange.endMs < timeRange.endMs)
+  //            startWithinPartition || endWithinPartition || partitionWithinInterval
+  //          })
+  //        else Nil
+  //      }
+  //      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = twoPartitions()
+  //    }
+  //    val engine = new MultiPartitionPlanner(
+  //      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
+  //    )
+  //    val lp = Parser.queryRangeToLogicalPlan(
+  //      """test{job = "app"}[9000s:100s]""", TimeStepParams(queryStartSecs, 0, queryStartSecs)
+  //    )
+  //    val promQlQueryParams = PromQlQueryParams("""test{job = "app"}[9000s:100s]""", queryStartSecs, 0, queryStartSecs)
+  //    val execPlan = engine.materialize(
+  //      lp,
+  //      QueryContext(origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true))
+  //    )
+  //    // note that start of the second partition is 7400, not 7000 that we would logically expect
+  //    // this comes  from the logic in MultiPartitionPlannerSpec.materializePeriodicAndRawSeries()
+  //    // val numStepsInPrevPartition = (p.timeRange.startMs - prevPartitionStart + lookBackMs) / stepMs
+  //    // (7000 - 3000 +300) / 100 = 43
+  //    // val lastPartitionInstant = prevPartitionStart + numStepsInPrevPartition * stepMs
+  //    //  3000 + 43*100 = 7300
+  //    // val start = lastPartitionInstant + stepMs
+  //    // 7300+100=7400
+  //    // overall the above is broken, in this particular query, we don't even have a lookback technically, it
+  //    // comes from the stalesness interval that is infused into the periodic series logical plan in the
+  //    // constructor when we create PeriodicSeries in Vector.
+  //    // Even if we did not have stale interval baked in the PeriodicSeries, it would be added by method
+  //    // LogicalPlanUtils.getLookBackMillis()
+  //    // ie if logical plan does not return lookback, default stale interval would be used instead
+  //    val expectedPlan =
+  //      """E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.QueryConfig@5ae1c281)
+  //      |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},3000,100,6999,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@5ae1c281)
+  //      |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},7400,100,15000,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url2, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@5ae1c281)""".stripMargin
+  //    validatePlan(execPlan, expectedPlan)
+  //  }
+
+  // not supported in production
+  // currently returns incomplete results
+  // 12/07/21
+  //  it ("should generate timesplit local and PromQlRemoteExec plan for TopLevelSubquery") {
+  //    val p1StartSecs = 1000
+  //    val p1EndSecs = 6999
+  //    val p2StartSecs = 7000
+  //    val p2EndSecs = 15000
+  //    val stepSecs = 100
+  //    val queryStartSecs = 12000
+  //    val subqueryLookbackSecs = 9000
+  //
+  //    def twoPartitions(): List[PartitionAssignment] = List(
+  //      PartitionAssignment("remote", "remote-url", TimeRange(p1StartSecs * 1000, p1EndSecs * 1000)),
+  //      PartitionAssignment("local", "local-url", TimeRange(p2StartSecs * 1000, p2EndSecs * 1000))
+  //    )
+  //
+  //    val partitionLocationProvider = new PartitionLocationProvider {
+  //      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+  //        if (routingKey.equals(Map("job" -> "app"))) twoPartitions().filter(
+  //          (p: PartitionAssignment) => {
+  //            val startWithinPartition = (p.timeRange.startMs <= timeRange.startMs) && (p.timeRange.endMs > timeRange.startMs)
+  //            val endWithinPartition = (p.timeRange.startMs <= timeRange.endMs) && (p.timeRange.endMs > timeRange.endMs)
+  //            val partitionWithinInterval = (p.timeRange.startMs >= timeRange.startMs) && (p.timeRange.endMs < timeRange.endMs)
+  //            startWithinPartition || endWithinPartition || partitionWithinInterval
+  //          })
+  //        else Nil
+  //      }
+  //      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = twoPartitions()
+  //    }
+  //    val engine = new MultiPartitionPlanner(
+  //      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
+  //    )
+  //    val lp = Parser.queryRangeToLogicalPlan(
+  //      """test{job = "app"}[9000s:100s]""", TimeStepParams(queryStartSecs, 0, queryStartSecs)
+  //    )
+  //    val promQlQueryParams = PromQlQueryParams("""test{job = "app"}[9000s:100s]""", queryStartSecs, 0, queryStartSecs)
+  //    val execPlan = engine.materialize(
+  //      lp,
+  //      QueryContext(origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true))
+  //    )
+  //    // same as in "should generate timesplit PromQlRemoteExec plans for TopLevelSubquery"
+  //    // start  of 7400 does not make sense, instead we should have done:
+  //    // E~StitchRvsExec
+  //    // |-T~PeriodicSamplesMapper
+  //    // |--E~MultiSchemaParitionsExec //essentially raw data
+  //    // |--E~PromQLRemoteExec //essentially raw data
+  //    // if extracting raw data to some node above is too expensive
+  //    // we could have extracted raw data only for the overlap though it's going to be considerably more complex
+  //    val expectedPlan =
+  //      """E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.QueryConfig@62b57479)
+  //         |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2031724201],raw)
+  //         |--T~PeriodicSamplesMapper(start=7400000, step=100000, end=15000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+  //         |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(7100000,15000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2031724201],raw)
+  //         |--T~PeriodicSamplesMapper(start=7400000, step=100000, end=15000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+  //         |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(7100000,15000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2031724201],raw)
+  //         |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"},3000,100,6999,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@62b57479)""".stripMargin
+  //    validatePlan(execPlan, expectedPlan)
+  //  }
+
+  // the only way we might hit two partitions that are not time split is if we have a binary join, ie one time series
+  // lives in one partition, and another one lives in another.
+  it ("should generate plan over remote and local partitions which are NOT time split for TopLevelSubquery") {
+    val stepSecs = 100
+    val queryStartSecs = 12000
+    val subqueryLookbackSecs = 9000
+
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
+      TimeRange(timeRange.startMs, timeRange.endMs)))
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
-        if (routingKey.equals(Map("job" -> "app"))) twoPartitions(timeRange)
-        else Nil
+        if (routingKey.equals(Map("job" -> "app1")))
+          List(PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs,timeRange.endMs)))
+        else
+          List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,timeRange.endMs)))
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = twoPartitions(timeRange)
-
-    }
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
-    val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}[9000s:100s]", TimeStepParams(endSeconds, step, endSeconds))
-
-    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}[9000s:100s]", endSeconds, step, endSeconds)
-
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
-      PlannerParams(processMultiPartition = true)))
-
-    val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
-    stitchRvsExec.children.size shouldEqual (2)
-    stitchRvsExec.children(0).isInstanceOf[PromQlRemoteExec] shouldEqual true
-    stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual true
-
-    val remoteExec1 = stitchRvsExec.children(0).asInstanceOf[PromQlRemoteExec]
-    val queryParams1 = remoteExec1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryParams1.startSecs shouldEqual endSeconds
-    queryParams1.endSecs shouldEqual endSeconds
-    queryParams1.stepSecs shouldEqual step
-    remoteExec1.queryContext.plannerParams.processFailure shouldEqual true
-    remoteExec1.queryContext.plannerParams.processMultiPartition shouldEqual false
-    remoteExec1.queryEndpoint shouldEqual "remote-url"
-
-    val expectedStartMs = ((startSeconds*1000) to (endSeconds*1000) by (step*1000)).find { instant =>
-      instant - lookbackMs > (localPartitionStart * 1000)
-    }.get
-
-    val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
-    val queryParams2 = remoteExec2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryParams2.startSecs shouldEqual endSeconds
-    queryParams2.endSecs shouldEqual endSeconds
-    queryParams2.stepSecs shouldEqual step
-    remoteExec2.queryContext.plannerParams.processFailure shouldEqual true
-    remoteExec2.queryContext.plannerParams.processMultiPartition shouldEqual false
-    remoteExec2.queryEndpoint shouldEqual "remote-url2"
-
-  }
-
-  it ("should not generate PromQlExec plan when partitions are local for TopLevelSubquery") {
-    val partitionLocationProvider = new PartitionLocationProvider {
-      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
-
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
     }
 
     val engine = new MultiPartitionPlanner(
       partitionLocationProvider, localPlanner, "local", dataset, queryConfig
     )
-    val query = """test{job = "app"}[100m:10m]"""
+    val query = """(test{job = "app1"} + test{job = "app2"})[9000s:100s]"""
     val lp = Parser.queryRangeToLogicalPlan(
       query,
-      TimeStepParams(endSeconds, step, endSeconds)
+      TimeStepParams(queryStartSecs, step, queryStartSecs),
+      Parser.Antlr
     )
+    val promQlQueryParams = PromQlQueryParams(query, queryStartSecs, step, queryStartSecs)
+    val execPlan = engine.materialize(
+      lp, QueryContext(
+        origQueryParams = promQlQueryParams,  plannerParams = PlannerParams(processMultiPartition = true)
+      )
+    )
+    val expectedPlan =
+    """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@1dad01fe)
+      |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app1"},3000,100,12000,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@1dad01fe)
+      |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1232106303],raw)
+      |--T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+      |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1232106303],raw)
+      |--T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+      |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1232106303],raw)""".stripMargin
+    validatePlan(execPlan, expectedPlan)
+  }
 
-    val promQlQueryParams = PromQlQueryParams(query, endSeconds, step, endSeconds)
+  // the only way we might hit two partitions that are not time split is if we have a binary join, ie one time series
+  // lives in one partition, and another one lives in another.
+  it ("should generate plan over two remote partitions which are NOT time split for TopLevelSubquery") {
+    val stepSecs = 100
+    val queryStartSecs = 12000
+    val subqueryLookbackSecs = 9000
 
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
-      PlannerParams(processMultiPartition = true)))
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
+      TimeRange(timeRange.startMs, timeRange.endMs)))
 
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        if (routingKey.equals(Map("job" -> "app1")))
+          List(PartitionAssignment("remote1", "remote-url1", TimeRange(timeRange.startMs,timeRange.endMs)))
+        else
+          List(PartitionAssignment("remote2", "remote-url2", TimeRange(timeRange.startMs,timeRange.endMs)))
+      }
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val engine = new MultiPartitionPlanner(
+      partitionLocationProvider, localPlanner, "local", dataset, queryConfig
+    )
+    val query = """(test{job = "app1"} + test{job = "app2"})[9000s:100s]"""
+    val lp = Parser.queryRangeToLogicalPlan(
+      query,
+      TimeStepParams(queryStartSecs, step, queryStartSecs),
+      Parser.Antlr
+    )
+    val promQlQueryParams = PromQlQueryParams(query, queryStartSecs, step, queryStartSecs)
+    val execPlan = engine.materialize(
+      lp, QueryContext(
+        origQueryParams = promQlQueryParams,  plannerParams = PlannerParams(processMultiPartition = true)
+      )
+    )
     execPlan.printTree()
-
-    execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual (true)
-    execPlan.children.length shouldEqual 2
-    execPlan.children.head.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
-    execPlan.children.head.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-
-    val distConcatPlan = execPlan.asInstanceOf[LocalPartitionDistConcatExec]
-
-    val localExec1 = distConcatPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
-    val queryParams1 = localExec1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryParams1.startSecs shouldEqual endSeconds
-    queryParams1.endSecs shouldEqual endSeconds
-    queryParams1.stepSecs shouldEqual step
-    val samplesMapper1 = localExec1.rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
-    samplesMapper1.startMs shouldEqual 4200000
-    samplesMapper1.endMs shouldEqual 9600000
-    samplesMapper1.stepMs shouldEqual 10*60*1000
-
-    val localExec2 = distConcatPlan.children(1).asInstanceOf[MultiSchemaPartitionsExec]
-    val queryParams2 = localExec2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryParams2.startSecs shouldEqual endSeconds
-    queryParams2.endSecs shouldEqual endSeconds
-    queryParams2.stepSecs shouldEqual step
-    val samplesMapper2 = localExec2.rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
-    samplesMapper2.startMs shouldEqual 4200000
-    samplesMapper2.endMs shouldEqual 9600000
-    samplesMapper2.stepMs shouldEqual 10*60*1000
+    val expectedPlan = {
+      """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@7c0f28f8)
+        |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app1"},3000,100,12000,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url1, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@7c0f28f8)
+        |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app2"},3000,100,12000,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url2, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@7c0f28f8)""".stripMargin
+    }
+    validatePlan(execPlan, expectedPlan)
   }
 
-  it ("should generate both PromQlExec and MultiSchemaPartitionsExec for TopLevelSubquery") {
-    val partitionLocationProvider = new PartitionLocationProvider {
-      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
-        List(
-          PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)),
-          PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs, timeRange.endMs))
-        )
+  // the only way we might hit two partitions that are not time split is if we have a binary join, ie one time series
+  // lives in one partition, and another one lives in another.
+  it ("should generate plan over remote and local partitions which are NOT time split for TopLevelSubquery /w func") {
+    val stepSecs = 100
+    val queryStartSecs = 12000
+    val subqueryLookbackSecs = 9000
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
-        List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
+      TimeRange(timeRange.startMs, timeRange.endMs)))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        if (routingKey.equals(Map("job" -> "app1")))
+          List(PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs,timeRange.endMs)))
+        else
+          List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs,timeRange.endMs)))
+      }
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
     }
 
     val engine = new MultiPartitionPlanner(
       partitionLocationProvider, localPlanner, "local", dataset, queryConfig
     )
-    val query = """test{job = "app"}[100m:10m]"""
+    val query = """sum(test{job = "app1"} + test{job = "app2"})[9000s:100s]"""
     val lp = Parser.queryRangeToLogicalPlan(
       query,
-      TimeStepParams(endSeconds, step, endSeconds)
+      TimeStepParams(queryStartSecs, step, queryStartSecs),
+      Parser.Antlr
     )
-
-    val promQlQueryParams = PromQlQueryParams(query, endSeconds, step, endSeconds)
-
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
-      PlannerParams(processMultiPartition = true)))
-
-    println(execPlan.printTree())
-
-    execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
-    execPlan.children.length shouldEqual 2
-    execPlan.children(0).isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
-    execPlan.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual true
-
-    val distConcatPlan = execPlan.children(0).asInstanceOf[LocalPartitionDistConcatExec]
-
-    val localExec = distConcatPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
-    val localQueryParams = localExec.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    localQueryParams.startSecs shouldEqual endSeconds
-    localQueryParams.endSecs shouldEqual endSeconds
-    localQueryParams.stepSecs shouldEqual step
-    val localSamplesMapper = localExec.rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
-    localSamplesMapper.startMs shouldEqual 4200000
-    localSamplesMapper.endMs shouldEqual 9600000
-    localSamplesMapper.stepMs shouldEqual 10*60*1000
-
-    val remoteExec = execPlan.children(1).asInstanceOf[PromQlRemoteExec]
-    val remoteQueryParams = remoteExec.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    remoteQueryParams.startSecs shouldEqual endSeconds
-    remoteQueryParams.endSecs shouldEqual endSeconds
-    remoteQueryParams.stepSecs shouldEqual step
+    val promQlQueryParams = PromQlQueryParams(query, queryStartSecs, step, queryStartSecs)
+    val execPlan = engine.materialize(
+      lp, QueryContext(
+        origQueryParams = promQlQueryParams,  plannerParams = PlannerParams(processMultiPartition = true)
+      )
+    )
+    val expectedPlan =
+      """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(3000,100,12000))
+        |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@2a8a3ada)
+        |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |---E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@2a8a3ada)
+        |----E~PromQlRemoteExec(PromQlQueryParams(test{job="app1"},3000,100,12000,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@2a8a3ada)
+        |----E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1705462153],raw)
+        |-----T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1705462153],raw)
+        |-----T~PeriodicSamplesMapper(start=3000000, step=100000, end=12000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(2700000,12000000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1705462153],raw)""".stripMargin
+    validatePlan(execPlan, expectedPlan)
   }
 
-  it ("one partition should work for SubqueryWithWindowing") {
 
+  it ("one remote partition should work for SubqueryWithWindowing") {
+    val stepSecs = 120
+    val queryStartSecs = 1200
+    val queryEndSecs = 1800
     def onePartition(timeRange: TimeRange): List[PartitionAssignment] = List(
       PartitionAssignment(
         "remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs, endSeconds * 1000)
       )
     )
-
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
         if (routingKey.equals(Map("job" -> "app"))) onePartition(timeRange)
         else Nil
       }
-
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = onePartition(timeRange)
-
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = onePartition(timeRange)
     }
     val query = "avg_over_time(test{job = \"app\"}[10m:1m])"
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
-    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(startSeconds, step, endSeconds))
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(queryStartSecs, step, queryEndSecs), Parser.Antlr)
+    val promQlQueryParams = PromQlQueryParams(query, queryStartSecs, step, queryEndSecs)
+    val execPlan = engine.materialize(
+      lp,
+      QueryContext(origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true))
+    )
+    val expectedPlan =
+      """E~PromQlRemoteExec(PromQlQueryParams(avg_over_time(test{job = "app"}[10m:1m]),1200,100,1800,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@4c82b5df)"""
 
-    val promQlQueryParams = PromQlQueryParams(query, startSeconds, step, endSeconds)
+    validatePlan(execPlan, expectedPlan)
+  }
 
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
-      PlannerParams(processMultiPartition = true)))
+  it ("one local partition should work for SubqueryWithWindowing") {
+    val stepSecs = 120
+    val queryStartSecs = 1200
+    val queryEndSecs = 1800
+    val p1StartSecs = 600
+    val p1EndSecs = 1800
 
-    // subqueries cannot be stitched, this test is to verify that subquery can be executed against one remote partition
-    val exec = execPlan.asInstanceOf[PromQlRemoteExec]
+    def onePartition(timeRange: TimeRange): List[PartitionAssignment] = List(
+      PartitionAssignment(
+        "local", "local-url", TimeRange(p1StartSecs * 1000, p1EndSecs * 1000)
+      )
+    )
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        if (routingKey.equals(Map("job" -> "app"))) onePartition(timeRange)
+        else Nil
+      }
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = onePartition(timeRange)
+    }
+    val query = "avg_over_time(test{job = \"app\"}[10m:1m])"
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(queryStartSecs, stepSecs, queryEndSecs), Parser.Antlr)
+    val promQlQueryParams = PromQlQueryParams(query, queryStartSecs, stepSecs, queryEndSecs)
+    val execPlan = engine.materialize(
+      lp,
+      QueryContext(origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true))
+    )
+    val expectedPlan = {
+      """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#64113238],raw)
+        |-T~PeriodicSamplesMapper(start=1200000, step=120000, end=1800000, window=Some(600000), functionId=Some(AvgOverTime), rawSource=false, offsetMs=None)
+        |--T~PeriodicSamplesMapper(start=600000, step=60000, end=1800000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(300000,1800000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#64113238],raw)
+        |-T~PeriodicSamplesMapper(start=1200000, step=120000, end=1800000, window=Some(600000), functionId=Some(AvgOverTime), rawSource=false, offsetMs=None)
+        |--T~PeriodicSamplesMapper(start=600000, step=60000, end=1800000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(300000,1800000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#64113238],raw)""".stripMargin
+    }
+    validatePlan(execPlan, expectedPlan)
+  }
 
-    val queryParams1 = exec.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryParams1.startSecs shouldEqual startSeconds
-    queryParams1.endSecs shouldEqual endSeconds
-    queryParams1.stepSecs shouldEqual step
-    exec.queryContext.plannerParams.processFailure shouldEqual true
-    exec.queryContext.plannerParams.processMultiPartition shouldEqual false
-    exec.queryEndpoint shouldEqual "remote-url"
+  it ("local and remote partition should work for SubqueryWithWindowing") {
+    val stepSecs = 120
+    val queryStartSecs = 1200
+    val queryEndSecs = 1800
+    val pStartSecs = 600
+    val pEndSecs = 1800
+
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        if (routingKey.equals(Map("job" -> "app1")))
+          List(PartitionAssignment("remote", "remote-url", TimeRange(pStartSecs * 1000, pEndSecs * 1000)))
+        else
+          List(PartitionAssignment("local", "local-url", TimeRange(pStartSecs * 1000, pEndSecs * 1000)))
+      }
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val query = """avg_over_time((test{job = "app1"} + test{job = "app2"})[10m:1m])"""
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(queryStartSecs, stepSecs, queryEndSecs), Parser.Antlr)
+    val promQlQueryParams = PromQlQueryParams(query, queryStartSecs, stepSecs, queryEndSecs)
+    val execPlan = engine.materialize(
+      lp,
+      QueryContext(origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true))
+    )
+    val expectedPlan =
+      """T~PeriodicSamplesMapper(start=1200000, step=120000, end=1800000, window=Some(600000), functionId=Some(AvgOverTime), rawSource=false, offsetMs=None)
+        |-E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@4684240f)
+        |--E~PromQlRemoteExec(PromQlQueryParams(test{job="app1"},600,60,1800,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@4684240f)
+        |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1103787767],raw)
+        |---T~PeriodicSamplesMapper(start=600000, step=60000, end=1800000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(300000,1800000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1103787767],raw)
+        |---T~PeriodicSamplesMapper(start=600000, step=60000, end=1800000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(300000,1800000), filters=List(ColumnFilter(job,Equals(app2)), ColumnFilter(__name__,Equals(test))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1103787767],raw)""".stripMargin
+    validatePlan(execPlan, expectedPlan)
   }
 
   it ("should generate only local exec for fixed scalar queries") {
@@ -325,7 +546,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -345,7 +566,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -389,7 +610,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -409,6 +630,92 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     queryParams.endSecs shouldEqual 10000
   }
 
+  it ("should generate Exec plan for Metadata query without shardkey") {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] =
+      List(PartitionAssignment("remote", "remote-url",
+        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
+        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val dataset = MetricsTestData.timeseriesDatasetMultipleShardKeys
+    val schemas = Schemas(dataset.schema)
+    val localPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+      queryConfig, "raw")
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.metadataQueryToLogicalPlan("http_requests_total{method=\"GET\"}",
+      TimeStepParams(startSeconds, step, endSeconds))
+
+    val promQlQueryParams = PromQlQueryParams(
+      "http_requests_total{method=\"GET\"}", startSeconds, step, endSeconds)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[PartKeysDistConcatExec] shouldEqual (true)
+    execPlan.children(0).isInstanceOf[PartKeysDistConcatExec] shouldEqual(true)
+    execPlan.children(1).isInstanceOf[MetadataRemoteExec] shouldEqual(true)
+
+    val queryParams = execPlan.children(1).asInstanceOf[MetadataRemoteExec].queryContext.origQueryParams.
+      asInstanceOf[PromQlQueryParams]
+
+    queryParams.startSecs shouldEqual(startSeconds)
+    queryParams.endSecs shouldEqual(localPartitionStart - 1)
+    execPlan.children(0).asInstanceOf[PartKeysDistConcatExec].children(0).asInstanceOf[PartKeysExec].start shouldEqual
+      (localPartitionStart * 1000)
+    execPlan.children(0).asInstanceOf[PartKeysDistConcatExec].children(0).asInstanceOf[PartKeysExec].end shouldEqual
+      (endSeconds * 1000)
+  }
+
+  it ("should generate Exec plan for Metadata query with partial shardkey") {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] =
+      List(PartitionAssignment("remote", "remote-url",
+        TimeRange(startSeconds * 1000, localPartitionStart * 1000 - 1)),
+        PartitionAssignment("local", "local-url", TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val dataset = MetricsTestData.timeseriesDatasetMultipleShardKeys
+    val schemas = Schemas(dataset.schema)
+    val localPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
+      queryConfig, "raw")
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.metadataQueryToLogicalPlan("http_requests_total{_ws_=\"demo\", method=\"GET\"}",
+      TimeStepParams(startSeconds, step, endSeconds))
+
+    val promQlQueryParams = PromQlQueryParams(
+      "http_requests_total{_ws_=\"demo\", method=\"GET\"}", startSeconds, step, endSeconds)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[PartKeysDistConcatExec] shouldEqual (true)
+    execPlan.children(0).isInstanceOf[PartKeysDistConcatExec] shouldEqual(true)
+    execPlan.children(1).isInstanceOf[MetadataRemoteExec] shouldEqual(true)
+
+    val queryParams = execPlan.children(1).asInstanceOf[MetadataRemoteExec].queryContext.origQueryParams.
+      asInstanceOf[PromQlQueryParams]
+
+    queryParams.startSecs shouldEqual(startSeconds)
+    queryParams.endSecs shouldEqual(localPartitionStart - 1)
+    execPlan.children(0).asInstanceOf[PartKeysDistConcatExec].children(0).asInstanceOf[PartKeysExec].start shouldEqual
+      (localPartitionStart * 1000)
+    execPlan.children(0).asInstanceOf[PartKeysDistConcatExec].children(0).asInstanceOf[PartKeysExec].end shouldEqual
+      (endSeconds * 1000)
+  }
+
   it ("should generate Exec plan for Metadata query") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] =
       List(PartitionAssignment("remote", "remote-url",
@@ -419,7 +726,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -465,7 +772,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
             PartitionAssignment("remote3", "remote-url3", TimeRange(thirdPartitionStart * 1000, endSeconds * 1000)))
         else Nil
       }
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("remote1", "remote-url1", TimeRange(startSeconds * 1000 - lookbackMs,
           secondPartitionStart * 1000 - 1)),
           PartitionAssignment("remote2", "remote-url2", TimeRange(secondPartitionStart * 1000,
@@ -535,7 +842,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         else Nil
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
           localPartitionStartSec * 1000 - 1)), PartitionAssignment("local", "local-url",
           TimeRange(localPartitionStartSec * 1000, endSeconds * 1000)))
@@ -592,7 +899,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         else Nil
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = List(
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = List(
         PartitionAssignment("remote1", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
           localPartitionStartMs - 1)), PartitionAssignment("remote2", "remote-url",
           TimeRange(localPartitionStartMs, endSeconds * 1000)))
@@ -641,7 +948,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -679,7 +986,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -711,7 +1018,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
             timeRange.endMs)))
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -740,7 +1047,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         List.empty
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         List.empty
     }
 
@@ -764,7 +1071,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         List.empty
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         List.empty
     }
 
@@ -785,7 +1092,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         List.empty
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = List.empty
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = List.empty
     }
 
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
@@ -818,7 +1125,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         else Nil
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] = List(
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = List(
         PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
           localPartitionStartMs - 1)), PartitionAssignment("remote", "remote-url",
           TimeRange(localPartitionStartMs, endSeconds * 1000)))
@@ -847,7 +1154,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -914,7 +1221,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
             timeRange.endMs)))
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -967,7 +1274,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
             timeRange.endMs)))
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -1025,7 +1332,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
             timeRange.endMs)))
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -1091,7 +1398,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
             timeRange.endMs)))
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -1150,7 +1457,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
             timeRange.endMs)))
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 
@@ -1188,7 +1495,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
             timeRange.endMs)))
       }
 
-      override def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment] =
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
         partitions(timeRange)
     }
 

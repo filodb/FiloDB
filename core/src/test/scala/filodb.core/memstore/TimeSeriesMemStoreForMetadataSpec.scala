@@ -5,11 +5,10 @@ import monix.execution.Scheduler.Implicits.global
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.core.MetricsTestData.{builder, timeseriesDataset, timeseriesSchema}
 import filodb.core.TestData
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query.{ColumnFilter, Filter, QuerySession}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -98,7 +97,7 @@ class TimeSeriesMemStoreForMetadataSpec extends AnyFunSpec with Matchers with Sc
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     val metadata = memStore.labelValuesWithFilters(timeseriesDataset.ref, 0,
-      filters, Seq("instance"), now, now - 5000, 10)
+      filters, Seq("instance"), now, now - 5000, QuerySession.makeForTestingOnly, 10)
 
     metadata.hasNext shouldEqual true
     metadata.next shouldEqual Map("instance".utf8 -> "someHost:8787".utf8)

@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
-import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.query._
 import filodb.query.LogicalPlan._
 import filodb.query.exec._
@@ -14,7 +14,8 @@ case class PartitionAssignment(partitionName: String, endPoint: String, timeRang
 trait PartitionLocationProvider {
 
   def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment]
-  def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment]
+  def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                            timeRange: TimeRange): List[PartitionAssignment]
 }
 
 /**
@@ -76,27 +77,29 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       // }
     val tsdbQueryParams = qContext.origQueryParams
 
-    if (!tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
-      (tsdbQueryParams.isInstanceOf[PromQlQueryParams]
-        && !qContext.plannerParams.processMultiPartition)) { // Query was part of routing
+    if(
+      !tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
+      (tsdbQueryParams.isInstanceOf[PromQlQueryParams] && !qContext.plannerParams.processMultiPartition)
+    ) { // Query was part of routing
       localPartitionPlanner.materialize(logicalPlan, qContext)
-    } else if (LogicalPlan.hasSubqueryWithWindowing(logicalPlan) || logicalPlan.isInstanceOf[TopLevelSubquery]) {
-      materializeSubquery(logicalPlan, qContext)
     } else logicalPlan match {
-      case mqp: MetadataQueryPlan => materializeMetadataQueryPlan(mqp, qContext).plans.head
-      case lp: TsCardinalities    => materializeTsCardinalities(lp, qContext).plans.head
-      case _                      => walkLogicalPlanTree(logicalPlan, qContext).plans.head
+      case mqp: MetadataQueryPlan             => materializeMetadataQueryPlan(mqp, qContext).plans.head
+      case lp: TsCardinalities                => materializeTsCardinalities(lp, qContext).plans.head
+      case _                                  => walkLogicalPlanTree(logicalPlan, qContext).plans.head
     }
   }
 
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
     // Should avoid this asInstanceOf, far many places where we do this now.
     val params = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val partitions = getPartitions(logicalPlan, params)
-
+    // MultiPartitionPlanner has capability to stitch across time partitions, however, the logic is mostly broken
+    // and not well tested. The logic below would not work well for any kind of subquery since their actual
+    // start and ends are different from the start/end parameter of the query context. If we are to implement
+    // stitching across time, we need to to pass proper parameters to getPartitions() call
+    val paramToCheckPartitions = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val partitions = getPartitions(logicalPlan, paramToCheckPartitions)
 
     if (isSinglePartition(partitions)) {
-
         val (partitionName, startMs, endMs) =
           ( partitions.headOption.map(_.partitionName).getOrElse(localPartitionName),
             params.startSecs * 1000L,
@@ -110,13 +113,23 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           // Single partition but remote, send the entire plan remotely
           val remotePartitionEndpoint = partitions.head.endPoint
           val httpEndpoint = remotePartitionEndpoint + params.remoteQueryPath.getOrElse("")
-          PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-            generateRemoteExecParams(qContext, startMs, endMs),
-            inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
+          val remoteContext = if (logicalPlan.isInstanceOf[PeriodicSeriesPlan]) {
+            val psp : PeriodicSeriesPlan = logicalPlan.asInstanceOf[PeriodicSeriesPlan]
+            val startSecs = psp.startMs / 1000
+            val stepSecs = psp.stepMs / 1000
+            val endSecs = psp.endMs / 1000
+            generateRemoteExecParamsWithStep(qContext, startSecs, stepSecs, endSecs)
+          } else {
+            generateRemoteExecParams(qContext, startMs, endMs)
+          }
+          PromQlRemoteExec(
+            httpEndpoint, remoteHttpTimeoutMs, remoteContext, inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient
+          )
         }
         PlanResult(Seq(execPlan))
     } else walkMultiPartitionPlan(logicalPlan, qContext)
   }
+
 
   /**
    * Invoked when the plan tree spans multiple plans
@@ -143,16 +156,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case lp: ScalarBinaryOperation      => super.materializeScalarBinaryOperation(qContext, lp)
       case lp: ApplyLimitFunction         => super.materializeLimitFunction(qContext, lp)
       case lp: TsCardinalities            => materializeTsCardinalities(lp, qContext)
-
-      // Imp: At the moment, these two cases for subquery will not get executed, materialize is already
-      // Checking if the plan is a TopLevelSubQuery or any of the descendant is a SubqueryWithWindowing and
-      // will invoke materializeSubquery, currently these placeholders are added to make compiler happy as LogicalPlan
-      // is a sealed trait. Ideally, everything, including subqueries need to be walked and materialized by the
-      // Planner. Once we identify the test cases for subqueries that need to walk the tree, remove this block of
-      // comment, remove the special handling from materialize method and fix the next case handling
-      // SubqueryWithWindowing and TopLevelSubquery
-      case _: SubqueryWithWindowing |
-           _: TopLevelSubquery            => PlanResult(materializeSubquery(logicalPlan, qContext) :: Nil)
+      case lp: SubqueryWithWindowing       => super.materializeSubqueryWithWindowing(qContext, lp)
+      case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
       case _: PeriodicSeries |
            _: PeriodicSeriesWithWindowing |
            _: RawChunkMeta |
@@ -164,13 +169,23 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val columnFilterGroup = LogicalPlan.getColumnFilterGroup(logicalPlan)
     val routingKeys = dataset.options.nonMetricShardColumns
       .map(x => (x, LogicalPlan.getColumnValues(columnFilterGroup, x)))
-    if (routingKeys.flatMap(_._2).isEmpty) Seq.empty else routingKeys
+    if (routingKeys.flatMap(_._2).isEmpty) Seq.empty else routingKeys.filter(x => x._2.nonEmpty)
   }
 
   private def generateRemoteExecParams(queryContext: QueryContext, startMs: Long, endMs: Long) = {
     val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     queryContext.copy(origQueryParams = queryParams.copy(startSecs = startMs/1000, endSecs = endMs / 1000),
       plannerParams = queryContext.plannerParams.copy(processMultiPartition = false))
+  }
+
+  private def generateRemoteExecParamsWithStep(
+    queryContext: QueryContext, startSecs: Long, stepSecs: Long, endSecs: Long
+  ) = {
+    val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    queryContext.copy(
+      origQueryParams = queryParams.copy(startSecs = startSecs, stepSecs = stepSecs, endSecs = endSecs),
+      plannerParams = queryContext.plannerParams.copy(processMultiPartition = false)
+    )
   }
 
   /**
@@ -260,31 +275,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   }
 
   /**
-   *
-   * @param logicalPlan Logical plan
-   * @param queryParams PromQlQueryParams having query details
-   * @return Returns PartitionAssignment and routing keys
-   */
-  private def partitionUtilSubquery(logicalPlan: LogicalPlan, queryParams: PromQlQueryParams) = {
-    val routingKeys = getRoutingKeys(logicalPlan)
-    val lastPoint = TimeRange(queryParams.endSecs * 1000, queryParams.endSecs * 1000)
-    val partitions =
-      if (routingKeys.isEmpty) {
-        List.empty
-      } else {
-        val routingKeyMap = routingKeys.map(x => (x._1, x._2.head)).toMap
-        partitionLocationProvider.getPartitions(routingKeyMap, lastPoint).sortBy(_.timeRange.startMs)
-      }
-    if (partitions.isEmpty && routingKeys.nonEmpty)
-      logger.warn(s"No partitions found for routing keys: $routingKeys")
-    (partitions, routingKeys)
-  }
-
-  /**
     * Materialize all queries except Binary Join and Metadata
     */
   def materializePeriodicAndRawSeries(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
-
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val (partitions, lookBackMs, offsetMs, routingKeys) = resolvePartitionsAndRoutingKeys(logicalPlan, queryParams)
     val execPlan = if (partitions.isEmpty || routingKeys.forall(_._2.isEmpty))
@@ -292,27 +285,31 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     else {
       val stepMs = queryParams.stepSecs * 1000
       val isInstantQuery: Boolean = if (queryParams.startSecs == queryParams.endSecs) true else false
-
       var prevPartitionStart = queryParams.startSecs * 1000
       val execPlans = partitions.zipWithIndex.map { case (p, i) =>
-        // First partition should start from query start time
-        // No need to calculate time according to step for instant queries
-        val startMs = if (i == 0 || isInstantQuery) queryParams.startSecs * 1000
-                      else {
-                        // Lookback not supported across partitions
-                        val numStepsInPrevPartition = (p.timeRange.startMs - prevPartitionStart + lookBackMs) / stepMs
-                        val lastPartitionInstant = prevPartitionStart + numStepsInPrevPartition * stepMs
-                        val start = lastPartitionInstant + stepMs
-                        // If query duration is less than or equal to lookback start will be greater than query end time
-                        if (start > (queryParams.endSecs * 1000)) queryParams.endSecs * 1000 else start
-                      }
+        // First partition should start from query start time, no need to calculate time according to step for instant
+        // queries
+        val startMs =
+          if (i == 0 || isInstantQuery) {
+            queryParams.startSecs * 1000
+          } else {
+            // The logic below does not work for partitions split across time as we encounter a hole
+            // in the produced result. The size of the hole is lookBackMs + stepMs
+            val numStepsInPrevPartition = (p.timeRange.startMs - prevPartitionStart + lookBackMs) / stepMs
+            val lastPartitionInstant = prevPartitionStart + numStepsInPrevPartition * stepMs
+            val start = lastPartitionInstant + stepMs
+            // If query duration is less than or equal to lookback start will be greater than query end time
+            if (start > (queryParams.endSecs * 1000)) queryParams.endSecs * 1000 else start
+          }
         prevPartitionStart = startMs
+        // we assume endMs should be equal partition endMs but if the query's end is smaller than partition endMs,
+        // why would we want to stretch the query??
         val endMs = if (isInstantQuery) queryParams.endSecs * 1000 else p.timeRange.endMs + offsetMs.min
         logger.debug(s"partitionInfo=$p; updated startMs=$startMs, endMs=$endMs")
-        if (p.partitionName.equals(localPartitionName))
-          localPartitionPlanner.materialize(
-            copyLogicalPlanWithUpdatedTimeRange(logicalPlan, TimeRange(startMs, endMs)), qContext)
-        else {
+        if (p.partitionName.equals(localPartitionName)) {
+          val lpWithUpdatedTime = copyLogicalPlanWithUpdatedTimeRange(logicalPlan, TimeRange(startMs, endMs))
+          localPartitionPlanner.materialize(lpWithUpdatedTime, qContext)
+        } else {
           val httpEndpoint = p.endPoint + queryParams.remoteQueryPath.getOrElse("")
           PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, generateRemoteExecParams(qContext, startMs, endMs),
             inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
@@ -321,7 +318,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       if (execPlans.size == 1) execPlans.head
       else {
         // TODO: Do we pass in QueryContext in LogicalPlan's helper rvRangeForPlan?
-
         StitchRvsExec(qContext, inProcessPlanDispatcher, rvRangeFromPlan(logicalPlan),
           execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]))
       }
@@ -329,49 +325,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       // Sort to move RemoteExec in end as it does not have schema
     }
     PlanResult(execPlan:: Nil)
-  }
-
-
-  /**
-   * Materialize queries having subqueries in them.
-   * Here, we don't stitch across partitions and we assume for a given
-   * set of routingKeys we will have only ONE partition. We do not try to find multiple
-   * partitions that cover our time range or find one that has the best overlap, we just
-   * choose one partition that has the end of our interval.
-   */
-  def materializeSubquery(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
-
-    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val (partitions, routingKeys) = partitionUtilSubquery(logicalPlan, queryParams)
-    if (partitions.isEmpty || routingKeys.forall(_._2.isEmpty)) {
-      localPartitionPlanner.materialize(logicalPlan, qContext)
-    } else {
-      val execPlans = partitions.map { p =>
-        val startMs = queryParams.startSecs * 1000
-        val endMs = queryParams.endSecs * 1000
-        logger.debug(s"partitionInfo=$p; updated startMs=$startMs, endMs=$endMs")
-        if (p.partitionName.equals(localPartitionName))
-          localPartitionPlanner.materialize(logicalPlan, qContext)
-        else {
-          val httpEndpoint = p.endPoint + queryParams.remoteQueryPath.getOrElse("")
-          PromQlRemoteExec(
-            httpEndpoint, remoteHttpTimeoutMs, generateRemoteExecParams(qContext, startMs, endMs),
-            inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient
-          )
-        }
-      }
-      if (execPlans.size == 1) {
-        execPlans.head
-      } else {
-        StitchRvsExec(
-          qContext,
-          inProcessPlanDispatcher, rvRangeFromPlan(logicalPlan),
-          execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
-        )
-      }
-      // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
-      // Sort to move RemoteExec in end as it does not have schema
-    }
   }
 
   private def materializeMultiPartitionBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): PlanResult = {
@@ -413,7 +366,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     // is a metadata operation and shares common components with other metadata endpoints.
     val partitions = lp match {
       case lc: LabelCardinality       => getPartitions(lc, qContext.origQueryParams.asInstanceOf[PromQlQueryParams])
-      case _                          => partitionLocationProvider.getAuthorizedPartitions(
+      case _                          => getMetadataPartitions(lp.filters,
         TimeRange(queryParams.startSecs * 1000, queryParams.endSecs * 1000))
     }
 
@@ -463,7 +416,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     } else {
       logger.info(s"(ws, ns) pair not provided in prefix=${lp.shardKeyPrefix};" +
                   s"dispatching to all authorized partitions")
-      partitionLocationProvider.getAuthorizedPartitions(TimeRange(0, Long.MaxValue))
+      getMetadataPartitions(lp.filters(), TimeRange(0, Long.MaxValue))
     }
     val execPlan = if (partitions.isEmpty) {
       logger.warn(s"no partitions found for $lp; defaulting to local planner")
@@ -490,6 +443,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       }
     }
     PlanResult(execPlan::Nil)
+  }
+
+  def getMetadataPartitions(filters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = {
+    val nonMetricShardKeyFilters = filters.filter(f => dataset.options.nonMetricShardColumns.contains(f.column))
+    partitionLocationProvider.getMetadataPartitions(nonMetricShardKeyFilters, timeRange)
   }
 
   private def createMetadataRemoteExec(qContext: QueryContext, partitionAssignment: PartitionAssignment,

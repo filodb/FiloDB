@@ -222,10 +222,17 @@ trait  PlannerHelper {
     // is optimal, if there is no overlap and even worse significant gap between the individual subqueries, retrieving
     // the entire range might be suboptimal, this still might be a better option than issuing and concatenating numerous
     // subqueries separately
-    val innerPlan = sqww.innerPeriodicSeries
     val window = Some(sqww.subqueryWindowMs)
-    // Here the inner periodic series already has start/end/step populated
-    // in Function's toSeriesPlan(), Functions.scala subqqueryArgument() method.
+    // Unfortunately the logical plan by itself does not always contain start/end parameters like periodic series plans
+    // such as subquery. We have to carry qContext together with the plans to walk the logical tree.
+    // Some planners such as MultiPartitionPlanner theoretically can split the query across time and send them to
+    // different partitions. If QueryContext is used to figure out start/end time it needs to be updated/in sync with
+    // the inner logical plan. Subquery logic on its own relies on the logical plan as it has start/end/step.
+    // MultiPartitionPlanner is modified, so, that if it encounters periodic series plan, it takes start and end from
+    // the plan itself, not from the query context. At this point query context start/end are almost guaranteed to be
+    // different from start/end of the inner logical plan. This is rather confusing, the intent, however, was to keep
+    // query context "original" without modification, so, as to capture the original intent of the user. This, however,
+    // does not hold true across the entire code base, there are a number of place where we modify query context.
     val innerExecPlan = walkLogicalPlanTree(sqww.innerPeriodicSeries, qContext)
     if (sqww.functionId != RangeFunctionId.AbsentOverTime) {
       val rangeFn = InternalRangeFunction.lpToInternalFunc(sqww.functionId)
@@ -245,6 +252,7 @@ trait  PlannerHelper {
       innerExecPlan.plans.foreach { p => p.addRangeVectorTransformer(rangeVectorTransformer)}
       innerExecPlan
     } else {
+      val innerPlan = sqww.innerPeriodicSeries
       createAbsentOverTimePlan(innerExecPlan, innerPlan, qContext, window, sqww.offsetMs, sqww)
     }
   }
