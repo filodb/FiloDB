@@ -42,8 +42,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
   require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
   require(!on.contains(metricColumn), "On cannot contain metric name")
 
-  val onLabels = on.map(Utf8Str(_)).toSet
-  val ignoringLabels = ignoring.map(Utf8Str(_)).toSet + metricColumn.utf8
+  private val onLabels = on.map(Utf8Str(_)).toSet
+  private val ignoringLabels = ignoring.map(Utf8Str(_)).toSet + metricColumn.utf8
   // if onLabels is non-empty, we are doing matching based on on-label, otherwise we are
   // doing matching based on ignoringLabels even if it is empty
 
@@ -93,9 +93,9 @@ final case class SetOperatorExec(queryContext: QueryContext,
   /***
     * Returns true when range vector does not have any values
     */
-  private def isEmpty(rv: RangeVector, schema: ResultSchema) = {
-    if (schema.isHistogram) rv.rows.map(_.getHistogram(1)).filter(_.numBuckets > 0).isEmpty
-    else rv.rows.filter(!_.getDouble(1).isNaN).isEmpty
+  private[exec] def isEmpty(rv: RangeVector, schema: ResultSchema) = {
+    if (schema.isHistogram) rv.rows().forall(_.getHistogram(1).numBuckets == 0)
+    else rv.rows().forall(_.getDouble(1).isNaN)
   }
 
   /***
@@ -103,7 +103,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
    * LHS row should only be added if corresponding row exists in RHS
    */
   // scalastyle:off method.length
-  private def setOpAnd(lhsRvs: List[RangeVector], rhsRvs: List[RangeVector],
+  private[exec] def setOpAnd(lhsRvs: List[RangeVector], rhsRvs: List[RangeVector],
                        rhsSchema: ResultSchema): Iterator[RangeVector] = {
     // isEmpty method consumes rhs range vector
     require(rhsRvs.forall(_.isInstanceOf[SerializedRangeVector]), "RHS should be SerializedRangeVector")
@@ -138,6 +138,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
         val lhsStitched = if (result.contains(jk)) {
           val resVal = result(jk)
           // If LHS keys exist in result, stitch if it is a duplicate
+          // While this may look like a nested loop scanning a lot of elements, in practice, this ArrayBuffer will only
+          // have size > 1 when there is a change of spread and the same timeseries comes from two different shards
           index = resVal.indexWhere(r => r.key.labelValues == lhs.key.labelValues)
           if (index >= 0) {
              StitchRvsExec.stitch(lhs, resVal(index), outputRvRange)
@@ -145,10 +147,10 @@ final case class SetOperatorExec(queryContext: QueryContext,
             lhs
           }
         } else lhs
-        val lhsRows = lhsStitched.rows
-        val rhsRows = rhsMap(jk).rows
+        val lhsRows = lhsStitched.rows()
+        val rhsRows = rhsMap(jk).rows()
 
-        val rows = new RangeVectorCursor {
+        val rows: RangeVectorCursor = new RangeVectorCursor {
           val cur = new TransientRow()
           override def hasNext: Boolean = lhsRows.hasNext && rhsRows.hasNext
           override def next(): RowReader = {
@@ -195,6 +197,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
       val jk = joinKeys(rv.key)
        if (lhsResult.contains(jk)) {
         val resVal = lhsResult(jk)
+         // While this may look like a nested loop scanning a lot of elements, in practice, this ArrayBuffer will only
+         // have size > 1 when there is a change of spread and the same timeseries comes from two different shards
         val index = resVal.indexWhere(r => r.key.labelValues == rv.key.labelValues)
         if (index >= 0) {
           val stitched = StitchRvsExec.stitch(rv, resVal(index), outputRvRange)
@@ -214,6 +218,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
       if (!lhsResult.contains(jk)) {
         if (rhsResult.contains(jk)) {
           val resVal = rhsResult(jk)
+          // While this may look like a nested loop scanning a lot of elements, in practice, this ArrayBuffer will only
+          // have size > 1 when there is a change of spread and the same timeseries comes from two different shards
           val index = resVal.indexWhere(r => r.key.labelValues == rhs.key.labelValues)
           if (index >= 0) {
             val stitched = StitchRvsExec.stitch(rhs, resVal(index), outputRvRange)
@@ -234,36 +240,31 @@ final case class SetOperatorExec(queryContext: QueryContext,
   /***
    * Return LHS range vector which have join keys not present in RHS
    */
-  private def setOpUnless(lhsRvs: List[RangeVector],
+  private[exec] def setOpUnless(lhsRvs: List[RangeVector],
                           rhsRvs: List[RangeVector]): Iterator[RangeVector] = {
-    val result = new mutable.HashMap[Map[Utf8Str, Utf8Str], ArrayBuffer[RangeVector]]()
+
     val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
       rhsKeysSet += jk
     }
     // Add range vectors which are not present in rhs
-    lhsRvs.foreach { lhs =>
-      val jk = joinKeys(lhs.key)
-      if (!rhsKeysSet.contains(jk)) {
-        if (result.contains(jk)) {
-          val resVal = result(jk)
 
-          val index = resVal.indexWhere(r => r.key.labelValues == lhs.key.labelValues)
-          if (index >= 0) {
-            val stitched = StitchRvsExec.stitch(lhs, resVal(index), outputRvRange)
-            resVal.update(index, stitched)
-          } else {
-            resVal.append(lhs)
+    val result = lhsRvs.foldLeft(
+      mutable.Map.empty[Map[Utf8Str, Utf8Str], mutable.Map[Map[Utf8Str, Utf8Str], RangeVector]]) {
+      case (accumulated, lhs) =>
+        val jk = joinKeys(lhs.key)
+        if (!rhsKeysSet.contains(jk)) {
+          val result = accumulated.getOrElseUpdate(jk, mutable.Map.empty)
+          val stitchedOrNewValue = result.get(lhs.key.labelValues) match {
+            case Some(matched)  => StitchRvsExec.stitch(lhs, matched, outputRvRange)
+            case None           => lhs
           }
-        } else {
-          val lhsList = result.getOrElse(jk, ArrayBuffer())
-          lhsList.append(lhs)
-          result.put(jk, lhsList)
+          result(lhs.key.labelValues) = stitchedOrNewValue
         }
-      }
+        accumulated
     }
-    result.valuesIterator.map(_.toIterator).flatten
+    result.valuesIterator.flatMap( m => m.valuesIterator)
   }
 
   /**
