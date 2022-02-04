@@ -138,6 +138,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
         val lhsStitched = if (result.contains(jk)) {
           val resVal = result(jk)
           // If LHS keys exist in result, stitch if it is a duplicate
+          // While this may look like a nested loop scanning a lot of elements, in practice, this ArrayBuffer will only
+          // have size > 1 when there is a change of spread and the same timeseries comes from two different shards
           index = resVal.indexWhere(r => r.key.labelValues == lhs.key.labelValues)
           if (index >= 0) {
              StitchRvsExec.stitch(lhs, resVal(index), outputRvRange)
@@ -195,6 +197,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
       val jk = joinKeys(rv.key)
        if (lhsResult.contains(jk)) {
         val resVal = lhsResult(jk)
+         // While this may look like a nested loop scanning a lot of elements, in practice, this ArrayBuffer will only
+         // have size > 1 when there is a change of spread and the same timeseries comes from two different shards
         val index = resVal.indexWhere(r => r.key.labelValues == rv.key.labelValues)
         if (index >= 0) {
           val stitched = StitchRvsExec.stitch(rv, resVal(index), outputRvRange)
@@ -214,6 +218,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
       if (!lhsResult.contains(jk)) {
         if (rhsResult.contains(jk)) {
           val resVal = rhsResult(jk)
+          // While this may look like a nested loop scanning a lot of elements, in practice, this ArrayBuffer will only
+          // have size > 1 when there is a change of spread and the same timeseries comes from two different shards
           val index = resVal.indexWhere(r => r.key.labelValues == rhs.key.labelValues)
           if (index >= 0) {
             val stitched = StitchRvsExec.stitch(rhs, resVal(index), outputRvRange)
