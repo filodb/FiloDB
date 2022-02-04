@@ -186,7 +186,10 @@ class SingleClusterPlanner(val dataset: Dataset,
         .getOrElse(throw new BadQueryException(s"Could not find metric value"))
       val shardValues = shardVals.filterNot(_._1 == dsOptions.metricColumn).map(_._2)
       logger.debug(s"For shardColumns $shardColumns, extracted metric $metric and shard values $shardValues")
-      val targetSchema = qContext.plannerParams.targetSchema.getOrElse(targetSchemaProvider).targetSchemaFunc(filters)
+      val targetSchemaChange = qContext.plannerParams.targetSchema
+        .getOrElse(targetSchemaProvider)
+        .targetSchemaFunc(filters)
+      val targetSchema = if (targetSchemaChange.nonEmpty) targetSchemaChange.last.schema else Seq.empty
       val shardHash = RecordBuilder.shardKeyHash(shardValues, dsOptions.metricColumn, metric, targetSchema)
       if(useTargetSchemaForShards(filters, targetSchema)) {
         val nonShardKeyLabelPairs = filters.filter(f => !shardColumns.contains(f.column)
@@ -211,7 +214,8 @@ class SingleClusterPlanner(val dataset: Dataset,
    */
   private def useTargetSchemaForShards(filters: Seq[ColumnFilter], targetSchema: Seq[String]): Boolean =
     targetSchema.nonEmpty &&
-      targetSchema.forall(s => filters.exists(cf => cf.column == s && cf.filter.isInstanceOf[Filter.Equals]))
+      targetSchema
+        .forall(s => filters.exists(cf => cf.column == s && cf.filter.isInstanceOf[Filter.Equals]))
 
   private def toChunkScanMethod(rangeSelector: RangeSelector): ChunkScanMethod = {
     rangeSelector match {

@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration._
 
-import filodb.core.{SpreadChange, SpreadProvider, TargetSchemaProvider}
+import filodb.core.{SpreadChange, SpreadProvider, TargetSchema, TargetSchemaProvider}
 import filodb.memory.EvictionLock
 
 trait TsdbQueryParams
@@ -102,7 +102,7 @@ object QueryContext {
   def mapTargetSchemaFunc(shardKeyNames: Seq[String],
                           targetSchemaMap: Map[Map[String, String], Seq[String]],
                           optionalShardKey: String)
-          : Seq[ColumnFilter] => Seq[String] = {
+          : Seq[ColumnFilter] => Seq[TargetSchema] = {
     filters: Seq[ColumnFilter] =>
       val shardKeysInQuery = filters.collect {
         case ColumnFilter(key, Filter.Equals(filtVal: String)) if shardKeyNames.contains(key) => key -> filtVal
@@ -112,13 +112,13 @@ object QueryContext {
           if key != optionalShardKey && shardKeyNames.contains(key) => key -> filtVal
       }.toMap
       val defaultSchema = targetSchemaMap.getOrElse(nonOptShardKeys, Seq.empty)
-      targetSchemaMap.getOrElse(shardKeysInQuery, defaultSchema)
+      Seq(TargetSchema(schema = targetSchemaMap.getOrElse(shardKeysInQuery, defaultSchema)))
   }
 
   def mapTargetSchemaFunc(shardKeyNames: java.util.List[String],
                           targetSchemaMap: java.util.Map[java.util.Map[String, String], java.util.List[String]],
                           optionalShardKey: String)
-          : Seq[ColumnFilter] => Seq[String]= {
+          : Seq[ColumnFilter] => Seq[TargetSchema] = {
     val targetSchema: Map[Map[String, String], Seq[String]] = targetSchemaMap.asScala.map {
       case (d, v) => d.asScala.toMap -> v.asScala.toSeq
     }.toMap
