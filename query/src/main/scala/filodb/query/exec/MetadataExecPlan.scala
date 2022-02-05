@@ -46,7 +46,7 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
       case (QueryError(_, _, ex), _)         => throw ex
     }.toListL.map { resp =>
       val metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
-      resp.foreach { rv =>
+      resp.filter(!_.isEmpty).foreach { rv =>
         metadataResult ++= rv.head.rows.map { rowReader =>
           val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
           rv.head match {
