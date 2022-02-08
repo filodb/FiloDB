@@ -70,7 +70,7 @@ object Util {
     def toIterator: Future[Iterator[Row]] = rsf.toScalaFuture.map { rs => rs.iterator.asScala }
     def toOne: Future[Option[Row]] = rsf.toScalaFuture.map { rs => Option(rs.one()) }
     def toObservable: Observable[Row] = {
-      val fut = rsf.toScalaFuture.map { rs => Observable.fromIterator(rs.iterator.asScala) }
+      val fut = rsf.toScalaFuture.map { rs => Observable.fromIteratorUnsafe(rs.iterator.asScala) }
       Observable.fromFuture(fut).flatten
     }
   }

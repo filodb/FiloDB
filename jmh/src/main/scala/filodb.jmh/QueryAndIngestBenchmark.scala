@@ -17,7 +17,7 @@ import filodb.core.GlobalConfig
 import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
-import filodb.core.query.QueryContext
+import filodb.core.query.{PlannerParams, QueryContext}
 import filodb.core.store.StoreConfig
 import filodb.gateway.GatewayServer
 import filodb.gateway.conversion.PrometheusInputRecord
@@ -87,7 +87,7 @@ class QueryAndIngestBenchmark extends StrictLogging {
 
   val ingestTask = containerStream.groupBy(_._1)
                     // Asynchronously subcribe and ingest each shard
-                    .mapAsync(numShards) { groupedStream =>
+                    .mapParallelUnordered(numShards) { groupedStream =>
                       val shard = groupedStream.key
                       println(s"Starting ingest on shard $shard...")
                       val shardStream = groupedStream.zipWithIndex.flatMap { case ((_, bytes), idx) =>
@@ -97,7 +97,7 @@ class QueryAndIngestBenchmark extends StrictLogging {
                       }
                       Task.fromFuture(
                         cluster.memStore.ingestStream(dataset.ref, shard, shardStream, global))
-                    }.countL.runAsync
+                    }.countL.runToFuture
 
   val memstore = cluster.memStore.asInstanceOf[TimeSeriesMemStore]
   val shards = (0 until numShards).map { s => memstore.getShardE(dataset.ref, s) }
@@ -118,6 +118,10 @@ class QueryAndIngestBenchmark extends StrictLogging {
   Thread sleep 2000
   memstore.refreshIndexForTesting(dataset.ref) // commit lucene index
   println(s"Initial ingestion ended, indexes set up")
+  val qContext = QueryContext(plannerParams =
+    new PlannerParams(spreadOverride = Some(StaticSpreadProvider(SpreadChange(0, spread))),
+      sampleLimit = 1000000,
+      queryTimeoutMillis = 2.hours.toMillis.toInt)) // high timeout since we are using same context for all queries
 
   /**
    * ## ========  Queries ===========
@@ -131,8 +135,7 @@ class QueryAndIngestBenchmark extends StrictLogging {
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>
-    LogicalPlan2Query(dataset.ref, plan, QueryContext(Some(new StaticSpreadProvider
-    (SpreadChange(0, 1))), 1000000))
+    LogicalPlan2Query(dataset.ref, plan, qContext)
   }
 
   private var testProducingFut: Option[Future[Unit]] = None

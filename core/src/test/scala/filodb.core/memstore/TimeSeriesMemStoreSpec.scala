@@ -380,7 +380,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries(), 200))
     // recover from checkpoints.min to checkpoints.max
     val offsets = memStore.recoverStream(dataset1.ref, 0, stream, 2, 21, checkpoints, 4L)
-                          .until(_ >= 21L).toListL.runAsync.futureValue
+                          .until(_ >= 21L).toListL.runToFuture.futureValue
 
     offsets shouldEqual Seq(7L, 11L, 15L, 19L, 21L) // last offset is always reported
     // no flushes
@@ -404,7 +404,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val endOffset = checkpoints.values.max
     // recover from checkpoints.min to checkpoints.max - timeout after 1sec
     val offsets = memStore.recoverStream(dataset1.ref, 0, stream, startOffset, endOffset, checkpoints, 4L)(1.second)
-      .until(_ >= 21L).toListL.runAsync.futureValue
+      .until(_ >= 21L).toListL.runToFuture.futureValue
 
     offsets shouldEqual Seq(checkpoints.values.max) // should equal end offset
   }
@@ -486,7 +486,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val ex = intercept[TestFailedException] {
       memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter)),
         querySession = session)
-        .toListL.runAsync.futureValue
+        .toListL.runToFuture.futureValue
     }
     session.close() // release lock
     ex.getCause.isInstanceOf[ServiceUnavailableException] shouldEqual true
@@ -499,7 +499,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val ex2 = intercept[TestFailedException] {
       memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter)),
         querySession = session)
-        .toListL.runAsync.futureValue
+        .toListL.runToFuture.futureValue
     }
     session.close() // release lock
     ex2.getCause.isInstanceOf[ServiceUnavailableException] shouldEqual true
@@ -510,7 +510,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     // now query should succeed
     val parts = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter)),
         querySession = session)
-        .toListL.runAsync.futureValue
+        .toListL.runToFuture.futureValue
     parts.size shouldEqual 1
     parts.head.partID shouldEqual 0 // same partId as before for ODPed partitions
     session.close() // release lock

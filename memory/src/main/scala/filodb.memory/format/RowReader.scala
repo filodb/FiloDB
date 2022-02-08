@@ -252,6 +252,32 @@ final case class SeqRowReader(sequence: Seq[Any]) extends RowReader {
   def getBlobNumBytes(columnNo: Int): Int = ???
 }
 
+final case class UTF8StringRowReader(records: Iterator[ZeroCopyUTF8String]) extends Iterator[RowReader] {
+  var currVal: ZeroCopyUTF8String = _
+
+  private val rowReader = new RowReader {
+    def notNull(columnNo: Int): Boolean = true
+    def getBoolean(columnNo: Int): Boolean = ???
+    def getInt(columnNo: Int): Int = ???
+    def getLong(columnNo: Int): Long = ???
+    def getDouble(columnNo: Int): Double = ???
+    def getFloat(columnNo: Int): Float = ???
+    def getString(columnNo: Int): String = currVal.toString
+    def getAny(columnNo: Int): Any = currVal
+
+    def getBlobBase(columnNo: Int): Any = currVal.base
+    def getBlobOffset(columnNo: Int): Long = currVal.offset
+    def getBlobNumBytes(columnNo: Int): Int = currVal.numBytes
+  }
+
+  override def hasNext: Boolean = records.hasNext
+
+  override def next(): RowReader = {
+    currVal = records.next()
+    rowReader
+  }
+}
+
 final case class UTF8MapIteratorRowReader(records: Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]) extends Iterator[RowReader] {
   var currVal: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = _
 

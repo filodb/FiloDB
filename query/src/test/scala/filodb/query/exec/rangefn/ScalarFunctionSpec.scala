@@ -120,7 +120,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
   it("should generate scalar") {
     val scalarFunctionMapper = exec.ScalarFunctionMapper(ScalarFunctionId.Scalar, RangeParams(1,1,1))
     val resultObs = scalarFunctionMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
-    val resultRangeVectors = resultObs.toListL.runAsync.futureValue
+    val resultRangeVectors = resultObs.toListL.runToFuture.futureValue
     resultRangeVectors.forall(x => x.isInstanceOf[ScalarFixedDouble]) shouldEqual (true)
     val resultRows = resultRangeVectors.flatMap(_.rows.map(_.getDouble(1)).toList)
     resultRows.size shouldEqual (1)
@@ -130,7 +130,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
   it("should generate scalar values when there is one range vector") {
     val scalarFunctionMapper = exec.ScalarFunctionMapper(ScalarFunctionId.Scalar, RangeParams(1,1,1))
     val resultObs = scalarFunctionMapper(Observable.fromIterable(oneSample), querySession, 1000, resultSchema, Nil)
-    val resultRangeVectors = resultObs.toListL.runAsync.futureValue
+    val resultRangeVectors = resultObs.toListL.runToFuture.futureValue
     resultRangeVectors.forall(x => x.isInstanceOf[ScalarVaryingDouble]) shouldEqual (true)
     val resultRows = resultRangeVectors.flatMap(_.rows.map(_.getDouble(1)).toList)
     resultRows.shouldEqual(List(1, 10, 30))
@@ -140,7 +140,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val execPlan = TimeScalarGeneratorExec(QueryContext(), timeseriesDataset.ref, RangeParams(10, 10, 100), ScalarFunctionId.Time)
     implicit val timeout: FiniteDuration = FiniteDuration(5, TimeUnit.SECONDS)
     import monix.execution.Scheduler.Implicits.global
-    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _) => {
         val rv = response(0)
@@ -155,7 +155,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val execPlan = TimeScalarGeneratorExec(QueryContext(), timeseriesDataset.ref, RangeParams(1565627710, 10, 1565627790), ScalarFunctionId.Hour)
     implicit val timeout: FiniteDuration = FiniteDuration(5, TimeUnit.SECONDS)
     import monix.execution.Scheduler.Implicits.global
-    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _) => {
         val rv = response(0)
@@ -171,7 +171,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val execPlan = TimeScalarGeneratorExec(QueryContext(), timeseriesDataset.ref, RangeParams(1583682900, 100, 1583683400), ScalarFunctionId.DayOfWeek)
     implicit val timeout: FiniteDuration = FiniteDuration(5, TimeUnit.SECONDS)
     import monix.execution.Scheduler.Implicits.global
-    val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _) => {
         val rv = response(0)

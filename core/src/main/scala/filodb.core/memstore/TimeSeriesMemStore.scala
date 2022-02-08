@@ -139,13 +139,13 @@ extends MemStore with StrictLogging {
         shard.ingest(d)
         Observable.fromIterable(tasks)
     }
-    .mapAsync(numParallelFlushes) {
+    .mapParallelUnordered(numParallelFlushes) {
       // asyncBoundary so subsequent computations in pipeline happen in default threadpool
       task => task.executeOn(flushSched).asyncBoundary
     }
     .completedL
     .doOnCancel(cancelTask)
-    .runAsync(shard.ingestSched)
+    .runToFuture(shard.ingestSched)
   }
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
@@ -209,9 +209,16 @@ extends MemStore with StrictLogging {
 
   def labelValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
                              labelNames: Seq[String], end: Long,
-                             start: Long, limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
-    = getShard(dataset, shard)
-        .map(_.labelValuesWithFilters(filters, labelNames, end, start, limit)).getOrElse(Iterator.empty)
+                             start: Long, querySession: QuerySession,
+                             limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] =
+    getShard(dataset, shard)
+        .map(_.labelValuesWithFilters(filters, labelNames, end, start, querySession, limit)).getOrElse(Iterator.empty)
+
+  def singleLabelValueWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                             label: String, end: Long,
+                             start: Long, querySession: QuerySession, limit: Int): Iterator[ZeroCopyUTF8String] =
+    getShard(dataset, shard)
+        .map(_.singleLabelValuesWithFilters(filters, label, end, start, querySession, limit)).getOrElse(Iterator.empty)
 
   def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
                           fetchFirstLastSampleTimes: Boolean, end: Long, start: Long,

@@ -380,7 +380,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
         c.copy(listener = _ => {})
       }
       downsampleCassandraColStore.write(downsampleRefsByRes(res),
-        Observable.fromIterator(chunksToPersist), settings.ttlByResolution(res))
+        Observable.fromIteratorUnsafe(chunksToPersist), settings.ttlByResolution(res))
     }
 
     writeFut.foreach { fut =>
