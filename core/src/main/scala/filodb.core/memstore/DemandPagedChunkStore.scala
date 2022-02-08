@@ -50,8 +50,7 @@ extends RawToPartitionMaker with StrictLogging {
   /**
    * Stores raw chunks into offheap memory and populates chunks into partition
    */
-  //scalastyle:off
-  def populateRawChunks(rawPartition: RawPartData): Task[ReadablePartition] = Task {
+  def populateRawChunks(rawPartition: RawPartData): Task[ReadablePartition] = Task.eval { // note this is not async
     FiloSchedulers.assertThreadName(FiloSchedulers.PopulateChunksSched)
     // Find the right partition given the partition key
     tsShard.getPartition(rawPartition.partitionKey).map { tsPart =>
@@ -102,7 +101,6 @@ extends RawToPartitionMaker with StrictLogging {
         s"not found, this is bad")
     }
   }
-  //scalastyle:on
 
   /**
     * Copies the onHeap contents read from ColStore into off-heap using the given memFactory.

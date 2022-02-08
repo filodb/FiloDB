@@ -117,7 +117,7 @@ private[filodb] class CsvStream(csvReader: CSVReader,
                           // Most likely to have only one container.  Just assign same offset.
                           builder.allContainers.map { c => SomeData(c, idx) }
                         }
-  val get = Observable.fromIterator(batchIterator)
+  val get = Observable.fromIteratorUnsafe(batchIterator)
 
   def teardown(): Unit = {
     csvReader.close()

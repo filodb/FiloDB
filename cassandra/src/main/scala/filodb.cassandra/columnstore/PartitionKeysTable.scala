@@ -88,7 +88,7 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
 
   def scanPartKeys(tokens: Seq[(String, String)], scanParallelism: Int): Observable[PartKeyRecord] = {
     val res: Observable[Iterator[PartKeyRecord]] = Observable.fromIterable(tokens)
-      .mapAsync(scanParallelism) { range =>
+      .mapParallelUnordered(scanParallelism) { range =>
         val fut = session.executeAsync(scanCql.bind(range._1.toLong: JLong, range._2.toLong: JLong))
                          .toIterator.handleErrors
                          .map { rowIt => rowIt.map(PartitionKeysTable.rowToPartKeyRecord) }
@@ -96,7 +96,7 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
       }
     for {
       pkRecs <- res
-      pk <- Observable.fromIterator(pkRecs)
+      pk <- Observable.fromIteratorUnsafe(pkRecs)
     } yield pk
   }
 

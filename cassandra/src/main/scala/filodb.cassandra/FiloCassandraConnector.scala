@@ -69,7 +69,7 @@ trait FiloCassandraConnector extends StrictLogging {
           FiloCassandraConnector.cassRetriesScheduledCount.increment()
           scheduleRetry(baseRetryInterval + ThreadLocalRandom.current().nextInt(retryIntervalMaxJitter).millis) {
             attemptExecute(statement, retryAttemptsLeft - 1)
-          }.runAsync.flatMap(r=>r)
+          }.runToFuture.flatMap(r=>r)
         } else {
           throw StorageEngineException(e)
         }

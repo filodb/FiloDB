@@ -221,8 +221,8 @@ object GatewayServer extends StrictLogging {
       curShard = (curShard + 1) % numShards
       shardToWorkOn
     }
-    val containerStream = Observable.fromIterator(shardIt)
-                                    .mapAsync(parallelism) { shard =>
+    val containerStream = Observable.fromIteratorUnsafe(shardIt)
+                                    .mapParallelUnordered(parallelism) { shard =>
                                       buildShardContainers(shard, shardQueues(shard), builders(shard), lastSendTime)
                                       .map { output =>
                                         // Mark this shard as done producing for now to allow another go
@@ -237,7 +237,7 @@ object GatewayServer extends StrictLogging {
   def buildShardContainers(shard: Int,
                            queue: MpscGrowableArrayQueue[InputRecord],
                            builder: RecordBuilder,
-                           sendTime: Array[Long]): Task[(Int, Seq[Array[Byte]])] = Task {
+                           sendTime: Array[Long]): Task[(Int, Seq[Array[Byte]])] = Task.evalAsync {
     // While there are still messages in the queue and there aren't containers to send, pull and build
     while (!queue.isEmpty && builder.allContainers.length <= 1) {
       queue.poll().addToBuilder(builder)
@@ -275,7 +275,7 @@ object GatewayServer extends StrictLogging {
     implicit val io = Scheduler.io("kafka-producer")
     val sink = new KafkaContainerSink(producerCfg, topicName)
     sink.writeTask(containerStream)
-        .runAsync
+        .runToFuture
         .map { _ => logger.info(s"Finished producing messages into topic $topicName") }
         // TODO: restart stream in case of failure?
         .recover { case NonFatal(e) => logger.error("Error occurred while producing messages to Kafka", e) }

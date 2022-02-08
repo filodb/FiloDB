@@ -140,7 +140,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
       QueryContext(origQueryParams=PromQlQueryParams("test", 123L, 234L, 15L, Option("http://localhost:31007/api/v1/series"))),
       InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder.build(), testingBackend))
 
-    val resp = exec.execute(memStore, querySession).runAsync.futureValue
+    val resp = exec.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _) => {
         val rv = response(0)
@@ -157,7 +157,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
       QueryContext(origQueryParams=PromQlQueryParams("test", 123L, 234L, 15L, Option("http://localhost:31007/api/v1/series"))),
       InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder.build(), testingBackend))
 
-    val resp = exec.execute(memStore, querySession).runAsync.futureValue
+    val resp = exec.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _) => {
         val rv = response(0)
@@ -181,7 +181,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val distConcatExec: LabelValuesDistConcatExec = LabelValuesDistConcatExec(QueryContext(), InProcessPlanDispatcher(queryConfig), Seq(exec2))
 
     val rootDistConcatExec: LabelValuesDistConcatExec = LabelValuesDistConcatExec(QueryContext(), InProcessPlanDispatcher(queryConfig) , Seq(distConcatExec, exec))
-    val resp = rootDistConcatExec.execute(memStore, querySession).runAsync.futureValue
+    val resp = rootDistConcatExec.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _) => {
         val rv = response(0)
@@ -205,10 +205,9 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val distConcatExec: LabelValuesDistConcatExec = LabelValuesDistConcatExec(QueryContext(), InProcessPlanDispatcher(queryConfig), Seq(exec2))
 
     val rootDistConcatExec: LabelValuesDistConcatExec = LabelValuesDistConcatExec(QueryContext(), InProcessPlanDispatcher(queryConfig) , Seq(distConcatExec, exec))
-    val resp = rootDistConcatExec.execute(memStore, querySession).runAsync.futureValue
+    val resp = rootDistConcatExec.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _) => {
-        response.size shouldEqual 0
         response.flatMap(rv => {
           rv.rows.size shouldEqual 0
           rv.rows.map(row => {
@@ -226,7 +225,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
       QueryContext(origQueryParams=PromQlQueryParams("test", 123L, 234L, 15L, Option("http://localhost:31007/api/v1/labels"))),
       InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder.build(), testingBackend))
 
-    val resp = exec.execute(memStore, querySession).runAsync.futureValue
+    val resp = exec.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
       case QueryResult(id, _, response, _, _, _) => {
         val rv = response(0)

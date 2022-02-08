@@ -114,11 +114,11 @@ class HistogramQueryBenchmark {
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(500)
   def histSchemaQuantileQuery(): Long = {
-    val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
+    val f = Observable.fromIterable(0 until numQueries).mapEval{ n =>
       val querySession = QuerySession(QueryContext(), queryConfig)
       hExecPlan.execute(memStore, querySession)(querySched)
     }.executeOn(querySched)
-     .countL.runAsync
+     .countL.runToFuture
     Await.result(f, 60.seconds)
   }
 
@@ -127,11 +127,11 @@ class HistogramQueryBenchmark {
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(500)
   def promSchemaQuantileQuery(): Long = {
-    val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
+    val f = Observable.fromIterable(0 until numQueries).mapEval { n =>
       val querySession = QuerySession(QueryContext(), queryConfig)
       pExecPlan.execute(memStore, querySession)(querySched)
     }.executeOn(querySched)
-     .countL.runAsync
+     .countL.runToFuture
     Await.result(f, 60.seconds)
   }
 }

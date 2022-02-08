@@ -31,7 +31,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     ColumnInfo("value", ColumnType.DoubleColumn)), 1)
   val schema = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
-  val tvSchemaTask = Task.now(tvSchema)
+  val tvSchemaTask = Task.eval(tvSchema)
 
   val rand = new Random()
 
@@ -144,7 +144,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
-      .toListL.runAsync.futureValue
+      .toListL.runToFuture.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
       ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
@@ -179,7 +179,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
-      .toListL.runAsync.futureValue
+      .toListL.runToFuture.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
       ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
@@ -205,7 +205,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), querySession, 1000, tvSchema)
 
     val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
-    val samplesRhs = resultObs4.toListL.runAsync.futureValue
+    val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
@@ -219,7 +219,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
-      .toListL.runAsync.futureValue
+      .toListL.runToFuture.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
       ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
@@ -264,7 +264,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
-      .toListL.runAsync.futureValue
+      .toListL.runToFuture.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
       ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
@@ -284,7 +284,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), querySession, 1000, tvSchema)
 
     val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
-    val samplesRhs = resultObs4.toListL.runAsync.futureValue
+    val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
@@ -298,7 +298,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
-      .toListL.runAsync.futureValue
+      .toListL.runToFuture.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
       ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
@@ -384,7 +384,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val rhs = QueryResult("someId", null, sampleRhs.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
-      .toListL.runAsync.futureValue
+      .toListL.runToFuture.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
       ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
@@ -422,7 +422,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     // actual query results into 2 rows. since limit is 1, this results in BadQueryException
     val thrown = intercept[TestFailedException] {
       execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
-        .toListL.runAsync.futureValue
+        .toListL.runToFuture.futureValue
     }
 
     thrown.getCause.getClass shouldEqual classOf[BadQueryException]
@@ -449,7 +449,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     // actual query results into 2 rows. since limit is 1, this results in BadQueryException
     val thrown = intercept[TestFailedException] {
       execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
-        .toListL.runAsync.futureValue
+        .toListL.runToFuture.futureValue
     }
 
     thrown.getCause.getClass shouldEqual classOf[BadQueryException]
@@ -464,7 +464,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), querySession, 1000, tvSchema)
 
     val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
-    val samplesRhs = resultObs4.toListL.runAsync.futureValue
+    val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
       Array(dummyPlan),
@@ -481,7 +481,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
     // actual query results into 4 rows. since limit is 3, this results in BadQueryException
     val thrown = intercept[TestFailedException] {
       execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
-        .toListL.runAsync.futureValue
+        .toListL.runToFuture.futureValue
     }
 
     thrown.getCause.getClass shouldEqual classOf[BadQueryException]
