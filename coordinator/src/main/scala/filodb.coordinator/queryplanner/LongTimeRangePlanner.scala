@@ -104,7 +104,7 @@ import filodb.query.exec._
   }
   // scalastyle:on method.length
 
-  def rawClusterMaterialize(qContext: QueryContext, logicalPlan: LogicalPlan): PlanResult = {
+  private def rawClusterMaterialize(qContext: QueryContext, logicalPlan: LogicalPlan): PlanResult = {
     PlanResult(Seq(rawClusterPlanner.materialize(logicalPlan, qContext)))
   }
 
@@ -180,30 +180,57 @@ import filodb.query.exec._
       case lp: RawChunkMeta                => rawClusterMaterialize(qContext, lp)
       case lp: PeriodicSeries              => materializePeriodicSeriesPlan(qContext, lp)
       case lp: PeriodicSeriesWithWindowing => materializePeriodicSeriesPlan(qContext, lp)
-      case lp: ApplyInstantFunction        => materializeApplyInstantFunction(qContext, lp)
-      case lp: ApplyInstantFunctionRaw     => materializeApplyInstantFunctionRaw(qContext, lp)
-      case lp: Aggregate                   => materializeAggregate(qContext, lp)
+      case lp: ApplyInstantFunction        => super.materializeApplyInstantFunction(qContext, lp)
+      case lp: ApplyInstantFunctionRaw     => super.materializeApplyInstantFunctionRaw(qContext, lp)
+      case lp: Aggregate                   => super.materializeAggregate(qContext, lp)
       case lp: BinaryJoin                  => materializeBinaryJoin(qContext, lp)
-      case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp)
+      case lp: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, lp)
       case lp: LabelValues                 => rawClusterMaterialize(qContext, lp)
       case lp: TsCardinalities             => rawClusterMaterialize(qContext, lp)
       case lp: SeriesKeysByFilters         => rawClusterMaterialize(qContext, lp)
-      case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
-      case lp: ApplySortFunction           => materializeApplySortFunction(qContext, lp)
-      case lp: ScalarVaryingDoublePlan     => materializeScalarPlan(qContext, lp)
-      case lp: ScalarTimeBasedPlan         => materializeScalarTimeBased(qContext, lp)
-      case lp: VectorPlan                  => materializeVectorPlan(qContext, lp)
-      case lp: ScalarFixedDoublePlan       => materializeFixedScalar(qContext, lp)
-      case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
-      case lp: ScalarBinaryOperation       => materializeScalarBinaryOperation(qContext, lp)
+      case lp: ApplyMiscellaneousFunction  => super.materializeApplyMiscellaneousFunction(qContext, lp)
+      case lp: ApplySortFunction           => super.materializeApplySortFunction(qContext, lp)
+      case lp: ScalarVaryingDoublePlan     => super.materializeScalarPlan(qContext, lp)
+      case lp: ScalarTimeBasedPlan         => super.materializeScalarTimeBased(qContext, lp)
+      case lp: VectorPlan                  => super.materializeVectorPlan(qContext, lp)
+      case lp: ScalarFixedDoublePlan       => super.materializeFixedScalar(qContext, lp)
+      case lp: ApplyAbsentFunction         => super.materializeAbsentFunction(qContext, lp)
+      case lp: ScalarBinaryOperation       => super.materializeScalarBinaryOperation(qContext, lp)
       case lp: SubqueryWithWindowing       => materializePeriodicSeriesPlan(qContext, lp)
-      case lp: TopLevelSubquery            => materializeTopLevelSubquery(qContext, lp)
+      case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
       case lp: ApplyLimitFunction          => rawClusterMaterialize(qContext, lp)
       case lp: LabelNames                  => rawClusterMaterialize(qContext, lp)
       case lp: LabelCardinality            => materializeLabelCardinalityPlan(lp, qContext)
     }
     // scalastyle:on cyclomatic.complexity
   }
+
+  override def materializeBinaryJoin(qContext: QueryContext, logicalPlan: BinaryJoin): PlanResult =
+    if (LogicalPlanUtils.getOffsetMillis(logicalPlan).foldLeft(0L)(_.max(_)) == 0) {
+      // No offset, can push down binary join to LT and Raw planner and stitch
+      // Binary joins can be pushed down to respective planners, exporting results to QS is not required
+      val (startTime, endTime) = (logicalPlan.startMs, logicalPlan.endMs)
+      val execPlan = if (startTime > latestDownsampleTimestampFn) {
+        rawClusterPlanner.materialize(logicalPlan, qContext)
+      } else if (endTime < earliestRawTimestampFn) {
+        downsampleClusterPlanner.materialize(logicalPlan, qContext)
+      } else {
+        val dsLogicalPlan = copyLogicalPlanWithUpdatedTimeRange(logicalPlan,
+              TimeRange(logicalPlan.startMs, earliestRawTimestampFn))
+        val dsPlan = downsampleClusterPlanner.materialize(dsLogicalPlan, qContext)
+        val rawLogicalPlan = copyLogicalPlanWithUpdatedTimeRange(logicalPlan,
+          TimeRange(earliestRawTimestampFn, logicalPlan.endMs))
+        val rawPlan = rawClusterPlanner.materialize(rawLogicalPlan, qContext)
+        StitchRvsExec(qContext, inProcessPlanDispatcher, LogicalPlan.rvRangeFromPlan(logicalPlan),
+          Seq(dsPlan, rawPlan))
+      }
+      PlanResult(Seq(execPlan))
+    } else {
+      // Offset present, simplify by pulling data to QS and join. This is not efficient and the most ideal
+      // solution would be to find a point in time that can be pushed down completely to LT, completely in Raw
+      // and minimal required data in QS and stitch all together
+      super.materializeBinaryJoin(qContext, logicalPlan)
+    }
 
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     walkLogicalPlanTree(logicalPlan, qContext).plans.head
