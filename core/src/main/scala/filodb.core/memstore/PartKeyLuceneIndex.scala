@@ -17,6 +17,9 @@ import kamon.metric.MeasurementUnit
 import org.apache.lucene.analysis.standard.StandardAnalyzer
 import org.apache.lucene.document._
 import org.apache.lucene.document.Field.Store
+import org.apache.lucene.facet.{FacetsCollector, FacetsConfig}
+import org.apache.lucene.facet.sortedset.{DefaultSortedSetDocValuesReaderState,
+                     SortedSetDocValuesFacetCounts, SortedSetDocValuesFacetField}
 import org.apache.lucene.index._
 import org.apache.lucene.search._
 import org.apache.lucene.search.BooleanClause.Occur
@@ -123,6 +126,11 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   //start this thread to flush the segments and refresh the searcher every specific time period
   private var flushThread: ControlledRealTimeReopenThread[IndexSearcher] = _
 
+  val facetsConfig = new FacetsConfig
+  schema.options.shardKeyColumns.foreach { c =>
+    facetsConfig.setIndexFieldName(c, s"facet_$c")
+  }
+
   case class ReusableLuceneDocument() {
     val document = new Document()
     private val partIdField = new StringField(PART_ID, "0", Store.NO)
@@ -135,6 +143,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     private val otherFields = mutable.WeakHashMap[String, StringField]() // weak so that it is GCed when unused
 
     def addField(name: String, value: String): Unit = {
+      if (schema.options.shardKeyColumns.contains(name)) {
+        document.add(new SortedSetDocValuesFacetField(name, value))
+      }
       val field = otherFields.getOrElseUpdate(name, new StringField(name, "", Store.NO))
       field.setStringValue(value)
       document.add(field)
@@ -272,6 +283,31 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     indexWriter.close()
   }
 
+  private val readerStateCache = mutable.WeakHashMap[(IndexReader, String), DefaultSortedSetDocValuesReaderState]()
+  def shardKeyColValues(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long,
+                        colName: String, limit: Int = 100): Seq[String] = {
+    require(schema.options.shardKeyColumns.contains(colName), s"The provided column $colName is not a shard key column")
+    val labelValues = mutable.ArrayBuffer[String]()
+    withNewSearcher { searcher =>
+      val reader = searcher.getIndexReader()
+      // the state object is expensive to create, so reuse across queries. It is associated with reader
+      val state = readerStateCache.getOrElseUpdate((reader, colName),
+                    new DefaultSortedSetDocValuesReaderState(searcher.getIndexReader, s"facet_$colName"))
+      val fc = new FacetsCollector
+      val query = colFiltersToQuery(colFilters, startTime, endTime)
+      FacetsCollector.search(searcher, query, 10, fc)
+      val facets = new SortedSetDocValuesFacetCounts(state, fc)
+      val result = facets.getTopChildren(limit, colName)
+      if (result != null) {
+        for (i <- 0 until result.childCount) {
+          val lv = result.labelValues(i)
+          labelValues += lv.label
+        }
+      }
+    }
+    labelValues
+  }
+
   /**
     * Fetch values/terms for a specific column/key/field, in order from most frequent on down.
    * Note that it iterates through all docs up to a certain limit only, so if there are too many terms
@@ -344,7 +380,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     val document = makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes, partId, startTime, endTime)
     logger.debug(s"Adding document ${partKeyString(partId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
                  s"with startTime=$startTime endTime=$endTime into dataset=$ref shard=$shardNum")
-    indexWriter.addDocument(document)
+    indexWriter.addDocument(facetsConfig.build(document))
   }
 
   def upsertPartKey(partKeyOnHeapBytes: Array[Byte],
@@ -356,7 +392,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     val document = makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes, partId, startTime, endTime)
     logger.debug(s"Upserting document ${partKeyString(partId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
                  s"with startTime=$startTime endTime=$endTime into dataset=$ref shard=$shardNum")
-    indexWriter.updateDocument(new Term(PART_ID, partId.toString), document)
+    indexWriter.updateDocument(new Term(PART_ID, partId.toString), facetsConfig.build(document))
   }
 
   private def partKeyString(partId: Int,
@@ -558,6 +594,15 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
     val startExecute = System.currentTimeMillis()
     val span = Kamon.currentSpan()
+    val query: BooleanQuery = colFiltersToQuery(columnFilters, startTime, endTime)
+    logger.debug(s"Querying dataset=$ref shard=$shardNum partKeyIndex with: $query")
+    withNewSearcher(s => s.search(query, collector))
+    val latency = System.currentTimeMillis - startExecute
+    span.mark(s"index-partition-lookup-latency=${latency}ms")
+    queryIndexLookupLatency.record(latency)
+  }
+
+  private def colFiltersToQuery(columnFilters: Seq[ColumnFilter], startTime: PartitionKey, endTime: PartitionKey) = {
     val booleanQuery = new BooleanQuery.Builder
     columnFilters.foreach { filter =>
       val q = leafFilter(filter.column, filter.filter)
@@ -566,11 +611,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     booleanQuery.add(LongPoint.newRangeQuery(START_TIME, 0, endTime), Occur.FILTER)
     booleanQuery.add(LongPoint.newRangeQuery(END_TIME, startTime, Long.MaxValue), Occur.FILTER)
     val query = booleanQuery.build()
-    logger.debug(s"Querying dataset=$ref shard=$shardNum partKeyIndex with: $query")
-    withNewSearcher(s => s.search(query, collector))
-    val latency = System.currentTimeMillis - startExecute
-    span.mark(s"index-partition-lookup-latency=${latency}ms")
-    queryIndexLookupLatency.record(latency)
+    query
   }
 
   def partIdFromPartKeySlow(partKeyBase: Any,
