@@ -3,6 +3,7 @@ package filodb.jmh
 import java.lang.management.{BufferPoolMXBean, ManagementFactory}
 import java.util.concurrent.TimeUnit
 
+import scala.collection.mutable
 import scala.concurrent.duration._
 
 import ch.qos.logback.classic.{Level, Logger}
@@ -12,11 +13,14 @@ import spire.syntax.cfor._
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.PartKeyLuceneIndex
+import filodb.core.metadata.Schemas
 import filodb.core.metadata.Schemas.untyped
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.memory.{BinaryRegionConsumer, MemFactory}
+import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.timeseries.TestTimeseriesProducer
 
+// scalastyle:off
 @State(Scope.Thread)
 class PartKeyIndexBenchmark {
 
@@ -49,16 +53,15 @@ class PartKeyIndexBenchmark {
   }
 
   val start = System.nanoTime()
-  //noinspection ScalaStyle
+
   println(s"Indexing started")
   partKeyBuilder.allContainers.foreach(_.consumeRecords(consumer))
   partKeyIndex.refreshReadersBlocking()
   val end = System.nanoTime()
-  //noinspection ScalaStyle
+
   println(s"Indexing finished. Added $partId part keys Took ${(end-start)/1000000000L}s")
   import scala.collection.JavaConverters._
 
-  //noinspection ScalaStyle
   println(s"Index Memory Map Size: " +
     s"${ManagementFactory.getPlatformMXBeans(classOf[BufferPoolMXBean]).asScala.find(_.getName == "mapped").get.getMemoryUsed}")
 
@@ -146,6 +149,22 @@ class PartKeyIndexBenchmark {
       val filter = Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
         ColumnFilter("_ws_", Filter.Equals("demo")))
       partKeyIndex.shardKeyColValues(filter, now, now + 1000, "_metric_", 10000)
+    }
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(8)
+  def getMetricNamesSearchAndIterate(): Unit = {
+    cforRange ( 0 until 8 ) { i =>
+      val filter = Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
+        ColumnFilter("_ws_", Filter.Equals("demo")))
+      val res = mutable.HashSet[ZeroCopyUTF8String]()
+      partKeyIndex.partIdsFromFilters(filter, now, now + 1000).map(partKeyIndex.partKeyFromPartId)
+        .iterator().flatten.takeWhile(_ => res.size < 10000).map { pk =>
+        Schemas.promCounter.partition.binSchema.singleColValues(pk.bytes, UnsafeUtils.arayOffset, "_metric_", res)
+      }
     }
   }
 
