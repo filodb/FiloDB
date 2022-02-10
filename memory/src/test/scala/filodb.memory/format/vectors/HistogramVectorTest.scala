@@ -279,8 +279,8 @@ class HistogramVectorTest extends NativeVectorTest {
   
    it("histogram should have right formatCode after sum operation is applied") {
     val appender = HistogramVector.appending(memFactory, 1024)
-    BinaryHistogram.writeDelta(HistogramBuckets.binaryBuckets64, Array.fill(64)(1L), buffer)
-    BinaryHistogram.writeDelta(HistogramBuckets.binaryBuckets64, Array.fill(64)(1L), buffer)
+    BinaryHistogram.writeNonIncreasing(HistogramBuckets.binaryBuckets64, Array.fill(64)(1L), buffer)
+    BinaryHistogram.writeNonIncreasing(HistogramBuckets.binaryBuckets64, Array.fill(64)(1L), buffer)
     appender.addData(buffer) shouldEqual Ack
     val mutableHisto = appender.reader.asHistReader.sum(0,0)
     BinHistogram(mutHisto.serialize()).formatCode shouldEqual HistFormat_Geometric1_Delta
