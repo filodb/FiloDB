@@ -395,5 +395,8 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val labelValues3 = index3.shardKeyColValues(filters3, 0, Long.MaxValue, "_metric_")
     labelValues3 shouldEqual Seq("counter1")
 
+    val labelValues4 = index3.shardKeyColValues(filters1, 0, Long.MaxValue, "instance", 1000)
+    labelValues4.toSet shouldEqual (0 until 1000).map(c => s"instance$c").toSet
+
   }
 }
