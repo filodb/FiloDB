@@ -43,6 +43,7 @@ object PartKeyLuceneIndex {
   final val START_TIME = "__startTime__"
   final val END_TIME = "__endTime__"
   final val PART_KEY = "__partKey__"
+  final val FACET_FIELD_PREFIX = "$facet_"
 
   final val ignoreIndexNames = HashSet(START_TIME, PART_KEY, END_TIME, PART_ID)
 
@@ -50,6 +51,8 @@ object PartKeyLuceneIndex {
   val MAX_TERMS_TO_ITERATE = 10000
 
   val NOT_FOUND = -1
+
+
 
   def bytesRefToUnsafeOffset(bytesRefOffset: Int): Int = bytesRefOffset + UnsafeUtils.arayOffset
 
@@ -74,6 +77,7 @@ final case class PartKeyLuceneIndexRecord(partKey: Array[Byte], startTime: Long,
 
 class PartKeyLuceneIndex(ref: DatasetRef,
                          schema: PartitionSchema,
+                         facetEnabled: Boolean,
                          shardNum: Int,
                          retentionMillis: Long, // only used to calculate fallback startTime
                          diskLocation: Option[File] = None
@@ -141,12 +145,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     private val otherFields = mutable.WeakHashMap[String, StringField]() // weak so that it is GCed when unused
 
     def addField(name: String, value: String): Unit = {
-      if (name.nonEmpty && value.nonEmpty) {
-        facetsConfig.setMultiValued(name, true)
-        facetsConfig.setRequireDimCount(name, false)
+      // Use PartKeyIndexBenchmark to measure indexing performance before changing this
+      if (facetEnabled && name.nonEmpty && value.nonEmpty) {
         facetsConfig.setRequireDimensionDrillDown(name, false)
-        facetsConfig.setHierarchical(name, false)
-        facetsConfig.setIndexFieldName(name, s"facet_$name")
+        facetsConfig.setIndexFieldName(name, FACET_FIELD_PREFIX + name)
         document.add(new SortedSetDocValuesFacetField(name, value))
       }
       val field = otherFields.getOrElseUpdate(name, new StringField(name, "", Store.NO))
@@ -156,7 +158,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
     def reset(partId: Int, partKey: BytesRef, startTime: Long, endTime: Long): Document = {
       document.clear();
-      facetsConfig = new FacetsConfig
+      if (facetEnabled) facetsConfig = new FacetsConfig
       partIdField.setStringValue(String.valueOf(partId))
       partIdDv.setLongValue(partId)
       partKeyDv.setBytesValue(partKey)
@@ -287,15 +289,17 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     indexWriter.close()
   }
 
+  // TODO - most frequently used eviction needed
   private val readerStateCache = mutable.WeakHashMap[(IndexReader, String), DefaultSortedSetDocValuesReaderState]()
-  def shardKeyColValues(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long,
-                        colName: String, limit: Int = 100): Seq[String] = {
+  def labelValuesEfficient(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long,
+                           colName: String, limit: Int = 100): Seq[String] = {
+    require(facetEnabled, "Faceting not enabled on this index; labelValuesEfficient cannot be called")
     val labelValues = mutable.ArrayBuffer[String]()
     withNewSearcher { searcher =>
-      val reader = searcher.getIndexReader()
+      val reader = searcher.getIndexReader
       // the state object is expensive to create, so reuse across queries. It is associated with reader
       val state = readerStateCache.getOrElseUpdate((reader, colName),
-                    new DefaultSortedSetDocValuesReaderState(searcher.getIndexReader, s"facet_$colName"))
+                    new DefaultSortedSetDocValuesReaderState(reader, FACET_FIELD_PREFIX + colName))
       val fc = new FacetsCollector
       val query = colFiltersToQuery(colFilters, startTime, endTime)
       FacetsCollector.search(searcher, query, 10, fc)
@@ -364,7 +368,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       val segments = indexReader.leaves()
       val iter = segments.asScala.iterator.flatMap { segment =>
         segment.reader().getFieldInfos.asScala.toIterator.map(_.name)
-      }.filterNot { n => ignoreIndexNames.contains(n) }
+      }.filterNot { n => ignoreIndexNames.contains(n) || n.startsWith(FACET_FIELD_PREFIX) }
       ret = iter.take(limit).toSeq
     }
     ret
@@ -384,7 +388,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     logger.debug(s"Adding document ${partKeyString(partId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
                  s"with startTime=$startTime endTime=$endTime into dataset=$ref shard=$shardNum")
     val doc = luceneDocument.get()
-    indexWriter.addDocument(doc.facetsConfig.build(doc.document))
+    val docToAdd = if (facetEnabled) doc.facetsConfig.build(doc.document) else doc.document
+    indexWriter.addDocument(docToAdd)
   }
 
   def upsertPartKey(partKeyOnHeapBytes: Array[Byte],
@@ -397,7 +402,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     logger.debug(s"Upserting document ${partKeyString(partId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
                  s"with startTime=$startTime endTime=$endTime into dataset=$ref shard=$shardNum")
     val doc = luceneDocument.get()
-    indexWriter.updateDocument(new Term(PART_ID, partId.toString), doc.facetsConfig.build(doc.document))
+    val docToAdd = if (facetEnabled) doc.facetsConfig.build(doc.document) else doc.document
+    indexWriter.updateDocument(new Term(PART_ID, partId.toString), docToAdd)
   }
 
   private def partKeyString(partId: Int,
@@ -511,7 +517,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     val doc = luceneDocument.get()
     logger.debug(s"Updating document ${partKeyString(partId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
                  s"with startTime=$startTime endTime=$endTime into dataset=$ref shard=$shardNum")
-    indexWriter.updateDocument(new Term(PART_ID, partId.toString), doc.facetsConfig.build(doc.document))
+    val docToAdd = if (facetEnabled) doc.facetsConfig.build(doc.document) else doc.document
+    indexWriter.updateDocument(new Term(PART_ID, partId.toString), docToAdd)
   }
 
   /**

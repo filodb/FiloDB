@@ -5,6 +5,7 @@ import scala.concurrent.duration._
 import scala.util.Random
 
 import com.googlecode.javaewah.IntIterator
+import org.apache.lucene.util.BytesRef
 import org.scalatest.BeforeAndAfter
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -21,7 +22,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   import Filter._
   import GdeltTestData._
 
-  val keyIndex = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, 0, 1.hour.toMillis)
+  val keyIndex = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, 0, 1.hour.toMillis)
   val partBuilder = new RecordBuilder(TestData.nativeMem)
 
   def partKeyOnHeap(partKeySchema: RecordSchema,
@@ -317,7 +318,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   }
 
   it("should ignore unsupported columns and return empty filter") {
-    val index2 = new PartKeyLuceneIndex(dataset1.ref, dataset1.schema.partition, 0, 1.hour.toMillis)
+    val index2 = new PartKeyLuceneIndex(dataset1.ref, dataset1.schema.partition, true, 0, 1.hour.toMillis)
     partKeyFromRecords(dataset1, records(dataset1, readers.take(10))).zipWithIndex.foreach { case (addr, i) =>
       index2.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, System.currentTimeMillis())()
     }
@@ -366,8 +367,9 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     }
   }
 
-  it("should be able to fetch shard key col values using facets") {
-    val index3 = new PartKeyLuceneIndex(DatasetRef("prometheus"), Schemas.promCounter.partition, 0, 1.hour.toMillis)
+  it("should be able to fetch label values efficiently using facets") {
+    val index3 = new PartKeyLuceneIndex(DatasetRef("prometheus"), Schemas.promCounter.partition,
+      true, 0, 1.hour.toMillis)
     val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8,
                          "_ns_".utf8 -> "my_ns".utf8)
 
@@ -384,19 +386,48 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val partNums1 = index3.partIdsFromFilters(filters1, 0, Long.MaxValue)
     partNums1.length shouldEqual 1000
 
-    val labelValues1 = index3.shardKeyColValues(filters1, 0, Long.MaxValue, "_metric_")
+    val labelValues1 = index3.labelValuesEfficient(filters1, 0, Long.MaxValue, "_metric_")
     labelValues1.toSet shouldEqual (0 until 10).map(c => s"counter$c").toSet
 
     val filters2 = Seq(ColumnFilter("_ws_", Equals("NotExist")))
-    val labelValues2 = index3.shardKeyColValues(filters2, 0, Long.MaxValue, "_metric_")
+    val labelValues2 = index3.labelValuesEfficient(filters2, 0, Long.MaxValue, "_metric_")
     labelValues2.size shouldEqual 0
 
     val filters3 = Seq(ColumnFilter("_metric_", Equals("counter1")))
-    val labelValues3 = index3.shardKeyColValues(filters3, 0, Long.MaxValue, "_metric_")
+    val labelValues3 = index3.labelValuesEfficient(filters3, 0, Long.MaxValue, "_metric_")
     labelValues3 shouldEqual Seq("counter1")
 
-    val labelValues4 = index3.shardKeyColValues(filters1, 0, Long.MaxValue, "instance", 1000)
+    val labelValues4 = index3.labelValuesEfficient(filters1, 0, Long.MaxValue, "instance", 1000)
     labelValues4.toSet shouldEqual (0 until 1000).map(c => s"instance$c").toSet
+  }
+
+  it("should be able to do regular operations when faceting is disabled") {
+    val index3 = new PartKeyLuceneIndex(DatasetRef("prometheus"), Schemas.promCounter.partition,
+      false, 0, 1.hour.toMillis)
+    val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8,
+      "_ns_".utf8 -> "my_ns".utf8)
+
+    // create 1000 time series with 10 metric names
+    for { i <- 0 until 1000} {
+      val counterNum = i % 10
+      val partKey = partBuilder.partKeyFromObjects(Schemas.promCounter, s"counter$counterNum",
+        seriesTags + ("instance".utf8 -> s"instance$i".utf8))
+      index3.addPartKey(partKeyOnHeap(Schemas.promCounter.partition.binSchema, ZeroPointer, partKey), i, 5)()
+    }
+    index3.refreshReadersBlocking()
+    val filters1 = Seq(ColumnFilter("_ws_", Equals("my_ws")))
+
+    val partNums1 = index3.partIdsFromFilters(filters1, 0, Long.MaxValue)
+    partNums1.length shouldEqual 1000
+
+    intercept[IllegalArgumentException] {
+      index3.labelValuesEfficient(filters1, 0, Long.MaxValue, "_metric_")
+    }
+
+    index3.partKeyFromPartId(0).isInstanceOf[Some[BytesRef]] shouldEqual true
+    index3.startTimeFromPartId(0) shouldEqual 5
+    index3.endTimeFromPartId(0) shouldEqual Long.MaxValue
 
   }
+
 }

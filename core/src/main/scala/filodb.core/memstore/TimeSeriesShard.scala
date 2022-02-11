@@ -289,7 +289,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Used to answer queries not involving the full partition key.
     * Maintained using a high-performance bitmap index.
     */
-  private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, shardNum,
+  private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, true, shardNum,
     storeConfig.diskTTLSeconds * 1000)
 
   private val cardTracker: CardinalityTracker = if (storeConfig.meteringEnabled) {

@@ -71,7 +71,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   private val stats = new DownsampledTimeSeriesShardStats(rawDatasetRef, shardNum)
 
-  private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, shardNum, indexTtlMs)
+  private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, false, shardNum, indexTtlMs)
 
   private val indexUpdatedHour = new AtomicLong(0)
 
