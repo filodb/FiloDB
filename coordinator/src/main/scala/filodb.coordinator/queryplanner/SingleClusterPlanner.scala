@@ -220,7 +220,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     * @return ExecPlans that answer the logical plan provided
     */
   // scalastyle:off cyclomatic.complexity
-  def walkLogicalPlanTree(logicalPlan: LogicalPlan,
+  override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                   qContext: QueryContext): PlanResult = {
      logicalPlan match {
       case lp: RawSeries                   => materializeRawSeries(qContext, lp)

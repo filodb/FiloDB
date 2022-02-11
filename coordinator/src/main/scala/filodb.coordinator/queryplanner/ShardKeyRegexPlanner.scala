@@ -73,7 +73,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     }
   }
 
-  def walkLogicalPlanTree(logicalPlan: LogicalPlan,
+  override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                           qContext: QueryContext): PlanResult = {
     logicalPlan match {
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
