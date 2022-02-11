@@ -45,9 +45,34 @@ trait  PlannerHelper {
     }
 
 
-
+  // scalastyle:off cyclomatic.complexity
     def walkLogicalPlanTree(logicalPlan: LogicalPlan,
-                            qContext: QueryContext): PlanResult
+                            qContext: QueryContext): PlanResult = logicalPlan match {
+
+        case lp: ApplyInstantFunction        => this.materializeApplyInstantFunction(qContext, lp)
+        case lp: ApplyInstantFunctionRaw     => this.materializeApplyInstantFunctionRaw(qContext, lp)
+        case lp: Aggregate                   => this.materializeAggregate(qContext, lp)
+        case lp: BinaryJoin                  => this.materializeBinaryJoin(qContext, lp)
+        case lp: ScalarVectorBinaryOperation => this.materializeScalarVectorBinOp(qContext, lp)
+
+        case lp: ApplyMiscellaneousFunction  => this.materializeApplyMiscellaneousFunction(qContext, lp)
+        case lp: ApplySortFunction           => this.materializeApplySortFunction(qContext, lp)
+        case lp: ScalarVaryingDoublePlan     => this.materializeScalarPlan(qContext, lp)
+        case lp: ScalarTimeBasedPlan         => this.materializeScalarTimeBased(qContext, lp)
+        case lp: VectorPlan                  => this.materializeVectorPlan(qContext, lp)
+        case lp: ScalarFixedDoublePlan       => this.materializeFixedScalar(qContext, lp)
+        case lp: ApplyAbsentFunction         => this.materializeAbsentFunction(qContext, lp)
+        case lp: ApplyLimitFunction          => this.materializeLimitFunction(qContext, lp)
+        case lp: ScalarBinaryOperation       => this.materializeScalarBinaryOperation(qContext, lp)
+        case lp: SubqueryWithWindowing       => this.materializeSubqueryWithWindowing(qContext, lp)
+        case lp: TopLevelSubquery            => this.materializeTopLevelSubquery(qContext, lp)
+        case _: RawSeries                   |
+             _: RawChunkMeta                |
+             _: PeriodicSeries              |
+             _: PeriodicSeriesWithWindowing |
+             _: MetadataQueryPlan           |
+             _: TsCardinalities              => throw new IllegalArgumentException("Unsupported operation")
+    }
 
     def materializeApplyInstantFunction(qContext: QueryContext,
                                         lp: ApplyInstantFunction): PlanResult = {

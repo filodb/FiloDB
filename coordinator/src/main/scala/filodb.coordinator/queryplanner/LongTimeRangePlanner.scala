@@ -38,17 +38,39 @@ import filodb.query.exec._
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options
 
-  // scalastyle:off method.length
+
   private def materializePeriodicSeriesPlan(qContext: QueryContext, periodicSeriesPlan: PeriodicSeriesPlan) = {
-    import LogicalPlan._
-    val earliestRawTime = earliestRawTimestampFn
-    lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(periodicSeriesPlan)
-    lazy val lookbackMs = LogicalPlanUtils.getLookBackMillis(periodicSeriesPlan).max
-    lazy val startWithOffsetMs = periodicSeriesPlan.startMs - offsetMillis.max
-    // For scalar binary operation queries like sum(rate(foo{job = "app"}[5m] offset 8d)) * 0.5
-    lazy val endWithOffsetMs = periodicSeriesPlan.endMs - offsetMillis.max
     val execPlan = if (!periodicSeriesPlan.isRoutable)
       rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
+    else
+      materializeRoutablePlan(qContext, periodicSeriesPlan)
+    PlanResult(Seq(execPlan))
+  }
+
+  // scalastyle:off method.length
+  private def materializeRoutablePlan(qContext: QueryContext, periodicSeriesPlan: PeriodicSeriesPlan): ExecPlan = {
+    import LogicalPlan._
+    import scala.math.{min, max}
+    val earliestRawTime = earliestRawTimestampFn
+    val offsetMillis = LogicalPlanUtils.getOffsetMillis(periodicSeriesPlan)
+    val (maxOffset, minOffset) = offsetMillis.foldLeft((Long.MinValue, Long.MaxValue))
+                                  {case ((maxAll, minAll), curr) => (max(maxAll, curr) , min(minAll, curr))}
+
+    val lookbackMs = LogicalPlanUtils.getLookBackMillis(periodicSeriesPlan).max
+    val startWithOffsetMs = periodicSeriesPlan.startMs - maxOffset
+    // For scalar binary operation queries like sum(rate(foo{job = "app"}[5m] offset 8d)) * 0.5
+    val endWithOffsetMs = periodicSeriesPlan.endMs - minOffset
+    if (maxOffset != minOffset
+          && startWithOffsetMs - lookbackMs < earliestRawTime
+          && endWithOffsetMs >= earliestRawTime) {
+          // Consider the case sum(foo{}) + sum(bar{} offset 8d), its a PeriodicSeriesPlan with two offset values
+          // This can be done most efficiently find a point in time that can be pushed down completely to LT,
+          // completely in Raw and minimal required data in QS and stitch all together. However currently will we
+          //  delegate to the default implementation of this logical plan, which would perform the operations
+          // in-process
+          //  Operations like sum(foo{} offset 8d) + 10
+         super.walkLogicalPlanTree(periodicSeriesPlan, qContext).plans.head
+    }
     else if (endWithOffsetMs < earliestRawTime) { // full time range in downsampled cluster
       logger.debug("materializing against downsample cluster:: {}", qContext.origQueryParams)
       downsampleClusterPlanner.materialize(periodicSeriesPlan, qContext)
@@ -60,7 +82,7 @@ import filodb.query.exec._
       // can happen with ANY lookback interval, not just the last one.
     } else if (
       endWithOffsetMs - lookbackMs < earliestRawTime || //TODO lookbacks can overlap in the middle intervals too
-      LogicalPlan.hasSubqueryWithWindowing(periodicSeriesPlan)
+        LogicalPlan.hasSubqueryWithWindowing(periodicSeriesPlan)
     ) {
       // For subqueries and long lookback queries, we keep things simple by routing to
       // downsample cluster since dealing with lookback windows across raw/downsample
@@ -84,7 +106,8 @@ import filodb.query.exec._
     } else { // raw/downsample overlapping query without long lookback
       // Split the query between raw and downsample planners
       // Note - should never arrive here when start == end (so step never 0)
-      require(periodicSeriesPlan.stepMs > 0, "Step was 0 when trying to split query between raw and downsample cluster")
+      require(periodicSeriesPlan.stepMs > 0,
+        "Step was 0 when trying to split query between raw and downsample cluster")
       val numStepsInDownsample = (earliestRawTime - startWithOffsetMs + lookbackMs) / periodicSeriesPlan.stepMs
       val lastDownsampleInstant = periodicSeriesPlan.startMs + numStepsInDownsample * periodicSeriesPlan.stepMs
       val firstInstantInRaw = lastDownsampleInstant + periodicSeriesPlan.stepMs
@@ -100,7 +123,6 @@ import filodb.query.exec._
       StitchRvsExec(qContext, stitchDispatcher, rvRangeFromPlan(periodicSeriesPlan),
         Seq(rawEp, downsampleEp))
     }
-    PlanResult(Seq(execPlan))
   }
   // scalastyle:on method.length
 
@@ -182,8 +204,8 @@ import filodb.query.exec._
       case lp: PeriodicSeriesWithWindowing => materializePeriodicSeriesPlan(qContext, lp)
       case lp: ApplyInstantFunction        => super.materializeApplyInstantFunction(qContext, lp)
       case lp: ApplyInstantFunctionRaw     => super.materializeApplyInstantFunctionRaw(qContext, lp)
-      case lp: Aggregate                   => super.materializeAggregate(qContext, lp)
-      case lp: BinaryJoin                  => materializeBinaryJoin(qContext, lp)
+      case lp: Aggregate                   => materializePeriodicSeriesPlan(qContext, lp)
+      case lp: BinaryJoin                  => materializePeriodicSeriesPlan(qContext, lp)
       case lp: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, lp)
       case lp: LabelValues                 => rawClusterMaterialize(qContext, lp)
       case lp: TsCardinalities             => rawClusterMaterialize(qContext, lp)
@@ -204,33 +226,6 @@ import filodb.query.exec._
     }
     // scalastyle:on cyclomatic.complexity
   }
-
-  override def materializeBinaryJoin(qContext: QueryContext, logicalPlan: BinaryJoin): PlanResult =
-    if (LogicalPlanUtils.getOffsetMillis(logicalPlan).foldLeft(0L)(_.max(_)) == 0) {
-      // No offset, can push down binary join to LT and Raw planner and stitch
-      // Binary joins can be pushed down to respective planners, exporting results to QS is not required
-      val (startTime, endTime) = (logicalPlan.startMs, logicalPlan.endMs)
-      val execPlan = if (startTime > latestDownsampleTimestampFn) {
-        rawClusterPlanner.materialize(logicalPlan, qContext)
-      } else if (endTime < earliestRawTimestampFn) {
-        downsampleClusterPlanner.materialize(logicalPlan, qContext)
-      } else {
-        val dsLogicalPlan = copyLogicalPlanWithUpdatedTimeRange(logicalPlan,
-              TimeRange(logicalPlan.startMs, earliestRawTimestampFn))
-        val dsPlan = downsampleClusterPlanner.materialize(dsLogicalPlan, qContext)
-        val rawLogicalPlan = copyLogicalPlanWithUpdatedTimeRange(logicalPlan,
-          TimeRange(earliestRawTimestampFn, logicalPlan.endMs))
-        val rawPlan = rawClusterPlanner.materialize(rawLogicalPlan, qContext)
-        StitchRvsExec(qContext, inProcessPlanDispatcher, LogicalPlan.rvRangeFromPlan(logicalPlan),
-          Seq(dsPlan, rawPlan))
-      }
-      PlanResult(Seq(execPlan))
-    } else {
-      // Offset present, simplify by pulling data to QS and join. This is not efficient and the most ideal
-      // solution would be to find a point in time that can be pushed down completely to LT, completely in Raw
-      // and minimal required data in QS and stitch all together
-      super.materializeBinaryJoin(qContext, logicalPlan)
-    }
 
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     walkLogicalPlanTree(logicalPlan, qContext).plans.head
