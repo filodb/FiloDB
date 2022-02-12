@@ -28,7 +28,7 @@ class PartKeyIndexBenchmark {
 
   println(s"Building Part Keys")
   val ref = DatasetRef("prometheus")
-  val partKeyIndex = new PartKeyLuceneIndex(ref, untyped.partition, 0, 1.hour.toMillis)
+  val partKeyIndex = new PartKeyLuceneIndex(ref, untyped.partition, true, 0, 1.hour.toMillis)
   val numSeries = 1000000
   val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory, RecordBuilder.DefaultContainerSize, false)
   val untypedData = TestTimeseriesProducer.timeSeriesData(0, numSeries) take numSeries
@@ -148,7 +148,7 @@ class PartKeyIndexBenchmark {
     cforRange ( 0 until 8 ) { i =>
       val filter = Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
         ColumnFilter("_ws_", Filter.Equals("demo")))
-      partKeyIndex.shardKeyColValues(filter, now, now + 1000, "_metric_", 10000)
+      partKeyIndex.labelValuesEfficient(filter, now, now + 1000, "_metric_", 10000)
     }
   }
 
