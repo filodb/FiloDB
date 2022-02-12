@@ -271,6 +271,11 @@ class TimeSeriesShard(val ref: DatasetRef,
     filodbConfig.getBoolean("shard-key-level-ingestion-metrics-enabled")
   private val clusterType = filodbConfig.getString("cluster-type")
   private val deploymentPartitionName = filodbConfig.getString("deployment-partition-name")
+  private val targetMaxPartitions = filodbConfig.getInt("memstore.max-partitions-on-heap-per-shard")
+  private val ensureTspHeadroomPercent = filodbConfig.getDouble("memstore.ensure-tsp-count-headroom-percent")
+  private val ensureBlockHeadroomPercent = filodbConfig.getDouble("memstore.ensure-block-memory-headroom-percent")
+  private val ensureNativeMemHeadroomPercent = filodbConfig.getDouble("memstore.ensure-native-memory-headroom-percent")
+  private val indexFacetingEnabled = filodbConfig.getBoolean("memstore.index-faceting-enabled")
 
   val creationTime = System.currentTimeMillis()
 
@@ -289,7 +294,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Used to answer queries not involving the full partition key.
     * Maintained using a high-performance bitmap index.
     */
-  private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, true, shardNum,
+  private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, indexFacetingEnabled, shardNum,
     storeConfig.diskTTLSeconds * 1000)
 
   private val cardTracker: CardinalityTracker = if (storeConfig.meteringEnabled) {
@@ -310,11 +315,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     * This is generally used to report status and metrics.
     */
   private final var ingested = 0L
-
-  private val targetMaxPartitions = filodbConfig.getInt("memstore.max-partitions-on-heap-per-shard")
-  private val ensureTspHeadroomPercent = filodbConfig.getDouble("memstore.ensure-tsp-count-headroom-percent")
-  private val ensureBlockHeadroomPercent = filodbConfig.getDouble("memstore.ensure-block-memory-headroom-percent")
-  private val ensureNativeMemHeadroomPercent = filodbConfig.getDouble("memstore.ensure-native-memory-headroom-percent")
 
   private val trackQueriesHoldingEvictionLock = filodbConfig.getBoolean("memstore.track-queries-holding-eviction-lock")
   /**
@@ -729,10 +729,14 @@ class TimeSeriesShard(val ref: DatasetRef,
                                    startTime: Long,
                                    querySession: QuerySession,
                                    limit: Int): Iterator[ZeroCopyUTF8String] = {
-    val metricShardKeys = schemas.part.options.shardKeyColumns
-    val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
-    SingleLabelValuesResultIterator(partKeyIndex.partIdsFromFilters(filters, startTime, endTime),
-                                    label, querySession, metricGroupBy, limit)
+    if (indexFacetingEnabled) {
+      partKeyIndex.labelValuesEfficient(filters, startTime, endTime, label, limit).iterator.map(_.utf8)
+    } else {
+      val metricShardKeys = schemas.part.options.shardKeyColumns
+      val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
+      SingleLabelValuesResultIterator(partKeyIndex.partIdsFromFilters(filters, startTime, endTime),
+        label, querySession, metricGroupBy, limit)
+    }
   }
 
   /**
