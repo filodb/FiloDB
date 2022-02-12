@@ -298,18 +298,24 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     withNewSearcher { searcher =>
       val reader = searcher.getIndexReader
       // the state object is expensive to create, so reuse across queries. It is associated with reader
-      val state = readerStateCache.getOrElseUpdate((reader, colName),
-                    new DefaultSortedSetDocValuesReaderState(reader, FACET_FIELD_PREFIX + colName))
-      val fc = new FacetsCollector
-      val query = colFiltersToQuery(colFilters, startTime, endTime)
-      FacetsCollector.search(searcher, query, 10, fc)
-      val facets = new SortedSetDocValuesFacetCounts(state, fc)
-      val result = facets.getTopChildren(limit, colName)
-      if (result != null) {
-        for (i <- 0 until Math.min(result.childCount, limit)) {
-          val lv = result.labelValues(i)
-          labelValues += lv.label
+      try {
+        val state = readerStateCache.getOrElseUpdate((reader, colName),
+            new DefaultSortedSetDocValuesReaderState(reader, FACET_FIELD_PREFIX + colName))
+        val fc = new FacetsCollector
+        val query = colFiltersToQuery(colFilters, startTime, endTime)
+        FacetsCollector.search(searcher, query, 10, fc)
+        val facets = new SortedSetDocValuesFacetCounts(state, fc)
+        val result = facets.getTopChildren(limit, colName)
+        if (result != null) {
+          for (i <- 0 until Math.min(result.childCount, limit)) {
+            val lv = result.labelValues(i)
+            labelValues += lv.label
+          }
         }
+      } catch {
+        case e: IllegalArgumentException =>
+          // If this exception is seen, then we have not seen the label. Return empty result.
+          if (!e.getMessage.contains("was not indexed with SortedSetDocValues")) throw e;
       }
     }
     labelValues
