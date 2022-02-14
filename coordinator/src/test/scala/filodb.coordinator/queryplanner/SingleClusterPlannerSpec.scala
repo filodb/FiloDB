@@ -5,7 +5,7 @@ import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, FunctionalTargetSchemaProvider, StaticSpreadProvider}
-import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange}
+import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange, TargetSchema}
 import filodb.core.metadata.Schemas
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
@@ -354,6 +354,107 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     partExec.chunkMethod.startTime shouldEqual 20100000
     partExec.chunkMethod.endTime shouldEqual 20880000
   }
+
+  // Target-Schema start
+
+  it("should stitch results when target-schema changes during query range") {
+    val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 2))
+    }
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchema] = {
+      Seq(TargetSchema(0, Seq("job")), TargetSchema(25000000L, Seq("job")))
+    }
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
+    (spreadOverride = Some(FunctionalSpreadProvider(spread)),
+      targetSchema = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
+    println(execPlan.children.size)
+    execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
+  }
+
+  it("should create a single plan and not stitch results when target-schema has not changed in query range") {
+    val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 2))
+    }
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchema] = {
+      Seq(TargetSchema(0, Seq("job")), TargetSchema(35000000L, Seq("job1")))
+    }
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
+    (spreadOverride = Some(FunctionalSpreadProvider(spread)),
+      targetSchema = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
+    execPlan.children.size shouldEqual 0
+    execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual false
+  }
+
+  it("should stitch results when target-schema has not changed but spread changed in query range") {
+    val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 1), SpreadChange(25000000, 2)) // spread change time is in ms
+    }
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchema] = {
+      Seq(TargetSchema(0, Seq("job")))
+    }
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
+    (spreadOverride = Some(FunctionalSpreadProvider(spread)),
+      targetSchema = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
+    execPlan.children.size shouldEqual 0
+    execPlan.rangeVectorTransformers.last.isInstanceOf[StitchRvsMapper] shouldEqual true
+  }
+
+  it("should stitch results when target-schema has changed but spread did not change in query range") {
+    val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar", instance="inst1"}""", TimeStepParams(20000, 100, 30000))
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 2)) // Spread 4
+    }
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchema] = {
+      Seq(TargetSchema(0, Seq("job")), TargetSchema(25000000, Seq("job", "instance")))
+    }
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
+    (spreadOverride = Some(FunctionalSpreadProvider(spread)),
+      targetSchema = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
+    execPlan.children.size shouldEqual 4 // target-schema does not apply when there are changes during a query-window
+    execPlan.rangeVectorTransformers.last.isInstanceOf[StitchRvsMapper] shouldEqual true
+  }
+
+  it("should not switch when all the target-schema labels are present in column filters in a binary join") {
+    val lp = Parser.queryRangeToLogicalPlan("""count(foo{job="bar"} + baz{job="bar"})""",
+      TimeStepParams(20000, 100, 30000))
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 2))
+    }
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchema] = {
+      Seq(TargetSchema(0, Seq("job")))
+    }
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
+    (spreadOverride = Some(FunctionalSpreadProvider(spread)),
+      targetSchema = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
+    val binaryJoinNode = execPlan.children(0)
+    binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
+    binaryJoinNode.children.size shouldEqual 2
+    binaryJoinNode.children.foreach(_.isInstanceOf[StitchRvsExec] shouldEqual true)
+  }
+
+  it("should create single child plan for LHS where target-schema filters provided" +
+    " and 4 (spread 2) children for RHS (no target-schema filters) of the binary join") {
+    val lp = Parser.queryRangeToLogicalPlan("""count(foo{job="bar", instance="inst1"} + baz{job="bar"})""",
+      TimeStepParams(20000, 100, 30000))
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 2))
+    }
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchema] = {
+      Seq(TargetSchema(0, Seq("instance")))
+    }
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
+    (spreadOverride = Some(FunctionalSpreadProvider(spread)),
+      targetSchema = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
+    val binaryJoinNode = execPlan.children(0)
+    binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
+    binaryJoinNode.asInstanceOf[BinaryJoinExec].lhs.size shouldEqual 1
+    binaryJoinNode.asInstanceOf[BinaryJoinExec].rhs.size shouldEqual 4
+  }
+
+  // end
 
   it("should stitch results when spread changes during query range") {
     val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
