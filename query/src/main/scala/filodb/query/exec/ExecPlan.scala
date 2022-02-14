@@ -213,6 +213,7 @@ trait ExecPlan extends QueryCommand {
                   sampleLimit} samples. Try applying more filters or reduce time range.")
               srv
           }
+          .filter(_.numRowsSerialized > 0)
           .guarantee(Task.eval(span.mark("after-last-materialized-result-rv")))
           .toListL
           .map { r =>

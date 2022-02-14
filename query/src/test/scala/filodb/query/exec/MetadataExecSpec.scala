@@ -153,8 +153,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     (resp: @unchecked) match {
-      case QueryResult(_, _, results, _, _, _) => results.size shouldEqual 1
-        results(0).rows.size shouldEqual 0
+      case QueryResult(_, _, results, _, _, _) => results.size shouldEqual 0
     }
   }
 
