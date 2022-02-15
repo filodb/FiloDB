@@ -46,7 +46,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                            timeSplitEnabled: Boolean = false,
                            minTimeRangeForSplitMs: => Long = 1.day.toMillis,
                            splitSizeMs: => Long = 1.day.toMillis)
-                           extends QueryPlanner with StrictLogging with PlannerHelper {
+                           extends QueryPlanner with StrictLogging with DefaultPlanner {
   override val dsOptions: DatasetOptions = schemas.part.options
   private val shardColumns = dsOptions.shardKeyColumns.sorted
   private val dsRef = dataset.ref

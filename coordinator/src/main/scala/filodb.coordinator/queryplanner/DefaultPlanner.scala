@@ -18,7 +18,7 @@ import filodb.query.exec._
   */
 case class PlanResult(plans: Seq[ExecPlan], needsStitch: Boolean = false)
 
-trait  PlannerHelper {
+trait  DefaultPlanner {
     def queryConfig: QueryConfig
     def dataset: Dataset
     def schemas: Schemas
@@ -44,9 +44,10 @@ trait  PlannerHelper {
                                            RangeParams(s.startMs, s.stepMs, s.endMs))
     }
 
+    def walkLogicalPlanTree(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult
 
-  // scalastyle:off cyclomatic.complexity
-    def walkLogicalPlanTree(logicalPlan: LogicalPlan,
+    // scalastyle:off cyclomatic.complexity
+    def defaultWalkLogicalPlanTree(logicalPlan: LogicalPlan,
                             qContext: QueryContext): PlanResult = logicalPlan match {
 
         case lp: ApplyInstantFunction        => this.materializeApplyInstantFunction(qContext, lp)

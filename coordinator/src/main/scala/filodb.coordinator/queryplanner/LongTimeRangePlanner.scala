@@ -34,7 +34,7 @@ import filodb.query.exec._
                              stitchDispatcher: => PlanDispatcher,
                              val queryConfig: QueryConfig,
                              val dataset: Dataset) extends QueryPlanner
-                             with PlannerHelper with StrictLogging {
+                             with DefaultPlanner with StrictLogging {
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options
 
@@ -63,13 +63,19 @@ import filodb.query.exec._
     if (maxOffset != minOffset
           && startWithOffsetMs - lookbackMs < earliestRawTime
           && endWithOffsetMs >= earliestRawTime) {
-          // Consider the case sum(foo{}) + sum(bar{} offset 8d), its a PeriodicSeriesPlan with two offset values
+          // If we get maxOffset != minOffset it means we have some Binary join in our LogicalPlan that
+          // has different offsets, for example sum(foo{} offset 8d + bar{}), here the top level operation
+          // is aggregation on a binary joined data with offset. Here we fall back to the default implementations in
+          // DefaultPlanner
+          // Also, consider the case sum(foo{}) + sum(bar{} offset 8d), its a PeriodicSeriesPlan with two offset values
           // This can be done most efficiently find a point in time that can be pushed down completely to LT,
           // completely in Raw and minimal required data in QS and stitch all together. However currently will we
-          //  delegate to the default implementation of this logical plan, which would perform the operations
-          // in-process
-          //  Operations like sum(foo{} offset 8d) + 10
-         super.walkLogicalPlanTree(periodicSeriesPlan, qContext).plans.head
+          // delegate to the default implementation of this logical plan, which would perform the operations
+          // in-process in DefaultPlanner
+          // TODO: Operations like sum(foo{} offset 8d) + 10 should be entirely pushed down despite the offset
+          //  however, right now this will just push then aggregation depending on offset or in worst case perform the
+          //  operation InProcess. This needs to be addressed in subsequent enhancements.
+         super.defaultWalkLogicalPlanTree(periodicSeriesPlan, qContext).plans.head
     }
     else if (endWithOffsetMs < earliestRawTime) { // full time range in downsampled cluster
       logger.debug("materializing against downsample cluster:: {}", qContext.origQueryParams)
