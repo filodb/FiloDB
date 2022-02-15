@@ -194,8 +194,20 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     val exec = if (nonMetricShardKeyFilters.head.isEmpty) queryPlanner.materialize(logicalPlan, queryContext)
     else {
       val execPlans = generateExecWithoutRegex(logicalPlan, nonMetricShardKeyFilters.head, queryContext)
-      if (execPlans.size == 1) execPlans.head else MultiPartitionDistConcatExec(queryContext, inProcessPlanDispatcher,
-        execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]))
+      if (execPlans.size == 1)
+        execPlans.head
+      // TODO
+      // here we essentially do not allow to optimize the physical plan for subqueries
+      // as we concat the results with MultiPartitionDisConcatExec,
+      // below queries:
+      // max_over_time(rate(foo{_ws_ = "demo", _ns_ =~ ".*Ns", instance = "Inst-1" }[10m])[1h:1m])
+      // sum_over_time(foo{_ws_ = "demo", _ns_ =~ ".*Ns", instance = "Inst-1" }[5d:300s])
+      // would have suboptimal performance. See subquery tests in PlannerHierarchySpec
+      else
+        MultiPartitionDistConcatExec(
+          queryContext, inProcessPlanDispatcher,
+          execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
+        )
     }
     PlanResult(Seq(exec))
   }
