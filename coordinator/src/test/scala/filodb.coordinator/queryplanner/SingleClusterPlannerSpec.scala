@@ -417,7 +417,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.rangeVectorTransformers.last.isInstanceOf[StitchRvsMapper] shouldEqual true
   }
 
-  it("should not switch when all the target-schema labels are present in column filters in a binary join") {
+  it("should not stitch when all the target-schema labels are present in column filters in a binary join") {
     val lp = Parser.queryRangeToLogicalPlan("""count(foo{job="bar"} + baz{job="bar"})""",
       TimeStepParams(20000, 100, 30000))
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
@@ -432,7 +432,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val binaryJoinNode = execPlan.children(0)
     binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
     binaryJoinNode.children.size shouldEqual 2
-    binaryJoinNode.children.foreach(_.isInstanceOf[StitchRvsExec] shouldEqual true)
+    binaryJoinNode.children.foreach(_.isInstanceOf[StitchRvsExec] shouldEqual false)
   }
 
   it("should create single child plan for LHS where target-schema filters provided" +
