@@ -283,7 +283,7 @@ class HistogramVectorTest extends NativeVectorTest {
     BinaryHistogram.writeNonIncreasing(HistogramBuckets.binaryBuckets64, Array.fill(64)(1L), buffer)
     appender.addData(buffer) shouldEqual Ack
     val mutableHisto = appender.reader.asHistReader.sum(0,0)
-    BinHistogram(mutHisto.serialize()).formatCode shouldEqual HistFormat_Geometric1_Delta
+    BinHistogram(mutableHisto.serialize()).formatCode shouldEqual HistFormat_Geometric1_Delta
   }
 
   it("should reject initially invalid BinaryHistogram") {
