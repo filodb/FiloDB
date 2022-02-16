@@ -5,6 +5,7 @@ import java.nio.ByteBuffer
 import org.agrona.concurrent.UnsafeBuffer
 
 import filodb.memory.format._
+import filodb.memory.format.vectors.BinaryHistogram.{BinHistogram, HistFormat_Geometric1_Delta}
 
 class HistogramVectorTest extends NativeVectorTest {
   import HistogramTest._
@@ -274,6 +275,15 @@ class HistogramVectorTest extends NativeVectorTest {
     // A record using a different schema
     BinaryHistogram.writeDelta(HistogramBuckets.binaryBuckets64, Array.fill(64)(1L), buffer)
     appender.addData(buffer) shouldEqual BucketSchemaMismatch
+  }
+  
+   it("histogram should have right formatCode after sum operation is applied") {
+    val appender = HistogramVector.appending(memFactory, 1024)
+    BinaryHistogram.writeNonIncreasing(HistogramBuckets.binaryBuckets64, Array.fill(64)(1L), buffer)
+    BinaryHistogram.writeNonIncreasing(HistogramBuckets.binaryBuckets64, Array.fill(64)(1L), buffer)
+    appender.addData(buffer) shouldEqual Ack
+    val mutableHisto = appender.reader.asHistReader.sum(0,0)
+    BinHistogram(mutableHisto.serialize()).formatCode shouldEqual HistFormat_Geometric1_Delta
   }
 
   it("should reject initially invalid BinaryHistogram") {
