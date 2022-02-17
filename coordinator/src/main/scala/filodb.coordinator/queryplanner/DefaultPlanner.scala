@@ -46,6 +46,20 @@ trait  DefaultPlanner {
 
     def walkLogicalPlanTree(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult
 
+
+
+    /**
+     * DefaultPlanner has logic to handle multiple LogicalPlans, classes implementing this trait may choose to override
+     * the behavior and delegate to the default implementation when no special implementation if required.
+     * The method is similar to walkLogicalPlanTree but deliberately chosen to have a different name to for the
+     * classes to implement walkLogicalPlanTree and explicitly delegate to defaultWalkLogicalPlanTree if needed. The
+     * method essentially pattern matches all LogicalPlans and invoke the default implementation in the
+     * DefaultPlanner trait
+     *
+     * @param logicalPlan The LogicalPlan instance
+     * @param qContext The QueryContext
+     * @return The PlanResult containing the ExecPlan
+     */
     // scalastyle:off cyclomatic.complexity
     def defaultWalkLogicalPlanTree(logicalPlan: LogicalPlan,
                             qContext: QueryContext): PlanResult = logicalPlan match {

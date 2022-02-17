@@ -50,11 +50,9 @@ import filodb.query.exec._
   // scalastyle:off method.length
   private def materializeRoutablePlan(qContext: QueryContext, periodicSeriesPlan: PeriodicSeriesPlan): ExecPlan = {
     import LogicalPlan._
-    import scala.math.{min, max}
     val earliestRawTime = earliestRawTimestampFn
     val offsetMillis = LogicalPlanUtils.getOffsetMillis(periodicSeriesPlan)
-    val (maxOffset, minOffset) = offsetMillis.foldLeft((Long.MinValue, Long.MaxValue))
-                                  {case ((maxAll, minAll), curr) => (max(maxAll, curr) , min(minAll, curr))}
+    val (maxOffset, minOffset) = (offsetMillis.max, offsetMillis.min)
 
     val lookbackMs = LogicalPlanUtils.getLookBackMillis(periodicSeriesPlan).max
     val startWithOffsetMs = periodicSeriesPlan.startMs - maxOffset
