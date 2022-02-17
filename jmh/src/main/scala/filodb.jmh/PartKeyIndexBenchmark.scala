@@ -161,9 +161,9 @@ class PartKeyIndexBenchmark {
       val filter = Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
         ColumnFilter("_ws_", Filter.Equals("demo")))
       val res = mutable.HashSet[ZeroCopyUTF8String]()
-      partKeyIndex.partIdsFromFilters(filter, now, now + 1000).map(partKeyIndex.partKeyFromPartId)
-        .iterator().flatten.takeWhile(_ => res.size < 10000).map { pk =>
-        Schemas.promCounter.partition.binSchema.singleColValues(pk.bytes, UnsafeUtils.arayOffset, "_metric_", res)
+      partKeyIndex.partIdsFromFilters(filter, now, now + 1000).foreach { pId =>
+        val pk = partKeyIndex.partKeyFromPartId(pId)
+        Schemas.promCounter.partition.binSchema.singleColValues(pk.get.bytes, UnsafeUtils.arayOffset, "_metric_", res)
       }
     }
   }

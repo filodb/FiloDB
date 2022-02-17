@@ -303,12 +303,11 @@ class PartKeyLuceneIndex(ref: DatasetRef,
             new DefaultSortedSetDocValuesReaderState(reader, FACET_FIELD_PREFIX + colName))
         val fc = new FacetsCollector
         val query = colFiltersToQuery(colFilters, startTime, endTime)
-        FacetsCollector.search(searcher, query, 10, fc)
+        FacetsCollector.search(searcher, query, limit, fc)
         val facets = new SortedSetDocValuesFacetCounts(state, fc)
         val result = facets.getTopChildren(limit, colName)
-        if (result != null) {
-          for (i <- 0 until Math.min(result.childCount, limit)) {
-            val lv = result.labelValues(i)
+        if (result != null && result.labelValues != null) {
+          result.labelValues.foreach { lv =>
             labelValues += lv.label
           }
         }
@@ -404,7 +403,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                     endTime: Long = Long.MaxValue,
                     partKeyBytesRefOffset: Int = 0)
                    (partKeyNumBytes: Int = partKeyOnHeapBytes.length): Unit = {
-    val document = makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes, partId, startTime, endTime)
+    makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes, partId, startTime, endTime)
     logger.debug(s"Upserting document ${partKeyString(partId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
                  s"with startTime=$startTime endTime=$endTime into dataset=$ref shard=$shardNum")
     val doc = luceneDocument.get()
