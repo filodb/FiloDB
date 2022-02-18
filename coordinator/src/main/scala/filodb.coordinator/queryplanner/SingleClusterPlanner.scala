@@ -8,7 +8,7 @@ import kamon.Kamon
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
-import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchema, TargetSchemaProvider}
+import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
@@ -199,6 +199,8 @@ class SingleClusterPlanner(val dataset: Dataset,
                                               cf.filter.asInstanceOf[Filter.Equals].value.toString).toMap
         val partitionHash = RecordBuilder.partitionKeyHash(nonShardKeyLabelPairs, shardVals.toMap, targetSchema,
           dsOptions.metricColumn, metric)
+        // since target-schema filter is provided in the query, ingestionShard can be used to find the single shard
+        // that can answer the query.
         Seq(shardMapperFunc.ingestionShard(shardHash, partitionHash, spreadProvToUse.spreadFunc(filters).last.spread))
       } else {
         shardMapperFunc.queryShards(shardHash, spreadProvToUse.spreadFunc(filters).last.spread)
@@ -207,13 +209,13 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
 
   // Is TargetSchema changing during query window.
-  private def isTargetSchemaChanging(targetSchemaChanges: Seq[TargetSchema],
+  private def isTargetSchemaChanging(targetSchemaChanges: Seq[TargetSchemaChange],
                                      startMs: Long, endMs: Long): Boolean =
     targetSchemaChanges.nonEmpty && targetSchemaChanges.exists(c => c.time >= startMs && c.time <= endMs)
 
   // Find the TargetSchema that is applicable i.e effective for the current query window
-  private def findTargetSchema(targetSchemaChanges: Seq[TargetSchema],
-                               startMs: Long, endMs: Long): Option[TargetSchema] = {
+  private def findTargetSchema(targetSchemaChanges: Seq[TargetSchemaChange],
+                               startMs: Long, endMs: Long): Option[TargetSchemaChange] = {
     val tsIndex = targetSchemaChanges.lastIndexWhere(t => t.time <= startMs)
     if(tsIndex > -1)
       Some(targetSchemaChanges(tsIndex))
@@ -228,7 +230,7 @@ class SingleClusterPlanner(val dataset: Dataset,
    * @param targetSchema TargetSchema
    * @return useTargetSchema - use target-schema to calculate query shards
    */
-  private def useTargetSchemaForShards(filters: Seq[ColumnFilter], targetSchema: Option[TargetSchema]): Boolean =
+  private def useTargetSchemaForShards(filters: Seq[ColumnFilter], targetSchema: Option[TargetSchemaChange]): Boolean =
     targetSchema match {
       case Some(ts) if ts.schema.nonEmpty => ts.schema
         .forall(s => filters.exists(cf => cf.column == s && cf.filter.isInstanceOf[Filter.Equals]))
@@ -507,9 +509,9 @@ class SingleClusterPlanner(val dataset: Dataset,
       MultiSchemaPartitionsExec(qContext, dispatcher, dsRef, shard, renamedFilters,
         toChunkScanMethod(rangeSelectorWithOffset), dsOptions.metricColumn, schemaOpt, colName)
     }
-    // Stitch only if spread and/or target-schema (all labels provided in the query), changes during the query-window
-    PlanResult(execPlans, needsStitch ||
-      (tsChangeExists && allTSLabelsPresent))
+    // Stitch only if spread and/or target-schema changes during the query-window.
+    // when target-schema changes during query window, data might be ingested in different shards after the change.
+    PlanResult(execPlans, needsStitch || tsChangeExists)
   }
 
   private def materializeLabelValues(qContext: QueryContext,

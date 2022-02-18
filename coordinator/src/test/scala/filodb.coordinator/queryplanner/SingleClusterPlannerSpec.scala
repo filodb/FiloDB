@@ -5,7 +5,7 @@ import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, FunctionalTargetSchemaProvider, StaticSpreadProvider}
-import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange, TargetSchema}
+import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange, TargetSchemaChange}
 import filodb.core.metadata.Schemas
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
@@ -362,8 +362,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 2))
     }
-    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchema] = {
-      Seq(TargetSchema(0, Seq("job")), TargetSchema(25000000L, Seq("job")))
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job")), TargetSchemaChange(25000000L, Seq("job")))
     }
     val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
     (spreadOverride = Some(FunctionalSpreadProvider(spread)),
@@ -377,8 +377,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 2))
     }
-    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchema] = {
-      Seq(TargetSchema(0, Seq("job")), TargetSchema(35000000L, Seq("job1")))
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job")), TargetSchemaChange(35000000L, Seq("job1")))
     }
     val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
     (spreadOverride = Some(FunctionalSpreadProvider(spread)),
@@ -392,8 +392,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(25000000, 2)) // spread change time is in ms
     }
-    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchema] = {
-      Seq(TargetSchema(0, Seq("job")))
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job")))
     }
     val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
     (spreadOverride = Some(FunctionalSpreadProvider(spread)),
@@ -407,8 +407,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 2)) // Spread 4
     }
-    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchema] = {
-      Seq(TargetSchema(0, Seq("job")), TargetSchema(25000000, Seq("job", "instance")))
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job")), TargetSchemaChange(25000000, Seq("job", "instance")))
     }
     val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
     (spreadOverride = Some(FunctionalSpreadProvider(spread)),
@@ -423,8 +423,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 2))
     }
-    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchema] = {
-      Seq(TargetSchema(0, Seq("job")))
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job")))
     }
     val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
     (spreadOverride = Some(FunctionalSpreadProvider(spread)),
@@ -442,8 +442,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 2))
     }
-    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchema] = {
-      Seq(TargetSchema(0, Seq("instance")))
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("instance")))
     }
     val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
     (spreadOverride = Some(FunctionalSpreadProvider(spread)),

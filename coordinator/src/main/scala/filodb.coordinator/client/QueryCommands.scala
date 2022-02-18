@@ -59,9 +59,9 @@ object QueryCommands {
     }
   }
 
-  final case class FunctionalTargetSchemaProvider(f: Seq[ColumnFilter] => Seq[TargetSchema] = { _ => Seq.empty})
+  final case class FunctionalTargetSchemaProvider(f: Seq[ColumnFilter] => Seq[TargetSchemaChange] = { _ => Seq.empty})
     extends TargetSchemaProvider {
-    def targetSchemaFunc(filter: Seq[ColumnFilter]): Seq[TargetSchema] = f(filter)
+    def targetSchemaFunc(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = f(filter)
   }
 
   /**
