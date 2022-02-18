@@ -72,6 +72,7 @@ object Dependencies {
     "com.github.rholder.fauxflake" % "fauxflake-core"     % "1.1.0",
     "org.scalactic"                %% "scalactic"         % "3.2.0" withJavadoc(),
     "org.apache.lucene"            % "lucene-core"        % "8.8.2" withJavadoc(),
+    "org.apache.lucene"            % "lucene-facet"       % "8.8.2" withJavadoc(),
     "com.github.alexandrnikitin"   %% "bloom-filter"      % "0.11.0",
     "org.rocksdb"                  % "rocksdbjni"         % "6.11.4",
     "com.esotericsoftware"         % "kryo"               % "4.0.0" excludeAll(excludeMinlog),
