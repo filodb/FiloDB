@@ -41,7 +41,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                             val dataset: Dataset,
                             val queryConfig: QueryConfig,
                             remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient)
-  extends QueryPlanner with StrictLogging with PlannerHelper {
+  extends QueryPlanner with StrictLogging with DefaultPlanner {
 
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options

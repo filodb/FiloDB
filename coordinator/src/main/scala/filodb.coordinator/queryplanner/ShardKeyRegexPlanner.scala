@@ -29,7 +29,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
                            queryPlanner: QueryPlanner,
                            shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]],
                            config: QueryConfig)
-  extends QueryPlanner with PlannerHelper {
+  extends QueryPlanner with DefaultPlanner {
 
   override def queryConfig: QueryConfig = config
   override val schemas: Schemas = Schemas(dataset.schema)
@@ -73,7 +73,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     }
   }
 
-  def walkLogicalPlanTree(logicalPlan: LogicalPlan,
+  override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                           qContext: QueryContext): PlanResult = {
     logicalPlan match {
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)

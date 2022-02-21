@@ -170,8 +170,9 @@ object BinaryHistogram extends StrictLogging {
   def writeDoubles(buckets: HistogramBuckets, values: Array[Double], buf: MutableDirectBuffer): Int = {
     require(buckets.numBuckets == values.size, s"Values array size of ${values.size} != ${buckets.numBuckets}")
     val formatCode = if (buckets.numBuckets == 0) HistFormat_Null else buckets match {
-      case g: GeometricBuckets               => HistFormat_Geometric_XOR
-      case c: CustomBuckets                  => HistFormat_Custom_XOR
+      case g: GeometricBuckets if g.minusOne => HistFormat_Geometric1_Delta
+      case _: GeometricBuckets               => HistFormat_Geometric_XOR
+      case _: CustomBuckets                  => HistFormat_Custom_XOR
     }
 
     buf.putByte(2, formatCode)
