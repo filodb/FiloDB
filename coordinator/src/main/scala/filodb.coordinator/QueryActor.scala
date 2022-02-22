@@ -135,6 +135,7 @@ final class QueryActor(memStore: MemStore,
         queryExecuteSpan.mark("query-actor-received-execute-start")
         val execTask = q.execute(memStore, querySession)(queryScheduler)
           .map { res =>
+            // below prevents from calling FiloDB directly (without Query Service)
             FiloSchedulers.assertThreadName(QuerySchedName)
             querySession.close()
             replyTo ! res
