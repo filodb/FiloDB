@@ -20,12 +20,15 @@ import filodb.core.store._
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
+/**
+ * An implementation of TimeSeriesStore with data cached in memory as needed
+ */
 class TimeSeriesMemStore(filodbConfig: Config,
                          val store: ColumnStore,
                          val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
                         (implicit val ioPool: ExecutionContext)
-extends MemStore with StrictLogging {
+extends TimeSeriesStore with StrictLogging {
   import collection.JavaConverters._
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
@@ -134,15 +137,16 @@ extends MemStore with StrictLogging {
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
     getShardE(dataset, shard).recoverIndex()
 
-  def recoverStream(dataset: DatasetRef,
-                    shardNum: Int,
-                    stream: Observable[SomeData],
-                    startOffset: Long,
-                    endOffset: Long,
-                    checkpoints: Map[Int, Long],
-                    reportingInterval: Long) (implicit timeout: FiniteDuration = 60.seconds): Observable[Long] = {
+  def createDataRecoveryObservable(dataset: DatasetRef,
+                                   shardNum: Int,
+                                   stream: Observable[SomeData],
+                                   startOffset: Long,
+                                   endOffset: Long,
+                                   checkpoints: Map[Int, Long],
+                                   reportingInterval: Long)
+                                  (implicit timeout: FiniteDuration = 60.seconds): Observable[Long] = {
     val shard = getShardE(dataset, shardNum)
-    shard.createDataRecoveryPipeline(dataset, shardNum, stream, startOffset, endOffset,
+    shard.createDataRecoveryObservable(dataset, shardNum, stream, startOffset, endOffset,
       checkpoints, reportingInterval, timeout)
   }
 

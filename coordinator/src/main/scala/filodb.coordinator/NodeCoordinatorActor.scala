@@ -14,7 +14,7 @@ import net.ceedubs.ficus.Ficus._
 import filodb.coordinator.client.MiscCommands
 import filodb.core._
 import filodb.core.downsample.DownsampleConfig
-import filodb.core.memstore.MemStore
+import filodb.core.memstore.TimeSeriesStore
 import filodb.core.metadata._
 import filodb.core.store.{IngestionConfig, MetaStore, StoreConfig}
 import filodb.query.QueryCommand
@@ -40,13 +40,13 @@ object NodeCoordinatorActor {
   final case class ClearState(dataset: DatasetRef)
 
   def props(metaStore: MetaStore,
-            memStore: MemStore,
+            memStore: TimeSeriesStore,
             settings: FilodbSettings): Props =
     Props(classOf[NodeCoordinatorActor], metaStore, memStore, settings)
 }
 
 private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
-                                                 memStore: MemStore,
+                                                 memStore: TimeSeriesStore,
                                                  settings: FilodbSettings) extends NamingAwareBaseActor {
   import context.dispatcher
 

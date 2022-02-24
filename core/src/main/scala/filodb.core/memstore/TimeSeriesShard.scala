@@ -1037,13 +1037,13 @@ class TimeSeriesShard(val ref: DatasetRef,
     tasks
   }
 
-  def createDataRecoveryPipeline(dataset: DatasetRef, shardNum: Int,
-                                 dataStream: Observable[SomeData],
-                                 startOffset: Long,
-                                 endOffset: Long,
-                                 checkpoints: Map[Int, Long],
-                                 reportingInterval: Long,
-                                 timeout: FiniteDuration): Observable[Long] = {
+  def createDataRecoveryObservable(dataset: DatasetRef, shardNum: Int,
+                                   dataStream: Observable[SomeData],
+                                   startOffset: Long,
+                                   endOffset: Long,
+                                   checkpoints: Map[Int, Long],
+                                   reportingInterval: Long,
+                                   timeout: FiniteDuration): Observable[Long] = {
     setGroupWatermarks(checkpoints)
     if (endOffset < startOffset) Observable.empty
     else {

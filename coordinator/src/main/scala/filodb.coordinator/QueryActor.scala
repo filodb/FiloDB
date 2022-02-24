@@ -18,7 +18,7 @@ import net.ceedubs.ficus.readers.ValueReader
 
 import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
-import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
+import filodb.core.memstore.{FiloSchedulers, TermInfo, TimeSeriesStore}
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryStats}
@@ -29,7 +29,7 @@ import filodb.query.exec.ExecPlan
 object QueryActor {
   final case class ThrowException(dataset: DatasetRef)
 
-  def props(memStore: MemStore, dataset: Dataset,
+  def props(memStore: TimeSeriesStore, dataset: Dataset,
             schemas: Schemas, shardMapFunc: => ShardMapper,
             earliestRawTimestampFn: => Long): Props =
     Props(new QueryActor(memStore, dataset, schemas,
@@ -42,7 +42,7 @@ object QueryActor {
  * The actual reading of data structures and aggregation is performed asynchronously by Observables,
  * so it is probably fine for there to be just one QueryActor per dataset.
  */
-final class QueryActor(memStore: MemStore,
+final class QueryActor(memStore: TimeSeriesStore,
                        dataset: Dataset,
                        schemas: Schemas,
                        shardMapFunc: => ShardMapper,

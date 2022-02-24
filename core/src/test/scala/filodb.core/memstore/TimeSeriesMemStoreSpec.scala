@@ -379,7 +379,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     // val stream = Observable.fromIterable(linearMultiSeries().take(100).grouped(5).toSeq.map(records(dataset1, _)))
     val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries(), 200))
     // recover from checkpoints.min to checkpoints.max
-    val offsets = memStore.recoverStream(dataset1.ref, 0, stream, 2, 21, checkpoints, 4L)
+    val offsets = memStore.createDataRecoveryObservable(dataset1.ref, 0, stream, 2, 21, checkpoints, 4L)
                           .until(_ >= 21L).toListL.runToFuture.futureValue
 
     offsets shouldEqual Seq(7L, 11L, 15L, 19L, 21L) // last offset is always reported
@@ -403,7 +403,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val startOffset = checkpoints.values.min
     val endOffset = checkpoints.values.max
     // recover from checkpoints.min to checkpoints.max - timeout after 1sec
-    val offsets = memStore.recoverStream(dataset1.ref, 0, stream, startOffset, endOffset, checkpoints, 4L)(1.second)
+    val offsets = memStore.createDataRecoveryObservable(dataset1.ref, 0, stream, startOffset, endOffset, checkpoints, 4L)(1.second)
       .until(_ >= 21L).toListL.runToFuture.futureValue
 
     offsets shouldEqual Seq(checkpoints.values.max) // should equal end offset

@@ -110,7 +110,10 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
   def schemas(ref: DatasetRef): Option[Schemas]
 
   /**
-   * Acquire shared lock to shard(s) for given dataset/partMethod.
+   * Acquire shared lock to shard(s) for given dataset/partMethod. Acquisition of this lock
+   * indicates that readers are reading chunks from the TimeSeriesStore. Writers wait for readers
+   * to complete before performing writes to the store.
+   *
    * Acquired lock is placed in querySession. It is the job of the client to release the lock.
    *
    * @throws QueryTimeoutException if shared lock was not acquired within timeoutMs
