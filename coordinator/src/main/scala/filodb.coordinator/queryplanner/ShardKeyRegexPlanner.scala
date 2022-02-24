@@ -69,11 +69,11 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
 
   def hasRequiredShardKeysPresent(nonMetricShardKeyFilters: Seq[Seq[ColumnFilter]],
                                   nonMetricShardColumns: Seq[String]): Boolean = {
-    nonMetricShardKeyFilters
-      .foreach(filterGroup => {
-        val columnNames = filterGroup.map(_.column)
-        if (!nonMetricShardColumns.toSet.subsetOf(columnNames.toSet)) return false
-      })
+    val nonMetricShardColumnsSet = nonMetricShardColumns.toSet
+    nonMetricShardKeyFilters.foreach(filterGroup => {
+      val columnNames = filterGroup.map(_.column)
+      if (!nonMetricShardColumnsSet.subsetOf(columnNames.toSet)) return false
+    })
     true
   }
 
