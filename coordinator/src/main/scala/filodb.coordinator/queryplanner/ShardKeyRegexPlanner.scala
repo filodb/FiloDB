@@ -58,12 +58,23 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     val nonMetricShardKeyFilters =
       LogicalPlan.getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
     if (isMetadataQuery(logicalPlan)
-      || LogicalPlan.hasShardKeyEqualsOnly(logicalPlan, dataset.options.nonMetricShardColumns)) {
+      || (hasRequiredShardKeysPresent(nonMetricShardKeyFilters, dataset.options.nonMetricShardColumns) &&
+      LogicalPlan.hasShardKeyEqualsOnly(logicalPlan, dataset.options.nonMetricShardColumns))) {
       queryPlanner.materialize(logicalPlan, qContext)
     } else if (hasSingleShardKeyMatch(nonMetricShardKeyFilters)) {
       // For queries like topk(2, test{_ws_ = "demo", _ns_ =~ "App-1"}) which have just one matching value
       generateExecWithoutRegex(logicalPlan, nonMetricShardKeyFilters.head, qContext).head
     } else walkLogicalPlanTree(logicalPlan, qContext).plans.head
+  }
+
+  def hasRequiredShardKeysPresent(nonMetricShardKeyFilters: Seq[Seq[ColumnFilter]],
+                                  nonMetricShardColumns: Seq[String]): Boolean = {
+    val nonMetricShardColumnsSet = nonMetricShardColumns.toSet
+    nonMetricShardKeyFilters.foreach(filterGroup => {
+      val columnNames = filterGroup.map(_.column)
+      if (!nonMetricShardColumnsSet.subsetOf(columnNames.toSet)) return false
+    })
+    true
   }
 
   def isMetadataQuery(logicalPlan: LogicalPlan): Boolean = {
