@@ -134,8 +134,6 @@ extends MemStore with StrictLogging {
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
     getShardE(dataset, shard).recoverIndex()
 
-  // a more optimized ingest stream handler specifically for recovery
-  // TODO: See if we can parallelize ingestion stream for even better throughput
   def recoverStream(dataset: DatasetRef,
                     shardNum: Int,
                     stream: Observable[SomeData],
@@ -144,35 +142,8 @@ extends MemStore with StrictLogging {
                     checkpoints: Map[Int, Long],
                     reportingInterval: Long) (implicit timeout: FiniteDuration = 60.seconds): Observable[Long] = {
     val shard = getShardE(dataset, shardNum)
-    shard.setGroupWatermarks(checkpoints)
-    if (endOffset < startOffset) Observable.empty
-    else {
-      var targetOffset = startOffset + reportingInterval
-      var startOffsetValidated = false
-      stream.map { r =>
-        if (!startOffsetValidated) {
-          if (r.offset > startOffset) {
-            val offsetsNotRecovered = r.offset - startOffset
-            logger.error(s"Could not recover dataset=$dataset shard=$shardNum from check pointed offset possibly " +
-                         s"because of retention issues. recoveryStartOffset=$startOffset " +
-                         s"firstRecordOffset=${r.offset} offsetsNotRecovered=$offsetsNotRecovered")
-            shard.shardStats.offsetsNotRecovered.increment(offsetsNotRecovered)
-          }
-          startOffsetValidated = true
-        }
-        shard.ingest(r)
-      }
-        // Nothing to read from source, blocking indefinitely. In such cases, 60sec timeout causes it
-        // to return endOffset, making recovery complete and to start normal ingestion.
-      .timeoutOnSlowUpstreamTo(timeout, Observable.now(endOffset))
-      .collect {
-        case offset: Long if offset >= endOffset => // last offset reached
-          offset
-        case offset: Long if offset > targetOffset => // reporting interval reached
-          targetOffset += reportingInterval
-          offset
-      }
-    }
+    shard.createDataRecoveryPipeline(dataset, shardNum, stream, startOffset, endOffset,
+      checkpoints, reportingInterval, timeout)
   }
 
   def indexNames(dataset: DatasetRef, limit: Int): Seq[(String, Int)] =

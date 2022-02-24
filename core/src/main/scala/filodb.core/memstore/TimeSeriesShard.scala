@@ -1037,6 +1037,44 @@ class TimeSeriesShard(val ref: DatasetRef,
     tasks
   }
 
+  def createDataRecoveryPipeline(dataset: DatasetRef, shardNum: Int,
+                                 dataStream: Observable[SomeData],
+                                 startOffset: Long,
+                                 endOffset: Long,
+                                 checkpoints: Map[Int, Long],
+                                 reportingInterval: Long,
+                                 timeout: FiniteDuration): Observable[Long] = {
+    setGroupWatermarks(checkpoints)
+    if (endOffset < startOffset) Observable.empty
+    else {
+      var targetOffset = startOffset + reportingInterval
+      var startOffsetValidated = false
+      dataStream.map { r =>
+        if (!startOffsetValidated) {
+          if (r.offset > startOffset) {
+            val offsetsNotRecovered = r.offset - startOffset
+            logger.error(s"Could not recover dataset=$dataset shard=$shardNum from check pointed offset possibly " +
+              s"because of retention issues. recoveryStartOffset=$startOffset " +
+              s"firstRecordOffset=${r.offset} offsetsNotRecovered=$offsetsNotRecovered")
+            shardStats.offsetsNotRecovered.increment(offsetsNotRecovered)
+          }
+          startOffsetValidated = true
+        }
+        ingest(r)
+      }
+        // Nothing to read from source, blocking indefinitely. In such cases, 60sec timeout causes it
+        // to return endOffset, making recovery complete and to start normal ingestion.
+        .timeoutOnSlowUpstreamTo(timeout, Observable.now(endOffset))
+        .collect {
+          case offset: Long if offset >= endOffset => // last offset reached
+            offset
+          case offset: Long if offset > targetOffset => // reporting interval reached
+            targetOffset += reportingInterval
+            offset
+        }
+    }
+  }
+
   def startIngestion(dataStream: Observable[SomeData],
                      cancelTask: Task[Unit],
                      flushSched: Scheduler): CancelableFuture[Unit] = {
