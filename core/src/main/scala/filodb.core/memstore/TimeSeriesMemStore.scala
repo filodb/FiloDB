@@ -35,7 +35,6 @@ extends MemStore with StrictLogging {
 
   val stats = new ChunkSourceStats
 
-  private val numParallelFlushes = filodbConfig.getInt("memstore.flush-task-parallelism")
   private val ensureTspHeadroomPercent = filodbConfig.getDouble("memstore.ensure-tsp-count-headroom-percent")
   private val ensureNmmHeadroomPercent = filodbConfig.getDouble("memstore.ensure-native-memory-headroom-percent")
 
@@ -120,32 +119,16 @@ extends MemStore with StrictLogging {
   // NOTE: Each ingestion message is a SomeData which has a RecordContainer, which can hold hundreds or thousands
   // of records each.  For this reason the object allocation of a SomeData and RecordContainer is not that bad.
   // If it turns out the batch size is small, consider using object pooling.
-  def ingestStream(dataset: DatasetRef,
-                   shardNum: Int,
-                   stream: Observable[SomeData],
-                   flushSched: Scheduler,
-                   cancelTask: Task[Unit]): CancelableFuture[Unit] = {
+  def startIngestion(dataset: DatasetRef,
+                     shardNum: Int,
+                     stream: Observable[SomeData],
+                     flushSched: Scheduler,
+                     cancelTask: Task[Unit]): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
     shard.isReadyForQuery = true
     logger.info(s"Shard now ready for query dataset=$dataset shard=$shardNum")
     shard.shardStats.shardTotalRecoveryTime.update(System.currentTimeMillis() - shard.creationTime)
-    stream.flatMap {
-      case d: SomeData =>
-        // The write buffers for all partitions in a group are switched here, in line with ingestion
-        // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
-        // at the same offset/watermark
-        val tasks = shard.createFlushTasks(d.records)
-
-        shard.ingest(d)
-        Observable.fromIterable(tasks)
-    }
-    .mapParallelUnordered(numParallelFlushes) {
-      // asyncBoundary so subsequent computations in pipeline happen in default threadpool
-      task => task.executeOn(flushSched).asyncBoundary
-    }
-    .completedL
-    .doOnCancel(cancelTask)
-    .runToFuture(shard.ingestSched)
+    shard.startIngestion(stream, cancelTask, flushSched)
   }
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =

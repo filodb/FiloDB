@@ -174,11 +174,12 @@ extends MemStore with StrictLogging {
   override def ingest(dataset: DatasetRef, shard: Int,
                       data: SomeData): Unit = throw new UnsupportedOperationException()
 
-  override def ingestStream(dataset: DatasetRef,
-                   shard: Int,
-                   stream: Observable[SomeData],
-                   flushSched: Scheduler,
-                   cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit] = throw new UnsupportedOperationException()
+  override def startIngestion(dataset: DatasetRef,
+                              shard: Int,
+                              stream: Observable[SomeData],
+                              flushSched: Scheduler,
+                              cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit] =
+    throw new UnsupportedOperationException()
 
   override def recoverStream(dataset: DatasetRef, shard: Int,
                              stream: Observable[SomeData],

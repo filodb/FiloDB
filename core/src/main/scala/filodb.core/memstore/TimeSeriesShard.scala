@@ -20,7 +20,7 @@ import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import kamon.tag.TagSet
 import monix.eval.Task
-import monix.execution.{Scheduler, UncaughtExceptionReporter}
+import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
 import monix.execution.atomic.AtomicBoolean
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
@@ -276,6 +276,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val ensureBlockHeadroomPercent = filodbConfig.getDouble("memstore.ensure-block-memory-headroom-percent")
   private val ensureNativeMemHeadroomPercent = filodbConfig.getDouble("memstore.ensure-native-memory-headroom-percent")
   private val indexFacetingEnabled = filodbConfig.getBoolean("memstore.index-faceting-enabled")
+  private val numParallelFlushes = filodbConfig.getInt("memstore.flush-task-parallelism")
 
   val creationTime = System.currentTimeMillis()
 
@@ -1034,6 +1035,27 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
 
     tasks
+  }
+
+  def startIngestion(dataStream: Observable[SomeData],
+                     cancelTask: Task[Unit],
+                     flushSched: Scheduler): CancelableFuture[Unit] = {
+    dataStream.flatMap {
+      case d: SomeData =>
+        // The write buffers for all partitions in a group are switched here, in line with ingestion
+        // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
+        // at the same offset/watermark
+        val tasks = createFlushTasks(d.records)
+        ingest(d)
+        Observable.fromIterable(tasks)
+    }
+      .mapParallelUnordered(numParallelFlushes) {
+        // asyncBoundary so subsequent computations in pipeline happen in default threadpool
+        task => task.executeOn(flushSched).asyncBoundary
+      }
+      .completedL
+      .doOnCancel(cancelTask)
+      .runToFuture(ingestSched)
   }
 
   private def createFlushTask(flushGroup: FlushGroup): Task[Response] = {

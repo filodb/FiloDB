@@ -217,7 +217,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
     val errStream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries()))
                               .endWithError(new NumberFormatException)
-    val fut = memStore.ingestStream(dataset1.ref, 0, errStream, s)
+    val fut = memStore.startIngestion(dataset1.ref, 0, errStream, s)
     whenReady(fut.failed) { e =>
       e shouldBe a[NumberFormatException]
     }
@@ -229,7 +229,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries()))
                            .executeWithModel(BatchedExecution(5))
-    memStore.ingestStream(dataset1.ref, 0, stream, s).futureValue
+    memStore.startIngestion(dataset1.ref, 0, stream, s).futureValue
 
     // Two flushes and 3 chunksets have been flushed
     chunksetsWritten shouldEqual initChunksWritten + 4
@@ -258,7 +258,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       linearMultiSeries(startTs= startTime1, seriesPrefix = "Set1"),
       n = numSamples, groupSize = 10, ingestionTimeStep = 310000, ingestionTimeStart = 0))
       .executeWithModel(BatchedExecution(5)) // results in 200 records
-    memStore.ingestStream(dataset1.ref, 0, stream, s).futureValue
+    memStore.startIngestion(dataset1.ref, 0, stream, s).futureValue
 
     partKeysWritten shouldEqual numPartKeysWritten + 10 // 10 set1 series started
     0.until(10).foreach{i => tsShard.partitions.get(i).ingesting shouldEqual true}
@@ -273,7 +273,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       n = numSamples, groupSize = 10, ingestionTimeStep = 310000, ingestionTimeStart = tsShard.lastIngestionTime + 1,
       offset = tsShard.latestOffset.toInt + 1))
       .executeWithModel(BatchedExecution(5)) // results in 200 records
-    memStore.ingestStream(dataset1.ref, 0, stream2, s).futureValue
+    memStore.startIngestion(dataset1.ref, 0, stream2, s).futureValue
 
     // 10 Set1 series started + 10 Set1 series ended + 10 Set2 series started
     partKeysWritten shouldEqual numPartKeysWritten + 30
@@ -291,7 +291,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       n = 500, groupSize = 10, ingestionTimeStep = 310000, ingestionTimeStart = tsShard.lastIngestionTime + 1,
       offset = tsShard.latestOffset.toInt + 1))
       .executeWithModel(BatchedExecution(5)) // results in 200 records
-    memStore.ingestStream(dataset1.ref, 0, stream3, s).futureValue
+    memStore.startIngestion(dataset1.ref, 0, stream3, s).futureValue
 
     // 10 Set1 series started + 10 Set1 series ended + 10 Set2 series started + 10 set2 series ended +
     // 10 set1 series restarted

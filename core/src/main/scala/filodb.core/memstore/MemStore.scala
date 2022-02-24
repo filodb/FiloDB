@@ -115,11 +115,11 @@ trait MemStore extends ChunkSource {
    * @return a CancelableFuture for cancelling the stream subscription, which should be done on teardown
    *        the Future completes the stream ends.  It is up to the caller to ensure this.
    */
-  def ingestStream(dataset: DatasetRef,
-                   shard: Int,
-                   stream: Observable[SomeData],
-                   flushSched: Scheduler,
-                   cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit]
+  def startIngestion(dataset: DatasetRef,
+                     shard: Int,
+                     stream: Observable[SomeData],
+                     flushSched: Scheduler,
+                     cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit]
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit]
 

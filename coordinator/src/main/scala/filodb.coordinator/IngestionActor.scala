@@ -248,7 +248,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
         sendStopMessage(shard)
       }
 
-      val shardIngestionEnd = memStore.ingestStream(ref,
+      val shardIngestionEnd = memStore.startIngestion(ref,
         shard,
         stream,
         flushSched,
