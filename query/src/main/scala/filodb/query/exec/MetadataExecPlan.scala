@@ -10,7 +10,7 @@ import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
 
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
-import filodb.core.memstore.{MemStore, TimeSeriesMemStore}
+import filodb.core.memstore.{TimeSeriesMemStore, TimeSeriesStore}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
 import filodb.core.query._
@@ -312,7 +312,7 @@ final case class PartKeysExec(queryContext: QueryContext,
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
     val rvs = source match {
-      case memStore: MemStore =>
+      case memStore: TimeSeriesStore =>
         val response = memStore.partKeysWithFilters(dataset, shard, filters,
           fetchFirstLastSampleTimes, end, start, queryContext.plannerParams.sampleLimit)
         Observable.now(IteratorBackedRangeVector(
@@ -342,8 +342,8 @@ final case class LabelValuesExec(queryContext: QueryContext,
                (implicit sched: Scheduler): ExecResult = {
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
-    val execResult = if (source.isInstanceOf[MemStore]) {
-      val memStore = source.asInstanceOf[MemStore]
+    val execResult = if (source.isInstanceOf[TimeSeriesStore]) {
+      val memStore = source.asInstanceOf[TimeSeriesStore]
       filters.isEmpty match {
         // retrieves label values for a single label - no column filter
         case true if (columns.size == 1) =>
@@ -401,7 +401,7 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
     val rvs = source match {
-      case ms: MemStore =>
+      case ms: TimeSeriesStore =>
         // TODO: Do we need to check for presence of all three, _ws_, _ns_ and _metric_?
         // TODO: What should be the limit, where to configure?
         // TODO: We don't need to allocate intermediate Map and create an Iterator of Map, instead we can get raw byte
@@ -578,8 +578,8 @@ final case class LabelNamesExec(queryContext: QueryContext,
                (implicit sched: Scheduler): ExecResult = {
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
-    val rvs = if (source.isInstanceOf[MemStore]) {
-      val memStore = source.asInstanceOf[MemStore]
+    val rvs = if (source.isInstanceOf[TimeSeriesStore]) {
+      val memStore = source.asInstanceOf[TimeSeriesStore]
       val response = memStore.labelNames(dataset, shard, filters, endMs, startMs)
 
       Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),

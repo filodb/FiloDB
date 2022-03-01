@@ -96,7 +96,7 @@ class QueryAndIngestBenchmark extends StrictLogging {
                         Observable.fromIterable(data)
                       }
                       Task.fromFuture(
-                        cluster.memStore.ingestStream(dataset.ref, shard, shardStream, global))
+                        cluster.memStore.startIngestion(dataset.ref, shard, shardStream, global))
                     }.countL.runToFuture
 
   val memstore = cluster.memStore.asInstanceOf[TimeSeriesMemStore]

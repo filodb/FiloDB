@@ -110,7 +110,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   private val mMapDirectory = new MMapDirectory(indexDiskLocation)
   private val analyzer = new StandardAnalyzer()
 
-  logger.info(s"Created lucene index for dataset=$ref shard=$shardNum at $indexDiskLocation")
+  logger.info(s"Created lucene index for dataset=$ref shard=$shardNum facetEnabled=$facetEnabled at $indexDiskLocation")
 
   private val config = new IndexWriterConfig(analyzer)
   config.setInfoStream(new LuceneMetricsRouter(ref, shardNum))

@@ -20,7 +20,7 @@ import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import kamon.tag.TagSet
 import monix.eval.Task
-import monix.execution.{Scheduler, UncaughtExceptionReporter}
+import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
 import monix.execution.atomic.AtomicBoolean
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
@@ -264,11 +264,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   import FiloSchedulers._
   import TimeSeriesShard._
 
-  @volatile var isReadyForQuery = false
+  /////// START CONFIGURATION FIELDS ///////////////////
 
-  val shardStats = new TimeSeriesShardStats(ref, shardNum)
-  private val shardKeyLevelIngestionMetricsEnabled =
-    filodbConfig.getBoolean("shard-key-level-ingestion-metrics-enabled")
   private val clusterType = filodbConfig.getString("cluster-type")
   private val deploymentPartitionName = filodbConfig.getString("deployment-partition-name")
   private val targetMaxPartitions = filodbConfig.getInt("memstore.max-partitions-on-heap-per-shard")
@@ -276,8 +273,16 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val ensureBlockHeadroomPercent = filodbConfig.getDouble("memstore.ensure-block-memory-headroom-percent")
   private val ensureNativeMemHeadroomPercent = filodbConfig.getDouble("memstore.ensure-native-memory-headroom-percent")
   private val indexFacetingEnabled = filodbConfig.getBoolean("memstore.index-faceting-enabled")
+  private val numParallelFlushes = filodbConfig.getInt("memstore.flush-task-parallelism")
 
-  val creationTime = System.currentTimeMillis()
+  /////// END CONFIGURATION FIELDS ///////////////////
+
+  /////// START MEMBER STATE FIELDS ///////////////////
+
+  val shardStats = new TimeSeriesShardStats(ref, shardNum)
+  @volatile var isReadyForQuery = false
+
+  private[memstore] val creationTime = System.currentTimeMillis()
 
   /**
     * Map of all partitions in the shard stored in memory, indexed by partition ID
@@ -297,18 +302,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, indexFacetingEnabled, shardNum,
     storeConfig.diskTTLSeconds * 1000)
 
-  private val cardTracker: CardinalityTracker = if (storeConfig.meteringEnabled) {
-    // FIXME switch this to some local-disk based store when we graduate out of POC mode
-    val cardStore = new RocksDbCardinalityStore(ref, shardNum)
-
-    val defaultQuota = quotaSource.getDefaults(ref)
-    val tracker = new CardinalityTracker(ref, shardNum, schemas.part.options.shardKeyColumns.length,
-                                                     defaultQuota, cardStore)
-    quotaSource.getQuotas(ref).foreach { q =>
-      tracker.setQuota(q.shardKeyPrefix, q.quota)
-    }
-    tracker
-  } else UnsafeUtils.ZeroPointer.asInstanceOf[CardinalityTracker]
+  private val cardTracker: CardinalityTracker = initCardTracker()
 
   /**
     * Keeps track of count of rows ingested into memstore, not necessarily flushed.
@@ -346,36 +340,15 @@ class TimeSeriesShard(val ref: DatasetRef,
   /**
    * The maximum blockMetaSize amongst all the schemas this Dataset could ingest
    */
-  val maxMetaSize = schemas.schemas.values.map(_.data.blockMetaSize).max
+  private[memstore] val maxMetaSize = schemas.schemas.values.map(_.data.blockMetaSize).max
 
   require (storeConfig.maxChunkTime > storeConfig.flushInterval, "MaxChunkTime should be greater than FlushInterval")
-  val maxChunkTime = storeConfig.maxChunkTime.toMillis
+  private[memstore] val maxChunkTime = storeConfig.maxChunkTime.toMillis
 
-  val acceptDuplicateSamples = storeConfig.acceptDuplicateSamples
+  private val acceptDuplicateSamples = storeConfig.acceptDuplicateSamples
 
   // Called to remove chunks from ChunkMap of a given partition, when an offheap block is reclaimed
-  private val reclaimListener = new ReclaimListener {
-    def onReclaim(metaAddr: Long, numBytes: Int): Unit = {
-      val partID = UnsafeUtils.getInt(metaAddr)
-      val partition = partitions.get(partID)
-      if (partition != UnsafeUtils.ZeroPointer) {
-        // The number of bytes passed in is the metadata size which depends on schema.  It should match the
-        // TSPartition's blockMetaSize; if it doesn't that is a flag for possible corruption, and we should halt
-        // the process to be safe and log details for further debugging.
-        val chunkID = UnsafeUtils.getLong(metaAddr + 4)
-        if (numBytes != partition.schema.data.blockMetaSize) {
-          Shutdown.haltAndCatchFire( new RuntimeException(f"POSSIBLE CORRUPTION DURING onReclaim(" +
-                       f"metaAddr=0x$metaAddr%08x, numBytes=$numBytes)" +
-                       s"Expected meta size: ${partition.schema.data.blockMetaSize} for schema=${partition.schema}" +
-                       s"  Reclaiming chunk chunkID=$chunkID from shard=$shardNum " +
-                       s"partID=$partID ${partition.stringPartition}"))
-        }
-        partition.removeChunksAt(chunkID)
-        logger.debug(s"Reclaiming chunk chunkID=$chunkID from shard=$shardNum " +
-          s"partID=$partID ${partition.stringPartition}")
-      }
-    }
-  }
+  private val reclaimListener = initReclaimListener()
 
   // Create a single-threaded scheduler just for ingestion.  Name the thread for ease of debugging
   // NOTE: to control intermixing of different Observables/Tasks in this thread, customize ExecutionModel param
@@ -385,7 +358,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val blockMemorySize = storeConfig.shardMemSize
   protected val numGroups = storeConfig.groupsPerShard
   private val chunkRetentionHours = (storeConfig.diskTTLSeconds / 3600).toInt
-  val pagingEnabled = storeConfig.demandPagingEnabled
+  private[memstore] val pagingEnabled = storeConfig.demandPagingEnabled
 
   /**
     * PartitionSet - access TSPartition using ingest record partition key in O(1) time.
@@ -481,7 +454,15 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Detailed filtered ingestion record logging.  See "trace-filters" StoreConfig setting.  Warning: may blow up
     * logs, use at your own risk.
     */
-  val tracedPartFilters = storeConfig.traceFilters
+  private val tracedPartFilters = storeConfig.traceFilters
+
+  private[memstore] val ingestConsumer = new IngestConsumer()
+
+  private[memstore] val addPartitionsDisabled = AtomicBoolean(false)
+
+  /////// END MEMBER STATE FIELDS ///////////////////
+
+  /////// START INNER CLASS DEFINITIONS ///////////////////
 
   /**
     * Iterate TimeSeriesPartition objects relevant to given partIds.
@@ -573,199 +554,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
-  private[memstore] val ingestConsumer = new IngestConsumer()
-
-  /**
-    * Ingest new BinaryRecords in a RecordContainer to this shard.
-    * Skips rows if the offset is below the group watermark for that record's group.
-    * Adds new partitions if needed.
-    */
-  def ingest(container: RecordContainer, offset: Long): Long = {
-    assertThreadName(IngestSchedName)
-    if (container.isCurrentVersion) {
-      if (!container.isEmpty) {
-        ingestConsumer.ingestionTime = container.timestamp
-        ingestConsumer.numActuallyIngested = 0
-        ingestConsumer.ingestOffset = offset
-        brRowReader.recordBase = container.base
-        container.consumeRecords(ingestConsumer)
-        shardStats.rowsIngested.increment(ingestConsumer.numActuallyIngested)
-        shardStats.rowsPerContainer.record(ingestConsumer.numActuallyIngested)
-        ingested += ingestConsumer.numActuallyIngested
-        _offset = offset
-      }
-    } else {
-      shardStats.oldContainers.increment()
-    }
-    _offset
-  }
-
-  def scanTsCardinalities(shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord] = {
-    if (storeConfig.meteringEnabled) {
-      cardTracker.scan(shardKeyPrefix, depth)
-    } else {
-      throw new IllegalArgumentException("Metering is not enabled")
-    }
-  }
-
-  def startFlushingIndex(): Unit =
-    partKeyIndex.startFlushThread(storeConfig.partIndexFlushMinDelaySeconds, storeConfig.partIndexFlushMaxDelaySeconds)
-
-  def ingest(data: SomeData): Long = ingest(data.records, data.offset)
-
-  def recoverIndex(): Future[Unit] = {
-    val indexBootstrapper = new IndexBootstrapper(colStore)
-    indexBootstrapper.bootstrapIndexRaw(partKeyIndex, shardNum, ref)(bootstrapPartKey)
-                     .executeOn(ingestSched) // to make sure bootstrapIndex task is run on ingestion thread
-                     .map { count =>
-                        startFlushingIndex()
-                       logger.info(s"Bootstrapped index for dataset=$ref shard=$shardNum with $count records")
-                     }.runToFuture(ingestSched)
-  }
-
-  /**
-    * Handles actions to be performed for the shard upon bootstrapping
-    * a partition key from index store
-    * @param pk partKey
-    * @return partId assigned to key
-    */
-  // scalastyle:off method.length
-  private[memstore] def bootstrapPartKey(pk: PartKeyRecord): Int = {
-    assertThreadName(IngestSchedName)
-    val schemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
-    val schema = schemas(schemaId)
-    val partId = if (pk.endTime == Long.MaxValue) {
-      // this is an actively ingesting partition
-      val group = partKeyGroup(schemas.part.binSchema, pk.partKey, UnsafeUtils.arayOffset, numGroups)
-      if (schema != Schemas.UnknownSchema) {
-        val part = createNewPartition(pk.partKey, UnsafeUtils.arayOffset, group, CREATE_NEW_PARTID, schema, false, 4)
-        // In theory, we should not get an OutOfMemPartition here since
-        // it should have occurred before node failed too, and with data stopped,
-        // index would not be updated. But if for some reason we see it, drop data
-        if (part == OutOfMemPartition) {
-          logger.error("Could not accommodate partKey while recovering index. " +
-            "WriteBuffer size may not be configured correctly")
-          -1
-        } else {
-          val stamp = partSetLock.writeLock()
-          try {
-            partSet.add(part) // createNewPartition doesn't add part to partSet
-            part.ingesting = true
-            part.partID
-          } finally {
-            partSetLock.unlockWrite(stamp)
-          }
-        }
-      } else {
-        logger.info(s"Ignoring part key with unknown schema ID $schemaId")
-        shardStats.unknownSchemaDropped.increment()
-        -1
-      }
-    } else {
-      // partition assign a new partId to non-ingesting partition,
-      // but no need to create a new TSPartition heap object
-      // instead add the partition to evictedPArtKeys bloom filter so that it can be found if necessary
-      evictedPartKeys.synchronized {
-        require(!evictedPartKeysDisposed)
-        evictedPartKeys.add(PartKey(pk.partKey, UnsafeUtils.arayOffset))
-      }
-      createPartitionID()
-    }
-
-    activelyIngesting.synchronized {
-      if (pk.endTime == Long.MaxValue) activelyIngesting += partId
-      else activelyIngesting -= partId
-    }
-    shardStats.indexRecoveryNumRecordsProcessed.increment()
-    if (schema != Schemas.UnknownSchema) {
-      if (storeConfig.meteringEnabled) {
-        val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset,
-                                                      schema.options.shardKeyColumns)
-        cardTracker.modifyCount(shardKey, 1, if (pk.endTime == Long.MaxValue) 1 else 0)
-      }
-    }
-    partId
-  }
-
-  def indexNames(limit: Int): Seq[String] = partKeyIndex.indexNames(limit)
-
-  def labelValues(labelName: String, topK: Int): Seq[TermInfo] = partKeyIndex.indexValues(labelName, topK)
-
-  /**
-   * This method is to apply column filters and fetch matching time series partitions.
-   *
-   * @param filters column filter
-   * @param labelNames labels to return in the response
-   * @param endTime end time
-   * @param startTime start time
-   * @param limit series limit
-   * @return returns an iterator of map of label key value pairs of each matching time series
-   */
-  def labelValuesWithFilters(filters: Seq[ColumnFilter],
-                             labelNames: Seq[String],
-                             endTime: Long,
-                             startTime: Long,
-                             querySession: QuerySession,
-                             limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
-    val metricShardKeys = schemas.part.options.shardKeyColumns
-    val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
-    LabelValueResultIterator(partKeyIndex.partIdsFromFilters(filters, startTime, endTime),
-                             labelNames, querySession, metricGroupBy, limit)
-  }
-
-  /**
-   * This method is to apply column filters and fetch values for a label.
-   *
-   * @param filters column filter
-   * @param label label values to return in the response
-   * @param endTime end time
-   * @param startTime start time
-   * @param limit series limit
-   * @return returns an iterator of values of for a given label
-   */
-  def singleLabelValuesWithFilters(filters: Seq[ColumnFilter],
-                                   label: String,
-                                   endTime: Long,
-                                   startTime: Long,
-                                   querySession: QuerySession,
-                                   limit: Int): Iterator[ZeroCopyUTF8String] = {
-    if (indexFacetingEnabled) {
-      partKeyIndex.labelValuesEfficient(filters, startTime, endTime, label, limit).iterator.map(_.utf8)
-    } else {
-      val metricShardKeys = schemas.part.options.shardKeyColumns
-      val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
-      SingleLabelValuesResultIterator(partKeyIndex.partIdsFromFilters(filters, startTime, endTime),
-        label, querySession, metricGroupBy, limit)
-    }
-  }
-
-  /**
-    * This method is to apply column filters and fetch matching time series partitions.
-    *
-    * @param filter column filter
-    * @param endTime end time
-    * @param startTime start time
-    * @return returns an iterator of map of label key value pairs of each matching time series
-    */
-  def labelNames(filter: Seq[ColumnFilter],
-                             endTime: Long,
-                             startTime: Long): Seq[String] =
-    labelNamesFromPartKeys(partKeyIndex.labelNamesFromFilters(filter, startTime, endTime))
-
-  /**
-   * Iterator for traversal of partIds, value for the given label will be extracted from the ParitionKey.
-   * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
-   */
-  private def labelNamesFromPartKeys(partId: Int): Seq[String] = {
-    val results = new mutable.HashSet[String]
-    if (PartKeyLuceneIndex.NOT_FOUND == partId) Seq.empty
-    else {
-      val partKeyWithTimes = partKeyFromPartId(partId)
-      results ++= schemas.part.binSchema.colNames(partKeyWithTimes.base, partKeyWithTimes.offset)
-      results.toSeq
-    }
-  }
-
   /**
    * Iterator for traversal of partIds, value for the given label will be extracted from the PartitionKey.
    * This is specifically implemented to avoid building a Map for single label.
@@ -839,81 +627,490 @@ class TimeSeriesShard(val ref: DatasetRef,
     override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = rows.next
   }
 
+  /////// END INNER CLASS DEFINITIONS ///////////////////
+
+  /////// START INIT METHODS ///////////////////
+
+  private def initCardTracker() = {
+    if (storeConfig.meteringEnabled) {
+      // FIXME switch this to some local-disk based store when we graduate out of POC mode
+      val cardStore = new RocksDbCardinalityStore(ref, shardNum)
+
+      val defaultQuota = quotaSource.getDefaults(ref)
+      val tracker = new CardinalityTracker(ref, shardNum, schemas.part.options.shardKeyColumns.length,
+        defaultQuota, cardStore)
+      quotaSource.getQuotas(ref).foreach { q =>
+        tracker.setQuota(q.shardKeyPrefix, q.quota)
+      }
+      tracker
+    } else UnsafeUtils.ZeroPointer.asInstanceOf[CardinalityTracker]
+  }
+
+  private def initReclaimListener() = {
+    new ReclaimListener {
+      def onReclaim(metaAddr: BinaryVectorPtr, numBytes: Int): Unit = {
+        val partID = UnsafeUtils.getInt(metaAddr)
+        val partition = partitions.get(partID)
+        if (partition != UnsafeUtils.ZeroPointer) {
+          // The number of bytes passed in is the metadata size which depends on schema.  It should match the
+          // TSPartition's blockMetaSize; if it doesn't that is a flag for possible corruption, and we should halt
+          // the process to be safe and log details for further debugging.
+          val chunkID = UnsafeUtils.getLong(metaAddr + 4)
+          if (numBytes != partition.schema.data.blockMetaSize) {
+            Shutdown.haltAndCatchFire(new RuntimeException(f"POSSIBLE CORRUPTION DURING onReclaim(" +
+              f"metaAddr=0x$metaAddr%08x, numBytes=$numBytes)" +
+              s"Expected meta size: ${partition.schema.data.blockMetaSize} for schema=${partition.schema}" +
+              s"  Reclaiming chunk chunkID=$chunkID from shard=$shardNum " +
+              s"partID=$partID ${partition.stringPartition}"))
+          }
+          partition.removeChunksAt(chunkID)
+          logger.debug(s"Reclaiming chunk chunkID=$chunkID from shard=$shardNum " +
+            s"partID=$partID ${partition.stringPartition}")
+        }
+      }
+    }
+  }
+  /////// END INIT METHODS ///////////////////
+
+  /////// START SHARD RECOVERY METHODS ///////////////////
+
+  def recoverIndex(): Future[Unit] = {
+    val indexBootstrapper = new IndexBootstrapper(colStore)
+    indexBootstrapper.bootstrapIndexRaw(partKeyIndex, shardNum, ref)(bootstrapPartKey)
+      .executeOn(ingestSched) // to make sure bootstrapIndex task is run on ingestion thread
+      .map { count =>
+        startFlushingIndex()
+        logger.info(s"Bootstrapped index for dataset=$ref shard=$shardNum with $count records")
+      }.runToFuture(ingestSched)
+  }
+
+  def startFlushingIndex(): Unit =
+    partKeyIndex.startFlushThread(storeConfig.partIndexFlushMinDelaySeconds, storeConfig.partIndexFlushMaxDelaySeconds)
+
   /**
-    * This method is to apply column filters and fetch matching time series partition keys.
-    */
-  def partKeysWithFilters(filter: Seq[ColumnFilter],
-                          fetchFirstLastSampleTimes: Boolean,
-                          endTime: Long,
-                          startTime: Long,
-                          limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
-    if (fetchFirstLastSampleTimes) {
-      partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime).iterator.map { pk =>
-        val partKeyMap = convertPartKeyWithTimesToMap(
-          PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime))
-        partKeyMap ++ Map(
-          ("_firstSampleTime_".utf8, pk.startTime.toString.utf8),
-          ("_lastSampleTime_".utf8, pk.endTime.toString.utf8))
-      } take(limit)
+   * Handles actions to be performed for the shard upon bootstrapping
+   * a partition key from index store
+   * @param pk partKey
+   * @return partId assigned to key
+   */
+  // scalastyle:off method.length
+  private[memstore] def bootstrapPartKey(pk: PartKeyRecord): Int = {
+    assertThreadName(IngestSchedName)
+    val schemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
+    val schema = schemas(schemaId)
+    val partId = if (pk.endTime == Long.MaxValue) {
+      // this is an actively ingesting partition
+      val group = partKeyGroup(schemas.part.binSchema, pk.partKey, UnsafeUtils.arayOffset, numGroups)
+      if (schema != Schemas.UnknownSchema) {
+        val part = createNewPartition(pk.partKey, UnsafeUtils.arayOffset, group, CREATE_NEW_PARTID, schema, false, 4)
+        // In theory, we should not get an OutOfMemPartition here since
+        // it should have occurred before node failed too, and with data stopped,
+        // index would not be updated. But if for some reason we see it, drop data
+        if (part == OutOfMemPartition) {
+          logger.error("Could not accommodate partKey while recovering index. " +
+            "WriteBuffer size may not be configured correctly")
+          -1
+        } else {
+          val stamp = partSetLock.writeLock()
+          try {
+            partSet.add(part) // createNewPartition doesn't add part to partSet
+            part.ingesting = true
+            part.partID
+          } finally {
+            partSetLock.unlockWrite(stamp)
+          }
+        }
+      } else {
+        logger.info(s"Ignoring part key with unknown schema ID $schemaId")
+        shardStats.unknownSchemaDropped.increment()
+        -1
+      }
     } else {
-      val partIds = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
-      val inMem = InMemPartitionIterator2(partIds)
-      val inMemPartKeys = inMem.map { p =>
-        convertPartKeyWithTimesToMap(PartKeyWithTimes(p.partKeyBase, p.partKeyOffset, -1, -1))}
-      val skippedPartKeys = inMem.skippedPartIDs.iterator().map(partId => {
-        convertPartKeyWithTimesToMap(partKeyFromPartId(partId))})
-      (inMemPartKeys ++ skippedPartKeys).take(limit)
+      // partition assign a new partId to non-ingesting partition,
+      // but no need to create a new TSPartition heap object
+      // instead add the partition to evictedPArtKeys bloom filter so that it can be found if necessary
+      evictedPartKeys.synchronized {
+        require(!evictedPartKeysDisposed)
+        evictedPartKeys.add(PartKey(pk.partKey, UnsafeUtils.arayOffset))
+      }
+      createPartitionID()
     }
-  }
 
-  private def convertPartKeyWithTimesToMap(partKey: PartKeyWithTimes): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = {
-    schemas.part.binSchema.toStringPairs(partKey.base, partKey.offset).map(pair => {
-      pair._1.utf8 -> pair._2.utf8
-    }).toMap ++
-      Map("_type_".utf8 -> Schemas.global.schemaName(RecordSchema.schemaID(partKey.base, partKey.offset)).utf8)
+    activelyIngesting.synchronized {
+      if (pk.endTime == Long.MaxValue) activelyIngesting += partId
+      else activelyIngesting -= partId
+    }
+    shardStats.indexRecoveryNumRecordsProcessed.increment()
+    if (schema != Schemas.UnknownSchema) {
+      if (storeConfig.meteringEnabled) {
+        val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset,
+          schema.options.shardKeyColumns)
+        cardTracker.modifyCount(shardKey, 1, if (pk.endTime == Long.MaxValue) 1 else 0)
+      }
+    }
+    partId
   }
 
   /**
-    * retrieve partKey for a given PartId
-    */
-  private def partKeyFromPartId(partId: Int): PartKeyWithTimes = {
-    val nextPart = partitions.get(partId)
-    if (nextPart != UnsafeUtils.ZeroPointer)
-      PartKeyWithTimes(nextPart.partKeyBase, nextPart.partKeyOffset, -1, -1)
-    else { //retrieving PartKey from lucene index
-      shardStats.indexPartkeyLookups.increment()
-      val partKeyByteBuf = partKeyIndex.partKeyFromPartId(partId)
-      if (partKeyByteBuf.isDefined) PartKeyWithTimes(partKeyByteBuf.get.bytes, UnsafeUtils.arayOffset, -1, -1)
-      else throw new IllegalStateException("This is not an expected behavior." +
-        " PartId should always have a corresponding PartKey!")
-    }
-  }
-
-  /**
-    * WARNING: Not performant. Use only in tests, or during initial bootstrap.
-    */
+   * WARNING: Not performant. Use only in tests, or during initial bootstrap.
+   */
   def refreshPartKeyIndexBlocking(): Unit = partKeyIndex.refreshReadersBlocking()
 
-  def numRowsIngested: Long = ingested
-
-  def numActivePartitions: Int = partSet.size
-
-  def latestOffset: Long = _offset
-
   /**
-    * Sets the watermark for each subgroup.  If an ingested record offset is below this watermark then it will be
-    * assumed to already have been persisted, and the record will be discarded.  Use only for recovery.
-    * @param watermarks a Map from group number to watermark
-    */
+   * Sets the watermark for each subgroup.  If an ingested record offset is below this watermark then it will be
+   * assumed to already have been persisted, and the record will be discarded.  Use only for recovery.
+   * @param watermarks a Map from group number to watermark
+   */
   def setGroupWatermarks(watermarks: Map[Int, Long]): Unit =
     watermarks.foreach { case (group, mark) => groupWatermark(group) = mark }
 
+  def createDataRecoveryObservable(dataset: DatasetRef, shardNum: Int,
+                                   dataStream: Observable[SomeData],
+                                   startOffset: Long,
+                                   endOffset: Long,
+                                   checkpoints: Map[Int, Long],
+                                   reportingInterval: Long,
+                                   timeout: FiniteDuration): Observable[Long] = {
+    setGroupWatermarks(checkpoints)
+    if (endOffset < startOffset) Observable.empty
+    else {
+      var targetOffset = startOffset + reportingInterval
+      var startOffsetValidated = false
+      dataStream.map { r =>
+        if (!startOffsetValidated) {
+          if (r.offset > startOffset) {
+            val offsetsNotRecovered = r.offset - startOffset
+            logger.error(s"Could not recover dataset=$dataset shard=$shardNum from check pointed offset possibly " +
+              s"because of retention issues. recoveryStartOffset=$startOffset " +
+              s"firstRecordOffset=${r.offset} offsetsNotRecovered=$offsetsNotRecovered")
+            shardStats.offsetsNotRecovered.increment(offsetsNotRecovered)
+          }
+          startOffsetValidated = true
+        }
+        ingest(r)
+      }
+        // Nothing to read from source, blocking indefinitely. In such cases, 60sec timeout causes it
+        // to return endOffset, making recovery complete and to start normal ingestion.
+        .timeoutOnSlowUpstreamTo(timeout, Observable.now(endOffset))
+        .collect {
+          case offset: Long if offset >= endOffset => // last offset reached
+            offset
+          case offset: Long if offset > targetOffset => // reporting interval reached
+            targetOffset += reportingInterval
+            offset
+        }
+    }
+  }
+
+  /////// END SHARD RECOVERY METHODS ///////////////////
+
+  /////// START SHARD INGESTION METHODS ///////////////////
+
   /**
-    * Prepares the given group for flushing.  This MUST be done in the same thread/stream as
-    * input records to avoid concurrency issues, and to ensure that all the partitions in a
-    * group are switched at the same watermark. Also required because this method removes
-    * entries from the partition data structures.
-    */
+   * Returns a new non-negative partition ID which isn't used by any existing parition. A negative
+   * partition ID wouldn't work with bitmaps.
+   */
+  private def createPartitionID(): Int = {
+    assertThreadName(IngestSchedName)
+    val id = nextPartitionID
+
+    // It's unlikely that partition IDs will wrap around, and it's unlikely that collisions
+    // will be encountered. In case either of these conditions occur, keep incrementing the id
+    // until no collision is detected. A given shard is expected to support up to 1M actively
+    // ingesting partitions, and so in the worst case, the loop might run for up to ~100ms.
+    // Afterwards, a complete wraparound is required for collisions to be detected again.
+
+    do {
+      nextPartitionID += 1
+      if (nextPartitionID < 0) {
+        nextPartitionID = 0
+        logger.info(s"dataset=$ref shard=$shardNum nextPartitionID has wrapped around to 0 again")
+      }
+    } while (partitions.containsKey(nextPartitionID))
+
+    id
+  }
+
+  /**
+   * Ingest new BinaryRecords in a RecordContainer to this shard.
+   * Skips rows if the offset is below the group watermark for that record's group.
+   * Adds new partitions if needed.
+   */
+  def ingest(container: RecordContainer, offset: Long): Long = {
+    assertThreadName(IngestSchedName)
+    if (container.isCurrentVersion) {
+      if (!container.isEmpty) {
+        ingestConsumer.ingestionTime = container.timestamp
+        ingestConsumer.numActuallyIngested = 0
+        ingestConsumer.ingestOffset = offset
+        brRowReader.recordBase = container.base
+        container.consumeRecords(ingestConsumer)
+        shardStats.rowsIngested.increment(ingestConsumer.numActuallyIngested)
+        shardStats.rowsPerContainer.record(ingestConsumer.numActuallyIngested)
+        ingested += ingestConsumer.numActuallyIngested
+        _offset = offset
+      }
+    } else {
+      shardStats.oldContainers.increment()
+    }
+    _offset
+  }
+
+  def ingest(data: SomeData): Long = ingest(data.records, data.offset)
+
+  def startIngestion(dataStream: Observable[SomeData],
+                     cancelTask: Task[Unit],
+                     flushSched: Scheduler): CancelableFuture[Unit] = {
+    dataStream.flatMap {
+      case d: SomeData =>
+        // The write buffers for all partitions in a group are switched here, in line with ingestion
+        // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
+        // at the same offset/watermark
+        val tasks = createFlushTasks(d.records)
+        ingest(d)
+        Observable.fromIterable(tasks)
+    }
+      .mapParallelUnordered(numParallelFlushes) {
+        // asyncBoundary so subsequent computations in pipeline happen in default threadpool
+        task => task.executeOn(flushSched).asyncBoundary
+      }
+      .completedL
+      .doOnCancel(cancelTask)
+      .runToFuture(ingestSched)
+  }
+
+  private[memstore] def updatePartEndTimeInIndex(p: TimeSeriesPartition, endTime: Long): Unit =
+    partKeyIndex.updatePartKeyWithEndTime(p.partKeyBytes, p.partID, endTime)()
+
+  private def updateIndexWithEndTime(p: TimeSeriesPartition,
+                                     partFlushChunks: Iterator[ChunkSet],
+                                     dirtyParts: debox.Buffer[Int]): Unit = {
+    // TODO re-enable following assertion. Am noticing that monix uses TrampolineExecutionContext
+    // causing the iterator to be consumed synchronously in some cases. It doesnt
+    // seem to be consistent environment to environment.
+    //assertThreadName(IOSchedName)
+
+    // Below is coded to work concurrently with logic in getOrAddPartitionAndIngest
+    // where we try to activate an inactive time series
+    activelyIngesting.synchronized {
+      if (partFlushChunks.isEmpty && p.ingesting) {
+        var endTime = p.timestampOfLatestSample
+        if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
+        updatePartEndTimeInIndex(p, endTime)
+        dirtyParts += p.partID
+        activelyIngesting -= p.partID
+        markPartAsNotIngesting(p, odp = false)
+        val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
+          p.schema.options.shardKeyColumns)
+        if (storeConfig.meteringEnabled) {
+          cardTracker.modifyCount(shardKey, 0, -1)
+        }
+      }
+    }
+  }
+
+  protected[memstore] def markPartAsNotIngesting(p: TimeSeriesPartition, odp: Boolean): Unit = {
+    p.ingesting = false
+    if (odp) {
+      evictableOdpPartIds.put(p.partID)
+    } else {
+      evictablePartIds.put(p.partID)
+    }
+    shardStats.evictablePartKeysSize.increment()
+  }
+
+  private def getOrAddPartitionForIngestion(recordBase: Any, recordOff: Long,
+                                            group: Int, schema: Schema) = {
+    var part = partSet.getWithIngestBR(recordBase, recordOff, schema)
+    if (part == null) {
+      part = addPartitionForIngestion(recordBase, recordOff, schema, group)
+    }
+    part
+  }
+
+  /**
+   * Looks up the previously assigned partId of a possibly evicted partition.
+   * @return partId >=0 if one is found, CREATE_NEW_PARTID (-1) if not found.
+   */
+  private def lookupPreviouslyAssignedPartId(partKeyBase: Array[Byte], partKeyOffset: Long): Int = {
+    assertThreadName(IngestSchedName)
+    shardStats.evictedPartKeyBloomFilterQueries.increment()
+
+    val mightContain = evictedPartKeys.synchronized {
+      if (!evictedPartKeysDisposed) {
+        evictedPartKeys.mightContain(PartKey(partKeyBase, partKeyOffset))
+      } else {
+        false
+      }
+    }
+
+    if (mightContain) {
+      partKeyIndex.partIdFromPartKeySlow(partKeyBase, partKeyOffset)
+        .getOrElse {
+          shardStats.evictedPartKeyBloomFilterFalsePositives.increment()
+          CREATE_NEW_PARTID
+        }
+    } else CREATE_NEW_PARTID
+  }
+
+  /**
+   * Adds new partition with appropriate partId. If it is a newly seen partKey, then new partId is assigned.
+   * If it is a previously seen partKey that is already in index, it reassigns same partId so that indexes
+   * are still valid.
+   *
+   * This method also updates lucene index and dirty part keys properly.
+   */
+  private def addPartitionForIngestion(recordBase: Any, recordOff: Long, schema: Schema, group: Int) = {
+    assertThreadName(IngestSchedName)
+    // TODO: remove when no longer needed - or figure out how to log only for tracing partitions
+    logger.trace(s"Adding ingestion record details: ${schema.ingestionSchema.debugString(recordBase, recordOff)}")
+    val partKeyOffset = schema.comparator.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
+    val previousPartId = lookupPreviouslyAssignedPartId(partKeyArray, partKeyOffset)
+    // TODO: remove when no longer needed
+    logger.trace(s"Adding part key details: ${schema.partKeySchema.debugString(partKeyArray, partKeyOffset)}")
+    val newPart = createNewPartition(partKeyArray, partKeyOffset, group, previousPartId, schema, false)
+    if (newPart != OutOfMemPartition) {
+      val partId = newPart.partID
+      val startTime = schema.ingestionSchema.getLong(recordBase, recordOff, 0)
+      val shardKey = schema.partKeySchema.colValues(newPart.partKeyBase, newPart.partKeyOffset,
+        schema.options.shardKeyColumns)
+      if (previousPartId == CREATE_NEW_PARTID) {
+        // add new lucene entry if this partKey was never seen before
+        // causes endTime to be set to Long.MaxValue
+        partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
+        if (storeConfig.meteringEnabled) {
+          cardTracker.modifyCount(shardKey, 1, 1)
+        }
+      } else {
+        // newly created partition is re-ingesting now, so update endTime
+        updatePartEndTimeInIndex(newPart, Long.MaxValue)
+      }
+      dirtyPartitionsForIndexFlush += partId // marks this part as dirty so startTime is flushed
+      activelyIngesting.synchronized {
+        activelyIngesting += partId
+        newPart.ingesting = true
+      }
+      val stamp = partSetLock.writeLock()
+      try {
+        partSet.add(newPart)
+      } finally {
+        partSetLock.unlockWrite(stamp)
+      }
+    }
+    newPart
+  }
+
+  /**
+   * Retrieves or creates a new TimeSeriesPartition, updating indices, then ingests the sample from record.
+   * partition portion of ingest BinaryRecord is used to look up existing TSPartition.
+   * Copies the partition portion of the ingest BinaryRecord to offheap write buffer memory.
+   * NOTE: ingestion is skipped if there is an error allocating WriteBuffer space.
+   * @param recordBase the base of the ingestion BinaryRecord
+   * @param recordOff the offset of the ingestion BinaryRecord
+   * @param group the group number, from abs(record.partitionHash % numGroups)
+   */
+  def getOrAddPartitionAndIngest(ingestionTime: Long,
+                                 recordBase: Any, recordOff: Long,
+                                 group: Int, schema: Schema): Unit = {
+    assertThreadName(IngestSchedName)
+    try {
+      val part: FiloPartition = getOrAddPartitionForIngestion(recordBase, recordOff, group, schema)
+      if (part == OutOfMemPartition) {
+        disableAddPartitions()
+      }
+      else {
+        val tsp = part.asInstanceOf[TimeSeriesPartition]
+        brRowReader.schema = schema.ingestionSchema
+        brRowReader.recordOffset = recordOff
+        tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.checkoutForOverflow(group),
+          storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, acceptDuplicateSamples, maxChunkTime)
+        // time series was inactive and has just started re-ingesting
+        if (!tsp.ingesting) {
+          // DO NOT use activelyIngesting to check above condition since it is slow and is called for every sample
+          activelyIngesting.synchronized {
+            if (!tsp.ingesting) {
+              // This is coded to work concurrently with logic in updateIndexWithEndTime
+              // where we try to de-activate an active time series.
+              // Checking ts.ingesting second time needed since the time series may have ended
+              // ingestion in updateIndexWithEndTime during the wait time of lock acquisition.
+              // DO NOT remove the second tsp.ingesting check without understanding this fully.
+              updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
+              dirtyPartitionsForIndexFlush += part.partID
+              activelyIngesting += part.partID
+              tsp.ingesting = true
+              val shardKey = tsp.schema.partKeySchema.colValues(tsp.partKeyBase, tsp.partKeyOffset,
+                tsp.schema.options.shardKeyColumns)
+              if (storeConfig.meteringEnabled) {
+                cardTracker.modifyCount(shardKey, 0, 1)
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      case e: OutOfOffheapMemoryException => disableAddPartitions()
+      case e: Exception =>
+        shardStats.dataDropped.increment()
+        logger.error(s"Unexpected ingestion err in dataset=$ref " +
+          s"shard=$shardNum partition=${schema.ingestionSchema.debugString(recordBase, recordOff)}", e)
+    }
+  }
+
+  private def shouldTrace(partKeyAddr: Long): Boolean = {
+    tracedPartFilters.nonEmpty && {
+      val partKeyPairs = schemas.part.binSchema.toStringPairs(UnsafeUtils.ZeroPointer, partKeyAddr)
+      tracedPartFilters.forall(p => partKeyPairs.contains(p))
+    }
+  }
+
+  /**
+   * Creates new partition and adds them to the shard data structures. DOES NOT update
+   * lucene index. It is the caller's responsibility to add or skip that step depending on the situation.
+   *
+   * @param usePartId pass CREATE_NEW_PARTID to force creation of new partId instead of using one that is passed in
+   */
+  protected def createNewPartition(partKeyBase: Array[Byte], partKeyOffset: Long,
+                                   group: Int, usePartId: Int, schema: Schema,
+                                   odp: Boolean,
+                                   initMapSize: Int = initInfoMapSize): TimeSeriesPartition = {
+    assertThreadName(IngestSchedName)
+    if (partitions.size() >= targetMaxPartitions) {
+      disableAddPartitions()
+    }
+    // Check and evict, if after eviction we still don't have enough memory, then don't proceed
+    // We do not evict in ODP cases since we do not want eviction of ODP partitions that we already paged
+    // in for same query. Calling this as ODP cannibalism. :-)
+    if (addPartitionsDisabled() && !odp) evictForHeadroom()
+    if (addPartitionsDisabled()) OutOfMemPartition
+    else {
+      // PartitionKey is copied to offheap bufferMemory and stays there until it is freed
+      // NOTE: allocateAndCopy and allocNew below could fail if there isn't enough memory.  It is CRUCIAL
+      // that min-write-buffers-free setting is large enough to accommodate the below use cases ALWAYS
+      val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, bufferMemoryManager)
+      val partId = if (usePartId == CREATE_NEW_PARTID) createPartitionID() else usePartId
+      val newPart = if (shouldTrace(partKeyAddr)) {
+        logger.debug(s"Adding tracing TSPartition dataset=$ref shard=$shardNum group=$group partId=$partId")
+        new TracingTimeSeriesPartition(partId, ref, schema, partKeyAddr, shardInfo, initMapSize)
+      } else {
+        new TimeSeriesPartition(partId, schema, partKeyAddr, shardInfo, initMapSize)
+      }
+      partitions.put(partId, newPart)
+      shardStats.partitionsCreated.increment()
+      partitionGroups(group).set(partId)
+      newPart
+    }
+  }
+
+  /////// END SHARD INGESTION METHODS ///////////////////
+
+  /////// START SHARD FLUSH METHODS ///////////////////
+
+  /**
+   * Prepares the given group for flushing.  This MUST be done in the same thread/stream as
+   * input records to avoid concurrency issues, and to ensure that all the partitions in a
+   * group are switched at the same watermark. Also required because this method removes
+   * entries from the partition data structures.
+   */
   def prepareFlushGroup(groupNum: Int): FlushGroup = {
     assertThreadName(IngestSchedName)
 
@@ -986,12 +1183,12 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   /**
-    * Creates zero or more flush tasks (up to the number of flush groups) based on examination
-    * of the record container's ingestion time. This should be called before ingesting the container.
-    *
-    * Note that the tasks returned by this method aren't executed yet. The caller decides how
-    * to run the tasks, and by which threads.
-    */
+   * Creates zero or more flush tasks (up to the number of flush groups) based on examination
+   * of the record container's ingestion time. This should be called before ingesting the container.
+   *
+   * Note that the tasks returned by this method aren't executed yet. The caller decides how
+   * to run the tasks, and by which threads.
+   */
   def createFlushTasks(container: RecordContainer): Seq[Task[Response]] = {
     val tasks = new ArrayBuffer[Task[Response]]()
 
@@ -1029,8 +1226,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     // Only update stuff if no exception was thrown.
 
     if (ingestionTime != lastIngestionTime) {
-        lastIngestionTime = ingestionTime
-        shardStats.ingestionClockDelay.update(System.currentTimeMillis() - ingestionTime)
+      lastIngestionTime = ingestionTime
+      shardStats.ingestionClockDelay.update(System.currentTimeMillis() - ingestionTime)
     }
 
     tasks
@@ -1144,6 +1341,33 @@ class TimeSeriesShard(val ref: DatasetRef,
     Task.fromFuture(result)
   }
 
+  private def commitCheckpoint(ref: DatasetRef, shardNum: Int, flushGroup: FlushGroup): Future[Response] = {
+    assertThreadName(IOSchedName)
+    // negative checkpoints are refused by Kafka, and also offsets should be positive
+    if (flushGroup.flushWatermark > 0) {
+      val fut = metastore.writeCheckpoint(ref, shardNum, flushGroup.groupNum, flushGroup.flushWatermark).map { r =>
+        shardStats.flushesSuccessful.increment()
+        r
+      }.recover { case e =>
+        logger.error(s"Critical! Checkpoint persistence skipped in dataset=$ref shard=$shardNum", e)
+        shardStats.flushesFailedOther.increment()
+        // skip the checkpoint write
+        // Sorry - need to skip to keep the ingestion moving
+        DataDropped
+      }
+      // Update stats
+      if (_offset >= 0) shardStats.offsetLatestInMem.update(_offset)
+      groupWatermark(flushGroup.groupNum) = flushGroup.flushWatermark
+      val maxWatermark = groupWatermark.max
+      val minWatermark = groupWatermark.min
+      if (maxWatermark >= 0) shardStats.offsetLatestFlushed.update(maxWatermark)
+      if (minWatermark >= 0) shardStats.offsetEarliestFlushed.update(minWatermark)
+      fut
+    } else {
+      Future.successful(NotApplied)
+    }
+  }
+
   protected def flushDoneTasks(flushGroup: FlushGroup, resTry: Try[Response]): Unit = {
     assertThreadName(IngestSchedName)
     resTry.foreach { resp =>
@@ -1159,8 +1383,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     val partKeyRecords = InMemPartitionIterator2(flushGroup.dirtyPartsToFlush).map(toPartKeyRecord)
     val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
     colStore.writePartKeys(ref, shardNum,
-                           Observable.fromIteratorUnsafe(partKeyRecords),
-                           storeConfig.diskTTLSeconds, updateHour).map { resp =>
+      Observable.fromIteratorUnsafe(partKeyRecords),
+      storeConfig.diskTTLSeconds, updateHour).map { resp =>
       if (flushGroup.dirtyPartsToFlush.length > 0) {
         logger.info(s"Finished flush of partKeys numPartKeys=${flushGroup.dirtyPartsToFlush.length}" +
           s" resp=$resp for dataset=$ref shard=$shardNum")
@@ -1199,303 +1423,17 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
-  private[memstore] def updatePartEndTimeInIndex(p: TimeSeriesPartition, endTime: Long): Unit =
-    partKeyIndex.updatePartKeyWithEndTime(p.partKeyBytes, p.partID, endTime)()
+  /////// END SHARD FLUSH METHODS ///////////////////
 
-  private def updateIndexWithEndTime(p: TimeSeriesPartition,
-                                     partFlushChunks: Iterator[ChunkSet],
-                                     dirtyParts: debox.Buffer[Int]): Unit = {
-    // TODO re-enable following assertion. Am noticing that monix uses TrampolineExecutionContext
-    // causing the iterator to be consumed synchronously in some cases. It doesnt
-    // seem to be consistent environment to environment.
-    //assertThreadName(IOSchedName)
+  /////// START TIME SERIES EVICTION / REMOVAL METHODS ///////////////////
 
-    // Below is coded to work concurrently with logic in getOrAddPartitionAndIngest
-    // where we try to activate an inactive time series
-    activelyIngesting.synchronized {
-      if (partFlushChunks.isEmpty && p.ingesting) {
-        var endTime = p.timestampOfLatestSample
-        if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
-        updatePartEndTimeInIndex(p, endTime)
-        dirtyParts += p.partID
-        activelyIngesting -= p.partID
-        markPartAsNotIngesting(p, odp = false)
-        val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
-                                                        p.schema.options.shardKeyColumns)
-        if (storeConfig.meteringEnabled) {
-          cardTracker.modifyCount(shardKey, 0, -1)
-        }
+  private def startHeadroomTask(sched: Scheduler) = {
+    sched.scheduleWithFixedDelay(1, 1, TimeUnit.MINUTES, new Runnable {
+      def run() = {
+        evictForHeadroom()
       }
-    }
+    })
   }
-
-  protected[memstore] def markPartAsNotIngesting(p: TimeSeriesPartition, odp: Boolean): Unit = {
-    p.ingesting = false
-    if (odp) {
-      evictableOdpPartIds.put(p.partID)
-    } else {
-      evictablePartIds.put(p.partID)
-    }
-    shardStats.evictablePartKeysSize.increment()
-  }
-
-  private def commitCheckpoint(ref: DatasetRef, shardNum: Int, flushGroup: FlushGroup): Future[Response] = {
-    assertThreadName(IOSchedName)
-    // negative checkpoints are refused by Kafka, and also offsets should be positive
-    if (flushGroup.flushWatermark > 0) {
-      val fut = metastore.writeCheckpoint(ref, shardNum, flushGroup.groupNum, flushGroup.flushWatermark).map { r =>
-        shardStats.flushesSuccessful.increment()
-        r
-      }.recover { case e =>
-        logger.error(s"Critical! Checkpoint persistence skipped in dataset=$ref shard=$shardNum", e)
-        shardStats.flushesFailedOther.increment()
-        // skip the checkpoint write
-        // Sorry - need to skip to keep the ingestion moving
-        DataDropped
-      }
-      // Update stats
-      if (_offset >= 0) shardStats.offsetLatestInMem.update(_offset)
-      groupWatermark(flushGroup.groupNum) = flushGroup.flushWatermark
-      val maxWatermark = groupWatermark.max
-      val minWatermark = groupWatermark.min
-      if (maxWatermark >= 0) shardStats.offsetLatestFlushed.update(maxWatermark)
-      if (minWatermark >= 0) shardStats.offsetEarliestFlushed.update(minWatermark)
-      fut
-    } else {
-      Future.successful(NotApplied)
-    }
-  }
-
-  private[memstore] val addPartitionsDisabled = AtomicBoolean(false)
-
-  // scalastyle:off null
-  private def getOrAddPartitionForIngestion(recordBase: Any, recordOff: Long,
-                                                    group: Int, schema: Schema) = {
-    var part = partSet.getWithIngestBR(recordBase, recordOff, schema)
-    if (part == null) {
-      part = addPartitionForIngestion(recordBase, recordOff, schema, group)
-    }
-    part
-  }
-  // scalastyle:on
-
-  /**
-    * Looks up the previously assigned partId of a possibly evicted partition.
-    * @return partId >=0 if one is found, CREATE_NEW_PARTID (-1) if not found.
-    */
-  private def lookupPreviouslyAssignedPartId(partKeyBase: Array[Byte], partKeyOffset: Long): Int = {
-    assertThreadName(IngestSchedName)
-    shardStats.evictedPartKeyBloomFilterQueries.increment()
-
-    val mightContain = evictedPartKeys.synchronized {
-      if (!evictedPartKeysDisposed) {
-        evictedPartKeys.mightContain(PartKey(partKeyBase, partKeyOffset))
-      } else {
-        false
-      }
-    }
-
-    if (mightContain) {
-      partKeyIndex.partIdFromPartKeySlow(partKeyBase, partKeyOffset)
-        .getOrElse {
-          shardStats.evictedPartKeyBloomFilterFalsePositives.increment()
-          CREATE_NEW_PARTID
-        }
-    } else CREATE_NEW_PARTID
-  }
-
-  /**
-    * Adds new partition with appropriate partId. If it is a newly seen partKey, then new partId is assigned.
-    * If it is a previously seen partKey that is already in index, it reassigns same partId so that indexes
-    * are still valid.
-    *
-    * This method also updates lucene index and dirty part keys properly.
-    */
-  private def addPartitionForIngestion(recordBase: Any, recordOff: Long, schema: Schema, group: Int) = {
-    assertThreadName(IngestSchedName)
-    // TODO: remove when no longer needed - or figure out how to log only for tracing partitions
-    logger.trace(s"Adding ingestion record details: ${schema.ingestionSchema.debugString(recordBase, recordOff)}")
-    val partKeyOffset = schema.comparator.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
-    val previousPartId = lookupPreviouslyAssignedPartId(partKeyArray, partKeyOffset)
-    // TODO: remove when no longer needed
-    logger.trace(s"Adding part key details: ${schema.partKeySchema.debugString(partKeyArray, partKeyOffset)}")
-    val newPart = createNewPartition(partKeyArray, partKeyOffset, group, previousPartId, schema, false)
-    if (newPart != OutOfMemPartition) {
-      val partId = newPart.partID
-      val startTime = schema.ingestionSchema.getLong(recordBase, recordOff, 0)
-      val shardKey = schema.partKeySchema.colValues(newPart.partKeyBase, newPart.partKeyOffset,
-        schema.options.shardKeyColumns)
-      if (previousPartId == CREATE_NEW_PARTID) {
-        // add new lucene entry if this partKey was never seen before
-        // causes endTime to be set to Long.MaxValue
-        partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
-        if (storeConfig.meteringEnabled) {
-          cardTracker.modifyCount(shardKey, 1, 1)
-        }
-      } else {
-        // newly created partition is re-ingesting now, so update endTime
-        updatePartEndTimeInIndex(newPart, Long.MaxValue)
-      }
-      dirtyPartitionsForIndexFlush += partId // marks this part as dirty so startTime is flushed
-      activelyIngesting.synchronized {
-        activelyIngesting += partId
-        newPart.ingesting = true
-      }
-      val stamp = partSetLock.writeLock()
-      try {
-        partSet.add(newPart)
-      } finally {
-        partSetLock.unlockWrite(stamp)
-      }
-    }
-    newPart
-  }
-
-  /**
-    * Retrieves or creates a new TimeSeriesPartition, updating indices, then ingests the sample from record.
-    * partition portion of ingest BinaryRecord is used to look up existing TSPartition.
-    * Copies the partition portion of the ingest BinaryRecord to offheap write buffer memory.
-    * NOTE: ingestion is skipped if there is an error allocating WriteBuffer space.
-    * @param recordBase the base of the ingestion BinaryRecord
-    * @param recordOff the offset of the ingestion BinaryRecord
-    * @param group the group number, from abs(record.partitionHash % numGroups)
-    */
-  def getOrAddPartitionAndIngest(ingestionTime: Long,
-                                 recordBase: Any, recordOff: Long,
-                                 group: Int, schema: Schema): Unit = {
-    assertThreadName(IngestSchedName)
-    try {
-      val part: FiloPartition = getOrAddPartitionForIngestion(recordBase, recordOff, group, schema)
-      if (part == OutOfMemPartition) {
-        disableAddPartitions()
-      }
-      else {
-        val tsp = part.asInstanceOf[TimeSeriesPartition]
-        brRowReader.schema = schema.ingestionSchema
-        brRowReader.recordOffset = recordOff
-        tsp.ingest(ingestionTime, brRowReader, blockFactoryPool.checkoutForOverflow(group),
-          storeConfig.timeAlignedChunksEnabled, flushBoundaryMillis, acceptDuplicateSamples, maxChunkTime)
-        // time series was inactive and has just started re-ingesting
-        if (!tsp.ingesting) {
-          // DO NOT use activelyIngesting to check above condition since it is slow and is called for every sample
-          activelyIngesting.synchronized {
-            if (!tsp.ingesting) {
-              // This is coded to work concurrently with logic in updateIndexWithEndTime
-              // where we try to de-activate an active time series.
-              // Checking ts.ingesting second time needed since the time series may have ended
-              // ingestion in updateIndexWithEndTime during the wait time of lock acquisition.
-              // DO NOT remove the second tsp.ingesting check without understanding this fully.
-              updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
-              dirtyPartitionsForIndexFlush += part.partID
-              activelyIngesting += part.partID
-              tsp.ingesting = true
-              val shardKey = tsp.schema.partKeySchema.colValues(tsp.partKeyBase, tsp.partKeyOffset,
-                tsp.schema.options.shardKeyColumns)
-              if (storeConfig.meteringEnabled) {
-                cardTracker.modifyCount(shardKey, 0, 1)
-              }
-            }
-          }
-        }
-      }
-    } catch {
-      case e: OutOfOffheapMemoryException => disableAddPartitions()
-      case e: Exception =>
-        shardStats.dataDropped.increment()
-        logger.error(s"Unexpected ingestion err in dataset=$ref " +
-          s"shard=$shardNum partition=${schema.ingestionSchema.debugString(recordBase, recordOff)}", e)
-    }
-  }
-
-  private def shouldTrace(partKeyAddr: Long): Boolean = {
-    tracedPartFilters.nonEmpty && {
-      val partKeyPairs = schemas.part.binSchema.toStringPairs(UnsafeUtils.ZeroPointer, partKeyAddr)
-      tracedPartFilters.forall(p => partKeyPairs.contains(p))
-    }
-  }
-
-  /**
-    * Creates new partition and adds them to the shard data structures. DOES NOT update
-    * lucene index. It is the caller's responsibility to add or skip that step depending on the situation.
-    *
-    * @param usePartId pass CREATE_NEW_PARTID to force creation of new partId instead of using one that is passed in
-    */
-  protected def createNewPartition(partKeyBase: Array[Byte], partKeyOffset: Long,
-                                   group: Int, usePartId: Int, schema: Schema,
-                                   odp: Boolean,
-                                   initMapSize: Int = initInfoMapSize): TimeSeriesPartition = {
-    assertThreadName(IngestSchedName)
-    if (partitions.size() >= targetMaxPartitions) {
-      disableAddPartitions()
-    }
-    // Check and evict, if after eviction we still don't have enough memory, then don't proceed
-    // We do not evict in ODP cases since we do not want eviction of ODP partitions that we already paged
-    // in for same query. Calling this as ODP cannibalism. :-)
-    if (addPartitionsDisabled() && !odp) evictForHeadroom()
-    if (addPartitionsDisabled()) OutOfMemPartition
-    else {
-      // PartitionKey is copied to offheap bufferMemory and stays there until it is freed
-      // NOTE: allocateAndCopy and allocNew below could fail if there isn't enough memory.  It is CRUCIAL
-      // that min-write-buffers-free setting is large enough to accommodate the below use cases ALWAYS
-      val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, bufferMemoryManager)
-      val partId = if (usePartId == CREATE_NEW_PARTID) createPartitionID() else usePartId
-      val newPart = if (shouldTrace(partKeyAddr)) {
-        logger.debug(s"Adding tracing TSPartition dataset=$ref shard=$shardNum group=$group partId=$partId")
-        new TracingTimeSeriesPartition(partId, ref, schema, partKeyAddr, shardInfo, initMapSize)
-      } else {
-        new TimeSeriesPartition(partId, schema, partKeyAddr, shardInfo, initMapSize)
-      }
-      partitions.put(partId, newPart)
-      shardStats.partitionsCreated.increment()
-      partitionGroups(group).set(partId)
-      newPart
-    }
-  }
-
-  /**
-   * Called during ingestion if we run out of memory while creating TimeSeriesPartition, or
-   * if we went above the maxPartitionsLimit without being able to evict. Can appens if
-   * within 1 minute (time between headroom tasks) too many new time series was added and it
-   * went beyond limit of max partitions (or ran out of native memory).
-   *
-   * When partition addition is disabled, headroom task begins to run inline during ingestion
-   * with force-eviction enabled.
-   */
-  private def disableAddPartitions(): Unit = {
-    assertThreadName(IngestSchedName)
-    if (addPartitionsDisabled.compareAndSet(false, true))
-      logger.warn(s"dataset=$ref shard=$shardNum: Out of native memory, or max partitions reached. " +
-        s"Not able to evict enough; adding partitions disabled")
-    shardStats.dataDropped.increment()
-  }
-
-  /**
-   * Returns a new non-negative partition ID which isn't used by any existing parition. A negative
-   * partition ID wouldn't work with bitmaps.
-   */
-  private def createPartitionID(): Int = {
-    assertThreadName(IngestSchedName)
-    val id = nextPartitionID
-
-    // It's unlikely that partition IDs will wrap around, and it's unlikely that collisions
-    // will be encountered. In case either of these conditions occur, keep incrementing the id
-    // until no collision is detected. A given shard is expected to support up to 1M actively
-    // ingesting partitions, and so in the worst case, the loop might run for up to ~100ms.
-    // Afterwards, a complete wraparound is required for collisions to be detected again.
-
-    do {
-      nextPartitionID += 1
-      if (nextPartitionID < 0) {
-        nextPartitionID = 0
-        logger.info(s"dataset=$ref shard=$shardNum nextPartitionID has wrapped around to 0 again")
-      }
-    } while (partitions.containsKey(nextPartitionID))
-
-    id
-  }
-
-  def analyzeAndLogCorruptPtr(cve: CorruptVectorException): Unit =
-    logger.error(cve.getMessage + "\n" + BlockDetective.stringReport(cve.ptr, blockStore, blockFactoryPool))
 
   /**
    * Check and evict partitions to free up memory and heap space.  NOTE: This must be called in the ingestion
@@ -1565,23 +1503,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
     true
   }
-
-  //scalastyle:on
-
-  // Permanently removes the given partition ID from our in-memory data structures
-  // Also frees partition key if necessary
-  private def removePartition(partitionObj: TimeSeriesPartition): Unit = {
-    assertThreadName(IngestSchedName)
-    val stamp = partSetLock.writeLock()
-    try {
-      partSet.remove(partitionObj)
-    } finally {
-      partSetLock.unlockWrite(stamp)
-    }
-    if (partitions.remove(partitionObj.partID, partitionObj)) {
-      partitionObj.shutdown()
-    }
-  }
+  // scalastyle:on method.length
 
   private def partitionsToEvict(numPartsToEvict: Int): debox.Buffer[Int] = {
     val partIdsToEvict = debox.Buffer.ofSize[Int](numPartsToEvict)
@@ -1591,115 +1513,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
     shardStats.evictablePartKeysSize.update(evictableOdpPartIds.size + evictablePartIds.size)
     partIdsToEvict
-  }
-
-  private[core] def getPartition(partKey: Array[Byte]): Option[TimeSeriesPartition] = {
-    var part: Option[FiloPartition] = None
-    // Access the partition set optimistically. If nothing acquired the write lock, then
-    // nothing changed in the set, and the partition object is the correct one.
-    var stamp = partSetLock.tryOptimisticRead()
-    if (stamp != 0) {
-      part = partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset, schemas.part)
-    }
-    if (!partSetLock.validate(stamp)) {
-      // Because the stamp changed, the write lock was acquired and the set likely changed.
-      // Try again with a full read lock, which will block if necessary so as to not run
-      // concurrently with any thread making changes to the set. This guarantees that
-      // the correct partition is returned.
-      stamp = partSetLock.readLock()
-      try {
-        part = partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset, schemas.part)
-      } finally {
-        partSetLock.unlockRead(stamp)
-      }
-    }
-    part.map(_.asInstanceOf[TimeSeriesPartition])
-  }
-
-  protected def schemaIDFromPartID(partID: Int): Int = {
-    partitions.get(partID) match {
-      case TimeSeriesShard.OutOfMemPartition =>
-        partKeyIndex.partKeyFromPartId(partID).map { pkBytesRef =>
-          val unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(pkBytesRef.offset)
-          RecordSchema.schemaID(pkBytesRef.bytes, unsafeKeyOffset)
-        }.getOrElse(-1)
-      case p: TimeSeriesPartition => p.schema.schemaHash
-    }
-  }
-
-  private def shardKeyValuesFromFilter(shardKeyColumns: Seq[String], filters: Seq[ColumnFilter]): Seq[String] = {
-    shardKeyColumns.map { col =>
-      filters.collectFirst {
-        case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
-      }.getOrElse("multiple")
-    }.toList
-  }
-  /**
-    * Looks up partitions and schema info from ScanMethods, usually by doing a Lucene search.
-    * Also returns detailed information about what is in memory and not, and does schema discovery.
-    */
-  def lookupPartitions(partMethod: PartitionScanMethod,
-                       chunkMethod: ChunkScanMethod,
-                       querySession: QuerySession): PartLookupResult = {
-    // any exceptions thrown here should be caught by a wrapped Task.
-    // At the end, MultiSchemaPartitionsExec.execute releases the lock when the task is complete
-    partMethod match {
-      case SinglePartitionScan(partition, _) =>
-        val partIds = debox.Buffer.empty[Int]
-        getPartition(partition).foreach(p => partIds += p.partID)
-        PartLookupResult(shardNum, chunkMethod, partIds, Some(RecordSchema.schemaID(partition)),
-          dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter())
-      case MultiPartitionScan(partKeys, _)   =>
-        val partIds = debox.Buffer.empty[Int]
-        partKeys.flatMap(getPartition).foreach(p => partIds += p.partID)
-        PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID),
-          dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter())
-      case FilteredPartitionScan(_, filters) =>
-        val metricShardKeys = schemas.part.options.shardKeyColumns
-        val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
-        val chunksReadCounter = querySession.queryStats.getDataBytesScannedCounter(metricGroupBy)
-        // No matter if there are filters or not, need to run things through Lucene so we can discover potential
-        // TSPartitions to read back from disk
-        val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
-        shardStats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
-        querySession.queryStats.getTimeSeriesScannedCounter(metricGroupBy).addAndGet(matches.length)
-        Kamon.currentSpan().tag(s"num-partitions-from-index-$shardNum", matches.length)
-
-        // first find out which partitions are being queried for data not in memory
-        val firstPartId = if (matches.isEmpty) None else Some(matches(0))
-        val _schema = firstPartId.map(schemaIDFromPartID)
-        val it1 = InMemPartitionIterator2(matches)
-        val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
-        val partIdsNotInMem = it1.skippedPartIDs
-        Kamon.currentSpan().tag(s"num-partitions-not-in-memory-$shardNum", partIdsNotInMem.length)
-        val startTimes = if (partIdsToPage.nonEmpty) {
-          val st = partKeyIndex.startTimeFromPartIds(partIdsToPage)
-          logger.debug(s"Some partitions have earliestTime > queryStartTime(${chunkMethod.startTime}); " +
-            s"startTime lookup for query in dataset=$ref shard=$shardNum " +
-            s"resulted in startTimes=$st")
-          st
-        }
-        else {
-          logger.debug(s"StartTime lookup was not needed. All partition's data for query in dataset=$ref " +
-            s"shard=$shardNum are in memory")
-          debox.Map.empty[Int, Long]
-        }
-        // now provide an iterator that additionally supplies the startTimes for
-        // those partitions that may need to be paged
-        PartLookupResult(shardNum, chunkMethod, matches, _schema, startTimes, partIdsNotInMem,
-          Nil, chunksReadCounter)
-    }
-  }
-
-  def scanPartitions(iterResult: PartLookupResult,
-                     colIds: Seq[Types.ColumnId],
-                     querySession: QuerySession): Observable[ReadablePartition] = {
-
-    val partIter = new InMemPartitionIterator2(iterResult.partsInMemory)
-    Observable.fromIteratorUnsafe(partIter.map { p =>
-      shardStats.partitionsQueried.increment()
-      p
-    })
   }
 
   /**
@@ -1727,13 +1540,14 @@ class TimeSeriesShard(val ref: DatasetRef,
    * If addPartitions is disabled, we force eviction even if we cannot acquire eviction lock.
    * @return true if eviction was attempted
    */
+    // scalastyle:off method.length
   private[memstore] def evictForHeadroom(): Boolean = {
 
     // measure how much headroom we have
     val blockStoreCurrentFreePercent = blockStore.currentFreePercent
     val tspCountFreePercent = (targetMaxPartitions - partitions.size.toDouble) * 100 / targetMaxPartitions
     val nativeMemFreePercent = bufferMemoryManager.numFreeBytes.toDouble * 100 /
-                                                  bufferMemoryManager.upperBoundSizeInBytes
+      bufferMemoryManager.upperBoundSizeInBytes
 
     // calculate lock timeouts based on free percents and target headroom to maintain. Lesser the headroom,
     // higher the timeout. Choose highest among the three.
@@ -1784,14 +1598,308 @@ class TimeSeriesShard(val ref: DatasetRef,
       true
     }
   }
+  // scalastyle:on method.length
 
-  private def startHeadroomTask(sched: Scheduler) = {
-    sched.scheduleWithFixedDelay(1, 1, TimeUnit.MINUTES, new Runnable {
-      def run() = {
-        evictForHeadroom()
+  /**
+   * Removes the given partition from our in-memory data structures.
+   * Also frees partition key if necessary.
+   * It is called either when evicting the partition, or permanently purging the partition.
+   * Note this does not remove the partition key from index.
+   */
+  private def removePartition(partitionObj: TimeSeriesPartition): Unit = {
+    assertThreadName(IngestSchedName)
+    val stamp = partSetLock.writeLock()
+    try {
+      partSet.remove(partitionObj)
+    } finally {
+      partSetLock.unlockWrite(stamp)
+    }
+    if (partitions.remove(partitionObj.partID, partitionObj)) {
+      partitionObj.shutdown()
+    }
+  }
+
+  /**
+   * Called during ingestion if we run out of memory while creating TimeSeriesPartition, or
+   * if we went above the maxPartitionsLimit without being able to evict. Can appens if
+   * within 1 minute (time between headroom tasks) too many new time series was added and it
+   * went beyond limit of max partitions (or ran out of native memory).
+   *
+   * When partition addition is disabled, headroom task begins to run inline during ingestion
+   * with force-eviction enabled.
+   */
+  private def disableAddPartitions(): Unit = {
+    assertThreadName(IngestSchedName)
+    if (addPartitionsDisabled.compareAndSet(false, true))
+      logger.warn(s"dataset=$ref shard=$shardNum: Out of native memory, or max partitions reached. " +
+        s"Not able to evict enough; adding partitions disabled")
+    shardStats.dataDropped.increment()
+  }
+
+  /////// END TIME SERIES EVICTION / REMOVAL METHODS ///////////////////
+
+  /////// START SHARD QUERY METHODS ///////////////////
+
+  def scanTsCardinalities(shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord] = {
+    if (storeConfig.meteringEnabled) {
+      cardTracker.scan(shardKeyPrefix, depth)
+    } else {
+      throw new IllegalArgumentException("Metering is not enabled")
+    }
+  }
+
+  def indexNames(limit: Int): Seq[String] = partKeyIndex.indexNames(limit)
+
+  def labelValues(labelName: String, topK: Int): Seq[TermInfo] = partKeyIndex.indexValues(labelName, topK)
+
+  /**
+   * This method is to apply column filters and fetch matching time series partitions.
+   *
+   * @param filters column filter
+   * @param labelNames labels to return in the response
+   * @param endTime end time
+   * @param startTime start time
+   * @param limit series limit
+   * @return returns an iterator of map of label key value pairs of each matching time series
+   */
+  def labelValuesWithFilters(filters: Seq[ColumnFilter],
+                             labelNames: Seq[String],
+                             endTime: Long,
+                             startTime: Long,
+                             querySession: QuerySession,
+                             limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
+    val metricShardKeys = schemas.part.options.shardKeyColumns
+    val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
+    LabelValueResultIterator(partKeyIndex.partIdsFromFilters(filters, startTime, endTime),
+      labelNames, querySession, metricGroupBy, limit)
+  }
+
+  /**
+   * This method is to apply column filters and fetch values for a label.
+   *
+   * @param filters column filter
+   * @param label label values to return in the response
+   * @param endTime end time
+   * @param startTime start time
+   * @param limit series limit
+   * @return returns an iterator of values of for a given label
+   */
+  def singleLabelValuesWithFilters(filters: Seq[ColumnFilter],
+                                   label: String,
+                                   endTime: Long,
+                                   startTime: Long,
+                                   querySession: QuerySession,
+                                   limit: Int): Iterator[ZeroCopyUTF8String] = {
+    if (indexFacetingEnabled) {
+      partKeyIndex.labelValuesEfficient(filters, startTime, endTime, label, limit).iterator.map(_.utf8)
+    } else {
+      val metricShardKeys = schemas.part.options.shardKeyColumns
+      val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
+      SingleLabelValuesResultIterator(partKeyIndex.partIdsFromFilters(filters, startTime, endTime),
+        label, querySession, metricGroupBy, limit)
+    }
+  }
+
+  /**
+   * This method is to apply column filters and fetch matching time series partitions.
+   *
+   * @param filter column filter
+   * @param endTime end time
+   * @param startTime start time
+   * @return returns an iterator of map of label key value pairs of each matching time series
+   */
+  def labelNames(filter: Seq[ColumnFilter],
+                 endTime: Long,
+                 startTime: Long): Seq[String] =
+    labelNamesFromPartKeys(partKeyIndex.labelNamesFromFilters(filter, startTime, endTime))
+
+  /**
+   * Iterator for traversal of partIds, value for the given label will be extracted from the ParitionKey.
+   * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
+   */
+  private def labelNamesFromPartKeys(partId: Int): Seq[String] = {
+    val results = new mutable.HashSet[String]
+    if (PartKeyLuceneIndex.NOT_FOUND == partId) Seq.empty
+    else {
+      val partKeyWithTimes = partKeyFromPartId(partId)
+      results ++= schemas.part.binSchema.colNames(partKeyWithTimes.base, partKeyWithTimes.offset)
+      results.toSeq
+    }
+  }
+
+  /**
+   * This method is to apply column filters and fetch matching time series partition keys.
+   */
+  def partKeysWithFilters(filter: Seq[ColumnFilter],
+                          fetchFirstLastSampleTimes: Boolean,
+                          endTime: Long,
+                          startTime: Long,
+                          limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
+    if (fetchFirstLastSampleTimes) {
+      partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime).iterator.map { pk =>
+        val partKeyMap = convertPartKeyWithTimesToMap(
+          PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime))
+        partKeyMap ++ Map(
+          ("_firstSampleTime_".utf8, pk.startTime.toString.utf8),
+          ("_lastSampleTime_".utf8, pk.endTime.toString.utf8))
+      } take(limit)
+    } else {
+      val partIds = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
+      val inMem = InMemPartitionIterator2(partIds)
+      val inMemPartKeys = inMem.map { p =>
+        convertPartKeyWithTimesToMap(PartKeyWithTimes(p.partKeyBase, p.partKeyOffset, -1, -1))}
+      val skippedPartKeys = inMem.skippedPartIDs.iterator().map(partId => {
+        convertPartKeyWithTimesToMap(partKeyFromPartId(partId))})
+      (inMemPartKeys ++ skippedPartKeys).take(limit)
+    }
+  }
+
+  private def convertPartKeyWithTimesToMap(partKey: PartKeyWithTimes): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = {
+    schemas.part.binSchema.toStringPairs(partKey.base, partKey.offset).map(pair => {
+      pair._1.utf8 -> pair._2.utf8
+    }).toMap ++
+      Map("_type_".utf8 -> Schemas.global.schemaName(RecordSchema.schemaID(partKey.base, partKey.offset)).utf8)
+  }
+
+  /**
+   * retrieve partKey for a given PartId
+   */
+  private def partKeyFromPartId(partId: Int): PartKeyWithTimes = {
+    val nextPart = partitions.get(partId)
+    if (nextPart != UnsafeUtils.ZeroPointer)
+      PartKeyWithTimes(nextPart.partKeyBase, nextPart.partKeyOffset, -1, -1)
+    else { //retrieving PartKey from lucene index
+      shardStats.indexPartkeyLookups.increment()
+      val partKeyByteBuf = partKeyIndex.partKeyFromPartId(partId)
+      if (partKeyByteBuf.isDefined) PartKeyWithTimes(partKeyByteBuf.get.bytes, UnsafeUtils.arayOffset, -1, -1)
+      else throw new IllegalStateException("This is not an expected behavior." +
+        " PartId should always have a corresponding PartKey!")
+    }
+  }
+
+  def numRowsIngested: Long = ingested
+
+  def numActivePartitions: Int = partSet.size
+
+  def latestOffset: Long = _offset
+
+  private[core] def getPartition(partKey: Array[Byte]): Option[TimeSeriesPartition] = {
+    var part: Option[FiloPartition] = None
+    // Access the partition set optimistically. If nothing acquired the write lock, then
+    // nothing changed in the set, and the partition object is the correct one.
+    var stamp = partSetLock.tryOptimisticRead()
+    if (stamp != 0) {
+      part = partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset, schemas.part)
+    }
+    if (!partSetLock.validate(stamp)) {
+      // Because the stamp changed, the write lock was acquired and the set likely changed.
+      // Try again with a full read lock, which will block if necessary so as to not run
+      // concurrently with any thread making changes to the set. This guarantees that
+      // the correct partition is returned.
+      stamp = partSetLock.readLock()
+      try {
+        part = partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset, schemas.part)
+      } finally {
+        partSetLock.unlockRead(stamp)
       }
+    }
+    part.map(_.asInstanceOf[TimeSeriesPartition])
+  }
+
+  protected def schemaIDFromPartID(partID: Int): Int = {
+    partitions.get(partID) match {
+      case TimeSeriesShard.OutOfMemPartition =>
+        partKeyIndex.partKeyFromPartId(partID).map { pkBytesRef =>
+          val unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(pkBytesRef.offset)
+          RecordSchema.schemaID(pkBytesRef.bytes, unsafeKeyOffset)
+        }.getOrElse(-1)
+      case p: TimeSeriesPartition => p.schema.schemaHash
+    }
+  }
+
+  def analyzeAndLogCorruptPtr(cve: CorruptVectorException): Unit =
+    logger.error(cve.getMessage + "\n" + BlockDetective.stringReport(cve.ptr, blockStore, blockFactoryPool))
+
+  private def shardKeyValuesFromFilter(shardKeyColumns: Seq[String], filters: Seq[ColumnFilter]): Seq[String] = {
+    shardKeyColumns.map { col =>
+      filters.collectFirst {
+        case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
+      }.getOrElse("multiple")
+    }.toList
+  }
+
+  /**
+   * Looks up partitions and schema info from ScanMethods, usually by doing a Lucene search.
+   * Also returns detailed information about what is in memory and not, and does schema discovery.
+   */
+  // scalastyle:off method.length
+  def lookupPartitions(partMethod: PartitionScanMethod,
+                       chunkMethod: ChunkScanMethod,
+                       querySession: QuerySession): PartLookupResult = {
+    // At the end, MultiSchemaPartitionsExec.execute releases the lock when the task is complete
+    partMethod match {
+      case SinglePartitionScan(partition, _) =>
+        val partIds = debox.Buffer.empty[Int]
+        getPartition(partition).foreach(p => partIds += p.partID)
+        PartLookupResult(shardNum, chunkMethod, partIds, Some(RecordSchema.schemaID(partition)),
+          dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter())
+      case MultiPartitionScan(partKeys, _)   =>
+        val partIds = debox.Buffer.empty[Int]
+        partKeys.flatMap(getPartition).foreach(p => partIds += p.partID)
+        PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID),
+          dataBytesScannedCtr = querySession.queryStats.getDataBytesScannedCounter())
+      case FilteredPartitionScan(_, filters) =>
+        val metricShardKeys = schemas.part.options.shardKeyColumns
+        val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
+        val chunksReadCounter = querySession.queryStats.getDataBytesScannedCounter(metricGroupBy)
+        // No matter if there are filters or not, need to run things through Lucene so we can discover potential
+        // TSPartitions to read back from disk
+        val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
+        shardStats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
+        querySession.queryStats.getTimeSeriesScannedCounter(metricGroupBy).addAndGet(matches.length)
+        Kamon.currentSpan().tag(s"num-partitions-from-index-$shardNum", matches.length)
+
+        // first find out which partitions are being queried for data not in memory
+        val firstPartId = if (matches.isEmpty) None else Some(matches(0))
+        val _schema = firstPartId.map(schemaIDFromPartID)
+        val it1 = InMemPartitionIterator2(matches)
+        val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
+        val partIdsNotInMem = it1.skippedPartIDs
+        Kamon.currentSpan().tag(s"num-partitions-not-in-memory-$shardNum", partIdsNotInMem.length)
+        val startTimes = if (partIdsToPage.nonEmpty) {
+          val st = partKeyIndex.startTimeFromPartIds(partIdsToPage)
+          logger.debug(s"Some partitions have earliestTime > queryStartTime(${chunkMethod.startTime}); " +
+            s"startTime lookup for query in dataset=$ref shard=$shardNum " +
+            s"resulted in startTimes=$st")
+          st
+        }
+        else {
+          logger.debug(s"StartTime lookup was not needed. All partition's data for query in dataset=$ref " +
+            s"shard=$shardNum are in memory")
+          debox.Map.empty[Int, Long]
+        }
+        // now provide an iterator that additionally supplies the startTimes for
+        // those partitions that may need to be paged
+        PartLookupResult(shardNum, chunkMethod, matches, _schema, startTimes, partIdsNotInMem,
+          Nil, chunksReadCounter)
+    }
+  }
+  // scalastyle:on method.length
+
+  def scanPartitions(iterResult: PartLookupResult,
+                     colIds: Seq[Types.ColumnId],
+                     querySession: QuerySession): Observable[ReadablePartition] = {
+
+    val partIter = new InMemPartitionIterator2(iterResult.partsInMemory)
+    Observable.fromIteratorUnsafe(partIter.map { p =>
+      shardStats.partitionsQueried.increment()
+      p
     })
   }
+
+  /////// END SHARD QUERY METHODS ///////////////////
+
+  /////// START SHARD SHUTDOWN METHODS ///////////////////
 
   /**
     * Please use this for testing only - reclaims ALL used offheap blocks.  Maybe you are trying to test
@@ -1841,4 +1949,6 @@ class TimeSeriesShard(val ref: DatasetRef,
       logger.error("Exception when shutting down shard", e)
     }
   }
+
+  /////// END SHARD SHUTDOWN METHODS ///////////////////
 }
