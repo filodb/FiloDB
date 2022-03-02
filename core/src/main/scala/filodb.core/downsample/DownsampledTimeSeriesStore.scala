@@ -19,11 +19,19 @@ import filodb.core.query.{ColumnFilter, QuerySession, ServiceUnavailableExceptio
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
+/**
+ * An implementation of TimeSeriesStore with data fetched from a column store
+ *
+ * @param store the store which houses the downsampled data
+ * @param rawColStore the store which houses the original raw data from which downsampled data was derived
+ * @param filodbConfig filodb configuration
+ * @param ioPool the executor used to perform network IO
+ */
 class DownsampledTimeSeriesStore(val store: ColumnStore,
                                  rawColStore: ColumnStore,
                                  val filodbConfig: Config)
                                 (implicit val ioPool: ExecutionContext)
-extends MemStore with StrictLogging {
+extends TimeSeriesStore with StrictLogging {
   import collection.JavaConverters._
 
   private val datasets = new HashMap[DatasetRef, NonBlockingHashMapLong[DownsampledTimeSeriesShard]]
@@ -174,16 +182,18 @@ extends MemStore with StrictLogging {
   override def ingest(dataset: DatasetRef, shard: Int,
                       data: SomeData): Unit = throw new UnsupportedOperationException()
 
-  override def ingestStream(dataset: DatasetRef,
-                   shard: Int,
-                   stream: Observable[SomeData],
-                   flushSched: Scheduler,
-                   cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit] = throw new UnsupportedOperationException()
+  override def startIngestion(dataset: DatasetRef,
+                              shard: Int,
+                              stream: Observable[SomeData],
+                              flushSched: Scheduler,
+                              cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit] =
+    throw new UnsupportedOperationException()
 
-  override def recoverStream(dataset: DatasetRef, shard: Int,
-                             stream: Observable[SomeData],
-                             startOffset: Long, endOffset: Long, checkpoints: Map[Int, Long],
-                             reportingInterval: Long) (implicit timeout: FiniteDuration)
+  override def createDataRecoveryObservable(dataset: DatasetRef, shard: Int,
+                                            stream: Observable[SomeData],
+                                            startOffset: Long, endOffset: Long, checkpoints: Map[Int, Long],
+                                            reportingInterval: Long)
+                                           (implicit timeout: FiniteDuration)
                               : Observable[Long] = throw new UnsupportedOperationException()
 
   override def numPartitions(dataset: DatasetRef, shard: Int): Int = throw new UnsupportedOperationException()

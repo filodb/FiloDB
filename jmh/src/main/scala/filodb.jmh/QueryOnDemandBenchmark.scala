@@ -109,7 +109,7 @@ class QueryOnDemandBenchmark extends StrictLogging {
                         val data = bytes.map { array => SomeData(RecordContainer(array), idx) }
                         Observable.fromIterable(data)
                       }
-                      Task.fromFuture(memStore.ingestStream
+                      Task.fromFuture(memStore.startIngestion
                         (dataset.ref, shard, shardStream, global, Task {}))
                     }.countL.runToFuture
   Await.result(producingFut, 30.seconds)
