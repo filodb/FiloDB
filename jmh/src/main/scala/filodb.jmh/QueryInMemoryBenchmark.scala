@@ -107,7 +107,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
                         val data = bytes.map { array => SomeData(RecordContainer(array), idx) }
                         Observable.fromIterable(data)
                       }
-                      Task.fromFuture(cluster.memStore.ingestStream(dataset.ref, shard, shardStream, global))
+                      Task.fromFuture(cluster.memStore.startIngestion(dataset.ref, shard, shardStream, global))
                     }.countL.runToFuture
   Await.result(producingFut, 30.seconds)
   Thread sleep 2000

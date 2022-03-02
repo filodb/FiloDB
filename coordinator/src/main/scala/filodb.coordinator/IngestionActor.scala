@@ -32,7 +32,7 @@ object IngestionActor {
 
   def props(ref: DatasetRef,
             schemas: Schemas,
-            memStore: MemStore,
+            memStore: TimeSeriesStore,
             source: NodeClusterActor.IngestionSource,
             downsample: DownsampleConfig,
             storeConfig: StoreConfig,
@@ -57,7 +57,7 @@ object IngestionActor {
   */
 private[filodb] final class IngestionActor(ref: DatasetRef,
                                            schemas: Schemas,
-                                           memStore: MemStore,
+                                           tsStore: TimeSeriesStore,
                                            source: NodeClusterActor.IngestionSource,
                                            downsample: DownsampleConfig,
                                            storeConfig: StoreConfig,
@@ -169,17 +169,17 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
 
   // scalastyle:off method.length
   private def startIngestion(shard: Int): Unit = {
-    try memStore.setup(ref, schemas, shard, storeConfig, downsample) catch {
+    try tsStore.setup(ref, schemas, shard, storeConfig, downsample) catch {
       case ShardAlreadySetup(ds, s) =>
         logger.warn(s"dataset=$ds shard=$s already setup, skipping....")
         return
     }
 
     implicit val futureMapDispatcher: ExecutionContext = actorDispatcher
-    val ingestion = if (memStore.isDownsampleStore) {
+    val ingestion = if (tsStore.isDownsampleStore) {
       logger.info(s"Initiating shard startup on read-only memstore for dataset=$ref shard=$shard")
       for {
-        _ <- memStore.recoverIndex(ref, shard)
+        _ <- tsStore.recoverIndex(ref, shard)
       } yield {
         // bring shard to active state by sending this message - this code path wont invoke normalIngestion
         statusActor ! IngestionStarted(ref, shard, nodeCoord)
@@ -188,10 +188,10 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
       }
     } else {
       logger.info(s"Initiating ingestion for dataset=$ref shard=$shard")
-      logger.info(s"Metastore is ${memStore.metastore}")
+      logger.info(s"Metastore is ${tsStore.metastore}")
       for {
-        _ <- memStore.recoverIndex(ref, shard)
-        checkpoints <- memStore.metastore.readCheckpoints(ref, shard)
+        _ <- tsStore.recoverIndex(ref, shard)
+        checkpoints <- tsStore.metastore.readCheckpoints(ref, shard)
       } yield {
         if (checkpoints.isEmpty) {
           logger.info(s"No checkpoints were found for dataset=$ref shard=$shard -- skipping kafka recovery")
@@ -248,7 +248,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
         sendStopMessage(shard)
       }
 
-      val shardIngestionEnd = memStore.ingestStream(ref,
+      val shardIngestionEnd = tsStore.startIngestion(ref,
         shard,
         stream,
         flushSched,
@@ -303,8 +303,8 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
       val stream = ingestionStream.get
       statusActor ! RecoveryInProgress(ref, shard, nodeCoord, 0)
 
-      val shardInstance = memStore.asInstanceOf[TimeSeriesMemStore].getShardE(ref, shard)
-      val fut = memStore.recoverStream(ref, shard, stream, startOffset, endOffset, checkpoints, interval)
+      val shardInstance = tsStore.asInstanceOf[TimeSeriesMemStore].getShardE(ref, shard)
+      val fut = tsStore.createDataRecoveryObservable(ref, shard, stream, startOffset, endOffset, checkpoints, interval)
         .map { off =>
           val progressPct = if (endOffset - startOffset == 0) 100
                             else (off - startOffset) * 100 / (endOffset - startOffset)
@@ -358,14 +358,14 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
     }
 
   private def ingest(e: IngestRows): Unit = {
-    memStore.ingest(ref, e.shard, e.records)
+    tsStore.ingest(ref, e.shard, e.records)
     if (!e.records.records.isEmpty) {
       e.ackTo ! client.IngestionCommands.Ack(e.records.offset)
     }
   }
 
   private def status(origin: ActorRef): Unit =
-    origin ! IngestionStatus(memStore.numRowsIngested(ref))
+    origin ! IngestionStatus(tsStore.numRowsIngested(ref))
 
   private def stopIngestion(shard: Int): Unit = {
     // When the future is canceled, the onCancel task installed earlier should run.
@@ -394,7 +394,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
     streams.remove(shardNum).foreach(_.teardown())
     // Release memory for shard in MemStore
 
-    memStore match {
+    tsStore match {
       case ro: DownsampledTimeSeriesStore => ro.getShard(ref, shardNum)
                                             .foreach { shard =>
                                               shard.shutdown()

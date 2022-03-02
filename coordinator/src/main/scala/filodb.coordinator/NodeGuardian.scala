@@ -6,13 +6,13 @@ import akka.actor._
 import akka.cluster.singleton._
 
 import filodb.core.DatasetRef
-import filodb.core.memstore.MemStore
+import filodb.core.memstore.TimeSeriesStore
 import filodb.core.store.MetaStore
 
 /** Supervisor for all child actors and their actors on the node. */
 final class NodeGuardian(val settings: FilodbSettings,
                          metaStore: MetaStore,
-                         memStore: MemStore,
+                         memStore: TimeSeriesStore,
                          assignmentStrategy: ShardAssignmentStrategy
                         ) extends BaseActor {
 
@@ -132,7 +132,7 @@ private[filodb] object NodeGuardian {
 
   def props(settings: FilodbSettings,
             metaStore: MetaStore,
-            memStore: MemStore,
+            memStore: TimeSeriesStore,
             assignmentStrategy: ShardAssignmentStrategy): Props =
     Props(new NodeGuardian(settings, metaStore, memStore, assignmentStrategy))
 }

@@ -58,12 +58,23 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     val nonMetricShardKeyFilters =
       LogicalPlan.getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
     if (isMetadataQuery(logicalPlan)
-      || LogicalPlan.hasShardKeyEqualsOnly(logicalPlan, dataset.options.nonMetricShardColumns)) {
+      || (hasRequiredShardKeysPresent(nonMetricShardKeyFilters, dataset.options.nonMetricShardColumns) &&
+      LogicalPlan.hasShardKeyEqualsOnly(logicalPlan, dataset.options.nonMetricShardColumns))) {
       queryPlanner.materialize(logicalPlan, qContext)
     } else if (hasSingleShardKeyMatch(nonMetricShardKeyFilters)) {
       // For queries like topk(2, test{_ws_ = "demo", _ns_ =~ "App-1"}) which have just one matching value
       generateExecWithoutRegex(logicalPlan, nonMetricShardKeyFilters.head, qContext).head
     } else walkLogicalPlanTree(logicalPlan, qContext).plans.head
+  }
+
+  def hasRequiredShardKeysPresent(nonMetricShardKeyFilters: Seq[Seq[ColumnFilter]],
+                                  nonMetricShardColumns: Seq[String]): Boolean = {
+    val nonMetricShardColumnsSet = nonMetricShardColumns.toSet
+    nonMetricShardKeyFilters.foreach(filterGroup => {
+      val columnNames = filterGroup.map(_.column)
+      if (!nonMetricShardColumnsSet.subsetOf(columnNames.toSet)) return false
+    })
+    true
   }
 
   def isMetadataQuery(logicalPlan: LogicalPlan): Boolean = {
@@ -194,8 +205,20 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     val exec = if (nonMetricShardKeyFilters.head.isEmpty) queryPlanner.materialize(logicalPlan, queryContext)
     else {
       val execPlans = generateExecWithoutRegex(logicalPlan, nonMetricShardKeyFilters.head, queryContext)
-      if (execPlans.size == 1) execPlans.head else MultiPartitionDistConcatExec(queryContext, inProcessPlanDispatcher,
-        execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]))
+      if (execPlans.size == 1)
+        execPlans.head
+      // TODO
+      // here we essentially do not allow to optimize the physical plan for subqueries
+      // as we concat the results with MultiPartitionDisConcatExec,
+      // below queries:
+      // max_over_time(rate(foo{_ws_ = "demo", _ns_ =~ ".*Ns", instance = "Inst-1" }[10m])[1h:1m])
+      // sum_over_time(foo{_ws_ = "demo", _ns_ =~ ".*Ns", instance = "Inst-1" }[5d:300s])
+      // would have suboptimal performance. See subquery tests in PlannerHierarchySpec
+      else
+        MultiPartitionDistConcatExec(
+          queryContext, inProcessPlanDispatcher,
+          execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
+        )
     }
     PlanResult(Seq(exec))
   }
