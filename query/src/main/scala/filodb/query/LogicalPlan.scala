@@ -354,8 +354,8 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
   with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(series)
 
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(series =
-    series.replaceRawSeriesFilters(filters))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
+    this.copy(columnFilters = filters, series = series.replaceRawSeriesFilters(filters))
 }
 
 /**
@@ -419,8 +419,9 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
   override def stepMs: Long = vector.stepMs
   override def endMs: Long = vector.endMs
   override def isRoutable: Boolean = vector.isRoutable
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vector =
-    vector.replacePeriodicSeriesFilters(filters))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
+    this.copy(vector = vector.replacePeriodicSeriesFilters(filters),
+              scalarArg = scalarArg.replacePeriodicSeriesFilters(filters).asInstanceOf[ScalarPlan])
 }
 
 /**
@@ -582,8 +583,8 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
   override def startMs: Long = vectors.startMs
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
-    vectors.replacePeriodicSeriesFilters(filters))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
+    this.copy(columnFilters = filters, vectors = vectors.replacePeriodicSeriesFilters(filters))
 }
 
 /**
@@ -597,8 +598,8 @@ case class ApplyLimitFunction(vectors: PeriodicSeriesPlan,
   override def startMs: Long = vectors.startMs
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
-    vectors.replacePeriodicSeriesFilters(filters))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
+    this.copy(columnFilters = filters, vectors = vectors.replacePeriodicSeriesFilters(filters))
 }
 
 object LogicalPlan {
