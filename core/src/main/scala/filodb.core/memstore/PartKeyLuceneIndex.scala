@@ -3,12 +3,14 @@ package filodb.core.memstore
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.PriorityQueue
+import java.util.concurrent.TimeUnit
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable.HashSet
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
+import com.github.benmanes.caffeine.cache.{Caffeine, Expiry, LoadingCache}
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
 import java.util
@@ -19,7 +21,7 @@ import org.apache.lucene.document._
 import org.apache.lucene.document.Field.Store
 import org.apache.lucene.facet.{FacetsCollector, FacetsConfig}
 import org.apache.lucene.facet.sortedset.{DefaultSortedSetDocValuesReaderState,
-                     SortedSetDocValuesFacetCounts, SortedSetDocValuesFacetField}
+          SortedSetDocValuesFacetCounts, SortedSetDocValuesFacetField}
 import org.apache.lucene.index._
 import org.apache.lucene.search._
 import org.apache.lucene.search.BooleanClause.Occur
@@ -51,8 +53,6 @@ object PartKeyLuceneIndex {
   val MAX_TERMS_TO_ITERATE = 10000
 
   val NOT_FOUND = -1
-
-
 
   def bytesRefToUnsafeOffset(bytesRefOffset: Int): Int = bytesRefOffset + UnsafeUtils.arayOffset
 
@@ -102,6 +102,15 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   val partIdFromPartKeyLookupLatency = Kamon.histogram("index-ingestion-partId-lookup-latency",
     MeasurementUnit.time.milliseconds)
+    .withTag("dataset", ref.dataset)
+    .withTag("shard", shardNum)
+
+  val labelValuesQueryLatency = Kamon.histogram("index-label-values-query-latency",
+    MeasurementUnit.time.milliseconds)
+    .withTag("dataset", ref.dataset)
+    .withTag("shard", shardNum)
+
+  val readerCacheHitRate = Kamon.gauge("index-ss-reader-cache-hit")
     .withTag("dataset", ref.dataset)
     .withTag("shard", shardNum)
 
@@ -289,18 +298,58 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     indexWriter.close()
   }
 
-  // TODO - most frequently used eviction needed
-  private val readerStateCache = mutable.WeakHashMap[(IndexReader, String), DefaultSortedSetDocValuesReaderState]()
+  // The reader state object is expensive to create, so reuse across queries.
+  // It is associated with reader/labelName
+  private val readerStateCache: LoadingCache[(IndexReader, String), DefaultSortedSetDocValuesReaderState] =
+    // TODO cache config is currently hardcoded - make configuration properties if really deemed necessary
+    Caffeine.newBuilder()
+      .maximumSize(300)
+      .recordStats()
+      .expireAfter(new Expiry[(IndexReader, String), DefaultSortedSetDocValuesReaderState]() {
+        // shard key columns have larger expiry time
+        override def expireAfterCreate(key: (IndexReader, String),
+                                       value: DefaultSortedSetDocValuesReaderState,
+                                       currentTime: Long): Long = {
+          if (schema.options.shardKeyColumns.contains(key._2)) {
+            TimeUnit.HOURS.convert(5, TimeUnit.NANOSECONDS)
+          } else {
+            TimeUnit.MINUTES.convert(10, TimeUnit.NANOSECONDS)
+          }
+        }
+
+        override def expireAfterUpdate(key: (IndexReader, String),
+                                       value: DefaultSortedSetDocValuesReaderState,
+                                       currentTime: Long, currentDuration: Long): Long = {
+          if (schema.options.shardKeyColumns.contains(key._2)) {
+            TimeUnit.HOURS.convert(5, TimeUnit.NANOSECONDS)
+          } else {
+            TimeUnit.MINUTES.convert(10, TimeUnit.NANOSECONDS)
+          }
+        }
+
+        override def expireAfterRead(key: (IndexReader, String),
+                                     value: DefaultSortedSetDocValuesReaderState,
+                                     currentTime: Long, currentDuration: Long): Long = {
+          if (schema.options.shardKeyColumns.contains(key._2)) {
+            TimeUnit.HOURS.convert(5, TimeUnit.NANOSECONDS)
+          } else {
+            TimeUnit.MINUTES.convert(10, TimeUnit.NANOSECONDS)
+          }
+        }
+      })
+      .build((key: (IndexReader, String)) => {
+        new DefaultSortedSetDocValuesReaderState(key._1, FACET_FIELD_PREFIX + key._2)
+      })
+
   def labelValuesEfficient(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long,
                            colName: String, limit: Int = 100): Seq[String] = {
     require(facetEnabled, "Faceting not enabled on this index; labelValuesEfficient cannot be called")
     val labelValues = mutable.ArrayBuffer[String]()
+    val start = System.currentTimeMillis()
     withNewSearcher { searcher =>
       val reader = searcher.getIndexReader
-      // the state object is expensive to create, so reuse across queries. It is associated with reader
       try {
-        val state = readerStateCache.getOrElseUpdate((reader, colName),
-            new DefaultSortedSetDocValuesReaderState(reader, FACET_FIELD_PREFIX + colName))
+        val state = readerStateCache.get((reader, colName))
         val fc = new FacetsCollector
         val query = colFiltersToQuery(colFilters, startTime, endTime)
         FacetsCollector.search(searcher, query, limit, fc)
@@ -317,6 +366,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
           if (!e.getMessage.contains("was not indexed with SortedSetDocValues")) throw e;
       }
     }
+    labelValuesQueryLatency.record(System.currentTimeMillis() - start)
+    readerCacheHitRate.update(readerStateCache.stats().hitRate())
     labelValues
   }
 
