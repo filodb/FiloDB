@@ -572,7 +572,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val expectedPlan =
       """T~PeriodicSamplesMapper(start=1200000, step=120000, end=1800000, window=Some(600000), functionId=Some(MinOverTime), rawSource=false, offsetMs=None)
         |-E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher
-        |--E~PromQlRemoteExec(PromQlQueryParams(sum_over_time(sum(test{job="app1"})[600s:60s]),600,60,1800,None,false), PlannerParams(filodb,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher
+        |--E~PromQlRemoteExec(PromQlQueryParams(sum_over_time(sum(test{job="app1"})[600s:60s]),600,60,1800,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher
         |--T~PeriodicSamplesMapper(start=600000, step=60000, end=1800000, window=Some(600000), functionId=Some(SumOverTime), rawSource=false, offsetMs=None)
         |---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(0,60,1800))
         |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
