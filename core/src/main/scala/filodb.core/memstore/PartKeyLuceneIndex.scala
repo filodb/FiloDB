@@ -77,7 +77,8 @@ final case class PartKeyLuceneIndexRecord(partKey: Array[Byte], startTime: Long,
 
 class PartKeyLuceneIndex(ref: DatasetRef,
                          schema: PartitionSchema,
-                         facetEnabled: Boolean,
+                         facetEnabledAllLabels: Boolean,
+                         facetEnabledSharedKeyLabels: Boolean,
                          shardNum: Int,
                          retentionMillis: Long, // only used to calculate fallback startTime
                          diskLocation: Option[File] = None
@@ -114,7 +115,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   private val mMapDirectory = new MMapDirectory(indexDiskLocation)
   private val analyzer = new StandardAnalyzer()
 
-  logger.info(s"Created lucene index for dataset=$ref shard=$shardNum facetEnabled=$facetEnabled at $indexDiskLocation")
+  logger.info(s"Created lucene index for dataset=$ref shard=$shardNum facetEnabledAllLabels=$facetEnabledAllLabels " +
+    s"facetEnabledSharedKeyLabels=$facetEnabledSharedKeyLabels at $indexDiskLocation")
 
   private val config = new IndexWriterConfig(analyzer)
   config.setInfoStream(new LuceneMetricsRouter(ref, shardNum))
@@ -134,6 +136,12 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   //start this thread to flush the segments and refresh the searcher every specific time period
   private var flushThread: ControlledRealTimeReopenThread[IndexSearcher] = _
 
+  private val facetEnabled = facetEnabledAllLabels || facetEnabledSharedKeyLabels
+
+  private def facetEnabledForLabel(label: String) = {
+    facetEnabledAllLabels || (facetEnabledSharedKeyLabels && schema.options.shardKeyColumns.contains(label))
+  }
+
   case class ReusableLuceneDocument() {
 
     var facetsConfig: FacetsConfig = _
@@ -150,7 +158,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
     def addField(name: String, value: String): Unit = {
       // Use PartKeyIndexBenchmark to measure indexing performance before changing this
-      if (facetEnabled && name.nonEmpty && value.nonEmpty) {
+      if (facetEnabledForLabel(name) && name.nonEmpty && value.nonEmpty) {
         facetsConfig.setRequireDimensionDrillDown(name, false)
         facetsConfig.setIndexFieldName(name, FACET_FIELD_PREFIX + name)
         document.add(new SortedSetDocValuesFacetField(name, value))
@@ -301,12 +309,12 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       .maximumSize(300)
       .recordStats()
       .expireAfter(new Expiry[(IndexReader, String), DefaultSortedSetDocValuesReaderState]() {
-        // shard key columns have larger expiry time
+        // shard key columns have 3-day TTL to prevent eviction over a weekend of non-use
         override def expireAfterCreate(key: (IndexReader, String),
                                        value: DefaultSortedSetDocValuesReaderState,
                                        currentTime: Long): Long = {
           if (schema.options.shardKeyColumns.contains(key._2)) {
-            TimeUnit.HOURS.convert(5, TimeUnit.NANOSECONDS)
+            TimeUnit.DAYS.convert(3, TimeUnit.NANOSECONDS)
           } else {
             TimeUnit.MINUTES.convert(10, TimeUnit.NANOSECONDS)
           }
@@ -316,7 +324,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                                        value: DefaultSortedSetDocValuesReaderState,
                                        currentTime: Long, currentDuration: Long): Long = {
           if (schema.options.shardKeyColumns.contains(key._2)) {
-            TimeUnit.HOURS.convert(5, TimeUnit.NANOSECONDS)
+            TimeUnit.DAYS.convert(3, TimeUnit.NANOSECONDS)
           } else {
             TimeUnit.MINUTES.convert(10, TimeUnit.NANOSECONDS)
           }
@@ -326,7 +334,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                                      value: DefaultSortedSetDocValuesReaderState,
                                      currentTime: Long, currentDuration: Long): Long = {
           if (schema.options.shardKeyColumns.contains(key._2)) {
-            TimeUnit.HOURS.convert(5, TimeUnit.NANOSECONDS)
+            TimeUnit.DAYS.convert(3, TimeUnit.NANOSECONDS)
           } else {
             TimeUnit.MINUTES.convert(10, TimeUnit.NANOSECONDS)
           }
