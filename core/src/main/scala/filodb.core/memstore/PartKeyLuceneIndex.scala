@@ -157,7 +157,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
     def addField(name: String, value: String): Unit = {
       // Use PartKeyIndexBenchmark to measure indexing performance before changing this
-      if (facetEnabledForLabel(name) && name.nonEmpty && value.nonEmpty) {
+      if (name.nonEmpty && value.nonEmpty && facetEnabledForLabel(name)) {
         facetsConfig.setRequireDimensionDrillDown(name, false)
         facetsConfig.setIndexFieldName(name, FACET_FIELD_PREFIX + name)
         document.add(new SortedSetDocValuesFacetField(name, value))
@@ -320,8 +320,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   def labelValuesEfficient(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long,
                            colName: String, limit: Int = 100): Seq[String] = {
-    require(facetEnabledAllLabels ||
-      facetEnabledSharedKeyLabels && schema.options.shardKeyColumns.contains(colName),
+    require(facetEnabledForLabel(colName),
       s"Faceting not enabled for label $colName; labelValuesEfficient should not have been called")
 
     val readerStateCache = if (schema.options.shardKeyColumns.contains(colName)) readerStateCacheShardKeys
@@ -695,7 +694,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     }
     val collector = new ActionCollector(handleMatch)
     withNewSearcher(s => s.search(query, collector))
-    partIdFromPartKeyLookupLatency.record(Math.max(0, System.nanoTime - startExecute))
+    partIdFromPartKeyLookupLatency.record(System.nanoTime - startExecute)
     chosenPartId
   }
 }
