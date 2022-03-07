@@ -18,6 +18,8 @@ import filodb.query.exec.InternalRangeFunction.Last
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+import filodb.core.query.Filter.{Equals, NotEquals}
+import filodb.query.LogicalPlan.getRawSeriesFilters
 
 import scala.concurrent.duration._
 
@@ -959,6 +961,33 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       val leaf = child.asInstanceOf[TsCardExec]
       leaf.shardKeyPrefix shouldEqual shardKeyPrefix
       leaf.numGroupByFields shouldEqual numGroupByFields
+    }
+  }
+
+  it("should recursively replace column filters") {
+    // TODO: this test should exist in LogicalPlanSpec, but it's substantially easier to run
+    //   more comprehensive tests with access to a Parser (filodb.prometheus depends on filodb.query,
+    //   so Parser use would give a cyclical dependency).
+    val newFilters = Seq(ColumnFilter("new1", Equals("new1val")),
+                         ColumnFilter("new2", NotEquals("new2val")))
+    val queries = Seq(
+        """scalar(my_gauge{l1="foo",new1="bar"})  +  my_gauge{l1="baz",new2="bat"}""",
+        """clamp_max(my_counter{new1="foo",new2="bar"},scalar(my_counter{l1="foo",new1="bar"}) )""",
+        """absent(my_gauge{l1="foo",l2="bar"})""",
+        """scalar(my_counter{l1="foo",new1="bar"}) < bool(my_counter{new1="foo",l2="bar"})""",
+        """absent_over_time(my_counter{new1="foo",new2="bar"}[10m])""",
+        """absent(my_gauge{new1="foo",l1="bar"})[20m:1m]""",
+        """sum_over_time(absent(my_gauge{l2="foo",new2="bar"})[20m:1m])"""
+    )
+    for (query <- queries) {
+      val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+      getRawSeriesFilters(lp).foreach{ filters =>
+        // sanity check; if this fails, just change the test query
+        filters.intersect(newFilters).size shouldEqual 0
+      }
+      getRawSeriesFilters(lp.replaceFilters(newFilters)).foreach{ filters =>
+        filters.intersect(newFilters).size shouldEqual newFilters.size
+      }
     }
   }
 }
