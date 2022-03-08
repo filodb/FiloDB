@@ -190,7 +190,10 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
   final def bucketValue(no: Int): Double = values(no)
   final def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = {
     val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
-    BinaryHistogram.writeDoubles(buckets, values, buf)
+    buckets match {
+      case g: GeometricBuckets if g.minusOne => BinaryHistogram.writeDelta(g, values.map(_.toLong), buf)
+      case _ => BinaryHistogram.writeDoubles(buckets, values, buf)
+    }
     buf
   }
 
