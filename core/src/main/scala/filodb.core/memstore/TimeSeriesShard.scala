@@ -272,7 +272,9 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val ensureTspHeadroomPercent = filodbConfig.getDouble("memstore.ensure-tsp-count-headroom-percent")
   private val ensureBlockHeadroomPercent = filodbConfig.getDouble("memstore.ensure-block-memory-headroom-percent")
   private val ensureNativeMemHeadroomPercent = filodbConfig.getDouble("memstore.ensure-native-memory-headroom-percent")
-  private val indexFacetingEnabled = filodbConfig.getBoolean("memstore.index-faceting-enabled")
+  private val indexFacetingEnabledShardKeyLabels =
+                           filodbConfig.getBoolean("memstore.index-faceting-enabled-shard-key-labels")
+  private val indexFacetingEnabledAllLabels = filodbConfig.getBoolean("memstore.index-faceting-enabled-for-all-labels")
   private val numParallelFlushes = filodbConfig.getInt("memstore.flush-task-parallelism")
 
   /////// END CONFIGURATION FIELDS ///////////////////
@@ -299,7 +301,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Used to answer queries not involving the full partition key.
     * Maintained using a high-performance bitmap index.
     */
-  private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, indexFacetingEnabled, shardNum,
+  private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part,
+    indexFacetingEnabledAllLabels, indexFacetingEnabledShardKeyLabels, shardNum,
     storeConfig.diskTTLSeconds * 1000)
 
   private val cardTracker: CardinalityTracker = initCardTracker()
@@ -1668,6 +1671,7 @@ class TimeSeriesShard(val ref: DatasetRef,
                              startTime: Long,
                              querySession: QuerySession,
                              limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
+    // TODO methods using faceting could be used here, but punted until performance test is completed
     val metricShardKeys = schemas.part.options.shardKeyColumns
     val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
     LabelValueResultIterator(partKeyIndex.partIdsFromFilters(filters, startTime, endTime),
@@ -1690,7 +1694,8 @@ class TimeSeriesShard(val ref: DatasetRef,
                                    startTime: Long,
                                    querySession: QuerySession,
                                    limit: Int): Iterator[ZeroCopyUTF8String] = {
-    if (indexFacetingEnabled) {
+    if (indexFacetingEnabledAllLabels ||
+      (indexFacetingEnabledShardKeyLabels && schemas.part.options.shardKeyColumns.contains(label))) {
       partKeyIndex.labelValuesEfficient(filters, startTime, endTime, label, limit).iterator.map(_.utf8)
     } else {
       val metricShardKeys = schemas.part.options.shardKeyColumns

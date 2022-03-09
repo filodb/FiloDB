@@ -654,19 +654,63 @@ object RecordBuilder {
   }
 
   /**
-   * Computes a shard key hash from the metric name and the values of the non-metric shard key columns
+   * Computes a shard key hash from the metric name and the values of the non-metric shard key columns. If a
+   * target-schema is defined and it doesn't include metric, then metric will be omitted from ShardKeyHash.
+   *
    * @param shardKeyValues the non-metric shard key values (such as the job/exporter/app), sorted in order of
    *        the key name.  For example, it should be Seq(exporter, job).
    * @param metric the metric value to use in the calculation.
+   * @param targetSchema labels that identify the resource-type of the source. Only these labels are used to
+   *        determine partition hash.
    */
-  final def shardKeyHash(shardKeyValues: Seq[Array[Byte]], metric: Array[Byte]): Int = {
+  final def shardKeyHash(shardKeyValues: Seq[Array[Byte]], metric: Array[Byte],
+                         includeMetric: Boolean): Int = {
     var hash = 7
     shardKeyValues.foreach { value => hash = combineHash(hash, BinaryRegion.hash32(value)) }
-    combineHash(hash, BinaryRegion.hash32(metric))
+    if (includeMetric)
+      hash = combineHash(hash, BinaryRegion.hash32(metric))
+    hash
   }
 
-  final def shardKeyHash(shardKeyValues: Seq[String], metric: String): Int =
-    shardKeyHash(shardKeyValues.map(_.getBytes(StandardCharsets.UTF_8)), metric.getBytes(StandardCharsets.UTF_8))
+  // If targetSchema has metric label, include metric to calculate ShardKeyHash. Otherwise omit it.
+  final def shardKeyHash(shardKeyValues: Seq[String],
+                         metricShardkeyColName: String,
+                         metric: String,
+                         targetSchema: Seq[String] = Seq.empty): Int = {
+    val includeMetric = targetSchema.isEmpty || targetSchema.contains(metricShardkeyColName)
+    shardKeyHash(shardKeyValues.map(_.getBytes(StandardCharsets.UTF_8)),
+                metric.getBytes(StandardCharsets.UTF_8),
+                includeMetric)
+  }
+
+  /**
+   * Calculate partition key hash from non-shard-key columns. This is used for calculating the ingestionShard.
+   * If a target-schema is provided, use the labels configured in target-schema.
+   * @param nonShardKeyLabelPair non-shard-key label pair
+   * @param targetSchema target-schema list of sorted labels that uniquely identify the source of data and used
+   *                     exclusively for determining target ingestion shard.
+   * @param metricShardkey metric shardKey (e.g __name__)
+   * @param metric metric name
+   * @return
+   */
+  final def partitionKeyHash(nonShardKeyLabelPair: Map[String, String],
+                             shardKeyLabelPair: Map[String, String],
+                             targetSchema: Seq[String],
+                             metricShardkey: String,
+                             metric: String): Int = {
+    var hash = 7
+    val labelPairs = nonShardKeyLabelPair ++ shardKeyLabelPair + (metricShardkey -> metric)
+    val tags = labelPairs.keys
+    val labelValues = if (targetSchema.nonEmpty && targetSchema.diff(tags.toSeq).isEmpty) {
+      targetSchema.map(labelPairs(_))
+    } else nonShardKeyLabelPair.values
+    labelValues.foreach { v => {
+        hash = RecordBuilder
+          .combineHash(hash, BinaryRegion.hash32(v.getBytes(StandardCharsets.UTF_8)))
+      }
+    }
+    hash
+  }
 
   /**
     * Removes the ignoreShardKeyColumnSuffixes from LabelPair as configured in DataSet.

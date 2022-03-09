@@ -28,7 +28,7 @@ class PartKeyIndexBenchmark {
 
   println(s"Building Part Keys")
   val ref = DatasetRef("prometheus")
-  val partKeyIndex = new PartKeyLuceneIndex(ref, untyped.partition, true, 0, 1.hour.toMillis)
+  val partKeyIndex = new PartKeyLuceneIndex(ref, untyped.partition, true, true,0, 1.hour.toMillis)
   val numSeries = 1000000
   val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory, RecordBuilder.DefaultContainerSize, false)
   val untypedData = TestTimeseriesProducer.timeSeriesData(0, numSeries) take numSeries

@@ -76,7 +76,8 @@ object Dependencies {
     "com.github.alexandrnikitin"   %% "bloom-filter"      % "0.11.0",
     "org.rocksdb"                  % "rocksdbjni"         % "6.11.4",
     "com.esotericsoftware"         % "kryo"               % "4.0.0" excludeAll(excludeMinlog),
-    "com.dorkbox"            % "MinLog-SLF4J"                 % "1.12"
+    "com.dorkbox"                  % "MinLog-SLF4J"       % "1.12",
+    "com.github.ben-manes.caffeine" % "caffeine"          % "3.0.5"
   )
 
   lazy val sparkJobsDeps = commonDeps ++ Seq(

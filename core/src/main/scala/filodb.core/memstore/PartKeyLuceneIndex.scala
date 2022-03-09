@@ -9,6 +9,7 @@ import scala.collection.immutable.HashSet
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
+import com.github.benmanes.caffeine.cache.{Caffeine, LoadingCache}
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
 import java.util
@@ -52,8 +53,6 @@ object PartKeyLuceneIndex {
 
   val NOT_FOUND = -1
 
-
-
   def bytesRefToUnsafeOffset(bytesRefOffset: Int): Int = bytesRefOffset + UnsafeUtils.arayOffset
 
   def unsafeOffsetToBytesRefOffset(offset: Long): Int = offset.toInt - UnsafeUtils.arayOffset
@@ -77,7 +76,8 @@ final case class PartKeyLuceneIndexRecord(partKey: Array[Byte], startTime: Long,
 
 class PartKeyLuceneIndex(ref: DatasetRef,
                          schema: PartitionSchema,
-                         facetEnabled: Boolean,
+                         facetEnabledAllLabels: Boolean,
+                         facetEnabledSharedKeyLabels: Boolean,
                          shardNum: Int,
                          retentionMillis: Long, // only used to calculate fallback startTime
                          diskLocation: Option[File] = None
@@ -86,22 +86,26 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   import PartKeyLuceneIndex._
 
   val startTimeLookupLatency = Kamon.histogram("index-startTimes-for-odp-lookup-latency",
-    MeasurementUnit.time.milliseconds)
+    MeasurementUnit.time.nanoseconds)
     .withTag("dataset", ref.dataset)
     .withTag("shard", shardNum)
 
   val queryIndexLookupLatency = Kamon.histogram("index-partition-lookup-latency",
-    MeasurementUnit.time.milliseconds)
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
-
-  val queryIndexTopNLookupLatency = Kamon.histogram("index-top-n-lookup-latency",
-    MeasurementUnit.time.milliseconds)
+    MeasurementUnit.time.nanoseconds)
     .withTag("dataset", ref.dataset)
     .withTag("shard", shardNum)
 
   val partIdFromPartKeyLookupLatency = Kamon.histogram("index-ingestion-partId-lookup-latency",
-    MeasurementUnit.time.milliseconds)
+    MeasurementUnit.time.nanoseconds)
+    .withTag("dataset", ref.dataset)
+    .withTag("shard", shardNum)
+
+  val labelValuesQueryLatency = Kamon.histogram("index-label-values-query-latency",
+    MeasurementUnit.time.nanoseconds)
+    .withTag("dataset", ref.dataset)
+    .withTag("shard", shardNum)
+
+  val readerStateCacheHitRate = Kamon.gauge("index-reader-state-cache-hit-rate")
     .withTag("dataset", ref.dataset)
     .withTag("shard", shardNum)
 
@@ -110,7 +114,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   private val mMapDirectory = new MMapDirectory(indexDiskLocation)
   private val analyzer = new StandardAnalyzer()
 
-  logger.info(s"Created lucene index for dataset=$ref shard=$shardNum facetEnabled=$facetEnabled at $indexDiskLocation")
+  logger.info(s"Created lucene index for dataset=$ref shard=$shardNum facetEnabledAllLabels=$facetEnabledAllLabels " +
+    s"facetEnabledSharedKeyLabels=$facetEnabledSharedKeyLabels at $indexDiskLocation")
 
   private val config = new IndexWriterConfig(analyzer)
   config.setInfoStream(new LuceneMetricsRouter(ref, shardNum))
@@ -130,6 +135,12 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   //start this thread to flush the segments and refresh the searcher every specific time period
   private var flushThread: ControlledRealTimeReopenThread[IndexSearcher] = _
 
+  private val facetEnabled = facetEnabledAllLabels || facetEnabledSharedKeyLabels
+
+  private def facetEnabledForLabel(label: String) = {
+    facetEnabledAllLabels || (facetEnabledSharedKeyLabels && schema.options.shardKeyColumns.contains(label))
+  }
+
   case class ReusableLuceneDocument() {
 
     var facetsConfig: FacetsConfig = _
@@ -146,7 +157,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
     def addField(name: String, value: String): Unit = {
       // Use PartKeyIndexBenchmark to measure indexing performance before changing this
-      if (facetEnabled && name.nonEmpty && value.nonEmpty) {
+      if (name.nonEmpty && value.nonEmpty && facetEnabledForLabel(name)) {
         facetsConfig.setRequireDimensionDrillDown(name, false)
         facetsConfig.setIndexFieldName(name, FACET_FIELD_PREFIX + name)
         document.add(new SortedSetDocValuesFacetField(name, value))
@@ -289,18 +300,38 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     indexWriter.close()
   }
 
-  // TODO - most frequently used eviction needed
-  private val readerStateCache = mutable.WeakHashMap[(IndexReader, String), DefaultSortedSetDocValuesReaderState]()
+  // DefaultSortedSetDocValuesReaderState (per label/reader) is expensive to create, so cache & reuse across queries.
+  // Different cache for shard keys and non-shard-keys since it is evicted differently.
+  // TODO cache config is currently hardcoded - make configuration properties if really deemed necessary
+  private val readerStateCacheShardKeys: LoadingCache[(IndexReader, String), DefaultSortedSetDocValuesReaderState] =
+  Caffeine.newBuilder()
+    .maximumSize(100)
+    .recordStats()
+    .build((key: (IndexReader, String)) => {
+      new DefaultSortedSetDocValuesReaderState(key._1, FACET_FIELD_PREFIX + key._2)
+    })
+  private val readerStateCacheNonShardKeys: LoadingCache[(IndexReader, String), DefaultSortedSetDocValuesReaderState] =
+    Caffeine.newBuilder()
+      .maximumSize(200)
+      .recordStats()
+      .build((key: (IndexReader, String)) => {
+        new DefaultSortedSetDocValuesReaderState(key._1, FACET_FIELD_PREFIX + key._2)
+      })
+
   def labelValuesEfficient(colFilters: Seq[ColumnFilter], startTime: Long, endTime: Long,
                            colName: String, limit: Int = 100): Seq[String] = {
-    require(facetEnabled, "Faceting not enabled on this index; labelValuesEfficient cannot be called")
+    require(facetEnabledForLabel(colName),
+      s"Faceting not enabled for label $colName; labelValuesEfficient should not have been called")
+
+    val readerStateCache = if (schema.options.shardKeyColumns.contains(colName)) readerStateCacheShardKeys
+                           else readerStateCacheNonShardKeys
+
     val labelValues = mutable.ArrayBuffer[String]()
+    val start = System.nanoTime()
     withNewSearcher { searcher =>
       val reader = searcher.getIndexReader
-      // the state object is expensive to create, so reuse across queries. It is associated with reader
       try {
-        val state = readerStateCache.getOrElseUpdate((reader, colName),
-            new DefaultSortedSetDocValuesReaderState(reader, FACET_FIELD_PREFIX + colName))
+        val state = readerStateCache.get((reader, colName))
         val fc = new FacetsCollector
         val query = colFiltersToQuery(colFilters, startTime, endTime)
         FacetsCollector.search(searcher, query, limit, fc)
@@ -317,6 +348,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
           if (!e.getMessage.contains("was not indexed with SortedSetDocValues")) throw e;
       }
     }
+    labelValuesQueryLatency.record(System.nanoTime() - start)
+    readerStateCacheHitRate.withTag("label", "shardKey").update(readerStateCacheShardKeys.stats().hitRate())
+    readerStateCacheHitRate.withTag("label", "other").update(readerStateCacheNonShardKeys.stats().hitRate())
     labelValues
   }
 
@@ -459,7 +493,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     */
   def startTimeFromPartIds(partIds: Iterator[Int]): debox.Map[Int, Long] = {
 
-    val startExecute = System.currentTimeMillis()
+    val startExecute = System.nanoTime()
     val span = Kamon.currentSpan()
     val collector = new PartIdStartTimeCollector()
     val terms = new util.ArrayList[BytesRef]()
@@ -470,8 +504,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     // more efficient within Lucene
     withNewSearcher(s => s.search(new TermInSetQuery(PART_ID, terms), collector))
     span.tag(s"num-partitions-to-page", terms.size())
-    val latency = System.currentTimeMillis - startExecute
-    span.mark(s"index-startTimes-for-odp-lookup-latency=${latency}ms")
+    val latency = System.nanoTime - startExecute
+    span.mark(s"index-startTimes-for-odp-lookup-latency=${latency}ns")
     startTimeLookupLatency.record(latency)
     collector.startTimes
   }
@@ -611,13 +645,13 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                          endTime: Long,
                          collector: Collector): Unit = {
 
-    val startExecute = System.currentTimeMillis()
+    val startExecute = System.nanoTime()
     val span = Kamon.currentSpan()
     val query: BooleanQuery = colFiltersToQuery(columnFilters, startTime, endTime)
     logger.debug(s"Querying dataset=$ref shard=$shardNum partKeyIndex with: $query")
     withNewSearcher(s => s.search(query, collector))
-    val latency = System.currentTimeMillis - startExecute
-    span.mark(s"index-partition-lookup-latency=${latency}ms")
+    val latency = System.nanoTime - startExecute
+    span.mark(s"index-partition-lookup-latency=${latency}ns")
     queryIndexLookupLatency.record(latency)
   }
 
@@ -639,7 +673,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     val columnFilters = schema.binSchema.toStringPairs(partKeyBase, partKeyOffset)
       .map { pair => ColumnFilter(pair._1, Filter.Equals(pair._2)) }
 
-    val startExecute = System.currentTimeMillis()
+    val startExecute = System.nanoTime()
     val booleanQuery = new BooleanQuery.Builder
     columnFilters.foreach { filter =>
       val q = leafFilter(filter.column, filter.filter)
@@ -660,7 +694,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     }
     val collector = new ActionCollector(handleMatch)
     withNewSearcher(s => s.search(query, collector))
-    partIdFromPartKeyLookupLatency.record(Math.max(0, System.currentTimeMillis - startExecute))
+    partIdFromPartKeyLookupLatency.record(System.nanoTime - startExecute)
     chosenPartId
   }
 }

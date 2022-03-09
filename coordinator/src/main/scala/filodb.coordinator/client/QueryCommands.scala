@@ -59,6 +59,11 @@ object QueryCommands {
     }
   }
 
+  final case class FunctionalTargetSchemaProvider(f: Seq[ColumnFilter] => Seq[TargetSchemaChange] = { _ => Seq.empty})
+    extends TargetSchemaProvider {
+    def targetSchemaFunc(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = f(filter)
+  }
+
   /**
    * Executes a query using a LogicalPlan and returns the result as one message to the client.
    * Depends on queryOptions, the query will fan out to multiple nodes and shards as needed to gather

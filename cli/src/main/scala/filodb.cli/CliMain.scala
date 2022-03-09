@@ -71,6 +71,7 @@ class Arguments(args: Seq[String]) extends ScallopConf(args) {
   val active = opt[Boolean](default = Some(false))
   val shardkeyprefix = opt[List[String]](default = Some(List()))
   val queries = opt[List[String]](default = Some(List()))
+  val targetschema = opt[List[String]](default = Some(List()))
 
   verify()
 
@@ -113,7 +114,7 @@ object CliMain extends FilodbClusterNode {
     println("  --host <hostname/IP> [--port ...] --command tscard --dataset <dataset> --shardkeyprefix <shard-key-prefix> --numgroupbyfields {1,2,3}")
     println("  --host <hostname/IP> [--port ...] --command topkcardlocal --dataset prometheus --k 2 --shardkeyprefix demo App-0")
     println("  --host <hostname/IP> [--port ...] --command labelcardinality --labelfilter <label-filter> --dataset prometheus")
-    println("  --host <hostname/IP> [--port ...] --command findqueryshards --queries <query> --spread <spread>")
+    println("  --host <hostname/IP> [--port ...] --command findqueryshards --queries <query> --spread <spread> --targetschema <target-schema-labels>")
     println("""  --command promFilterToPartKeyBR --promql "myMetricName{_ws_='myWs',_ns_='myNs'}" --schema prom-counter""")
     println("""  --command partKeyBrAsString --hexpk 0x2C0000000F1712000000200000004B8B36940C006D794D65747269634E616D650E00C104006D794E73C004006D795773""")
     println("""  --command decodeChunkInfo --hexchunkinfo 0x12e8253a267ea2db060000005046fc896e0100005046fc896e010000""")
@@ -296,7 +297,8 @@ object CliMain extends FilodbClusterNode {
         val dataset = new Dataset(dsRef.dataset, Schemas.global.schemas.get(args.schema()).get)
         val planner = new SingleClusterPlanner(dataset, Schemas.global,
           mapperRef, earliestRetainedTimestampFn = 0, queryConfig, "raw",
-          StaticSpreadProvider(SpreadChange(0, args.spread())))
+          StaticSpreadProvider(SpreadChange(0, args.spread())),
+          targetSchemaProvider=StaticTargetSchemaProvider(args.targetschema.getOrElse(List())))
         println(FindShardFormatStr.format("Shards", "Query"))
         args.queries().foreach(query => {
           val lp = Parser.queryToLogicalPlan(query, 100, 1)

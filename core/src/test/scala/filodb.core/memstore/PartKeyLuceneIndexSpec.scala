@@ -22,7 +22,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   import Filter._
   import GdeltTestData._
 
-  val keyIndex = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, 0, 1.hour.toMillis)
+  val keyIndex = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis)
   val partBuilder = new RecordBuilder(TestData.nativeMem)
 
   def partKeyOnHeap(partKeySchema: RecordSchema,
@@ -318,7 +318,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   }
 
   it("should ignore unsupported columns and return empty filter") {
-    val index2 = new PartKeyLuceneIndex(dataset1.ref, dataset1.schema.partition, true, 0, 1.hour.toMillis)
+    val index2 = new PartKeyLuceneIndex(dataset1.ref, dataset1.schema.partition, true, true, 0, 1.hour.toMillis)
     partKeyFromRecords(dataset1, records(dataset1, readers.take(10))).zipWithIndex.foreach { case (addr, i) =>
       index2.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, System.currentTimeMillis())()
     }
@@ -369,7 +369,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
   it("should be able to fetch label values efficiently using facets") {
     val index3 = new PartKeyLuceneIndex(DatasetRef("prometheus"), Schemas.promCounter.partition,
-      true, 0, 1.hour.toMillis)
+      true, true, 0, 1.hour.toMillis)
     val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8,
                          "_ns_".utf8 -> "my_ns".utf8)
 
@@ -403,7 +403,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
   it("should be able to do regular operations when faceting is disabled") {
     val index3 = new PartKeyLuceneIndex(DatasetRef("prometheus"), Schemas.promCounter.partition,
-      false, 0, 1.hour.toMillis)
+      false, false, 0, 1.hour.toMillis)
     val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8,
       "_ns_".utf8 -> "my_ns".utf8)
 
