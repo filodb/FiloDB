@@ -105,7 +105,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     .withTag("dataset", ref.dataset)
     .withTag("shard", shardNum)
 
-  val readerStateCacheHitRate = Kamon.gauge("index-reader-state-cache-hit")
+  val readerStateCacheHitRate = Kamon.gauge("index-reader-state-cache-hit-rate")
     .withTag("dataset", ref.dataset)
     .withTag("shard", shardNum)
 
