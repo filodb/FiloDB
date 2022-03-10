@@ -36,7 +36,7 @@ sealed class CheckpointTable(val config: Config,
       s"""SELECT groupnum, offset FROM $tableString WHERE
          | databasename = ? AND
          | datasetname = ? AND
-         | shardnum = ? """.stripMargin).setConsistencyLevel(ConsistencyLevel.QUORUM)
+         | shardnum = ? """.stripMargin).setConsistencyLevel(ConsistencyLevel.ONE)
     // we want consistent reads during recovery
 
   lazy val writeCheckpointCql = {
