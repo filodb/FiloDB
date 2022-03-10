@@ -354,8 +354,9 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
   with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(series)
 
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(series =
-    series.replaceRawSeriesFilters(filters))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
+    this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
+              series = series.replaceRawSeriesFilters(filters))
 }
 
 /**
@@ -419,8 +420,9 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
   override def stepMs: Long = vector.stepMs
   override def endMs: Long = vector.endMs
   override def isRoutable: Boolean = vector.isRoutable
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vector =
-    vector.replacePeriodicSeriesFilters(filters))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
+    this.copy(vector = vector.replacePeriodicSeriesFilters(filters),
+              scalarArg = scalarArg.replacePeriodicSeriesFilters(filters).asInstanceOf[ScalarPlan])
 }
 
 /**
@@ -582,8 +584,9 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
   override def startMs: Long = vectors.startMs
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
-    vectors.replacePeriodicSeriesFilters(filters))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
+    this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
+              vectors = vectors.replacePeriodicSeriesFilters(filters))
 }
 
 /**
@@ -597,8 +600,9 @@ case class ApplyLimitFunction(vectors: PeriodicSeriesPlan,
   override def startMs: Long = vectors.startMs
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
-    vectors.replacePeriodicSeriesFilters(filters))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
+    this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
+              vectors = vectors.replacePeriodicSeriesFilters(filters))
 }
 
 object LogicalPlan {
@@ -731,6 +735,22 @@ object LogicalPlan {
                                                     stepMs = Math.max(p.stepMs, 1)))
       case _                       => None
     }
+  }
+
+  /**
+   * @param base the column filters to override
+   * @param overrides the overriding column filters
+   * @return union of base and override filters except where column names intersect;
+   *         when names intersect, only the overriding filter is included.
+   *         Example:
+   *           base = [(name=a, filter=1), (name=b, filter=2)]
+   *           overrides = [(name=c, filter=3), (name=a, filter=4)]
+   *           result = [(name=a, filter=4), (name=b, filter=2), (name=c, filter=3)]
+   */
+  def overrideColumnFilters(base: Seq[ColumnFilter],
+                            overrides: Seq[ColumnFilter]): Seq[ColumnFilter] = {
+    val overrideColumns = overrides.map(_.column)
+    base.filterNot(f => overrideColumns.contains(f.column)) ++ overrides
   }
 }
 
