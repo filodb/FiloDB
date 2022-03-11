@@ -2,13 +2,13 @@ package filodb.query.exec
 
 import monix.eval.Task
 import monix.execution.Scheduler
+import monix.reactive.Observable
 
 import filodb.core.DatasetRef
 import filodb.core.memstore.TimeSeriesShard
 import filodb.core.metadata.Column
 import filodb.core.query._
 import filodb.core.store._
-import monix.reactive.Observable
 
 object SelectChunkInfosExec {
   import Column.ColumnType._
