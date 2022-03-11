@@ -24,6 +24,86 @@ import filodb.query.exec.InternalRangeFunction.Last
 
 object SingleClusterPlanner {
   private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests").withoutTags
+
+  // Is TargetSchema changing during query window.
+  private def isTargetSchemaChanging(targetSchemaChanges: Seq[TargetSchemaChange],
+                                     startMs: Long, endMs: Long): Boolean =
+    targetSchemaChanges.nonEmpty && targetSchemaChanges.exists(c => c.time >= startMs && c.time <= endMs)
+
+  // Find the TargetSchema that is applicable i.e effective for the current query window
+  private def findTargetSchema(targetSchemaChanges: Seq[TargetSchemaChange],
+                               startMs: Long, endMs: Long): Option[TargetSchemaChange] = {
+    val tsIndex = targetSchemaChanges.lastIndexWhere(t => t.time <= startMs)
+    if(tsIndex > -1)
+      Some(targetSchemaChanges(tsIndex))
+    else
+      None
+  }
+
+  /**
+   * If TargetSchema exists and all of the target-schema label filters (equals) are provided in the query,
+   * then return true.
+   * @param filters Query Column Filters
+   * @param targetSchema TargetSchema
+   * @return useTargetSchema - use target-schema to calculate query shards
+   */
+  private def useTargetSchemaForShards(filters: Seq[ColumnFilter], targetSchema: Option[TargetSchemaChange]): Boolean =
+    targetSchema match {
+      case Some(ts) if ts.schema.nonEmpty => ts.schema
+        .forall(s => filters.exists(cf => cf.column == s && cf.filter.isInstanceOf[Filter.Equals]))
+      case _ => false
+    }
+
+  // TODO(a_theimer): reverse of Vish suggestion-- is this correct?
+  /**
+   * Given a BinaryJoin and target schema for one of its children, returns true iff the
+   *   target schema's set of names constitutes a subset of each of the child's eventual join keys.
+   */
+  private def targetSchemaIsJoinKeySubset(binaryJoin: BinaryJoin,
+                                          targetSchema: Seq[String]): Boolean = {
+    // We cannot know the exact RangeVectorKeys a child will eventually yield,
+    //   but-- since it has a target schema-- we do know that those keys will include
+    //   the target schema columns.
+    if (binaryJoin.on.nonEmpty) {
+      // "on" must include at least the set of target schema columns
+      targetSchema.toSet.diff(binaryJoin.on.toSet).isEmpty
+    } else {
+      // "ignore" can't include any of the target schema columns
+      targetSchema.toSet.intersect(binaryJoin.ignoring.toSet).isEmpty
+    }
+  }
+
+  /**
+   * Given a BinaryJoin, returns true iff it would be valid to apply the "pushdown" optimization.
+   * See materializeBinaryJoinWithPushdown for more details about the optimization.
+   *
+   * It is valid to apply the optimization iff three conditions are met:
+   *   (1) each child is a PeriodicSeries (TODO: relax this?)
+   *   (2) each child has a target schema defined for its RawSeries filters
+   *   (3) when the eventual ExecPlan is executed, each child join-key must
+   *       constitute a superset of the target-schema columns.
+   */
+  private def canPushdownBinaryJoin(binJoin: BinaryJoin,
+                                    qContext: QueryContext): Boolean = {
+    val targetSchemaProviderOpt = qContext.plannerParams.targetSchema
+    if (targetSchemaProviderOpt.isEmpty) {
+      return false
+    }
+    Seq(binJoin.lhs, binJoin.rhs).forall { case child =>
+      if (!child.isInstanceOf[PeriodicSeries]) {
+        return false
+      }
+      val targetSchemaOpt = {
+        val filters = getRawSeriesFilters(child).flatten.toSet.toSeq
+        val targetSchemaChanges = targetSchemaProviderOpt.get.targetSchemaFunc(filters)
+        findTargetSchema(targetSchemaChanges, child.startMs, child.endMs)
+      }
+      if (targetSchemaOpt.isEmpty) {
+        return false
+      }
+      targetSchemaIsJoinKeySubset(binJoin, targetSchemaOpt.get.schema)
+    }
+  }
 }
 
 /**
@@ -208,36 +288,6 @@ class SingleClusterPlanner(val dataset: Dataset,
     }
   }
 
-  // Is TargetSchema changing during query window.
-  private def isTargetSchemaChanging(targetSchemaChanges: Seq[TargetSchemaChange],
-                                     startMs: Long, endMs: Long): Boolean =
-    targetSchemaChanges.nonEmpty && targetSchemaChanges.exists(c => c.time >= startMs && c.time <= endMs)
-
-  // Find the TargetSchema that is applicable i.e effective for the current query window
-  private def findTargetSchema(targetSchemaChanges: Seq[TargetSchemaChange],
-                               startMs: Long, endMs: Long): Option[TargetSchemaChange] = {
-    val tsIndex = targetSchemaChanges.lastIndexWhere(t => t.time <= startMs)
-    if(tsIndex > -1)
-      Some(targetSchemaChanges(tsIndex))
-    else
-      None
-  }
-
-  /**
-   * If TargetSchema exists and all of the target-schema label filters (equals) are provided in the query,
-   * then return true.
-   * @param filters Query Column Filters
-   * @param targetSchema TargetSchema
-   * @return useTargetSchema - use target-schema to calculate query shards
-   */
-  private def useTargetSchemaForShards(filters: Seq[ColumnFilter], targetSchema: Option[TargetSchemaChange]): Boolean =
-    targetSchema match {
-      case Some(ts) if ts.schema.nonEmpty => ts.schema
-        .forall(s => filters.exists(cf => cf.column == s && cf.filter.isInstanceOf[Filter.Equals]))
-      case _ => false
-    }
-
-
   private def toChunkScanMethod(rangeSelector: RangeSelector): ChunkScanMethod = {
     rangeSelector match {
       case IntervalSelector(from, to) => TimeRangeChunkScan(from, to)
@@ -301,13 +351,19 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
   // scalastyle:on cyclomatic.complexity
 
-  override def materializeBinaryJoin(qContext: QueryContext,
-                                     lp: BinaryJoin): PlanResult = {
-    val lhs = walkLogicalPlanTree(lp.lhs, qContext)
+  /**
+   * Materialize a binary join without the target-schema pushdown optimization.
+   * materializeBinaryJoin helper.
+   *
+   * See materializeBinaryJoinWithPushdown for details.
+   */
+  private def materializeBinaryJoinNoPushdown(lp: BinaryJoin,
+                                              lhs: PlanResult,
+                                              rhs: PlanResult,
+                                              qContext: QueryContext): PlanResult = {
     val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext,
       PlannerUtil.pickDispatcher(lhs.plans), rvRangeFromPlan(lp), lhs.plans))
     else lhs.plans
-    val rhs = walkLogicalPlanTree(lp.rhs, qContext)
     val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext,
       PlannerUtil.pickDispatcher(rhs.plans), rvRangeFromPlan(lp), rhs.plans))
     else rhs.plans
@@ -319,18 +375,113 @@ class SingleClusterPlanner(val dataset: Dataset,
     // In the interest of keeping it simple, deferring decorations to the ExecPlan. Add only if needed after measuring.
 
     val targetActor = PlannerUtil.pickDispatcher(stitchedLhs ++ stitchedRhs)
-    val joined = if (lp.operator.isInstanceOf[SetOperator])
-      Seq(exec.SetOperatorExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator,
+    val execPlan = if (lp.operator.isInstanceOf[SetOperator])
+      exec.SetOperatorExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator,
         LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
         LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn), dsOptions.metricColumn,
-        rvRangeFromPlan(lp)))
+        rvRangeFromPlan(lp))
     else
-      Seq(BinaryJoinExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
+      BinaryJoinExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
         LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
         LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
-        LogicalPlanUtils.renameLabels(lp.include, dsOptions.metricColumn), dsOptions.metricColumn, rvRangeFromPlan(lp)))
+        LogicalPlanUtils.renameLabels(lp.include, dsOptions.metricColumn), dsOptions.metricColumn, rvRangeFromPlan(lp))
+    PlanResult(Seq(execPlan))
+  }
 
-    PlanResult(joined)
+  /**
+   * Materialize a binary join with the target-schema pushdown optimization.
+   * materializeBinaryJoin helper.
+   *
+   * When both children of a BinaryJoin are a PeriodicSeries, the result ExecPlan would
+   *   typically be of the form:
+   *
+   * E~BinaryJoinExec(binaryOp=ADD) on ActorPlanDispatcher(actor=0)
+   * -T~PeriodicSamplesMapper()
+   * --E~MultiSchemaPartitionsExec(shard=0) on ActorPlanDispatcher(actor=0)  // lhs
+   * -T~PeriodicSamplesMapper()
+   * --E~MultiSchemaPartitionsExec(shard=0) on ActorPlanDispatcher(actor=0)  // rhs
+   * -T~PeriodicSamplesMapper()
+   * --E~MultiSchemaPartitionsExec(shard=1) on ActorPlanDispatcher(actor=1)  // lhs
+   * -T~PeriodicSamplesMapper()
+   * --E~MultiSchemaPartitionsExec(shard=1) on ActorPlanDispatcher(actor=1)  // rhs
+   *
+   * Data is pulled from each shard, sent to the BinaryJoin actor, then that single actor
+   *   needs to process all of this data.
+   *
+   * When (1) a target-schema is defined and (2) every join-key fully-specifies the
+   *   target-schema columns, we can relieve much of this single-actor pressure.
+   *   Lhs/rhs values will never be joined across shards, so the following ExecPlan
+   *   would yield the same result as the above plan:
+   *
+   * E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(actor=0)
+   * -E~BinaryJoinExec(binaryOp=ADD) on ActorPlanDispatcher(actor=0)
+   * --T~PeriodicSamplesMapper()
+   * ---E~MultiSchemaPartitionsExec(shard=0) on InProcessPlanDispatcher()
+   * --T~PeriodicSamplesMapper()
+   * ---E~MultiSchemaPartitionsExec(shard=0) on InProcessPlanDispatcher()
+   * -E~BinaryJoinExec(binaryOp=ADD) on ActorPlanDispatcher(actor=1)
+   * --T~PeriodicSamplesMapper()
+   * ---E~MultiSchemaPartitionsExec(shard=1) on InProcessPlanDispatcher()
+   * --T~PeriodicSamplesMapper()
+   * ---E~MultiSchemaPartitionsExec(shard=1) on InProcessPlanDispatcher()
+   *
+   * Now, data is joined locally and in smaller batches.
+   */
+  private def materializeBinaryJoinWithPushdown(lp: BinaryJoin,
+                                                lhs: PlanResult,
+                                                rhs: PlanResult,
+                                                qContext: QueryContext): PlanResult = {
+    // for the lhs, map shards to plans
+    val lhsShardToPlanMap = lhs.plans.map{ p =>
+      val mspe = p.asInstanceOf[MultiSchemaPartitionsExec]
+      mspe.shard -> mspe
+    }.toMap
+
+    // map each rhs plan to its same-shard lhs counterpart
+    val joinPairs = rhs.plans
+      .map(_.asInstanceOf[MultiSchemaPartitionsExec])
+      .filter(r => lhsShardToPlanMap.contains(r.shard))
+      .map(r => (lhsShardToPlanMap.apply(r.shard), r))
+
+    if (joinPairs.isEmpty) {
+      return PlanResult(Seq(EmptyResultExec(qContext, dataset.ref)))
+    }
+
+    // build the pushed-down join subtrees, where each child plan will be executed in-process.
+    val execPlans = if (lp.operator.isInstanceOf[SetOperator]) {
+      joinPairs.map{ case (lhs, rhs) =>
+        exec.SetOperatorExec(qContext, lhs.dispatcher,
+          Seq(lhs.replaceDispatcher(inProcessPlanDispatcher)),
+          Seq(rhs.replaceDispatcher(inProcessPlanDispatcher)), lp.operator,
+          LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
+          LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn), dsOptions.metricColumn,
+          rvRangeFromPlan(lp))
+      }
+    } else {
+      joinPairs.map{ case (lhs, rhs) =>
+        BinaryJoinExec(qContext, lhs.dispatcher,
+          Seq(lhs.replaceDispatcher(inProcessPlanDispatcher)),
+          Seq(rhs.replaceDispatcher(inProcessPlanDispatcher)), lp.operator, lp.cardinality,
+          LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
+          LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
+          LogicalPlanUtils.renameLabels(lp.include, dsOptions.metricColumn), dsOptions.metricColumn,
+          rvRangeFromPlan(lp))
+      }
+    }
+    PlanResult(execPlans)
+  }
+
+  override def materializeBinaryJoin(qContext: QueryContext,
+                                     lp: BinaryJoin): PlanResult = {
+    val lhs = walkLogicalPlanTree(lp.lhs, qContext)
+    val rhs = walkLogicalPlanTree(lp.rhs, qContext)
+
+    // see materializeBinaryJoinWithPushdown for details about this optimization
+    if (canPushdownBinaryJoin(lp, qContext)) {
+      materializeBinaryJoinWithPushdown(lp, lhs, rhs, qContext)
+    } else {
+      materializeBinaryJoinNoPushdown(lp, lhs, rhs, qContext)
+    }
   }
 
   private def materializePeriodicSeriesWithWindowing(qContext: QueryContext,

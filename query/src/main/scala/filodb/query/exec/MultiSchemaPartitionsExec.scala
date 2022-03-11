@@ -146,5 +146,21 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
          printFunctionArgument(t, level + i + 1).mkString("\n")
     }
   }
-}
 
+  def replaceDispatcher(dispatcher: PlanDispatcher): MultiSchemaPartitionsExec = {
+    // Make sure to copy any mutable state...
+
+    // scalastyle:off null
+    // Note: null is finalPlan's default (i.e. initial) value.
+    val finalPlanCopy = if (finalPlan != null) {
+      val finalPlanCopy = finalPlan.copy(dispatcher = dispatcher)
+      finalPlanCopy.rangeVectorTransformers.appendAll(finalPlan.rangeVectorTransformers)
+      finalPlanCopy
+    } else null
+    // scalastyle:on null
+    val res = copy(dispatcher = dispatcher)
+    res.finalPlan = finalPlanCopy
+    res.rangeVectorTransformers.appendAll(rangeVectorTransformers)
+    res
+  }
+}

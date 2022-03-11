@@ -435,10 +435,11 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
     binaryJoinNode.children.size shouldEqual 2
     binaryJoinNode.children.foreach(_.isInstanceOf[StitchRvsExec] shouldEqual false)
+    binaryJoinNode.children.forall(_.dispatcher.isInstanceOf[InProcessPlanDispatcher]) shouldEqual true
   }
 
   it("should create single child plan for LHS where target-schema filters provided" +
-    " and 4 (spread 2) children for RHS (no target-schema filters) of the binary join") {
+       "and RHS (no target-schema filters) of the binary join") {
     val lp = Parser.queryRangeToLogicalPlan("""count(foo{job="bar", instance="inst1"} + baz{job="bar"})""",
       TimeStepParams(20000, 100, 30000))
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
@@ -453,7 +454,148 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val binaryJoinNode = execPlan.children(0)
     binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
     binaryJoinNode.asInstanceOf[BinaryJoinExec].lhs.size shouldEqual 1
-    binaryJoinNode.asInstanceOf[BinaryJoinExec].rhs.size shouldEqual 4
+    binaryJoinNode.asInstanceOf[BinaryJoinExec].rhs.size shouldEqual 1
+    binaryJoinNode.children.forall(_.dispatcher.isInstanceOf[InProcessPlanDispatcher]) shouldEqual true
+  }
+
+  it ("should pushdown BinaryJoin/SetOp when applicable") {
+    // Pushdown requirements:
+    //   (1) target schema is defined
+    //   (2) target schema is subset of join key
+    //   (3) lhs and rhs are PeriodicSeries
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 1))
+    }
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job", "app")))
+    }
+    val queryExpectedPairs = Seq(
+      // binary join; same shard
+      ("""foo{job="bak", app="baz"} + bar{job="bak", app="baz"}""",
+        """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#305293475],raw)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(app,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@590adb41)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(app,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@590adb41)""".stripMargin),
+      // binary join; different shards
+      ("""foo{job="bak", app="baz"} + bar{job="bak", app="bag"}""",
+        """E~EmptyResultExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@2f4ba1ae)"""),
+      // set op; same shard
+      ("""foo{job="bak", app="baz"} and bar{job="bak", app="baz"}""",
+        """E~SetOperatorExec(binaryOp=LAND, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(app,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(app,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)""".stripMargin),
+      // set op; different shards
+      ("""foo{job="bak", app="baz"} and bar{job="bak", app="bag"}""",
+        """E~EmptyResultExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@633cc6b5)"""),
+      // all shards
+      ("""foo{job="bak"} + bar{job="bak"}""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)""".stripMargin),
+      // should only pushdown child tree
+      ("""(foo{job="bak"} + bar{job="bak"})  + bat{job="bak"}""",
+        """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)""".stripMargin),
+      // should not pushdown
+      ("""sum(foo{job="bak"}) + sum(bar{job="bak"})""",
+        """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
+          |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+          |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+          |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
+          |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+          |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+          |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)""".stripMargin),
+      // should pushdown w/ on labels
+      ("""foo{job="bak"} + on(job, app, label) bar{job="bak"}""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app, label), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app, label), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)""".stripMargin),
+      // should not pushdown w/ on labels
+      ("""foo{job="bak"} + on(job, label) bar{job="bak"}""",
+        """E~BinaryJoinExec(binaryOp=ADD, on=List(job, label), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1757233073],raw)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1757233073],raw)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1757233073],raw)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1757233073],raw)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1757233073],raw)""".stripMargin),
+      // should pushdown w/ ignoring labels
+      ("""foo{job="bak"} + ignoring(label) bar{job="bak"}""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List(label)) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List(label)) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-785052375],raw)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@68ed3f30)""".stripMargin),
+      // should not pushdown w/ ignoring labels
+      ("""foo{job="bak"} + ignoring(job, app) baz{job="bak"}""",
+        """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List(job, app)) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#133014017],raw)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#133014017],raw)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#133014017],raw)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#133014017],raw)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#133014017],raw)""".stripMargin)
+    )
+    queryExpectedPairs.foreach{ case (query, expected) =>
+      val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(20000, 100, 30000))
+      val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
+      (spreadOverride = Some(FunctionalSpreadProvider(spread)),
+        targetSchema = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
+
+      validatePlan(execPlan, expected)
+    }
   }
 
   // end
