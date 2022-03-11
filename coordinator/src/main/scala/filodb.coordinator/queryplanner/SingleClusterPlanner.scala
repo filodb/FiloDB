@@ -54,13 +54,13 @@ object SingleClusterPlanner {
       case _ => false
     }
 
-  // TODO(a_theimer): reverse of Vish suggestion-- is this correct?
+  // TODO(a_theimer): different from Vish's suggestion-- is this correct?
   /**
-   * Given a BinaryJoin and target schema for one of its children, returns true iff the
-   *   target schema's set of names constitutes a subset of each of the child's eventual join keys.
+   * Given a BinaryJoin and target schema for one of its children, returns true iff
+   *   each of the child's eventual join keys describe a superset of the target schema columns.
    */
-  private def targetSchemaIsJoinKeySubset(binaryJoin: BinaryJoin,
-                                          targetSchema: Seq[String]): Boolean = {
+  private def joinKeyIsTargetSchemaSuperset(binaryJoin: BinaryJoin,
+                                            targetSchema: Seq[String]): Boolean = {
     // We cannot know the exact RangeVectorKeys a child will eventually yield,
     //   but-- since it has a target schema-- we do know that those keys will include
     //   the target schema columns.
@@ -101,7 +101,7 @@ object SingleClusterPlanner {
       if (targetSchemaOpt.isEmpty) {
         return false
       }
-      targetSchemaIsJoinKeySubset(binJoin, targetSchemaOpt.get.schema)
+      joinKeyIsTargetSchemaSuperset(binJoin, targetSchemaOpt.get.schema)
     }
   }
 }
