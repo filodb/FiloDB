@@ -22,7 +22,7 @@ import filodb.query.LogicalPlan._
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
 import filodb.query.exec.InternalRangeFunction.Last
 
-object SingleClusterPlanner {
+object SingleClusterPlanner extends StrictLogging {
   private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests").withoutTags
 
   // Is TargetSchema changing during query window.
@@ -54,7 +54,6 @@ object SingleClusterPlanner {
       case _ => false
     }
 
-  // TODO(a_theimer): different from Vish's suggestion-- is this correct?
   /**
    * Given a BinaryJoin and target schema for one of its children, returns true iff
    *   each of the child's eventual join keys describe a superset of the target schema columns.
@@ -78,14 +77,14 @@ object SingleClusterPlanner {
    * See materializeBinaryJoinWithPushdown for more details about the optimization.
    *
    * It is valid to apply the optimization iff three conditions are met:
-   *   (1) each child is a PeriodicSeries (TODO: relax this?)
+   *   (1) each child is a PeriodicSeries
    *   (2) each child has a target schema defined for its RawSeries filters
    *   (3) when the eventual ExecPlan is executed, each child join-key must
    *       constitute a superset of the target-schema columns.
    */
   private def canPushdownBinaryJoin(binJoin: BinaryJoin,
                                     qContext: QueryContext): Boolean = {
-    val targetSchemaProviderOpt = qContext.plannerParams.targetSchema
+    val targetSchemaProviderOpt = qContext.plannerParams.targetSchemaProvider
     if (targetSchemaProviderOpt.isEmpty) {
       return false
     }
@@ -94,8 +93,13 @@ object SingleClusterPlanner {
         return false
       }
       val targetSchemaOpt = {
-        val filters = getRawSeriesFilters(child).flatten.toSet.toSeq
-        val targetSchemaChanges = targetSchemaProviderOpt.get.targetSchemaFunc(filters)
+        val filters = getRawSeriesFilters(child)
+        if (filters.size != 1) {
+          logger.warn(s"expected a single set of column filters, but found $filters " +
+                      s"from child $child")
+          return false
+        }
+        val targetSchemaChanges = targetSchemaProviderOpt.get.targetSchemaFunc(filters.head)
         findTargetSchema(targetSchemaChanges, child.startMs, child.endMs)
       }
       if (targetSchemaOpt.isEmpty) {
@@ -267,7 +271,7 @@ class SingleClusterPlanner(val dataset: Dataset,
         .getOrElse(throw new BadQueryException(s"Could not find metric value"))
       val shardValues = shardVals.filterNot(_._1 == dsOptions.metricColumn).map(_._2)
       logger.debug(s"For shardColumns $shardColumns, extracted metric $metric and shard values $shardValues")
-      val targetSchemaChange = qContext.plannerParams.targetSchema
+      val targetSchemaChange = qContext.plannerParams.targetSchemaProvider
         .getOrElse(targetSchemaProvider)
         .targetSchemaFunc(filters)
       val targetSchema = if (targetSchemaChange.nonEmpty) targetSchemaChange.last.schema else Seq.empty
@@ -624,7 +628,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))
     val spreadChanges = spreadProvToUse.spreadFunc(renamedFilters)
 
-    val targetSchemaChanges = qContext.plannerParams.targetSchema
+    val targetSchemaChanges = qContext.plannerParams.targetSchemaProvider
       .getOrElse(targetSchemaProvider)
       .targetSchemaFunc(renamedFilters)
     val rangeSelectorWithOffset = lp.rangeSelector match {
@@ -745,7 +749,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     // NOTE: _type_ filter support currently isn't there in series keys queries
     val (renamedFilters, _) = extractSchemaFilter(renameMetricFilter(lp.filters))
 
-    val targetSchemaChanges = qContext.plannerParams.targetSchema
+    val targetSchemaChanges = qContext.plannerParams.targetSchemaProvider
       .getOrElse(targetSchemaProvider)
       .targetSchemaFunc(renamedFilters)
     // Change in Target Schema in query window, do not use target schema to find query shards
