@@ -90,6 +90,25 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
         }
       }
     } ~
+    // Path: /promql/<datasetName>/api/v2/label/<labelName>/values
+    // This endpoint returns a list of label values
+    // For more details, see Prometheus HTTP API Documentation
+    // [Label names](https://prometheus.io/docs/prometheus/latest/querying/api/#querying-label-values)
+    // TODO Why did we deviate from Prom by taking match param as comma separated key-values instead of PromQL selector?
+    path ("api" / "v1" / "label" / Segment / "values") { label: String =>
+      get {
+        parameter(("match[]".as[String].?, 'start.as[Double].?, 'end.as[Double].?, 'explainOnly.as[Boolean].?))
+        { (query, start, end, explainOnly) =>
+          val currentTimeInSecs = System.currentTimeMillis()/1000
+          val startLong = start.map(_.toLong).getOrElse(currentTimeInSecs - ONE_DAY_IN_SECS)
+          val endLong = end.map(_.toLong).getOrElse(currentTimeInSecs)
+          val logicalPlan = Parser.labelValuesQueryToLogicalPlan(Seq(label), query,
+                                                                 TimeStepParams(startLong, 0L, endLong))
+          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
+            false, None, PromQlQueryParams(query.getOrElse(""), startLong, 0L, endLong), false)
+        }
+      }
+    } ~
     // Path: /promql/<datasetName>/api/v1/read
     // Used to extract raw data for integration with other TSDB systems.
     //  * Input: ReadRequest Protobuf
