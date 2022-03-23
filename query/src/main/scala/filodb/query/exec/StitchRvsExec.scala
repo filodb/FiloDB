@@ -103,6 +103,14 @@ final case class StitchRvsExec(queryContext: QueryContext,
   }
   protected def args: String = ""
 
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    copy(dispatcher = planDispatcher)
+  }
+
+  override def _withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
+    copy(children = children)
+  }
+
   protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {

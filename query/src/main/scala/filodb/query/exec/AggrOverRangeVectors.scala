@@ -52,7 +52,14 @@ final case class LocalPartitionReduceAggregateExec(queryContext: QueryContext,
                                                    dispatcher: PlanDispatcher,
                                                    childAggregates: Seq[ExecPlan],
                                                    aggrOp: AggregationOperator,
-                                                   aggrParams: Seq[Any]) extends ReduceAggregateExec
+                                                   aggrParams: Seq[Any]) extends ReduceAggregateExec {
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    copy(dispatcher = planDispatcher)
+  }
+  override def _withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
+    copy(childAggregates = children)
+  }
+}
 
 /**
   * Use when child ExecPlan's span multiple partitions
@@ -62,6 +69,12 @@ final case class MultiPartitionReduceAggregateExec(queryContext: QueryContext,
                                                    childAggregates: Seq[ExecPlan],
                                                    aggrOp: AggregationOperator,
                                                    aggrParams: Seq[Any]) extends ReduceAggregateExec {
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    copy(dispatcher = planDispatcher)
+  }
+  override def _withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
+    copy(childAggregates = children)
+  }
   // overriden since it can reduce schemas with different vector lengths as long as the columns are same
   override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema =
     IgnoreFixedVectorLenAndColumnNamesSchemaReducer.reduceSchema(rs, resp)

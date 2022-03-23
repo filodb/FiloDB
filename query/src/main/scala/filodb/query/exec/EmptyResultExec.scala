@@ -13,6 +13,10 @@ case class EmptyResultExec(queryContext: QueryContext,
                            dataset: DatasetRef) extends LeafExecPlan {
   override def dispatcher: PlanDispatcher = InProcessPlanDispatcher(EmptyQueryConfig)
 
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    this
+  }
+
   override def execute(source: ChunkSource,
                        querySession: QuerySession)
                       (implicit sched: Scheduler): Task[QueryResponse] = {

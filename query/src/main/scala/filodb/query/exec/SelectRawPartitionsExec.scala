@@ -114,6 +114,10 @@ final case class SelectRawPartitionsExec(queryContext: QueryContext,
                                          colIds: Seq[Types.ColumnId]) extends LeafExecPlan {
   def dataset: DatasetRef = datasetRef
 
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    copy(dispatcher = planDispatcher)
+  }
+
   private def schemaOfDoExecute(): ResultSchema = {
     // If the data schema cannot be found, then return empty ResultSchema
     dataSchema.map { sch =>

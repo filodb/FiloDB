@@ -66,7 +66,14 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
 
 final case class PartKeysDistConcatExec(queryContext: QueryContext,
                                         dispatcher: PlanDispatcher,
-                                        children: Seq[ExecPlan]) extends MetadataDistConcatExec
+                                        children: Seq[ExecPlan]) extends MetadataDistConcatExec {
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    copy(dispatcher = planDispatcher)
+  }
+  override def _withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
+    copy(children = children)
+  }
+}
 
 /**
   * Aggregates output from TsCardExec.
@@ -114,11 +121,24 @@ final case class TsCardReduceExec(queryContext: QueryContext,
       }
     Observable.fromTask(taskOfResults)
   }
+
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    copy(dispatcher = planDispatcher)
+  }
+  override def _withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
+    copy(children = children)
+  }
 }
 
 final case class LabelValuesDistConcatExec(queryContext: QueryContext,
                                            dispatcher: PlanDispatcher,
                                            children: Seq[ExecPlan]) extends MetadataDistConcatExec {
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    copy(dispatcher = planDispatcher)
+  }
+  override def _withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
+    copy(children = children)
+  }
   /**
    * Compose the sub-query/leaf results here.
    */
@@ -173,7 +193,6 @@ final case class LabelValuesDistConcatExec(queryContext: QueryContext,
 }
 
 final class LabelCardinalityPresenter(val funcParams: Seq[FuncArgs]  = Nil) extends RangeVectorTransformer {
-
   override def apply(source: Observable[RangeVector],
                      querySession: QuerySession,
                      limit: Int,
@@ -197,6 +216,12 @@ final class LabelCardinalityPresenter(val funcParams: Seq[FuncArgs]  = Nil) exte
 final case class LabelNamesDistConcatExec(queryContext: QueryContext,
                                            dispatcher: PlanDispatcher,
                                            children: Seq[ExecPlan]) extends MetadataDistConcatExec {
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    copy(dispatcher = planDispatcher)
+  }
+  override def _withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
+    copy(children = children)
+  }
   /**
    * Pick first non empty result from child.
    */
@@ -221,8 +246,14 @@ final case class LabelCardinalityReduceExec(queryContext: QueryContext,
                                             dispatcher: PlanDispatcher,
                                             children: Seq[ExecPlan]) extends DistConcatExec
                                             with LabelCardinalityExecPlan {
-
   import scala.collection.mutable.{Map => MutableMap}
+
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    copy(dispatcher = planDispatcher)
+  }
+  override def _withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
+    copy(children = children)
+  }
 
   private def mapConsumer(sketchMap: MutableMap[ZeroCopyUTF8String, CpcSketch]) = new MapItemConsumer {
     def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
@@ -306,6 +337,10 @@ final case class PartKeysExec(queryContext: QueryContext,
 
   override def enforceLimit: Boolean = false
 
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    copy(dispatcher = planDispatcher)
+  }
+
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
@@ -336,6 +371,10 @@ final case class LabelValuesExec(queryContext: QueryContext,
                                  endMs: Long) extends LeafExecPlan {
 
   override def enforceLimit: Boolean = false
+
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    copy(dispatcher = planDispatcher)
+  }
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
@@ -394,6 +433,10 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
                                  endMs: Long) extends LeafExecPlan with LabelCardinalityExecPlan {
 
   override def enforceLimit: Boolean = false
+
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    copy(dispatcher = planDispatcher)
+  }
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
@@ -532,6 +575,10 @@ final case class TsCardExec(queryContext: QueryContext,
 
   override def enforceLimit: Boolean = false
 
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    copy(dispatcher = planDispatcher)
+  }
+
   // scalastyle:off method.length
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
@@ -572,6 +619,10 @@ final case class LabelNamesExec(queryContext: QueryContext,
                                  endMs: Long) extends LeafExecPlan {
 
   override def enforceLimit: Boolean = false
+
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    copy(dispatcher = planDispatcher)
+  }
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)

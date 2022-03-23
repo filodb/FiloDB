@@ -207,5 +207,12 @@ final case class BinaryJoinExec(queryContext: QueryContext,
         else rs
     }
   }
+
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    copy(dispatcher = planDispatcher)
+  }
+  override def _withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
+    throw new RuntimeException("should not be called for BinaryJoinExec")
+  }
 }
 

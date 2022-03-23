@@ -34,12 +34,25 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
                                            metricColumn: String,
                                            schema: Option[String] = None,
                                            colName: Option[String] = None) extends LeafExecPlan {
+
   import SelectRawPartitionsExec._
 
   override def allTransformers: Seq[RangeVectorTransformer] = finalPlan.rangeVectorTransformers
 
   @transient // dont serialize the SelectRawPartitionsExec plan created for plan execution
   var finalPlan: SelectRawPartitionsExec = _
+
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    // scalastyle:off null
+    // Note: null is finalPlan's default (i.e. initial) value.
+    val finalPlanCopy = if (finalPlan != null) {
+      finalPlan.withDispatcher(dispatcher)
+    } else null
+    // scalastyle:on null
+    val res = copy(dispatcher = dispatcher)
+    res.finalPlan = finalPlanCopy.asInstanceOf[SelectRawPartitionsExec]
+    res
+  }
 
   // Remove _columnName suffix from metricName and generate PartLookupResult
   private def removeSuffixAndGenerateLookupResult(filters: Seq[ColumnFilter], metricName: String, columnName: String,
@@ -119,6 +132,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
                                     None, Some(lookupRes),
                                     schema.isDefined, Nil)
           }
+
   }
   // scalastyle:on method.length
 
@@ -145,22 +159,5 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
        s"${"-" * (level + i)}T~${t.getClass.getSimpleName}(${t.args})" +
          printFunctionArgument(t, level + i + 1).mkString("\n")
     }
-  }
-
-  def replaceDispatcher(dispatcher: PlanDispatcher): MultiSchemaPartitionsExec = {
-    // Make sure to copy any mutable state...
-
-    // scalastyle:off null
-    // Note: null is finalPlan's default (i.e. initial) value.
-    val finalPlanCopy = if (finalPlan != null) {
-      val finalPlanCopy = finalPlan.copy(dispatcher = dispatcher)
-      finalPlanCopy.rangeVectorTransformers.appendAll(finalPlan.rangeVectorTransformers)
-      finalPlanCopy
-    } else null
-    // scalastyle:on null
-    val res = copy(dispatcher = dispatcher)
-    res.finalPlan = finalPlanCopy
-    res.rangeVectorTransformers.appendAll(rangeVectorTransformers)
-    res
   }
 }

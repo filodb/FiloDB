@@ -35,6 +35,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
       override def queryContext: QueryContext = QueryContext()
       override def dataset: DatasetRef = ???
       override def dispatcher: PlanDispatcher = ???
+      override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = ???
       override def doExecute(source: ChunkSource,
                              querySession: QuerySession)(implicit sched: Scheduler): ExecResult = {
         ExecResult(Observable.fromIterable(rvs), Task.now(schema))

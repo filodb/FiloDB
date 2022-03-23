@@ -39,6 +39,10 @@ final case class SelectChunkInfosExec(queryContext: QueryContext,
                                       colName: Option[String] = None) extends LeafExecPlan {
   import SelectChunkInfosExec._
 
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    copy(dispatcher = planDispatcher)
+  }
+
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {

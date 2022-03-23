@@ -26,6 +26,10 @@ case class ScalarBinaryOperationExec(queryContext: QueryContext,
   val resultSchema = ResultSchema(columns, 1)
   val operatorFunction = BinaryOperatorFunction.factoryMethod(operator)
 
+  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    this
+  }
+
   def evaluate: Double = {
     if (lhs.isRight  && rhs.isRight) operatorFunction.calculate(lhs.right.get.evaluate, rhs.right.get.evaluate)
     else if (lhs.isLeft && rhs.isLeft) operatorFunction.calculate(lhs.left.get, rhs.left.get)

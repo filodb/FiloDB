@@ -80,6 +80,19 @@ trait ExecPlan extends QueryCommand {
 
   protected def allTransformers: Seq[RangeVectorTransformer] = rangeVectorTransformers
 
+  // TODO(a_theimer): this needs stronger type guarantees
+  def copyStateInto(other: ExecPlan) : Unit = {
+    other.rangeVectorTransformers.appendAll(rangeVectorTransformers)
+  }
+
+  protected def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan
+
+  def withDispatcher(planDispatcher: PlanDispatcher): ExecPlan = {
+    val res = _withDispatcherHelper(planDispatcher)
+    copyStateInto(res)
+    res
+  }
+
   /**
     * Facade for the execution orchestration of the plan sub-tree
     * starting from this node.
@@ -403,6 +416,14 @@ abstract class NonLeafExecPlan extends ExecPlan {
   final def dataset: DatasetRef = children.head.dataset
 
   final def submitTime: Long = children.head.queryContext.submitTime
+
+  protected def _withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan
+
+  def withChildren(children: Seq[ExecPlan]): NonLeafExecPlan = {
+    val res = _withChildrenHelper(children)
+    copyStateInto(res)
+    res
+  }
 
   // flag to override child task execution behavior. If it is false, child tasks get executed sequentially.
   // Use-cases include splitting longer range query into multiple smaller range queries.
