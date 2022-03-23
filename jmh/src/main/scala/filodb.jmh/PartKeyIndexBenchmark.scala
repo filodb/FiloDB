@@ -3,6 +3,7 @@ package filodb.jmh
 import java.lang.management.{BufferPoolMXBean, ManagementFactory}
 import java.util.concurrent.TimeUnit
 
+import scala.collection.mutable
 import scala.concurrent.duration._
 
 import ch.qos.logback.classic.{Level, Logger}
@@ -12,9 +13,11 @@ import spire.syntax.cfor._
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.PartKeyLuceneIndex
+import filodb.core.metadata.Schemas
 import filodb.core.metadata.Schemas.untyped
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.memory.{BinaryRegionConsumer, MemFactory}
+import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.timeseries.TestTimeseriesProducer
 
 // scalastyle:off
@@ -61,81 +64,81 @@ class PartKeyIndexBenchmark {
 
   println(s"Index Memory Map Size: " +
     s"${ManagementFactory.getPlatformMXBeans(classOf[BufferPoolMXBean]).asScala.find(_.getName == "mapped").get.getMemoryUsed}")
-//
-//  @Benchmark
-//  @BenchmarkMode(Array(Mode.Throughput))
-//  @OutputTimeUnit(TimeUnit.SECONDS)
-//  def partIdsLookupWithEqualsFilters(): Unit = {
-//    cforRange ( 0 until 8 ) { i =>
-//      partKeyIndex.partIdsFromFilters(
-//        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
-//            ColumnFilter("_ws_", Filter.Equals("demo")),
-//            ColumnFilter("host", Filter.EqualsRegex("H0")),
-//            ColumnFilter("_metric_", Filter.Equals("heap_usage"))),
-//        now,
-//        now + 1000)
-//    }
-//  }
-//
-//  @Benchmark
-//  @BenchmarkMode(Array(Mode.Throughput))
-//  @OutputTimeUnit(TimeUnit.SECONDS)
-//  @OperationsPerInvocation(8)
-//  def emptyPartIdsLookupWithEqualsFilters(): Unit = {
-//    cforRange ( 0 until 8 ) { i =>
-//      partKeyIndex.partIdsFromFilters(
-//        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-${i + 200}")),
-//          ColumnFilter("_ws_", Filter.Equals("demo")),
-//          ColumnFilter("host", Filter.EqualsRegex("H0")),
-//          ColumnFilter("_metric_", Filter.Equals("heap_usage"))),
-//        now,
-//        now + 1000)
-//    }
-//  }
-//
-//  @Benchmark
-//  @BenchmarkMode(Array(Mode.Throughput))
-//  @OutputTimeUnit(TimeUnit.SECONDS)
-//  @OperationsPerInvocation(8)
-//  def partIdsLookupWithSuffixRegexFilters(): Unit = {
-//    cforRange ( 0 until 8 ) { i =>
-//      partKeyIndex.partIdsFromFilters(
-//        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
-//          ColumnFilter("_ws_", Filter.Equals("demo")),
-//          ColumnFilter("_metric_", Filter.Equals("heap_usage")),
-//          ColumnFilter("instance", Filter.EqualsRegex("Instance-2.*"))),
-//        now,
-//        now + 1000)
-//    }
-//  }
-//
-//  @Benchmark
-//  @BenchmarkMode(Array(Mode.Throughput))
-//  @OutputTimeUnit(TimeUnit.SECONDS)
-//  @OperationsPerInvocation(8)
-//  def partIdsLookupWithPrefixRegexFilters(): Unit = {
-//    cforRange ( 0 until 8 ) { i =>
-//      partKeyIndex.partIdsFromFilters(
-//        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
-//          ColumnFilter("_ws_", Filter.Equals("demo")),
-//          ColumnFilter("_metric_", Filter.Equals("heap_usage")),
-//          ColumnFilter("instance", Filter.EqualsRegex(".*2"))),
-//        now,
-//        now + 1000)
-//    }
-//  }
-//
-//  @Benchmark
-//  @BenchmarkMode(Array(Mode.Throughput))
-//  @OutputTimeUnit(TimeUnit.SECONDS)
-//  @OperationsPerInvocation(8)
-//  def startTimeLookupWithPartId(): Unit = {
-//    cforRange ( 0 until 8 ) { i =>
-//      val pIds = debox.Buffer.empty[Int]
-//      cforRange ( i * 1000 to i * 1000 + 1000 ) { j => pIds += j }
-//      partKeyIndex.startTimeFromPartIds(pIds.iterator())
-//    }
-//  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def partIdsLookupWithEqualsFilters(): Unit = {
+    cforRange ( 0 until 8 ) { i =>
+      partKeyIndex.partIdsFromFilters(
+        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
+            ColumnFilter("_ws_", Filter.Equals("demo")),
+            ColumnFilter("host", Filter.EqualsRegex("H0")),
+            ColumnFilter("_metric_", Filter.Equals("heap_usage"))),
+        now,
+        now + 1000)
+    }
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(8)
+  def emptyPartIdsLookupWithEqualsFilters(): Unit = {
+    cforRange ( 0 until 8 ) { i =>
+      partKeyIndex.partIdsFromFilters(
+        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-${i + 200}")),
+          ColumnFilter("_ws_", Filter.Equals("demo")),
+          ColumnFilter("host", Filter.EqualsRegex("H0")),
+          ColumnFilter("_metric_", Filter.Equals("heap_usage"))),
+        now,
+        now + 1000)
+    }
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(8)
+  def partIdsLookupWithSuffixRegexFilters(): Unit = {
+    cforRange ( 0 until 8 ) { i =>
+      partKeyIndex.partIdsFromFilters(
+        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
+          ColumnFilter("_ws_", Filter.Equals("demo")),
+          ColumnFilter("_metric_", Filter.Equals("heap_usage")),
+          ColumnFilter("instance", Filter.EqualsRegex("Instance-2.*"))),
+        now,
+        now + 1000)
+    }
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(8)
+  def partIdsLookupWithPrefixRegexFilters(): Unit = {
+    cforRange ( 0 until 8 ) { i =>
+      partKeyIndex.partIdsFromFilters(
+        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
+          ColumnFilter("_ws_", Filter.Equals("demo")),
+          ColumnFilter("_metric_", Filter.Equals("heap_usage")),
+          ColumnFilter("instance", Filter.EqualsRegex(".*2"))),
+        now,
+        now + 1000)
+    }
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(8)
+  def startTimeLookupWithPartId(): Unit = {
+    cforRange ( 0 until 8 ) { i =>
+      val pIds = debox.Buffer.empty[Int]
+      cforRange ( i * 1000 to i * 1000 + 1000 ) { j => pIds += j }
+      partKeyIndex.startTimeFromPartIds(pIds.iterator())
+    }
+  }
 
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
@@ -149,20 +152,20 @@ class PartKeyIndexBenchmark {
     }
   }
 
-//  @Benchmark
-//  @BenchmarkMode(Array(Mode.Throughput))
-//  @OutputTimeUnit(TimeUnit.SECONDS)
-//  @OperationsPerInvocation(8)
-//  def getMetricNamesSearchAndIterate(): Unit = {
-//    cforRange ( 0 until 8 ) { i =>
-//      val filter = Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
-//        ColumnFilter("_ws_", Filter.Equals("demo")))
-//      val res = mutable.HashSet[ZeroCopyUTF8String]()
-//      partKeyIndex.partIdsFromFilters(filter, now, now + 1000).foreach { pId =>
-//        val pk = partKeyIndex.partKeyFromPartId(pId)
-//        Schemas.promCounter.partition.binSchema.singleColValues(pk.get.bytes, UnsafeUtils.arayOffset, "_metric_", res)
-//      }
-//    }
-//  }
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(8)
+  def getMetricNamesSearchAndIterate(): Unit = {
+    cforRange ( 0 until 8 ) { i =>
+      val filter = Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
+        ColumnFilter("_ws_", Filter.Equals("demo")))
+      val res = mutable.HashSet[ZeroCopyUTF8String]()
+      partKeyIndex.partIdsFromFilters(filter, now, now + 1000).foreach { pId =>
+        val pk = partKeyIndex.partKeyFromPartId(pId)
+        Schemas.promCounter.partition.binSchema.singleColValues(pk.get.bytes, UnsafeUtils.arayOffset, "_metric_", res)
+      }
+    }
+  }
 
 }
