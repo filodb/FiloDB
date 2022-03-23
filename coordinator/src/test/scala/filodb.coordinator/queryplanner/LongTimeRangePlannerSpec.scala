@@ -27,6 +27,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
     override def submitTime: Long = ???
     override def dataset: DatasetRef = ???
     override def dispatcher: PlanDispatcher = ???
+    override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = ???
     override def doExecute(source: ChunkSource, querySession: QuerySession)
                           (implicit sched: Scheduler): ExecResult = ???
     override protected def args: String = ???

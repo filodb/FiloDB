@@ -61,6 +61,7 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     override def submitTime: Long = 1000
     override def dataset: DatasetRef = ???
     override def dispatcher: PlanDispatcher = InProcessPlanDispatcher(queryConfig)
+    override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = this
     override def doExecute(source: ChunkSource, querySession: QuerySession)
                           (implicit sched: Scheduler): ExecResult = ???
     override protected def args: String = "mock-args"

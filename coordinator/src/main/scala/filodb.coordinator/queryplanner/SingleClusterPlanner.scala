@@ -455,8 +455,8 @@ class SingleClusterPlanner(val dataset: Dataset,
     val execPlans = if (lp.operator.isInstanceOf[SetOperator]) {
       joinPairs.map{ case (lhs, rhs) =>
         exec.SetOperatorExec(qContext, lhs.dispatcher,
-          Seq(lhs.replaceDispatcher(inProcessPlanDispatcher)),
-          Seq(rhs.replaceDispatcher(inProcessPlanDispatcher)), lp.operator,
+          Seq(lhs.withDispatcher(inProcessPlanDispatcher)),
+          Seq(rhs.withDispatcher(inProcessPlanDispatcher)), lp.operator,
           LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
           LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn), dsOptions.metricColumn,
           rvRangeFromPlan(lp))
@@ -464,8 +464,8 @@ class SingleClusterPlanner(val dataset: Dataset,
     } else {
       joinPairs.map{ case (lhs, rhs) =>
         BinaryJoinExec(qContext, lhs.dispatcher,
-          Seq(lhs.replaceDispatcher(inProcessPlanDispatcher)),
-          Seq(rhs.replaceDispatcher(inProcessPlanDispatcher)), lp.operator, lp.cardinality,
+          Seq(lhs.withDispatcher(inProcessPlanDispatcher)),
+          Seq(rhs.withDispatcher(inProcessPlanDispatcher)), lp.operator, lp.cardinality,
           LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
           LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
           LogicalPlanUtils.renameLabels(lp.include, dsOptions.metricColumn), dsOptions.metricColumn,
