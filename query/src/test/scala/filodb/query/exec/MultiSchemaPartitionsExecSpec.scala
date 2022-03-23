@@ -87,6 +87,9 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     memStore.ingest(dsRef, 0, SomeData(container, 0))
     memStore.ingest(dsRef, 0, MMD.records(MMD.histDataset, histData))
 
+    // set up shard, but do not ingest data to simulate an empty shard
+    memStore.setup(dsRef, schemas, 1, TestData.storeConf)
+
     memStore.setup(MMD.dataset1.ref, Schemas(MMD.schema1), 0, TestData.storeConf)
     memStore.ingest(MMD.dataset1.ref, 0, mmdSomeData)
     memStore.setup(MMD.histMaxDS.ref, Schemas(MMD.histMaxDS.schema), 0, TestData.storeConf)
@@ -419,6 +422,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
                        ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     // TODO: SelectChunkInfos should not require a raw schema
+    // shard 0 contains data
     val execPlan = SelectChunkInfosExec(QueryContext(), dummyDispatcher,
       dsRef, 0, filters, AllChunkScan, colName = Some("timestamp"))
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
@@ -441,6 +445,19 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
 
     val startTimes = tuples.grouped(67).map(_.head._1).toBuffer
     infosRead.map(_._2) shouldEqual startTimes
+  }
+
+  it("should return empty chunk metadata from MemStore when shard has no data") {
+    val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    // TODO: SelectChunkInfos should not require a raw schema
+    // shard 1 does not contain data
+    val execPlan = SelectChunkInfosExec(QueryContext(), dummyDispatcher,
+      dsRef, 1, filters, AllChunkScan, colName = Some("timestamp"))
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
+    info(s"resp = $resp")
+    val result = resp.asInstanceOf[QueryResult]
+    result.result.size shouldEqual 0
   }
 
   it ("should fail with exception BadQueryException") {

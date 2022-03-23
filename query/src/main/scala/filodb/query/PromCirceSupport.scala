@@ -15,7 +15,7 @@ object PromCirceSupport {
 
   implicit val encodeMetadataSampl: Encoder[MetadataSampl] = Encoder.instance {
     case m @ MetadataMapSampl(v) => Json.fromValues(Seq(v.asJson))
-    case l @ LabelSampl(v) => Json.fromValues(Seq(v.asJson))
+    case l @ LabelSampl(v) => v.asJson
     // Where are these used? added to make compiler happy
     case l @ LabelCardinalitySampl(group, cardinality)  =>
       Json.fromValues(Seq(group.asJson, cardinality.asJson))

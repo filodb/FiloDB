@@ -10,7 +10,7 @@ import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
 import filodb.prometheus.ast.TimeStepParams
-import filodb.query.{BinaryOperator, InstantFunctionId, LogicalPlan, MiscellaneousFunctionId, SortFunctionId}
+import filodb.query.{BinaryOperator, InstantFunctionId, LogicalPlan, MiscellaneousFunctionId, SortFunctionId, TsCardinalities}
 import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.core.query.Filter.Equals
 import filodb.prometheus.parse.Parser
@@ -365,6 +365,18 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       PlannerParams(processMultiPartition = true)))
 
     execPlan.isInstanceOf[LabelValuesDistConcatExec] shouldEqual (true)
+  }
+
+  it ("should generate ExecPlan for TsCardinalities") {
+    val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => Nil
+    val engine = new ShardKeyRegexPlanner( dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+    val lp = TsCardinalities(Seq("ws_foo", "ns_bar"), 3)
+    val promQlQueryParams = PromQlQueryParams(
+      "", 1000, 20, 5000, Some("/api/v1/metering/cardinality/timeseries"))
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+    execPlan.isInstanceOf[TsCardReduceExec] shouldEqual true
+    engine.isMetadataQuery(lp) shouldEqual true
   }
 
   it("should generate Exec plan for Binary join with regex") {
