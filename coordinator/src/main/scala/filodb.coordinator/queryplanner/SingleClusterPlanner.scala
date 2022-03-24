@@ -355,7 +355,8 @@ class SingleClusterPlanner(val dataset: Dataset,
       logicalPlanWithoutBucket.stepMultipleNotationUsed,
       paramsExec, logicalPlanWithoutBucket.offsetMs, rawSource)))
     if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
-      val aggregate = Aggregate(AggregationOperator.Sum, logicalPlanWithoutBucket, Nil, Seq("job"))
+      val aggregate = Aggregate(AggregationOperator.Sum, logicalPlanWithoutBucket, Nil,
+                                AggregateClause.byOpt(Seq("job")))
       // Add sum to aggregate all child responses
       // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
       val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =

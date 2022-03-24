@@ -162,8 +162,11 @@ trait  DefaultPlanner {
       vectors
     }
 
+   // scalastyle:off method.length
    def addAggregator(lp: Aggregate, qContext: QueryContext, toReduceLevel: PlanResult):
    LocalPartitionReduceAggregateExec = {
+
+    import filodb.query.AggregateClause.ClauseType
 
     // Now we have one exec plan per shard
     /*
@@ -177,10 +180,23 @@ trait  DefaultPlanner {
      *
      * Starting off with solution 1 first until (2) or some other approach is decided on.
      */
+
+    // rename the clause labels (if they exist)
+    val renamedLabelsClauseOpt =
+      lp.clauseOpt.map{ clause =>
+        val renamedLabels = LogicalPlanUtils.renameLabels(clause.labels, dsOptions.metricColumn)
+        clause.clauseType match {
+          case ClauseType.By =>
+            AggregateClause(ClauseType.By, renamedLabels)
+          case ClauseType.Without =>
+            AggregateClause(ClauseType.Without, renamedLabels)
+        }
+      }
+
     toReduceLevel.plans.foreach {
-      _.addRangeVectorTransformer(AggregateMapReduce(lp.operator, lp.params,
-        LogicalPlanUtils.renameLabels(lp.without, dsOptions.metricColumn),
-        LogicalPlanUtils.renameLabels(lp.by, dsOptions.metricColumn)))
+      _.addRangeVectorTransformer(
+        AggregateMapReduce(lp.operator, lp.params, renamedLabelsClauseOpt)
+      )
     }
 
     val toReduceLevel2 =
@@ -202,11 +218,13 @@ trait  DefaultPlanner {
 
     reducer
   }
+  // scalastyle:on method.length
 
   def materializeAbsentFunction(qContext: QueryContext,
                                   lp: ApplyAbsentFunction): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, qContext)
-    val aggregate = Aggregate(AggregationOperator.Sum, lp, Nil, Seq("job"))
+    val aggregate = Aggregate(AggregationOperator.Sum, lp, Nil, AggregateClause.byOpt(Seq("job")))
+
     // Add sum to aggregate all child responses
     // If all children have NaN value, sum will yield NaN and AbsentFunctionMapper will yield 1
     val aggregatePlanResult = PlanResult(Seq(addAggregator(aggregate, qContext.copy(plannerParams =
@@ -317,7 +335,8 @@ trait  DefaultPlanner {
         rawSource = false
       ))
     )
-    val aggregate = Aggregate(AggregationOperator.Sum, innerPlan, Nil, Seq("job"))
+    val aggregate = Aggregate(AggregationOperator.Sum, innerPlan, Nil,
+                              AggregateClause.byOpt(Seq("job")))
     val aggregatePlanResult = PlanResult(
       Seq(
         addAggregator(

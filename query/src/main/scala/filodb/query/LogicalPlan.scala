@@ -360,17 +360,43 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
 }
 
 /**
+  * Identifies the by/without clause used with an aggregator.
+  */
+case class AggregateClause(clauseType: AggregateClause.ClauseType.Value,
+                           labels: Seq[String] = Nil)
+
+case object AggregateClause {
+
+  case object ClauseType extends Enumeration {
+    val By, Without = Value
+  }
+
+  /**
+    * Returns an Optional-wrapped "by" AggregateClause.
+    */
+  def byOpt(labels: Seq[String] = Nil) : Option[AggregateClause] = {
+    Option(new AggregateClause(ClauseType.By, labels))
+  }
+
+  /**
+   * Returns an Optional-wrapped "without" AggregateClause.
+   */
+  def withoutOpt(labels: Seq[String] = Nil) : Option[AggregateClause] = {
+    Option(new AggregateClause(ClauseType.Without, labels))
+  }
+}
+
+/**
   * Aggregate data across partitions (not in the time dimension).
   * Aggregation can be done only on range vectors with consistent
   * sampling interval.
-  * @param by columns to group by
-  * @param without columns to leave out while grouping
+  * @param clauseOpt columns to group by/without.
+  *     None indicates no by/without clause is specified.
   */
 case class Aggregate(operator: AggregationOperator,
                      vectors: PeriodicSeriesPlan,
                      params: Seq[Any] = Nil,
-                     by: Seq[String] = Nil,
-                     without: Seq[String] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                     clauseOpt: Option[AggregateClause] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
   override def startMs: Long = vectors.startMs
   override def stepMs: Long = vectors.stepMs
