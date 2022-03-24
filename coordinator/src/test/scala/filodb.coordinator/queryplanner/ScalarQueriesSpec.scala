@@ -48,7 +48,7 @@ class ScalarQueriesSpec extends AnyFunSpec with Matchers {
 
   val raw1 = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
   val windowed1 = PeriodicSeriesWithWindowing(raw1, from, 1000, to, 5000, RangeFunctionId.Rate)
-  val summed1 = Aggregate(AggregationOperator.Sum, windowed1, Nil, Seq("job"))
+  val summed1 = Aggregate(AggregationOperator.Sum, windowed1, Nil, AggregateClause.byOpt(Seq("job")))
 
   private def maskDispatcher(input: String) = {
    input.replaceAll("Actor\\[.*\\]", "Actor\\[\\]").

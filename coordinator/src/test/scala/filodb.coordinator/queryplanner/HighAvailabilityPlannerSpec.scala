@@ -61,7 +61,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     val intervalSelector = IntervalSelector(from, to)
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
-    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, AggregateClause.byOpt(Seq("job")))
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -100,7 +100,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     val intervalSelector = IntervalSelector(from, to)
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
-    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, AggregateClause.byOpt(Seq("job")))
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -125,7 +125,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     val intervalSelector = IntervalSelector(from, to) // Lookback of 50000
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"), Some(50000))
     val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
-    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, AggregateClause.byOpt(Seq("job")))
     val promQlQueryParams = PromQlQueryParams("", from/1000, 1, to/1000)
 
     val failureProvider = new FailureProvider {
@@ -178,7 +178,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     val intervalSelector = IntervalSelector(from, to)
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 10000, RangeFunctionId.Rate)
-    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, AggregateClause.byOpt(Seq("job")))
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -204,7 +204,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     val intervalSelector = IntervalSelector(from, to)
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 10000, RangeFunctionId.Rate)
-    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, AggregateClause.byOpt(Seq("job")))
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -230,7 +230,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     val intervalSelector = IntervalSelector(from, to)
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 10000, RangeFunctionId.Rate)
-    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, AggregateClause.byOpt(Seq("job")))
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -258,7 +258,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     val intervalSelector = IntervalSelector(from * 1000 - lookBack , to * 1000) // Lookback of 300
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from * 1000, step * 1000, to * 1000, 5000, RangeFunctionId.Rate)
-    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, AggregateClause.byOpt(Seq("job")))
     val promQlQueryParams = PromQlQueryParams("dummy query", from, step, to)
 
     val failureProvider = new FailureProvider {
@@ -315,7 +315,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     val intervalSelector = IntervalSelector(from * 1000 - lookBack , to * 1000) // Lookback of 300
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from * 1000, step * 1000, to * 1000, 5000, RangeFunctionId.Rate)
-    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, AggregateClause.byOpt(Seq("job")))
     val promQlQueryParams = PromQlQueryParams("dummy query", from, step, to)
 
     val failureProvider = new FailureProvider {
@@ -349,7 +349,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     val intervalSelector = IntervalSelector(from * 1000 - lookBack , to * 1000) // Lookback of 300
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from * 1000, step * 1000, to * 1000, 5000, RangeFunctionId.Rate)
-    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, AggregateClause.byOpt(Seq("job")))
     val promQlQueryParams = PromQlQueryParams("dummy query", from, step, to)
 
     val failureProvider = new FailureProvider {
@@ -388,7 +388,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     val intervalSelector = IntervalSelector(from * 1000 - lookBack , to * 1000) // Lookback of 300
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from * 1000, step * 1000, to * 1000, 5000, RangeFunctionId.Rate)
-    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, AggregateClause.byOpt(Seq("job")))
     val promQlQueryParams = PromQlQueryParams("dummy query", from, step, to)
 
     val failureProvider = new FailureProvider {
