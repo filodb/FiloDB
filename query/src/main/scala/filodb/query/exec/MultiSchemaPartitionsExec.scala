@@ -46,10 +46,10 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
     // scalastyle:off null
     // Note: null is finalPlan's default (i.e. initial) value.
     val finalPlanCopy = if (finalPlan != null) {
-      finalPlan.withDispatcher(dispatcher)
+      finalPlan.withDispatcher(planDispatcher)
     } else null
     // scalastyle:on null
-    val res = copy(dispatcher = dispatcher)
+    val res = copy(dispatcher = planDispatcher)
     res.finalPlan = finalPlanCopy.asInstanceOf[SelectRawPartitionsExec]
     res
   }
