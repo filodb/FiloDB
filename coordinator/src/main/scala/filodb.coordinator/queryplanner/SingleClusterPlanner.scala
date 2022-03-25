@@ -164,11 +164,12 @@ class SingleClusterPlanner(val dataset: Dataset,
             rvRangeFromPlan(logicalPlan))
           stitchPlan
       }
-      logger.debug(s"Materialized logical plan for dataset=$dsRef :" +
-        s" $logicalPlan to \n${materialized.printTree()}")
+
       var matFinal = materialized
       matFinal = BinaryJoinPushdownOpt.optimize(matFinal)
-      matFinal = CommonDispatcherOpt.optimize(matFinal)
+      matFinal = CommonDispatcherOpt.optimize(matFinal, queryConfig)
+      logger.debug(s"Materialized logical plan for dataset=$dsRef :" +
+        s" $logicalPlan to \n${matFinal.printTree()}")
       matFinal
     }
   }

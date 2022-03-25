@@ -1,6 +1,6 @@
 package filodb.coordinator.queryplanner.optimize
 
-import filodb.core.query.EmptyQueryConfig
+import filodb.core.query.{EmptyQueryConfig, QueryConfig}
 import filodb.query.exec.{BinaryJoinExec, ExecPlan, InProcessPlanDispatcher, MultiSchemaPartitionsExec, NonLeafExecPlan, SetOperatorExec}
 
 object CommonDispatcherOpt {
@@ -10,6 +10,9 @@ object CommonDispatcherOpt {
 
   private case class ChildrenResult(children: Seq[Seq[ExecPlan]],
                                     sameShard: Option[Int])
+
+  // TODO(a_theimer): !!!
+  var queryConfig: QueryConfig = EmptyQueryConfig
 
   // TODO(a_theimer): cleanup
   private def optimizeChildren(children: Seq[Seq[ExecPlan]]): ChildrenResult = {
@@ -28,7 +31,7 @@ object CommonDispatcherOpt {
 
     val plans = results.map(_.map(_.plan))
     val optChildren = if (sameShard.isDefined) {
-      plans.map(_.map(_.withDispatcher(new InProcessPlanDispatcher(EmptyQueryConfig))))
+      plans.map(_.map(_.withDispatcher(new InProcessPlanDispatcher(queryConfig))))
     } else {
       plans
     }
@@ -73,7 +76,8 @@ object CommonDispatcherOpt {
     }
   }
 
-  def optimize(plan: ExecPlan): ExecPlan = {
+  def optimize(plan: ExecPlan, _queryConfig: QueryConfig): ExecPlan = {
+    queryConfig = _queryConfig
     optimizeWalker(plan).plan
   }
 
