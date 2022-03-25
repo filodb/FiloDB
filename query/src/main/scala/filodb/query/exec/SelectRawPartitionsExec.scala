@@ -114,7 +114,7 @@ final case class SelectRawPartitionsExec(queryContext: QueryContext,
                                          colIds: Seq[Types.ColumnId]) extends LeafExecPlan {
   def dataset: DatasetRef = datasetRef
 
-  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+  override def withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
     copy(dispatcher = planDispatcher)
   }
 

@@ -26,7 +26,7 @@ case class ScalarBinaryOperationExec(queryContext: QueryContext,
   val resultSchema = ResultSchema(columns, 1)
   val operatorFunction = BinaryOperatorFunction.factoryMethod(operator)
 
-  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+  override def withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
     this
   }
 

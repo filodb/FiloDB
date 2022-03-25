@@ -30,10 +30,10 @@ trait DistConcatExec extends NonLeafExecPlan {
 final case class LocalPartitionDistConcatExec(queryContext: QueryContext,
                                               dispatcher: PlanDispatcher,
                                               children: Seq[ExecPlan]) extends DistConcatExec {
-  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+  override def withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
     copy(dispatcher = planDispatcher)
   }
-  override def _withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
+  override def withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
     copy(children = children)
   }
 }
@@ -53,10 +53,10 @@ final case class SplitLocalPartitionDistConcatExec(queryContext: QueryContext,
   override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema =
     IgnoreFixedVectorLenAndColumnNamesSchemaReducer.reduceSchema(rs, resp)
 
-  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+  override def withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
     copy(dispatcher = planDispatcher)
   }
-  override def _withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
+  override def withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
     copy(children = children)
   }
 }
@@ -67,10 +67,10 @@ final case class SplitLocalPartitionDistConcatExec(queryContext: QueryContext,
 final case class MultiPartitionDistConcatExec(queryContext: QueryContext,
                                               dispatcher: PlanDispatcher,
                                               children: Seq[ExecPlan]) extends DistConcatExec {
-  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+  override def withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
     copy(dispatcher = planDispatcher)
   }
-  override def _withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
+  override def withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
     copy(children = children)
   }
   // overriden since it can reduce schemas with different vector lengths as long as the columns are same

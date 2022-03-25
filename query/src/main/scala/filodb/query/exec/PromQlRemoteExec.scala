@@ -43,7 +43,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
 
   override val urlParams = Map("query" -> promQlQueryParams.promQl)
 
-  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+  override def withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
     copy(dispatcher = planDispatcher)
   }
 

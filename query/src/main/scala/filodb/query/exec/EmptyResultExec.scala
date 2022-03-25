@@ -13,7 +13,7 @@ case class EmptyResultExec(queryContext: QueryContext,
                            dataset: DatasetRef) extends LeafExecPlan {
   override def dispatcher: PlanDispatcher = InProcessPlanDispatcher(EmptyQueryConfig)
 
-  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+  override def withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
     this
   }
 

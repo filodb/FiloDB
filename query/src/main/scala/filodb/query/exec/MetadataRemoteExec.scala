@@ -33,7 +33,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
 
   private val builder = SerializedRangeVector.newBuilder()
 
-  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+  override def withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
     copy(dispatcher = planDispatcher)
   }
 

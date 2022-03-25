@@ -1,18 +1,46 @@
 package filodb.coordinator.queryplanner.optimize
 
-import filodb.core.query.{EmptyQueryConfig, QueryConfig}
-import filodb.query.exec.{BinaryJoinExec, ExecPlan, InProcessPlanDispatcher, MultiSchemaPartitionsExec, NonLeafExecPlan, SetOperatorExec}
+import filodb.core.query.QueryConfig
+import filodb.query.exec.{BinaryJoinExec, ExecPlan, InProcessPlanDispatcher,
+                          MultiSchemaPartitionsExec, NonLeafExecPlan, SetOperatorExec}
 
-object CommonDispatcherOpt {
+/**
+ * Suppose we had the following ExecPlan:
+ *
+ * E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(actor=0)
+ * -E~BinaryJoinExec(binaryOp=ADD) on ActorPlanDispatcher(actor=0)
+ * --T~PeriodicSamplesMapper()
+ * ---E~MultiSchemaPartitionsExec(shard=0) on ActorPlanDispatcher(actor=0)
+ * --T~PeriodicSamplesMapper()
+ * ---E~MultiSchemaPartitionsExec(shard=0) on ActorPlanDispatcher(actor=0)
+ * -E~BinaryJoinExec(binaryOp=ADD) on ActorPlanDispatcher(actor=1)
+ * --T~PeriodicSamplesMapper()
+ * ---E~MultiSchemaPartitionsExec(shard=1) on ActorPlanDispatcher(actor=1)
+ * --T~PeriodicSamplesMapper()
+ * ---E~MultiSchemaPartitionsExec(shard=1) on ActorPlanDispatcher(actor=1)
+ *
+ * It would be inefficient to make actor asks between nodes of a subtree that dispatch to the same actor.
+ *   Therefore, we can dispatch all children of a single-actor subtree with an InProcessPlanDispatcher:
+ *
+ * E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(actor=0)
+ * -E~BinaryJoinExec(binaryOp=ADD) on ActorPlanDispatcher(actor=0)
+ * --T~PeriodicSamplesMapper()
+ * ---E~MultiSchemaPartitionsExec(shard=0) on InProcessPlanDispatcher
+ * --T~PeriodicSamplesMapper()
+ * ---E~MultiSchemaPartitionsExec(shard=0) on InProcessPlanDispatcher
+ * -E~BinaryJoinExec(binaryOp=ADD) on ActorPlanDispatcher(actor=1)
+ * --T~PeriodicSamplesMapper()
+ * ---E~MultiSchemaPartitionsExec(shard=1) on InProcessPlanDispatcher
+ * --T~PeriodicSamplesMapper()
+ * ---E~MultiSchemaPartitionsExec(shard=1) on InProcessPlanDispatcher
+ */
+class CommonDispatcherOpt(queryConfig: QueryConfig) {
 
   private case class Result(plan: ExecPlan,
                             sameShard: Option[Int]) {}
 
   private case class ChildrenResult(children: Seq[Seq[ExecPlan]],
                                     sameShard: Option[Int])
-
-  // TODO(a_theimer): !!!
-  var queryConfig: QueryConfig = EmptyQueryConfig
 
   // TODO(a_theimer): cleanup
   private def optimizeChildren(children: Seq[Seq[ExecPlan]]): ChildrenResult = {
@@ -76,8 +104,7 @@ object CommonDispatcherOpt {
     }
   }
 
-  def optimize(plan: ExecPlan, _queryConfig: QueryConfig): ExecPlan = {
-    queryConfig = _queryConfig
+  def optimize(plan: ExecPlan): ExecPlan = {
     optimizeWalker(plan).plan
   }
 

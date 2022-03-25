@@ -1,9 +1,11 @@
 package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration._
+
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.coordinator.queryplanner.optimize.{BinaryJoinPushdownOpt, CommonDispatcherOpt}
@@ -166,8 +168,8 @@ class SingleClusterPlanner(val dataset: Dataset,
       }
 
       var matFinal = materialized
-      matFinal = BinaryJoinPushdownOpt.optimize(matFinal)
-      matFinal = CommonDispatcherOpt.optimize(matFinal, queryConfig)
+      matFinal = new BinaryJoinPushdownOpt().optimize(matFinal)
+      matFinal = new CommonDispatcherOpt(queryConfig).optimize(matFinal)
       logger.debug(s"Materialized logical plan for dataset=$dsRef :" +
         s" $logicalPlan to \n${matFinal.printTree()}")
       matFinal

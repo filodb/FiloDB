@@ -51,11 +51,11 @@ final case class SetOperatorExec(queryContext: QueryContext,
 
   protected def args: String = s"binaryOp=$binaryOp, on=$on, ignoring=$ignoring"
 
-  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+  override def withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
     copy(dispatcher = planDispatcher)
   }
 
-  override def _withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
+  override def withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
     throw new RuntimeException("Should not be called on SetOperatorExec")
   }
 

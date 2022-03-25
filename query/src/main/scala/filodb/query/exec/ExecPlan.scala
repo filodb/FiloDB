@@ -85,10 +85,10 @@ trait ExecPlan extends QueryCommand {
     other.rangeVectorTransformers.appendAll(rangeVectorTransformers)
   }
 
-  protected def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan
+  protected def withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan
 
   def withDispatcher(planDispatcher: PlanDispatcher): ExecPlan = {
-    val res = _withDispatcherHelper(planDispatcher)
+    val res = withDispatcherHelper(planDispatcher)
     copyStateInto(res)
     res
   }
@@ -417,10 +417,10 @@ abstract class NonLeafExecPlan extends ExecPlan {
 
   final def submitTime: Long = children.head.queryContext.submitTime
 
-  protected def _withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan
+  protected def withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan
 
   def withChildren(children: Seq[ExecPlan]): NonLeafExecPlan = {
-    val res = _withChildrenHelper(children)
+    val res = withChildrenHelper(children)
     copyStateInto(res)
     res
   }

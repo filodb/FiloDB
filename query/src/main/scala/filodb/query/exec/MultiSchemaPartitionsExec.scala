@@ -42,7 +42,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   @transient // dont serialize the SelectRawPartitionsExec plan created for plan execution
   var finalPlan: SelectRawPartitionsExec = _
 
-  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+  override def withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
     // scalastyle:off null
     // Note: null is finalPlan's default (i.e. initial) value.
     val finalPlanCopy = if (finalPlan != null) {

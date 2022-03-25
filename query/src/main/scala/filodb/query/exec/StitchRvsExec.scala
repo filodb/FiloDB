@@ -103,11 +103,11 @@ final case class StitchRvsExec(queryContext: QueryContext,
   }
   protected def args: String = ""
 
-  override def _withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+  override def withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
     copy(dispatcher = planDispatcher)
   }
 
-  override def _withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
+  override def withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
     copy(children = children)
   }
 
