@@ -2,8 +2,8 @@ package com.esotericsoftware.kryo.io
 
 import com.esotericsoftware.kryo.{Serializer => KryoSerializer}
 import com.esotericsoftware.kryo.Kryo
+import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2}
 import filodb.core.query.{ColumnInfo, PartitionInfo, PartitionRangeVectorKey}
 import filodb.memory.format._
@@ -76,5 +76,16 @@ class PartitionInfoSerializer extends KryoSerializer[PartitionInfo] {
     kryo.writeObject(output, info.schema)
     BinaryRegionUtils.writeLargeRegion(info.base, info.offset, output)
     output.writeInt(info.shardNo)
+  }
+}
+
+class ConfigSerializer extends KryoSerializer[Config] {
+  override def write(kryo: Kryo, output: Output, config: Config): Unit = {
+    kryo.writeClassAndObject(output, config.root().render())
+  }
+
+  override def read(kryo: Kryo, input: Input, config: Class[Config]): Config = {
+    val s = kryo.readClassAndObject(input).asInstanceOf[String]
+    ConfigFactory.parseString(s)
   }
 }

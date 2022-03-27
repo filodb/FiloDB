@@ -1,7 +1,6 @@
 package filodb.core.query
 
 import scala.concurrent.duration.FiniteDuration
-
 import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
 
@@ -9,7 +8,7 @@ object QueryConfig {
   val DefaultVectorsLimit = 150
 }
 
-class QueryConfig(queryConfig: Config) {
+class QueryConfig(private val queryConfig: Config) {
   lazy val askTimeout = queryConfig.as[FiniteDuration]("ask-timeout")
   lazy val staleSampleAfterMs = queryConfig.getDuration("stale-sample-after").toMillis
   lazy val minStepMs = queryConfig.getDuration("min-step").toMillis
@@ -22,6 +21,18 @@ class QueryConfig(queryConfig: Config) {
    * Feature flag test: returns true if the config has an entry with "true", "t" etc
    */
   def has(feature: String): Boolean = queryConfig.as[Option[Boolean]](feature).getOrElse(false)
+
+  override def hashCode(): Int = {
+    super.hashCode()
+  }
+
+  override def equals(obj: Any): Boolean = {
+    obj.isInstanceOf[QueryConfig] && obj.asInstanceOf[QueryConfig].queryConfig == queryConfig
+  }
+
+  override def toString: String = {
+    s"QueryContext(configHash=${queryConfig.hashCode()})"
+  }
 }
 
 /**
