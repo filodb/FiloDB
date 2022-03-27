@@ -47,7 +47,7 @@ import filodb.query.exec.{BinaryJoinExec, DistConcatExec, EmptyResultExec, ExecP
  *
  * TODO(a_theimer): lots of missing description here. When can['t] this optimization be done?
  */
-class BinaryJoinPushdownOpt {
+class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
 
   /**
    * Describes an ExecPlan subtree.
@@ -230,10 +230,7 @@ class BinaryJoinPushdownOpt {
     }
   }
 
-  /**
-   * Apply the BinaryJoinPushdown optimization.
-   */
-  def optimize(plan: ExecPlan): ExecPlan = {
+  override def optimize(plan: ExecPlan): ExecPlan = {
     val res = optimizeWalker(plan)
     if (res.subtrees.size > 1) {
       LocalPartitionDistConcatExec(plan.queryContext, plan.dispatcher, res.subtrees.map(_.root))

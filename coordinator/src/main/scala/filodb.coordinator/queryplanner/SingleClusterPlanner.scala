@@ -8,7 +8,7 @@ import kamon.Kamon
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
-import filodb.coordinator.queryplanner.optimize.{BinaryJoinPushdownOpt, CommonDispatcherOpt}
+import filodb.coordinator.queryplanner.optimize.{BinaryJoinPushdownEpOpt, CommonDispatcherEpOpt}
 import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
@@ -168,8 +168,8 @@ class SingleClusterPlanner(val dataset: Dataset,
       }
 
       var matFinal = materialized
-      matFinal = new BinaryJoinPushdownOpt().optimize(matFinal)
-      matFinal = new CommonDispatcherOpt(queryConfig).optimize(matFinal)
+      matFinal = new BinaryJoinPushdownEpOpt().optimize(matFinal)
+      matFinal = new CommonDispatcherEpOpt(queryConfig).optimize(matFinal)
       logger.debug(s"Materialized logical plan for dataset=$dsRef :" +
         s" $logicalPlan to \n${matFinal.printTree()}")
       matFinal

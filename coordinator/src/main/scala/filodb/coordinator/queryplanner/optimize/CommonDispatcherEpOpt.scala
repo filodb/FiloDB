@@ -34,7 +34,7 @@ import filodb.query.exec.{BinaryJoinExec, ExecPlan, InProcessPlanDispatcher,
  * --T~PeriodicSamplesMapper()
  * ---E~MultiSchemaPartitionsExec(shard=1) on InProcessPlanDispatcher
  */
-class CommonDispatcherOpt(queryConfig: QueryConfig) {
+class CommonDispatcherEpOpt(queryConfig: QueryConfig) extends ExecPlanOptimizer {
 
   private case class Result(plan: ExecPlan,
                             sameShard: Option[Int]) {}
@@ -104,7 +104,7 @@ class CommonDispatcherOpt(queryConfig: QueryConfig) {
     }
   }
 
-  def optimize(plan: ExecPlan): ExecPlan = {
+  override def optimize(plan: ExecPlan): ExecPlan = {
     optimizeWalker(plan).plan
   }
 
