@@ -9,7 +9,7 @@ import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSer
 import filodb.core.metadata.Schemas
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
-import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
+import filodb.core.store.{ChunkSource, InMemoryMetaStore, NullColumnStore}
 import filodb.core.TestData
 import filodb.memory.format.SeqRowReader
 import filodb.query._
@@ -104,7 +104,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
   val executeDispatcher = new PlanDispatcher {
     override def isLocalCall: Boolean = ???
     override def clusterName: String = ???
-    override def dispatch(plan: ExecPlan)
+    override def dispatch(plan: ExecPlan, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = {
       plan.execute(memStore, querySession)(sched)
     }
