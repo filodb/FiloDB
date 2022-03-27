@@ -1,6 +1,7 @@
 package filodb.core.query
 
 import scala.concurrent.duration.FiniteDuration
+
 import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
 

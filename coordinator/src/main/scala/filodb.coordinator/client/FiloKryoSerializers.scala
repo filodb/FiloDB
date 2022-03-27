@@ -4,6 +4,7 @@ import com.esotericsoftware.kryo.{Serializer => KryoSerializer}
 import com.esotericsoftware.kryo.Kryo
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2}
 import filodb.core.query.{ColumnInfo, PartitionInfo, PartitionRangeVectorKey}
 import filodb.memory.format._

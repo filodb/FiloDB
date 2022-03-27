@@ -1,12 +1,15 @@
 package filodb.query.exec
 
 import java.util.concurrent.TimeUnit
+
 import scala.concurrent.duration.FiniteDuration
+
 import akka.actor.ActorRef
 import akka.pattern.ask
 import akka.util.Timeout
 import monix.eval.Task
 import monix.execution.Scheduler
+
 import filodb.core.QueryTimeoutException
 import filodb.core.store.ChunkSource
 import filodb.query.QueryResponse

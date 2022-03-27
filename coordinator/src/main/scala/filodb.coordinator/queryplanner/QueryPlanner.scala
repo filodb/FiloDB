@@ -1,9 +1,11 @@
 package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration.FiniteDuration
+
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
+
 import filodb.core.query.QueryContext
 import filodb.core.store.ChunkSource
 import filodb.query.{LogicalPlan, QueryResponse}
