@@ -3,10 +3,10 @@ package filodb.coordinator.client
 import com.esotericsoftware.kryo.{Kryo, Serializer => KryoSerializer}
 import com.esotericsoftware.kryo.io._
 import com.esotericsoftware.minlog.Log
+import com.typesafe.config.Config
 import de.javakaffee.kryoserializers.UnmodifiableCollectionsSerializer
 import io.altoo.akka.serialization.kryo.DefaultKryoInitializer
 import io.altoo.akka.serialization.kryo.serializer.scala.ScalaKryo
-
 import filodb.coordinator.FilodbSettings
 import filodb.core._
 import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2}
@@ -39,6 +39,7 @@ class KryoInit extends DefaultKryoInitializer {
 
     kryo.addDefaultSerializer(classOf[RecordSchema2], classOf[RecordSchema2Serializer])
     kryo.addDefaultSerializer(classOf[ZeroCopyUTF8String], classOf[ZeroCopyUTF8StringSerializer])
+    kryo.addDefaultSerializer(classOf[Config], classOf[ConfigSerializer])
     kryo.register(classOf[Schema], new SchemaSerializer)
     kryo.register(classOf[PartitionSchema], new PartSchemaSerializer)
 
