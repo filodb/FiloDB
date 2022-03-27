@@ -34,12 +34,9 @@ case class MetadataRemoteExec(queryEndpoint: String,
   private val builder = SerializedRangeVector.newBuilder()
 
   override def withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    require(builder.allContainers.isEmpty,
+      "attempted to copy MetadataRemoteExec with nonempty builder")
     copy(dispatcher = planDispatcher)
-  }
-
-  override def copyStateInto(other: ExecPlan): Unit = {
-    super.copyStateInto(other)
-    throw new RuntimeException("TODO(a_theimer): deal with builder?")
   }
 
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)

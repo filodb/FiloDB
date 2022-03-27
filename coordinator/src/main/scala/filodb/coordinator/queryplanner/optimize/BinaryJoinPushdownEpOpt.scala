@@ -109,7 +109,6 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
                                 dataset: DatasetRef,
                                 copyJoinPlanWithChildren: (Seq[ExecPlan], Seq[ExecPlan]) => ExecPlan): Result = {
 
-    // TODO(a_theimer): make this less confusing
     val joinPairs = lhsRes.shardToSubtrees.filter{ case (shard, _) =>
       // select only the single-shard subtrees that exist in both maps
       rhsRes.shardToSubtrees.contains(shard)
@@ -161,7 +160,7 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
         .foldLeft(Set[String]()){ case (acc, nextCols) =>
           acc.union(nextCols)
         }
-      // make sure all cols present in join keys (TODO(a_theimer): relax this?)
+      // make sure all cols present in join keys
       // TODO(a_theimer): this is not technically correct; combines on-empty and both-empty cases
       val alltargetSchemaColsPresent = if (on.isEmpty) {
         // make sure no target schema strings are ignored

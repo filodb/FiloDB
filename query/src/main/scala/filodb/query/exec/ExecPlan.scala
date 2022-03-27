@@ -80,13 +80,27 @@ trait ExecPlan extends QueryCommand {
 
   protected def allTransformers: Seq[RangeVectorTransformer] = rangeVectorTransformers
 
-  // TODO(a_theimer): this needs stronger type guarantees
+  /**
+   * Concrete ExecPlans are case classes that contain mutable attributes. In order to take advantage
+   *   of the case class copy() method, this method should also be called to additionally copy this mutable state.
+   * This should be overridden when derived classes contain additional state.
+   *
+   * TODO(a_theimer): this is an error-prone solution
+   */
   def copyStateInto(other: ExecPlan) : Unit = {
     other.rangeVectorTransformers.appendAll(rangeVectorTransformers)
   }
 
+  /**
+   * Returns a copy of this ExecPlan with the argument dispatcher.
+   *   Implementations do not also need to call copyStateInto().
+   */
   protected def withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan
 
+  /**
+   * Returns a copy of this ExecPlan with the argument dispatcher.
+   *   Callers do not also need to call copyStateInto().
+   */
   def withDispatcher(planDispatcher: PlanDispatcher): ExecPlan = {
     val res = withDispatcherHelper(planDispatcher)
     copyStateInto(res)
@@ -417,8 +431,16 @@ abstract class NonLeafExecPlan extends ExecPlan {
 
   final def submitTime: Long = children.head.queryContext.submitTime
 
+  /**
+   * Returns a copy of this NonLeafExecPlan with the argument children.
+   *   Implementations do not also need to call copyStateInto().
+   */
   protected def withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan
 
+  /**
+   * Returns a copy of this NonLeafExecPlan with the argument chiildren.
+   *   Callers do not also need to call copyStateInto().
+   */
   def withChildren(children: Seq[ExecPlan]): NonLeafExecPlan = {
     val res = withChildrenHelper(children)
     copyStateInto(res)

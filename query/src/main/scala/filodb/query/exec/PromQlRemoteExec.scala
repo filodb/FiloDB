@@ -44,12 +44,9 @@ case class PromQlRemoteExec(queryEndpoint: String,
   override val urlParams = Map("query" -> promQlQueryParams.promQl)
 
   override def withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
+    require(builder.allContainers.isEmpty,
+      "attempted to copy PromQlRemoteExec with nonempty builder")
     copy(dispatcher = planDispatcher)
-  }
-
-  override def copyStateInto(other: ExecPlan): Unit = {
-    super.copyStateInto(other)
-    throw new RuntimeException("TODO(a_theimer): deal with builder?")
   }
 
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
