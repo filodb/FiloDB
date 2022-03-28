@@ -6,9 +6,7 @@ import filodb.coordinator.queryplanner.SingleClusterPlanner.findTargetSchema
 import filodb.core.DatasetRef
 import filodb.core.query.QueryContext
 import filodb.query.exec.{BinaryJoinExec, DistConcatExec, EmptyResultExec, ExecPlan,
-                          LocalPartitionDistConcatExec, MultiSchemaPartitionsExec,
-                          ReduceAggregateExec, SetOperatorExec}
-
+                          LocalPartitionDistConcatExec, MultiSchemaPartitionsExec, ReduceAggregateExec, SetOperatorExec}
 
 /**
  * Suppose we had the following ExecPlan:
@@ -50,27 +48,35 @@ import filodb.query.exec.{BinaryJoinExec, DistConcatExec, EmptyResultExec, ExecP
 class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
 
   /**
-   * Describes an ExecPlan subtree.
+   * Subtree metadata.
+   * @param sameShardOpt occupied with a shard ID iff all of the subtree's data is derived from the same shard.
    * @param targetSchemaColsOpt occupied with a set of target schema columns iff a
    *                            target schema is defined for every leaf of the subtree
+   *                            and all subtree join keys are supersets of these columns
+   */
+  private case class TreeStats(sameShardOpt: Option[Int],
+                               targetSchemaColsOpt: Option[Set[String]]) {}
+
+  /**
+   * Describes an ExecPlan subtree.
    */
   private case class Subtree(root: ExecPlan,
-                             targetSchemaColsOpt: Option[Set[String]]) {}
+                             stats: TreeStats) {}
 
   /**
    * Describes the result of an optimization step.
+   * @param aggrStats aggregated TreeStats data (as if all subtrees were children of a no-RVT DistConcat node).
    * @param shardToSubtrees mapping of shards to least-depth subtrees that span a single shard.
    *                        TODO(a_theimer): example
    */
   private case class Result(subtrees: Seq[Subtree],
+                            aggrStats: TreeStats,
                             shardToSubtrees: Map[Int, Seq[Subtree]]) {}
 
   /**
-   * Returns a Result where:
-   *   (1) each ExecPlan is individually optimized, and
-   *   (2) all other Result attributes (i.e. not `subtrees`) aggregate the Results of each optimization.
+   * Returns a Result where each argument ExecPlan is individually optimized.
    */
-  private def optimizeAndAggregateResult(plans: Seq[ExecPlan]): Result = {
+  private def optimizePlans(plans: Seq[ExecPlan]): Result = {
     val results = plans.map(optimizeWalker(_))
     val optimizedPlans = results.map(_.subtrees).flatten
     val shardToSubtrees = results.map(_.shardToSubtrees).foldLeft(
@@ -81,23 +87,56 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
       }
       acc
     }
-    Result(optimizedPlans, shardToSubtrees.toMap)
+    val sameShardOpt = {
+      val shardSet = results.map(_.aggrStats.sameShardOpt).toSet
+      if (shardSet.size == 1) {
+        shardSet.head
+      } else {
+        None
+      }
+    }
+    val targetSchemaColsOpt = {
+      val opts = results.map(_.aggrStats.targetSchemaColsOpt)
+      if (opts.forall(_.isDefined)) {
+        Some(opts.flatMap(_.get).toSet)
+      } else {
+        None
+      }
+    }
+    Result(optimizedPlans, TreeStats(sameShardOpt, targetSchemaColsOpt), shardToSubtrees.toMap)
   }
 
   private def optimizeAggregate(plan: ReduceAggregateExec): Result = {
-    // for now: just end the optimization here
-    val childPlans = optimizeAndAggregateResult(plan.children).subtrees.map(_.root)
-    val subtree = Subtree(plan.withChildren(childPlans), None)
-    Result(Seq(subtree), Map())
+    val childrenResult = optimizePlans(plan.children)
+    val optimizedPlan = plan.withChildren(childrenResult.subtrees.map(_.root))
+    if (childrenResult.aggrStats.sameShardOpt.isDefined) {
+      val stats = TreeStats(childrenResult.aggrStats.sameShardOpt,
+                            childrenResult.aggrStats.targetSchemaColsOpt)
+      val subtree = Subtree(optimizedPlan, stats)
+      val shardToSubtrees = Map(childrenResult.aggrStats.sameShardOpt.get -> Seq(subtree))
+      Result(Seq(subtree), stats, shardToSubtrees)
+    } else {
+      // end optimization for this subtree
+      val stats = TreeStats(None, None)
+      val subtree = Subtree(optimizedPlan, stats)
+      Result(Seq(subtree), stats, Map())
+    }
   }
 
   private def optimizeConcat(plan: DistConcatExec): Result = {
-    // for now: just end the optimization here
-    val childPlans = optimizeAndAggregateResult(plan.children).subtrees.map(_.root)
-    val subtree = Subtree(plan.withChildren(childPlans), None)
-    Result(Seq(subtree), Map())
+    val childrenResult = optimizePlans(plan.children)
+    if (plan.rangeVectorTransformers.isEmpty ) {
+      childrenResult
+    } else {
+      // TODO: continue optimization when RVT's don't combine data across shards
+      // end optimization for this subtree
+      val stats = TreeStats(None, None)
+      val subtree = Subtree(plan.withChildren(childrenResult.subtrees.map(_.root)), stats)
+      Result(Seq(subtree), stats, Map())
+    }
   }
 
+  // scalastyle:off method.length
   /**
    * Creates the "pushed-down" join plans.
    * @param copyJoinPlanWithChildren accepts a lhs and rhs, then returns a copy of the
@@ -125,20 +164,37 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
     }
 
     if (joinPairs.isEmpty) {
-      return Result(Seq(Subtree(EmptyResultExec(queryContext, dataset), None)), Map())
+      // TODO(a_theimer): this shouldn't end optimization for others
+      val emptyStats = TreeStats(None, None)
+      return Result(Seq(Subtree(EmptyResultExec(queryContext, dataset), emptyStats)), emptyStats, Map())
     }
 
     // make the pushed-down join subtrees
     val shardToSubtrees = new mutable.HashMap[Int, Seq[Subtree]]
     val pushdownSubtrees = joinPairs.map{ case (shard, (lhsSubtree, rhsSubtree)) =>
       val pushdownJoinPlan = copyJoinPlanWithChildren(Seq(lhsSubtree.root), Seq(rhsSubtree.root))
-      val targetSchemaColUnion = lhsSubtree.targetSchemaColsOpt.get.union(rhsSubtree.targetSchemaColsOpt.get)
-      val pushdownJoinSubtree = Subtree(pushdownJoinPlan, Some(targetSchemaColUnion))
+      val targetSchemaColUnion =
+        lhsSubtree.stats.targetSchemaColsOpt.get.union(rhsSubtree.stats.targetSchemaColsOpt.get)
+      val stats = TreeStats(Some(shard), Some(targetSchemaColUnion))
+      val pushdownJoinSubtree = Subtree(pushdownJoinPlan, stats)
       shardToSubtrees(shard) = Seq(pushdownJoinSubtree)
       pushdownJoinSubtree
     }.toSeq
-    Result(pushdownSubtrees, shardToSubtrees.toMap)
+
+    // TODO(a_theimer): have Result automatically aggregate over its subtrees?
+    val sameShardOpt = if (shardToSubtrees.size == 1) {
+      Some(shardToSubtrees.head._1)
+    } else {
+      None
+    }
+    val targetSchemaColsOpt = if (pushdownSubtrees.forall(_.stats.targetSchemaColsOpt.isDefined)) {
+      Some(pushdownSubtrees.flatMap(_.stats.targetSchemaColsOpt.get).toSet)
+    } else {
+      None
+    }
+    Result(pushdownSubtrees, TreeStats(sameShardOpt, targetSchemaColsOpt), shardToSubtrees.toMap)
   }
+  // scalastyle:on method.length
 
   /**
    * Helper function for optimizeSetOp / optimizeBinaryJoin.
@@ -154,13 +210,9 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
                                copyJoinPlanWithChildren: (Seq[ExecPlan], Seq[ExecPlan]) => ExecPlan): Result = {
     val childSubtrees = Seq(lhsRes, rhsRes).flatMap(_.subtrees)
     // make sure all child subtrees have all leaf-level target schema columns defined and present
-    if (childSubtrees.forall(_.targetSchemaColsOpt.isDefined)) {
-      // get union of all target schema columns
-      val targetSchemaColsUnion = childSubtrees.map(_.targetSchemaColsOpt.get)
-        .foldLeft(Set[String]()){ case (acc, nextCols) =>
-          acc.union(nextCols)
-        }
-      // make sure all cols present in join keys
+    if (childSubtrees.forall(_.stats.targetSchemaColsOpt.isDefined)) {
+      val targetSchemaColsUnion = childSubtrees.flatMap(_.stats.targetSchemaColsOpt.get).toSet
+      // make sure all target schema cols present in join keys
       // TODO(a_theimer): this is not technically correct; combines on-empty and both-empty cases
       val alltargetSchemaColsPresent = if (on.isEmpty) {
         // make sure no target schema strings are ignored
@@ -173,14 +225,15 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
         return makePushdownJoins(lhsRes, rhsRes, queryContext, dataset, copyJoinPlanWithChildren)
       }
     }
-    // no pushdown and end optimization here
+    // no pushdown and end this subtree's optimization
     val root = copyJoinPlanWithChildren(lhsRes.subtrees.map(_.root), rhsRes.subtrees.map(_.root))
-    Result(Seq(Subtree(root, None)), Map())
+    val stats = TreeStats(None, None)
+    Result(Seq(Subtree(root, stats)), stats, Map())
   }
 
   private def optimizeSetOp(plan: SetOperatorExec): Result = {
-    val lhsRes = optimizeAndAggregateResult(plan.lhs)
-    val rhsRes = optimizeAndAggregateResult(plan.rhs)
+    val lhsRes = optimizePlans(plan.lhs)
+    val rhsRes = optimizePlans(plan.rhs)
     optimizeJoinPlan(lhsRes, rhsRes, plan.on, plan.ignoring, plan.queryContext, plan.dataset,
       (left: Seq[ExecPlan], right: Seq[ExecPlan]) => {
         val res = plan.copy(lhs = left, rhs = right)
@@ -190,8 +243,8 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
   }
 
   private def optimizeBinaryJoin(plan: BinaryJoinExec): Result = {
-    val lhsRes = optimizeAndAggregateResult(plan.lhs)
-    val rhsRes = optimizeAndAggregateResult(plan.rhs)
+    val lhsRes = optimizePlans(plan.lhs)
+    val rhsRes = optimizePlans(plan.rhs)
     optimizeJoinPlan(lhsRes, rhsRes, plan.on, plan.ignoring, plan.queryContext, plan.dataset,
       (left: Seq[ExecPlan], right: Seq[ExecPlan]) => {
         val res = plan.copy(lhs = left, rhs = right)
@@ -208,8 +261,9 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
       val endMs = plan.chunkMethod.endTime
       findTargetSchema(changes, startMs, endMs).map(_.schema.toSet)
     }.filter(_.isDefined).map(_.get)
-    val subtree = Subtree(plan, targetSchemaColsOpt)
-    Result(Seq(subtree), Map(plan.shard -> Seq(subtree)))
+    val stats = TreeStats(Some(plan.shard), targetSchemaColsOpt)
+    val subtree = Subtree(plan, stats)
+    Result(Seq(subtree), stats, Map(plan.shard -> Seq(subtree)))
   }
 
   /**
@@ -223,8 +277,9 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
       case plan: DistConcatExec => optimizeConcat(plan)
       case plan: MultiSchemaPartitionsExec => optimizeMultiSchemaPartitionsExec(plan)
       case plan => {
-        // end the optimization here
-        Result(Seq(Subtree(plan, None)), Map())
+        // end optimization for this subtree
+        val stats = TreeStats(None, None)
+        Result(Seq(Subtree(plan, stats)), stats, Map())
       }
     }
   }
