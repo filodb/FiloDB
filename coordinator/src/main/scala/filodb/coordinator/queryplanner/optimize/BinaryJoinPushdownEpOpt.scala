@@ -5,8 +5,9 @@ import scala.collection.mutable
 import filodb.coordinator.queryplanner.SingleClusterPlanner.findTargetSchema
 import filodb.core.DatasetRef
 import filodb.core.query.QueryContext
-import filodb.query.exec.{BinaryJoinExec, DistConcatExec, EmptyResultExec, ExecPlan,
-                          LocalPartitionDistConcatExec, MultiSchemaPartitionsExec, ReduceAggregateExec, SetOperatorExec}
+import filodb.query.exec.{BinaryJoinExec, DistConcatExec, EmptyResultExec, ExecPlan, LabelCardinalityReduceExec,
+                          LocalPartitionDistConcatExec, MultiSchemaPartitionsExec, ReduceAggregateExec,
+                          SetOperatorExec, SplitLocalPartitionDistConcatExec}
 
 /**
  * Suppose we had the following ExecPlan:
@@ -266,21 +267,30 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
     Result(Seq(subtree), stats, Map(plan.shard -> Seq(subtree)))
   }
 
+  // TODO(a_theimer): use this elsewhere?
+  /**
+   * Ends all optimization for the subtree.
+   */
+  private def endOptimization(plan: ExecPlan): Result = {
+    val stats = TreeStats(None, None)
+    Result(Seq(Subtree(plan, stats)), stats, Map())
+  }
+
   /**
    * Calls the optimizer function specific to the plan type.
    */
   private def optimizeWalker(plan: ExecPlan): Result = {
     plan match {
+      // TODO(a_theimer): need to handle these vvvvvvvvvvvvvvvvvvvv
+      case plan: SplitLocalPartitionDistConcatExec => endOptimization(plan)
+      case plan: LabelCardinalityReduceExec => endOptimization(plan)
+      // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
       case plan: BinaryJoinExec => optimizeBinaryJoin(plan)
       case plan: SetOperatorExec => optimizeSetOp(plan)
       case plan: ReduceAggregateExec => optimizeAggregate(plan)
       case plan: DistConcatExec => optimizeConcat(plan)
       case plan: MultiSchemaPartitionsExec => optimizeMultiSchemaPartitionsExec(plan)
-      case plan => {
-        // end optimization for this subtree
-        val stats = TreeStats(None, None)
-        Result(Seq(Subtree(plan, stats)), stats, Map())
-      }
+      case plan => endOptimization(plan)
     }
   }
 
