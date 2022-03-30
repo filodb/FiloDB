@@ -1,6 +1,6 @@
 package filodb.prometheus.ast
 
-import filodb.query.{Aggregate, AggregationOperator, PeriodicSeriesPlan}
+import filodb.query.{Aggregate, AggregateClause, AggregationOperator, PeriodicSeriesPlan}
 
 
 sealed trait AggregateGrouping {
@@ -73,22 +73,19 @@ case class AggregateExpression(name: String, params: Seq[Expression],
         Aggregate(aggOpOption.get,
           periodicSeriesPlan,
           parameter,
-          b.labels,
-          Nil
+          AggregateClause.byOpt(b.labels)
         )
       case Some(w: Without) =>
         Aggregate(aggOpOption.get,
           periodicSeriesPlan,
           parameter,
-          Nil,
-          w.labels
+          AggregateClause.withoutOpt(w.labels)
         )
       case None =>
         Aggregate(aggOpOption.get,
           periodicSeriesPlan,
           parameter,
-          Nil,
-          Nil
+          None
         )
     }
   }

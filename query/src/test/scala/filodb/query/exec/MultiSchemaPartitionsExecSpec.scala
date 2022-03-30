@@ -354,7 +354,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val end = 185000L
     execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, Some(300 * 1000),  // [5m]
                                          Some(InternalRangeFunction.SumOverTime), QueryContext()))
-    execPlan.addRangeVectorTransformer(AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Nil))
+    execPlan.addRangeVectorTransformer(AggregateMapReduce(AggregationOperator.Sum, Nil))
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     info(execPlan.printTree())

@@ -62,13 +62,13 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   val raw1 = RawSeries(rangeSelector = intervalSelector, filters= f1, columns = Seq("value"))
   val windowed1 = PeriodicSeriesWithWindowing(raw1, from, 1000, to, 5000, RangeFunctionId.Rate)
-  val summed1 = Aggregate(AggregationOperator.Sum, windowed1, Nil, Seq("job"))
+  val summed1 = Aggregate(AggregationOperator.Sum, windowed1, Nil, AggregateClause.byOpt(Seq("job")))
 
   val f2 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_count")),
     ColumnFilter("job", Filter.Equals("myService")))
   val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("value"))
   val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
-  val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
+  val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, AggregateClause.byOpt(Seq("job")))
   val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000)
 
 
@@ -77,7 +77,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     ColumnFilter("instance", Filter.Equals("akgH34")))
   val raw3 = RawSeries(rangeSelector = intervalSelector, filters= f3, columns = Seq("value"))
   val windowed3 = PeriodicSeriesWithWindowing(raw3, from, 1000, to, 5000, RangeFunctionId.Rate)
-  val summed3 = Aggregate(AggregationOperator.Sum, windowed3, Nil, Seq("job"))
+  val summed3 = Aggregate(AggregationOperator.Sum, windowed3, Nil, AggregateClause.byOpt(Seq("job")))
 
   it ("should generate ExecPlan for LogicalPlan") {
     // final logical plan
@@ -660,7 +660,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan1.children.foreach { l1 =>
       l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
-      l1.rangeVectorTransformers(1).asInstanceOf[AggregateMapReduce].by shouldEqual List("_metric_")
+      l1.rangeVectorTransformers(1).asInstanceOf[AggregateMapReduce].clauseOpt shouldEqual AggregateClause.byOpt(Seq("_metric_"))
     }
 
     val logicalPlan2 = Parser.queryRangeToLogicalPlan(
@@ -675,7 +675,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan2.children.foreach { l1 =>
       l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
-      l1.rangeVectorTransformers(1).asInstanceOf[AggregateMapReduce].without shouldEqual List("_metric_", "instance")
+      l1.rangeVectorTransformers(1).asInstanceOf[AggregateMapReduce].clauseOpt shouldEqual AggregateClause.withoutOpt(Seq("_metric_", "instance"))
     }
   }
 
@@ -987,6 +987,27 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       }
       getRawSeriesFilters(lp.replaceFilters(newFilters)).foreach{ filters =>
         filters.intersect(newFilters).size shouldEqual newFilters.size
+      }
+    }
+  }
+
+  it("should generate aggregation LogicalPlan/ExecPlan with correct by/without clause") {
+    val queryClausePairs = Seq (
+      ("""sum (test{job="app"})""", None),
+      ("""sum without()(test{job="app"})""", AggregateClause.withoutOpt()),
+      ("""sum by()(test{job="app"})""", AggregateClause.byOpt()),
+      ("""sum without(foo, bar)(test{job="app"})""", AggregateClause.withoutOpt(Seq("foo", "bar"))),
+      ("""sum by(foo, bar)(test{job="app"})""", AggregateClause.byOpt(Seq("foo", "bar")))
+    )
+    for ((query, clauseOpt) <- queryClausePairs) {
+      val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+      lp.asInstanceOf[Aggregate].clauseOpt shouldEqual clauseOpt
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+      for (child <- execPlan.children) {
+        child.asInstanceOf[MultiSchemaPartitionsExec]
+             .rangeVectorTransformers
+             .last.asInstanceOf[AggregateMapReduce]
+             .clauseOpt shouldEqual clauseOpt
       }
     }
   }

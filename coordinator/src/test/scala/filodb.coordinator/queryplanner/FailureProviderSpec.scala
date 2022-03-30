@@ -22,13 +22,13 @@ class FailureProviderSpec extends AnyFunSpec with Matchers {
 
   val raw1 = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
   val windowed1 = PeriodicSeriesWithWindowing(raw1, from, 1000, to, 5000, RangeFunctionId.Rate)
-  val summed1 = Aggregate(AggregationOperator.Sum, windowed1, Nil, Seq("job"))
+  val summed1 = Aggregate(AggregationOperator.Sum, windowed1, Nil, AggregateClause.byOpt(Seq("job")))
 
   val f2 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_count")),
     ColumnFilter("job", Filter.Equals("myService")))
   val raw2 = RawSeries(rangeSelector = intervalSelector, filters = f2, columns = Seq("value"))
   val windowed2 = PeriodicSeriesWithWindowing(raw2, from + 1000, 1000, to, 5000, RangeFunctionId.Rate)
-  val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
+  val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, AggregateClause.byOpt(Seq("job")))
 
   val datasetRef = DatasetRef("dataset", Some("cassandra"))
 
@@ -157,7 +157,7 @@ class FailureProviderSpec extends AnyFunSpec with Matchers {
   it("should update time in logical plan when lookBack is present") {
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"), Some(100))
     val windowed = PeriodicSeriesWithWindowing(raw, from, 1000, to, 5000, RangeFunctionId.Rate)
-    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, AggregateClause.byOpt(Seq("job")))
 
     val expectedRaw = RawSeries(rangeSelector = IntervalSelector(20000, 30000), filters = f1, columns = Seq("value"),
       Some(100), None)
