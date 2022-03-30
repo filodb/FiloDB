@@ -121,7 +121,8 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
         .withTag("downsamplePeriod", downsamplePeriodStr)
       downsampleHourStartGauge.update(userTimeStart / 1000 / 60 / 60)
     }
-    Thread.sleep(62000) // quick & dirty hack to ensure that the completed metric gets published
+    if (dsSettings.shouldSleepForMetricsFlush)
+      Thread.sleep(62000) // quick & dirty hack to ensure that the completed metric gets published
     spark
   }
 
