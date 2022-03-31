@@ -50,31 +50,24 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
   @transient lazy val endTimeLTE = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(dsSettings.filodbConfig
     .as[String]("cardbuster.delete-endTimeLTE"))).toEpochMilli
 
-  def bustIndexRecords(shard: Int, split: (String, String)): Unit = {
+  def bustIndexRecords(shard: Int, split: (String, String), isSimulation: Boolean): Int = {
     val numPartKeysDeleted = Kamon.counter("num-partkeys-deleted").withTag("dataset", dataset.toString)
-        .withTag("shard", shard)
+        .withTag("shard", shard).withTag("simulation", isSimulation)
     val numPartKeysCouldNotDelete = Kamon.counter("num-partkeys-could-not-delete").withTag("dataset", dataset.toString)
-      .withTag("shard", shard)
+      .withTag("shard", shard).withTag("simulation", isSimulation)
     require(deleteFilter.nonEmpty, "cardbuster.delete-pk-filters should be non-empty")
-    BusterContext.log.info(s"Starting to bust cardinality in shard=$shard with " +
-      s"filter=$deleteFilter " +
-      s"inDownsampleTables=$inDownsampleTables " +
-      s"startTimeGTE=$startTimeGTE " +
-      s"startTimeLTE=$startTimeLTE " +
-      s"endTimeGTE=$endTimeGTE " +
-      s"endTimeLTE=$endTimeLTE " +
-      s"split=$split"
-    )
+    BusterContext.log.info(s"Starting to bust cardinality in shard=$shard with isSimulation=$isSimulation " +
+      s"filter=$deleteFilter inDownsampleTables=$inDownsampleTables startTimeGTE=$startTimeGTE " +
+      s"startTimeLTE=$startTimeLTE endTimeGTE=$endTimeGTE  endTimeLTE=$endTimeLTE split=$split")
     val candidateKeys = colStore.scanPartKeysByStartEndTimeRangeNoAsync(dataset, shard,
-      split, startTimeGTE, startTimeLTE,
-      endTimeGTE, endTimeLTE)
-
+      split, startTimeGTE, startTimeLTE, endTimeGTE, endTimeLTE)
     var numDeleted = 0
     var numCouldNotDelete = 0
+    var numCandidateKeys = 0
     candidateKeys.filter { pk =>
-      val rawSchemaId = RecordSchema.schemaID(pk, UnsafeUtils.arayOffset)
+      val rawSchemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
       val schema = schemas(rawSchemaId)
-      val pkPairs = schema.partKeySchema.toStringPairs(pk, UnsafeUtils.arayOffset)
+      val pkPairs = schema.partKeySchema.toStringPairs(pk.partKey, UnsafeUtils.arayOffset)
       val willDelete = deleteFilter.exists { filter => // at least one filter should match
         filter.forall { case (filterKey, filterValRegex) => // should match all tags in this filter
           pkPairs.exists { case (pkKey, pkVal) =>
@@ -83,12 +76,14 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
         }
       }
       if (willDelete) {
-        BusterContext.log.debug(s"Deleting part key $pkPairs from shard=$shard")
+        BusterContext.log.info(s"Deleting part key $pkPairs from shard=$shard startTime=${pk.startTime} " +
+          s"endTime=${pk.endTime} split=$split isSimulation=$isSimulation")
       }
+      numCandidateKeys += 1
       willDelete
     }.foreach { pk =>
       try {
-        colStore.deletePartKeyNoAsync(dataset, shard, pk)
+        if (!isSimulation) colStore.deletePartKeyNoAsync(dataset, shard, pk.partKey)
         numPartKeysDeleted.increment()
         numDeleted += 1
       } catch { case e: Exception =>
@@ -98,7 +93,8 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
       }
       Unit
     }
-    BusterContext.log.info(s"Finished deleting keys from shard shard=$shard " +
-      s"numDeleted=$numDeleted numCouldNotDelete=$numCouldNotDelete")
+    BusterContext.log.info(s"Finished deleting keys from shard shard=$shard numCandidateKeys=$numCandidateKeys " +
+      s"numDeleted=$numDeleted numCouldNotDelete=$numCouldNotDelete isSimulation=$isSimulation")
+    numDeleted
   }
 }

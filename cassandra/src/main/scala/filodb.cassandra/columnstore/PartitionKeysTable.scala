@@ -47,7 +47,7 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
     .setConsistencyLevel(ConsistencyLevel.ONE)
 
   private lazy val scanCqlForStartEndTime = session.prepare(
-    s"SELECT partKey FROM $tableString " +
+    s"SELECT partKey, startTime, endTime FROM $tableString " +
       s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ? AND " +
       s"startTime >= ? AND startTime <= ? AND " +
       s"endTime >= ? AND endTime <= ? " +
@@ -154,7 +154,7 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
                                         startTimeGTE: Long,
                                         startTimeLTE: Long,
                                         endTimeGTE: Long,
-                                        endTimeLTE: Long): Iterator[Array[Byte]] = {
+                                        endTimeLTE: Long): Iterator[PartKeyRecord] = {
       /*
        * FIXME conversion of tokens to Long works only for Murmur3Partitioner because it generates
        * Long based tokens. If other partitioners are used, this can potentially break.
@@ -166,7 +166,7 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
         startTimeLTE: java.lang.Long,
         endTimeGTE: java.lang.Long,
         endTimeLTE: java.lang.Long)
-    session.execute(stmt).iterator.asScala.map(row => row.getBytes("partKey").array())
+    session.execute(stmt).iterator.asScala.map(PartitionKeysTable.rowToPartKeyRecord)
   }
 
   /**
