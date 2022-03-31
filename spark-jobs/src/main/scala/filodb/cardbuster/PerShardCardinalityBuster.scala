@@ -56,13 +56,10 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
     val numPartKeysCouldNotDelete = Kamon.counter("num-partkeys-could-not-delete").withTag("dataset", dataset.toString)
       .withTag("shard", shard)
     require(deleteFilter.nonEmpty, "cardbuster.delete-pk-filters should be non-empty")
-    BusterContext.log.info(s"Starting to bust cardinality in shard=$shard with " +
-      s"filter=$deleteFilter " +
-      s"inDownsampleTables=$inDownsampleTables " +
-      s"startTimeGTE=$startTimeGTE " +
-      s"startTimeLTE=$startTimeLTE " +
-      s"endTimeGTE=$endTimeGTE " +
-      s"endTimeLTE=$endTimeLTE " +
+    BusterContext.log.info(s"Starting to bust cardinality in shard=$shard with isSimulation=$isSimulation " +
+      s"filter=$deleteFilter inDownsampleTables=$inDownsampleTables " +
+      s"startTimeGTE=$startTimeGTE  startTimeLTE=$startTimeLTE " +
+      s"endTimeGTE=$endTimeGTE  endTimeLTE=$endTimeLTE " +
       s"split=$split"
     )
     val candidateKeys = colStore.scanPartKeysByStartEndTimeRangeNoAsync(dataset, shard,
@@ -99,7 +96,7 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
       Unit
     }
     BusterContext.log.info(s"Finished deleting keys from shard shard=$shard " +
-      s"numDeleted=$numDeleted numCouldNotDelete=$numCouldNotDelete")
+      s"numDeleted=$numDeleted numCouldNotDelete=$numCouldNotDelete isSimulation=$isSimulation")
     numDeleted
   }
 }
