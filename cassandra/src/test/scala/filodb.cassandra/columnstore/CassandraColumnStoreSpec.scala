@@ -17,6 +17,7 @@ import filodb.memory.{BinaryRegionLarge, NativeMemoryManager}
 import filodb.memory.format.{TupleRowReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
 
+
 import java.nio.charset.StandardCharsets
 
 class CassandraColumnStoreSpec extends ColumnStoreSpec {
@@ -70,7 +71,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
                               .zipWithIndex.map { case (pk, i) => PartKeyRecord(pk, 5, 10, Some(i))}.toSet
 
     val updateHour = 10
-    colStore.writePartKeys(dataset, 0, Observable.fromIterable(pks), 1.hour.toSeconds.toInt, 10, true )
+    colStore.writePartKeys(dataset, 0, Observable.fromIterable(pks), 1.hour.toSeconds.toInt, 10, schemas, true)
       .futureValue shouldEqual Success
 
     val expectedKeys = pks.map(pk => new String(pk.partKey, StandardCharsets.UTF_8).toInt)
@@ -81,7 +82,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     val readData2 = colStore.scanPartKeys(dataset, 0).toListL.runToFuture.futureValue.toSet
     readData2.map(pk => new String(pk.partKey, StandardCharsets.UTF_8).toInt) shouldEqual expectedKeys
 
-    readData2.map(_.partKey).foreach(pk => colStore.deletePartKeyNoAsync(dataset, 0, pk))
+    readData2.map(_.partKey).foreach(pk => colStore.deletePartKeyNoAsync(dataset, 0, pk, schemas))
 
     val readData3 = colStore.scanPartKeys(dataset, 0).toListL.runToFuture.futureValue
     readData3.isEmpty shouldEqual true

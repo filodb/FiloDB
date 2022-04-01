@@ -12,6 +12,7 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core._
+import filodb.core.metadata.Schemas
 
 case class PartKeyRecord(partKey: Array[Byte], startTime: Long, endTime: Long, hash: Option[Int])
 
@@ -46,9 +47,9 @@ trait ChunkSink {
                               shard: Int,
                               updateHour: Long): Observable[PartKeyRecord]
 
-  def writePartKeys(ref: DatasetRef, shard: Int,
-                    partKeys: Observable[PartKeyRecord], diskTTLSeconds: Long,
-                    updateHour: Long, writeToPkUTTable: Boolean = true): Future[Response]
+  def writePartKeys(ref: DatasetRef, shard: Int, partKeys: Observable[PartKeyRecord],
+                    diskTTLSeconds: Long, updateHour: Long, schemas: Schemas,
+                    writeToPkUTTable: Boolean = true): Future[Response]
   /**
    * Initializes the ChunkSink for a given dataset.  Must be called once before writing.
    */
@@ -155,9 +156,9 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
 
   override def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord] = Observable.empty
 
-  override def writePartKeys(ref: DatasetRef, shard: Int,
-                             partKeys: Observable[PartKeyRecord], diskTTLSeconds: Long,
-                             updateHour: Long, writeToPkUTTable: Boolean = true): Future[Response] = {
+  override def writePartKeys(ref: DatasetRef, shard: Int, partKeys: Observable[PartKeyRecord],
+                             diskTTLSeconds: Long, updateHour: Long, schemas: Schemas,
+                             writeToPkUTTable: Boolean = true): Future[Response] = {
     partKeys.countL.map(c => sinkStats.partKeysWrite(c.toInt)).runToFuture.map(_ => Success)
   }
 

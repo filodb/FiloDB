@@ -109,10 +109,12 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
       eligible
     }.map(toDownsamplePkrWithHash)
     val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
-    Await.result(dsDatasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
-      partKeys = pkRecords,
-      diskTTLSeconds = dsSettings.ttlByResolution(highestDSResolution), updateHour,
-      writeToPkUTTable = false), dsSettings.cassWriteTimeout)
+    Await.result(
+      dsDatasource.writePartKeys(
+        ref = dsDatasetRef, shard = shard.toInt, partKeys = pkRecords,
+        diskTTLSeconds = dsSettings.ttlByResolution(highestDSResolution),
+        updateHour, schemas, writeToPkUTTable = false),
+      dsSettings.cassWriteTimeout)
     numPartKeysMigrated.increment(count)
     count
   }

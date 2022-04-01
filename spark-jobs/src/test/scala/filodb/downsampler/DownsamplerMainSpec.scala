@@ -145,7 +145,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(untypedPartKeyBytes, 74372801000L, currTime, Some(150))
-    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, ).futureValue
   }
 
   it ("should write gauge data to cassandra") {
@@ -186,7 +186,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(gaugePartKeyBytes, 74372801000L, currTime, Some(150))
-    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, ).futureValue
   }
 
   it ("should write low freq gauge data to cassandra") {
@@ -225,7 +225,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(gaugeLowFreqPartKeyBytes, 74372801000L, currTime, Some(150))
-    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, ).futureValue
   }
 
   it ("should write prom counter data to cassandra") {
@@ -270,7 +270,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(counterPartKeyBytes, 74372801000L, currTime, Some(1))
-    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, ).futureValue
   }
 
   it ("should write prom histogram data to cassandra") {
@@ -316,7 +316,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(histPartKeyBytes, 74372801000L, currTime, Some(199))
-    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, ).futureValue
   }
 
   it ("should write prom histogram data with NaNs to cassandra") {
@@ -366,7 +366,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(histNaNPartKeyBytes, 74372801000L, currTime, Some(199))
-    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, ).futureValue
   }
 
   val numShards = dsIndexJobSettings.numShards
@@ -389,8 +389,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     val rawDataset = Dataset("prometheus", Schemas.promHistogram)
     pks.groupBy(k => (k.shard, k.updateHour)).foreach { case ((shard, updHour), shardPks) =>
-      rawColStore.writePartKeys(rawDataset.ref, shard, Observable.fromIterable(shardPks).map(_.pkr),
-        259200, updHour).futureValue
+      rawColStore.writePartKeys(rawDataset.ref, shard, Observable.fromIterable(shardPks).map(_.pkr), 259200, updHour, ).futureValue
     }
   }
 

@@ -89,7 +89,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
 
     colStore.write(dataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(gaugePartKeyBytes, firstSampleTime, firstSampleTime + numSamples, Some(150))
-    colStore.writePartKeys(dataset.ref, 0, Observable.now(pk), 259200, 34).futureValue
+    colStore.writePartKeys(dataset.ref, 0, Observable.now(pk), 259200, 34, schemas).futureValue
   }
 
   it ("should be able to do full ODP for non concurrent queries") {
