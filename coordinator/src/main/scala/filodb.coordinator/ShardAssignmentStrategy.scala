@@ -1,5 +1,7 @@
 package filodb.coordinator
 
+import java.net.InetAddress
+
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 
@@ -31,7 +33,66 @@ trait ShardAssignmentStrategy {
                         resources: DatasetResourceSpec,
                         mapper: ShardMapper): Int
 
+}
+
+/**
+ * Uses the trailing number in the host name to determine the shards that can be mapped to the host
+ * the implementation falls back to DefaultShardAssignmentStrategy if assignment cannot be determined
+ *
+ * The implementation assumes the number of shards is a multiple of number of nodes and there are no
+ * uneven assignments of shards to nodes
+ */
+class K8sStatefulSetShardAssignmentStrategy(useHostNameToResolveShards: Boolean)
+  extends ShardAssignmentStrategy with StrictLogging {
+
+  private val pat = "-\\d+$".r
+
+  private def getOrdinalFromActorRef(coord: ActorRef): Option[(String, Int)] = {
+    // if hostname is None from coordinator actor path, then its a local actor
+    // If the host name does not contain an ordinal at the end (e.g filodb-host-0, filodb-host-10), it will match None
+    coord.path.address.host
+      .map(host => InetAddress.getByName(host).getHostName)
+      .orElse(Some(InetAddress.getLocalHost.getHostName))
+      .flatMap(hostName => pat.findFirstIn(hostName).map(ordinal => (hostName, -Integer.parseInt(ordinal))))
   }
+
+  override def shardAssignments(coord: ActorRef,
+                                dataset: DatasetRef,
+                                resources: DatasetResourceSpec,
+                                mapper: ShardMapper): Seq[Int] = {
+    if (useHostNameToResolveShards) {
+      getOrdinalFromActorRef(coord) match {
+        case Some((hostName, ordinal)) =>
+          val numShardsPerHost = resources.numShards / resources.minNumNodes
+          // Suppose we have a total of 8 shards and 2 hosts, assuming the hostnames are host-0 and host-1, we will map
+          // host-0 to shard [0,1] and host-1 to shard [2, 3]
+          val firstShard = ordinal * numShardsPerHost
+          val shardsMapped = (firstShard until firstShard + numShardsPerHost).toList
+          logger.info("Using hostname resolution for shard mapping, mapping host={} tp shards={}",
+            hostName, shardsMapped)
+          shardsMapped
+        case None                      =>
+          // Host name does not have the ordinal at the end like a stateful set needs to have, delegate to default
+          //strategy
+          DefaultShardAssignmentStrategy.shardAssignments(coord, dataset, resources, mapper)
+      }
+    } else
+      DefaultShardAssignmentStrategy.shardAssignments(coord, dataset, resources, mapper)
+  }
+
+  override def remainingCapacity(coord: ActorRef,
+                                 dataset: DatasetRef,
+                                 resources: DatasetResourceSpec,
+                                 mapper: ShardMapper): Int = {
+    if (useHostNameToResolveShards) {
+      // Remaining capacity
+      ???
+    } else {
+      DefaultShardAssignmentStrategy.remainingCapacity(coord, dataset, resources, mapper)
+    }
+  }
+}
+
 
 object DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with StrictLogging {
 
