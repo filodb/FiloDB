@@ -565,6 +565,24 @@ abstract class NonLeafExecPlan extends ExecPlan {
 
 }
 
+// TODO(a_theimer): document
+abstract class JoinExecPlan extends NonLeafExecPlan {
+  def lhs: Seq[ExecPlan]
+  def rhs: Seq[ExecPlan]
+  def binaryOp: BinaryOperator
+  def on: Seq[String]
+  def ignoring: Seq[String]
+  protected def withChildrenBinaryHelper(lhs: Seq[ExecPlan], rhs: Seq[ExecPlan]): JoinExecPlan
+  def withChildrenBinary(lhs: Seq[ExecPlan], rhs: Seq[ExecPlan]): JoinExecPlan = {
+    val res = withChildrenBinaryHelper(lhs, rhs)
+    copyStateInto(res)
+    res
+  }
+  override def withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
+    throw new RuntimeException("should not be called for JoinPlans; use withChildrenBinary instead")
+  }
+}
+
 object IgnoreFixedVectorLenAndColumnNamesSchemaReducer {
   def reduceSchema(rs: ResultSchema, resp: QueryResult): ResultSchema = {
     resp match {

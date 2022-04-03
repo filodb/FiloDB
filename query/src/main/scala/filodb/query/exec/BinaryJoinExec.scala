@@ -45,7 +45,7 @@ final case class BinaryJoinExec(queryContext: QueryContext,
                                 ignoring: Seq[String],
                                 include: Seq[String],
                                 metricColumn: String,
-                                outputRvRange: Option[RvRange]) extends NonLeafExecPlan {
+                                outputRvRange: Option[RvRange]) extends JoinExecPlan {
 
   require(cardinality != Cardinality.ManyToMany,
     "Many To Many cardinality is not supported for BinaryJoinExec")
@@ -211,8 +211,9 @@ final case class BinaryJoinExec(queryContext: QueryContext,
   override def withDispatcherHelper(planDispatcher: PlanDispatcher): ExecPlan = {
     copy(dispatcher = planDispatcher)
   }
-  override def withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
-    throw new RuntimeException("should not be called for BinaryJoinExec")
+
+  override def withChildrenBinaryHelper(_lhs: Seq[ExecPlan], _rhs: Seq[ExecPlan]): JoinExecPlan = {
+    copy(lhs = _lhs, rhs = _rhs)
   }
 }
 

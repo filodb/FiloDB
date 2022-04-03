@@ -38,7 +38,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
                                  on: Seq[String],
                                  ignoring: Seq[String],
                                  metricColumn: String,
-                                 outputRvRange: Option[RvRange]) extends NonLeafExecPlan {
+                                 outputRvRange: Option[RvRange]) extends JoinExecPlan {
   require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
   require(!on.contains(metricColumn), "On cannot contain metric name")
 
@@ -55,8 +55,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
     copy(dispatcher = planDispatcher)
   }
 
-  override def withChildrenHelper(children: Seq[ExecPlan]): NonLeafExecPlan = {
-    throw new RuntimeException("Should not be called on SetOperatorExec")
+  override def withChildrenBinaryHelper(_lhs: Seq[ExecPlan], _rhs: Seq[ExecPlan]): JoinExecPlan = {
+    copy(lhs = _lhs, rhs = _rhs)
   }
 
   protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],
