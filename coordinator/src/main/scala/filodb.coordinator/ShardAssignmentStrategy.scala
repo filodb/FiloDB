@@ -85,8 +85,13 @@ class K8sStatefulSetShardAssignmentStrategy(useHostNameToResolveShards: Boolean)
                                  resources: DatasetResourceSpec,
                                  mapper: ShardMapper): Int = {
     if (useHostNameToResolveShards) {
-      // Remaining capacity
-      ???
+      getOrdinalFromActorRef(coord) match {
+        // Host name has the ordinal at the end, we can thus use the logic we use for stateful sets
+        // Difference between fixed number of shards the coordinator can take and those currently assigned
+        case Some(_)  => (resources.numShards / resources.minNumNodes - mapper.shardsForCoord(coord).size).max(0)
+        // Flag to resolve shards using hostname set but hostname does not follow stateful set hostname pattern
+        case None     => DefaultShardAssignmentStrategy.remainingCapacity(coord, dataset, resources, mapper)
+      }
     } else {
       DefaultShardAssignmentStrategy.remainingCapacity(coord, dataset, resources, mapper)
     }
