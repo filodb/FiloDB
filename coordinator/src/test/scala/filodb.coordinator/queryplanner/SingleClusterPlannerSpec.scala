@@ -596,8 +596,6 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       (spreadOverride = Some(FunctionalSpreadProvider(spread)),
         targetSchemaProvider = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
 
-      println("AAAAAAAAAAAAAAA")
-      println(query)
       validatePlan(execPlan, expected)
     }
   }

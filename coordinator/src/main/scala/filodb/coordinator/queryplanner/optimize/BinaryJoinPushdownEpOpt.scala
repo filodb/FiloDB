@@ -1,17 +1,16 @@
 package filodb.coordinator.queryplanner.optimize
 
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 
 import filodb.coordinator.queryplanner.SingleClusterPlanner.findTargetSchema
 import filodb.coordinator.queryplanner.optimize.BinaryJoinPushdownEpOpt.JoinSide
 import filodb.coordinator.queryplanner.optimize.BinaryJoinPushdownEpOpt.JoinSide.JoinSide
 import filodb.core.DatasetRef
 import filodb.core.query.QueryContext
-import filodb.query.BinaryOperator
 import filodb.query.exec.{DistConcatExec, EmptyResultExec, ExecPlan, JoinExecPlan, LabelCardinalityReduceExec,
-                          LocalPartitionDistConcatExec, MultiSchemaPartitionsExec, NonLeafExecPlan,
-                          ReduceAggregateExec, SplitLocalPartitionDistConcatExec}
-
+  LocalPartitionDistConcatExec, MultiSchemaPartitionsExec, NonLeafExecPlan, ReduceAggregateExec,
+  SplitLocalPartitionDistConcatExec}
 
 object BinaryJoinPushdownEpOpt {
   /**
@@ -126,9 +125,9 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
   private def propagatePlanUpdate(subtreeWithOldPlan: Subtree, updPlan: ExecPlan): Unit = {
     var oldPlan = subtreeWithOldPlan.root
     var child = subtreeWithOldPlan
-    // set the new pplan
+    // set the new plan
     subtreeWithOldPlan.root = updPlan
-    // walk up the tree and update plans until the root is finally updated
+    // walk up the tree and update plans until the parent is also updated
     while (child.parent != None) {
       val parent = child.parent.get
       val newParentPlan = replaceChild(parent.root, oldPlan, child.root)
@@ -157,16 +156,17 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
    * Returns a sequence of JoinInfos that describe, in order, any join plans encountered along the
    *   path from the child until the parent (non-inclusive of `child`; inclusive of `parent`).
    *
-   * @param parent: cannot be the same instance as `child`
+   * @param parent: cannot be same ExecPlan instance wrapped by `child`
    */
-  private def getParentJoinInfos(parent: Subtree, child: Subtree): Seq[(BinaryOperator, JoinSide)] = {
-    require(!(parent eq child))  // TODO(a_theimer): remove this; this is really just to prevent parent=child ambiguity
+  private def getParentJoinInfos(parent: ExecPlan, child: Subtree): Seq[(Subtree, JoinSide)] = {
+    // TODO(a_theimer): remove this; this is really just to prevent parent=child ambiguity
+    require(!(parent eq child.root))
     var childPtr = child
     var parentPtrOpt = child.parent
-    val infos = new mutable.ArrayBuffer[(BinaryOperator, JoinSide)]
-    while (parentPtrOpt.isDefined && !(childPtr eq parent)) {
+    val infos = new mutable.ArrayBuffer[(Subtree, JoinSide)]
+    while (parentPtrOpt.isDefined && !(childPtr.root eq parent)) {
       parentPtrOpt.get.root match {
-        case plan: JoinExecPlan => infos.append((plan.binaryOp, getChildJoinSide(plan, childPtr.root)))
+        case plan: JoinExecPlan => infos.append((parentPtrOpt.get, getChildJoinSide(plan, childPtr.root)))
       }
       childPtr = parentPtrOpt.get
       parentPtrOpt = parentPtrOpt.get.parent
@@ -177,7 +177,7 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
   /**
    * TODO(a_theimer)
    */
-  private def canPushdownToLeftGrandchild(join: Subtree, left: Subtree, right: Subtree): Boolean = {
+  private def canPushdownToLeftGrandchild(join: JoinExecPlan, left: Subtree, right: Subtree): Boolean = {
     val leftJoinInfos = getParentJoinInfos(join, left)
     // TODO(a_theimer): fill in this logic
     false
@@ -186,7 +186,7 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
   /**
    * TODO(a_theimer)
    */
-  private def canPushdownToRightGrandchild(join: Subtree, left: Subtree, right: Subtree): Boolean = {
+  private def canPushdownToRightGrandchild(join: JoinExecPlan, left: Subtree, right: Subtree): Boolean = {
     val rightJoinInfos = getParentJoinInfos(join, right)
     // TODO(a_theimer): fill in this logic
     false
@@ -194,30 +194,44 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
 
   // scalastyle:off method.length
   /**
-   * TODO(a_theimer)
+   * TODO(a_theimer): document. Also-- just accept Result args?
+   *   Also also: need to review what is/isn't mutable
+   *
+   * *** Below code is ultra-WIP ***
    */
-  private def pushdownToGrandchildren(join: Subtree,
-                                      leftSubtrees: Seq[Subtree],
-                                      rightSubtrees: Seq[Subtree],
-                                      shardToSubtreesLeft: Map[Int, Seq[Subtree]],
-                                      shardToSubtreesRight: Map[Int, Seq[Subtree]]): Option[Result] = {
+  private def pushdownToJoinGrandchildren(plan: JoinExecPlan,
+                                          lhsRes: Result,
+                                          rhsRes: Result): Option[Result] = {
+    // TODO(a_theimer): documentation / renames needed down here
+    val pushedDown = new mutable.HashSet[Subtree]()
+    // make a mutable copy of the shard->subtree maps
+    val updMap = new mutable.HashMap[Int, mutable.ArrayBuffer[Subtree]]()
+    Seq(lhsRes.shardToSubtrees, rhsRes.shardToSubtrees).flatten.map{ case (shard, subtrees) =>
+      val mappedSubtrees = updMap.getOrElseUpdate(shard, new ArrayBuffer[Subtree]())
+      mappedSubtrees.appendAll(subtrees)
+    }
 
-    val joinPlanCopyDummy = join.root.asInstanceOf[JoinExecPlan]
-    var pushedDown = Set[Subtree]()
-    val pushToLeft = leftSubtrees.filter(_.stats.sameShardOpt.isDefined).flatMap{ leftSubtree =>
-        shardToSubtreesRight(leftSubtree.stats.sameShardOpt.get).map{ rightSubtree =>
-          (leftSubtree, rightSubtree)
-        }
+    val pushToLeftCandidates = lhsRes.subtrees.filter{ leftSubtree =>
+      leftSubtree.stats.sameShardOpt.isDefined && rhsRes.shardToSubtrees.contains(leftSubtree.stats.sameShardOpt.get)
+    }.flatMap{ leftSubtree =>
+      rhsRes.shardToSubtrees(leftSubtree.stats.sameShardOpt.get).map{ rightSubtree =>
+        (leftSubtree, rightSubtree)
       }
-    val pushToRight = rightSubtrees.filter(_.stats.sameShardOpt.isDefined).flatMap{ rightSubtree =>
-        shardToSubtreesLeft(rightSubtree.stats.sameShardOpt.get).map{ leftSubtree =>
-          (leftSubtree, rightSubtree)
-        }
+    }
+    val pushToRightCandidates = rhsRes.subtrees.filter{ rightSubtree =>
+      rightSubtree.stats.sameShardOpt.isDefined && lhsRes.shardToSubtrees.contains(rightSubtree.stats.sameShardOpt.get)
+    }.filter(_.stats.sameShardOpt.isDefined).flatMap{ rightSubtree =>
+      lhsRes.shardToSubtrees(rightSubtree.stats.sameShardOpt.get).map{ leftSubtree =>
+        (leftSubtree, rightSubtree)
       }
-    val pushedLeft = pushToLeft.filter{ case (left, right) =>
-      if (!pushedDown.contains(right) && canPushdownToLeftGrandchild(join, left, right)) {
+    }
+
+    // TODO(a_theimer): order the pushdowns?
+    // TODO(a_theimer): lots of repeat code
+    pushToLeftCandidates.foreach{ case (left, right) =>
+      if (!pushedDown.contains(right) && canPushdownToLeftGrandchild(plan, left, right)) {
         // make the pushed-down node
-        val pushdown = joinPlanCopyDummy.withChildrenBinary(Seq(left.root), Seq(right.root))
+        val pushdown = plan.withChildrenBinary(Seq(left.root), Seq(right.root))
         // replace the left node with the pushdown
         val leftParent = left.parent
         val leftParentUpd = replaceChild(leftParent.get.root, left.root, pushdown)
@@ -225,33 +239,85 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
         leftParent.get.root = leftParentUpd
         left.root = pushdown
         // remove the right subtree as a pushdown candidate
-        pushedDown = pushedDown ++ Set(right)
-        true
-      } else {
-        false
+        pushedDown.add(right)
+        // TODO(a_theimer): worth maybe just keeping sets?
+        val shardSeq = updMap(right.stats.sameShardOpt.get)
+        val indexToRemove = shardSeq.indexOf(right)
+        shardSeq(indexToRemove) = shardSeq.last
+        shardSeq.dropRight(1)
       }
     }
-    val pushedRight = pushToRight.filter{ case (left, right) =>
-      if (!pushedDown.contains(left) && canPushdownToLeftGrandchild(join, left, right)) {
+    pushToRightCandidates.foreach{ case (left, right) =>
+      if (!pushedDown.contains(left) && canPushdownToRightGrandchild(plan, left, right)) {
         // make the pushed-down node
-        val pushdown = joinPlanCopyDummy.withChildrenBinary(Seq(left.root), Seq(right.root))
-        // replace the left node with the pushdown
+        val pushdown = plan.withChildrenBinary(Seq(left.root), Seq(right.root))
+        // replace the right node with the pushdown
         val rightParent = right.parent
         val rightParentUpd = replaceChild(rightParent.get.root, left.root, pushdown)
         // update the subtree nodes
         rightParent.get.root = rightParentUpd
         right.root = pushdown
         // remove the right subtree as a pushdown candidate
-        pushedDown = pushedDown ++ Set(left)
-        true
-      } else {
-        false
+        pushedDown.add(left)
+        val shardSeq = updMap(left.stats.sameShardOpt.get)
+        val indexToRemove = shardSeq.indexOf(left)
+        shardSeq(indexToRemove) = shardSeq.last
+        shardSeq.dropRight(1)
       }
     }
-    // TODO(a_theimer): update map     vvvvv
-    Some(Result(Seq(join), join.stats, Map()))
+
+    val resultMap = updMap.map{ case (shard, subtrees) =>
+      shard -> subtrees.toSeq
+    }.toMap
+
+    // TODO(a_theimer): what if one subtree is exhausted?
+
+    // TODO(a_theimer): these might have changed
+    val sameShardOpt = {
+      val leftShardOpt = lhsRes.aggrStats.sameShardOpt
+      val rightShardOpt = rhsRes.aggrStats.sameShardOpt
+      if (leftShardOpt.isDefined && rightShardOpt.isDefined && leftShardOpt.get == rightShardOpt.get) {
+        leftShardOpt
+      } else {
+        None
+      }
+    }
+    val targetSchemaColsOpt = {
+      val leftTsOpt = lhsRes.aggrStats.targetSchemaColsOpt
+      val rightTsOpt = rhsRes.aggrStats.targetSchemaColsOpt
+      if (leftTsOpt.isDefined && rightTsOpt.isDefined) {
+        Some(Seq(leftTsOpt, rightTsOpt).flatMap(_.get).toSet)
+      } else {
+        None
+      }
+    }
+    val stats = TreeStats(sameShardOpt, targetSchemaColsOpt)
+    Some(Result(Seq(new Subtree(plan, stats)), stats, resultMap))
   }
   // scalastyle:on method.length
+
+  private def pushdownToJoinChildren(plan: JoinExecPlan,
+                                     lhsRes: Result,
+                                     rhsRes: Result): Option[Result] = {
+    val childSubtrees = Seq(lhsRes, rhsRes).flatMap(_.subtrees)
+    // make sure all child subtrees have all leaf-level target schema columns defined and present
+    if (childSubtrees.forall(_.stats.targetSchemaColsOpt.isDefined)) {
+      val targetSchemaColsUnion = childSubtrees.flatMap(_.stats.targetSchemaColsOpt.get).toSet
+      // make sure all target schema cols present in join keys
+      // TODO(a_theimer): this is not technically correct; combines on-empty and both-empty cases
+      val alltargetSchemaColsPresent = if (plan.on.isEmpty) {
+        // make sure no target schema strings are ignored
+        plan.ignoring.find(targetSchemaColsUnion.contains(_)).isEmpty
+      } else {
+        // make sure all target schema cols are included in on
+        targetSchemaColsUnion.forall(plan.on.toSet.contains(_))
+      }
+      if (alltargetSchemaColsPresent) {
+        return makePushdownJoins(plan, lhsRes, rhsRes, plan.queryContext, plan.dataset)
+      }
+    }
+    endOptimization(plan.withChildrenBinary(lhsRes.subtrees.map(_.root), rhsRes.subtrees.map(_.root)))
+  }
 
   /**
    * Returns a Result where each argument ExecPlan is individually optimized.
@@ -394,24 +460,13 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
     }
     val lhsRes = lhsResOpt.get
     val rhsRes = rhsResOpt.get
-    val childSubtrees = Seq(lhsRes, rhsRes).flatMap(_.subtrees)
-    // make sure all child subtrees have all leaf-level target schema columns defined and present
-    if (childSubtrees.forall(_.stats.targetSchemaColsOpt.isDefined)) {
-      val targetSchemaColsUnion = childSubtrees.flatMap(_.stats.targetSchemaColsOpt.get).toSet
-      // make sure all target schema cols present in join keys
-      // TODO(a_theimer): this is not technically correct; combines on-empty and both-empty cases
-      val alltargetSchemaColsPresent = if (plan.on.isEmpty) {
-        // make sure no target schema strings are ignored
-        plan.ignoring.find(targetSchemaColsUnion.contains(_)).isEmpty
-      } else {
-        // make sure all target schema cols are included in on
-        targetSchemaColsUnion.forall(plan.on.toSet.contains(_))
-      }
-      if (alltargetSchemaColsPresent) {
-        return makePushdownJoins(plan, lhsRes, rhsRes, plan.queryContext, plan.dataset)
-      }
+    val childrenPushdownOpt = pushdownToJoinChildren(plan, lhsRes, rhsRes)
+    if (childrenPushdownOpt.isEmpty || !(childrenPushdownOpt.get.subtrees.head.root eq plan)) {
+      // can't do any better than this-- return this result
+      return childrenPushdownOpt
     }
-    endOptimization(plan.withChildrenBinary(lhsRes.subtrees.map(_.root), rhsRes.subtrees.map(_.root)))
+    // otherwise, see if there are any possible pushdowns beyond immediate children (more complicated and less optimal)
+    pushdownToJoinGrandchildren(plan, lhsRes, rhsRes)
   }
 
   private def optimizeMultiSchemaPartitionsExec(plan: MultiSchemaPartitionsExec): Option[Result] = {
@@ -452,19 +507,17 @@ class BinaryJoinPushdownEpOpt extends ExecPlanOptimizer {
     }
   }
 
-  // TODO(a_theimer): lots of renaming needed
   override def optimize(plan: ExecPlan): ExecPlan = {
     val resOpt = optimizeWalker(plan)
     if (resOpt.isDefined) {
       val res = resOpt.get
-      if (res.subtrees.size > 1) {
-        LocalPartitionDistConcatExec(plan.queryContext, plan.dispatcher, res.subtrees.map(_.root))
-      } else {
-        res.subtrees.head.root
+      res.subtrees.size match {
+        case 0 => EmptyResultExec(plan.queryContext, plan.dataset)
+        case 1 => res.subtrees.head.root
+        case _ => LocalPartitionDistConcatExec(plan.queryContext, plan.dispatcher, res.subtrees.map(_.root))
       }
     } else {
       EmptyResultExec(plan.queryContext, plan.dataset)
     }
-
   }
 }
