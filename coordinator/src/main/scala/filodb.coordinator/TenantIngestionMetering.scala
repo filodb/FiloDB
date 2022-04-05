@@ -39,8 +39,9 @@ case class TenantIngestionMetering(settings: FilodbSettings,
 
   private val CLUSTER_TYPE = settings.config.getString("cluster-type")
 
-  private val METRIC_ACTIVE = "active_timeseries_by_tenant"
-  private val METRIC_TOTAL = "total_timeseries_by_tenant"
+  private val METRIC_PREFIX = settings.config.getString("metering-metrics-prefix")
+  private val METRIC_ACTIVE = METRIC_PREFIX + "ns_active_timeseries"
+  private val METRIC_TOTAL = METRIC_PREFIX + "ns_total_timeseries"
 
   def schedulePeriodicPublishJob() : Unit = {
     // NOTE: the FiniteDuration overload of scheduleWithFixedDelay
