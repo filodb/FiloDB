@@ -74,6 +74,8 @@ class K8sStatefulSetShardAssignmentStrategy(useHostNameToResolveShards: Boolean)
         case None                      =>
           // Host name does not have the ordinal at the end like a stateful set needs to have, delegate to default
           //strategy
+          logger.debug(
+            "Falling back to DefaultShardAssignmentStrategy as hostname does not match k8s StatefulSet convention")
           DefaultShardAssignmentStrategy.shardAssignments(coord, dataset, resources, mapper)
       }
     } else
