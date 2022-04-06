@@ -107,19 +107,36 @@ case class MetadataRemoteExec(queryEndpoint: String,
 
   def mapTypeQueryResponse(response: MetadataSuccessResponse, id: String): QueryResponse = {
     val data = response.data.asInstanceOf[Seq[MetadataMapSampl]]
-    val iteratorMap = data.map { r => r.value.map { v => (v._1.utf8, v._2.utf8) }}
+    // FIXME
+    // Single label value query, older version returns Map type where as newer version works with List type
+    // so this explicit handling is added for backward compatibility.
+    if(data.nonEmpty && data(0).value.size == 1) {
+      val iteratorMap = data.flatMap{ r => r.value.map { v => v._2 }}
+      import NoCloseCursor._
+      val rangeVector = IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
+        NoCloseCursor(StringArrayRowReader(iteratorMap)), None)
 
-    import NoCloseCursor._
-    val rangeVector = IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
+      val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, labelsRecordSchema,
+        queryWithPlanName(queryContext)))
+
+      QueryResult(id, labelsResultSchema, srvSeq, QueryStats(),
+        if (response.partial.isDefined) response.partial.get else false, response.message)
+    } else {
+      val iteratorMap = data.map { r => r.value.map { v => (v._1.utf8, v._2.utf8) }}
+
+      import NoCloseCursor._
+      val rangeVector = IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
         UTF8MapIteratorRowReader(iteratorMap.toIterator), None)
 
-    val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, recordSchema,
-      queryWithPlanName(queryContext)))
+      val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, recordSchema,
+        queryWithPlanName(queryContext)))
 
-    val schema = if (data.isEmpty) ResultSchema.empty else resultSchema
-    // FIXME need to send and parse query stats in remote calls
-    QueryResult(id, schema, srvSeq, QueryStats(),
-      if (response.partial.isDefined) response.partial.get else false, response.message)
+      val schema = if (data.isEmpty) ResultSchema.empty else resultSchema
+      // FIXME need to send and parse query stats in remote calls
+      QueryResult(id, schema, srvSeq, QueryStats(),
+        if (response.partial.isDefined) response.partial.get else false, response.message)
+    }
+
   }
 
   def labelsQueryResponse(response: MetadataSuccessResponse, id: String): QueryResponse = {
