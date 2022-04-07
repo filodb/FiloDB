@@ -44,7 +44,8 @@ final case class BinaryJoinExec(queryContext: QueryContext,
                                 on: Seq[String],
                                 ignoring: Seq[String],
                                 include: Seq[String],
-                                metricColumn: String) extends NonLeafExecPlan {
+                                metricColumn: String,
+                                outputRvRange: Option[RvRange]) extends NonLeafExecPlan {
 
   require(cardinality != Cardinality.ManyToMany,
     "Many To Many cardinality is not supported for BinaryJoinExec")
@@ -99,7 +100,7 @@ final case class BinaryJoinExec(queryContext: QueryContext,
         if (oneSideMap.contains(jk)) {
           val rvDupe = oneSideMap(jk)
           if (rv.key.labelValues == rvDupe.key.labelValues) {
-            oneSideMap.put(jk, StitchRvsExec.stitch(rv, rvDupe))
+            oneSideMap.put(jk, StitchRvsExec.stitch(rv, rvDupe, outputRvRange))
           } else {
             throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk. " +
               s"${rvDupe.key.labelValues} and ${rv.key.labelValues} were the violating keys on many side")
@@ -119,7 +120,7 @@ final case class BinaryJoinExec(queryContext: QueryContext,
           val rvOtherCorrect = if (results.contains(resKey)) {
             val resVal = results(resKey)
             if (resVal.stitchedOtherSide.key.labelValues == rvOther.key.labelValues) {
-              StitchRvsExec.stitch(rvOther, resVal.stitchedOtherSide)
+              StitchRvsExec.stitch(rvOther, resVal.stitchedOtherSide, outputRvRange)
             } else {
               throw new BadQueryException(s"Non-unique result vectors ${resVal.stitchedOtherSide.key.labelValues} " +
                 s"and ${rvOther.key.labelValues} found for $resKey . Use grouping to create unique matching")

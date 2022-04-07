@@ -5,7 +5,7 @@ import com.typesafe.scalalogging.StrictLogging
 import monix.execution.Scheduler
 
 import filodb.core.Instance
-import filodb.core.memstore.{MemStore, TimeSeriesMemStore}
+import filodb.core.memstore.{TimeSeriesMemStore, TimeSeriesStore}
 import filodb.core.store._
 
 /** Strategies from configuration or type. */
@@ -22,7 +22,7 @@ object StoreStrategy {
   * should be a class that is passed two params, the FilodbSettings, and a Scheduler for scheduling I/O tasks
   */
 trait StoreFactory {
-  def memStore: MemStore
+  def memStore: TimeSeriesStore
   def metaStore: MetaStore
   // TODO: explicitly add a method for a ColumnStore or ChunkSink?
 }

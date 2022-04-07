@@ -115,7 +115,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
 
     // NOTE: multiPartitionODP mode does not work with AllChunkScan and unit tests; namely missing partitions will not
     // return data that is in memory.  TODO: fix
-    val result = Observable.fromIterator(noOdpPartitions) ++ {
+    val result = Observable.fromIteratorUnsafe(noOdpPartitions) ++ {
       if (storeConfig.multiPartitionODP) {
         Observable.fromTask(odpPartTask(partIdsNotInMemory, partKeyBytesToPage, pagingMethods,
                                         partLookupRes.chunkMethod)).flatMap { odpParts =>
@@ -125,9 +125,9 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
             rawStore.readRawPartitions(ref, maxChunkTime, multiPart, computeBoundingMethod(pagingMethods))
               // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
               // In the future optimize this if needed.
-              .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+              .mapEval { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
               .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
-              .doOnTerminate(ex => span.finish())
+              .guarantee(Task.eval(span.finish())) // not async
           } else { Observable.empty }
         }
       } else {
@@ -143,15 +143,15 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
             Observable.fromIterable(partKeyBytesToPage.zip(pagingMethods))
-              .mapAsync(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
+              .mapParallelUnordered(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
                 rawStore.readRawPartitions(ref, maxChunkTime, SinglePartitionScan(partBytes, shardNum), method)
-                  .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+                  .mapEval { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
                   .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
                   .defaultIfEmpty(getPartition(partBytes).get)
                   .headL
                   // headL since we are fetching a SinglePartition above
               }
-              .doOnTerminate(ex => span.finish())
+              .guarantee(Task.eval(span.finish())) // not async
           } else {
             Observable.empty
           }
@@ -179,7 +179,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
     // as opposed to ingestSched
 
   // No need to execute the task on ingestion thread if it's empty / no ODP partitions
-  } else Task.now(Nil)
+  } else Task.eval(Nil)
 
   /**
    * Creates a Task which is meant ONLY TO RUN ON INGESTION THREAD
@@ -187,7 +187,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
    * It runs in ingestion thread so it can correctly verify which ones to actually create or not
    */
   private def createODPPartitionsTask(partIDs: Buffer[Int], callback: (Int, Array[Byte]) => Unit):
-                                                                  Task[Seq[TimeSeriesPartition]] = Task {
+                                                                  Task[Seq[TimeSeriesPartition]] = Task.evalAsync {
     assertThreadName(IngestSchedName)
     require(partIDs.nonEmpty)
     partIDs.map { id =>

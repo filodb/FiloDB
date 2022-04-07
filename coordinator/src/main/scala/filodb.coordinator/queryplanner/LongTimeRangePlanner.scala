@@ -34,20 +34,47 @@ import filodb.query.exec._
                              stitchDispatcher: => PlanDispatcher,
                              val queryConfig: QueryConfig,
                              val dataset: Dataset) extends QueryPlanner
-                             with PlannerHelper with StrictLogging {
+                             with DefaultPlanner with StrictLogging {
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options
 
-  // scalastyle:off method.length
+
   private def materializePeriodicSeriesPlan(qContext: QueryContext, periodicSeriesPlan: PeriodicSeriesPlan) = {
-    val earliestRawTime = earliestRawTimestampFn
-    lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(periodicSeriesPlan)
-    lazy val lookbackMs = LogicalPlanUtils.getLookBackMillis(periodicSeriesPlan).max
-    lazy val startWithOffsetMs = periodicSeriesPlan.startMs - offsetMillis.max
-    // For scalar binary operation queries like sum(rate(foo{job = "app"}[5m] offset 8d)) * 0.5
-    lazy val endWithOffsetMs = periodicSeriesPlan.endMs - offsetMillis.max
     val execPlan = if (!periodicSeriesPlan.isRoutable)
       rawClusterPlanner.materialize(periodicSeriesPlan, qContext)
+    else
+      materializeRoutablePlan(qContext, periodicSeriesPlan)
+    PlanResult(Seq(execPlan))
+  }
+
+  // scalastyle:off method.length
+  private def materializeRoutablePlan(qContext: QueryContext, periodicSeriesPlan: PeriodicSeriesPlan): ExecPlan = {
+    import LogicalPlan._
+    val earliestRawTime = earliestRawTimestampFn
+    val offsetMillis = LogicalPlanUtils.getOffsetMillis(periodicSeriesPlan)
+    val (maxOffset, minOffset) = (offsetMillis.max, offsetMillis.min)
+
+    val lookbackMs = LogicalPlanUtils.getLookBackMillis(periodicSeriesPlan).max
+    val startWithOffsetMs = periodicSeriesPlan.startMs - maxOffset
+    // For scalar binary operation queries like sum(rate(foo{job = "app"}[5m] offset 8d)) * 0.5
+    val endWithOffsetMs = periodicSeriesPlan.endMs - minOffset
+    if (maxOffset != minOffset
+          && startWithOffsetMs - lookbackMs < earliestRawTime
+          && endWithOffsetMs >= earliestRawTime) {
+          // If we get maxOffset != minOffset it means we have some Binary join in our LogicalPlan that
+          // has different offsets, for example sum(foo{} offset 8d + bar{}), here the top level operation
+          // is aggregation on a binary joined data with offset. Here we fall back to the default implementations in
+          // DefaultPlanner
+          // Also, consider the case sum(foo{}) + sum(bar{} offset 8d), its a PeriodicSeriesPlan with two offset values
+          // This can be done most efficiently find a point in time that can be pushed down completely to LT,
+          // completely in Raw and minimal required data in QS and stitch all together. However currently will we
+          // delegate to the default implementation of this logical plan, which would perform the operations
+          // in-process in DefaultPlanner
+          // TODO: Operations like sum(foo{} offset 8d) + 10 should be entirely pushed down despite the offset
+          //  however, right now this will just push then aggregation depending on offset or in worst case perform the
+          //  operation InProcess. This needs to be addressed in subsequent enhancements.
+         super.defaultWalkLogicalPlanTree(periodicSeriesPlan, qContext).plans.head
+    }
     else if (endWithOffsetMs < earliestRawTime) { // full time range in downsampled cluster
       logger.debug("materializing against downsample cluster:: {}", qContext.origQueryParams)
       downsampleClusterPlanner.materialize(periodicSeriesPlan, qContext)
@@ -59,7 +86,7 @@ import filodb.query.exec._
       // can happen with ANY lookback interval, not just the last one.
     } else if (
       endWithOffsetMs - lookbackMs < earliestRawTime || //TODO lookbacks can overlap in the middle intervals too
-      LogicalPlan.hasSubqueryWithWindowing(periodicSeriesPlan)
+        LogicalPlan.hasSubqueryWithWindowing(periodicSeriesPlan)
     ) {
       // For subqueries and long lookback queries, we keep things simple by routing to
       // downsample cluster since dealing with lookback windows across raw/downsample
@@ -83,7 +110,8 @@ import filodb.query.exec._
     } else { // raw/downsample overlapping query without long lookback
       // Split the query between raw and downsample planners
       // Note - should never arrive here when start == end (so step never 0)
-      require(periodicSeriesPlan.stepMs > 0, "Step was 0 when trying to split query between raw and downsample cluster")
+      require(periodicSeriesPlan.stepMs > 0,
+        "Step was 0 when trying to split query between raw and downsample cluster")
       val numStepsInDownsample = (earliestRawTime - startWithOffsetMs + lookbackMs) / periodicSeriesPlan.stepMs
       val lastDownsampleInstant = periodicSeriesPlan.startMs + numStepsInDownsample * periodicSeriesPlan.stepMs
       val firstInstantInRaw = lastDownsampleInstant + periodicSeriesPlan.stepMs
@@ -96,14 +124,65 @@ import filodb.query.exec._
       val rawLp = copyLogicalPlanWithUpdatedTimeRange(periodicSeriesPlan, TimeRange(firstInstantInRaw,
         periodicSeriesPlan.endMs))
       val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
-      StitchRvsExec(qContext, stitchDispatcher, Seq(rawEp, downsampleEp))
+      StitchRvsExec(qContext, stitchDispatcher, rvRangeFromPlan(periodicSeriesPlan),
+        Seq(rawEp, downsampleEp))
     }
-    PlanResult(Seq(execPlan), false)
   }
   // scalastyle:on method.length
 
-  def rawClusterMaterialize(qContext: QueryContext, logicalPlan: LogicalPlan): PlanResult = {
+  private def rawClusterMaterialize(qContext: QueryContext, logicalPlan: LogicalPlan): PlanResult = {
     PlanResult(Seq(rawClusterPlanner.materialize(logicalPlan, qContext)))
+  }
+
+  /**
+   * Materializes Label cardinality plan, the entire plan is split in long term cluster and raw cluster
+   * The split will be performed in the following fashion if the user provided start and end time spans across
+   * earliestRawTs and latestDSTS
+   *
+   *                  |------------------------|-----------------|-------------------------------|
+   *                  ^                        ^                 ^                               ^
+   *    User provided start time          earliestRawTS      latestDSTS                User provided end time
+   *
+   *
+   *                           <merge sketches to get total cardinality>
+   *                                  |                           \
+   *                        <Sketch from DS Cluster>          <Sketch from Raw Cluster>
+   *                             |                                   |
+   *                 |------------------------|             |------------------------|
+   *                 ^                        ^             ^                        ^
+   *   User provided start time           earliestRawTS   earliestRawTS            User provided end time
+   *
+   * @param logicalPlan           The LabelCardinality logical plan to materialize
+   * @param queryContext          The QueryContext object
+   * @return
+   */
+  private def materializeLabelCardinalityPlan(logicalPlan: LabelCardinality, queryContext: QueryContext): PlanResult = {
+    val (startTime, endTime) = (logicalPlan.startMs, logicalPlan.endMs)
+    val execPlan = if (startTime > latestDownsampleTimestampFn) {
+      // This is the case where no data cardinality will be retrieved from DownsampleStore, simply push down to
+      // raw planner
+      rawClusterPlanner.materialize(logicalPlan, queryContext)
+    } else if (endTime < earliestRawTimestampFn) {
+      // This is the case where no data cardinality will be retrieved from RawStore, simply push down to
+      // DS planner
+      downsampleClusterPlanner.materialize(logicalPlan, queryContext)
+    } else {
+      // There is a split, send to DS and Raw planners and get sketches from them without the presenter,
+      // perform a local reduction to merge the sketches and add a presenter
+      val dsLogicalPlan = logicalPlan.copy(endMs = earliestRawTimestampFn, clusterType = "downsample")
+      val rawLogicalPlan = logicalPlan.copy(startMs = earliestRawTimestampFn)
+      val qCtx = queryContext.copy(plannerParams = queryContext.plannerParams.copy(skipAggregatePresent = true))
+
+      val dsPlan = downsampleClusterPlanner.materialize(dsLogicalPlan, qCtx)
+      val rawPlan = rawClusterPlanner.materialize(rawLogicalPlan, qCtx)
+
+      val reduceExec = LabelCardinalityReduceExec(queryContext, stitchDispatcher, Seq(dsPlan, rawPlan))
+      if (!queryContext.plannerParams.skipAggregatePresent) {
+        reduceExec.addRangeVectorTransformer(new LabelCardinalityPresenter())
+      }
+      reduceExec
+    }
+    PlanResult(Seq(execPlan))
   }
 
   // scalastyle:off cyclomatic.complexity
@@ -111,13 +190,15 @@ import filodb.query.exec._
 
     if (!LogicalPlanUtils.hasBinaryJoin(logicalPlan)) {
       logicalPlan match {
-        case p: PeriodicSeriesPlan => materializePeriodicSeriesPlan(qContext, p)
+        case p: PeriodicSeriesPlan         => materializePeriodicSeriesPlan(qContext, p)
+        case lc: LabelCardinality          => materializeLabelCardinalityPlan(lc, qContext)
         case _: LabelValues |
              _: ApplyLimitFunction |
              _: SeriesKeysByFilters |
              _: ApplyInstantFunctionRaw |
              _: RawSeries |
-             _: LabelNames => rawClusterMaterialize(qContext, logicalPlan)
+             _: LabelNames |
+             _: TsCardinalities            => rawClusterMaterialize(qContext, logicalPlan)
       }
     }
     else logicalPlan match {
@@ -125,25 +206,27 @@ import filodb.query.exec._
       case lp: RawChunkMeta                => rawClusterMaterialize(qContext, lp)
       case lp: PeriodicSeries              => materializePeriodicSeriesPlan(qContext, lp)
       case lp: PeriodicSeriesWithWindowing => materializePeriodicSeriesPlan(qContext, lp)
-      case lp: ApplyInstantFunction        => materializeApplyInstantFunction(qContext, lp)
-      case lp: ApplyInstantFunctionRaw     => materializeApplyInstantFunctionRaw(qContext, lp)
-      case lp: Aggregate                   => materializeAggregate(qContext, lp)
-      case lp: BinaryJoin                  => materializeBinaryJoin(qContext, lp)
-      case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(qContext, lp)
+      case lp: ApplyInstantFunction        => super.materializeApplyInstantFunction(qContext, lp)
+      case lp: ApplyInstantFunctionRaw     => super.materializeApplyInstantFunctionRaw(qContext, lp)
+      case lp: Aggregate                   => materializePeriodicSeriesPlan(qContext, lp)
+      case lp: BinaryJoin                  => materializePeriodicSeriesPlan(qContext, lp)
+      case lp: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, lp)
       case lp: LabelValues                 => rawClusterMaterialize(qContext, lp)
+      case lp: TsCardinalities             => rawClusterMaterialize(qContext, lp)
       case lp: SeriesKeysByFilters         => rawClusterMaterialize(qContext, lp)
-      case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
-      case lp: ApplySortFunction           => materializeApplySortFunction(qContext, lp)
-      case lp: ScalarVaryingDoublePlan     => materializeScalarPlan(qContext, lp)
-      case lp: ScalarTimeBasedPlan         => materializeScalarTimeBased(qContext, lp)
-      case lp: VectorPlan                  => materializeVectorPlan(qContext, lp)
-      case lp: ScalarFixedDoublePlan       => materializeFixedScalar(qContext, lp)
-      case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
-      case lp: ScalarBinaryOperation       => materializeScalarBinaryOperation(qContext, lp)
+      case lp: ApplyMiscellaneousFunction  => super.materializeApplyMiscellaneousFunction(qContext, lp)
+      case lp: ApplySortFunction           => super.materializeApplySortFunction(qContext, lp)
+      case lp: ScalarVaryingDoublePlan     => super.materializeScalarPlan(qContext, lp)
+      case lp: ScalarTimeBasedPlan         => super.materializeScalarTimeBased(qContext, lp)
+      case lp: VectorPlan                  => super.materializeVectorPlan(qContext, lp)
+      case lp: ScalarFixedDoublePlan       => super.materializeFixedScalar(qContext, lp)
+      case lp: ApplyAbsentFunction         => super.materializeAbsentFunction(qContext, lp)
+      case lp: ScalarBinaryOperation       => super.materializeScalarBinaryOperation(qContext, lp)
       case lp: SubqueryWithWindowing       => materializePeriodicSeriesPlan(qContext, lp)
-      case lp: TopLevelSubquery            => materializeTopLevelSubquery(qContext, lp)
+      case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
       case lp: ApplyLimitFunction          => rawClusterMaterialize(qContext, lp)
       case lp: LabelNames                  => rawClusterMaterialize(qContext, lp)
+      case lp: LabelCardinality            => materializeLabelCardinalityPlan(lp, qContext)
     }
     // scalastyle:on cyclomatic.complexity
   }

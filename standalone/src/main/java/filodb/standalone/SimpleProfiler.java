@@ -34,6 +34,9 @@ import com.typesafe.config.ConfigException;
  * makes it possible to use a very long report interval without data loss.
  */
 public class SimpleProfiler {
+
+    private final static Logger logger  = LoggerFactory.getLogger(SimpleProfiler.class);
+
     /**
      * Launches a global profiler, based on config. Typically, these are nested under the
      * "filodb.profiler" path:
@@ -51,13 +54,16 @@ public class SimpleProfiler {
      */
     public static boolean launch(Config config) throws IOException {
         try {
-            long sampleRateMillis = config.getDuration("sample-rate", TimeUnit.MILLISECONDS);
-            long reportIntervalSeconds = config.getDuration("report-interval", TimeUnit.SECONDS);
-            int topCount = config.getInt("top-count");
-            File outFile = selectProfilerFile(config.getString("out-file"));
-            FileOutputStream out = new FileOutputStream(outFile);
-            new SimpleProfiler(sampleRateMillis, reportIntervalSeconds, topCount, out).start();
-            return true;
+            boolean enableSimpleProfiler = config.getBoolean("enable-simple-profiler");
+            if(enableSimpleProfiler) {
+                long sampleRateMillis = config.getDuration("sample-rate", TimeUnit.MILLISECONDS);
+                long reportIntervalSeconds = config.getDuration("report-interval", TimeUnit.SECONDS);
+                int topCount = config.getInt("top-count");
+                new SimpleProfiler(sampleRateMillis, reportIntervalSeconds, topCount).start();
+                return true;
+            } else {
+                return false;
+            }
         } catch (ConfigException e) {
             LoggerFactory.getLogger(SimpleProfiler.class).debug("Not profiling: " + e);
             return false;
@@ -80,7 +86,6 @@ public class SimpleProfiler {
     private final long mSampleRateMillis;
     private final long mReportIntervalMillis;
     private final int mTopCount;
-    private final OutputStream mOut;
 
     private Sampler mSampler;
     private Thread mShutdownHook;
@@ -88,25 +93,16 @@ public class SimpleProfiler {
     private long mNextReportAtMillis;
 
     /**
-     * Reports to System.out.
-     */
-    public SimpleProfiler(long sampleRateMillis, long reportIntervalSeconds, int topCount) {
-        this(sampleRateMillis, reportIntervalSeconds, topCount, System.out);
-    }
-
-    /**
      * @param sampleRateMillis how often to perform a thread dump (10 millis is good)
      * @param reportIntervalSeconds how often to write a report to the output stream
      * @param topCount number of methods to report
      * @param out where to write the report
      */
-    public SimpleProfiler(long sampleRateMillis, long reportIntervalSeconds, int topCount,
-                          OutputStream out)
+    public SimpleProfiler(long sampleRateMillis, long reportIntervalSeconds, int topCount)
     {
         mSampleRateMillis = sampleRateMillis;
         mReportIntervalMillis = reportIntervalSeconds * 1000;
         mTopCount = topCount;
-        mOut = out;
     }
 
     /**
@@ -222,90 +218,84 @@ public class SimpleProfiler {
                         Map<String, SummaryCounter> summaries)
         throws IOException
     {
-        int size = samples.size();
-        if (size == 0) {
-            return;
+        if(logger.isInfoEnabled()) {
+            int size = samples.size();
+            if (size == 0) {
+                return;
+            }
+
+            SummaryCounter[] allSummaries = new SummaryCounter[summaries.size()];
+            summaries.values().toArray(allSummaries);
+            Arrays.sort(allSummaries);
+
+            double summarySum = 0;
+            for (SummaryCounter sc : allSummaries) {
+                summarySum += sc.mValue;
+            }
+
+            TraceCounter[] topTraces = new TraceCounter[size];
+            samples.values().toArray(topTraces);
+            Arrays.sort(topTraces);
+
+            double traceSum = 0;
+            for (TraceCounter tc : topTraces) {
+                traceSum += tc.mValue;
+            }
+
+            int limit = Math.min(mTopCount, size);
+            StringBuilder b = new StringBuilder((allSummaries.length + limit) * 80);
+
+            b.append(Instant.now()).append(' ').append(getClass().getName()).append('\n');
+
+            b.append("--- all profiled packages --- \n");
+
+            for (SummaryCounter sc : allSummaries) {
+                String percentStr = String.format("%1$7.3f%%", 100.0 * (sc.mValue / summarySum));
+                b.append(percentStr).append(' ').append(sc.mName).append('\n');
+            }
+
+            b.append("--- top profiled methods --- \n");
+
+            for (int i=0; i<limit; i++) {
+                TraceCounter tc = topTraces[i];
+                if (tc.mValue == 0) {
+                    // No more to report.
+                    break;
+                }
+
+                String percentStr = String.format("%1$7.3f%%", 100.0 * (tc.mValue / traceSum));
+                b.append(percentStr);
+
+                StackTraceElement elem = tc.mElem;
+                b.append(' ').append(elem.getClassName()).append('.').append(elem.getMethodName());
+
+                String fileName = elem.getFileName();
+                int lineNumber = elem.getLineNumber();
+
+                if (fileName == null) {
+                    if (lineNumber >= 0) {
+                        b.append("(:").append(lineNumber).append(')');
+                    }
+                } else {
+                    b.append('(').append(fileName);
+                    if (lineNumber >= 0) {
+                        b.append(':').append(lineNumber);
+                    }
+                    b.append(')');
+                }
+
+                b.append('\n');
+
+                // Reset for next report.
+                tc.mValue = 0;
+            }
+            logger.info(b.toString());
         }
-
-        SummaryCounter[] allSummaries = new SummaryCounter[summaries.size()];
-        summaries.values().toArray(allSummaries);
-        Arrays.sort(allSummaries);
-
-        double summarySum = 0;
-        for (SummaryCounter sc : allSummaries) {
-            summarySum += sc.mValue;
-        }
-
         // Clear for next report.
         summaries.clear();
 
-        TraceCounter[] topTraces = new TraceCounter[size];
-        samples.values().toArray(topTraces);
-        Arrays.sort(topTraces);
-
-        double traceSum = 0;
-        for (TraceCounter tc : topTraces) {
-            traceSum += tc.mValue;
-        }
-
-        int limit = Math.min(mTopCount, size);
-        StringBuilder b = new StringBuilder((allSummaries.length + limit) * 80);
-
-        b.append(Instant.now()).append(' ').append(getClass().getName()).append('\n');
-
-        b.append("--- all profiled packages --- \n");
-
-        for (SummaryCounter sc : allSummaries) {
-            String percentStr = String.format("%1$7.3f%%", 100.0 * (sc.mValue / summarySum));
-            b.append(percentStr).append(' ').append(sc.mName).append('\n');
-        }
-
-        b.append("--- top profiled methods --- \n");
-
-        for (int i=0; i<limit; i++) {
-            TraceCounter tc = topTraces[i];
-            if (tc.mValue == 0) {
-                // No more to report.
-                break;
-            }
-
-            String percentStr = String.format("%1$7.3f%%", 100.0 * (tc.mValue / traceSum));
-            b.append(percentStr);
-
-            StackTraceElement elem = tc.mElem;
-            b.append(' ').append(elem.getClassName()).append('.').append(elem.getMethodName());
-
-            String fileName = elem.getFileName();
-            int lineNumber = elem.getLineNumber();
-
-            if (fileName == null) {
-                if (lineNumber >= 0) {
-                    b.append("(:").append(lineNumber).append(')');
-                }
-            } else {
-                b.append('(').append(fileName);
-                if (lineNumber >= 0) {
-                    b.append(':').append(lineNumber);
-                }
-                b.append(')');
-            }
-
-            b.append('\n');
-
-            // Reset for next report.
-            tc.mValue = 0;
-        }
-
-        report(b.toString());
     }
 
-    /**
-     * Override this method to report somewhere else.
-     */
-    protected void report(String s) throws IOException {
-        mOut.write(s.getBytes(StandardCharsets.UTF_8));
-        mOut.flush();
-    }
 
     /**
      * @return null if rejected

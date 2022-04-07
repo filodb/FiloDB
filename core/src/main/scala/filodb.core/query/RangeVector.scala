@@ -119,15 +119,6 @@ object CustomRangeVectorKey {
 
 case class RvRange(startMs: Long, stepMs: Long, endMs: Long)
 
-object RvRange {
-  def union(v1: Option[RvRange], v2: Option[RvRange]): Option[RvRange] = {
-    require(v1.map(_.stepMs) == v2.map(_.stepMs), s"Steps for Rvs being stitched were not equal: $v1 and $v2")
-    if (v1.isDefined && v2.isDefined) {
-      Some(RvRange(Math.min(v1.get.startMs, v2.get.startMs), v1.get.stepMs, Math.max(v1.get.endMs, v2.get.endMs)))
-    } else None
-  }
-}
-
 /**
   * Represents a single result of any FiloDB Query.
   */

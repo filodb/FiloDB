@@ -199,6 +199,8 @@ object LogicalPlanParser {
         getFiltersFromColumnFilters(lp.filters), Seq.empty, Option.empty, Option.empty, false)
       case lp: LabelNames             => filtersToQuery(
         getFiltersFromColumnFilters(lp.filters), Seq.empty, Option.empty, Option.empty, false)
+      case lp: LabelCardinality       => filtersToQuery(
+        getFiltersFromColumnFilters(lp.filters), Seq.empty, Option.empty, Option.empty, false)
       case _                          => throw new UnsupportedOperationException(s"$lp can't be converted to Query")
     }
   }

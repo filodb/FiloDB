@@ -30,6 +30,181 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
    parseAndValidate(inputString, List(Sampl(1600102672,1.2), Sampl(1600102687,3.1)))
   }
 
+  it("should parse LabelSampl") {
+    val inputString = """{
+                         |    "status": "success",
+                         |    "data": ["data1","data2","data3"]
+                         |}""".stripMargin
+
+    parser.decode[MetadataSuccessResponse](inputString) match {
+      case Right(labels) => labels shouldEqual
+        MetadataSuccessResponse(List(LabelSampl("data1"), LabelSampl("data2"), LabelSampl("data3")), "success", None, None)
+      case Left(ex) => throw ex
+    }
+  }
+
+  it("should parse MetadataMapSampl") {
+    val expected = Seq(
+      MetadataMapSampl(Map("tag1" -> "value1", "tag2" -> "value2", "tag3" -> "value3")),
+      MetadataMapSampl(Map("tag11" -> "value11", "tag22" -> "value22", "tag33" -> "value33"))
+    )
+    val inputString =
+      """{
+        |    "status": "success",
+        |    "data": [
+        |       {
+        |		      "tag1": "value1",
+        |		      "tag2": "value2",
+        |		      "tag3": "value3"
+        |       },
+        |       {
+        |		      "tag11": "value11",
+        |		      "tag22": "value22",
+        |		      "tag33": "value33"
+        |       }
+        |     ]
+        |}""".stripMargin
+
+    parser.decode[MetadataSuccessResponse](inputString) match {
+      case Right(response) => response shouldEqual MetadataSuccessResponse(expected)
+      case Left(ex) => throw ex
+    }
+  }
+
+  /**
+   *   final case class LabelCardinalitySampl(metric: Map[String, String],
+                                       cardinality: Seq[Map[String, String]]) extends MetadataSampl
+   */
+
+  it("should parse LabelCardinalitySampl") {
+    val expected = Seq(
+      LabelCardinalitySampl(
+        Map("_ws_" -> "demo", "_ns_" -> "App-0", "_metric_" -> "heap_usage"),
+        Seq(
+          Map("tag" -> "instance", "count" -> "10"),
+          Map("tag" -> "host", "count" -> "5"),
+          Map("tag" -> "datacenter", "count" -> "2")
+        )
+      ),
+      LabelCardinalitySampl(Map("_ws_" -> "demo", "_ns_" -> "App-1", "_metric_" -> "request_latency"),
+        Seq(
+          Map("tag" -> "instance", "count" -> "6"),
+          Map("tag" -> "host", "count" -> "2"),
+          Map("tag" -> "datacenter", "count" -> "2")
+        ))
+    )
+    val inputString =
+      """{
+        |    "status": "success",
+        |    "data": [
+        |       {
+        |		      "metric": {
+        |           "_ws_": "demo",
+        |		        "_ns_": "App-0",
+        |		        "_metric_": "heap_usage"
+        |          },
+        |          "cardinality":
+        |             [
+        |               {
+        |                 "tag": "instance",
+        |                 "count": "10"
+        |               },
+        |               {
+        |                 "tag": "host",
+        |                 "count": "5"
+        |               },
+        |               {
+        |                 "tag": "datacenter",
+        |                 "count": "2"
+        |               }
+        |             ]
+        |       },
+        |       {
+        |		      "metric": {
+        |           "_ws_": "demo",
+        |		        "_ns_": "App-1",
+        |		        "_metric_": "request_latency"
+        |          },
+        |          "cardinality":
+        |             [
+        |               {
+        |                 "tag": "instance",
+        |                 "count": "6"
+        |               },
+        |               {
+        |                 "tag": "host",
+        |                 "count": "2"
+        |               },
+        |               {
+        |                 "tag": "datacenter",
+        |                 "count": "2"
+        |               }
+        |             ]
+        |       }
+        |     ]
+        |}""".stripMargin
+
+    parser.decode[MetadataSuccessResponse](inputString) match {
+      case Right(response) => response shouldEqual MetadataSuccessResponse(expected)
+      case Left(ex) => throw ex
+    }
+  }
+
+  it("should parse TsCardinalitiesSampl") {
+    val expected = Seq(
+      TsCardinalitiesSampl(
+        Map("_ws_" -> "demo", "_ns_" -> "App-0", "_metric_" -> "heap_usage"),
+        Map("active" -> 2, "total" -> 3)),
+      TsCardinalitiesSampl(
+        Map("_ws_" -> "demo", "_ns_" -> "App-1"),
+        Map("active" -> 6, "total" -> 8)),
+      TsCardinalitiesSampl(
+        Map("_ws_" -> "demo"),
+        Map("active" -> 7, "total" -> 10))
+    )
+    val inputString =
+      """{
+        |  "status": "success",
+        |  "data": [
+        |    {
+        |	     "group": {
+        |         "_ws_": "demo",
+        |	       "_ns_": "App-0",
+        |	       "_metric_": "heap_usage"
+        |      },
+        |      "cardinality": {
+        |        "active": 2,
+        |        "total": 3
+        |      }
+        |    },
+        |    {
+        |	     "group": {
+        |        "_ws_": "demo",
+        |	       "_ns_": "App-1"
+        |      },
+        |      "cardinality": {
+        |        "active": 6,
+        |        "total": 8
+        |      }
+        |    },
+        |    {
+        |      "group": {
+        |        "_ws_": "demo"
+        |      },
+        |      "cardinality": {
+        |        "active": 7,
+        |        "total": 10
+        |      }
+        |    }
+        |  ]
+        |}""".stripMargin
+
+    parser.decode[MetadataSuccessResponse](inputString) match {
+      case Right(response) => response shouldEqual MetadataSuccessResponse(expected)
+      case Left(ex) => throw ex
+    }
+  }
+
   it("should parse aggregateResponse") {
     val input = """[{
                   |	"status": "success",
@@ -208,6 +383,80 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
         errorResponse.head.queryStats.get.size shouldEqual 1
         errorResponse.head.queryStats.get.head shouldBe qs
       case Left(ex)             => throw ex
+    }
+  }
+
+  it("should parse label cardinality response correctly") {
+    val input =
+      """[
+        |{
+        |  "status": "success",
+        |  "data": [
+        |    {
+        |      "cardinality": [
+        |        {
+        |          "count": "1",
+        |          "label": "app"
+        |        },
+        |        {
+        |          "count": "1",
+        |          "label": "_type_"
+        |        },
+        |        {
+        |          "count": "1",
+        |          "label": "__name__"
+        |        },
+        |        {
+        |          "count": "1",
+        |          "label": "_ns_"
+        |        },
+        |        {
+        |          "count": "1",
+        |          "label": "_ws_"
+        |        },
+        |        {
+        |          "count": "1",
+        |          "label": "host"
+        |        },
+        |        {
+        |          "count": "1",
+        |          "label": "version"
+        |        }
+        |      ],
+        |      "metric": {
+        |        "_ns_": "App-0",
+        |        "_metric_": "go_info",
+        |        "_ws_": "filodb-demo"
+        |      }
+        |    }
+        |  ],
+        |  "errorType": null,
+        |  "error": null
+        |}
+        |]""".stripMargin
+
+    val lc = Seq(LabelCardinalitySampl(
+      Map("_ws_"      -> "filodb-demo",
+          "_ns_"      -> "App-0",
+          "_metric_"  -> "go_info"),
+      List(
+        Map("label" -> "app", "count" -> "1"),
+        Map("label" -> "_type_", "count" -> "1"),
+        Map("label" -> "__name__", "count" -> "1"),
+        Map("label" -> "_ns_", "count" -> "1"),
+        Map("label" -> "_ws_", "count" -> "1"),
+        Map("label" -> "host", "count" -> "1"),
+        Map("label" -> "version", "count" -> "1"),
+    )))
+    val expected = MetadataSuccessResponse(lc)
+    val resp: Either[io.circe.Error, List[MetadataSuccessResponse]] =
+      parser.decode[List[MetadataSuccessResponse]](input)
+    resp match {
+      case Right(success :: Nil)        =>
+            success shouldEqual expected
+
+      case Left(ex)                     => throw ex
+      case _                            => fail("Expected to see a Right with just one element")
     }
   }
 

@@ -602,8 +602,31 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       val jobHash = BinaryRegion.hash32(labels("job").getBytes(StandardCharsets.UTF_8))
       val metricHash = BinaryRegion.hash32(labels("__name__").getBytes(StandardCharsets.UTF_8))
 
-      RecordBuilder.shardKeyHash(Nil, labels("__name__")) shouldEqual (7*31 + metricHash)
-      RecordBuilder.shardKeyHash(Seq(labels("job")), labels("__name__")) shouldEqual ((7*31 + jobHash)*31 + metricHash)
+      RecordBuilder.shardKeyHash(Nil, "__name__", labels("__name__")) shouldEqual (7*31 + metricHash)
+      RecordBuilder.shardKeyHash(Seq(labels("job")), "__name__", labels("__name__")) shouldEqual ((7*31 + jobHash)*31 + metricHash)
+    }
+
+    it("should compute shard hash correctly when target schema is provided") {
+      val jobHash = BinaryRegion.hash32(labels("job").getBytes(StandardCharsets.UTF_8))
+      val metricHash = BinaryRegion.hash32(labels("__name__").getBytes(StandardCharsets.UTF_8))
+      val targetSchemaNoMetric = Seq("job")
+      val targetSchemaWithMetric = Seq("job", "__name__")
+
+      RecordBuilder.shardKeyHash(Nil, "__name__", labels("__name__"), targetSchemaNoMetric) shouldEqual (7)
+      RecordBuilder.shardKeyHash(Seq(labels("job")), "__name__", labels("__name__"), targetSchemaNoMetric) shouldEqual (31*7 + jobHash)
+      RecordBuilder.shardKeyHash(Seq(labels("job")), "__name__", labels("__name__"), targetSchemaWithMetric) shouldEqual ((7*31 + jobHash)*31 + metricHash)
+    }
+
+    it("should compute partition key hash correctly when target schema is provided") {
+      val jobHash = BinaryRegion.hash32(labels("job").getBytes(StandardCharsets.UTF_8))
+      val instanceHash = BinaryRegion.hash32(labels("instance").getBytes(StandardCharsets.UTF_8))
+      val nonShardKeyPairs = labels.filter(f => f._1 != "job" && f._1 != "__name__")
+      val shardKeyPairs = labels.filter(f => f._1 == "job" || f._1 == "__name__")
+      val targetSchema = Seq("job","instance")
+
+      RecordBuilder.partitionKeyHash(
+        nonShardKeyPairs, shardKeyPairs,
+        targetSchema, "__name__", labels("__name__")) shouldEqual ((7*31 + jobHash)*31 + instanceHash)
     }
 
     it("should combine hash excluding certain keys") {

@@ -71,7 +71,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   private val stats = new DownsampledTimeSeriesShardStats(rawDatasetRef, shardNum)
 
-  private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, shardNum, indexTtlMs)
+  private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, false,
+    false, shardNum, indexTtlMs)
 
   private val indexUpdatedHour = new AtomicLong(0)
 
@@ -91,12 +92,28 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   def labelValues(labelName: String, topK: Int): Seq[TermInfo] = partKeyIndex.indexValues(labelName, topK)
 
-  def labelValuesWithFilters(filter: Seq[ColumnFilter],
+  def labelValuesWithFilters(filters: Seq[ColumnFilter],
                              labelNames: Seq[String],
                              endTime: Long,
                              startTime: Long,
+                             querySession: QuerySession,
                              limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
-    LabelValueResultIterator(partKeyIndex.partIdsFromFilters(filter, startTime, endTime), labelNames, limit)
+    val metricShardKeys = schemas.part.options.shardKeyColumns
+    val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
+    LabelValueResultIterator(partKeyIndex.partIdsFromFilters(filters, startTime, endTime), labelNames,
+      querySession, metricGroupBy, limit)
+  }
+
+  def singleLabelValuesWithFilters(filters: Seq[ColumnFilter],
+                                   label: String,
+                                   endTime: Long,
+                                   startTime: Long,
+                                   querySession: QuerySession,
+                                   limit: Int): Iterator[ZeroCopyUTF8String] = {
+    val metricShardKeys = schemas.part.options.shardKeyColumns
+    val metricGroupBy = deploymentPartitionName +: clusterType +: shardKeyValuesFromFilter(metricShardKeys, filters)
+    SingleLabelValuesResultIterator(partKeyIndex.partIdsFromFilters(filters, startTime, endTime),
+      label, querySession, metricGroupBy, limit)
   }
 
   def labelNames(filter: Seq[ColumnFilter],
@@ -136,7 +153,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         startStatsUpdateTask()
         logger.info(s"Shard now ready for query dataset=$indexDataset shard=$shardNum")
         isReadyForQuery = true
-      }.runAsync(housekeepingSched)
+      }.runToFuture(housekeepingSched)
   }
 
   private def startHousekeepingTask(): Unit = {
@@ -150,12 +167,12 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     logger.info(s"Starting housekeeping for downsample cluster of dataset=$rawDatasetRef shard=$shardNum " +
                 s"every ${rawStoreConfig.flushInterval}")
     houseKeepingFuture = Observable.intervalWithFixedDelay(rawStoreConfig.flushInterval,
-                                                           rawStoreConfig.flushInterval).mapAsync { _ =>
+                                                           rawStoreConfig.flushInterval).mapEval { _ =>
       purgeExpiredIndexEntries()
       indexRefresh()
     }.map { _ =>
       partKeyIndex.refreshReadersBlocking()
-    }.onErrorRestartUnlimited.completedL.runAsync(housekeepingSched)
+    }.onErrorRestartUnlimited.completedL.runToFuture(housekeepingSched)
   }
 
   private def purgeExpiredIndexEntries(): Unit = {
@@ -199,7 +216,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     logger.info(s"Starting Stats Update task from raw dataset=$rawDatasetRef shard=$shardNum every 1 minute")
     gaugeUpdateFuture = Observable.intervalWithFixedDelay(1.minute).map { _ =>
       updateGauges()
-    }.onErrorRestartUnlimited.completedL.runAsync(housekeepingSched)
+    }.onErrorRestartUnlimited.completedL.runToFuture(housekeepingSched)
   }
 
   private def updateGauges(): Unit = {
@@ -284,7 +301,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
     // when query is complete.
     Observable.fromIterable(lookup.pkRecords)
-      .mapAsync(downsampleStoreConfig.demandPagingParallelism) { partRec =>
+      .mapParallelUnordered(downsampleStoreConfig.demandPagingParallelism) { partRec =>
         val startExecute = System.currentTimeMillis()
         // TODO test multi-partition scan if latencies are high
         // IMPORTANT: The Raw partition reads need to honor the start time in the index. Suppose, the shards for the
@@ -365,13 +382,23 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     }
   }
 
+  private def shardKeyValuesFromFilter(shardKeyColumns: Seq[String], filters: Seq[ColumnFilter]): Seq[String] = {
+    shardKeyColumns.map { col =>
+      filters.collectFirst {
+        case ColumnFilter(c, Filter.Equals(filtVal: String)) if c == col => filtVal
+      }.getOrElse("unknown")
+    }.toList
+  }
+
   /**
     * Iterator for traversal of partIds, value for the given label will be extracted from the ParitionKey.
     * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
     */
-  case class LabelValueResultIterator(partIds: debox.Buffer[Int], labelNames: Seq[String], limit: Int)
-    extends Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] {
+  case class LabelValueResultIterator(partIds: debox.Buffer[Int], labelNames: Seq[String],
+                                      querySession: QuerySession, statsGroup: Seq[String], limit: Int)
+      extends Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] {
     private lazy val rows = labelValues
+    override def size: Int = rows.size
 
     def labelValues: Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
       var partLoopIndx = 0
@@ -392,12 +419,41 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         if (currVal.nonEmpty) rows.add(currVal)
         partLoopIndx += 1
       }
+      querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(partLoopIndx)
       rows.toIterator
     }
 
     override def hasNext: Boolean = rows.hasNext
 
     override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = rows.next
+  }
+
+  case class SingleLabelValuesResultIterator(partIds: debox.Buffer[Int], label: String,
+                                             querySession: QuerySession, statsGroup: Seq[String], limit: Int)
+      extends Iterator[ZeroCopyUTF8String] {
+    private val rows = labels
+
+    def labels: Iterator[ZeroCopyUTF8String] = {
+      var partLoopIndx = 0
+      val rows = new mutable.HashSet[ZeroCopyUTF8String]()
+      val colIndex = schemas.part.binSchema.colNames.indexOf(label)
+      while(partLoopIndx < partIds.length && rows.size < limit) {
+        val partId = partIds(partLoopIndx)
+        //retrieve PartKey either from In-memory map or from PartKeyIndex
+        val nextPart = partKeyFromPartId(partId)
+        if (colIndex > -1)
+          rows.add(schemas.part.binSchema.asZCUTF8Str(nextPart, UnsafeUtils.arayOffset, colIndex))
+        else
+          schemas.part.binSchema.singleColValues(nextPart, UnsafeUtils.arayOffset, label, rows)
+        partLoopIndx += 1
+      }
+      querySession.queryStats.getTimeSeriesScannedCounter(statsGroup).addAndGet(partLoopIndx)
+      rows.toIterator
+    }
+
+    def hasNext: Boolean = rows.hasNext
+
+    def next(): ZeroCopyUTF8String = rows.next
   }
 
   /**

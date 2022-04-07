@@ -1,11 +1,13 @@
 package filodb.kafka
 
-import java.lang.{Long => JLong}
+import scala.concurrent.blocking
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
+import monix.eval.Task
+import monix.kafka.{CommittableMessage, KafkaConsumerConfig, KafkaConsumerObservable}
 import monix.reactive.Observable
-import org.apache.kafka.clients.consumer.ConsumerRecord
+import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.common.TopicPartition
 
 import filodb.coordinator.{IngestionStream, IngestionStreamFactory}
@@ -34,8 +36,36 @@ class KafkaIngestionStream(config: Config,
   private val tp = new TopicPartition(IngestionTopic, shard)
 
   logger.info(s"Creating consumer assigned to topic ${tp.topic} partition ${tp.partition} offset $offset")
-  protected lazy val consumer: Observable[ConsumerRecord[JLong, Any]] =
-    PartitionedConsumerObservable.create(sc, tp, offset)
+  protected lazy val consumer = createKCO(sc, tp, offset)
+
+  private[filodb] def createKCO(sourceConfig: SourceConfig,
+                topicPartition: TopicPartition,
+                offset: Option[Long]): KafkaConsumerObservable[Long, Any, CommittableMessage[Long, Any]] = {
+
+    val consumer = createConsumer(sourceConfig, topicPartition, offset)
+    val cfg = KafkaConsumerConfig(sourceConfig.asConfig)
+    require(!cfg.enableAutoCommit, "'enable.auto.commit' must be false.")
+
+    KafkaConsumerObservable.manualCommit(cfg, consumer)
+  }
+
+  private[filodb] def createConsumer(sourceConfig: SourceConfig,
+                                     topicPartition: TopicPartition,
+                                     offset: Option[Long]): Task[KafkaConsumer[Long, Any]] = {
+    import collection.JavaConverters._
+
+    Task {
+      val props = sourceConfig.asProps
+      if (sourceConfig.LogConfig) logger.info(s"Consumer properties: $props")
+
+      blocking {
+        val consumer = new KafkaConsumer(props)
+        consumer.assign(List(topicPartition).asJava)
+        offset.foreach { off => consumer.seek(topicPartition, off) }
+        consumer.asInstanceOf[KafkaConsumer[Long, Any]]
+      }
+    }
+  }
 
   /**
    * Returns a reactive Observable stream of RecordContainers from Kafka.
@@ -47,8 +77,8 @@ class KafkaIngestionStream(config: Config,
    *   one or a few partitions at a time; probably doesn't work when you have lots of streams
    */
   override def get: Observable[SomeData] =
-    consumer.map { record =>
-      SomeData(record.value.asInstanceOf[RecordContainer], record.offset)
+    consumer.map { msg =>
+      SomeData(msg.record.value.asInstanceOf[RecordContainer], msg.record.offset)
     }
 
   override def teardown(): Unit = {

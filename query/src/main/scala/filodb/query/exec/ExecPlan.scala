@@ -10,6 +10,7 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, QueryTimeoutException}
+import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.query._
@@ -107,12 +108,12 @@ trait ExecPlan extends QueryCommand {
     def checkTimeout(timeoutAt: String): Unit = {
       val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
       if (queryTimeElapsed >= queryContext.plannerParams.queryTimeoutMillis) {
-          throw QueryTimeoutException(queryTimeElapsed, timeoutAt)
+        throw QueryTimeoutException(queryTimeElapsed, timeoutAt)
       }
     }
 
     // Step 1: initiate doExecute: make result schema and set up the async monix pipeline to create RVs
-    lazy val step1: Task[ExecResult] = Task {
+    lazy val step1: Task[ExecResult] = Task.evalAsync {
       // avoid any work when plan has waited in executor queue for long
       checkTimeout(s"step1-${this.getClass.getSimpleName}")
       span.mark(s"execute-step1-start-${getClass.getSimpleName}")
@@ -132,7 +133,7 @@ trait ExecPlan extends QueryCommand {
       }
     }
 
-    // Step 2: Run connect monix pipeline to transformers, materialize the result
+    // Step 2: Append transformer execution to step1 result, materialize the final result
     def step2(res: ExecResult): Task[QueryResponse] = res.schema.map { resSchema =>
       // avoid any work when plan has waited in executor queue for long
       checkTimeout(s"step2-${this.getClass.getSimpleName}")
@@ -141,30 +142,54 @@ trait ExecPlan extends QueryCommand {
         .record(Math.max(0, System.currentTimeMillis - startExecute))
       span.mark(s"execute-step2-start-${getClass.getSimpleName}")
       FiloSchedulers.assertThreadName(QuerySchedName)
-      val emptySchemaTransformers = allTransformers.filter(_.canHandleEmptySchemas)
-      // It is possible a null schema is returned (due to no time series). In that case just return empty results
-      val resultTask = if (resSchema == ResultSchema.empty && emptySchemaTransformers.isEmpty) {
-        qLogger.debug(s"queryId: ${queryContext.queryId} Empty plan $this, returning empty results")
-        span.mark("empty-plan")
-        span.mark(s"execute-step2-end-${getClass.getSimpleName}")
-        Task.eval(QueryResult(queryContext.queryId, resSchema, Nil, querySession.queryStats,
-          querySession.resultCouldBePartial, querySession.partialResultsReason))
-      } else {
-        val transformersToRun = if (resSchema == ResultSchema.empty) emptySchemaTransformers else allTransformers
-        val finalRes = transformersToRun.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
+      val resultTask = {
+        val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult(querySession))
-          (transf.apply(acc._1, querySession, queryContext.plannerParams.sampleLimit, acc._2,
-            paramRangeVector), transf.schema(acc._2))
+          val resultSchema : ResultSchema = acc._2
+          if (resultSchema == ResultSchema.empty && (!transf.canHandleEmptySchemas)) {
+            // It is possible a null schema is returned (due to no time series). In that case just skip the
+            // transformers that cannot handle empty results
+            (acc._1, resultSchema)
+          } else {
+            val rangeVector : Observable[RangeVector] = transf.apply(
+              acc._1, querySession, queryContext.plannerParams.sampleLimit, acc._2, paramRangeVector
+            )
+            val schema = transf.schema(resultSchema)
+            (rangeVector, schema)
+          }
         }
-        val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
-        Kamon.histogram("query-execute-time-elapsed-step2-transformer-pipeline-setup",
-                    MeasurementUnit.time.milliseconds)
-          .withTag("plan", getClass.getSimpleName)
-          .record(Math.max(0, System.currentTimeMillis - startExecute))
-        val builder = SerializedRangeVector.newBuilder()
+        if (finalRes._2 == ResultSchema.empty) {
+          span.mark("empty-plan")
+          span.mark(s"execute-step2-end-${getClass.getSimpleName}")
+          Task.eval( {
+            qLogger.debug(s"Finished query execution pipeline with empty results for $this")
+            QueryResult(queryContext.queryId, resSchema, Nil, querySession.queryStats,
+              querySession.resultCouldBePartial, querySession.partialResultsReason
+            )
+          })
+        } else {
+          val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
+          Kamon
+            .histogram(
+            "query-execute-time-elapsed-step2-transformer-pipeline-setup",
+              MeasurementUnit.time.milliseconds
+            )
+            .withTag("plan", getClass.getSimpleName)
+            .record(Math.max(0, System.currentTimeMillis - startExecute))
+          makeResult(finalRes._1, recSchema, finalRes._2)
+        }
+      }
+      resultTask.onErrorHandle { case ex: Throwable =>
+        QueryError(queryContext.queryId, querySession.queryStats, ex)
+      }
+    }.flatten
+
+    def makeResult(
+      rv : Observable[RangeVector], recordSchema: RecordSchema, resultSchema: ResultSchema
+    ): Task[QueryResult] = {
         @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
-        finalRes._1
-          .doOnStart(_ => span.mark("before-first-materialized-result-rv"))
+        val builder = SerializedRangeVector.newBuilder()
+        rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
           .map {
             case srv: SerializableRangeVector =>
               numResultSamples += srv.numRowsSerialized
@@ -176,7 +201,7 @@ trait ExecPlan extends QueryCommand {
             case rv: RangeVector =>
               // materialize, and limit rows per RV
               val execPlanString = queryWithPlanName(queryContext)
-              val srv = SerializedRangeVector(rv, builder, recSchema, execPlanString)
+              val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString)
               if (rv.outputRange.isEmpty)
                 qLogger.debug(s"Empty rangevector found. Rv class is:  ${rv.getClass.getSimpleName}, " +
                   s"execPlan is: $execPlanString, execPlan children ${this.children}")
@@ -188,7 +213,8 @@ trait ExecPlan extends QueryCommand {
                   sampleLimit} samples. Try applying more filters or reduce time range.")
               srv
           }
-          .doOnTerminate(_ => span.mark("after-last-materialized-result-rv"))
+          .filter(_.numRowsSerialized > 0)
+          .guarantee(Task.eval(span.mark("after-last-materialized-result-rv")))
           .toListL
           .map { r =>
             Kamon.histogram("query-execute-time-elapsed-step2-result-materialized",
@@ -203,22 +229,21 @@ trait ExecPlan extends QueryCommand {
             span.mark(s"resultBytes=$resultSize")
             span.mark(s"resultSamples=$numResultSamples")
             span.mark(s"numSrv=${r.size}")
-            span.mark(s"execute-step2-end-${getClass.getSimpleName}")
-            QueryResult(queryContext.queryId, finalRes._2, r, querySession.queryStats,
+            span.mark(s"execute-step2-end-${this.getClass.getSimpleName}")
+            qLogger.debug(s"Finished query execution pipeline with ${r.size} RVs for $this")
+            QueryResult(queryContext.queryId, resultSchema, r, querySession.queryStats,
               querySession.resultCouldBePartial, querySession.partialResultsReason)
           }
-      }
-      resultTask.onErrorHandle { case ex: Throwable =>
-        QueryError(queryContext.queryId, querySession.queryStats, ex)
-      }
-    }.flatten
+    }
 
     val qresp = for { res <- step1
                     qResult <- step2(res) }
               yield { qResult }
-    qresp.onErrorRecover { case NonFatal(ex) =>
+    val ret = qresp.onErrorRecover { case NonFatal(ex) =>
       QueryError(queryContext.queryId, querySession.queryStats, ex)
     }
+    qLogger.debug(s"Constructed monix query execution pipeline for $this")
+    ret
   }
 
 
@@ -419,7 +444,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // Create tasks for all results.
     // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
     val childTasks = Observable.fromIterable(children.zipWithIndex)
-                               .mapAsync(parallelism) { case (plan, i) =>
+                               .mapParallelUnordered(parallelism) { case (plan, i) =>
                                  val task = dispatchRemotePlan(plan, querySession, span).map((_, i))
                                  span.mark(s"child-plan-$i-dispatched-${plan.getClass.getSimpleName}")
                                  task
@@ -429,17 +454,18 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // an empty schema.  Validate that the other schemas are the same.  Skip over empty schemas.
     var sch = ResultSchema.empty
     val processedTasks = childTasks
-      .doOnStart(_ => span.mark("first-child-result-received"))
-      .doOnTerminate(_ => span.mark("last-child-result-received"))
+      .doOnStart(_ => Task.eval(span.mark("first-child-result-received")))
+      .guarantee(Task.eval(span.mark("last-child-result-received")))
       .map {
         case (res @ QueryResult(_, _, _, qStats, isPartialResult, partialResultReason), i) =>
+          qLogger.debug(s"Child query result received for $this")
           if (isPartialResult) {
             querySession.resultCouldBePartial = true
             querySession.partialResultsReason = partialResultReason
           }
           querySession.queryStats.add(qStats)
           if (res.resultSchema != ResultSchema.empty) sch = reduceSchemas(sch, res)
-          (res, i.toInt)
+          (res, i)
         case (e: QueryError, _) =>
           querySession.queryStats.add(e.queryStats)
           throw e.t
@@ -448,12 +474,14 @@ abstract class NonLeafExecPlan extends ExecPlan {
       .cache // cache caches results so that multiple subscribers can process
 
     val outputSchema = processedTasks.collect { // collect schema of first result that is nonEmpty
-      case (QueryResult(_, schema, _, qStats, _, _), _) if schema.columns.nonEmpty => schema
+      case (QueryResult(_, schema, _, _, _, _), _) if schema.columns.nonEmpty => schema
     }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
       // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {
         val outputRvs = compose(processedTasks, outputSchema, querySession)
-          .doOnTerminate(_ => span.mark(s"execute-step1-child-result-composition-end-${getClass.getSimpleName}"))
+          .guaranteeCase { _ =>
+            Task.eval(span.mark(s"execute-step1-child-result-composition-end-${this.getClass.getSimpleName}"))
+          }
         ExecResult(outputRvs, outputSchema)
       }
   }

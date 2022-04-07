@@ -20,7 +20,7 @@ class HashRandomnessSpec extends AnyFunSpec with Matchers {
     val allPairs = (0 until NumPairs).map(genPairs)
 
     val shardHashes = allPairs.map { case pairs =>
-      RecordBuilder.shardKeyHash(Seq(pairs("job")), pairs("__name__"))
+      RecordBuilder.shardKeyHash(Seq(pairs("job")), "__name__", pairs("__name__"))
     }
 
     // println(s"shardHashes=${shardHashes.take(100)}")

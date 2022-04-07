@@ -1,6 +1,7 @@
 package filodb.query
 
-import filodb.core.query.{ColumnFilter, RangeParams}
+import filodb.core.query.{ColumnFilter, RangeParams, RvRange}
+import filodb.core.query.Filter.Equals
 
 //scalastyle:off number.of.types
 sealed trait LogicalPlan {
@@ -23,11 +24,13 @@ sealed trait LogicalPlan {
     */
   def replaceFilters(filters: Seq[ColumnFilter]): LogicalPlan = {
     this match {
-      case p: PeriodicSeriesPlan  => p.replacePeriodicSeriesFilters(filters)
-      case r: RawSeriesLikePlan   => r.replaceRawSeriesFilters(filters)
-      case l: LabelValues         => l.copy(filters = filters)
-      case n: LabelNames          => n.copy(filters = filters)
-      case s: SeriesKeysByFilters => s.copy(filters = filters)
+      case n: LabelCardinality         => n.copy(filters = filters)
+      case p: PeriodicSeriesPlan       => p.replacePeriodicSeriesFilters(filters)
+      case r: RawSeriesLikePlan        => r.replaceRawSeriesFilters(filters)
+      case l: LabelValues              => l.copy(filters = filters)
+      case n: LabelNames               => n.copy(filters = filters)
+      case s: SeriesKeysByFilters      => s.copy(filters = filters)
+      case c: TsCardinalities          => c  // immutable & no members need to be updated
     }
   }
 }
@@ -69,7 +72,15 @@ sealed trait PeriodicSeriesPlan extends LogicalPlan {
 }
 
 sealed trait MetadataQueryPlan extends LogicalPlan {
+
   override def isTimeSplittable: Boolean = false
+
+  val filters: Seq[ColumnFilter]
+
+  val startMs: Long
+
+  val endMs: Long
+
 }
 
 /**
@@ -107,6 +118,13 @@ case class LabelValues(labelNames: Seq[String],
                        filters: Seq[ColumnFilter],
                        startMs: Long,
                        endMs: Long) extends MetadataQueryPlan
+
+
+case class LabelCardinality( filters: Seq[ColumnFilter],
+                             startMs: Long,
+                             endMs: Long,
+                             clusterType: String  = "raw") extends MetadataQueryPlan
+
 case class LabelNames(filters: Seq[ColumnFilter],
                       startMs: Long,
                       endMs: Long) extends MetadataQueryPlan
@@ -115,6 +133,62 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
                                fetchFirstLastSampleTimes: Boolean,
                                startMs: Long,
                                endMs: Long) extends MetadataQueryPlan
+
+object TsCardinalities {
+  val SHARD_KEY_LABELS = Seq("_ws_", "_ns_", "__name__")
+}
+
+/**
+ * Plan to answer queries of the abstract form:
+ *
+ * Find (active, total) cardinality pairs for all time series with <shard-key-prefix>,
+ *   then group them by { key[:1], key[:2], key[:3], ... }.
+ *
+ * Examples:
+ *
+ *  { prefix=[], numGroupByFields=2 } -> {
+ *      prefix=["ws_a", "ns_a"] -> (4, 6),
+ *      prefix=["ws_a", "ns_b"] -> (2, 4),
+ *      prefix=["ws_b", "ns_c"] -> (3, 5) }
+ *
+ *  { prefix=["ws_a", "ns_a"], numGroupByFields=3 } -> {
+ *      prefix=["ws_a", "ns_a", "met_a"] -> (4, 6),
+ *      prefix=["ws_a", "ns_a", "met_b"] -> (3, 5) }
+ *
+ *  { prefix=["ws_a"], numGroupByFields=1 } -> {
+ *      prefix=["ws_a"] -> (3, 5) }
+ *
+ * @param numGroupByFields: indicates "hierarchical depth" at which to group cardinalities.
+ *   For example:
+ *     1 -> workspace
+ *     2 -> namespace
+ *     3 -> metric
+ *   Must indicate a depth:
+ *     (1) at least as deep as shardKeyPrefix.
+ *     (2) less than '3' when the prefix does not contain values for all lesser depths.
+ *   Example (if shard keys specify a ws, ns, and metric):
+ *     shardKeyPrefix     numGroupByFields
+ *     []                 { 1, 2 }
+ *     [ws]               { 1, 2 }
+ *     [ws, ns]           { 2, 3 }
+ *     [ws, ns, metric]   { 3 }
+ */
+case class TsCardinalities(shardKeyPrefix: Seq[String], numGroupByFields: Int) extends LogicalPlan {
+  import TsCardinalities._
+
+  require(numGroupByFields >= 1 && numGroupByFields <= 3,
+    "numGroupByFields must lie on [1, 3]")
+  require(numGroupByFields >= shardKeyPrefix.size,
+    "numGroupByFields indicate a depth at least as deep as shardKeyPrefix")
+  require(numGroupByFields < 3 || shardKeyPrefix.size >= 2,
+    "cannot group at the metric level when prefix does not contain ws and ns")
+
+  // TODO: this should eventually be "true" to enable HAP/LTRP routing
+  override def isRoutable: Boolean = false
+
+  def filters(): Seq[ColumnFilter] = SHARD_KEY_LABELS.zip(shardKeyPrefix).map{ case (label, value) =>
+    ColumnFilter(label, Equals(value))}
+}
 
 /**
  * Concrete logical plan to query for chunk metadata from raw time series in a given range
@@ -280,8 +354,9 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
   with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(series)
 
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(series =
-    series.replaceRawSeriesFilters(filters))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
+    this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
+              series = series.replaceRawSeriesFilters(filters))
 }
 
 /**
@@ -345,8 +420,9 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
   override def stepMs: Long = vector.stepMs
   override def endMs: Long = vector.endMs
   override def isRoutable: Boolean = vector.isRoutable
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vector =
-    vector.replacePeriodicSeriesFilters(filters))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
+    this.copy(vector = vector.replacePeriodicSeriesFilters(filters),
+              scalarArg = scalarArg.replacePeriodicSeriesFilters(filters).asInstanceOf[ScalarPlan])
 }
 
 /**
@@ -508,8 +584,9 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
   override def startMs: Long = vectors.startMs
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
-    vectors.replacePeriodicSeriesFilters(filters))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
+    this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
+              vectors = vectors.replacePeriodicSeriesFilters(filters))
 }
 
 /**
@@ -523,8 +600,9 @@ case class ApplyLimitFunction(vectors: PeriodicSeriesPlan,
   override def startMs: Long = vectors.startMs
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
-    vectors.replacePeriodicSeriesFilters(filters))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
+    this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
+              vectors = vectors.replacePeriodicSeriesFilters(filters))
 }
 
 object LogicalPlan {
@@ -538,6 +616,7 @@ object LogicalPlan {
      // Find leaf logical plans for all children and concatenate results
      case lp: NonLeafLogicalPlan          => lp.children.flatMap(findLeafLogicalPlans)
      case lp: MetadataQueryPlan           => Seq(lp)
+     case lp: TsCardinalities             => Seq(lp)
      case lp: ScalarBinaryOperation       => val lhsLeafs = if (lp.lhs.isRight) findLeafLogicalPlans(lp.lhs.right.get)
                                                              else Nil
                                              val rhsLeafs = if (lp.rhs.isRight) findLeafLogicalPlans(lp.rhs.right.get)
@@ -578,13 +657,21 @@ object LogicalPlan {
 
   def getColumnValues(columnFilters: Set[ColumnFilter], labelName: String): Set[String] = {
     columnFilters.flatMap(cFilter => {
-      cFilter.column == labelName match {
-        case true  => cFilter.filter.valuesStrings.map(_.toString)
-        case false => Seq.empty
+      if (cFilter.column == labelName) {
+        cFilter.filter.valuesStrings.map(_.toString)
+      } else {
+        Seq.empty
       }
     })
   }
 
+  /**
+   *  Given a LogicalPlan, the function finds a Seq of all Child nodes, and returns a Set of ColumnFilters for
+   *  each of the Leaf node
+   *
+   * @param logicalPlan the root LogicalPlan
+   * @return Seq of Set of Column filters, Seq has size same as the number of leaf nodes
+   */
   def getColumnFilterGroup(logicalPlan: LogicalPlan): Seq[Set[ColumnFilter]] = {
     LogicalPlan.findLeafLogicalPlans(logicalPlan) map { lp =>
       lp match {
@@ -593,6 +680,8 @@ object LogicalPlan {
         case lp: RawSeries             => lp.filters toSet
         case lp: RawChunkMeta          => lp.filters toSet
         case lp: SeriesKeysByFilters   => lp.filters toSet
+        case lp: LabelCardinality      => lp.filters.toSet
+        case lp: TsCardinalities       => lp.filters.toSet
         case _: ScalarTimeBasedPlan    => Set.empty[ColumnFilter] // Plan does not have labels
         case _: ScalarFixedDoublePlan  => Set.empty[ColumnFilter]
         case _: ScalarBinaryOperation  => Set.empty[ColumnFilter]
@@ -630,5 +719,39 @@ object LogicalPlan {
     getNonMetricShardKeyFilters(logicalPlan: LogicalPlan, nonMetricShardColumns: Seq[String]).
       forall(_.forall(f => f.filter.isInstanceOf[filodb.core.query.Filter.Equals]))
 
+  /**
+   *  Given a Logical Plan, the method returns a RVRange, there are two cases possible
+   *  1. The given plan is a PeriodicPlan in which case the start, end and step are retrieved from the plan instance
+   *  2. If plan is not a PeriodicPlan then start step and end are irrelevant for the plan and None is returned
+   *
+   * @param plan: The Logical Plan instance
+   * @param qContext: The query context
+   * @return Option of the RVRange instance
+   */
+  def rvRangeFromPlan(plan: LogicalPlan): Option[RvRange] = {
+    plan match {
+      case p: PeriodicSeriesPlan   => Some(RvRange( startMs = p.startMs,
+                                                    endMs = p.endMs,
+                                                    stepMs = Math.max(p.stepMs, 1)))
+      case _                       => None
+    }
+  }
+
+  /**
+   * @param base the column filters to override
+   * @param overrides the overriding column filters
+   * @return union of base and override filters except where column names intersect;
+   *         when names intersect, only the overriding filter is included.
+   *         Example:
+   *           base = [(name=a, filter=1), (name=b, filter=2)]
+   *           overrides = [(name=c, filter=3), (name=a, filter=4)]
+   *           result = [(name=a, filter=4), (name=b, filter=2), (name=c, filter=3)]
+   */
+  def overrideColumnFilters(base: Seq[ColumnFilter],
+                            overrides: Seq[ColumnFilter]): Seq[ColumnFilter] = {
+    val overrideColumns = overrides.map(_.column)
+    base.filterNot(f => overrideColumns.contains(f.column)) ++ overrides
+  }
 }
+
 //scalastyle:on number.of.types

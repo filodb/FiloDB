@@ -122,12 +122,15 @@ object TestTimeseriesProducer extends StrictLogging {
       val timestamp = startTime + (n.toLong / numTimeSeries) * 10000 // generate 1 sample every 10s for each instance
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
 
-      val tags = Map("dc"       -> s"DC$dc",
-                     "_ws_"      -> "demo",
-                     "_ns_"      -> s"App-$app",
-                     "partition" -> s"partition-$partition",
-                     "host"     -> s"H$host",
-                     "instance" -> s"Instance-$instance")
+      val tags = Map("dc"         -> s"DC$dc",
+                     "_ws_"       -> "demo",
+                     "_ns_"       -> s"App-$app",
+                     "partition"  -> s"partition-$partition",
+                     "partitionAl"-> s"partition-$partition",
+                     "longTag"    -> "AlonglonglonglonglonglonglonglonglonglonglonglonglonglongTag",
+                     "host"       -> s"H$host",
+                     "hostAlias"  -> s"H$host",
+                     "instance"   -> s"Instance-$instance")
 
       PrometheusInputRecord(tags, "heap_usage", timestamp, value)
     }

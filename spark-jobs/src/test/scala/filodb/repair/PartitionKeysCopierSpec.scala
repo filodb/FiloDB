@@ -3,6 +3,7 @@ package filodb.repair
 import java.io.File
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+
 import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
 import monix.reactive.Observable
 import org.apache.spark.SparkConf
@@ -11,15 +12,15 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
+
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.GlobalConfig
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.downsample.OffHeapMemory
-import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesShardStats}
+import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesShardInfo, TimeSeriesShardStats}
 import filodb.core.metadata.{Dataset, Schema, Schemas}
 import filodb.core.store.{PartKeyRecord, StoreConfig}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -148,9 +149,8 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
                     seriesTags: Map[ZeroCopyUTF8String, ZeroCopyUTF8String]): TimeSeriesPartition = {
       val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
       val partKey = partBuilder.partKeyFromObjects(schema, gaugeName, seriesTags)
-      val part = new TimeSeriesPartition(0, schema, partKey,
-        0, offheapMem.bufferPools(schema.schemaHash), shardStats,
-        offheapMem.nativeMemoryManager, 1)
+      val shardInfo = TimeSeriesShardInfo(0, shardStats, offheapMem.bufferPools, offheapMem.nativeMemoryManager)
+      val part = new TimeSeriesPartition(0, schema, partKey, shardInfo, 1)
       part
     }
 
@@ -214,7 +214,7 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
     // verify data in index table.
     for (shard <- 0 until numOfShards) {
-      val partKeyRecords = Await.result(colStore.scanPartKeys(dataset.ref, shard).toListL.runAsync, Duration(1, "minutes"))
+      val partKeyRecords = Await.result(colStore.scanPartKeys(dataset.ref, shard).toListL.runToFuture, Duration(1, "minutes"))
       // because there will be 3 records that meets the copier time period.
       partKeyRecords.size shouldEqual 3
       for (pkr <- partKeyRecords) {
@@ -235,7 +235,7 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
       // verify data in pk_by_update_time table
       val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
       for (shard <- 0 until numOfShards) {
-        val partKeyRecords = Await.result(colStore.getPartKeysByUpdateHour(dataset.ref, shard, updateHour).toListL.runAsync, Duration(1, "minutes"))
+        val partKeyRecords = Await.result(colStore.getPartKeysByUpdateHour(dataset.ref, shard, updateHour).toListL.runToFuture, Duration(1, "minutes"))
         // because there will be 3 records that meets the copier time period.
         partKeyRecords.size shouldEqual 3
         for (pkr <- partKeyRecords) {
@@ -255,7 +255,7 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
     // verify workspace/namespace names in shard=0.
     val shard0 = 0
-    val partKeyRecordsShard0 = Await.result(colStore.scanPartKeys(dataset.ref, shard0).toListL.runAsync,
+    val partKeyRecordsShard0 = Await.result(colStore.scanPartKeys(dataset.ref, shard0).toListL.runToFuture,
       Duration(1, "minutes"))
     partKeyRecordsShard0.size shouldEqual 3
     for (pkr <- partKeyRecordsShard0) {
@@ -274,7 +274,7 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
 
     // verify workspace/namespace names in shard=2.
     val shard2 = 2
-    val partKeyRecordsShard2 = Await.result(colStore.scanPartKeys(dataset.ref, shard2).toListL.runAsync,
+    val partKeyRecordsShard2 = Await.result(colStore.scanPartKeys(dataset.ref, shard2).toListL.runToFuture,
       Duration(1, "minutes"))
     partKeyRecordsShard2.size shouldEqual 3
     for (pkr <- partKeyRecordsShard2) {
