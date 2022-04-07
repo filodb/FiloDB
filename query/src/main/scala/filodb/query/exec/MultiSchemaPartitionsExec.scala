@@ -137,7 +137,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   // Print inner node's details for debugging
   override def curNodeText(level: Int): String = {
     val innerText = Option(finalPlan).map(e => s"Inner: + ${e.curNodeText(level + 1)}\n").getOrElse("")
-    s"${super.curNodeText(level)} $innerText"
+    s"${super.curNodeText(level)} $innerText".trim
   }
 
   override protected def printRangeVectorTransformersForLevel(level: Int = 0) = {

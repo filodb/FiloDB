@@ -82,7 +82,8 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
   val plannerSelector = (metricName: String) => { if (metricName.equals("rr1")) "rules1"
   else if (metricName.equals("rr2")) "rules2" else "local" }
 
-  val engine = new SinglePartitionPlanner(planners, plannerSelector, "_metric_", queryConfig)
+  val engine = new SinglePartitionPlanner(planners, "local", plannerSelector,
+                       "_metric_", queryConfig)
 
   it("should generate Exec plan for simple query") {
     val lp = Parser.queryToLogicalPlan("test{job = \"app\"}", 1000, 1000)
@@ -156,6 +157,27 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
 
     execPlan.asInstanceOf[PartKeysDistConcatExec].children(1).asInstanceOf[MockExecPlan].name shouldEqual ("rules1")
     execPlan.asInstanceOf[PartKeysDistConcatExec].children(2).asInstanceOf[MockExecPlan].name shouldEqual ("rules2")
+  }
+
+  it("should generate correct ExecPlan for TsCardinalities") {
+
+    // Note: this test is expected to break when TsCardinalities.isRoutable = true
+    // Note: unrelated to the above, this test is setup to confirm that a hacky fix to
+    //   SPP::materializeTsCardinalities is working. See there for additional details.
+
+    val localPlanner = new SingleClusterPlanner(
+      dataset, schemas, localMapper, earliestRetainedTimestampFn = 0, queryConfig, "raw-temp")
+    val planners = Map("raw-temp" -> localPlanner, "rules1" -> rrPlanner1, "rules2" -> rrPlanner2)
+    val engine = new SinglePartitionPlanner(planners, "raw-temp", plannerSelector,
+                         "_metric_", queryConfig)
+    val lp = TsCardinalities(Seq("a", "b"), 2)
+
+    // Plan should just contain a single root TsCardReduceExec and its TsCardExec children.
+    // Currently, queries are routed only to the planner who's name equals the SPP's "defaultPlanner" member.
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams.copy(promQl = "")))
+    execPlan.isInstanceOf[TsCardReduceExec] shouldEqual (true)
+    execPlan.asInstanceOf[TsCardReduceExec].children.length shouldEqual(32)
+    execPlan.children.forall(_.isInstanceOf[TsCardExec]) shouldEqual true
   }
 
   it("should generate Exec plan for Scalar query which does not have any metric") {

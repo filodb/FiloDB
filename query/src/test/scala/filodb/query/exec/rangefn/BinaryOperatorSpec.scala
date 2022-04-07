@@ -253,7 +253,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val expectedVal = sampleBase.map(_.rows.map(v => scala.math.floor(v.getDouble(1))))
     val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, true, Seq(StaticFuncArgs(scalar, RangeParams(0,0,0))))
     val resultObs = binaryOpMapper(Observable.fromIterable(sampleBase), querySession, 1000, resultSchema)
-    val result = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
         ex.zip(res).foreach {
@@ -295,7 +295,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val expectedVal = samples.map(_.rows.map(v => v.getDouble(1) * 2))
     val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, true, Seq(TimeFuncArgs(RangeParams(1,1,4))))
     val resultObs = binaryOpMapper(Observable.fromIterable(samples), querySession, 1000, resultSchema)
-    val result = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
     result.foreach(x=> println(x.toList))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
@@ -321,7 +321,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val expectedVal = samples.map(_.rows.map(v => scala.math.floor(v.getDouble(1))))
     val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, true, Seq(StaticFuncArgs(1571267260, RangeParams(0,0,0))))
     val resultObs = binaryOpMapper(Observable.fromIterable(samples), querySession, 1000, resultSchema)
-    val result = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
         ex.zip(res).foreach {
@@ -336,7 +336,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
                                                   binOp: BinaryOperator, scalar: Double, scalarOnLhs: Boolean): Unit = {
     val scalarOpMapper = exec.ScalarOperationMapper(binOp, scalarOnLhs, Seq(StaticFuncArgs(scalar, RangeParams(0,0,0))))
     val resultObs = scalarOpMapper(Observable.fromIterable(samples), querySession, 1000, resultSchema)
-    val result = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    val result = resultObs.toListL.runToFuture.futureValue.map(_.rows.map(_.getDouble(1)))
 
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {

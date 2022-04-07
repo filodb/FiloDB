@@ -40,7 +40,7 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
     // Flush every ~50 records
     val start = System.currentTimeMillis
     val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries(startTs=start)))
-    memStore.ingestStream(dataset1.ref, 0, stream, scheduler).futureValue
+    memStore.startIngestion(dataset1.ref, 0, stream, scheduler).futureValue
 
     Thread sleep 1000
 
@@ -59,7 +59,7 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
     // Series 3, Series 4, Series 8, Series 9
     val splits2 = columnStore.getScanSplits(dataset1.ref, 1)
     val rawParts = columnStore.readRawPartitions(dataset1.ref, 1.hour.toMillis, FilteredPartitionScan(splits2.head))
-                              .toListL.runAsync.futureValue
+                              .toListL.runToFuture.futureValue
     val writtenNums = (5 to 95 by 10) ++ (6 to 96 by 10) ++ (8 to 98 by 10)
     // Cannot check the result, because FilteredPartitionScan() will be broken until indices are implemented
     // agg2.result should equal (Array(writtenNums.map(_.toDouble).sum))

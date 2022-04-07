@@ -10,7 +10,7 @@ import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.query.{PromQlQueryParams, QueryContext}
 import filodb.memory.format.vectors.MutableHistogram
 import filodb.query
-import filodb.query.{Data, HistSampl, MetadataSuccessResponse, QueryResponse, QueryResult, Sampl, SuccessResponse}
+import filodb.query.{Data, HistSampl, MetadataMapSampl, MetadataSuccessResponse, QueryResponse, QueryResult, Sampl, SuccessResponse}
 
 
 class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
@@ -61,7 +61,7 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       queryContext, dummyDispatcher, timeseriesDataset.ref, RemoteHttpClient.defaultClient)
     val map1 = Map("instance" -> "inst-1", "last-sample" -> "6377838" )
     val map2 = Map("instance" -> "inst-2", "last-sample" -> "6377834" )
-    val res = exec.toQueryResponse(MetadataSuccessResponse(Seq(map1, map2)), "id", Kamon.currentSpan())
+    val res = exec.toQueryResponse(MetadataSuccessResponse(Seq(MetadataMapSampl(map1), MetadataMapSampl(map2))), "id", Kamon.currentSpan())
     res.isInstanceOf[QueryResult] shouldEqual true
     val queryResult = res.asInstanceOf[QueryResult]
     val data = queryResult.result.flatMap(x=>x.rows.map{ r => r.getAny(0) }.toList)
@@ -74,7 +74,7 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       dummyDispatcher, timeseriesDataset.ref, RemoteHttpClient.defaultClient)
     val map1 = Map("instance" -> "inst-1", "last-sample" -> "6377838" )
     val map2 = Map("instance" -> "inst-2", "last-sample" -> "6377834" )
-    val res = exec.toQueryResponse(MetadataSuccessResponse(Seq(map1, map2)), "id", Kamon.currentSpan())
+    val res = exec.toQueryResponse(MetadataSuccessResponse(Seq(MetadataMapSampl(map1), MetadataMapSampl(map2))), "id", Kamon.currentSpan())
     res.isInstanceOf[QueryResult] shouldEqual true
     val queryResult = res.asInstanceOf[QueryResult]
     val data = queryResult.result.flatMap(x => x.rows.map(r => r.getAny(0)).toList)

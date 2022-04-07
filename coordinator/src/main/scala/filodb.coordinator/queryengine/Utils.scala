@@ -96,7 +96,7 @@ object Utils extends StrictLogging {
     }.toMap
     val metricColumn = dataset.options.metricColumn
     val metric = shardValMap(metricColumn)
-    Some(RecordBuilder.shardKeyHash((shardValMap - metricColumn).values.toSeq, metric))
+    Some(RecordBuilder.shardKeyHash((shardValMap - metricColumn).values.toSeq, metricColumn, metric))
   }
 
   /**
@@ -110,7 +110,7 @@ object Utils extends StrictLogging {
                       (implicit t: Timeout, ec: ExecutionContext): Observable[A] =
     Observable.fromIterable(coordsAndMsgs)
               .filter(_._1 != ActorRef.noSender)               // Filter out null ActorRef's
-              .mapAsync(parallelism) { case (coordRef, msg) =>
+              .mapParallelUnordered(parallelism) { case (coordRef, msg) =>
                 val future: Future[A] = (coordRef ? msg).map {
                   case err: ErrorResponse => throw ChildErrorResponse(coordRef, err)
                   case a: A @unchecked    => logger.trace(s"Received $a from $coordRef"); a

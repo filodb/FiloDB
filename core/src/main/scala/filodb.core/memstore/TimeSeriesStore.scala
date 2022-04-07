@@ -19,7 +19,7 @@ import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.{Column, DataSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType._
-import filodb.core.query.ColumnFilter
+import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.format.{vectors => bv, _}
@@ -38,15 +38,12 @@ final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error 
 
 
 /**
- * A MemStore is an in-memory ChunkSource that ingests data not in chunks but as new records, potentially
- * spread over many partitions.  It supports the high-level ChunkSource API, and should support real-time reads
- * of fresh ingested data.  Being in-memory, it is designed to not retain data forever but flush completed
- * chunks to a persistent ChunkSink.
- *
- * A MemStore contains shards of data for one or more datasets, with optimized ingestion pipeline for
+ * A TimeSeriesStore is the interface for the uber data structure that represents the
+ * in-memory representation of time series database on one node.
+ * A TimeSeriesStore contains shards of data for one or more datasets, with optimized ingestion pipeline for
  * each shard.
  */
-trait MemStore extends ChunkSource {
+trait TimeSeriesStore extends ChunkSource {
 
   // this is added since Kamon does not report stats on direct and mapped memory pools which lucene uses
   Observable.interval(FiniteDuration.apply(1, TimeUnit.MINUTES))
@@ -115,11 +112,11 @@ trait MemStore extends ChunkSource {
    * @return a CancelableFuture for cancelling the stream subscription, which should be done on teardown
    *        the Future completes the stream ends.  It is up to the caller to ensure this.
    */
-  def ingestStream(dataset: DatasetRef,
-                   shard: Int,
-                   stream: Observable[SomeData],
-                   flushSched: Scheduler,
-                   cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit]
+  def startIngestion(dataset: DatasetRef,
+                     shard: Int,
+                     stream: Observable[SomeData],
+                     flushSched: Scheduler,
+                     cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit]
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit]
 
@@ -144,13 +141,14 @@ trait MemStore extends ChunkSource {
    * @param reportingInterval the interval at which the latest offsets ingested will be sent back
    * @return an Observable of the latest ingested offsets.  Caller is responsible for subscribing and ending the stream
    */
-  def recoverStream(dataset: DatasetRef,
-                    shard: Int,
-                    stream: Observable[SomeData],
-                    startOffset: Long,
-                    endOffset: Long,
-                    checkpoints: Map[Int, Long],
-                    reportingInterval: Long) (implicit timeout: FiniteDuration = 60.seconds): Observable[Long]
+  def createDataRecoveryObservable(dataset: DatasetRef,
+                                   shard: Int,
+                                   stream: Observable[SomeData],
+                                   startOffset: Long,
+                                   endOffset: Long,
+                                   checkpoints: Map[Int, Long],
+                                   reportingInterval: Long)
+                                  (implicit timeout: FiniteDuration = 60.seconds): Observable[Long]
 
   /**
    * Returns the names of tags or columns that are indexed at the partition level, across
@@ -180,9 +178,21 @@ trait MemStore extends ChunkSource {
     * shard on this node.
     * @return an Iterator for the index values
     */
-  def labelValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+  def labelValuesWithFilters(dataset: DatasetRef, shard: Int,
+                             filters: Seq[ColumnFilter],
                              labelNames: Seq[String], end: Long,
-                             start: Long, limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+                             start: Long, querySession: QuerySession,
+                             limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+
+  /**
+   * Returns the values of a given label-name for the matching Column Filters
+   * that are indexed at the partition level, on the given
+   * shard on this node.
+   * @return an Iterator for the index values
+   */
+  def singleLabelValueWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                                  label: String, end: Long,
+                                  start: Long, querySession: QuerySession, limit: Int): Iterator[ZeroCopyUTF8String]
 
   /**
     * Returns the indexed TimeSeriesPartitions matching the column filters,
@@ -245,7 +255,7 @@ trait MemStore extends ChunkSource {
   def shutdown(): Unit
 }
 
-object MemStore {
+object TimeSeriesStore {
   /**
    * Figures out the AppendableVectors for each column, depending on type and whether it is a static/
    * constant column for each partition.

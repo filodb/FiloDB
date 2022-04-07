@@ -1,26 +1,29 @@
 package filodb.coordinator.queryplanner
 
-import scala.concurrent.duration._
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
-import org.scalatest.concurrent.ScalaFutures
-
 import filodb.coordinator.ShardMapper
-import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, StaticSpreadProvider}
-import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange}
+import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, FunctionalTargetSchemaProvider, StaticSpreadProvider}
+import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange, TargetSchemaChange}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query._
+import filodb.core.query.Filter.Equals
 import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
 import filodb.query._
-import filodb.query.exec.InternalRangeFunction.Last
 import filodb.query.exec._
+import filodb.query.exec.InternalRangeFunction.Last
+import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+import filodb.core.query.Filter.{Equals, NotEquals}
+import filodb.query.LogicalPlan.getRawSeriesFilters
 
-class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures {
+import scala.concurrent.duration._
+
+class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures with PlanValidationSpec {
 
   implicit val system = ActorSystem()
   private val node = TestProbe().ref
@@ -67,6 +70,14 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
   val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
   val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000)
+
+
+  val f3 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_total")),
+    ColumnFilter("job", Filter.Equals("myService")),
+    ColumnFilter("instance", Filter.Equals("akgH34")))
+  val raw3 = RawSeries(rangeSelector = intervalSelector, filters= f3, columns = Seq("value"))
+  val windowed3 = PeriodicSeriesWithWindowing(raw3, from, 1000, to, 5000, RangeFunctionId.Rate)
+  val summed3 = Aggregate(AggregationOperator.Sum, windowed3, Nil, Seq("job"))
 
   it ("should generate ExecPlan for LogicalPlan") {
     // final logical plan
@@ -173,6 +184,35 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
       val rpExec = l1.asInstanceOf[MultiSchemaPartitionsExec]
       rpExec.filters.map(_.column).toSet shouldEqual Set("kpi", "job")
+    }
+  }
+
+  it("should use target-schema and generate ExecPlan with appropriate shards") {
+    val targetSchema = Map(Map("job" -> "myService") -> Seq("job", "instance"))
+
+    val filodbSpreadMap = new collection.mutable.HashMap[collection.Map[String, String], Int]
+    filodbSpreadMap.put(collection.Map(("job" -> "myService")), 2)
+    val spreadFunc = QueryContext.simpleMapSpreadFunc(Seq("job"), filodbSpreadMap, 1)
+    val targetSchemaFunc = QueryContext.mapTargetSchemaFunc(Seq("job"), targetSchema, "client")
+
+    // final logical plan
+    // LHS has all the targetSchema label filters (1 shard), second one doesn't (spread - 4 shards)
+    val logicalPlan = BinaryJoin(summed3, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
+
+    // materialized exec plan
+    val execPlan = engine.materialize(logicalPlan, QueryContext(promQlQueryParams, plannerParams = PlannerParams
+    (spreadOverride = Some(FunctionalSpreadProvider(spreadFunc)),
+      targetSchema = Some(FunctionalTargetSchemaProvider(targetSchemaFunc)), queryTimeoutMillis =1000000)))
+    execPlan.printTree()
+
+    // LHS column filters includes all target-schema labels, so query will be routed to single shard.
+    val expectedShards = Array(1, 4) // target-schema vs default spread
+
+    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
+    execPlan.children should have length (2)
+    execPlan.children.zipWithIndex.foreach { case(reduceAggPlan, i) =>
+      reduceAggPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
+      reduceAggPlan.children should have length expectedShards(i)
     }
   }
 
@@ -317,6 +357,107 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     partExec.chunkMethod.endTime shouldEqual 20880000
   }
 
+  // Target-Schema start
+
+  it("should stitch results when target-schema changes during query range") {
+    val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 2))
+    }
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job")), TargetSchemaChange(25000000L, Seq("job")))
+    }
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
+    (spreadOverride = Some(FunctionalSpreadProvider(spread)),
+      targetSchema = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
+    println(execPlan.children.size)
+    execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
+  }
+
+  it("should create a single plan and not stitch results when target-schema has not changed in query range") {
+    val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 2))
+    }
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job")), TargetSchemaChange(35000000L, Seq("job1")))
+    }
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
+    (spreadOverride = Some(FunctionalSpreadProvider(spread)),
+      targetSchema = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
+    execPlan.children.size shouldEqual 0
+    execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual false
+  }
+
+  it("should stitch results when target-schema has not changed but spread changed in query range") {
+    val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 1), SpreadChange(25000000, 2)) // spread change time is in ms
+    }
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job")))
+    }
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
+    (spreadOverride = Some(FunctionalSpreadProvider(spread)),
+      targetSchema = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
+    execPlan.children.size shouldEqual 0
+    execPlan.rangeVectorTransformers.last.isInstanceOf[StitchRvsMapper] shouldEqual true
+  }
+
+  it("should stitch results when target-schema has changed but spread did not change in query range") {
+    val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar", instance="inst1"}""", TimeStepParams(20000, 100, 30000))
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 2)) // Spread 4
+    }
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job")), TargetSchemaChange(25000000, Seq("job", "instance")))
+    }
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
+    (spreadOverride = Some(FunctionalSpreadProvider(spread)),
+      targetSchema = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
+    execPlan.children.size shouldEqual 4 // target-schema does not apply when there are changes during a query-window
+    execPlan.rangeVectorTransformers.last.isInstanceOf[StitchRvsMapper] shouldEqual true
+  }
+
+  it("should not stitch when all the target-schema labels are present in column filters in a binary join") {
+    val lp = Parser.queryRangeToLogicalPlan("""count(foo{job="bar"} + baz{job="bar"})""",
+      TimeStepParams(20000, 100, 30000))
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 2))
+    }
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job")))
+    }
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
+    (spreadOverride = Some(FunctionalSpreadProvider(spread)),
+      targetSchema = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
+    val binaryJoinNode = execPlan.children(0)
+    binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
+    binaryJoinNode.children.size shouldEqual 2
+    binaryJoinNode.children.foreach(_.isInstanceOf[StitchRvsExec] shouldEqual false)
+  }
+
+  it("should create single child plan for LHS where target-schema filters provided" +
+    " and 4 (spread 2) children for RHS (no target-schema filters) of the binary join") {
+    val lp = Parser.queryRangeToLogicalPlan("""count(foo{job="bar", instance="inst1"} + baz{job="bar"})""",
+      TimeStepParams(20000, 100, 30000))
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 2))
+    }
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("instance")))
+    }
+    val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams
+    (spreadOverride = Some(FunctionalSpreadProvider(spread)),
+      targetSchema = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
+    val binaryJoinNode = execPlan.children(0)
+    binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
+    binaryJoinNode.asInstanceOf[BinaryJoinExec].lhs.size shouldEqual 1
+    binaryJoinNode.asInstanceOf[BinaryJoinExec].rhs.size shouldEqual 4
+  }
+
+  // end
+
   it("should stitch results when spread changes during query range") {
     val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
@@ -433,7 +574,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val ep4 = planner.materialize(logicalPlan4, QueryContext())
     ep4.isInstanceOf[EmptyResultExec] shouldEqual true
     import GlobalScheduler._
-    val res = ep4.dispatcher.dispatch(ep4).runAsync.futureValue.asInstanceOf[QueryResult]
+    val res = ep4.dispatcher.dispatch(ep4).runToFuture.futureValue.asInstanceOf[QueryResult]
     res.result.isEmpty shouldEqual true
   }
 
@@ -512,7 +653,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan("""sum(foo{_ns_="bar", _ws_="test"}) by (__name__)""",
       TimeStepParams(1000, 20, 2000))
-    
+
     val execPlan1 = engine.materialize(logicalPlan1, QueryContext(origQueryParams = promQlQueryParams))
 
     execPlan1.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
@@ -705,5 +846,148 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     // _bucket should be removed from name
     multiSchemaPartitionsExec.filters.filter(_.column == "__name__").head.filter.valuesStrings.
       head.equals("my_hist") shouldEqual true
+  }
+
+  it("should generate correct execPlan for instant vector functions") {
+    // ensures:
+    //   (1) the execPlan tree has a LocalPartitionDistConcatExec root, and
+    //   (2) the tree has a max depth 1 where all children are MultiSchemaPartitionsExec nodes, and
+    //   (3) the final RangeVectorTransformer at each child is an InstantVectorFunctionMapper, and
+    //   (4) the InstantVectorFunctionMapper has the appropriate InstantFunctionId
+    val queryIdPairs = Seq(
+      ("""abs(metric{job="app"})""", InstantFunctionId.Abs),
+      ("""ceil(metric{job="app"})""", InstantFunctionId.Ceil),
+      ("""clamp_max(metric{job="app"}, 1)""", InstantFunctionId.ClampMax),
+      ("""clamp_min(metric{job="app"}, 1)""", InstantFunctionId.ClampMin),
+      ("""exp(metric{job="app"})""", InstantFunctionId.Exp),
+      ("""floor(metric{job="app"})""", InstantFunctionId.Floor),
+      ("""histogram_quantile(0.9, metric{job="app"})""", InstantFunctionId.HistogramQuantile),
+      ("""histogram_max_quantile(0.9, metric{job="app"})""", InstantFunctionId.HistogramMaxQuantile),
+      ("""histogram_bucket(0.1, metric{job="app"})""", InstantFunctionId.HistogramBucket),
+      ("""ln(metric{job="app"})""", InstantFunctionId.Ln),
+      ("""log10(metric{job="app"})""", InstantFunctionId.Log10),
+      ("""log2(metric{job="app"})""", InstantFunctionId.Log2),
+      ("""round(metric{job="app"})""", InstantFunctionId.Round),
+      ("""sgn(metric{job="app"})""", InstantFunctionId.Sgn),
+      ("""sqrt(metric{job="app"})""", InstantFunctionId.Sqrt),
+      ("""days_in_month(metric{job="app"})""", InstantFunctionId.DaysInMonth),
+      ("""day_of_month(metric{job="app"})""", InstantFunctionId.DayOfMonth),
+      ("""day_of_week(metric{job="app"})""", InstantFunctionId.DayOfWeek),
+      ("""hour(metric{job="app"})""", InstantFunctionId.Hour),
+      ("""minute(metric{job="app"})""", InstantFunctionId.Minute),
+      ("""month(metric{job="app"})""", InstantFunctionId.Month),
+      ("""year(metric{job="app"})""", InstantFunctionId.Year)
+    )
+    for ((query, funcId) <- queryIdPairs) {
+      val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+      execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
+      for (child <- execPlan.children) {
+        child.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
+        child.children.size shouldEqual 0
+        val finalTransformer = child.asInstanceOf[MultiSchemaPartitionsExec].rangeVectorTransformers.last
+        finalTransformer.isInstanceOf[InstantVectorFunctionMapper] shouldEqual true
+        finalTransformer.asInstanceOf[InstantVectorFunctionMapper].function shouldEqual funcId
+      }
+    }
+  }
+
+  it("should generate correct execPlan for simple aggregate queries") {
+    // ensures:
+    //   (1) the execPlan tree has a LocalPartitionReduceAggregateExec root, and
+    //   (2) the tree has a max depth 1 where all children are MultiSchemaPartitionsExec nodes, and
+    //   (3) the final RangeVectorTransformer at each child is an AggregateMapReduce, and
+    //   (4) the AggregateMapReduce has the appropriate InstantFunctionId
+    val queryIdPairs = Seq(
+      ("""avg(metric{job="app"})""", AggregationOperator.Avg),
+      ("""count(metric{job="app"})""", AggregationOperator.Count),
+      ("""group(metric{job="app"})""", AggregationOperator.Group),
+      ("""sum(metric{job="app"})""", AggregationOperator.Sum),
+      ("""min(metric{job="app"})""", AggregationOperator.Min),
+      ("""max(metric{job="app"})""", AggregationOperator.Max),
+      ("""stddev(metric{job="app"})""", AggregationOperator.Stddev),
+      ("""stdvar(metric{job="app"})""", AggregationOperator.Stdvar),
+      ("""topk(1, metric{job="app"})""", AggregationOperator.TopK),
+      ("""bottomk(1, metric{job="app"})""", AggregationOperator.BottomK),
+      ("""count_values(1, metric{job="app"})""", AggregationOperator.CountValues),
+      ("""quantile(0.9, metric{job="app"})""", AggregationOperator.Quantile)
+    )
+    for ((query, funcId) <- queryIdPairs) {
+      val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+      execPlan.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual true
+      execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].aggrOp shouldEqual funcId
+      for (child <- execPlan.children) {
+        child.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
+        child.children.size shouldEqual 0
+        val lastTransformer = child.asInstanceOf[MultiSchemaPartitionsExec].rangeVectorTransformers.last
+        lastTransformer.isInstanceOf[AggregateMapReduce] shouldEqual true
+        lastTransformer.asInstanceOf[AggregateMapReduce].aggrOp shouldEqual funcId
+      }
+    }
+  }
+
+  it("should materialize LabelCardinalityPlan") {
+    val filters = Seq(
+      ColumnFilter("job", Equals("job")),
+      ColumnFilter("__name__", Equals("metric"))
+    )
+    val lp = LabelCardinality(filters, 0 * 1000, 1634920729000L)
+
+    val queryContext = QueryContext(origQueryParams = promQlQueryParams)
+    val execPlan = engine.materialize(lp, queryContext)
+
+    val expected =
+      """T~LabelCardinalityPresenter(LabelCardinalityPresenter)
+        |-E~LabelCardinalityReduceExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
+        |--E~LabelCardinalityExec(shard=3, filters=List(ColumnFilter(job,Equals(job)), ColumnFilter(__name__,Equals(metric))), limit=1000000, startMs=0, endMs=1634920729000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)
+        |--E~LabelCardinalityExec(shard=19, filters=List(ColumnFilter(job,Equals(job)), ColumnFilter(__name__,Equals(metric))), limit=1000000, startMs=0, endMs=1634920729000) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#758856902],raw)"""
+        .stripMargin
+    validatePlan(execPlan, expected)
+  }
+
+  it ("should correctly materialize TsCardExec") {
+    val shardKeyPrefix = Seq("foo", "bar")
+    val numGroupByFields = 3
+
+    val lp = TsCardinalities(shardKeyPrefix, numGroupByFields)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[TsCardReduceExec] shouldEqual true
+
+    val reducer = execPlan.asInstanceOf[TsCardReduceExec]
+    reducer.children.size shouldEqual mapper.numShards
+    reducer.children.foreach{ child =>
+      child.isInstanceOf[TsCardExec] shouldEqual true
+      val leaf = child.asInstanceOf[TsCardExec]
+      leaf.shardKeyPrefix shouldEqual shardKeyPrefix
+      leaf.numGroupByFields shouldEqual numGroupByFields
+    }
+  }
+
+  it("should recursively replace column filters") {
+    // TODO: this test should exist in LogicalPlanSpec, but it's substantially easier to run
+    //   more comprehensive tests with access to a Parser (filodb.prometheus depends on filodb.query,
+    //   so Parser use would give a cyclical dependency).
+    val newFilters = Seq(ColumnFilter("new1", Equals("new1val")),
+                         ColumnFilter("new2", NotEquals("new2val")))
+    val queries = Seq(
+        """scalar(my_gauge{l1="foo",new1="bar"})  +  my_gauge{l1="baz",new2="bat"}""",
+        """clamp_max(my_counter{new1="foo",new2="bar"},scalar(my_counter{l1="foo",new1="bar"}) )""",
+        """absent(my_gauge{l1="foo",l2="bar"})""",
+        """scalar(my_counter{l1="foo",new1="bar"}) < bool(my_counter{new1="foo",l2="bar"})""",
+        """absent_over_time(my_counter{new1="foo",new2="bar"}[10m])""",
+        """absent(my_gauge{new1="foo",l1="bar"})[20m:1m]""",
+        """sum_over_time(absent(my_gauge{l2="foo",new2="bar"})[20m:1m])"""
+    )
+    for (query <- queries) {
+      val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+      getRawSeriesFilters(lp).foreach{ filters =>
+        // sanity check; if this fails, just change the test query
+        filters.intersect(newFilters).size shouldEqual 0
+      }
+      getRawSeriesFilters(lp.replaceFilters(newFilters)).foreach{ filters =>
+        filters.intersect(newFilters).size shouldEqual newFilters.size
+      }
+    }
   }
 }

@@ -64,18 +64,13 @@ final case class InfoAppenders(info: ChunkSetInfo, appenders: TimeSeriesPartitio
 class TimeSeriesPartition(val partID: Int,
                           val schema: Schema,
                           partitionKey: BinaryRegion.NativePointer,
-                          val shard: Int,
-                          bufferPool: WriteBufferPool,
-                          val shardStats: TimeSeriesShardStats,
-                          memFactory: NativeMemoryManager,
+                          val shardInfo: TimeSeriesShardInfo,
                           initMapSize: Int)
-extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
+extends ChunkMap(initMapSize) with ReadablePartition {
   import TimeSeriesPartition._
 
-  // Really important that buffer pool schema matches
-  require(bufferPool.schema == schema.data,
-    s"BufferPool schema was ${bufferPool.schema} but partition schema was ${schema.data}")
-
+  def memFactory: NativeMemoryManager = shardInfo.nativeMemoryManager
+  def shard: Int = shardInfo.shardNum
   def partKeyBase: Array[Byte] = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]
   def partKeyOffset: Long = partitionKey
 
@@ -183,7 +178,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
         }
       }
     } else {
-      shardStats.outOfOrderDropped.increment()
+      shardInfo.stats.outOfOrderDropped.increment()
     }
   }
 
@@ -209,6 +204,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   }
 
   protected def initNewChunk(startTime: Long, ingestionTime: Long): Unit = {
+    val bufferPool = shardInfo.bufferPools(schema.schemaHash)
     // First row of a chunk, set the start time to it
     val (infoAddr, newAppenders) = bufferPool.obtain()
     val currentChunkID = chunkID(startTime, ingestionTime / 1000) // convert to seconds
@@ -260,9 +256,9 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
           // If this gets triggered, decrease the max writebuffer size so smaller chunks are encoded
           require(blockHolder.blockAllocationSize() > appender.frozenSize)
           val optimized = appender.optimize(blockHolder)
-          shardStats.encodedBytes.increment(BinaryVector.totalBytes(nativePtrReader, optimized))
+          shardInfo.stats.encodedBytes.increment(BinaryVector.totalBytes(nativePtrReader, optimized))
           if (schema.data.columns(i).columnType == Column.ColumnType.HistogramColumn)
-            shardStats.encodedHistBytes.increment(BinaryVector.totalBytes(nativePtrReader, optimized))
+            shardInfo.stats.encodedHistBytes.increment(BinaryVector.totalBytes(nativePtrReader, optimized))
           optimized
         }
       } catch { case e: Exception =>
@@ -272,7 +268,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
         Shutdown.haltAndCatchFire(new RuntimeException("Error occurred when encoding vectors", e))
         throw e
       }
-      shardStats.numSamplesEncoded.increment(info.numRows)
+      shardInfo.stats.numSamplesEncoded.increment(info.numRows)
       // Now, write metadata into offheap block metadata space and update infosChunks
       val metaAddr = blockHolder.endMetaSpan(TimeSeriesShard.writeMeta(_, partID, info, frozenVectors),
         schema.data.blockMetaSize.toShort)
@@ -282,6 +278,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       infoPut(newInfo)
 
       // release older write buffers back to pool.  Nothing at this point should reference the older appenders.
+      val bufferPool = shardInfo.bufferPools(schema.schemaHash)
       bufferPool.release(info.infoAddr, appenders)
       frozenVectors
     }
@@ -437,7 +434,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     // Remove all chunks at and lower than the given chunk. Doing so prevents a hole from
     // emerging in the middle which ODP can't easily cope with.
     val amt = chunkmapWithExclusive(chunkmapDoRemoveFloor(id))
-    shardStats.chunkIdsEvicted.increment(amt)
+    shardInfo.stats.chunkIdsEvicted.increment(amt)
   }
 
   final def hasChunksAt(id: ChunkID): Boolean = chunkmapContains(id)
@@ -474,6 +471,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
 
   override protected def finalize(): Unit = {
     memFactory.freeMemory(partKeyOffset)
+    val bufferPool = shardInfo.bufferPools(schema.schemaHash)
     if (currentInfo != nullInfo) bufferPool.release(currentInfo.infoAddr, currentChunks)
   }
 
@@ -495,12 +493,9 @@ class TracingTimeSeriesPartition(partID: Int,
                                  ref: DatasetRef,
                                  schema: Schema,
                                  partitionKey: BinaryRegion.NativePointer,
-                                 shard: Int,
-                                 bufferPool: WriteBufferPool,
-                                 shardStats: TimeSeriesShardStats,
-                                 memFactory: NativeMemoryManager,
+                                 shardInfo: TimeSeriesShardInfo,
                                  initMapSize: Int) extends
-TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats, memFactory, initMapSize) {
+TimeSeriesPartition(partID, schema, partitionKey, shardInfo, initMapSize) {
   import TimeSeriesPartition._
 
   _log.info(s"Creating TracingTimeSeriesPartition dataset=$ref schema=${schema.name} partId=$partID $stringPartition")

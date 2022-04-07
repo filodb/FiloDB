@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration._
 
-import filodb.core.{SpreadChange, SpreadProvider}
+import filodb.core.{SpreadChange, SpreadProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.memory.EvictionLock
 
 trait TsdbQueryParams
@@ -25,6 +25,7 @@ case class PlannerParams(applicationId: String = "filodb",
                          spread: Option[Int] = None,
                          spreadOverride: Option[SpreadProvider] = None,
                          shardOverrides: Option[Seq[Int]] = None,
+                         targetSchema: Option[TargetSchemaProvider] = None,
                          queryTimeoutMillis: Int = 30000,
                          sampleLimit: Int = 1000000,
                          groupByCardLimit: Int = 100000,
@@ -81,6 +82,49 @@ object QueryContext {
 
     simpleMapSpreadFunc(shardKeyNames.asScala, spreadAssignment, defaultSpread)
   }
+
+  /**
+   * A functional TargetSchemaProvider which takes a targetSchema config that has key as shardKey/values mapped to
+   * TargetSchema.
+   * for e.g in the following config, first key has targetSchema as `_ws_,_ns_,_instanceId_`, All the metrics coming
+   * from aService/aClient for an `_instanceId_` will be routed to a single shard.
+   * {
+   *  {"_ws_" -> "aService", "_ns_" ->"aClient" : ["_ws_","_ns_",_instanceId_"]},
+   *  {"_ws_" -> "bService", "_ns_" ->"bClient" : ["_ws_","_ns_","_resourceId_"]}
+   * }
+   * @param shardKeyNames
+   * @param targetSchemaMap
+   * @param optionalShardKey look up targetSchemaMap excluding this filter (for e.g target-schema is defined at
+   *                         _ws_ = "cService", then all the timeseries published from cService will use same
+   *                         target-schema irrespective of the namespace.
+   * @return
+   */
+  def mapTargetSchemaFunc(shardKeyNames: Seq[String],
+                          targetSchemaMap: Map[Map[String, String], Seq[String]],
+                          optionalShardKey: String)
+          : Seq[ColumnFilter] => Seq[TargetSchemaChange] = {
+    filters: Seq[ColumnFilter] =>
+      val shardKeysInQuery = filters.collect {
+        case ColumnFilter(key, Filter.Equals(filtVal: String)) if shardKeyNames.contains(key) => key -> filtVal
+      }.toMap
+      val nonOptShardKeys = filters.collect {
+        case ColumnFilter(key, Filter.Equals(filtVal: String))
+          if key != optionalShardKey && shardKeyNames.contains(key) => key -> filtVal
+      }.toMap
+      val defaultSchema = targetSchemaMap.getOrElse(nonOptShardKeys, Seq.empty)
+      Seq(TargetSchemaChange(schema = targetSchemaMap.getOrElse(shardKeysInQuery, defaultSchema)))
+  }
+
+  def mapTargetSchemaFunc(shardKeyNames: java.util.List[String],
+                          targetSchemaMap: java.util.Map[java.util.Map[String, String], java.util.List[String]],
+                          optionalShardKey: String)
+          : Seq[ColumnFilter] => Seq[TargetSchemaChange] = {
+    val targetSchema: Map[Map[String, String], Seq[String]] = targetSchemaMap.asScala.map {
+      case (d, v) => d.asScala.toMap -> v.asScala.toSeq
+    }.toMap
+    mapTargetSchemaFunc(shardKeyNames.asScala, targetSchema, optionalShardKey)
+  }
+
 }
 
 /**

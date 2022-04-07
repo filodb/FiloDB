@@ -104,21 +104,21 @@ class SortFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
   it("should sort instant vectors in ascending order") {
     val sortFunctionMapper = exec.SortFunctionMapper(SortFunctionId.Sort)
     val resultObs = sortFunctionMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
-    val resultRows = resultObs.toListL.runAsync.futureValue.flatMap(_.rows.map(_.getDouble(1)).toList)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.flatMap(_.rows.map(_.getDouble(1)).toList)
     resultRows.shouldEqual(List(0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0))
   }
 
   it("should sort instant vectors in descending order") {
     val sortFunctionMapper = exec.SortFunctionMapper(SortFunctionId.SortDesc)
     val resultObs = sortFunctionMapper(Observable.fromIterable(testSample), querySession, 1000, resultSchema, Nil)
-    val resultRows = resultObs.toListL.runAsync.futureValue.flatMap(_.rows.map(_.getDouble(1)).toList)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.flatMap(_.rows.map(_.getDouble(1)).toList)
     resultRows.shouldEqual(List(6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.0))
   }
 
   it("should return empty rangeVector when sorting empty sample") {
     val sortFunctionMapper = exec.SortFunctionMapper(SortFunctionId.Sort)
     val resultObs = sortFunctionMapper(Observable.fromIterable(emptySample), querySession, 1000, resultSchema, Nil)
-    val resultRows = resultObs.toListL.runAsync.futureValue.flatMap(_.rows.map(_.getDouble(1)).toList)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.flatMap(_.rows.map(_.getDouble(1)).toList)
     resultRows.isEmpty shouldEqual(true)
   }
 
@@ -155,13 +155,13 @@ class SortFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
    val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
    val resultObs1 = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(testSample), grouping)
    val resultObs2 = RangeVectorAggregator.mapReduce(agg, true, resultObs1, grouping)
-   val resultAgg = resultObs2.toListL.runAsync.futureValue
+   val resultAgg = resultObs2.toListL.runToFuture.futureValue
    resultAgg.size shouldEqual 2
    resultAgg.flatMap(_.rows.map(_.getDouble(1)).toList) shouldEqual(List(5.0, 1.0))
    
    val sortFunctionMapper = exec.SortFunctionMapper(SortFunctionId.Sort)
    val resultObs = sortFunctionMapper(resultObs2, querySession, 1000, resultSchema, Nil)
-   val resultRows = resultObs.toListL.runAsync.futureValue.flatMap(_.rows.map(_.getDouble(1)).toList)
+   val resultRows = resultObs.toListL.runToFuture.futureValue.flatMap(_.rows.map(_.getDouble(1)).toList)
    resultRows.shouldEqual(List(1.0, 5.0))
  }
 }

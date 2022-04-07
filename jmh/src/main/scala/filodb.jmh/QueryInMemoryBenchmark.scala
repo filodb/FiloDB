@@ -20,7 +20,7 @@ import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{QueryConfig, QueryContext, QuerySession}
+import filodb.core.query.{PlannerParams, QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -99,7 +99,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
                                           numSamples * numSeries, dataset, shardMapper, spread)
   val ingestTask = containerStream.groupBy(_._1)
                     // Asynchronously subcribe and ingest each shard
-                    .mapAsync(numShards) { groupedStream =>
+                    .mapParallelUnordered(numShards) { groupedStream =>
                       val shard = groupedStream.key
                       println(s"Starting ingest on shard $shard...")
                       val shardStream = groupedStream.zipWithIndex.flatMap { case ((_, bytes), idx) =>
@@ -107,8 +107,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
                         val data = bytes.map { array => SomeData(RecordContainer(array), idx) }
                         Observable.fromIterable(data)
                       }
-                      Task.fromFuture(cluster.memStore.ingestStream(dataset.ref, shard, shardStream, global))
-                    }.countL.runAsync
+                      Task.fromFuture(cluster.memStore.startIngestion(dataset.ref, shard, shardStream, global))
+                    }.countL.runToFuture
   Await.result(producingFut, 30.seconds)
   Thread sleep 2000
   cluster.memStore.asInstanceOf[TimeSeriesMemStore].refreshIndexForTesting(dataset.ref) // commit lucene index
@@ -192,7 +192,10 @@ class QueryInMemoryBenchmark extends StrictLogging {
   }
 
   // Single-threaded query test
-  val qContext = QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 10000)
+  val qContext = QueryContext(plannerParams =
+    new PlannerParams(spreadOverride = Some(StaticSpreadProvider(SpreadChange(0, spread))),
+      sampleLimit = 10000,
+      queryTimeoutMillis = 2.hours.toMillis.toInt)) // high timeout since we are using same context for all queries
   val logicalPlan = Parser.queryRangeToLogicalPlan(rawQuery, qParams)
   // Pick the children nodes, not the LocalPartitionDistConcatExec.  Thus we can run in a single thread this way
   val execPlan = engine.materialize(logicalPlan, qContext).children.head
@@ -205,12 +208,12 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(numQueries)
   def singleThreadedRawQuery(): Long = {
-    val querySession = QuerySession(QueryContext(), queryConfig)
+    val querySession = QuerySession(qContext, queryConfig)
 
-    val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
+    val f = Observable.fromIterable(0 until numQueries).mapEval { n =>
       execPlan.execute(cluster.memStore, querySession)(querySched)
     }.executeOn(querySched)
-     .countL.runAsync
+     .countL.runToFuture
     Await.result(f, 60.seconds)
   }
 
@@ -223,11 +226,11 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(numQueries)
   def singleThreadedMinOverTimeQuery(): Long = {
-    val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      val querySession = QuerySession(QueryContext(), queryConfig)
+    val f = Observable.fromIterable(0 until numQueries).mapEval { n =>
+      val querySession = QuerySession(qContext, queryConfig)
       minEP.execute(cluster.memStore, querySession)(querySched)
     }.executeOn(querySched)
-     .countL.runAsync
+     .countL.runToFuture
     Await.result(f, 60.seconds)
   }
 
@@ -240,11 +243,11 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(numQueries)
   def singleThreadedSumRateCCQuery(): Long = {
-    val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      val querySession = QuerySession(QueryContext(), queryConfig)
+    val f = Observable.fromIterable(0 until numQueries).mapEval { n =>
+      val querySession = QuerySession(qContext, queryConfig)
       sumRateEP.execute(cluster.memStore, querySession)(querySched)
     }.executeOn(querySched)
-     .countL.runAsync
+     .countL.runToFuture
     Await.result(f, 60.seconds)
   }
 }

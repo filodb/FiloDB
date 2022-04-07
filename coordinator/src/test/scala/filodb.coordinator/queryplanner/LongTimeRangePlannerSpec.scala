@@ -19,7 +19,7 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
 
-class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
+class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidationSpec {
 
   class MockExecPlan(val name: String, val lp: LogicalPlan) extends ExecPlan {
     override def queryContext: QueryContext = QueryContext()
@@ -45,7 +45,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
   }
 
   val rawRetention = 10.minutes
-  val now = System.currentTimeMillis() / 1000 * 1000
+  private val now = 1634777330000L
   val earliestRawTime = now - rawRetention.toMillis
   val latestDownsampleTime = now - 4.minutes.toMillis // say it takes 4 minutes to downsample
 
@@ -333,6 +333,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
     binaryJoinExec.rhs.head.isInstanceOf[StitchRvsExec] shouldEqual (true)
   }
 
+
   it("should direct overlapping binary join offset queries with vector(0) " +
     "to both raw & downsample planner and stitch") {
 
@@ -428,13 +429,26 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
-    ep.isInstanceOf[BinaryJoinExec] shouldEqual (true)
-
-    val binaryJoinExec = ep.asInstanceOf[BinaryJoinExec]
-    binaryJoinExec.rangeVectorTransformers.head.isInstanceOf[InstantVectorFunctionMapper] shouldEqual true
-    ep.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual true
-    binaryJoinExec.lhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
-    binaryJoinExec.rhs.head.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual (true)
+    val expectedPlan =
+      """T~InstantVectorFunctionMapper(function=Abs)
+        |-E~BinaryJoinExec(binaryOp=SUB, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@939ff41)
+        |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634777030,60,1634777210))
+        |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-478643822],raw)
+        |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |-----T~PeriodicSamplesMapper(start=1634777030000, step=60000, end=1634777210000, window=Some(300000), functionId=Some(Rate), rawSource=true, offsetMs=None)
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1634776730000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-478643822],raw)
+        |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |-----T~PeriodicSamplesMapper(start=1634777030000, step=60000, end=1634777210000, window=Some(300000), functionId=Some(Rate), rawSource=true, offsetMs=None)
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1634776730000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-478643822],raw)
+        |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634777030,60,1634777210))
+        |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-478643822],downsample)
+        |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |-----T~PeriodicSamplesMapper(start=1634777030000, step=60000, end=1634777210000, window=Some(300000), functionId=Some(Rate), rawSource=true, offsetMs=Some(691200000))
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1634085530000,1634086010000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-478643822],downsample)
+        |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |-----T~PeriodicSamplesMapper(start=1634777030000, step=60000, end=1634777210000, window=Some(300000), functionId=Some(Rate), rawSource=true, offsetMs=Some(691200000))
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1634085530000,1634086010000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-478643822],downsample)""".stripMargin
+    validatePlan(ep, expectedPlan)
   }
 
   it("should run multiple binary join") {
@@ -805,6 +819,15 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
     val earliestDownSampleTime = now - downsampleRetention.toMillis
     val latestDownsampleTime = now - 12.hours.toMillis
 
+    // This case of nested Binary join with aggregation, but the LHS as offset and RHS does not
+    //                  + (in process)
+    //            /           \
+    //    has offset           * (pushed down)
+    //                      /     \
+    //                no offset  no offset
+    //  Expected behavior here is to perform the top level binary join in-process, the RHS however should be
+    //  entirely pushed down
+
     val query =
       """sum(foo{job = "app"} offset 4d) by (col1) + sum(bar{job = "app"}) by (col1) *
         |sum(baz{job = "app"}) by (col1)""".stripMargin
@@ -812,108 +835,71 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
       TimeStepParams(start, step, end))
       .asInstanceOf[PeriodicSeriesPlan]
 
-    val rawPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = earliestRawTime,
-      queryConfig, "raw")
+    val rawPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
+                                              earliestRetainedTimestampFn = earliestRawTime,
+                                              queryConfig, "raw")
     val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
       earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
     val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
+    val expectedPlan =
+      """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@3fb9a67f)
+        |-E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@6d8796c1)
+        |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634517890,60,1634777210))
+        |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],raw)
+        |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-----T~PeriodicSamplesMapper(start=1634517890000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1634171990000,1634431610000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],raw)
+        |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-----T~PeriodicSamplesMapper(start=1634517890000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1634171990000,1634431610000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],raw)
+        |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634086130,60,1634517830))
+        |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],downsample)
+        |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634517830000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1633740230000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],downsample)
+        |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634517830000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1633740230000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],downsample)
+        |-E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@6d8796c1)
+        |--E~BinaryJoinExec(binaryOp=MUL, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],raw)
+        |---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634172290,60,1634777210))
+        |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],raw)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |------T~PeriodicSamplesMapper(start=1634172290000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(1634171990000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],raw)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |------T~PeriodicSamplesMapper(start=1634172290000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(1634171990000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],raw)
+        |---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634172290,60,1634777210))
+        |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],raw)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |------T~PeriodicSamplesMapper(start=1634172290000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634171990000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],raw)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |------T~PeriodicSamplesMapper(start=1634172290000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(1634171990000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],raw)
+        |--E~BinaryJoinExec(binaryOp=MUL, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],downsample)
+        |---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634086130,60,1634172230))
+        |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],downsample)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |------T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634172230000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(1634085830000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],downsample)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |------T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634172230000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(1634085830000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],downsample)
+        |---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634086130,60,1634172230))
+        |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],downsample)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |------T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634172230000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634085830000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],downsample)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |------T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634172230000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(1634085830000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-16967916],downsample)""".stripMargin
 
-/* E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@40a72ecd)
-  -E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@73971965)
-  --T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634363574,60,1634622894))
-  ---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],raw)
-  ----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  -----T~PeriodicSamplesMapper(start=1634363574000, step=60000, end=1634622894000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
-  ------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1634017674000,1634277294000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],raw)
-  ----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  -----T~PeriodicSamplesMapper(start=1634363574000, step=60000, end=1634622894000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
-  ------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1634017674000,1634277294000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],raw)
-  --T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1633931814,60,1634363514))
-  ---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],downsample)
-  ----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  -----T~PeriodicSamplesMapper(start=1633931814000, step=60000, end=1634363514000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
-  ------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1633585914000,1634017914000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],downsample)
-  ----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  -----T~PeriodicSamplesMapper(start=1633931814000, step=60000, end=1634363514000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
-  ------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1633585914000,1634017914000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],downsample)
-  -E~BinaryJoinExec(binaryOp=MUL, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@40a72ecd)
-  --E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@73971965)
-  ---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634017974,60,1634622894))
-  ----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],raw)
-  -----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  ------T~PeriodicSamplesMapper(start=1634017974000, step=60000, end=1634622894000, window=None, functionId=None, rawSource=true, offsetMs=None)
-  -------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(1634017674000,1634622894000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],raw)
-  -----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  ------T~PeriodicSamplesMapper(start=1634017974000, step=60000, end=1634622894000, window=None, functionId=None, rawSource=true, offsetMs=None)
-  -------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(1634017674000,1634622894000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],raw)
-  ---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1633931814,60,1634017914))
-  ----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],downsample)
-  -----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  ------T~PeriodicSamplesMapper(start=1633931814000, step=60000, end=1634017914000, window=None, functionId=None, rawSource=true, offsetMs=None)
-  -------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(1633931514000,1634017914000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],downsample)
-  -----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  ------T~PeriodicSamplesMapper(start=1633931814000, step=60000, end=1634017914000, window=None, functionId=None, rawSource=true, offsetMs=None)
-  -------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(1633931514000,1634017914000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],downsample)
-  --E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@73971965)
-  ---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634017974,60,1634622894))
-  ----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],raw)
-  -----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  ------T~PeriodicSamplesMapper(start=1634017974000, step=60000, end=1634622894000, window=None, functionId=None, rawSource=true, offsetMs=None)
-  -------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634017674000,1634622894000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],raw)
-  -----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  ------T~PeriodicSamplesMapper(start=1634017974000, step=60000, end=1634622894000, window=None, functionId=None, rawSource=true, offsetMs=None)
-  -------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(1634017674000,1634622894000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],raw)
-  ---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1633931814,60,1634017914))
-  ----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],downsample)
-  -----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  ------T~PeriodicSamplesMapper(start=1633931814000, step=60000, end=1634017914000, window=None, functionId=None, rawSource=true, offsetMs=None)
-  -------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633931514000,1634017914000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],downsample)
-  -----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  ------T~PeriodicSamplesMapper(start=1633931814000, step=60000, end=1634017914000, window=None, functionId=None, rawSource=true, offsetMs=None)
-  -------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(1633931514000,1634017914000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1417811245],downsample)
-*/
-    val binaryJoinExec = ep.asInstanceOf[BinaryJoinExec]
-
-    binaryJoinExec.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual true
-    binaryJoinExec.lhs.head.isInstanceOf[StitchRvsExec] shouldEqual (true)
-    binaryJoinExec.lhs.head.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual true
-
-    binaryJoinExec.rhs.head.isInstanceOf[BinaryJoinExec] shouldEqual (true)
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].lhs.head.isInstanceOf[StitchRvsExec] shouldEqual(true)
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].rhs.head.isInstanceOf[StitchRvsExec] shouldEqual(true)
-
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].lhs.head.children.head.
-      isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
-
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].lhs.head.children.head.dispatcher.
-      isInstanceOf[ActorPlanDispatcher] shouldEqual(true)
-
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].lhs.head.children.head.dispatcher.
-      clusterName.equals("raw") shouldEqual(true)
-
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].lhs.head.children.last.
-      isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
-
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].lhs.head.children.last.dispatcher.
-      clusterName.equals("downsample") shouldEqual(true)
-
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].rhs.head.children.head.
-      isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
-
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].rhs.head.children.head.dispatcher.
-      isInstanceOf[ActorPlanDispatcher] shouldEqual(true)
-
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].rhs.head.children.head.dispatcher.
-      clusterName.equals("raw") shouldEqual(true)
-
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].rhs.head.children.last.
-      isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
-
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].rhs.head.children.last.dispatcher.
-      clusterName.equals("downsample") shouldEqual(true)
+    validatePlan(ep, expectedPlan)
 
   }
 
@@ -1055,102 +1041,174 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
 
-   /* T~InstantVectorFunctionMapper(function=Abs)
-  -E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@591a4f8e)
-  --E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@53ed80d3)
-  ---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634363080,60,1634622400))
-  ----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],raw)
-  -----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  ------T~PeriodicSamplesMapper(start=1634363080000, step=60000, end=1634622400000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
-  -------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1634017180000,1634276800000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],raw)
-  -----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  ------T~PeriodicSamplesMapper(start=1634363080000, step=60000, end=1634622400000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
-  -------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1634017180000,1634276800000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],raw)
-  ---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1633931320,60,1634363020))
-  ----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],downsample)
-  -----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  ------T~PeriodicSamplesMapper(start=1633931320000, step=60000, end=1634363020000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
-  -------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1633585420000,1634017420000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],downsample)
-  -----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  ------T~PeriodicSamplesMapper(start=1633931320000, step=60000, end=1634363020000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
-  -------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1633585420000,1634017420000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],downsample)
-  --E~BinaryJoinExec(binaryOp=MUL, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@591a4f8e)
-  ---E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@53ed80d3)
-  ----T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634017480,60,1634622400))
-  -----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],raw)
-  ------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  -------T~PeriodicSamplesMapper(start=1634017480000, step=60000, end=1634622400000, window=None, functionId=None, rawSource=true, offsetMs=None)
-  --------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(1634017180000,1634622400000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],raw)
-  ------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  -------T~PeriodicSamplesMapper(start=1634017480000, step=60000, end=1634622400000, window=None, functionId=None, rawSource=true, offsetMs=None)
-  --------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(1634017180000,1634622400000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],raw)
-  ----T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1633931320,60,1634017420))
-  -----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],downsample)
-  ------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  -------T~PeriodicSamplesMapper(start=1633931320000, step=60000, end=1634017420000, window=None, functionId=None, rawSource=true, offsetMs=None)
-  --------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(1633931020000,1634017420000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],downsample)
-  ------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  -------T~PeriodicSamplesMapper(start=1633931320000, step=60000, end=1634017420000, window=None, functionId=None, rawSource=true, offsetMs=None)
-  --------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(1633931020000,1634017420000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],downsample)
-  ---E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@53ed80d3)
-  ----T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634017480,60,1634622400))
-  -----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],raw)
-  ------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  -------T~PeriodicSamplesMapper(start=1634017480000, step=60000, end=1634622400000, window=None, functionId=None, rawSource=true, offsetMs=None)
-  --------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634017180000,1634622400000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],raw)
-  ------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  -------T~PeriodicSamplesMapper(start=1634017480000, step=60000, end=1634622400000, window=None, functionId=None, rawSource=true, offsetMs=None)
-  --------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(1634017180000,1634622400000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],raw)
-  ----T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1633931320,60,1634017420))
-  -----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],downsample)
-  ------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  -------T~PeriodicSamplesMapper(start=1633931320000, step=60000, end=1634017420000, window=None, functionId=None, rawSource=true, offsetMs=None)
-  --------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633931020000,1634017420000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],downsample)
-  ------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
-  -------T~PeriodicSamplesMapper(start=1633931320000, step=60000, end=1634017420000, window=None, functionId=None, rawSource=true, offsetMs=None)
-  --------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(1633931020000,1634017420000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1862263235],downsample)
-    */
+    // This case of abs function applied nested Binary join with aggregation, but the LHS as offset and RHS does not
+    //                  abs(in process)
+    //                  |
+    //                  + (in process)
+    //            /           \
+    //    has offset           * (pushed down)
+    //                      /     \
+    //                no offset  no offset
+    //  Expected behavior here is to perform the top level binary join in-process, the RHS however should be
+    //  entirely pushed down
 
-    ep.rangeVectorTransformers.head.isInstanceOf[InstantVectorFunctionMapper] shouldEqual(true)
-    val binaryJoinExec = ep.asInstanceOf[BinaryJoinExec]
+    val expectedPlan =
+      """T~InstantVectorFunctionMapper(function=Abs)
+        |-E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@7ce85af2)
+        |--E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@1a565afb)
+        |---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634517890,60,1634777210))
+        |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],raw)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |------T~PeriodicSamplesMapper(start=1634517890000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1634171990000,1634431610000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],raw)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |------T~PeriodicSamplesMapper(start=1634517890000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1634171990000,1634431610000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],raw)
+        |---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634086130,60,1634517830))
+        |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],downsample)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |------T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634517830000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1633740230000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],downsample)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |------T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634517830000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1633740230000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],downsample)
+        |--E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@1a565afb)
+        |---E~BinaryJoinExec(binaryOp=MUL, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],raw)
+        |----T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634172290,60,1634777210))
+        |-----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],raw)
+        |------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-------T~PeriodicSamplesMapper(start=1634172290000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(1634171990000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],raw)
+        |------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-------T~PeriodicSamplesMapper(start=1634172290000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(1634171990000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],raw)
+        |----T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634172290,60,1634777210))
+        |-----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],raw)
+        |------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-------T~PeriodicSamplesMapper(start=1634172290000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634171990000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],raw)
+        |------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-------T~PeriodicSamplesMapper(start=1634172290000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(1634171990000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],raw)
+        |---E~BinaryJoinExec(binaryOp=MUL, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],downsample)
+        |----T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634086130,60,1634172230))
+        |-----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],downsample)
+        |------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-------T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634172230000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(1634085830000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],downsample)
+        |------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-------T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634172230000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(1634085830000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],downsample)
+        |----T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634086130,60,1634172230))
+        |-----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],downsample)
+        |------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-------T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634172230000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634085830000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],downsample)
+        |------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-------T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634172230000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(1634085830000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#139560088],downsample)""".stripMargin
 
-    binaryJoinExec.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual true
-    binaryJoinExec.lhs.head.isInstanceOf[StitchRvsExec] shouldEqual (true)
-    binaryJoinExec.lhs.head.dispatcher.isInstanceOf[InProcessPlanDispatcher] shouldEqual true
+    validatePlan(ep, expectedPlan)
+  }
 
-    binaryJoinExec.rhs.head.isInstanceOf[BinaryJoinExec] shouldEqual (true)
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].lhs.head.isInstanceOf[StitchRvsExec] shouldEqual(true)
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].rhs.head.isInstanceOf[StitchRvsExec] shouldEqual(true)
 
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].lhs.head.children.head.
-      isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
+  it("""should generate plan for abs(sum(foo{job = "app"}) by (col1) + sum(bar{job = "app"}) by (col1) *
+       |sum(baz{job = "app"}) by (col1))""".stripMargin) {
 
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].lhs.head.children.head.dispatcher.
-      isInstanceOf[ActorPlanDispatcher] shouldEqual(true)
+    val start = now / 1000 - 8.days.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now / 1000 - 2.minutes.toSeconds
 
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].lhs.head.children.head.dispatcher.
-      clusterName.equals("raw") shouldEqual(true)
+    val rawRetention = 10090.minutes // 7 days
+    val downsampleRetention = 183.days
+    val earliestRawTime = now - rawRetention.toMillis
+    val earliestDownSampleTime = now - downsampleRetention.toMillis
+    val latestDownsampleTime = now - 12.hours.toMillis
 
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].lhs.head.children.last.
-      isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
+    val query =
+      """abs(sum(foo{job = "app"}) by (col1) + sum(bar{job = "app"}) by (col1) *
+        |sum(baz{job = "app"}) by (col1))""".stripMargin
+    val logicalPlan = Parser.queryRangeToLogicalPlan(query,
+      TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan]
 
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].lhs.head.children.last.dispatcher.
-      clusterName.equals("downsample") shouldEqual(true)
+    val rawPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = earliestRawTime,
+      queryConfig, "raw")
+    val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
+      earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+      earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].rhs.head.children.head.
-      isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
 
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].rhs.head.children.head.dispatcher.
-      isInstanceOf[ActorPlanDispatcher] shouldEqual(true)
+    // This case of abs function applied nested Binary join with aggregation, there are no offsets, entire binary join
+    // should be pushed down and just stitch should happen inProcess
+    //                Stitch (inProcess with ABS RangeVectorTransformer (RVT))
+    //                   /                                     \
+    //                  + (pushed down to DS)                   + (pushed down to Raw)
+    //            /           \                            /           \
+    //     no offset           * (pushed down)      no offset           * (pushed down)
+    //                      /     \                                   /     \
+    //                no offset  no offset                      no offset  no offset
 
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].rhs.head.children.head.dispatcher.
-      clusterName.equals("raw") shouldEqual(true)
+    // Its is also valid for abs function to be pushed down and Stitch with No RVT in it
 
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].rhs.head.children.last.
-      isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
-
-    binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].rhs.head.children.last.dispatcher.
-      clusterName.equals("downsample") shouldEqual(true)
+    val expectedPlan =
+      """T~InstantVectorFunctionMapper(function=Abs)
+        |-E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@49fa1d74)
+        |--E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],raw)
+        |---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634172290,60,1634777210))
+        |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],raw)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |------T~PeriodicSamplesMapper(start=1634172290000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1634171990000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],raw)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |------T~PeriodicSamplesMapper(start=1634172290000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1634171990000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],raw)
+        |---E~BinaryJoinExec(binaryOp=MUL, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],raw)
+        |----T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634172290,60,1634777210))
+        |-----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],raw)
+        |------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-------T~PeriodicSamplesMapper(start=1634172290000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(1634171990000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],raw)
+        |------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-------T~PeriodicSamplesMapper(start=1634172290000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(1634171990000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],raw)
+        |----T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634172290,60,1634777210))
+        |-----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],raw)
+        |------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-------T~PeriodicSamplesMapper(start=1634172290000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634171990000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],raw)
+        |------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-------T~PeriodicSamplesMapper(start=1634172290000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(1634171990000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],raw)
+        |--E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],downsample)
+        |---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634086130,60,1634172230))
+        |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],downsample)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |------T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634172230000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1634085830000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],downsample)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |------T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634172230000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1634085830000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],downsample)
+        |---E~BinaryJoinExec(binaryOp=MUL, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],downsample)
+        |----T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634086130,60,1634172230))
+        |-----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],downsample)
+        |------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-------T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634172230000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(1634085830000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],downsample)
+        |------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-------T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634172230000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(1634085830000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],downsample)
+        |----T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634086130,60,1634172230))
+        |-----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],downsample)
+        |------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-------T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634172230000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634085830000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],downsample)
+        |------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(col1))
+        |-------T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634172230000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(1634085830000,1634172230000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#669282060],downsample)""".stripMargin
+    validatePlan(ep, expectedPlan)
   }
 
   it("""should generate plan for count(sum(foo{job = "app"} offset 4d) by (col1) + sum(bar{job = "app"}) by (col1) *
@@ -1266,5 +1324,207 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers {
 
     binaryJoinExec.rhs.head.asInstanceOf[BinaryJoinExec].rhs.head.dispatcher.clusterName.
       equals("downsample") shouldEqual(true)
+  }
+
+  it("should push down aggregation to ds and raw cluster") {
+
+    val start = now / 1000 - 8.days.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now / 1000 - 2.minutes.toSeconds
+
+    val rawRetention = 7.days // 7 days
+    val downsampleRetention = 183.days
+    val earliestRawTime = now - rawRetention.toMillis
+    val earliestDownSampleTime = now - downsampleRetention.toMillis
+    val latestDownsampleTime = now - 6.hours.toMillis
+
+    // should span across both clusters and stitch
+    val query = """avg(foo{job="app"} offset 4d)"""
+    val logicalPlan = Parser.queryRangeToLogicalPlan(query,
+      TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan]
+
+    val rawPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = earliestRawTime,
+      queryConfig, "raw")
+    val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
+      earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+      earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
+
+    val expectedPlan =
+      """E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@1ee47d9e)
+        |-T~AggregatePresenter(aggrOp=Avg, aggrParams=List(), rangeParams=RangeParams(1634518490,60,1634777210))
+        |--E~LocalPartitionReduceAggregateExec(aggrOp=Avg, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1999941542],raw)
+        |---T~AggregateMapReduce(aggrOp=Avg, aggrParams=List(), without=List(), by=List())
+        |----T~PeriodicSamplesMapper(start=1634518490000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1634172590000,1634431610000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1999941542],raw)
+        |---T~AggregateMapReduce(aggrOp=Avg, aggrParams=List(), without=List(), by=List())
+        |----T~PeriodicSamplesMapper(start=1634518490000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1634172590000,1634431610000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1999941542],raw)
+        |-T~AggregatePresenter(aggrOp=Avg, aggrParams=List(), rangeParams=RangeParams(1634086130,60,1634518430))
+        |--E~LocalPartitionReduceAggregateExec(aggrOp=Avg, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1999941542],downsample)
+        |---T~AggregateMapReduce(aggrOp=Avg, aggrParams=List(), without=List(), by=List())
+        |----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634518430000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1633740230000,1634172830000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1999941542],downsample)
+        |---T~AggregateMapReduce(aggrOp=Avg, aggrParams=List(), without=List(), by=List())
+        |----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634518430000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1633740230000,1634172830000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1999941542],downsample)""".stripMargin
+
+    validatePlan(ep, expectedPlan)
+  }
+
+  it("should push down Binary join with scalar to individual clusters") {
+
+    val start = now / 1000 - 8.days.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now / 1000 - 2.minutes.toSeconds
+
+    val rawRetention = 7.days // 7 days
+    val downsampleRetention = 183.days
+    val earliestRawTime = now - rawRetention.toMillis
+    val earliestDownSampleTime = now - downsampleRetention.toMillis
+    val latestDownsampleTime = now - 6.hours.toMillis
+
+    // should span across both clusters and stitch
+    val query = """sum(foo{job="app"} offset 4d) + 10"""
+    val logicalPlan = Parser.queryRangeToLogicalPlan(query,
+      TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan]
+
+    val rawPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
+      earliestRetainedTimestampFn = earliestRawTime, queryConfig, "raw")
+    val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
+      earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+      earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
+
+    val ep1 = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
+
+    // TODO: Though not bad, the plan can be optimized since one operator of this Binary operator is scalar,
+    //  entire join should have been pushed down despite offset being present
+    val expectedPlan1 =
+      """T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
+        |-FA1~StaticFuncArgs(10.0,RangeParams(1634086130,60,1634777210))
+        |-E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@41b13f3d)
+        |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634518490,60,1634777210))
+        |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-381101616],raw)
+        |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |-----T~PeriodicSamplesMapper(start=1634518490000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1634172590000,1634431610000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-381101616],raw)
+        |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |-----T~PeriodicSamplesMapper(start=1634518490000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1634172590000,1634431610000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-381101616],raw)
+        |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634086130,60,1634518430))
+        |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-381101616],downsample)
+        |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |-----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634518430000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1633740230000,1634172830000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-381101616],downsample)
+        |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |-----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634518430000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+        |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1633740230000,1634172830000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-381101616],downsample)""".stripMargin
+
+    validatePlan(ep1, expectedPlan1)
+
+    val query1 = """sum(foo{job="app"}) + 10"""
+    val ep2 = longTermPlanner.materialize( Parser.queryRangeToLogicalPlan(query1, TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan], QueryContext(origQueryParams = promQlQueryParams))
+
+    // Unlike above case, the scalar operator operation is pushed down
+    val expectedPlan2=
+    """E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@5807efad)
+      |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
+      |--FA1~StaticFuncArgs(10.0,RangeParams(1634086130,60,1634777210))
+      |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634172890,60,1634777210))
+      |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1285276689],raw)
+      |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+      |-----T~PeriodicSamplesMapper(start=1634172890000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=None)
+      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1634172590000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1285276689],raw)
+      |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+      |-----T~PeriodicSamplesMapper(start=1634172890000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=None)
+      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1634172590000,1634777210000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1285276689],raw)
+      |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
+      |--FA1~StaticFuncArgs(10.0,RangeParams(1634086130,60,1634777210))
+      |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634086130,60,1634172830))
+      |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1285276689],downsample)
+      |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+      |-----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634172830000, window=None, functionId=None, rawSource=true, offsetMs=None)
+      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1634085830000,1634172830000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1285276689],downsample)
+      |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+      |-----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634172830000, window=None, functionId=None, rawSource=true, offsetMs=None)
+      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1634085830000,1634172830000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1285276689],downsample)""".stripMargin
+    validatePlan(ep2, expectedPlan2)
+  }
+
+  it("should push down binary join when all offsets are same") {
+
+
+    val start = now / 1000 - 8.days.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now / 1000 - 2.minutes.toSeconds
+
+    val rawRetention = 7.days // 7 days
+    val downsampleRetention = 183.days
+    val earliestRawTime = now - rawRetention.toMillis
+    val earliestDownSampleTime = now - downsampleRetention.toMillis
+    val latestDownsampleTime = now - 6.hours.toMillis
+
+    // Binary join has offset but same for all, we can optimize by pushing this join down to
+    // individual clusters
+    val query = """sum(foo{job = "app"} offset 4d) + sum(bar{job= "app"} offset 4d)"""
+
+    val logicalPlan = Parser.queryRangeToLogicalPlan(query,
+      TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan]
+
+    val rawPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
+      earliestRetainedTimestampFn = earliestRawTime, queryConfig, "raw")
+    val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
+      earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
+    val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+      earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
+
+    val expectedPlan =
+    """E~StitchRvsExec() on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@2fd954f)
+      |-E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#208769433],raw)
+      |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634518490,60,1634777210))
+      |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#208769433],raw)
+      |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+      |-----T~PeriodicSamplesMapper(start=1634518490000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1634172590000,1634431610000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#208769433],raw)
+      |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+      |-----T~PeriodicSamplesMapper(start=1634518490000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1634172590000,1634431610000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#208769433],raw)
+      |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634518490,60,1634777210))
+      |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#208769433],raw)
+      |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+      |-----T~PeriodicSamplesMapper(start=1634518490000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(1634172590000,1634431610000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#208769433],raw)
+      |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+      |-----T~PeriodicSamplesMapper(start=1634518490000, step=60000, end=1634777210000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(1634172590000,1634431610000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#208769433],raw)
+      |-E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#208769433],downsample)
+      |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634086130,60,1634518430))
+      |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#208769433],downsample)
+      |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+      |-----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634518430000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=9, chunkMethod=TimeRangeChunkScan(1633740230000,1634172830000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#208769433],downsample)
+      |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+      |-----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634518430000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=25, chunkMethod=TimeRangeChunkScan(1633740230000,1634172830000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#208769433],downsample)
+      |--T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634086130,60,1634518430))
+      |---E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#208769433],downsample)
+      |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+      |-----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634518430000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(1633740230000,1634172830000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#208769433],downsample)
+      |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+      |-----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634518430000, window=None, functionId=None, rawSource=true, offsetMs=Some(345600000))
+      |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(1633740230000,1634172830000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#208769433],downsample)""".stripMargin
+
+    validatePlan(ep, expectedPlan)
+
   }
 }

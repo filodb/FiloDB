@@ -9,10 +9,18 @@ object PromCirceSupport {
   // necessary to encode sample in promql response as an array with long and double value as string
   // Specific encoders for *Sampl types
   implicit val encodeSampl: Encoder[DataSampl] = Encoder.instance {
-    case s @ Sampl(t, v)     => Json.fromValues(Seq(t.asJson, v.toString.asJson))
-    case h @ HistSampl(t, b) => Json.fromValues(Seq(t.asJson, b.asJson))
-    case m @ MetadataSampl(v) => Json.fromValues(Seq(v.asJson))
-    case l @ LabelSampl(v) => Json.fromValues(Seq(v.asJson))
+    case s @ Sampl(t, v)                                => Json.fromValues(Seq(t.asJson, v.toString.asJson))
+    case h @ HistSampl(t, b)                            => Json.fromValues(Seq(t.asJson, b.asJson))
+  }
+
+  implicit val encodeMetadataSampl: Encoder[MetadataSampl] = Encoder.instance {
+    case m @ MetadataMapSampl(v) => Json.fromValues(Seq(v.asJson))
+    case l @ LabelSampl(v) => v.asJson
+    // Where are these used? added to make compiler happy
+    case l @ LabelCardinalitySampl(group, cardinality)  =>
+      Json.fromValues(Seq(group.asJson, cardinality.asJson))
+    case t @ TsCardinalitiesSampl(group, cardinality) =>
+      Json.fromValues(Seq(group.asJson, cardinality.asJson))
   }
 
   implicit val decodeAvgSample: Decoder[AvgSampl] = new Decoder[AvgSampl] {
@@ -38,7 +46,33 @@ object PromCirceSupport {
       }
     }
 
-  implicit val decodeFoo: Decoder[DataSampl] = new Decoder[DataSampl] {
+  implicit val decodeMetadataSampl: Decoder[MetadataSampl] = new Decoder[MetadataSampl] {
+    def apply(c: HCursor): Decoder.Result[MetadataSampl] = {
+      // TODO: Not the best way to find if this is a cardinality response, is there a better way?
+      if (c.downField("cardinality").focus.nonEmpty) {
+        // LabelCardinality has "metric" map; TsCardinalities has "group" map
+        if (c.downField("metric").focus.nonEmpty) {
+          for {
+            metric <- c.get[Map[String, String]]("metric")
+            card <- c.get[Seq[Map[String, String]]]("cardinality")
+          } yield LabelCardinalitySampl(metric, card)
+        } else if (c.downField("group").focus.nonEmpty) {
+          for {
+            group <- c.get[Map[String, String]]("group")
+            card <- c.get[Map[String, Int]]("cardinality")
+          } yield TsCardinalitiesSampl(group, card)
+        } else {
+          throw new IllegalArgumentException("could not decode any expected cardinality-related field")
+        }
+      } else if (c.value.isString) {
+        for { label <- c.as[String] } yield LabelSampl(label)
+      } else {
+        for { metadataMap <- c.as[Map[String, String]] } yield MetadataMapSampl(metadataMap)
+      }
+    }
+  }
+
+  implicit val decodeDataSampl: Decoder[DataSampl] = new Decoder[DataSampl] {
     final def apply(c: HCursor): Decoder.Result[DataSampl] = {
       val tsResult = c.downArray.as[Long]
       val rightCurs = c.downArray.right
@@ -55,6 +89,7 @@ object PromCirceSupport {
       }
     }
   }
+
 
   implicit val decodeAggregate: Decoder[AggregateResponse] = new Decoder[AggregateResponse] {
     final def apply(c: HCursor): Decoder.Result[AggregateResponse] = {

@@ -20,12 +20,15 @@ import filodb.core.store._
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
+/**
+ * An implementation of TimeSeriesStore with data cached in memory as needed
+ */
 class TimeSeriesMemStore(filodbConfig: Config,
                          val store: ColumnStore,
                          val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
                         (implicit val ioPool: ExecutionContext)
-extends MemStore with StrictLogging {
+extends TimeSeriesStore with StrictLogging {
   import collection.JavaConverters._
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
@@ -35,7 +38,6 @@ extends MemStore with StrictLogging {
 
   val stats = new ChunkSourceStats
 
-  private val numParallelFlushes = filodbConfig.getInt("memstore.flush-task-parallelism")
   private val ensureTspHeadroomPercent = filodbConfig.getDouble("memstore.ensure-tsp-count-headroom-percent")
   private val ensureNmmHeadroomPercent = filodbConfig.getDouble("memstore.ensure-native-memory-headroom-percent")
 
@@ -79,15 +81,16 @@ extends MemStore with StrictLogging {
     }
   }
 
-  def topKCardinality(ref: DatasetRef, shards: Seq[Int],
-                      shardKeyPrefix: Seq[String], k: Int): Seq[CardinalityRecord] = {
+  def scanTsCardinalities(ref: DatasetRef, shards: Seq[Int],
+                          shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord] = {
     datasets.get(ref).toSeq
       .flatMap { ts =>
         ts.values().asScala
           .filter(s => shards.isEmpty || shards.contains(s.shardNum))
-          .flatMap(_.topKCardinality(k, shardKeyPrefix))
+          .flatMap(_.scanTsCardinalities(shardKeyPrefix, depth))
       }
   }
+
   /**
     * WARNING: use only for testing. Not performant
     */
@@ -119,76 +122,32 @@ extends MemStore with StrictLogging {
   // NOTE: Each ingestion message is a SomeData which has a RecordContainer, which can hold hundreds or thousands
   // of records each.  For this reason the object allocation of a SomeData and RecordContainer is not that bad.
   // If it turns out the batch size is small, consider using object pooling.
-  def ingestStream(dataset: DatasetRef,
-                   shardNum: Int,
-                   stream: Observable[SomeData],
-                   flushSched: Scheduler,
-                   cancelTask: Task[Unit]): CancelableFuture[Unit] = {
+  def startIngestion(dataset: DatasetRef,
+                     shardNum: Int,
+                     stream: Observable[SomeData],
+                     flushSched: Scheduler,
+                     cancelTask: Task[Unit]): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
     shard.isReadyForQuery = true
     logger.info(s"Shard now ready for query dataset=$dataset shard=$shardNum")
     shard.shardStats.shardTotalRecoveryTime.update(System.currentTimeMillis() - shard.creationTime)
-    stream.flatMap {
-      case d: SomeData =>
-        // The write buffers for all partitions in a group are switched here, in line with ingestion
-        // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
-        // at the same offset/watermark
-        val tasks = shard.createFlushTasks(d.records)
-
-        shard.ingest(d)
-        Observable.fromIterable(tasks)
-    }
-    .mapAsync(numParallelFlushes) {
-      // asyncBoundary so subsequent computations in pipeline happen in default threadpool
-      task => task.executeOn(flushSched).asyncBoundary
-    }
-    .completedL
-    .doOnCancel(cancelTask)
-    .runAsync(shard.ingestSched)
+    shard.startIngestion(stream, cancelTask, flushSched)
   }
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
     getShardE(dataset, shard).recoverIndex()
 
-  // a more optimized ingest stream handler specifically for recovery
-  // TODO: See if we can parallelize ingestion stream for even better throughput
-  def recoverStream(dataset: DatasetRef,
-                    shardNum: Int,
-                    stream: Observable[SomeData],
-                    startOffset: Long,
-                    endOffset: Long,
-                    checkpoints: Map[Int, Long],
-                    reportingInterval: Long) (implicit timeout: FiniteDuration = 60.seconds): Observable[Long] = {
+  def createDataRecoveryObservable(dataset: DatasetRef,
+                                   shardNum: Int,
+                                   stream: Observable[SomeData],
+                                   startOffset: Long,
+                                   endOffset: Long,
+                                   checkpoints: Map[Int, Long],
+                                   reportingInterval: Long)
+                                  (implicit timeout: FiniteDuration = 60.seconds): Observable[Long] = {
     val shard = getShardE(dataset, shardNum)
-    shard.setGroupWatermarks(checkpoints)
-    if (endOffset < startOffset) Observable.empty
-    else {
-      var targetOffset = startOffset + reportingInterval
-      var startOffsetValidated = false
-      stream.map { r =>
-        if (!startOffsetValidated) {
-          if (r.offset > startOffset) {
-            val offsetsNotRecovered = r.offset - startOffset
-            logger.error(s"Could not recover dataset=$dataset shard=$shardNum from check pointed offset possibly " +
-                         s"because of retention issues. recoveryStartOffset=$startOffset " +
-                         s"firstRecordOffset=${r.offset} offsetsNotRecovered=$offsetsNotRecovered")
-            shard.shardStats.offsetsNotRecovered.increment(offsetsNotRecovered)
-          }
-          startOffsetValidated = true
-        }
-        shard.ingest(r)
-      }
-        // Nothing to read from source, blocking indefinitely. In such cases, 60sec timeout causes it
-        // to return endOffset, making recovery complete and to start normal ingestion.
-      .timeoutOnSlowUpstreamTo(timeout, Observable.now(endOffset))
-      .collect {
-        case offset: Long if offset >= endOffset => // last offset reached
-          offset
-        case offset: Long if offset > targetOffset => // reporting interval reached
-          targetOffset += reportingInterval
-          offset
-      }
-    }
+    shard.createDataRecoveryObservable(dataset, shardNum, stream, startOffset, endOffset,
+      checkpoints, reportingInterval, timeout)
   }
 
   def indexNames(dataset: DatasetRef, limit: Int): Seq[(String, Int)] =
@@ -208,9 +167,16 @@ extends MemStore with StrictLogging {
 
   def labelValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
                              labelNames: Seq[String], end: Long,
-                             start: Long, limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
-    = getShard(dataset, shard)
-        .map(_.labelValuesWithFilters(filters, labelNames, end, start, limit)).getOrElse(Iterator.empty)
+                             start: Long, querySession: QuerySession,
+                             limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] =
+    getShard(dataset, shard)
+        .map(_.labelValuesWithFilters(filters, labelNames, end, start, querySession, limit)).getOrElse(Iterator.empty)
+
+  def singleLabelValueWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                             label: String, end: Long,
+                             start: Long, querySession: QuerySession, limit: Int): Iterator[ZeroCopyUTF8String] =
+    getShard(dataset, shard)
+        .map(_.singleLabelValuesWithFilters(filters, label, end, start, querySession, limit)).getOrElse(Iterator.empty)
 
   def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
                           fetchFirstLastSampleTimes: Boolean, end: Long, start: Long,

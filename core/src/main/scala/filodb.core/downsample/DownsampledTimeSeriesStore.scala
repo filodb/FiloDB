@@ -19,11 +19,19 @@ import filodb.core.query.{ColumnFilter, QuerySession, ServiceUnavailableExceptio
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
+/**
+ * An implementation of TimeSeriesStore with data fetched from a column store
+ *
+ * @param store the store which houses the downsampled data
+ * @param rawColStore the store which houses the original raw data from which downsampled data was derived
+ * @param filodbConfig filodb configuration
+ * @param ioPool the executor used to perform network IO
+ */
 class DownsampledTimeSeriesStore(val store: ColumnStore,
                                  rawColStore: ColumnStore,
                                  val filodbConfig: Config)
                                 (implicit val ioPool: ExecutionContext)
-extends MemStore with StrictLogging {
+extends TimeSeriesStore with StrictLogging {
   import collection.JavaConverters._
 
   private val datasets = new HashMap[DatasetRef, NonBlockingHashMapLong[DownsampledTimeSeriesShard]]
@@ -90,9 +98,16 @@ extends MemStore with StrictLogging {
 
   def labelValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
                              labelNames: Seq[String], end: Long,
-                             start: Long, limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+                             start: Long, querySession: QuerySession,
+                             limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
     = getShard(dataset, shard)
-        .map(_.labelValuesWithFilters(filters, labelNames, end, start, limit)).getOrElse(Iterator.empty)
+        .map(_.labelValuesWithFilters(filters, labelNames, end, start, querySession, limit)).getOrElse(Iterator.empty)
+
+  def singleLabelValueWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                                  label: String, end: Long,
+                                  start: Long, querySession: QuerySession, limit: Int): Iterator[ZeroCopyUTF8String] =
+    getShard(dataset, shard)
+      .map(_.singleLabelValuesWithFilters(filters, label, end, start, querySession, limit)).getOrElse(Iterator.empty)
 
   def labelNames(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
                  end: Long, start: Long): Seq[String] =
@@ -167,16 +182,18 @@ extends MemStore with StrictLogging {
   override def ingest(dataset: DatasetRef, shard: Int,
                       data: SomeData): Unit = throw new UnsupportedOperationException()
 
-  override def ingestStream(dataset: DatasetRef,
-                   shard: Int,
-                   stream: Observable[SomeData],
-                   flushSched: Scheduler,
-                   cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit] = throw new UnsupportedOperationException()
+  override def startIngestion(dataset: DatasetRef,
+                              shard: Int,
+                              stream: Observable[SomeData],
+                              flushSched: Scheduler,
+                              cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit] =
+    throw new UnsupportedOperationException()
 
-  override def recoverStream(dataset: DatasetRef, shard: Int,
-                             stream: Observable[SomeData],
-                             startOffset: Long, endOffset: Long, checkpoints: Map[Int, Long],
-                             reportingInterval: Long) (implicit timeout: FiniteDuration)
+  override def createDataRecoveryObservable(dataset: DatasetRef, shard: Int,
+                                            stream: Observable[SomeData],
+                                            startOffset: Long, endOffset: Long, checkpoints: Map[Int, Long],
+                                            reportingInterval: Long)
+                                           (implicit timeout: FiniteDuration)
                               : Observable[Long] = throw new UnsupportedOperationException()
 
   override def numPartitions(dataset: DatasetRef, shard: Int): Int = throw new UnsupportedOperationException()
@@ -197,8 +214,6 @@ extends MemStore with StrictLogging {
                                  chunkMethod: ChunkScanMethod): Observable[RawPartData] = ???
 
   // TODO we need breakdown for downsample store too, but in a less memory intensive way
-  override def topKCardinality(ref: DatasetRef,
-                               shards: Seq[Int],
-                               shardKeyPrefix: scala.Seq[String],
-                               k: Int): scala.Seq[CardinalityRecord] = ???
+  override def scanTsCardinalities(ref: DatasetRef, shards: Seq[Int],
+                                   shardKeyPrefix: Seq[String], depth: Int): scala.Seq[CardinalityRecord] = ???
 }

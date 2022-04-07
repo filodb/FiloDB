@@ -35,7 +35,9 @@ object QueryCommands {
   final case class GetTopkCardinality(dataset: DatasetRef,
                                       shards: Seq[Int],
                                       shardKeyPrefix: Seq[String],
+                                      depth: Int,
                                       k: Int,
+                                      addInactive: Boolean,
                                       submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
   final case class StaticSpreadProvider(spreadChange: SpreadChange = SpreadChange()) extends SpreadProvider {
@@ -55,6 +57,11 @@ object QueryCommands {
     def spreadFunc(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       f (filter)
     }
+  }
+
+  final case class FunctionalTargetSchemaProvider(f: Seq[ColumnFilter] => Seq[TargetSchemaChange] = { _ => Seq.empty})
+    extends TargetSchemaProvider {
+    def targetSchemaFunc(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = f(filter)
   }
 
   /**

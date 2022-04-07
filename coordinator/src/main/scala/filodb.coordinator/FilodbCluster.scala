@@ -15,7 +15,6 @@ import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.execution.{Scheduler, UncaughtExceptionReporter}
-import monix.execution.misc.NonFatal
 
 import filodb.core.GlobalScheduler
 import filodb.core.memstore.FiloSchedulers
@@ -198,7 +197,7 @@ final class FilodbCluster(val system: ExtendedActorSystem, overrideConfig: Confi
       memStore.shutdown()
       ioPool.shutdown()
     } catch {
-      case NonFatal(e) =>
+      case _: Exception =>
         system.terminate()
         ioPool.shutdown()
     }

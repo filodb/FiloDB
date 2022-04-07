@@ -83,7 +83,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
     numShards, numSeries, numSamples * numSeries, dataset, shardMapper, spread)
   val ingestTask = containerStream.groupBy(_._1)
                     // Asynchronously subcribe and ingest each shard
-                    .mapAsync(numShards) { groupedStream =>
+                    .mapParallelUnordered(numShards) { groupedStream =>
                       val shard = groupedStream.key
                       println(s"Starting ingest on shard $shard...")
                       val shardStream = groupedStream.zipWithIndex.flatMap { case ((_, bytes), idx) =>
@@ -91,8 +91,8 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
                         val data = bytes.map { array => SomeData(RecordContainer(array), idx) }
                         Observable.fromIterable(data)
                       }
-                      Task.fromFuture(cluster.memStore.ingestStream(dataset.ref, shard, shardStream, global))
-                    }.countL.runAsync
+                      Task.fromFuture(cluster.memStore.startIngestion(dataset.ref, shard, shardStream, global))
+                    }.countL.runToFuture
   Await.result(producingFut, 200.seconds)
   Thread sleep 2000
   val store = cluster.memStore.asInstanceOf[TimeSeriesMemStore]
@@ -132,7 +132,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   def scanSumOfRateBenchmark(): Unit = {
     (0 until numQueries).foreach { _ =>
       val querySession = QuerySession(qContext, queryConfig)
-      Await.result(scanSumOfRate.execute(store, querySession).runAsync, 60.seconds)
+      Await.result(scanSumOfRate.execute(store, querySession).runToFuture, 60.seconds)
     }
   }
 
@@ -144,7 +144,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   def scanSumOfSumOverTimeBenchmark(): Unit = {
     (0 until numQueries).foreach { _ =>
       val querySession = QuerySession(qContext, queryConfig)
-      Await.result(scanSumSumOverTime.execute(store, querySession).runAsync, 60.seconds)
+      Await.result(scanSumSumOverTime.execute(store, querySession).runToFuture, 60.seconds)
     }
   }
 

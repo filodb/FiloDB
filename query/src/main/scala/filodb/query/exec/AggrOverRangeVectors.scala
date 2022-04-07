@@ -248,7 +248,7 @@ object RangeVectorAggregator extends StrictLogging {
     // FoldLeft means we create the source PeriodicMapper etc and process immediately.  We can release locks right away
     // NOTE: ChunkedWindowIterator automatically releases locks after last window.  So it should all just work.  :)
     val aggObs = if (skipMapPhase) {
-      source.foldLeftF(accs) { case (_, rv) =>
+      source.foldLeft(accs) { case (_, rv) =>
         count += 1
         val rowIter = rv.rows
         if (period.isEmpty) period = rv.outputRange
@@ -263,7 +263,7 @@ object RangeVectorAggregator extends StrictLogging {
       }
     } else {
       val mapIntos = Array.fill(outputLen)(rowAgg.newRowToMapInto)
-      source.foldLeftF(accs) { case (_, rv) =>
+      source.foldLeft(accs) { case (_, rv) =>
         count += 1
         val rowIter = rv.rows
         if (period.isEmpty) period = rv.outputRange

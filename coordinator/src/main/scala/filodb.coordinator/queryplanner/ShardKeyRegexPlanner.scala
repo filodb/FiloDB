@@ -3,6 +3,7 @@ package filodb.coordinator.queryplanner
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
 import filodb.query._
+import filodb.query.LogicalPlan._
 import filodb.query.exec._
 
 /**
@@ -28,12 +29,12 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
                            queryPlanner: QueryPlanner,
                            shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]],
                            config: QueryConfig)
-  extends QueryPlanner with PlannerHelper {
+  extends QueryPlanner with DefaultPlanner {
 
   override def queryConfig: QueryConfig = config
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options
-  val datasetMetricColumn = dataset.options.metricColumn
+  private val datasetMetricColumn = dataset.options.metricColumn
 
   /**
    * Returns true when regex has single matching value
@@ -42,7 +43,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   private def hasSingleShardKeyMatch(nonMetricShardKeyFilters: Seq[Seq[ColumnFilter]]) = {
     val shardKeyMatchers = nonMetricShardKeyFilters.map(shardKeyMatcher(_))
     shardKeyMatchers.forall(_.size == 1) &&
-      shardKeyMatchers.forall(_.head.toSet.sameElements(shardKeyMatchers.head.head.toSet))
+      shardKeyMatchers.forall(_.head.toSet == shardKeyMatchers.head.head.toSet)
     // ^^ For Binary join LHS and RHS should have same value
   }
 
@@ -57,7 +58,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     val nonMetricShardKeyFilters =
       LogicalPlan.getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
     if (isMetadataQuery(logicalPlan)
-      || LogicalPlan.hasShardKeyEqualsOnly(logicalPlan, dataset.options.nonMetricShardColumns)) {
+      || (hasRequiredShardKeysPresent(nonMetricShardKeyFilters, dataset.options.nonMetricShardColumns) &&
+      LogicalPlan.hasShardKeyEqualsOnly(logicalPlan, dataset.options.nonMetricShardColumns))) {
       queryPlanner.materialize(logicalPlan, qContext)
     } else if (hasSingleShardKeyMatch(nonMetricShardKeyFilters)) {
       // For queries like topk(2, test{_ws_ = "demo", _ns_ =~ "App-1"}) which have just one matching value
@@ -65,14 +67,25 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     } else walkLogicalPlanTree(logicalPlan, qContext).plans.head
   }
 
+  def hasRequiredShardKeysPresent(nonMetricShardKeyFilters: Seq[Seq[ColumnFilter]],
+                                  nonMetricShardColumns: Seq[String]): Boolean = {
+    val nonMetricShardColumnsSet = nonMetricShardColumns.toSet
+    nonMetricShardKeyFilters.foreach(filterGroup => {
+      val columnNames = filterGroup.map(_.column)
+      if (!nonMetricShardColumnsSet.subsetOf(columnNames.toSet)) return false
+    })
+    true
+  }
+
   def isMetadataQuery(logicalPlan: LogicalPlan): Boolean = {
     logicalPlan match {
       case _: MetadataQueryPlan => true
+      case _: TsCardinalities => true
       case _ => false
     }
   }
 
-  def walkLogicalPlanTree(logicalPlan: LogicalPlan,
+  override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                           qContext: QueryContext): PlanResult = {
     logicalPlan match {
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
@@ -85,6 +98,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       case lp: VectorPlan                  => materializeVectorPlan(qContext, lp)
       case lp: Aggregate                   => materializeAggregate(lp, qContext)
       case lp: BinaryJoin                  => materializeBinaryJoin(lp, qContext)
+      case lp: SubqueryWithWindowing       => super.materializeSubqueryWithWindowing(qContext, lp)
+      case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
       case _                               => materializeOthers(logicalPlan, qContext)
     }
   }
@@ -121,17 +136,18 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     val lhsExec = materialize(logicalPlan.lhs, lhsQueryContext)
     val rhsExec = materialize(logicalPlan.rhs, rhsQueryContext)
 
-    val onKeysReal = ExtraOnByKeysUtil.getRealOnLabels(logicalPlan, queryConfig.addExtraOnByKeysTimeRanges)
-
     val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
       SetOperatorExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-        LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
-        LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn)
+        LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
+        LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn,
+        rvRangeFromPlan(logicalPlan))
     else
       BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-        logicalPlan.cardinality, LogicalPlanUtils.renameLabels(onKeysReal, datasetMetricColumn),
+        logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
-        LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn)
+        LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn,
+        rvRangeFromPlan(logicalPlan))
+
     PlanResult(Seq(execPlan))
   }
 
@@ -154,7 +170,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
         // be InProcessPlanDispatcher and adding the current aggregate using addAggregate will use the same dispatcher
         // If the underlying plan however is not multi partition, adding the aggregator using addAggregator will
         // use the same dispatcher
-        addAggregator(aggregate, queryContext, PlanResult(Seq(childPlan)), Seq.empty)
+        addAggregator(aggregate, queryContext, PlanResult(Seq(childPlan)))
     } else {
       val execPlans = generateExecWithoutRegex(aggregate,
         LogicalPlan.getNonMetricShardKeyFilters(aggregate, dataset.options.nonMetricShardColumns).head, queryContext)
@@ -166,7 +182,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
               throw new UnsupportedOperationException(s"Shard Key regex not supported for ${aggregate.operator}")
         else {
           val reducer = MultiPartitionReduceAggregateExec(queryContext, inProcessPlanDispatcher,
-            execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
+            execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
           val promQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
           reducer.addRangeVectorTransformer(AggregatePresenter(aggregate.operator, aggregate.params,
             RangeParams(promQlQueryParams.startSecs, promQlQueryParams.stepSecs, promQlQueryParams.endSecs)))
@@ -190,8 +206,20 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     val exec = if (nonMetricShardKeyFilters.head.isEmpty) queryPlanner.materialize(logicalPlan, queryContext)
     else {
       val execPlans = generateExecWithoutRegex(logicalPlan, nonMetricShardKeyFilters.head, queryContext)
-      if (execPlans.size == 1) execPlans.head else MultiPartitionDistConcatExec(queryContext, inProcessPlanDispatcher,
-        execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
+      if (execPlans.size == 1)
+        execPlans.head
+      // TODO
+      // here we essentially do not allow to optimize the physical plan for subqueries
+      // as we concat the results with MultiPartitionDisConcatExec,
+      // below queries:
+      // max_over_time(rate(foo{_ws_ = "demo", _ns_ =~ ".*Ns", instance = "Inst-1" }[10m])[1h:1m])
+      // sum_over_time(foo{_ws_ = "demo", _ns_ =~ ".*Ns", instance = "Inst-1" }[5d:300s])
+      // would have suboptimal performance. See subquery tests in PlannerHierarchySpec
+      else
+        MultiPartitionDistConcatExec(
+          queryContext, inProcessPlanDispatcher,
+          execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
+        )
     }
     PlanResult(Seq(exec))
   }

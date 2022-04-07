@@ -84,14 +84,14 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     // partition exists but no chunks in range > 1000, this should find nothing
     val noChunkScan = TimeRangeChunkScan(1000L, 2000L)
     val parts = colStore.readRawPartitions(dataset.ref, 1.millis.toMillis,
-                             partScan, noChunkScan).toListL.runAsync.futureValue
+                             partScan, noChunkScan).toListL.runToFuture.futureValue
     parts should have length (0)
   }
 
   it should "return empty iterator if cannot find partition or version" in {
     // Don't write any data
     colStore.readRawPartitions(dataset.ref, 1.hour.toMillis, partScan)
-            .toListL.runAsync.futureValue should have length (0)
+            .toListL.runToFuture.futureValue should have length (0)
   }
 
   "scanRows" should "read back rows that were written" ignore {
@@ -129,7 +129,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     memStore.setup(dataset2.ref, schemas, 0, TestData.storeConf)
     val stream = Observable.now(records(dataset2))
     // Force flush of all groups at end
-    memStore.ingestStream(dataset2.ref, 0, stream, s, Task {}).futureValue
+    memStore.startIngestion(dataset2.ref, 0, stream, s, Task {}).futureValue
 
     val paramSet = colStore.getScanSplits(dataset.ref, 1)
     paramSet should have length (1)
@@ -146,7 +146,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     memStore.setup(dataset2.ref, schemas, 0, TestData.storeConf)
     val stream = Observable.now(records(dataset2))
     // Force flush of all groups at end
-    memStore.ingestStream(dataset2.ref, 0, stream, s, Task {}).futureValue
+    memStore.startIngestion(dataset2.ref, 0, stream, s, Task {}).futureValue
 
     val paramSet = colStore.getScanSplits(dataset.ref, 1)
     paramSet should have length (1)
@@ -158,7 +158,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val rangeVectorObs = memStore.rangeVectors(dataset2.ref, lookupRes, schema2.colIDs("NumArticles").get,
                                                schema2, false,
                                                QuerySession.makeForTestingOnly)
-    val rangeVectors = rangeVectorObs.toListL.runAsync.futureValue
+    val rangeVectors = rangeVectorObs.toListL.runToFuture.futureValue
 
     rangeVectors should have length (1)
     rangeVectors.head.key.labelValues.head._1.asNewString shouldEqual "MonthYear"

@@ -201,7 +201,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                              }
     for {
       it <- Observable.fromFuture(futRawParts)
-      rpd <- Observable.fromIterator(it)
+      rpd <- Observable.fromIteratorUnsafe(it)
     } yield rpd
   }
 
@@ -244,7 +244,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     for {
       fut <- res
       it <- Observable.fromFuture(fut)
-      rpd <- Observable.fromIterator(it)
+      rpd <- Observable.fromIteratorUnsafe(it)
     } yield rpd
   }
 

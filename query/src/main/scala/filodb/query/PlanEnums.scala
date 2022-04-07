@@ -21,6 +21,7 @@ object InstantFunctionId extends Enum[InstantFunctionId] {
   case object Log10 extends InstantFunctionId("log10")
   case object Log2 extends InstantFunctionId("log2")
   case object Round extends InstantFunctionId("round")
+  case object Sgn extends InstantFunctionId("sgn")
   case object Sqrt extends InstantFunctionId("sqrt")
   case object DaysInMonth extends InstantFunctionId("days_in_month")
   case object DayOfMonth extends InstantFunctionId("day_of_month")
@@ -93,6 +94,7 @@ object AggregationOperator extends Enum[AggregationOperator] {
 
   case object Avg extends AggregationOperator("avg")
   case object Count extends AggregationOperator("count")
+  case object Group extends AggregationOperator("group")
   case object Sum extends AggregationOperator("sum")
   case object Min extends AggregationOperator("min")
   case object Max extends AggregationOperator("max")

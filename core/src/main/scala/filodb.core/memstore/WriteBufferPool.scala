@@ -43,7 +43,7 @@ class WriteBufferPool(memFactory: NativeMemoryManager,
     logger.debug(s"Allocating ${AllocStepSize} WriteBuffers....")
     // Fill queue up
     (0 until AllocStepSize).foreach { n =>
-      val builders = MemStore.getAppendables(memFactory, schema, storeConf)
+      val builders = TimeSeriesStore.getAppendables(memFactory, schema, storeConf)
       val info = ChunkSetInfo(memFactory, schema, 0, 0, 0, Long.MaxValue)
       // Point vectors in chunkset metadata to builders addresses
       cforRange { 0 until schema.columns.length } { colNo =>

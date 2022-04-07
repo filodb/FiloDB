@@ -3,6 +3,7 @@ package filodb.coordinator
 import java.lang.Thread.UncaughtExceptionHandler
 import java.util.concurrent.{ForkJoinPool, ForkJoinWorkerThread}
 
+import scala.collection.mutable
 import scala.util.control.NonFatal
 
 import akka.actor.{ActorRef, Props}
@@ -17,7 +18,8 @@ import net.ceedubs.ficus.readers.ValueReader
 
 import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
-import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
+import filodb.core.memstore.{FiloSchedulers, TermInfo, TimeSeriesStore}
+import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryStats}
 import filodb.core.store.CorruptVectorException
@@ -27,7 +29,7 @@ import filodb.query.exec.ExecPlan
 object QueryActor {
   final case class ThrowException(dataset: DatasetRef)
 
-  def props(memStore: MemStore, dataset: Dataset,
+  def props(memStore: TimeSeriesStore, dataset: Dataset,
             schemas: Schemas, shardMapFunc: => ShardMapper,
             earliestRawTimestampFn: => Long): Props =
     Props(new QueryActor(memStore, dataset, schemas,
@@ -40,7 +42,7 @@ object QueryActor {
  * The actual reading of data structures and aggregation is performed asynchronously by Observables,
  * so it is probably fine for there to be just one QueryActor per dataset.
  */
-final class QueryActor(memStore: MemStore,
+final class QueryActor(memStore: TimeSeriesStore,
                        dataset: Dataset,
                        schemas: Schemas,
                        shardMapFunc: => ShardMapper,
@@ -114,9 +116,11 @@ final class QueryActor(memStore: MemStore,
       }
     }
     val executor = new ForkJoinPool( numSchedThreads, threadFactory, exceptionHandler, true)
+
     Scheduler.apply(ExecutorInstrumentation.instrument(executor, schedName))
   }
 
+  // scalastyle:off method.length
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
     if (checkTimeout(q.queryContext, replyTo)) {
       epRequests.increment()
@@ -129,8 +133,9 @@ final class QueryActor(memStore: MemStore,
         queryExecuteSpan.tag("query-id", q.queryContext.queryId)
         val querySession = QuerySession(q.queryContext, queryConfig, catchMultipleLockSetErrors = true)
         queryExecuteSpan.mark("query-actor-received-execute-start")
-        q.execute(memStore, querySession)(queryScheduler)
-          .foreach { res =>
+        val execTask = q.execute(memStore, querySession)(queryScheduler)
+          .map { res =>
+            // below prevents from calling FiloDB directly (without Query Service)
             FiloSchedulers.assertThreadName(QuerySchedName)
             querySession.close()
             replyTo ! res
@@ -157,7 +162,9 @@ final class QueryActor(memStore: MemStore,
                 }
             }
             queryExecuteSpan.finish()
-          }(queryScheduler).recover { case ex =>
+          }
+          logger.debug(s"Will now run query execution pipeline for $q")
+          execTask.runToFuture(queryScheduler).recover { case ex =>
             querySession.close()
             // Unhandled exception in query, should be rare
             logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error," +
@@ -212,9 +219,20 @@ final class QueryActor(memStore: MemStore,
   }
 
   private def execTopkCardinalityQuery(q: GetTopkCardinality, sender: ActorRef): Unit = {
+    implicit val ord = new Ordering[CardinalityRecord]() {
+      override def compare(x: CardinalityRecord, y: CardinalityRecord): Int = {
+        if (q.addInactive) x.tsCount - y.tsCount
+          else x.activeTsCount - y.activeTsCount
+        }
+      }.reverse
     try {
-      val ret = memStore.topKCardinality(q.dataset, q.shards, q.shardKeyPrefix, q.k)
-      sender ! ret
+      val cards = memStore.scanTsCardinalities(q.dataset, q.shards, q.shardKeyPrefix, q.depth)
+      val heap = mutable.PriorityQueue[CardinalityRecord]()
+      cards.foreach { card =>
+          heap.enqueue(card)
+          if (heap.size > q.k) heap.dequeue()
+        }
+      sender ! heap.toSeq
     } catch { case e: Exception =>
       sender ! QueryError(s"Error Occurred", QueryStats(), e)
     }

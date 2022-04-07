@@ -118,9 +118,9 @@ class SplitLocalPartitionDistConcatExecSpec extends AnyFunSpec with Matchers wit
     execPlan2.addRangeVectorTransformer(new PeriodicSamplesMapper(start2, step, end2, Some(reportingInterval * 100),
       Some(InternalRangeFunction.SumOverTime), QueryContext()))
 
-    val distConcatExec = SplitLocalPartitionDistConcatExec(QueryContext(), dispacher, Seq(execPlan1, execPlan2))
+    val distConcatExec = SplitLocalPartitionDistConcatExec(QueryContext(), dispacher, Seq(execPlan1, execPlan2), None)
 
-    val resp = distConcatExec.execute(memStore, querySession).runAsync.futureValue
+    val resp = distConcatExec.execute(memStore, querySession).runToFuture.futureValue
     val result = resp.asInstanceOf[QueryResult]
     result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
     result.result.size shouldEqual 1

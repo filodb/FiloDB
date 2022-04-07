@@ -80,7 +80,7 @@ object MemStoreStress extends App {
                           // RawSeries(interval, MultiPartitionQuery(keys), Seq("trip_distance")),
                           RawSeries(interval, Nil, Seq("trip_distance")),
                           startTime, 4*3600*1000, endTime))   // start to end in four hour steps
-                   }.mapAsync(queryThreads) { plan =>
+                   }.mapParallelUnordered(queryThreads) { plan =>
                      Perftools.withTrace(Task.fromFuture(FiloExecutor.coordinatorActor ? LogicalPlan2Query(ref, plan)),
                                          "time-series-query")
                    }.delaySubscription(8 seconds)
