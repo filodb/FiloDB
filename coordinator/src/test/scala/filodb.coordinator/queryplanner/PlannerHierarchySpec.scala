@@ -91,8 +91,8 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
   private val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
     // to ensure that tests dont call something else that is not configured
-    //    require(shardColumnFilters.exists(f => f.column == "_ns_" && f.filter.isInstanceOf[EqualsRegex]
-    //      && f.filter.asInstanceOf[EqualsRegex].pattern.toString == ".*Ns"))
+        require(shardColumnFilters.exists(f => f.column == "_ns_" && f.filter.isInstanceOf[EqualsRegex]
+          && f.filter.asInstanceOf[EqualsRegex].pattern.toString == ".*Ns"))
     Seq(
       Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("localNs"))),
       Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("remoteNs")))
@@ -812,7 +812,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
                   |""".stripMargin
 
     val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(endSeconds, step, endSeconds), Antlr)
-    val execPlan = multiPartitionPlanner.materialize(
+    val execPlan = rootPlanner.materialize(
       lp, QueryContext(origQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(lp)),
         plannerParams = PlannerParams(processMultiPartition = true)))
 
