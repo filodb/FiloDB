@@ -494,11 +494,10 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       }
       val writeSkToPkFut = {
         val shardKey = shardKeyFromPartKey(pk.partKey, schemas)
-        if (shardKey.nonEmpty) {
+        if (shardKey.nonEmpty)
           skToPkTable.addMapping(shardKey, pk.partKey, diskTTLSeconds)
-        } else {
+        else
           Future(Success)
-        }
       }
       Task.fromFuture(Future.sequence(Seq(writePkFut, writeSkToPkFut))).map{ respSeq =>
         sinkStats.partKeysWrite(1)
@@ -509,7 +508,6 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       errorOpt.getOrElse(Some(Success)).get
     }.runToFuture
     ret.onComplete { _ =>
-      // TODO(a_theimer): no longer correct
       writePksLatency.record(System.currentTimeMillis() - start)
     }
     ret
@@ -533,15 +531,22 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val pkTable = getOrCreatePartitionKeysTable(ref, shard)
     val skToPkTable = getOrCreateShardKeyToPartKeyTable(ref, shard)
     val shardKey = shardKeyFromPartKey(pk, schemas)
-    // TODO(a_theimer): literally anything better than this
-    var resp = pkTable.deletePartKeyNoAsync(pk)
-    if (shardKey.nonEmpty) {
-      skToPkTable.deleteMappingNoAsync(shardKey, pk) match {
-        case er: ErrorResponse => resp = er
-        case _ => {}
-      }
+
+    def deletePartKey = {
+      Some(pkTable.deletePartKeyNoAsync(pk))
     }
-    resp
+    def deleteShardKeyMapping = {
+      if (shardKey.nonEmpty) {
+        Some(skToPkTable.deleteMappingNoAsync(shardKey, pk))
+      } else None
+    }
+
+    val deleteResps = Seq(deletePartKey, deleteShardKeyMapping)
+      .filter(_.isDefined)
+      .map(_.get)
+
+    // return the first ErrorResponse; otherwise just the first Response
+    deleteResps.find(_.isInstanceOf[ErrorResponse]).getOrElse(deleteResps.head)
   }
 
   def getPartKeysByUpdateHour(ref: DatasetRef,
@@ -666,6 +671,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   }
 
   def getOrCreateShardKeyToPartKeyTable(dataset: DatasetRef, shard: Int): ShardKeyToPartKeyTable = {
+    // TODO(a_theimer): should this be on a per-shard basis?
     val map = shardKeyToPartKeyTableCache.getOrElseUpdate(dataset, { _ =>
       concurrentCache[Int, ShardKeyToPartKeyTable](tableCacheSize)
     })

@@ -88,8 +88,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     readData3.isEmpty shouldEqual true
   }
 
-  // TODO(a_theimer): cleanup below
-  "PartKey Reads, Writes and Deletes2" should "work" in {
+  "ShardKeyToPartKeyTable Reads, Writes, and Deletes" should "work" in {
     import MetricsTestData._
 
     val dataset = timeseriesDatasetMultipleShardKeys
@@ -118,17 +117,14 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
       PartKeyRecord(bytes, 0, 0, Some(i))
     }
 
-    val shardKeyCounts = pks.foldLeft(Map[Seq[Byte], (Int, Set[Seq[Byte]])]()){ case (map, pk) =>
+    // map shardKeys to their corresponding sets of partKeys
+    val shardKeyToPartKeySet = pks.foldLeft(Map[Seq[Byte], Set[Seq[Byte]]]()){ case (map, pk) =>
       val shardKey = colStore.shardKeyFromPartKey(pk.partKey, schemas).toSeq
       val partKey = pk.partKey.toSeq
-      val (count, seen: Set[Seq[Byte]]) = map.get(shardKey).getOrElse((0, Set()))
-      if (!seen.contains(partKey)) {
-        // TODO(a_theimer): why does this only work when all are declared variables
-        val newSeen: Set[Seq[Byte]] = seen.union(Set(partKey))
-        val newCount = count + 1
-        val newTuple = (newCount, newSeen)
-        val newMap = Map(shardKey -> newTuple)
-        map.filterKeys(k => k != shardKey) ++ newMap
+      val seenKeys: Set[Seq[Byte]] = map.get(shardKey).getOrElse(Set())
+      if (!seenKeys.contains(partKey)) {
+        val mapWithNewKey = Map(shardKey -> seenKeys.union(Set(partKey)))
+        map.filterKeys(k => k != shardKey) ++ mapWithNewKey
       } else {
         map
       }
@@ -140,17 +136,20 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     colStore.writePartKeys(dataset.ref, 0, Observable.fromIterable(pks), 1.hour.toSeconds.toInt, 10, schemas, true)
       .futureValue shouldEqual Success
 
-    shardKeyCounts.map{ case (shardKey, (count, partKeySet)) =>
+    // scan for each shard key and compare against expected result set
+    shardKeyToPartKeySet.map{ case (shardKey, partKeySet) =>
       val scannedPks = colStore.scanPartKeysByShardKey(dataset.ref, 0, shardKey.toArray).toListL.runToFuture.futureValue
-      scannedPks.size shouldEqual count
+      scannedPks.size shouldEqual partKeySet.size
       scannedPks.map(_.toSeq).toSet shouldEqual partKeySet
     }
 
-    shardKeyCounts.flatMap{case (_, v) =>
-      v._2
-    }.foreach(pk => colStore.deletePartKeyNoAsync(dataset.ref, 0, pk.toArray, schemas))
+    // delete all partkeys
+    shardKeyToPartKeySet.values.flatten.foreach{pk =>
+      colStore.deletePartKeyNoAsync(dataset.ref, 0, pk.toArray, schemas)
+    }
 
-    shardKeyCounts.map{ case (shardKey, (count, partKeySet)) =>
+    // make sure shardKey scans all return empty result
+    shardKeyToPartKeySet.keys.foreach{ shardKey =>
       val scannedPks = colStore.scanPartKeysByShardKey(dataset.ref, 0, shardKey.toArray).toListL.runToFuture.futureValue
       scannedPks.isEmpty shouldEqual true
     }
