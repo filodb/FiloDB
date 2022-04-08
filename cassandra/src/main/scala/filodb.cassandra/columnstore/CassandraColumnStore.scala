@@ -585,7 +585,8 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   val partKeysByUTTableCache = concurrentCache[DatasetRef, PartitionKeysByUpdateTimeTable](tableCacheSize)
   val partitionKeysTableCache = concurrentCache[DatasetRef,
                                   ConcurrentLinkedHashMap[Int, PartitionKeysTable]](tableCacheSize)
-  val shardKeyToPartKeyTableCache = concurrentCache[DatasetRef, ShardKeyToPartKeyTable](tableCacheSize)
+  val shardKeyToPartKeyTableCache = concurrentCache[DatasetRef,
+                                      ConcurrentLinkedHashMap[Int, ShardKeyToPartKeyTable]](tableCacheSize)
 
   protected val clusterConnector = new FiloCassandraConnector {
     def config: Config = cassandraConfig
@@ -665,8 +666,12 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   }
 
   def getOrCreateShardKeyToPartKeyTable(dataset: DatasetRef, shard: Int): ShardKeyToPartKeyTable = {
-    shardKeyToPartKeyTableCache.getOrElseUpdate(dataset, { dataset: DatasetRef =>
-      new ShardKeyToPartKeyTable(dataset, shard, clusterConnector, ingestionConsistencyLevel)(readEc) })
+    val map = shardKeyToPartKeyTableCache.getOrElseUpdate(dataset, { _ =>
+      concurrentCache[Int, ShardKeyToPartKeyTable](tableCacheSize)
+    })
+    map.getOrElseUpdate(shard, { shard: Int =>
+      new ShardKeyToPartKeyTable(dataset, shard, clusterConnector, ingestionConsistencyLevel)(readEc)
+    })
   }
 
   def reset(): Unit = {}

@@ -16,7 +16,7 @@ sealed class ShardKeyToPartKeyTable(val dataset: DatasetRef,
 
   import filodb.cassandra.Util._
 
-  val suffix = s"shardKeyTopartKey_$shard"
+  val suffix = s"shardKeyToPartKey_$shard"
 
   // TODO(a_theimer): compression settings okay?
   // TODO(a_theimer): probably need to prevent hot-spotting on a single node
