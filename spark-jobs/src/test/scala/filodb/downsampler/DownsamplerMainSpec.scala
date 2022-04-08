@@ -110,6 +110,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   it ("should write untyped data to cassandra") {
 
     val rawDataset = Dataset("prometheus", Schemas.untyped)
+    val schemas = Schemas(rawDataset.schema)
 
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val partKey = partBuilder.partKeyFromObjects(Schemas.untyped, untypedName, seriesTags)
@@ -145,12 +146,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(untypedPartKeyBytes, 74372801000L, currTime, Some(150))
-    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, ).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, schemas).futureValue
   }
 
   it ("should write gauge data to cassandra") {
 
     val rawDataset = Dataset("prometheus", Schemas.gauge)
+    val schemas = Schemas(rawDataset.schema)
 
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val partKey = partBuilder.partKeyFromObjects(Schemas.gauge, gaugeName, seriesTags)
@@ -186,12 +188,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(gaugePartKeyBytes, 74372801000L, currTime, Some(150))
-    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, ).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, schemas).futureValue
   }
 
   it ("should write low freq gauge data to cassandra") {
 
     val rawDataset = Dataset("prometheus", Schemas.gauge)
+    val schemas = Schemas(rawDataset.schema)
 
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val partKey = partBuilder.partKeyFromObjects(Schemas.gauge, gaugeLowFreqName, seriesTags)
@@ -225,12 +228,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(gaugeLowFreqPartKeyBytes, 74372801000L, currTime, Some(150))
-    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, ).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, schemas).futureValue
   }
 
   it ("should write prom counter data to cassandra") {
 
     val rawDataset = Dataset("prometheus", Schemas.promCounter)
+    val schemas = Schemas(rawDataset.schema)
 
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val partKey = partBuilder.partKeyFromObjects(Schemas.promCounter, counterName, seriesTags)
@@ -270,12 +274,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(counterPartKeyBytes, 74372801000L, currTime, Some(1))
-    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, ).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, schemas).futureValue
   }
 
   it ("should write prom histogram data to cassandra") {
 
     val rawDataset = Dataset("prometheus", Schemas.promHistogram)
+    val schemas = Schemas(rawDataset.schema)
 
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val partKey = partBuilder.partKeyFromObjects(Schemas.promHistogram, histName, seriesTags)
@@ -316,12 +321,13 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(histPartKeyBytes, 74372801000L, currTime, Some(199))
-    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, ).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, schemas).futureValue
   }
 
   it ("should write prom histogram data with NaNs to cassandra") {
 
     val rawDataset = Dataset("prometheus", Schemas.promHistogram)
+    val schemas = Schemas(rawDataset.schema)
 
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val partKey = partBuilder.partKeyFromObjects(Schemas.promHistogram, histNameNaN, seriesTagsNaN)
@@ -366,7 +372,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     rawColStore.write(rawDataset.ref, Observable.fromIteratorUnsafe(chunks)).futureValue
     val pk = PartKeyRecord(histNaNPartKeyBytes, 74372801000L, currTime, Some(199))
-    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, ).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour, schemas).futureValue
   }
 
   val numShards = dsIndexJobSettings.numShards
@@ -377,10 +383,12 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
   it("should simulate bulk part key records being written into raw for migration") {
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
-    val schemas = Seq(Schemas.promHistogram, Schemas.gauge, Schemas.promCounter)
+    val schemaSeq = Seq(Schemas.promHistogram, Schemas.gauge, Schemas.promCounter)
+    // TODO(a_theimer): remove this?
+    val dummySchemas = Schemas(Schemas.untyped)
     case class PkToWrite(pkr: PartKeyRecord, shard: Int, updateHour: Long)
     val pks = for { i <- 0 to 10000 } yield {
-      val schema = schemas(i % schemas.size)
+      val schema = schemaSeq(i % schemaSeq.size)
       val partKey = partBuilder.partKeyFromObjects(schema, s"bulkmetric$i", bulkSeriesTags)
       val bytes = schema.partKeySchema.asByteArray(UnsafeUtils.ZeroPointer, partKey)
       PkToWrite(PartKeyRecord(bytes, i, i + 500, Some(-i)), i % numShards,
@@ -389,7 +397,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     val rawDataset = Dataset("prometheus", Schemas.promHistogram)
     pks.groupBy(k => (k.shard, k.updateHour)).foreach { case ((shard, updHour), shardPks) =>
-      rawColStore.writePartKeys(rawDataset.ref, shard, Observable.fromIterable(shardPks).map(_.pkr), 259200, updHour, ).futureValue
+      rawColStore.writePartKeys(rawDataset.ref, shard, Observable.fromIterable(shardPks).map(_.pkr), 259200, updHour, dummySchemas).futureValue
     }
   }
 

@@ -141,7 +141,8 @@ class PartitionKeysCopierSpec extends AnyFunSpec with Matchers with BeforeAndAft
     val shardStats = new TimeSeriesShardStats(dataset.ref, -1)
 
     def writePartKeys(pk: PartKeyRecord, shard: Int): Unit = {
-      colStore.writePartKeys(dataset.ref, shard, Observable.now(pk), 259200, 0L, , false).futureValue
+      val dummySchemas = Schemas(Schemas.untyped)
+      colStore.writePartKeys(dataset.ref, shard, Observable.now(pk), 259200, 0L, dummySchemas, false).futureValue
     }
 
     def tsPartition(schema: Schema,

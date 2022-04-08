@@ -83,7 +83,7 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
       willDelete
     }.foreach { pk =>
       try {
-        if (!isSimulation) colStore.deletePartKeyNoAsync(dataset, shard, pk.partKey)
+        if (!isSimulation) colStore.deletePartKeyNoAsync(dataset, shard, pk.partKey, schemas)
         numPartKeysDeleted.increment()
         numDeleted += 1
       } catch { case e: Exception =>
