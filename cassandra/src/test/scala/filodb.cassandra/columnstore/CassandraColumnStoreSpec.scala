@@ -14,7 +14,7 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.store.{ChunkSet, ChunkSetInfo, ColumnStoreSpec, PartKeyRecord}
 import filodb.memory.{BinaryRegionLarge, NativeMemoryManager}
-import filodb.memory.format.{TupleRowReader, UnsafeUtils}
+import filodb.memory.format.{SeqRowReader, TupleRowReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
 
 
@@ -86,6 +86,74 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
 
     val readData3 = colStore.scanPartKeys(dataset, 0).toListL.runToFuture.futureValue
     readData3.isEmpty shouldEqual true
+  }
+
+  // TODO(a_theimer): cleanup below
+  "PartKey Reads, Writes and Deletes2" should "work" in {
+    import MetricsTestData._
+
+    val dataset = timeseriesDatasetMultipleShardKeys
+    val schemas = Schemas(dataset.schema.partition, Map("timeseries" -> dataset.schema))
+
+    // ws, ns, metric triplets
+    val shardKeys = Seq(
+      Seq("ws1", "ns1", "metric1"),
+      Seq("ws1", "ns1", "metric1"),  // same as above
+      Seq("ws1", "ns1", "metric2"),  // same as above, different metric
+      Seq("ws1", "ns2", "metric1"),
+      Seq("ws2", "ns1", "metric1"),
+      Seq("ws2", "ns2", "metric1"),
+    )
+
+    val rows = shardKeys.zipWithIndex.map{ case (key, i) =>
+      val keyMap = Seq("_ws_", "_ns_", "_metric_")
+        .zip(key)
+        .map{ case (k, v) => (k.utf8, v.utf8)}
+        .toMap
+      SeqRowReader(Seq(i.toLong, i.toDouble, keyMap))
+    }
+
+    val pks = partKeyFromRecords(dataset, records(dataset, rows)).zipWithIndex.map { case (pk, i) =>
+      val bytes = dataset.schema.partKeySchema.asByteArray(pk)
+      PartKeyRecord(bytes, 0, 0, Some(i))
+    }
+
+    val shardKeyCounts = pks.foldLeft(Map[Seq[Byte], (Int, Set[Seq[Byte]])]()){ case (map, pk) =>
+      val shardKey = colStore.shardKeyFromPartKey(pk.partKey, schemas).toSeq
+      val partKey = pk.partKey.toSeq
+      val (count, seen: Set[Seq[Byte]]) = map.get(shardKey).getOrElse((0, Set()))
+      if (!seen.contains(partKey)) {
+        // TODO(a_theimer): why does this only work when all are declared variables
+        val newSeen: Set[Seq[Byte]] = seen.union(Set(partKey))
+        val newCount = count + 1
+        val newTuple = (newCount, newSeen)
+        val newMap = Map(shardKey -> newTuple)
+        map.filterKeys(k => k != shardKey) ++ newMap
+      } else {
+        map
+      }
+    }
+
+    colStore.initialize(dataset.ref, 1).futureValue
+    colStore.truncate(dataset.ref, 1).futureValue
+
+    colStore.writePartKeys(dataset.ref, 0, Observable.fromIterable(pks), 1.hour.toSeconds.toInt, 10, schemas, true)
+      .futureValue shouldEqual Success
+
+    shardKeyCounts.map{ case (shardKey, (count, partKeySet)) =>
+      val scannedPks = colStore.scanPartKeysByShardKey(dataset.ref, 0, shardKey.toArray).toListL.runToFuture.futureValue
+      scannedPks.size shouldEqual count
+      scannedPks.map(_.toSeq).toSet shouldEqual partKeySet
+    }
+
+    shardKeyCounts.flatMap{case (_, v) =>
+      v._2
+    }.foreach(pk => colStore.deletePartKeyNoAsync(dataset.ref, 0, pk.toArray, schemas))
+
+    shardKeyCounts.map{ case (shardKey, (count, partKeySet)) =>
+      val scannedPks = colStore.scanPartKeysByShardKey(dataset.ref, 0, shardKey.toArray).toListL.runToFuture.futureValue
+      scannedPks.isEmpty shouldEqual true
+    }
   }
 
   "copyOrDeleteChunksByIngestionTimeRange" should "actually work" in {
