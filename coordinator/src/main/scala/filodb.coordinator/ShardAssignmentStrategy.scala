@@ -47,6 +47,8 @@ class K8sStatefulSetShardAssignmentStrategy(useHostNameToResolveShards: Boolean)
 
   private val pat = "-\\d+$".r
 
+  logger.info("flag useHostNameToResolveShards is set to {}", useHostNameToResolveShards)
+
   private def getOrdinalFromActorRef(coord: ActorRef): Option[(String, Int)] = {
     // if hostname is None from coordinator actor path, then its a local actor
     // If the host name does not contain an ordinal at the end (e.g filodb-host-0, filodb-host-10), it will match None
@@ -74,8 +76,9 @@ class K8sStatefulSetShardAssignmentStrategy(useHostNameToResolveShards: Boolean)
         case None                      =>
           // Host name does not have the ordinal at the end like a stateful set needs to have, delegate to default
           //strategy
-          logger.debug(
-            "Falling back to DefaultShardAssignmentStrategy as hostname does not match k8s StatefulSet convention")
+          logger.info(
+            "Falling back to DefaultShardAssignmentStrategy as hostname does not match k8s StatefulSet convention" +
+              " for coordinator {}", coord.path.address.host.getOrElse(InetAddress.getLocalHost.getHostName))
           DefaultShardAssignmentStrategy.shardAssignments(coord, dataset, resources, mapper)
       }
     } else
