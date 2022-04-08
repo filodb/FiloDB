@@ -67,7 +67,15 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     } else walkLogicalPlanTree(logicalPlan, qContext).plans.head
   }
 
-  def hasRequiredShardKeysPresent(nonMetricShardKeyFilters: Seq[Seq[ColumnFilter]],
+
+  /**
+   * Checks if all the nonMetricShardKeyFilters are wither empty or have the required shard columns in them.
+   *
+   * @param nonMetricShardKeyFilters The leaf level plan's shard key columns
+   * @param nonMetricShardColumns The required shard key columns defined in the schema
+   * @return true of all nonMetricShardKeyFilters are either empty or have the shard key columns
+   */
+  private def hasRequiredShardKeysPresent(nonMetricShardKeyFilters: Seq[Seq[ColumnFilter]],
                                   nonMetricShardColumns: Seq[String]): Boolean = {
     val nonMetricShardColumnsSet = nonMetricShardColumns.toSet
     nonMetricShardKeyFilters.forall { filterGroup =>
