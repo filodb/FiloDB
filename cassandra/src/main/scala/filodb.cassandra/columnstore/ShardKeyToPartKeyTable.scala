@@ -1,10 +1,12 @@
 package filodb.cassandra.columnstore
 
 import scala.concurrent.{ExecutionContext, Future}
+
 import com.datastax.driver.core.{ConsistencyLevel}
+import monix.reactive.Observable
+
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core.{DatasetRef, Response}
-import monix.reactive.Observable
 
 sealed class ShardKeyToPartKeyTable(val dataset: DatasetRef,
                                     val shard: Int,

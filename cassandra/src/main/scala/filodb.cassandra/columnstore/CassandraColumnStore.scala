@@ -3,9 +3,11 @@ package filodb.cassandra.columnstore
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.util.concurrent.TimeUnit
+
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
+
 import com.datastax.driver.core.{ConsistencyLevel, Metadata, Session, TokenRange}
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
 import com.typesafe.config.Config
@@ -15,14 +17,15 @@ import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
+
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
+import filodb.core.ErrorResponse
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Schemas
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge
 import filodb.memory.format.UnsafeUtils
-import filodb.core.ErrorResponse
 
 /**
  * Implementation of a column store using Apache Cassandra tables.
