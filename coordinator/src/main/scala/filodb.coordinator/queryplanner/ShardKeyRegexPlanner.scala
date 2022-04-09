@@ -75,7 +75,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
    * @param nonMetricShardColumns The required shard key columns defined in the schema
    * @return true of all nonMetricShardKeyFilters are either empty or have the shard key columns
    */
-  private def hasRequiredShardKeysPresent(nonMetricShardKeyFilters: Seq[Seq[ColumnFilter]],
+  private[queryplanner] def hasRequiredShardKeysPresent(nonMetricShardKeyFilters: Seq[Seq[ColumnFilter]],
                                   nonMetricShardColumns: Seq[String]): Boolean = {
     val nonMetricShardColumnsSet = nonMetricShardColumns.toSet
     nonMetricShardKeyFilters.forall { filterGroup =>
