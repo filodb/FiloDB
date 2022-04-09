@@ -343,6 +343,23 @@ final case class Schemas(part: PartitionSchema,
   }
 
   /**
+   * Returns the partition key's shard key bytes.
+   */
+  def shardKeyFromPartKey(partKey: Array[Byte]): Array[Byte] = {
+    val schemaId = RecordSchema.schemaID(partKey)
+    if (schemaId == -1) {
+      return Array.emptyByteArray
+    }
+    val schema = this(schemaId)
+    if (schema == null) {
+      return Array.emptyByteArray
+    }
+    val nonMetricShardKeyCols = schema.options.nonMetricShardColumns
+    part.binSchema.colValues(partKey, UnsafeUtils.arayOffset, nonMetricShardKeyCols)
+      .flatMap(_.getBytes).toArray  // TODO(a_theimer): this is wildly inefficient
+  }
+
+  /**
    * Returns the Schema for a given schemaID, or UnknownSchema if not found
    */
   final def apply(id: Int): Schema = _schemas(id)

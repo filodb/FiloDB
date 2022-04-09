@@ -21,11 +21,9 @@ import monix.reactive.Observable
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
 import filodb.core.ErrorResponse
-import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Schemas
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge
-import filodb.memory.format.UnsafeUtils
 
 /**
  * Implementation of a column store using Apache Cassandra tables.
@@ -459,21 +457,6 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 //    }
   }
 
-  // TODO(a_theimer): should be private, but used in test-- generalize and move to util class?
-  def shardKeyFromPartKey(partKey: Array[Byte], schemas: Schemas): Array[Byte] = {
-    val schemaId = RecordSchema.schemaID(partKey)
-    if (schemaId == -1) {
-      return Array.emptyByteArray
-    }
-    val schema = schemas(schemaId)
-    if (schema == null) {
-      return Array.emptyByteArray
-    }
-    val nonMetricShardKeyCols = schema.options.nonMetricShardColumns
-    schemas.part.binSchema.colValues(partKey, UnsafeUtils.arayOffset, nonMetricShardKeyCols)
-      .flatMap(_.getBytes).toArray  // TODO(a_theimer): this is wildly inefficient
-  }
-
   def writePartKeys(ref: DatasetRef, shard: Int, partKeys: Observable[PartKeyRecord],
                     diskTTLSeconds: Long, updateHour: Long, schemas: Schemas,
                     writeToPkUTTable: Boolean = true): Future[Response] = {
@@ -493,7 +476,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
           Future.successful(resp)
       }
       val writeSkToPkFut = {
-        val shardKey = shardKeyFromPartKey(pk.partKey, schemas)
+        val shardKey = schemas.shardKeyFromPartKey(pk.partKey)
         if (shardKey.nonEmpty)
           skToPkTable.addMapping(shardKey, pk.partKey, diskTTLSeconds)
         else
@@ -530,7 +513,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                            schemas: Schemas): Response = {
     val pkTable = getOrCreatePartitionKeysTable(ref, shard)
     val skToPkTable = getOrCreateShardKeyToPartKeyTable(ref, shard)
-    val shardKey = shardKeyFromPartKey(pk, schemas)
+    val shardKey = schemas.shardKeyFromPartKey(pk)
 
     def deletePartKey = {
       Some(pkTable.deletePartKeyNoAsync(pk))

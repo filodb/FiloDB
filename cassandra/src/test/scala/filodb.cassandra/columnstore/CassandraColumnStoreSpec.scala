@@ -119,7 +119,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
 
     // map shardKeys to their corresponding sets of partKeys
     val shardKeyToPartKeySet = pks.foldLeft(Map[Seq[Byte], Set[Seq[Byte]]]()){ case (map, pk) =>
-      val shardKey = colStore.shardKeyFromPartKey(pk.partKey, schemas).toSeq
+      val shardKey = schemas.shardKeyFromPartKey(pk.partKey).toSeq
       val partKey = pk.partKey.toSeq
       val seenKeys: Set[Seq[Byte]] = map.get(shardKey).getOrElse(Set())
       if (!seenKeys.contains(partKey)) {
