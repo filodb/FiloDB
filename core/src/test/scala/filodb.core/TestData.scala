@@ -548,10 +548,8 @@ object MetricsTestData {
     }
   }
 
-  // Routes input records to the dataset schema correctly
   def records(ds: Dataset, readerSeq: Seq[RowReader]): SomeData = {
     val builder = new RecordBuilder(MemFactory.onHeapFactory)
-    //val routing = ds.schema.ingestRouting(columnNames)
     readerSeq.foreach { row => builder.addFromReader(row, ds.schema) }
     builder.allContainers.zipWithIndex.map { case (container, i) => SomeData(container, i) }.head
   }

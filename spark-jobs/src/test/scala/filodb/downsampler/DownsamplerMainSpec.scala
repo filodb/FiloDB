@@ -384,8 +384,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   it("should simulate bulk part key records being written into raw for migration") {
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val schemaSeq = Seq(Schemas.promHistogram, Schemas.gauge, Schemas.promCounter)
-    // TODO(a_theimer): remove this?
-    val dummySchemas = Schemas(Schemas.untyped)
+    val dummySchemas = Schemas(Schemas.untyped)  // doesn't matter for the sake of this test
     case class PkToWrite(pkr: PartKeyRecord, shard: Int, updateHour: Long)
     val pks = for { i <- 0 to 10000 } yield {
       val schema = schemaSeq(i % schemaSeq.size)
