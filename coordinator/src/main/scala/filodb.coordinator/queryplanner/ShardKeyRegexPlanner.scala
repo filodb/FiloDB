@@ -67,15 +67,22 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     } else walkLogicalPlanTree(logicalPlan, qContext).plans.head
   }
 
-  def hasRequiredShardKeysPresent(nonMetricShardKeyFilters: Seq[Seq[ColumnFilter]],
+
+  /**
+   * Checks if all the nonMetricShardKeyFilters are wither empty or have the required shard columns in them.
+   *
+   * @param nonMetricShardKeyFilters The leaf level plan's shard key columns
+   * @param nonMetricShardColumns The required shard key columns defined in the schema
+   * @return true of all nonMetricShardKeyFilters are either empty or have the shard key columns
+   */
+  private[queryplanner] def hasRequiredShardKeysPresent(nonMetricShardKeyFilters: Seq[Seq[ColumnFilter]],
                                   nonMetricShardColumns: Seq[String]): Boolean = {
     val nonMetricShardColumnsSet = nonMetricShardColumns.toSet
-    nonMetricShardKeyFilters.foreach(filterGroup => {
-      val columnNames = filterGroup.map(_.column)
-      if (!nonMetricShardColumnsSet.subsetOf(columnNames.toSet)) return false
-    })
-    true
+    nonMetricShardKeyFilters.forall { filterGroup =>
+      filterGroup.isEmpty || nonMetricShardColumnsSet.subsetOf(filterGroup.map(_.column).toSet)
+    }
   }
+
 
   def isMetadataQuery(logicalPlan: LogicalPlan): Boolean = {
     logicalPlan match {
@@ -86,7 +93,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   }
 
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
-                          qContext: QueryContext): PlanResult = {
+                                   qContext: QueryContext): PlanResult = {
     logicalPlan match {
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplyInstantFunction        => materializeApplyInstantFunction(qContext, lp)
@@ -165,12 +172,12 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     // there are any, the provided aggregation needs to be done using inProcess, else we can materialize the aggregate
     // using the wrapped planner
     val plan = if (LogicalPlanUtils.hasDescendantAggregate(aggregate.vectors)) {
-        val childPlan = materialize(aggregate.vectors, queryContext)
-        // We are here because we have descendent aggregate, if that was multi-partition, the dispatcher will
-        // be InProcessPlanDispatcher and adding the current aggregate using addAggregate will use the same dispatcher
-        // If the underlying plan however is not multi partition, adding the aggregator using addAggregator will
-        // use the same dispatcher
-        addAggregator(aggregate, queryContext, PlanResult(Seq(childPlan)))
+      val childPlan = materialize(aggregate.vectors, queryContext)
+      // We are here because we have descendent aggregate, if that was multi-partition, the dispatcher will
+      // be InProcessPlanDispatcher and adding the current aggregate using addAggregate will use the same dispatcher
+      // If the underlying plan however is not multi partition, adding the aggregator using addAggregator will
+      // use the same dispatcher
+      addAggregator(aggregate, queryContext, PlanResult(Seq(childPlan)))
     } else {
       val execPlans = generateExecWithoutRegex(aggregate,
         LogicalPlan.getNonMetricShardKeyFilters(aggregate, dataset.options.nonMetricShardColumns).head, queryContext)
@@ -179,7 +186,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
         if (aggregate.operator.equals(AggregationOperator.TopK)
           || aggregate.operator.equals(AggregationOperator.BottomK)
           || aggregate.operator.equals(AggregationOperator.CountValues))
-              throw new UnsupportedOperationException(s"Shard Key regex not supported for ${aggregate.operator}")
+          throw new UnsupportedOperationException(s"Shard Key regex not supported for ${aggregate.operator}")
         else {
           val reducer = MultiPartitionReduceAggregateExec(queryContext, inProcessPlanDispatcher,
             execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]), aggregate.operator, aggregate.params)
