@@ -1,11 +1,9 @@
 package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration._
-
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchemaChange, TargetSchemaProvider}
@@ -21,6 +19,10 @@ import filodb.query.InstantFunctionId.HistogramBucket
 import filodb.query.LogicalPlan._
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
 import filodb.query.exec.InternalRangeFunction.Last
+
+
+import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 
 object SingleClusterPlanner {
   private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests").withoutTags
@@ -301,7 +303,8 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
   // scalastyle:on cyclomatic.complexity
 
-  override def materializeBinaryJoin(qContext: QueryContext,
+  // TODO(a_theimer): rename
+  private def materializeBinaryJoinOld(qContext: QueryContext,
                                      lp: BinaryJoin): PlanResult = {
     val lhs = walkLogicalPlanTree(lp.lhs, qContext)
     val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext,
@@ -331,6 +334,150 @@ class SingleClusterPlanner(val dataset: Dataset,
         LogicalPlanUtils.renameLabels(lp.include, dsOptions.metricColumn), dsOptions.metricColumn, rvRangeFromPlan(lp)))
 
     PlanResult(joined)
+  }
+
+  // TODO(a_theimer): refactor/rename/move
+  private def getRawSeriesTargetSchemaCols(lp: RawSeries,
+                                           tsp: TargetSchemaProvider): Seq[String] = {
+    // TODO(a_theimer): declaration required?
+    val opt: Option[(Long, Long)] = lp.rangeSelector match {
+      // TODO(a_theimer): other selectors
+      // TODO(a_theimer): label and double-check units
+      case IntervalSelector(from, to) => Some((from, to))
+      case _ => None
+    }
+    opt.map{ case (from, to) =>
+      val changes = tsp.targetSchemaFunc(lp.filters)
+      findTargetSchema(changes, from, to).map(_.schema).getOrElse(Nil)
+    }.getOrElse(Nil)
+  }
+
+  // TODO(a_theimer): tsp should be removed (and field/arg tsp should be reconciled)
+  private def getTargetSchemaCols(lp: LogicalPlan,
+                                  tsp: TargetSchemaProvider): Seq[Seq[String]] = {
+    lp match {
+      case rs: RawSeries => Seq(getRawSeriesTargetSchemaCols(rs, tsp))
+      case nl: NonLeafLogicalPlan => nl.children.flatMap(getTargetSchemaCols(_, tsp))
+      case _ => throw new RuntimeException("TODO(a_theimer)")
+    }
+  }
+
+  // TODO(a_theimer): move/rename/refactor
+  private def joinColsPreserveTargetSchema(lp: LogicalPlan,
+                                           tsCols: Seq[String]): Boolean = {
+    lp match {
+      case join: BinaryJoin => {
+        // TODO(a_theimer): probably pass sets around instead of seqs
+        val noneIgnored = tsCols.toSet.intersect(join.ignoring.toSet).isEmpty
+        // TODO(a_theimer): included/on?
+        val allIncluded = tsCols.toSet.subsetOf(join.on.toSet)
+        if (noneIgnored && allIncluded) {
+          joinColsPreserveTargetSchema(join.lhs, tsCols) && joinColsPreserveTargetSchema(join.rhs, tsCols)
+        } else false
+      }
+      case nl: NonLeafLogicalPlan => {
+        nl.children.forall(joinColsPreserveTargetSchema(_, tsCols))
+      }
+      case _ => {
+        // TODO(a_theimer): add LeafLogicalPlan type?
+        // must be a leaf plan, since above case did not trip
+        true
+      }
+    }
+  }
+
+
+  // TODO(a_theimer): rename/refactor/document
+  private def materializeBinaryJoinPushdown(qContext: QueryContext,
+                                            lp: BinaryJoin): PlanResult = {
+    // TODO(a_theimer): probably a bunch of assertions here
+    val lhs = walkLogicalPlanTree(lp.lhs, qContext)
+    val rhs = walkLogicalPlanTree(lp.rhs, qContext)
+
+    // TODO(a_theimer): remove this and/or handle stitching here
+    assert(!lhs.needsStitch && !rhs.needsStitch)
+
+    // TODO(a_theimer): stitch? (also probably doesn't need separate method)
+    PlanResult(makePushdownJoins(lp, lhs.plans, rhs.plans, qContext))
+  }
+
+  // TODO(a_theimer): rename/refactor/document
+  private def sameShard(ep: ExecPlan): Option[Int] = {
+    ep match {
+      case mspe: MultiSchemaPartitionsExec => Some(mspe.shard)
+      case nl: NonLeafExecPlan => {
+        val refShard = sameShard(nl.children.head)
+        if (refShard.isDefined){
+          val allChildrenSame = nl.children.drop(1).map(sameShard(_)).find(_ != refShard).isEmpty
+          if (allChildrenSame){
+            return refShard
+          }
+        }
+        None
+      }
+      case _ => throw new RuntimeException("TODO(a_theimer)")
+    }
+  }
+
+  // TODO(a_theimer)
+  // scalastyle:off
+  private def makePushdownJoins(plan: BinaryJoin,
+                                lhs: Seq[ExecPlan],
+                                rhs: Seq[ExecPlan],
+                                queryContext: QueryContext): Seq[ExecPlan] = {
+
+    val lhsShardMap = new mutable.HashMap[Int, mutable.ArrayBuffer[ExecPlan]]
+    val rhsShardMap = new mutable.HashMap[Int, mutable.ArrayBuffer[ExecPlan]]
+    lhs.map(ep => (ep, sameShard(ep)))
+      .filter(_._2.isDefined)
+      .foreach{ case (plan, shard) =>
+        lhsShardMap.getOrElseUpdate(shard.get, new ArrayBuffer[ExecPlan]()).append(plan)
+      }
+    rhs.map(ep => (ep, sameShard(ep)))
+      .filter(_._2.isDefined)
+      .foreach{ case (plan, shard) =>
+        rhsShardMap.getOrElseUpdate(shard.get, new ArrayBuffer[ExecPlan]()).append(plan)
+      }
+
+    val joinPairs = lhsShardMap.keySet.intersect(rhsShardMap.keySet).map{ shard =>
+      (lhsShardMap(shard), rhsShardMap(shard))
+    }.toSeq
+
+    // TODO(a_theimer): stitch lhs/rhs?
+    joinPairs.map{ case (lhsPlans, rhsPlans) =>
+      val targetActor = PlannerUtil.pickDispatcher(lhsPlans ++ rhsPlans)
+      plan.operator match {
+        case _: SetOperator => exec.SetOperatorExec(queryContext, targetActor, lhsPlans, rhsPlans, plan.operator,
+          LogicalPlanUtils.renameLabels(plan.on, dsOptions.metricColumn),
+          LogicalPlanUtils.renameLabels(plan.ignoring, dsOptions.metricColumn), dsOptions.metricColumn,
+          rvRangeFromPlan(plan))
+        case _ => BinaryJoinExec(queryContext, targetActor, lhsPlans, rhsPlans, plan.operator, plan.cardinality,
+          LogicalPlanUtils.renameLabels(plan.on, dsOptions.metricColumn),
+          LogicalPlanUtils.renameLabels(plan.ignoring, dsOptions.metricColumn),
+          LogicalPlanUtils.renameLabels(plan.include, dsOptions.metricColumn), dsOptions.metricColumn, rvRangeFromPlan(plan))
+      }
+    }
+  }
+
+
+  override def materializeBinaryJoin(qContext: QueryContext,
+                                     lp: BinaryJoin): PlanResult = {
+    // (1) get target schemas for all leaves. If all match, proceed.
+    if (qContext.plannerParams.targetSchema.isDefined) {
+      val targetSchemas = getTargetSchemaCols(lp, qContext.plannerParams.targetSchema.get)
+      lazy val allSame = {
+        val refColSet = targetSchemas.head.toSet
+        // TODO(a_theimer): does column order matter?
+        targetSchemas.drop(1).find(_.toSet != refColSet).isDefined
+      }
+      // (2) make sure all child joins preserve ts columns. If yes, proceed.
+      // (3) [after 1 and 2]: figure out how to implement CommonDispatcherOpt TODO(a_theimer)
+      lazy val colsPreserved = joinColsPreserveTargetSchema(lp, targetSchemas.head)
+      if (allSame && colsPreserved) {
+        return materializeBinaryJoinPushdown(qContext, lp)
+      }
+    }
+    materializeBinaryJoinOld(qContext, lp)
   }
 
   private def materializePeriodicSeriesWithWindowing(qContext: QueryContext,
