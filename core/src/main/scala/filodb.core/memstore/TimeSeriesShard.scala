@@ -1475,6 +1475,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
+  // scalastyle:off method.length
   private[memstore] def evictPartitions(numPartsToEvict: Int): Boolean = {
     assertThreadName(IngestSchedName)
     val partIdsToEvict = partitionsToEvict(numPartsToEvict)
@@ -1527,6 +1528,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     shardStats.partitionsEvicted.increment(numPartsEvicted)
     true
   }
+  // scalastyle:on method.length
 
   private def partitionsToEvict(numPartsToEvict: Int): debox.Buffer[Int] = {
     val partIdsToEvict = debox.Buffer.ofSize[Int](numPartsToEvict)
