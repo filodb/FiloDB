@@ -89,7 +89,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     }
   }
 
-  override def walkLogicalPlanTree(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
+  override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
+                                   qContext: QueryContext,
+                                   forceInProcess: Boolean = false): PlanResult = {
     // Should avoid this asInstanceOf, far many places where we do this now.
     val params = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     // MultiPartitionPlanner has capability to stitch across time partitions, however, the logic is mostly broken
