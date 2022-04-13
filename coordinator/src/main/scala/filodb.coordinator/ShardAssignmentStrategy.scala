@@ -42,8 +42,7 @@ trait ShardAssignmentStrategy {
  * The implementation assumes the number of shards is a multiple of number of nodes and there are no
  * uneven assignments of shards to nodes
  */
-class K8sStatefulSetShardAssignmentStrategy(useHostNameToResolveShards: Boolean)
-  extends ShardAssignmentStrategy with StrictLogging {
+object K8sStatefulSetShardAssignmentStrategy extends ShardAssignmentStrategy with StrictLogging {
 
   private val pat = "-\\d+$".r
 
@@ -61,8 +60,7 @@ class K8sStatefulSetShardAssignmentStrategy(useHostNameToResolveShards: Boolean)
   override def shardAssignments(coord: ActorRef,
                                 dataset: DatasetRef,
                                 resources: DatasetResourceSpec,
-                                mapper: ShardMapper): Seq[Int] = {
-    if (useHostNameToResolveShards) {
+                                mapper: ShardMapper): Seq[Int] =
       getOrdinalFromActorRef(coord) match {
         case Some((hostName, ordinal)) =>
           val numShardsPerHost = resources.numShards / resources.minNumNodes
@@ -81,15 +79,11 @@ class K8sStatefulSetShardAssignmentStrategy(useHostNameToResolveShards: Boolean)
               " for coordinator {}", coord.path.address.host.getOrElse(InetAddress.getLocalHost.getHostName))
           DefaultShardAssignmentStrategy.shardAssignments(coord, dataset, resources, mapper)
       }
-    } else
-      DefaultShardAssignmentStrategy.shardAssignments(coord, dataset, resources, mapper)
-  }
 
   override def remainingCapacity(coord: ActorRef,
                                  dataset: DatasetRef,
                                  resources: DatasetResourceSpec,
-                                 mapper: ShardMapper): Int = {
-    if (useHostNameToResolveShards) {
+                                 mapper: ShardMapper): Int =
       getOrdinalFromActorRef(coord) match {
         // Host name has the ordinal at the end, we can thus use the logic we use for stateful sets
         // Difference between fixed number of shards the coordinator can take and those currently assigned
@@ -97,10 +91,6 @@ class K8sStatefulSetShardAssignmentStrategy(useHostNameToResolveShards: Boolean)
         // Flag to resolve shards using hostname set but hostname does not follow stateful set hostname pattern
         case None     => DefaultShardAssignmentStrategy.remainingCapacity(coord, dataset, resources, mapper)
       }
-    } else {
-      DefaultShardAssignmentStrategy.remainingCapacity(coord, dataset, resources, mapper)
-    }
-  }
 }
 
 
