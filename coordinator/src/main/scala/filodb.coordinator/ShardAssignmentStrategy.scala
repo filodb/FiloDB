@@ -47,14 +47,14 @@ class K8sStatefulSetShardAssignmentStrategy(useHostNameToResolveShards: Boolean)
 
   private val pat = "-\\d+$".r
 
-  logger.info("flag useHostNameToResolveShards is set to {}", useHostNameToResolveShards)
-
   private def getOrdinalFromActorRef(coord: ActorRef): Option[(String, Int)] = {
     // if hostname is None from coordinator actor path, then its a local actor
     // If the host name does not contain an ordinal at the end (e.g filodb-host-0, filodb-host-10), it will match None
     coord.path.address.host
       .map(host => InetAddress.getByName(host).getHostName)
       .orElse(Some(InetAddress.getLocalHost.getHostName))
+      // TODO: Is there a better way? This returns from the FQDN the hostname part only
+      .map(name => if (name.contains(".")) name.substring(0, name.indexOf('.')) else name)
       .flatMap(hostName => pat.findFirstIn(hostName).map(ordinal => (hostName, -Integer.parseInt(ordinal))))
   }
 
@@ -70,7 +70,7 @@ class K8sStatefulSetShardAssignmentStrategy(useHostNameToResolveShards: Boolean)
           // host-0 to shard [0,1] and host-1 to shard [2, 3]
           val firstShard = ordinal * numShardsPerHost
           val shardsMapped = (firstShard until firstShard + numShardsPerHost).toList
-          logger.info("Using hostname resolution for shard mapping, mapping host={} tp shards={}",
+          logger.info("Using hostname resolution for shard mapping, mapping host={} to shards={}",
             hostName, shardsMapped)
           shardsMapped
         case None                      =>
