@@ -1,9 +1,13 @@
 package filodb.coordinator.queryplanner
 
+import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
+
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchemaChange, TargetSchemaProvider}
@@ -19,9 +23,6 @@ import filodb.query.InstantFunctionId.HistogramBucket
 import filodb.query.LogicalPlan._
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
 import filodb.query.exec.InternalRangeFunction.Last
-
-import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
 
 object SingleClusterPlanner {
   private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests").withoutTags
