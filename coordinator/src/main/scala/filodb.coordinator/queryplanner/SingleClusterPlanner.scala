@@ -399,14 +399,19 @@ class SingleClusterPlanner(val dataset: Dataset,
                                             forceInProcess: Boolean): PlanResult = {
     // TODO(a_theimer): probably a bunch of assertions here
     val forceInProcessUpd = forceInProcess || sameShardLP(lp, qContext, qContext.plannerParams.targetSchema).isDefined
-    val lhs = walkLogicalPlanTree(lp.lhs, qContext, forceInProcessUpd)
-    val rhs = walkLogicalPlanTree(lp.rhs, qContext, forceInProcessUpd)
+    val lhs = walkLogicalPlanTree(lp.lhs, qContext, true)
+    val rhs = walkLogicalPlanTree(lp.rhs, qContext, true)
 
     // TODO(a_theimer): remove this and/or handle stitching here
     assert(!lhs.needsStitch && !rhs.needsStitch)
 
     // TODO(a_theimer): stitch? (also probably doesn't need separate method)
-    PlanResult(makePushdownJoins(lp, lhs.plans, rhs.plans, qContext))
+    val pushdowns = makePushdownJoins(lp, lhs.plans, rhs.plans, qContext, forceInProcess)
+    if (pushdowns.nonEmpty) {
+      PlanResult(pushdowns)
+    } else {
+      PlanResult(Seq(EmptyResultExec(qContext, dataset.ref)))
+    }
   }
 
   // TODO(a_theimer): rename/reconcile/refactor
@@ -473,7 +478,8 @@ class SingleClusterPlanner(val dataset: Dataset,
   private def makePushdownJoins(plan: BinaryJoin,
                                 lhs: Seq[ExecPlan],
                                 rhs: Seq[ExecPlan],
-                                queryContext: QueryContext): Seq[ExecPlan] = {
+                                queryContext: QueryContext,
+                                forceInProcess: Boolean): Seq[ExecPlan] = {
 
     val lhsShardMap = new mutable.HashMap[Int, mutable.ArrayBuffer[ExecPlan]]
     val rhsShardMap = new mutable.HashMap[Int, mutable.ArrayBuffer[ExecPlan]]
@@ -488,13 +494,14 @@ class SingleClusterPlanner(val dataset: Dataset,
         rhsShardMap.getOrElseUpdate(shard.get, new ArrayBuffer[ExecPlan]()).append(plan)
       }
 
-    val joinPairs = lhsShardMap.keySet.intersect(rhsShardMap.keySet).map{ shard =>
-      (lhsShardMap(shard), rhsShardMap(shard))
+    val joinTriplets = lhsShardMap.keySet.intersect(rhsShardMap.keySet).map{ shard =>
+      (shard, lhsShardMap(shard), rhsShardMap(shard))
     }.toSeq
 
     // TODO(a_theimer): stitch lhs/rhs?
-    joinPairs.map{ case (lhsPlans, rhsPlans) =>
-      val targetActor = PlannerUtil.pickDispatcher(lhsPlans ++ rhsPlans)
+    joinTriplets.map{ case (shard, lhsPlans, rhsPlans) =>
+      // since we can't pick the dispatcher from the children
+      val targetActor = if (forceInProcess) inProcessPlanDispatcher else dispatcherForShard(shard, false)
       plan.operator match {
         case _: SetOperator => exec.SetOperatorExec(queryContext, targetActor, lhsPlans, rhsPlans, plan.operator,
           LogicalPlanUtils.renameLabels(plan.on, dsOptions.metricColumn),
@@ -518,7 +525,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       lazy val allSame = {
         val refColSet = targetSchemas.head.toSet
         // TODO(a_theimer): does column order matter?
-        targetSchemas.drop(1).find(_.toSet != refColSet).isDefined
+        targetSchemas.drop(1).forall(_.toSet == refColSet)
       }
       // (2) make sure all child joins preserve ts columns. If yes, proceed.
       // (3) [after 1 and 2]: figure out how to implement CommonDispatcherOpt TODO(a_theimer)
