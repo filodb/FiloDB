@@ -59,6 +59,7 @@ trait  DefaultPlanner {
      *
      * @param logicalPlan The LogicalPlan instance
      * @param qContext The QueryContext
+     * @param forceInProcess if true, all materialized plans will dispatch via an InProcessDispatcher
      * @return The PlanResult containing the ExecPlan
      */
     // scalastyle:off cyclomatic.complexity
