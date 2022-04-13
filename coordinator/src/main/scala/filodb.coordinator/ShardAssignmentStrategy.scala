@@ -67,7 +67,7 @@ class K8sStatefulSetShardAssignmentStrategy(useHostNameToResolveShards: Boolean)
         case Some((hostName, ordinal)) =>
           val numShardsPerHost = resources.numShards / resources.minNumNodes
           // Suppose we have a total of 8 shards and 2 hosts, assuming the hostnames are host-0 and host-1, we will map
-          // host-0 to shard [0,1] and host-1 to shard [2, 3]
+          // host-0 to shard [0,1,2,3] and host-1 to shard [4,5,6,7]
           val firstShard = ordinal * numShardsPerHost
           val shardsMapped = (firstShard until firstShard + numShardsPerHost).toList
           logger.info("Using hostname resolution for shard mapping, mapping host={} to shards={}",
