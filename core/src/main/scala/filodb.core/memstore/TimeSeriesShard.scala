@@ -477,7 +477,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       while (intIt.hasNext && nextPart == UnsafeUtils.ZeroPointer) {
         val nextPartID = intIt.next
         nextPart = partitions.get(nextPartID)
-          if (nextPart == UnsafeUtils.ZeroPointer) skippedPartIDs += nextPartID
+        if (nextPart == UnsafeUtils.ZeroPointer) skippedPartIDs += nextPartID
       }
     }
 
