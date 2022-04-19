@@ -3,11 +3,9 @@ package filodb.coordinator.queryplanner
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
-
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchemaChange, TargetSchemaProvider}
@@ -447,8 +445,19 @@ class SingleClusterPlanner(val dataset: Dataset,
   private def materializeBinaryJoinWithPushdown(qContext: QueryContext,
                                                 lp: BinaryJoin,
                                                 forceInProcess: Boolean): PlanResult = {
-    val lhs = walkLogicalPlanTree(lp.lhs, qContext, true)
-    val rhs = walkLogicalPlanTree(lp.rhs, qContext, true)
+    val forceInProcessChildren = forceInProcess || {
+      val lhsShards = getShardSpanGroupsLp(lp.lhs, qContext, qContext.plannerParams.targetSchemaProvider)
+      val rhsShards = getShardSpanGroupsLp(lp.rhs, qContext, qContext.plannerParams.targetSchemaProvider)
+      println(lhsShards)
+      println(rhsShards)
+      lhsShards.isDefined && rhsShards.isDefined &&
+        lhsShards.get.forall(_.size == 1) && rhsShards.get.forall(_.size == 1)
+        // lhsShards.get.head == rhsShards.get.head
+    }
+    println(forceInProcess)
+    println(forceInProcessChildren)
+    val lhs = walkLogicalPlanTree(lp.lhs, qContext, forceInProcessChildren)
+    val rhs = walkLogicalPlanTree(lp.rhs, qContext, forceInProcessChildren)
 
     // TODO(a_theimer): remove this and/or handle stitching here
     assert(!lhs.needsStitch && !rhs.needsStitch)
@@ -456,33 +465,64 @@ class SingleClusterPlanner(val dataset: Dataset,
     // for each side of the join, map shards to sets of ExecPlans with shard-local data
     val lhsShardMap = new mutable.HashMap[Int, mutable.ArrayBuffer[ExecPlan]]
     val rhsShardMap = new mutable.HashMap[Int, mutable.ArrayBuffer[ExecPlan]]
-    lhs.plans.map(ep => (ep, spansSingleShard(ep)))
-      .filter(_._2.isDefined)
-      .foreach{ case (plan, shard) =>
-        lhsShardMap.getOrElseUpdate(shard.get, new ArrayBuffer[ExecPlan]()).append(plan)
-      }
-    rhs.plans.map(ep => (ep, spansSingleShard(ep)))
-      .filter(_._2.isDefined)
-      .foreach{ case (plan, shard) =>
-        rhsShardMap.getOrElseUpdate(shard.get, new ArrayBuffer[ExecPlan]()).append(plan)
+    val shardGraph = new mutable.HashMap[Int, mutable.HashSet[Int]]
+    val connected = new mutable.HashSet[mutable.HashSet[Int]]
+    lhs.plans.map(ep => (ep, getShardSpanEp(ep)))
+      .foreach{ case (plan, shards) =>
+        shards.take(1).foreach {shard =>
+          lhsShardMap.getOrElseUpdate(shard, new ArrayBuffer[ExecPlan]()).append(plan)
+        }
+        val set = new mutable.HashSet[Int]
+        connected.add(set)
+        shards.foreach(set.add(_))
+        shards.foreach{shard =>
+          val existShards = shardGraph.getOrElse(shard, new mutable.HashSet[Int])
+          connected.remove(existShards)
+          existShards.foreach{ existShard =>
+            set.add(existShard)
+          }
+          shardGraph(shard) = set
+        }
       }
 
-    // triplets of (shard, lhsPlans, rhsPlans)
-    val joinInfos = lhsShardMap.keySet.intersect(rhsShardMap.keySet).map{ shard =>
-      (shard, lhsShardMap(shard), rhsShardMap(shard))
-    }.toSeq
+    rhs.plans.map(ep => (ep, getShardSpanEp(ep)))
+      .foreach{ case (plan, shards) =>
+        shards.take(1).foreach {shard =>
+          rhsShardMap.getOrElseUpdate(shard, new ArrayBuffer[ExecPlan]()).append(plan)
+        }
+        val set = new mutable.HashSet[Int]
+        connected.add(set)
+        shards.foreach(set.add(_))
+        shards.foreach{shard =>
+          val existShards = shardGraph.getOrElse(shard, new mutable.HashSet[Int])
+          connected.remove(existShards)
+          existShards.foreach{ existShard =>
+            set.add(existShard)
+          }
+          shardGraph(shard) = set
+        }
+      }
+
+    // triplets of (shards, lhsPlans, rhsPlans)
+    val joinInfos = connected.map{ shards =>
+      val lhsPlans = shards.flatMap(lhsShardMap.getOrElse(_, Seq()))
+      val rhsPlans = shards.flatMap(rhsShardMap.getOrElse(_, Seq()))
+      if (lhsPlans.nonEmpty && rhsPlans.nonEmpty) {
+        Some((shards, lhsPlans, rhsPlans))
+      } else None
+    }.filter(_.isDefined).map(_.get).toSeq
 
     // TODO(a_theimer): stitch anything here?
-    val joinPlans = joinInfos.map{ case (shard, lhsPlans, rhsPlans) =>
+    val joinPlans = joinInfos.map{ case (shards, lhsPlans, rhsPlans) =>
       // since we can't pick the dispatcher from the children (all will be InProcessPlanDispatchers)
-      val targetActor = if (forceInProcess) inProcessPlanDispatcher else dispatcherForShard(shard, false)
+      val targetActor = if (forceInProcess) inProcessPlanDispatcher else dispatcherForShard(shards.head, false)
       lp.operator match {
-        case _: SetOperator => exec.SetOperatorExec(qContext, targetActor, lhsPlans, rhsPlans, lp.operator,
+        case _: SetOperator => exec.SetOperatorExec(qContext, targetActor, lhsPlans.toSeq, rhsPlans.toSeq, lp.operator,
           LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
           LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
           dsOptions.metricColumn,
           rvRangeFromPlan(lp))
-        case _ => BinaryJoinExec(qContext, targetActor, lhsPlans, rhsPlans, lp.operator, lp.cardinality,
+        case _ => BinaryJoinExec(qContext, targetActor, lhsPlans.toSeq, rhsPlans.toSeq, lp.operator, lp.cardinality,
           LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
           LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
           LogicalPlanUtils.renameLabels(lp.include, dsOptions.metricColumn),
@@ -498,68 +538,157 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
   // scalastyle:on method.length
 
-    // TODO(a_theimer): delete?
-//  // TODO(a_theimer): rename/reconcile/refactor-- super WIP
-//  private def sameShardLP(lp: LogicalPlan,
-//                          qContext: QueryContext,
-//                          tsProvider: Option[TargetSchemaProvider]): Option[Int] = {
-//    val leafFilterPairs = findLeafLogicalPlans(lp).map{ leaf =>
-//      // TODO(a_theimer): rename these?
-//      val filters = getColumnFilterGroup(leaf)
-//      assert(filters.size == 1)
-//      (leaf, filters.head)
-//    }
-//
-//    lazy val canGetShardsFromFilts = leafFilterPairs.forall{ case (_, filters) =>
-//      canGetShardsFromFilters(filters.toSeq, qContext)
-//    }
-//
-//    // TODO(a_theimer): rename / reconcile expr
-//    lazy val useTargetSchemaFS = tsProvider.isDefined && leafFilterPairs.forall{ case (leaf, filters) =>
-//      val targetSchema = tsProvider.get.targetSchemaFunc(filters.toSeq)
-//      val (start, stop) = leaf match {
-//        case rs: RawSeries => rs.rangeSelector match {
-//          case is: IntervalSelector => (is.from, is.to)
-//          case _ => throw new IllegalArgumentException("TODO(a_theimer)")
-//        }
-//        case _ => throw new IllegalArgumentException("TODO(a_theimer)")
-//      }
-//      findTargetSchema(targetSchema, start, stop).isDefined
-//    }
-//
-//    if (!canGetShardsFromFilts || !useTargetSchemaFS) {
-//      return None
-//    }
-//
-//    val shards = leafFilterPairs.flatMap{case (leaf, filters) =>
-//      shardsFromFilters(filters.toSeq, qContext, useTargetSchemaFS)
-//    }
-//
-//    if (shards.drop(1).forall(_ == shards.head)) {
-//      Some(shards.head)
-//    } else None
-//  }
+  // TODO(a_theimer): rename/reconcile/refactor-- super WIP
+  private def getShardSpanLp(lp: LogicalPlan,
+                             qContext: QueryContext,
+                             tsProvider: Option[TargetSchemaProvider]): Option[Set[Int]] = {
+    case class Leaf(lp: LogicalPlan,
+                    filters: Set[ColumnFilter],
+                    tslabels: Option[Seq[String]])
 
-  // TODO(a_theimer): make this more straightforward
+    val leaves = findLeafLogicalPlans(lp).map{ leaf =>
+      val filters = getColumnFilterGroup(leaf)
+      assert(filters.size == 1)
+      if (tsProvider.isDefined) {
+        val tsFunc = tsProvider.get.targetSchemaFunc(filters.head.toSeq)
+        val (start, stop) = leaf match {
+          case rs: RawSeries => rs.rangeSelector match {
+            case is: IntervalSelector => (is.from, is.to)
+            case _ => throw new IllegalArgumentException(s"unhandled type: ${rs.rangeSelector.getClass}")
+          }
+          case _ => throw new IllegalArgumentException(s"unhandled type: ${leaf.getClass}")
+        }
+        val tsLabels = findTargetSchema(tsFunc, start, stop).map(_.schema)
+        Leaf(leaf, filters.head, tsLabels)
+      } else {
+        Leaf(leaf, filters.head, None)
+      }
+    }
+
+   if (!leaves.forall{ leaf =>
+      canGetShardsFromFilters(leaf.filters.toSeq, qContext)
+    }) return None
+
+    Some(leaves.flatMap{ leaf =>
+      val colLabels = leaf.filters.map(_.column)
+      shardsFromFilters(leaf.filters.toSeq, qContext, leaf.tslabels.isDefined && leaf.tslabels.get.toSet.subsetOf(colLabels))
+    }.toSet)
+  }
+
+  // TODO(a_theimer): worth a proper union-find?
+  private def connectShards(shardGroups: Seq[Set[Int]]): Seq[Set[Int]] = {
+    // build the graph we'll use to find connected components
+    val shardGraph = new mutable.HashMap[Int, mutable.HashSet[Int]]
+    shardGroups.foreach{ shards =>
+      shards.foreach{ shard =>
+        val adjShards = shardGraph.getOrElseUpdate(shard, new mutable.HashSet[Int])
+        // add edges from this shard
+        shards.filterNot(_ == shard).foreach(adjShards.add(_))
+        // add edges to this shard
+        adjShards.foreach{ adjShard =>
+          shardGraph.getOrElseUpdate(adjShard, new mutable.HashSet[Int]).add(shard)
+        }
+      }
+    }
+
+    // dfs to find each connected component
+    def dfs(shard: Int, graph: mutable.HashMap[Int, mutable.HashSet[Int]], visited: mutable.HashSet[Int]): Unit = {
+      visited.add(shard)
+      graph.getOrElse(shard, Set()).foreach{ child =>
+        if (!visited.contains(child)) {
+          dfs(child, graph, visited)
+        }
+      }
+    }
+
+    val unvisited = new mutable.HashSet[Int]
+    shardGraph.keySet.foreach(unvisited.add(_))
+
+    val res = new mutable.ArrayBuffer[Set[Int]]
+    while (unvisited.nonEmpty) {
+      val root = unvisited.head
+      val connected = new mutable.HashSet[Int]
+      dfs(root, shardGraph, connected)
+      res.append(connected.toSet)
+      connected.foreach(unvisited.remove(_))
+    }
+    res
+  }
+
+  // TODO(a_theimer): cleanup
+  private def getShardSpanGroupsLp(lp: LogicalPlan,
+                                   qContext: QueryContext,
+                                   tsProvider: Option[TargetSchemaProvider]): Option[Seq[Set[Int]]] = {
+    lp match {
+      case ps: PeriodicSeries => {
+        getShardSpanGroupsLp(ps.rawSeries, qContext, tsProvider)
+      }
+      case aif: ApplyInstantFunction => {
+        getShardSpanGroupsLp(aif.vectors, qContext, tsProvider)
+      }
+      case psw: PeriodicSeriesWithWindowing => {
+        getShardSpanGroupsLp(psw.series, qContext, tsProvider)
+      }
+      case nl: NonLeafLogicalPlan => {
+        println(nl.getClass)
+        nl match {
+          case bj: BinaryJoin => {
+            if (canPushdownBinaryJoin(qContext, bj)) {
+              val lhsGroups = getShardSpanGroupsLp(bj.lhs, qContext, tsProvider)
+              val rhsGroups = getShardSpanGroupsLp(bj.rhs, qContext, tsProvider)
+              // TODO(a_theimer): need this?
+              assert(lhsGroups.isDefined && rhsGroups.isDefined)
+              return Some(connectShards(Seq(lhsGroups.get, rhsGroups.get).flatten))
+            }
+          }
+          case _ => {}
+        }
+        val childGroups = nl.children.map(getShardSpanGroupsLp(_, qContext, tsProvider))
+        if (childGroups.find(_.isEmpty).isDefined) {
+          return None
+        }
+        Some(Seq(childGroups.flatMap(group => group.get.flatten).toSet))
+      }
+      case rs: RawSeries => {
+        getShardSpanLp(lp, qContext, tsProvider)
+          .map(set => set.map(Set(_)).toSeq)
+      }
+      case _ => throw new IllegalArgumentException(s"unhandled type: ${lp.getClass}")
+    }
+  }
+
   /**
+   * // TODO(a_theimer): update
    * Returns an Option occupied by a shard iff the ExecPlan's data exists exclusively within that shard.
    */
-  private def spansSingleShard(ep: ExecPlan): Option[Int] = {
-    ep match {
-      case mspe: MultiSchemaPartitionsExec => Some(mspe.shard)
-      case nl: NonLeafExecPlan => {
-        // check if all children span the same shard
-        val refShard = spansSingleShard(nl.children.head)
-        if (refShard.isDefined){
-          val allChildrenSameShard = nl.children.drop(1).map(spansSingleShard(_)).forall(_ == refShard)
-          if (allChildrenSameShard){
-            return refShard
-          }
-        }
-        None
-      }
+  private def getShardSpanEp(ep: ExecPlan): Set[Int] = {
+    def helper(ep: ExecPlan, set: mutable.HashSet[Int]): Unit = ep match {
+      case mspe: MultiSchemaPartitionsExec => set.add(mspe.shard)
+      case nl: NonLeafExecPlan => nl.children.foreach(helper(_, set))
       case _ => throw new IllegalArgumentException(s"unhandled type: ${ep.getClass}")
     }
+    val set = new mutable.HashSet[Int]
+    helper(ep, set)
+    set.toSet
+  }
+
+  // TODO(a_theimer)
+  private def canPushdownBinaryJoin(qContext: QueryContext,
+                                    lp: BinaryJoin): Boolean = {
+
+    if (qContext.plannerParams.targetSchemaProvider.isDefined) {
+      val targetSchemaLabels = getTargetSchemaLabels(lp, qContext.plannerParams.targetSchemaProvider.get)
+      lazy val allGroupsDefined = targetSchemaLabels.forall(_.isDefined)
+      lazy val allGroupsSame = {
+        val refColSet = targetSchemaLabels.head.get.toSet
+        targetSchemaLabels.drop(1).forall(_.get.toSet == refColSet)
+      }
+      lazy val joinIncludesAllTsLabels = targetSchemaLabels.head.get.toSet.subsetOf(lp.on.toSet)
+      if (allGroupsDefined && allGroupsSame && joinIncludesAllTsLabels) {
+        return true
+      }
+    }
+    false
   }
 
   override def materializeBinaryJoin(qContext: QueryContext,
