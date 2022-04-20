@@ -2,13 +2,11 @@ package filodb.query.exec
 
 import scala.collection.mutable.ArrayBuffer
 import scala.util.control.NonFatal
-
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
-
 import filodb.core.{DatasetRef, QueryTimeoutException}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
@@ -264,17 +262,20 @@ trait ExecPlan extends QueryCommand {
     */
   protected def args: String
 
+  // TODO(a_theimer): more generic way to handle lambda param with default?
   /**
     * Prints the ExecPlan and RangeVectorTransformer execution flow as a tree
     * structure, useful for debugging
     *
     * @param useNewline pass false if the result string needs to be in one line
     */
-  final def printTree(useNewline: Boolean = true, level: Int = 0): String = {
+  final def printTree(useNewline: Boolean = true,
+                      level: Int = 0,
+                      childSort: (ExecPlan) => Int = (ep) => 0): String = {
     val transf = printRangeVectorTransformersForLevel(level)
     val nextLevel = rangeVectorTransformers.size + level
     val curNode = curNodeText(nextLevel)
-    val childr = children.map(_.printTree(useNewline, nextLevel + 1))
+    val childr = children.sortBy(childSort).map(_.printTree(useNewline, nextLevel + 1))
     ((transf :+ curNode) ++ childr).mkString(if (useNewline) "\n" else " @@@ ")
   }
 
