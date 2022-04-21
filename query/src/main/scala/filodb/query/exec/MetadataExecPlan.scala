@@ -395,42 +395,49 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
 
   override def enforceLimit: Boolean = false
 
+  // scalastyle:off
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
     val rvs = source match {
-      case ms: TimeSeriesStore =>
-        // TODO: Do we need to check for presence of all three, _ws_, _ns_ and _metric_?
-        // TODO: What should be the limit, where to configure?
-        // TODO: We don't need to allocate intermediate Map and create an Iterator of Map, instead we can get raw byte
-        //  sequences and operate directly with it to create the final data structures we need
-        val partKeysMap = ms.partKeysWithFilters(dataset, shard, filters, fetchFirstLastSampleTimes = false,
-          endMs, startMs, limit = 1000000)
-        import scala.collection.mutable.{Map => MutableMap}
-        val metadataResult = MutableMap.empty[RangeVectorKey, MutableMap[String, CpcSketch]]
-        partKeysMap.foreach { rv =>
-          val rvKey = CustomRangeVectorKey(rv.filterKeys(key => {
-            val keyStr = key.toString
-            keyStr.equals("_ws_") || keyStr.equals("_ns_") || keyStr.equals("_metric_")
-          }))
-          val sketchMap = metadataResult.getOrElseUpdate(rvKey, MutableMap.empty)
-          rv.foreach {
-            case (labelName, labelValue) =>
-              val (labelNameStr, labelValueStr) = (labelName.toString, labelValue.toString)
-              sketchMap.getOrElseUpdate(labelNameStr, new CpcSketch(logK)).update(labelValueStr)
+      case memstore: TimeSeriesStore =>
+        val shardKeyCols = memstore.schemas(dataset).get.part.options.shardKeyColumns.map(_.utf8)
+
+        // TODO: require presence of shard key in column filters
+        val matches = memstore.partKeysWithFilters(dataset, shard, filters, fetchFirstLastSampleTimes = false,
+          endMs, startMs, limit = 1).toSeq
+        if (matches.nonEmpty) {
+          val sketchMap = scala.collection.mutable.Map[String, CpcSketch]()
+          val firstMatchLVs = matches.head
+          val shardKeyLVs = firstMatchLVs.filterKeys(shardKeyCols.contains)
+          shardKeyLVs.foreach { case (label, value) =>
+            sketchMap.getOrElseUpdate(label.toString, new CpcSketch(logK)).update(value.toString)
           }
-        }
-        val rvIterable = for((key, sketchMap) <- metadataResult) yield {
-          IteratorBackedRangeVector(key,
+
+          val nonShardKeyLVs = firstMatchLVs.filterKeys(k => !shardKeyCols.contains(k))
+          nonShardKeyLVs.foreach { case (label, _) =>
+            val labelStr = label.toString
+            // GOTCHA: This approach will not catch cardinality of labels which are disabled for faceting
+            // since their value lengths are > 1000. We expect the gateway to reject (or shorten) that data early on.
+            memstore.singleLabelValueWithFilters(dataset, shard, filters, label.toString,
+              endMs, startMs, querySession, 1000000).foreach { labelValue =>
+              sketchMap.getOrElseUpdate(labelStr, new CpcSketch(logK)).update(labelValue.toString)
+            }
+          }
+
+          val rv = IteratorBackedRangeVector(CustomRangeVectorKey(shardKeyLVs.toMap),
             UTF8MapIteratorRowReader(
               Seq(sketchMap.map {
                 case (label, cpcSketch) =>
-                  (ZeroCopyUTF8String(label), ZeroCopyUTF8String(cpcSketch.toByteArray))}.toMap).toIterator),
+                  (ZeroCopyUTF8String(label), ZeroCopyUTF8String(cpcSketch.toByteArray))
+              }.toMap).toIterator),
             None)
+          Observable.now(rv)
+        } else {
+          Observable.empty
         }
-        Observable.fromIterable(rvIterable)
       case _ => Observable.empty
     }
     val sch = ResultSchema(Seq(ColumnInfo("metadataMap", ColumnType.MapColumn)), 1)

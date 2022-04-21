@@ -253,49 +253,37 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   it("should be able to query label cardinality") {
     // Tests all, LabelCardinalityExec, LabelCardinalityDistConcatExec and LabelCardinalityPresenter
     // Though we will search by ns, ws and metric name, technically we can search by any label in index
-    val filters = Seq(ColumnFilter("instance", Filter.Equals("someHost:8787".utf8)))
+    val filters = Seq(ColumnFilter("_ws_", Filter.Equals("demo")),
+                      ColumnFilter("_ns_", Filter.Equals("App-0")),
+                      ColumnFilter("_metric_", Filter.Equals("http_req_total")),
+    )
+
     val qContext = QueryContext()
 
-    val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
+    val leaves = (0 until shardPartKeyLabelValues.size).map { ishard =>
       LabelCardinalityExec(qContext, dummyDispatcher,
         timeseriesDatasetMultipleShardKeys.ref, ishard, filters, now - 5000, now)
-    }.toSeq
+    }
 
     val execPlan = LabelCardinalityReduceExec(qContext, dummyDispatcher, leaves)
     execPlan.addRangeVectorTransformer(new LabelCardinalityPresenter())
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _) => {
-        response.size shouldEqual 2
+      case QueryResult(id, _, response, _, _, _) =>
+        response.size shouldEqual 1
         val rv1 = response(0)
-        val rv2 = response(1)
         rv1.rows.size shouldEqual 1
-        rv2.rows.size shouldEqual 1
         val record1 = rv1.rows.next().asInstanceOf[BinaryRecordRowReader]
         val result1 = rv1.asInstanceOf[SerializedRangeVector]
                           .schema.toStringPairs(record1.recordBase, record1.recordOffset).toMap
 
-        val record2 = rv2.rows.next().asInstanceOf[BinaryRecordRowReader]
-        val result2 = rv2.asInstanceOf[SerializedRangeVector]
-                            .schema.toStringPairs(record2.recordBase, record2.recordOffset).toMap
-
         result1 shouldEqual Map("_ns_" -> "1",
           "unicode_tag" -> "1",
-          "_type_" -> "1",
           "job" -> "1",
-          "instance" -> "1",
+          "instance" -> "2",
           "_metric_" -> "1",
           "_ws_" -> "1")
-
-        result2 shouldEqual Map("_ns_" -> "1",
-          "unicode_tag" -> "1",
-          "_type_" -> "1",
-          "job" -> "1",
-          "instance" -> "1",
-          "_metric_" -> "1",
-          "_ws_" -> "1")
-      }
     }
   }
 
