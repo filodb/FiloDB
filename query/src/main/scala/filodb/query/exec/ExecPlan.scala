@@ -2,11 +2,13 @@ package filodb.query.exec
 
 import scala.collection.mutable.ArrayBuffer
 import scala.util.control.NonFatal
+
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
+
 import filodb.core.{DatasetRef, QueryTimeoutException}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
