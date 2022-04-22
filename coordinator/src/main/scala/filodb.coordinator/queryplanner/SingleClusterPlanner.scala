@@ -3,6 +3,7 @@ package filodb.coordinator.queryplanner
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
+import scala.util.Random
 
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
@@ -19,6 +20,7 @@ import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, Time
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
 import filodb.query.{exec, _}
+import filodb.query.AggregateClause.ClauseType
 import filodb.query.InstantFunctionId.HistogramBucket
 import filodb.query.LogicalPlan._
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
@@ -164,6 +166,29 @@ object SingleClusterPlanner {
       lazy val joinIncludesAllTsLabels = targetSchemaLabels.head.get.toSet.subsetOf(lp.on.toSet)
       allGroupsDefined && allGroupsSame && joinIncludesAllTsLabels
     } else false
+  }
+
+  /**
+   * Returns true iff it is valid to perform the Aggregate pushdown optimization.
+   */
+  private def canPushdownAggregate(qContext: QueryContext,
+                                   lp: Aggregate): Boolean = {
+    if (qContext.plannerParams.targetSchemaProvider.isDefined) {
+      val targetSchemaLabels = getTargetSchemaLabels(lp, qContext.plannerParams.targetSchemaProvider.get)
+      lazy val allGroupsDefined = targetSchemaLabels.forall(_.isDefined)
+      lazy val allGroupsSame = {
+        val refColSet = targetSchemaLabels.head.get.toSet
+        targetSchemaLabels.drop(1).forall(_.get.toSet == refColSet)
+      }
+      lazy val clauseIncludesAllTsLabels = if (lp.clauseOpt.isDefined) {
+        lp.clauseOpt.get.clauseType match {
+          case ClauseType.By => targetSchemaLabels.head.get.toSet.subsetOf(lp.clauseOpt.get.labels.toSet)
+          case ClauseType.Without => false
+        }
+      } else false
+      return allGroupsDefined && allGroupsSame && clauseIncludesAllTsLabels
+    }
+    false
   }
 
 //  // TODO(a_theimer): need this? Probably only necessary for grandchild pushdowns.
@@ -522,6 +547,15 @@ class SingleClusterPlanner(val dataset: Dataset,
           mergeChildGroups(bj)
         }
       }
+      case agg: Aggregate => {
+        if (canPushdownAggregate(qContext, agg)) {
+          val groups = getShardSpanGroupsFromLp(agg.vectors, qContext)
+          assert(groups.isDefined, s"expected groups to be defined")
+          Some(getConnectedShards(groups.get))
+        } else {
+          mergeChildGroups(agg)
+        }
+      }
       case nl: NonLeafLogicalPlan => mergeChildGroups(nl)
       case rs: RawSeries => getShardSpanFromLp(rs, qContext).map(set => set.map(Set(_)).toSeq)
       case _ => throw new IllegalArgumentException(s"unhandled type: ${lp.getClass}")
@@ -661,7 +695,8 @@ class SingleClusterPlanner(val dataset: Dataset,
     // TODO(a_theimer): stitch anything here?
     val joinPlans = joinInfos.map{ case (shards, lhsPlans, rhsPlans) =>
       // since we can't pick the dispatcher from the children (all will be InProcessPlanDispatchers)
-      val targetActor = if (forceInProcess) inProcessPlanDispatcher else dispatcherForShard(shards.head, false)
+      val targetActor = if (forceInProcess) inProcessPlanDispatcher
+                        else dispatcherForShard(shards.toSeq(Random.nextInt(shards.size)), false)
       lp.operator match {
         case _: SetOperator => exec.SetOperatorExec(qContext, targetActor, lhsPlans.toSeq, rhsPlans.toSeq, lp.operator,
           LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
@@ -1001,5 +1036,67 @@ class SingleClusterPlanner(val dataset: Dataset,
         schemaOpt, colName)
     }
     PlanResult(metaExec)
+  }
+
+  /**
+   * TODO(a_theimer): document this
+   */
+  private def materializeAggregateWithPushdown(qContext: QueryContext,
+                                               lp: Aggregate,
+                                               forceInProcess: Boolean): PlanResult = {
+    // Force in-process dispatchers for children iff we can confirm child ExecPlans
+    //   will each draw data from only one shard.
+    val forceInProcessChildren = forceInProcess || {
+      val groups = getShardSpanGroupsFromLp(lp.vectors, qContext)
+        groups.isDefined && groups.get.forall(_.size == 1)
+    }
+
+    val childRes = walkLogicalPlanTree(lp.vectors, qContext, forceInProcessChildren)
+
+    // TODO(a_theimer): remove this and/or handle stitching here
+    assert(!childRes.needsStitch)
+
+    // Map shards to sets of ExecPlans with shard-local data. If an ExecPlan spans more than
+    //   one shard, a mapping is maintained from only one shard.
+    val shardMap = new mutable.HashMap[Int, mutable.ArrayBuffer[ExecPlan]]
+
+    // Also keep a list of the shards spanned by each ExecPlan.
+    val shardGroups = new mutable.ArrayBuffer[Set[Int]]
+
+    childRes.plans.map(ep => (ep, getShardSpanFromEp(ep)))
+      .foreach{ case (plan, shards) =>
+        shards.take(1).foreach {shard =>
+          shardMap.getOrElseUpdate(shard, new ArrayBuffer[ExecPlan]()).append(plan)
+        }
+        shardGroups.append(shards)
+      }
+
+    // Pairs of (shards, plans); all plans with data on `shards` are included.
+    // All shard sets are disjoint.
+    val joinInfos = getConnectedShards(shardGroups).map{ shards =>
+      val plans = shards.flatMap(shardMap.getOrElse(_, Seq())).toSeq
+      if (plans.nonEmpty) {
+        Some((shards, plans))
+      } else None
+    }.filter(_.isDefined).map(_.get)
+
+    val joinPlans = joinInfos.map{ case (shards, plans) =>
+      // since we can't pick the dispatcher from the children (all will be InProcessPlanDispatchers)
+      val targetActor = if (forceInProcess) inProcessPlanDispatcher
+                        else dispatcherForShard(shards.toSeq(Random.nextInt(shards.size)), false)
+      addAggregator(lp, qContext, PlanResult(plans, false), Some(targetActor))
+    }
+    PlanResult(joinPlans)
+  }
+
+  override def materializeAggregate(qContext: QueryContext,
+                                    lp: Aggregate,
+                                    forceInProcess: Boolean): PlanResult = {
+    // see materializeAggregateWithPushdown for details about the Aggregate pushdown optimization.
+    if (canPushdownAggregate(qContext, lp)) {
+      materializeAggregateWithPushdown(qContext, lp, forceInProcess)
+    } else {
+      super.materializeAggregate(qContext, lp, forceInProcess)
+    }
   }
 }
