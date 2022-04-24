@@ -65,18 +65,16 @@ object SingleClusterPlanner {
    */
   private def getRawSeriesTargetSchemaLabels(lp: RawSeries,
                                              tsp: TargetSchemaProvider): Option[Seq[String]] = {
-    // TODO(a_theimer): declaration seems to be required?
     val rangeSelectorOpt: Option[(Long, Long)] = lp.rangeSelector match {
       // TODO(a_theimer): other selectors?
-      // TODO(a_theimer): label and units
-      case IntervalSelector(from, to) => Some((from, to))
+      case IntervalSelector(fromMs, toMs) => Some((fromMs, toMs))
       case _ => None
     }
-    val tsOpt = rangeSelectorOpt.map{ case (from, to) =>
+    val targetSchemaOpt = rangeSelectorOpt.map{ case (fromMs, toMs) =>
       val tsChanges = tsp.targetSchemaFunc(lp.filters)
-      findTargetSchema(tsChanges, from, to).map(_.schema)
+      findTargetSchema(tsChanges, fromMs, toMs).map(_.schema)
     }
-    if (tsOpt.isDefined) tsOpt.get else None
+    if (targetSchemaOpt.isDefined) targetSchemaOpt.get else None
   }
 
   /**
@@ -134,20 +132,6 @@ object SingleClusterPlanner {
       connected.foreach(unvisited.remove(_))
     }
     res
-  }
-
-  /**
-   * Returns the set of shards that contain an ExecPlan's data.
-   */
-  private def getShardSpanFromEp(ep: ExecPlan): Set[Int] = {
-    def helper(ep: ExecPlan, set: mutable.HashSet[Int]): Unit = ep match {
-      case mspe: MultiSchemaPartitionsExec => set.add(mspe.shard)
-      case nl: NonLeafExecPlan => nl.children.foreach(helper(_, set))
-      case _ => throw new IllegalArgumentException(s"unhandled type: ${ep.getClass}")
-    }
-    val set = new mutable.HashSet[Int]
-    helper(ep, set)
-    set.toSet
   }
 
   /**
@@ -530,7 +514,6 @@ class SingleClusterPlanner(val dataset: Dataset,
       Some(Seq(childGroups.flatMap(group => group.get.flatten).toSet))
     }
 
-    // TODO(a_theimer): fall-thru alternative?
     lp match {
       case ps: PeriodicSeries => getShardSpanGroupsFromLp(ps.rawSeries, qContext)
       case psw: PeriodicSeriesWithWindowing => getShardSpanGroupsFromLp(psw.series, qContext)
@@ -606,15 +589,15 @@ class SingleClusterPlanner(val dataset: Dataset,
    *
    * This might be materialized as follows:
    *
-   * E~BinaryJoinExec(binaryOp=ADD)
+   * E~BinaryJoinExec(binaryOp=ADD) on ActorPlanDispatcher
    * -T~PeriodicSamplesMapper()
-   * --E~MultiSchemaPartitionsExec(shard=0)  // lhs
+   * --E~MultiSchemaPartitionsExec(shard=0) on ActorPlanDispatcher  // lhs
    * -T~PeriodicSamplesMapper()
-   * --E~MultiSchemaPartitionsExec(shard=1)  // lhs
+   * --E~MultiSchemaPartitionsExec(shard=1) on ActorPlanDispatcher  // lhs
    * -T~PeriodicSamplesMapper()
-   * --E~MultiSchemaPartitionsExec(shard=0)  // rhs
+   * --E~MultiSchemaPartitionsExec(shard=0) on ActorPlanDispatcher  // rhs
    * -T~PeriodicSamplesMapper()
-   * --E~MultiSchemaPartitionsExec(shard=1)  // rhs
+   * --E~MultiSchemaPartitionsExec(shard=1) on ActorPlanDispatcher  // rhs
    *
    * Data is pulled from two shards, sent to the BinaryJoin actor, then that single actor
    *   needs to process all of this data.
@@ -626,26 +609,29 @@ class SingleClusterPlanner(val dataset: Dataset,
    *   would yield the same result as the above plan:
    *
    * E~LocalPartitionDistConcatExec()
-   * -E~BinaryJoinExec(binaryOp=ADD)
+   * -E~BinaryJoinExec(binaryOp=ADD) on ActorPlanDispatcher
    * --T~PeriodicSamplesMapper()
-   * ---E~MultiSchemaPartitionsExec(shard=0)
+   * ---E~MultiSchemaPartitionsExec(shard=0) on InProcessPlanDispatcher
    * --T~PeriodicSamplesMapper()
-   * ---E~MultiSchemaPartitionsExec(shard=0)
-   * -E~BinaryJoinExec(binaryOp=ADD)
+   * ---E~MultiSchemaPartitionsExec(shard=0) on InProcessPlanDispatcher
+   * -E~BinaryJoinExec(binaryOp=ADD) on ActorPlanDispatcher
    * --T~PeriodicSamplesMapper()
-   * ---E~MultiSchemaPartitionsExec(shard=1)
+   * ---E~MultiSchemaPartitionsExec(shard=1) on InProcessPlanDispatcher
    * --T~PeriodicSamplesMapper()
-   * ---E~MultiSchemaPartitionsExec(shard=1)
+   * ---E~MultiSchemaPartitionsExec(shard=1) on InProcessPlanDispatcher
    *
    * Now, data is joined locally and in smaller batches.
-   *
-   * TODO(a_theimer): lots of missing description here. When can['t] this optimization be done?
-   *
    */
   private def materializeBinaryJoinWithPushdown(qContext: QueryContext,
                                                 lp: BinaryJoin,
                                                 forceInProcess: Boolean): PlanResult = {
-    // TODO(a_theimer): this does not feel scala-thonic
+    /**
+     * Return the plan(s) that result from joining lhs/rhs plans.
+     * In the typical case, this means returning a single ExecPlan that mirrors the outer method's
+     *   argument LogicalPlan. In some special cases (see below), lhs/rhs plans are returned without being
+     *   wrapped in a join-like ExecPlan.
+     * @param shards all shards that contain any data for lhs/rhsPlans
+     */
     def makePlans(lhsPlans: Seq[ExecPlan],
                   rhsPlans: Seq[ExecPlan],
                   shards: Set[Int],
@@ -659,8 +645,7 @@ class SingleClusterPlanner(val dataset: Dataset,
             val plans = Seq(lhsPlans, rhsPlans).flatten
             if (!forceInProcess && forceChildrenInProcess) {
               // Children were materialized with in-process dispatchers, but we need to artificially add our own.
-              // TODO(a_theimer): individually wrap?
-              assert(shards.size == 1, s"expected single shard, but found $shards")
+              assert(shards.size == 1, s"expected single shard since forceChildrenInProcess=true, but found $shards")
               val actorDisp = dispatcherForShard(shards.head, forceInProcess = false)
               return Seq(LocalPartitionDistConcatExec(qContext, actorDisp, plans))
             } else {
@@ -672,8 +657,7 @@ class SingleClusterPlanner(val dataset: Dataset,
           if (lhsPlans.nonEmpty && rhsPlans.isEmpty) {
             if (!forceInProcess && forceChildrenInProcess) {
               // Children were materialized with in-process dispatchers, but we need to artificially add our own.
-              // TODO(a_theimer): individually wrap?
-              assert(shards.size == 1, s"expected single shard, but found $shards")
+              assert(shards.size == 1, s"expected single shard since forceChildrenInProcess=true, but found $shards")
               val actorDisp = dispatcherForShard(shards.head, forceInProcess = false)
               return Seq(LocalPartitionDistConcatExec(qContext, actorDisp, lhsPlans))
             } else {
@@ -713,16 +697,6 @@ class SingleClusterPlanner(val dataset: Dataset,
       val rhsShards = getShardSpanGroupsFromLp(lp.rhs, qContext)
       lhsShards.isDefined && rhsShards.isDefined &&
         lhsShards.get.forall(_.size == 1) && rhsShards.get.forall(_.size == 1)
-
-        // TODO(a_theimer): below comment outdated and should be repurposed / removed
-        // TODO: Need to exclude these (for now). For example, consider these
-        //   <operator>(<lhs-shards>, <rhs-shards>) scenarios:
-        //     OR({1,2}, {2,3}) -> We can simply return lhs/rhs plans directly for shards 1 and 3. Since we will
-        //                         not join them with an actor-assigned plan, they cannot always be materialized
-        //                         in-process.
-        //     UNLESS({1,2}, {2,3}) -> We can return lhs plans directly for shard 1. As above, we will not
-        //                             join it with anything via an actor-assigned plan, so it can't always be
-        //                             materialized in-process.
     }
 
     val lhs = walkLogicalPlanTree(lp.lhs, qContext, forceChildrenInProcess)
@@ -739,14 +713,14 @@ class SingleClusterPlanner(val dataset: Dataset,
     // Also keep a list of the shards spanned by each ExecPlan.
     val shardGroups = new mutable.ArrayBuffer[Set[Int]]
 
-    lhs.plans.map(ep => (ep, getShardSpanFromEp(ep)))
+    lhs.plans.map(ep => (ep, PlannerUtil.getShardSpanFromEp(ep)))
       .foreach{ case (plan, shards) =>
         shards.take(1).foreach {shard =>
           lhsShardMap.getOrElseUpdate(shard, new ArrayBuffer[ExecPlan]()).append(plan)
         }
         shardGroups.append(shards)
       }
-    rhs.plans.map(ep => (ep, getShardSpanFromEp(ep)))
+    rhs.plans.map(ep => (ep, PlannerUtil.getShardSpanFromEp(ep)))
       .foreach{ case (plan, shards) =>
         shards.take(1).foreach {shard =>
           rhsShardMap.getOrElseUpdate(shard, new ArrayBuffer[ExecPlan]()).append(plan)
@@ -1089,7 +1063,43 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
 
   /**
-   * TODO(a_theimer): document this
+   * Suppose we had the following LogicalPlan:
+   *
+   * Aggregate([PeriodicSeries on shards 0,1])
+   *
+   * This might be materialized as follows:
+   *
+   *  T~AggregatePresenter()
+   *  -E~LocalPartitionReduceAggregateExec() on ActorPlanDispatcher
+   *  --T~AggregateMapReduce()
+   *  ---T~PeriodicSamplesMapper()
+   *  ----E~MultiSchemaPartitionsExec(shard=0) on ActorPlanDispatcher
+   *  --T~AggregateMapReduce()
+   *  ---T~PeriodicSamplesMapper()
+   *  ----E~MultiSchemaPartitionsExec(shard=1) on ActorPlanDispatcher
+   *
+   * Data is pulled from two shards, sent to the ReduceAggregateExec actor, then that single actor
+   *   needs to process all of this data.
+   *
+   * When (1) a target-schema is defined for all leaf-level filters, (2) all of these
+   *   target schemas are identical, and (3) the join-key fully-specifies the
+   *   target-schema labels, we can relieve much of this single-actor pressure.
+   *   aggregations will never occur across shards, so the following ExecPlan
+   *   would yield the same result as the above plan:
+   *
+   * E~LocalPartitionDistConcatExec() on ActorPlanDispatcher
+   * -T~AggregatePresenter()
+   * --E~LocalPartitionReduceAggregateExec() on ActorPlanDispatcher
+   * ---T~AggregateMapReduce()
+   * ----T~PeriodicSamplesMapper()
+   * -----E~MultiSchemaPartitionsExec(shard=0) on InProcessPlanDispatcher
+   * -T~AggregatePresenter()
+   * --E~LocalPartitionReduceAggregateExec() on ActorPlanDispatcher
+   * ---T~AggregateMapReduce()
+   * ----T~PeriodicSamplesMapper()
+   * -----E~MultiSchemaPartitionsExec(shard=1) on InProcessPlanDispatcher
+   *
+   * Now, data is aggregated locally and in smaller batches.
    */
   private def materializeAggregateWithPushdown(qContext: QueryContext,
                                                lp: Aggregate,
@@ -1113,7 +1123,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     // Also keep a list of the shards spanned by each ExecPlan.
     val shardGroups = new mutable.ArrayBuffer[Set[Int]]
 
-    childRes.plans.map(ep => (ep, getShardSpanFromEp(ep)))
+    childRes.plans.map(ep => (ep, PlannerUtil.getShardSpanFromEp(ep)))
       .foreach{ case (plan, shards) =>
         shards.take(1).foreach {shard =>
           shardMap.getOrElseUpdate(shard, new ArrayBuffer[ExecPlan]()).append(plan)

@@ -22,8 +22,6 @@ import filodb.core.query.Filter.{Equals, NotEquals}
 import filodb.query.LogicalPlan.getRawSeriesFilters
 import org.scalatest.exceptions.TestFailedException
 
-
-import scala.collection.mutable
 import scala.concurrent.duration._
 
 class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures with PlanValidationSpec {
@@ -440,18 +438,6 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     binaryJoinNode.children.foreach(_.isInstanceOf[StitchRvsExec] shouldEqual false)
   }
 
-  // TODO(a_theimer): reconcile this copy-paste with the one in SCP
-  private def getShardSpanEp(ep: ExecPlan): Set[Int] = {
-    def helper(ep: ExecPlan, set: mutable.HashSet[Int]): Unit = ep match {
-      case mspe: MultiSchemaPartitionsExec => set.add(mspe.shard)
-      case nl: NonLeafExecPlan => nl.children.foreach(helper(_, set))
-      case _ => throw new IllegalArgumentException(s"unhandled type: ${ep.getClass}")
-    }
-    val set = new mutable.HashSet[Int]
-    helper(ep, set)
-    set.toSet
-  }
-
   it("should create single child plan for LHS where target-schema filters provided" +
     " and 4 (spread 2) children for RHS (no target-schema filters) of the binary join") {
     val lp = Parser.queryRangeToLogicalPlan("""count(foo{job="bar", instance="inst1"} + baz{job="bar"})""",
@@ -617,8 +603,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@765d55d5)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@765d55d5)""".stripMargin),
-      // TODO(a_theimer): add a note below about this weird setup
       // or; disjoint shards. Should return all children directly.
+      // See SingleClusterPlanner::materializeBinaryJoinWithPushdown for documentation about these weird concat-wrappers.
       ("""foo{job="baz"} or on (job, app) bar{job="bat"}""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1110431818],raw)
           |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1110431818],raw)
@@ -634,6 +620,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=22, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bat)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@2ddb3ae8)""".stripMargin),
       // unless; disjoint shards. Should return the lhs directly.
+      // See SingleClusterPlanner::materializeBinaryJoinWithPushdown for documentation about these weird concat-wrappers.
       ("""foo{job="baz"} unless on (job, app) bar{job="bat"}""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1079343266],raw)
           |-E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1079343266],raw)
@@ -905,7 +892,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       (spreadOverride = Some(FunctionalSpreadProvider(spread)),
         targetSchemaProvider = Some(FunctionalTargetSchemaProvider(targetSchema)), queryTimeoutMillis = 1000000)))
       try {
-        validatePlan(execPlan, expected, ep => getShardSpanEp(ep).min)
+        validatePlan(execPlan, expected, ep => PlannerUtil.getShardSpanFromEp(ep).min)
       } catch {
         case e: TestFailedException =>
           println(s"Plan validation failed for query: $query")
