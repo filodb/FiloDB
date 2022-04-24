@@ -645,17 +645,88 @@ class SingleClusterPlanner(val dataset: Dataset,
   private def materializeBinaryJoinWithPushdown(qContext: QueryContext,
                                                 lp: BinaryJoin,
                                                 forceInProcess: Boolean): PlanResult = {
+    // TODO(a_theimer): this does not feel scala-thonic
+    def makePlans(lhsPlans: Seq[ExecPlan],
+                  rhsPlans: Seq[ExecPlan],
+                  shards: Set[Int],
+                  forceChildrenInProcess: Boolean): Seq[ExecPlan] = {
+      // Need special cases here for certain set operators...
+      lp.operator match {
+        case BinaryOperator.LOR =>
+          // exactly one side of the "or" is absent-- just return that side as the result
+          if (lhsPlans.nonEmpty ^ rhsPlans.nonEmpty) {
+            // one of these seqs will be empty
+            val plans = Seq(lhsPlans, rhsPlans).flatten
+            if (!forceInProcess && forceChildrenInProcess) {
+              // Children were materialized with in-process dispatchers, but we need to artificially add our own.
+              // TODO(a_theimer): individually wrap?
+              assert(shards.size == 1, s"expected single shard, but found $shards")
+              val actorDisp = dispatcherForShard(shards.head, forceInProcess = false)
+              return Seq(LocalPartitionDistConcatExec(qContext, actorDisp, plans))
+            } else {
+              return plans
+            }
+          }
+        case BinaryOperator.LUnless =>
+          // when this holds, the join will return the "unless" is effectively a no-op
+          if (lhsPlans.nonEmpty && rhsPlans.isEmpty) {
+            if (!forceInProcess && forceChildrenInProcess) {
+              // Children were materialized with in-process dispatchers, but we need to artificially add our own.
+              // TODO(a_theimer): individually wrap?
+              assert(shards.size == 1, s"expected single shard, but found $shards")
+              val actorDisp = dispatcherForShard(shards.head, forceInProcess = false)
+              return Seq(LocalPartitionDistConcatExec(qContext, actorDisp, lhsPlans))
+            } else {
+              return lhsPlans
+            }
+          }
+        case _ => { /* Continue below... */}
+      }
+
+      // All below code is the default case; single join ExecPlan will be returned
+      if (lhsPlans.isEmpty || rhsPlans.isEmpty) {
+        return Seq.empty
+      }
+      // since we can't pick the dispatcher from the children (all will be InProcessPlanDispatchers)
+      val targetActor = if (forceInProcess) inProcessPlanDispatcher
+      else dispatcherForShard(shards.toSeq(Random.nextInt(shards.size)), false)
+      val joinExecPlan = lp.operator match {
+        case _: SetOperator => exec.SetOperatorExec(qContext, targetActor, lhsPlans, rhsPlans, lp.operator,
+          LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
+          LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
+          dsOptions.metricColumn,
+          rvRangeFromPlan(lp))
+        case _ => BinaryJoinExec(qContext, targetActor, lhsPlans, rhsPlans, lp.operator, lp.cardinality,
+          LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
+          LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
+          LogicalPlanUtils.renameLabels(lp.include, dsOptions.metricColumn),
+          dsOptions.metricColumn,
+          rvRangeFromPlan(lp))
+      }
+      Seq(joinExecPlan)
+    }
+
     // Force in-process dispatchers for children iff we can confirm lhs and rhs ExecPlans
     //   will each draw data from only one shard.
-    val forceInProcessChildren = forceInProcess || {
+    val forceChildrenInProcess = forceInProcess || {
       val lhsShards = getShardSpanGroupsFromLp(lp.lhs, qContext)
       val rhsShards = getShardSpanGroupsFromLp(lp.rhs, qContext)
       lhsShards.isDefined && rhsShards.isDefined &&
         lhsShards.get.forall(_.size == 1) && rhsShards.get.forall(_.size == 1)
+
+        // TODO(a_theimer): below comment outdated and should be repurposed / removed
+        // TODO: Need to exclude these (for now). For example, consider these
+        //   <operator>(<lhs-shards>, <rhs-shards>) scenarios:
+        //     OR({1,2}, {2,3}) -> We can simply return lhs/rhs plans directly for shards 1 and 3. Since we will
+        //                         not join them with an actor-assigned plan, they cannot always be materialized
+        //                         in-process.
+        //     UNLESS({1,2}, {2,3}) -> We can return lhs plans directly for shard 1. As above, we will not
+        //                             join it with anything via an actor-assigned plan, so it can't always be
+        //                             materialized in-process.
     }
 
-    val lhs = walkLogicalPlanTree(lp.lhs, qContext, forceInProcessChildren)
-    val rhs = walkLogicalPlanTree(lp.rhs, qContext, forceInProcessChildren)
+    val lhs = walkLogicalPlanTree(lp.lhs, qContext, forceChildrenInProcess)
+    val rhs = walkLogicalPlanTree(lp.rhs, qContext, forceChildrenInProcess)
 
     // TODO(a_theimer): remove this and/or handle stitching here
     assert(!lhs.needsStitch && !rhs.needsStitch)
@@ -683,34 +754,13 @@ class SingleClusterPlanner(val dataset: Dataset,
         shardGroups.append(shards)
       }
 
-    // Triplets of (shards, lhsPlans, rhsPlans); all plans with data on `shards` are included.
-    val joinInfos = getConnectedShards(shardGroups).map{ shards =>
-      val lhsPlans = shards.flatMap(lhsShardMap.getOrElse(_, Seq()))
-      val rhsPlans = shards.flatMap(rhsShardMap.getOrElse(_, Seq()))
-      if (lhsPlans.nonEmpty && rhsPlans.nonEmpty) {
-        Some((shards, lhsPlans, rhsPlans))
-      } else None
-    }.filter(_.isDefined).map(_.get).toSeq
-
     // TODO(a_theimer): stitch anything here?
-    val joinPlans = joinInfos.map{ case (shards, lhsPlans, rhsPlans) =>
-      // since we can't pick the dispatcher from the children (all will be InProcessPlanDispatchers)
-      val targetActor = if (forceInProcess) inProcessPlanDispatcher
-                        else dispatcherForShard(shards.toSeq(Random.nextInt(shards.size)), false)
-      lp.operator match {
-        case _: SetOperator => exec.SetOperatorExec(qContext, targetActor, lhsPlans.toSeq, rhsPlans.toSeq, lp.operator,
-          LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
-          LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
-          dsOptions.metricColumn,
-          rvRangeFromPlan(lp))
-        case _ => BinaryJoinExec(qContext, targetActor, lhsPlans.toSeq, rhsPlans.toSeq, lp.operator, lp.cardinality,
-          LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
-          LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
-          LogicalPlanUtils.renameLabels(lp.include, dsOptions.metricColumn),
-          dsOptions.metricColumn,
-          rvRangeFromPlan(lp))
-      }
+    val joinPlans = getConnectedShards(shardGroups).flatMap{ shards =>
+      val lhsPlans = shards.toSeq.flatMap(lhsShardMap.getOrElse(_, Seq()))
+      val rhsPlans = shards.toSeq.flatMap(rhsShardMap.getOrElse(_, Seq()))
+      makePlans(lhsPlans, rhsPlans, shards, forceChildrenInProcess)
     }
+
     if (joinPlans.nonEmpty) {
       PlanResult(joinPlans)
     } else {
