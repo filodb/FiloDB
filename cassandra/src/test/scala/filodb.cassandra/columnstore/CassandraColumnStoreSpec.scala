@@ -14,8 +14,9 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.store.{ChunkSet, ChunkSetInfo, ColumnStoreSpec, PartKeyRecord}
 import filodb.memory.{BinaryRegionLarge, NativeMemoryManager}
-import filodb.memory.format.{TupleRowReader, UnsafeUtils}
+import filodb.memory.format.{SeqRowReader, TupleRowReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
+
 
 import java.nio.charset.StandardCharsets
 
@@ -70,7 +71,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
                               .zipWithIndex.map { case (pk, i) => PartKeyRecord(pk, 5, 10, Some(i))}.toSet
 
     val updateHour = 10
-    colStore.writePartKeys(dataset, 0, Observable.fromIterable(pks), 1.hour.toSeconds.toInt, 10, true )
+    colStore.writePartKeys(dataset, 0, Observable.fromIterable(pks), 1.hour.toSeconds.toInt, 10, schemas, true)
       .futureValue shouldEqual Success
 
     val expectedKeys = pks.map(pk => new String(pk.partKey, StandardCharsets.UTF_8).toInt)
@@ -81,10 +82,77 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     val readData2 = colStore.scanPartKeys(dataset, 0).toListL.runToFuture.futureValue.toSet
     readData2.map(pk => new String(pk.partKey, StandardCharsets.UTF_8).toInt) shouldEqual expectedKeys
 
-    readData2.map(_.partKey).foreach(pk => colStore.deletePartKeyNoAsync(dataset, 0, pk))
+    readData2.map(_.partKey).foreach(pk => colStore.deletePartKeyNoAsync(dataset, 0, pk, schemas))
 
     val readData3 = colStore.scanPartKeys(dataset, 0).toListL.runToFuture.futureValue
     readData3.isEmpty shouldEqual true
+  }
+
+  "ShardKeyToPartKeyTable Reads, Writes, and Deletes" should "work" in {
+    import MetricsTestData._
+
+    val dataset = timeseriesDatasetMultipleShardKeys
+    val schemas = Schemas(dataset.schema.partition, Map("timeseries" -> dataset.schema))
+
+    // ws, ns, metric triplets
+    val shardKeys = Seq(
+      Seq("ws1", "ns1", "metric1"),
+      Seq("ws1", "ns1", "metric1"),  // same as above
+      Seq("ws1", "ns1", "metric2"),  // same as above, different metric
+      Seq("ws1", "ns2", "metric1"),
+      Seq("ws2", "ns1", "metric1"),
+      Seq("ws2", "ns2", "metric1"),
+    )
+
+    val rows = shardKeys.zipWithIndex.map{ case (key, i) =>
+      val keyMap = Seq("_ws_", "_ns_", "_metric_")
+        .zip(key)
+        .map{ case (k, v) => (k.utf8, v.utf8)}
+        .toMap
+      SeqRowReader(Seq(i.toLong, i.toDouble, keyMap))
+    }
+
+    val pks = partKeyFromRecords(dataset, records(dataset, rows)).zipWithIndex.map { case (pk, i) =>
+      val bytes = dataset.schema.partKeySchema.asByteArray(pk)
+      PartKeyRecord(bytes, 0, 0, Some(i))
+    }
+
+    // map shardKeys to their corresponding sets of partKeys
+    val shardKeyToPartKeySet = pks.foldLeft(Map[Seq[Byte], Set[Seq[Byte]]]()){ case (map, pk) =>
+      val shardKey = schemas.shardKeyFromPartKey(pk.partKey).toSeq
+      val partKey = pk.partKey.toSeq
+      val seenKeys: Set[Seq[Byte]] = map.get(shardKey).getOrElse(Set())
+      if (!seenKeys.contains(partKey)) {
+        val mapWithNewKey = Map(shardKey -> seenKeys.union(Set(partKey)))
+        map.filterKeys(k => k != shardKey) ++ mapWithNewKey
+      } else {
+        map
+      }
+    }
+
+    colStore.initialize(dataset.ref, 1).futureValue
+    colStore.truncate(dataset.ref, 1).futureValue
+
+    colStore.writePartKeys(dataset.ref, 0, Observable.fromIterable(pks), 1.hour.toSeconds.toInt, 10, schemas, true)
+      .futureValue shouldEqual Success
+
+    // scan for each shard key and compare against expected result set
+    shardKeyToPartKeySet.map{ case (shardKey, partKeySet) =>
+      val scannedPks = colStore.scanPartKeysByShardKey(dataset.ref, 0, shardKey.toArray).toListL.runToFuture.futureValue
+      scannedPks.size shouldEqual partKeySet.size
+      scannedPks.map(_.toSeq).toSet shouldEqual partKeySet
+    }
+
+    // delete all partkeys
+    shardKeyToPartKeySet.values.flatten.foreach{pk =>
+      colStore.deletePartKeyNoAsync(dataset.ref, 0, pk.toArray, schemas)
+    }
+
+    // make sure shardKey scans all return empty result
+    shardKeyToPartKeySet.keys.foreach{ shardKey =>
+      val scannedPks = colStore.scanPartKeysByShardKey(dataset.ref, 0, shardKey.toArray).toListL.runToFuture.futureValue
+      scannedPks.isEmpty shouldEqual true
+    }
   }
 
   "copyOrDeleteChunksByIngestionTimeRange" should "actually work" in {

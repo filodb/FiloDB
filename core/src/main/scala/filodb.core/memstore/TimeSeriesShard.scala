@@ -1386,9 +1386,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     assertThreadName(IOSchedName)
     val partKeyRecords = InMemPartitionIterator2(flushGroup.dirtyPartsToFlush).map(toPartKeyRecord)
     val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
-    colStore.writePartKeys(ref, shardNum,
-      Observable.fromIteratorUnsafe(partKeyRecords),
-      storeConfig.diskTTLSeconds, updateHour).map { resp =>
+    colStore.writePartKeys(ref, shardNum, Observable.fromIteratorUnsafe(partKeyRecords),
+                           storeConfig.diskTTLSeconds, updateHour, schemas).map { resp =>
       if (flushGroup.dirtyPartsToFlush.length > 0) {
         logger.info(s"Finished flush of partKeys numPartKeys=${flushGroup.dirtyPartsToFlush.length}" +
           s" resp=$resp for dataset=$ref shard=$shardNum")

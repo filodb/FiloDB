@@ -20,6 +20,8 @@ import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
+import filodb.core.ErrorResponse
+import filodb.core.metadata.Schemas
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge
 
@@ -84,6 +86,9 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       val partKeyTablesInit = Observable.fromIterable(0.until(numShards)).map { s =>
         getOrCreatePartitionKeysTable(dataset, s)
       }.mapEval(t => Task.fromFuture(t.initialize())).toListL
+      val shardKeyToPartKeyTableInit = Observable.fromIterable(0.until(numShards)).map { s =>
+        getOrCreateShardKeyToPartKeyTable(dataset, s)
+      }.mapEval(t => Task.fromFuture(t.initialize())).toListL
       clusterConnector.createKeyspace(chunkTable.keyspace)
       val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
       // Important: make sure nodes are in agreement before any schema changes
@@ -92,10 +97,15 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
            ixResp <- indexTable.initialize() if ixResp == Success
            pkutResp <- partitionKeysByUpdateTimeTable.initialize() if pkutResp == Success
            partKeyTablesResp <- partKeyTablesInit.runToFuture if partKeyTablesResp.forall(_ == Success)
+           shardKeyToPartkeyTableResp <-
+             shardKeyToPartKeyTableInit.runToFuture if shardKeyToPartkeyTableResp.forall(_ == Success)
       } yield Success
     } else {
       // ensure the table handles are eagerly created
-      0.until(numShards).foreach(getOrCreatePartitionKeysTable(dataset, _))
+      0.until(numShards).foreach{
+        getOrCreatePartitionKeysTable(dataset, _)
+        getOrCreateShardKeyToPartKeyTable(dataset, _)
+      }
       Future.successful(Success)
     }
   }
@@ -107,12 +117,17 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val partKeyTablesTrunc = Observable.fromIterable(0.until(numShards)).map { s =>
       getOrCreatePartitionKeysTable(dataset, s)
     }.mapEval(t => Task.fromFuture(t.clearAll())).toListL
+    val shardKeyToPartKeyTableTrunc = Observable.fromIterable(0.until(numShards)).map { s =>
+      getOrCreateShardKeyToPartKeyTable(dataset, s)
+    }.mapEval(t => Task.fromFuture(t.clearAll())).toListL
     val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
     clusterMeta.checkSchemaAgreement()
-    for { ctResp    <- chunkTable.clearAll() if ctResp == Success
-          ixResp    <- indexTable.clearAll() if ixResp == Success
-          pkutResp  <- partitionKeysByUpdateTimeTable.clearAll() if pkutResp == Success
-          partKeyTablesResp <- partKeyTablesTrunc.runToFuture if partKeyTablesResp.forall( _ == Success)
+    for {ctResp    <- chunkTable.clearAll() if ctResp == Success
+         ixResp    <- indexTable.clearAll() if ixResp == Success
+         pkutResp  <- partitionKeysByUpdateTimeTable.clearAll() if pkutResp == Success
+         partKeyTablesResp <- partKeyTablesTrunc.runToFuture if partKeyTablesResp.forall( _ == Success)
+         shardKeyToPartKeyTableTruncResp <-
+           shardKeyToPartKeyTableTrunc.runToFuture if shardKeyToPartKeyTableTruncResp.forall( _ == Success)
     } yield Success
   }
 
@@ -123,15 +138,21 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val partKeyTablesDrop = Observable.fromIterable(0.until(numShards)).map { s =>
       getOrCreatePartitionKeysTable(dataset, s)
     }.mapEval(t => Task.fromFuture(t.drop())).toListL
+    val shardKeyToPartKeyTablesDrop = Observable.fromIterable(0.until(numShards)).map { s =>
+      getOrCreateShardKeyToPartKeyTable(dataset, s)
+    }.mapEval(t => Task.fromFuture(t.drop())).toListL
     clusterMeta.checkSchemaAgreement()
     for {ctResp <- chunkTable.drop() if ctResp == Success
          ixResp <- indexTable.drop() if ixResp == Success
          pkutResp  <- partitionKeysByUpdateTimeTable.drop() if pkutResp == Success
          partKeyTablesResp <- partKeyTablesDrop.runToFuture if partKeyTablesResp.forall(_ == Success)
+         shardKeyToPartKeyTablesResp <-
+           shardKeyToPartKeyTablesDrop.runToFuture if shardKeyToPartKeyTablesResp.forall(_ == Success)
     } yield {
       chunkTableCache.remove(dataset)
       indexTableCache.remove(dataset)
       partitionKeysTableCache.remove(dataset)
+      shardKeyToPartKeyTableCache.remove(dataset)
       Success
     }
   }
@@ -232,14 +253,11 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
    *
    * @param diskTimeToLiveSeconds ttl
    */
-  def copyPartitionKeysByTimeRange(datasetRef: DatasetRef,
-                                   numOfShards: Int,
-                                   splits: Iterator[ScanSplit],
-                                   repairStartTime: Long,
-                                   repairEndTime: Long,
+  def copyPartitionKeysByTimeRange(datasetRef: DatasetRef, numOfShards: Int, splits: Iterator[ScanSplit],
+                                   repairStartTime: Long, repairEndTime: Long,
                                    target: CassandraColumnStore,
                                    partKeyHashFn: PartKeyRecord => Option[Int],
-                                   diskTimeToLiveSeconds: Int): Unit = {
+                                   diskTimeToLiveSeconds: Int, schemas: Schemas): Unit = {
     def pkRecordWithHash(pkRecord: PartKeyRecord) = {
       PartKeyRecord(pkRecord.partKey, pkRecord.startTime, pkRecord.endTime, partKeyHashFn(pkRecord))
     }
@@ -261,8 +279,8 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       )
       val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
       Await.result(
-        target.writePartKeys(datasetRef,
-          shard, Observable.fromIterable(partKeys), diskTimeToLiveSeconds, updateHour, !downsampledData),
+        target.writePartKeys(datasetRef, shard, Observable.fromIterable(partKeys),
+                             diskTimeToLiveSeconds, updateHour, schemas, !downsampledData),
         5.minutes
       )
     }
@@ -430,12 +448,20 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     }
   }
 
-  def writePartKeys(ref: DatasetRef,
-                    shard: Int,
-                    partKeys: Observable[PartKeyRecord],
-                    diskTTLSeconds: Long, updateHour: Long,
+  def scanPartKeysByShardKey(ref: DatasetRef, shard: Int, shardKey: Array[Byte]): Observable[Array[Byte]] = {
+    val table = getOrCreateShardKeyToPartKeyTable(ref, shard)
+    table.scanPartKeys(shardKey)
+    // TODO(a_theimer): figure out if token ranges apply here
+//    Observable.fromIterable(getScanSplits(ref)).flatMap { tokenRange =>
+//      table.scanPartKeys(tokenRange.asInstanceOf[CassandraTokenRangeSplit].tokens, indexScanParallelismPerShard)
+//    }
+  }
+
+  def writePartKeys(ref: DatasetRef, shard: Int, partKeys: Observable[PartKeyRecord],
+                    diskTTLSeconds: Long, updateHour: Long, schemas: Schemas,
                     writeToPkUTTable: Boolean = true): Future[Response] = {
     val pkTable = getOrCreatePartitionKeysTable(ref, shard)
+    val skToPkTable = getOrCreateShardKeyToPartKeyTable(ref, shard)
     val pkByUTTable = getOrCreatePartitionKeysByUpdateTimeTable(ref)
     val start = System.currentTimeMillis()
     val ret = partKeys.mapParallelUnordered(writeParallelism) { pk =>
@@ -449,11 +475,21 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
         case resp =>
           Future.successful(resp)
       }
-      Task.fromFuture(writePkFut).map{ resp =>
-        sinkStats.partKeysWrite(1)
-        resp
+      val writeSkToPkFut = {
+        val shardKey = schemas.shardKeyFromPartKey(pk.partKey)
+        if (shardKey.nonEmpty)
+          skToPkTable.addMapping(shardKey, pk.partKey, diskTTLSeconds)
+        else
+          Future(Success)
       }
-    }.findL(_.isInstanceOf[ErrorResponse]).map(_.getOrElse(Success)).runToFuture
+      Task.fromFuture(Future.sequence(Seq(writePkFut, writeSkToPkFut))).map{ respSeq =>
+        sinkStats.partKeysWrite(1)
+        // TODO(a_theimer): why won't flatten work?
+        respSeq.find(_.isInstanceOf[ErrorResponse])
+      }
+    }.findL(respOpt => respOpt.isDefined).map{errorOpt =>
+      errorOpt.getOrElse(Some(Success)).get
+    }.runToFuture
     ret.onComplete { _ =>
       writePksLatency.record(System.currentTimeMillis() - start)
     }
@@ -473,9 +509,27 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   def deletePartKeyNoAsync(ref: DatasetRef,
                            shard: Int,
-                           pk: Array[Byte]): Response = {
+                           pk: Array[Byte],
+                           schemas: Schemas): Response = {
     val pkTable = getOrCreatePartitionKeysTable(ref, shard)
-    pkTable.deletePartKeyNoAsync(pk)
+    val skToPkTable = getOrCreateShardKeyToPartKeyTable(ref, shard)
+    val shardKey = schemas.shardKeyFromPartKey(pk)
+
+    def deletePartKey = {
+      Some(pkTable.deletePartKeyNoAsync(pk))
+    }
+    def deleteShardKeyMapping = {
+      if (shardKey.nonEmpty) {
+        Some(skToPkTable.deleteMappingNoAsync(shardKey, pk))
+      } else None
+    }
+
+    val deleteResps = Seq(deletePartKey, deleteShardKeyMapping)
+      .filter(_.isDefined)
+      .map(_.get)
+
+    // return the first ErrorResponse; otherwise just the first Response
+    deleteResps.find(_.isInstanceOf[ErrorResponse]).getOrElse(deleteResps.head)
   }
 
   def getPartKeysByUpdateHour(ref: DatasetRef,
@@ -519,6 +573,8 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   val partKeysByUTTableCache = concurrentCache[DatasetRef, PartitionKeysByUpdateTimeTable](tableCacheSize)
   val partitionKeysTableCache = concurrentCache[DatasetRef,
                                   ConcurrentLinkedHashMap[Int, PartitionKeysTable]](tableCacheSize)
+  val shardKeyToPartKeyTableCache = concurrentCache[DatasetRef,
+                                      ConcurrentLinkedHashMap[Int, ShardKeyToPartKeyTable]](tableCacheSize)
 
   protected val clusterConnector = new FiloCassandraConnector {
     def config: Config = cassandraConfig
@@ -594,6 +650,16 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
     })
     map.getOrElseUpdate(shard, { shard: Int =>
       new PartitionKeysTable(dataset, shard, clusterConnector, ingestionConsistencyLevel)(readEc)
+    })
+  }
+
+  def getOrCreateShardKeyToPartKeyTable(dataset: DatasetRef, shard: Int): ShardKeyToPartKeyTable = {
+    // TODO(a_theimer): should this be on a per-shard basis?
+    val map = shardKeyToPartKeyTableCache.getOrElseUpdate(dataset, { _ =>
+      concurrentCache[Int, ShardKeyToPartKeyTable](tableCacheSize)
+    })
+    map.getOrElseUpdate(shard, { shard: Int =>
+      new ShardKeyToPartKeyTable(dataset, shard, clusterConnector, ingestionConsistencyLevel)(readEc)
     })
   }
 

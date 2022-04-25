@@ -111,14 +111,8 @@ class PartitionKeysCopier(conf: SparkConf) {
 
   def copySourceToTarget(splitIter: Iterator[ScanSplit]): Unit = {
     sourceCassandraColStore.copyPartitionKeysByTimeRange(
-      datasetRef,
-      numOfShards,
-      splitIter,
-      copyStartTime.toEpochMilli(),
-      copyEndTime.toEpochMilli(),
-      targetCassandraColStore,
-      partKeyHashFn,
-      diskTimeToLiveSeconds.toInt)
+      datasetRef, numOfShards, splitIter, copyStartTime.toEpochMilli(), copyEndTime.toEpochMilli(),
+      targetCassandraColStore, partKeyHashFn, diskTimeToLiveSeconds.toInt, schemas)
   }
 
   def shutdown(): Unit = {

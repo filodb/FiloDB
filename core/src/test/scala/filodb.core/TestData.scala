@@ -547,4 +547,17 @@ object MetricsTestData {
       override def outputRange: Option[RvRange] = Some(range)
     }
   }
+
+  def records(ds: Dataset, readerSeq: Seq[RowReader]): SomeData = {
+    val builder = new RecordBuilder(MemFactory.onHeapFactory)
+    readerSeq.foreach { row => builder.addFromReader(row, ds.schema) }
+    builder.allContainers.zipWithIndex.map { case (container, i) => SomeData(container, i) }.head
+  }
+
+  def partKeyFromRecords(ds: Dataset, records: SomeData, builder: Option[RecordBuilder] = None): Seq[Long] = {
+    val partKeyBuilder = builder.getOrElse(new RecordBuilder(TestData.nativeMem))
+    records.records.map { case (base, offset) =>
+      ds.comparator.buildPartKeyFromIngest(base, offset, partKeyBuilder)
+    }.toVector
+  }
 }
