@@ -61,30 +61,30 @@ object SingleClusterPlanner {
     }
 
   /**
-   * Returns an occupied option with a RawSeries' target schema labels iff they are defined.
+   * Returns an occupied option with target schema labels iff they are defined and identical
+   *   for every leaf LogicalPlan.
    */
-  private def getRawSeriesTargetSchemaLabels(lp: RawSeries,
-                                             tsp: TargetSchemaProvider): Option[Seq[String]] = {
-    val rangeSelectorOpt: Option[(Long, Long)] = lp.rangeSelector match {
-      // TODO(a_theimer): other selectors?
-      case IntervalSelector(fromMs, toMs) => Some((fromMs, toMs))
-      case _ => None
-    }
-    val targetSchemaOpt = rangeSelectorOpt.map{ case (fromMs, toMs) =>
-      val tsChanges = tsp.targetSchemaFunc(lp.filters)
-      findTargetSchema(tsChanges, fromMs, toMs).map(_.schema)
-    }
-    if (targetSchemaOpt.isDefined) targetSchemaOpt.get else None
-  }
-
-  /**
-   * Returns one Option per leaf plan; each is occupied iff it has a target schema defined.
-   */
-  private def getTargetSchemaLabels(lp: LogicalPlan,
-                                    tsp: TargetSchemaProvider): Seq[Option[Seq[String]]] = {
+  private def getUniversalTargetSchemaLabels(lp: LogicalPlan,
+                                    tsp: TargetSchemaProvider): Option[Seq[String]] = {
     lp match {
-      case rs: RawSeries => Seq(getRawSeriesTargetSchemaLabels(rs, tsp))
-      case nl: NonLeafLogicalPlan => nl.children.flatMap(getTargetSchemaLabels(_, tsp))
+      case rs: RawSeries => {
+        val rangeSelectorOpt: Option[(Long, Long)] = rs.rangeSelector match {
+          // TODO(a_theimer): other selectors?
+          case IntervalSelector(fromMs, toMs) => Some((fromMs, toMs))
+          case _ => None
+        }
+        val targetSchemaOpt = rangeSelectorOpt.map{ case (fromMs, toMs) =>
+          val tsChanges = tsp.targetSchemaFunc(rs.filters)
+          findTargetSchema(tsChanges, fromMs, toMs).map(_.schema)
+        }
+        if (targetSchemaOpt.isDefined) targetSchemaOpt.get else None
+      }
+      case nl: NonLeafLogicalPlan => {
+        val tsLabelOpts = nl.children.map(getUniversalTargetSchemaLabels(_, tsp))
+        val allDefinedAndSame = tsLabelOpts.forall(_.isDefined) &&
+          tsLabelOpts.drop(1).forall(_ == tsLabelOpts.head)
+        if (allDefinedAndSame) tsLabelOpts.head else None
+      }
       case _ => throw new RuntimeException(s"unhandled type: ${lp.getClass}")
     }
   }
@@ -139,17 +139,10 @@ object SingleClusterPlanner {
    */
   private def canPushdownBinaryJoin(qContext: QueryContext,
                                     lp: BinaryJoin): Boolean = {
-
-    if (qContext.plannerParams.targetSchemaProvider.isDefined) {
-      val targetSchemaLabels = getTargetSchemaLabels(lp, qContext.plannerParams.targetSchemaProvider.get)
-      lazy val allGroupsDefined = targetSchemaLabels.forall(_.isDefined)
-      lazy val allGroupsSame = {
-        val refColSet = targetSchemaLabels.head.get.toSet
-        targetSchemaLabels.drop(1).forall(_.get.toSet == refColSet)
-      }
-      lazy val joinIncludesAllTsLabels = targetSchemaLabels.head.get.toSet.subsetOf(lp.on.toSet)
-      allGroupsDefined && allGroupsSame && joinIncludesAllTsLabels
-    } else false
+    qContext.plannerParams.targetSchemaProvider.isDefined && {
+      val targetSchemaLabels = getUniversalTargetSchemaLabels(lp, qContext.plannerParams.targetSchemaProvider.get)
+      targetSchemaLabels.isDefined && targetSchemaLabels.get.toSet.subsetOf(lp.on.toSet)
+    }
   }
 
   /**
@@ -157,22 +150,15 @@ object SingleClusterPlanner {
    */
   private def canPushdownAggregate(qContext: QueryContext,
                                    lp: Aggregate): Boolean = {
-    if (qContext.plannerParams.targetSchemaProvider.isDefined) {
-      val targetSchemaLabels = getTargetSchemaLabels(lp, qContext.plannerParams.targetSchemaProvider.get)
-      lazy val allGroupsDefined = targetSchemaLabels.forall(_.isDefined)
-      lazy val allGroupsSame = {
-        val refColSet = targetSchemaLabels.head.get.toSet
-        targetSchemaLabels.drop(1).forall(_.get.toSet == refColSet)
-      }
-      lazy val clauseIncludesAllTsLabels = if (lp.clauseOpt.isDefined) {
+    qContext.plannerParams.targetSchemaProvider.isDefined && {
+      val targetSchemaLabels = getUniversalTargetSchemaLabels(lp, qContext.plannerParams.targetSchemaProvider.get)
+      lp.clauseOpt.isDefined && {
         lp.clauseOpt.get.clauseType match {
-          case ClauseType.By => targetSchemaLabels.head.get.toSet.subsetOf(lp.clauseOpt.get.labels.toSet)
+          case ClauseType.By => targetSchemaLabels.get.toSet.subsetOf(lp.clauseOpt.get.labels.toSet)
           case ClauseType.Without => false
         }
-      } else false
-      return allGroupsDefined && allGroupsSame && clauseIncludesAllTsLabels
+      }
     }
-    false
   }
 
 //  // TODO(a_theimer): need this? Probably only necessary for grandchild pushdowns.
@@ -631,6 +617,7 @@ class SingleClusterPlanner(val dataset: Dataset,
      *   argument LogicalPlan. In some special cases (see below), lhs/rhs plans are returned without being
      *   wrapped in a join-like ExecPlan.
      * @param shards all shards that contain any data for lhs/rhsPlans
+     * @param forceChildrenInProcess true iff all children were materialized with forceInProcess=true
      */
     def makePlans(lhsPlans: Seq[ExecPlan],
                   rhsPlans: Seq[ExecPlan],
