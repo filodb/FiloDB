@@ -290,37 +290,38 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   it ("should correctly execute TsCardExec") {
     import filodb.query.exec.TsCardExec._
 
-    case class TestSpec(shardKeyPrefix: Seq[String], numGroupByFields: Int, exp: Map[Seq[String], CardCounts])
+    case class TestSpec(shardKeyPrefix: Seq[String], numGroupByFields: Int, exp: Seq[(Seq[String], CardCounts)])
 
     // Note: expected strings are eventually concatenated with a delimiter
     //   and converted to ZeroCopyUTF8Strings.
     Seq(
-      TestSpec(Seq(), 1, Map(
-        Seq("demo-A") -> CardCounts(1,1),
-        Seq("demo") -> CardCounts(4,4))),
-      TestSpec(Seq(), 2, Map(
+      TestSpec(Seq(), 1, Seq(
+        Seq("demo") -> CardCounts(4,4),
+        Seq("demo-A") -> CardCounts(1,1)
+        )),
+      TestSpec(Seq(), 2, Seq(
         Seq("demo", "App-0") -> CardCounts(4,4),
         Seq("demo-A", "App-A") -> CardCounts(1,1))),
-      TestSpec(Seq(), 3, Map(
-        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
+      TestSpec(Seq(), 3, Seq(
         Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
-        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1),
-        Seq("demo-A", "App-A", "http_req_total-A") -> CardCounts(1,1))),
-      TestSpec(Seq("demo"), 1, Map(
+        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
+        Seq("demo-A", "App-A", "http_req_total-A") -> CardCounts(1,1),
+        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1))),
+      TestSpec(Seq("demo"), 1, Seq(
         Seq("demo") -> CardCounts(4,4))),
-      TestSpec(Seq("demo"), 2, Map(
+      TestSpec(Seq("demo"), 2, Seq(
         Seq("demo", "App-0") -> CardCounts(4,4))),
-      TestSpec(Seq("demo"), 3, Map(
-        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
+      TestSpec(Seq("demo"), 3, Seq(
         Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
+        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
         Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1))),
-      TestSpec(Seq("demo", "App-0"), 2, Map(
+      TestSpec(Seq("demo", "App-0"), 2, Seq(
         Seq("demo", "App-0") -> CardCounts(4,4))),
-      TestSpec(Seq("demo", "App-0"), 3, Map(
-        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
+      TestSpec(Seq("demo", "App-0"), 3, Seq(
         Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
+        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
         Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1))),
-      TestSpec(Seq("demo", "App-0", "http_req_total"), 3, Map(
+      TestSpec(Seq("demo", "App-0", "http_req_total"), 3, Seq(
         Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2)))
     ).foreach{ testSpec =>
 
@@ -340,11 +341,11 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
           val resultMap = response(0).rows().map{r =>
             val data = RowData.fromRowReader(r)
             data.group -> data.counts
-          }.toMap
+          }.toSeq
 
           resultMap shouldEqual testSpec.exp.map { case (prefix, counts) =>
             prefixToGroup(prefix) -> counts
-          }.toMap
+          }
       }
     }
   }

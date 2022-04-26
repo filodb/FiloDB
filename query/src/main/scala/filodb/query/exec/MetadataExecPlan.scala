@@ -107,7 +107,7 @@ final case class TsCardReduceExec(queryContext: QueryContext,
     }.flatten
       .foldLeftL(new mutable.HashMap[ZeroCopyUTF8String, CardCounts])(mapFold)
       .map{ aggMap =>
-        val it = aggMap.map{ case (group, counts) =>
+        val it = aggMap.toSeq.sortBy(-_._2.total).map{ case (group, counts) =>
           CardRowReader(group, counts)
         }.iterator
         IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
@@ -181,13 +181,13 @@ final class LabelCardinalityPresenter(val funcParams: Seq[FuncArgs]  = Nil) exte
                      paramsResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
 
     source.filter(!_.rows().isEmpty).map(rv => {
-          val x = rv.rows().next()
-          // TODO: We expect only one column to be a map, pattern matching does not work, is there better way?
-          val sketchMap = x.getAny(columnNo = 0).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+      val x = rv.rows().next()
+      // TODO: We expect only one column to be a map, pattern matching does not work, is there better way?
+      val sketchMap = x.getAny(columnNo = 0).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
           val sketchMapIterator = (sketchMap.mapValues {
             sketch => ZeroCopyUTF8String(Math.round(CpcSketch.heapify(sketch.bytes).getEstimate).toInt.toString)}
             :: Nil).toIterator
-          IteratorBackedRangeVector(rv.key, UTF8MapIteratorRowReader(sketchMapIterator), None)
+      IteratorBackedRangeVector(rv.key, UTF8MapIteratorRowReader(sketchMapIterator), None)
       })
   }
 
