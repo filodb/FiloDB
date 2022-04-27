@@ -174,10 +174,14 @@ trait  DefaultPlanner {
     }
 
    // scalastyle:off method.length
+
+   /**
+    * @param forceDispatcher forces the reducer exec plan to dispatch with the provided dispatcher
+    */
    def addAggregator(lp: Aggregate,
                      qContext: QueryContext,
                      toReduceLevel: PlanResult,
-                     disp: Option[PlanDispatcher] = None):
+                     forceDispatcher: Option[PlanDispatcher] = None):
    LocalPartitionReduceAggregateExec = {
 
     import filodb.query.AggregateClause.ClauseType
@@ -223,7 +227,7 @@ trait  DefaultPlanner {
         }.toList
       } else toReduceLevel.plans
 
-    val reduceDispatcher = disp.getOrElse(PlannerUtil.pickDispatcher(toReduceLevel2))
+    val reduceDispatcher = forceDispatcher.getOrElse(PlannerUtil.pickDispatcher(toReduceLevel2))
     val reducer = LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
 
     if (!qContext.plannerParams.skipAggregatePresent)
