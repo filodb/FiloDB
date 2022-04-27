@@ -1,9 +1,6 @@
 package filodb.coordinator.queryplanner
 
-import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
-import scala.util.Random
 
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
@@ -20,7 +17,6 @@ import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, Time
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.prometheus.ast.WindowConstants
 import filodb.query.{exec, _}
-import filodb.query.AggregateClause.ClauseType
 import filodb.query.InstantFunctionId.HistogramBucket
 import filodb.query.LogicalPlan._
 import filodb.query.exec.{LocalPartitionDistConcatExec, _}
@@ -88,101 +84,6 @@ object SingleClusterPlanner {
       case _ => throw new RuntimeException(s"unhandled type: ${lp.getClass}")
     }
   }
-
-  // TODO(a_theimer): worth a proper union-find?
-  /**
-   * Given the undirected edges defined by each set of shard IDs, returns the
-   *   sets of connected shards.
-   * @param shardGroups the sets of shards spanned by individual ExecPlans
-   */
-  private def getConnectedShards(shardGroups: Seq[Set[Int]]): Seq[Set[Int]] = {
-    // build the graph we'll use to find connected components
-    val shardGraph = new mutable.HashMap[Int, mutable.HashSet[Int]]
-    shardGroups.foreach{ shards =>
-      shards.foreach{ shard =>
-        val adjShards = shardGraph.getOrElseUpdate(shard, new mutable.HashSet[Int])
-        // add edges from this shard
-        shards.filterNot(_ == shard).foreach(adjShards.add(_))
-        // add edges to this shard
-        adjShards.foreach{ adjShard =>
-          shardGraph.getOrElseUpdate(adjShard, new mutable.HashSet[Int]).add(shard)
-        }
-      }
-    }
-
-    // dfs to find each connected component
-    def dfs(shard: Int, graph: mutable.HashMap[Int, mutable.HashSet[Int]], visited: mutable.HashSet[Int]): Unit = {
-      visited.add(shard)
-      graph.getOrElse(shard, Set()).foreach{ child =>
-        if (!visited.contains(child)) {
-          dfs(child, graph, visited)
-        }
-      }
-    }
-
-    val unvisited = new mutable.HashSet[Int]
-    shardGraph.keySet.foreach(unvisited.add(_))
-
-    val res = new mutable.ArrayBuffer[Set[Int]]
-    while (unvisited.nonEmpty) {
-      val root = unvisited.head
-      val connected = new mutable.HashSet[Int]
-      dfs(root, shardGraph, connected)
-      res.append(connected.toSet)
-      connected.foreach(unvisited.remove(_))
-    }
-    res
-  }
-
-  /**
-   * Returns true iff it is valid to perform the BinaryJoin pushdown optimization.
-   */
-  private def canPushdownBinaryJoin(qContext: QueryContext,
-                                    lp: BinaryJoin): Boolean = {
-    qContext.plannerParams.targetSchemaProvider.isDefined && {
-      val targetSchemaLabels = getUniversalTargetSchemaLabels(lp, qContext.plannerParams.targetSchemaProvider.get)
-      targetSchemaLabels.isDefined && targetSchemaLabels.get.toSet.subsetOf(lp.on.toSet)
-    }
-  }
-
-  /**
-   * Returns true iff it is valid to perform the Aggregate pushdown optimization.
-   */
-  private def canPushdownAggregate(qContext: QueryContext,
-                                   lp: Aggregate): Boolean = {
-    qContext.plannerParams.targetSchemaProvider.isDefined && {
-      val targetSchemaLabels = getUniversalTargetSchemaLabels(lp, qContext.plannerParams.targetSchemaProvider.get)
-      lp.clauseOpt.isDefined && {
-        lp.clauseOpt.get.clauseType match {
-          case ClauseType.By => targetSchemaLabels.get.toSet.subsetOf(lp.clauseOpt.get.labels.toSet)
-          case ClauseType.Without => false
-        }
-      }
-    }
-  }
-
-//  // TODO(a_theimer): need this? Probably only necessary for grandchild pushdowns.
-//  /**
-//   * Walks the plan tree and returns true iff all BinaryJoin join keys preserve the target schema labels.
-//   */
-//  private def joinLabelsPreserveTargetSchema(lp: LogicalPlan,
-//                                             tsLabels: Set[String]): Boolean = {
-//    lp match {
-//      case join: BinaryJoin => {
-//        lazy val noneIgnored = tsLabels.intersect(join.ignoring.toSet).isEmpty
-//        lazy val allIncluded = tsLabels.subsetOf(join.on.toSet)
-//        if (noneIgnored && allIncluded) {
-//          joinLabelsPreserveTargetSchema(join.lhs, tsLabels) && joinLabelsPreserveTargetSchema(join.rhs, tsLabels)
-//        } else false
-//      }
-//      case nl: NonLeafLogicalPlan => {
-//        nl.children.forall(joinLabelsPreserveTargetSchema(_, tsLabels))
-//      }
-//      case _ => {
-//        // must be a leaf plan, since above case did not trip
-//        true
-//      }
-//    }
 }
 
 /**
@@ -483,60 +384,52 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
 
   /**
-   * Returns a set of shard IDs for each ExecPlan that will result from the argument
-   *   LogicalPlan's materialization. Each set gives all shards on which the corresponding
-   *   ExecPlan contains data.
-   * Multiple plans will be returned if the top-level ExecPlan is a DistConcatExec.
-   * @return an occupied Option iff shard spans could be determined for all leaf-level plans.
+   * Returns the set of shards to which a BinaryJoin can be pushed down.  // TODO(a_theimer): awk
+   * @return an occupied Option iff it is valid to perform the BinaryJoin pushdown optimization.
    */
-  private def getShardSpanGroupsFromLp(lp: LogicalPlan,
-                                       qContext: QueryContext): Option[Seq[Set[Int]]] = {
-
-    def mergeChildGroups(plan: NonLeafLogicalPlan): Option[Seq[Set[Int]]] = {
-      val childGroups = plan.children.map(getShardSpanGroupsFromLp(_, qContext))
-      if (childGroups.find(_.isEmpty).isDefined) {
-        return None
-      }
-      Some(Seq(childGroups.flatMap(group => group.get.flatten).toSet))
-    }
-
-    lp match {
-      case ps: PeriodicSeries => getShardSpanGroupsFromLp(ps.rawSeries, qContext)
-      case psw: PeriodicSeriesWithWindowing => getShardSpanGroupsFromLp(psw.series, qContext)
-      case aif: ApplyInstantFunction => getShardSpanGroupsFromLp(aif.vectors, qContext)
+  private def getBinaryJoinPushdownShards(qContext: QueryContext,
+                                          bj: BinaryJoin): Option[Set[Int]] = {
+    // Recursive helper that accepts a LogicalPlan (instead of strictly a BinaryJoin).
+    def helper(lp: LogicalPlan) : Option[Set[Int]] = lp match {
+      case ps: PeriodicSeries => helper(ps.rawSeries)
+      case psw: PeriodicSeriesWithWindowing => helper(psw.series)
+      case aif: ApplyInstantFunction => helper(aif.vectors)
       case bj: BinaryJoin => {
-        if (canPushdownBinaryJoin(qContext, bj)) {
-          val lhsGroups = getShardSpanGroupsFromLp(bj.lhs, qContext)
-          val rhsGroups = getShardSpanGroupsFromLp(bj.rhs, qContext)
-          assert(lhsGroups.isDefined && rhsGroups.isDefined,
-            s"expected lhs and rhs groups to be defined, but found " +
-              s"lhs:${lhsGroups.isDefined}, rhs:${rhsGroups.isDefined}")
-          Some(getConnectedShards(Seq(lhsGroups.get, rhsGroups.get).flatten))
-        } else {
-          mergeChildGroups(bj)
+        val lhsShards = helper(bj.lhs)
+        val rhsShards = helper(bj.rhs)
+        val canPushdown = qContext.plannerParams.targetSchemaProvider.isDefined && {
+          val targetSchemaLabels =
+            getUniversalTargetSchemaLabels(bj, qContext.plannerParams.targetSchemaProvider.get)
+          targetSchemaLabels.isDefined &&
+            targetSchemaLabels.get.toSet.subsetOf(bj.on.toSet) &&
+            lhsShards != None &&
+            lhsShards == rhsShards
         }
+        if (canPushdown) lhsShards else None
       }
-      case agg: Aggregate => {
-        if (canPushdownAggregate(qContext, agg)) {
-          val groups = getShardSpanGroupsFromLp(agg.vectors, qContext)
-          assert(groups.isDefined, s"expected groups to be defined")
-          Some(getConnectedShards(groups.get))
-        } else {
-          mergeChildGroups(agg)
-        }
+      case nl: NonLeafLogicalPlan => {
+        val shardGroups = nl.children.map(helper(_))
+        if (shardGroups.forall(_.isDefined)) {
+          val shards = shardGroups.flatMap(_.get).toSet
+          if (shards.size == 1) Some(shards) else None
+        } else None
       }
-      case nl: NonLeafLogicalPlan => mergeChildGroups(nl)
-      case rs: RawSeries => getShardSpanFromLp(rs, qContext).map(set => set.map(Set(_)).toSeq)
+      case rs: RawSeries => getShardSpanFromLp(rs, qContext)
       case _ => throw new IllegalArgumentException(s"unhandled type: ${lp.getClass}")
     }
+    helper(bj)
   }
 
   /**
    * Materialize a BinaryJoin without the pushdown optimization.
+   * @param forceDispatcher If occupied, forces this BinaryJoin to be materialized with the dispatcher.
+   *                        Only this root plan has its dispatcher forced; children are unaffected.
+   *                        ####### The dispatcher is applied regardless of forceInProcess #######
    */
   private def materializeBinaryJoinNoPushdown(qContext: QueryContext,
                                               lp: BinaryJoin,
-                                              forceInProcess: Boolean): PlanResult = {
+                                              forceInProcess: Boolean,
+                                              forceDispatcher: Option[PlanDispatcher]): PlanResult = {
     val lhs = walkLogicalPlanTree(lp.lhs, qContext, forceInProcess)
     val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext,
       PlannerUtil.pickDispatcher(lhs.plans), rvRangeFromPlan(lp), lhs.plans))
@@ -552,7 +445,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     // In theory, more efficient to use transformer than to have separate exec plan node to avoid IO.
     // In the interest of keeping it simple, deferring decorations to the ExecPlan. Add only if needed after measuring.
 
-    val targetActor = PlannerUtil.pickDispatcher(stitchedLhs ++ stitchedRhs)
+    val targetActor = forceDispatcher.getOrElse(PlannerUtil.pickDispatcher(stitchedLhs ++ stitchedRhs))
     val joined = if (lp.operator.isInstanceOf[SetOperator])
       Seq(exec.SetOperatorExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator,
         LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
@@ -607,126 +500,28 @@ class SingleClusterPlanner(val dataset: Dataset,
    * ---E~MultiSchemaPartitionsExec(shard=1) on InProcessPlanDispatcher
    *
    * Now, data is joined locally and in smaller batches.
+   *
+   * For the sake of simplicity, we impose two additional prerequisites for this optimization:
+   *   (1) the ExecPlans materialized by lhs/rhs must each draw data from only a single shard
+   *   (2) the sets of shards from which lhs/rhs draw data must be identical
+   *
+   * @param shards The set of shards from which lhs/rhs both individually draw their data.
    */
   private def materializeBinaryJoinWithPushdown(qContext: QueryContext,
                                                 lp: BinaryJoin,
+                                                shards: Set[Int],
                                                 forceInProcess: Boolean): PlanResult = {
-    /**
-     * Return the plan(s) that result from joining lhs/rhs plans.
-     * In the typical case, this means returning a single ExecPlan that mirrors the outer method's
-     *   argument LogicalPlan. In some special cases (see below), lhs/rhs plans are returned without being
-     *   wrapped in a join-like ExecPlan.
-     * @param shards all shards that contain any data for lhs/rhsPlans
-     * @param forceChildrenInProcess true iff all children were materialized with forceInProcess=true
-     */
-    def makePlans(lhsPlans: Seq[ExecPlan],
-                  rhsPlans: Seq[ExecPlan],
-                  shards: Set[Int],
-                  forceChildrenInProcess: Boolean): Seq[ExecPlan] = {
-      // Need special cases here for certain set operators...
-      lp.operator match {
-        case BinaryOperator.LOR =>
-          // exactly one side of the "or" is absent-- just return that side as the result
-          if (lhsPlans.nonEmpty ^ rhsPlans.nonEmpty) {
-            // one of these seqs will be empty
-            val plans = Seq(lhsPlans, rhsPlans).flatten
-            if (!forceInProcess && forceChildrenInProcess) {
-              // Children were materialized with in-process dispatchers, but we need to artificially add our own.
-              assert(shards.size == 1, s"expected single shard since forceChildrenInProcess=true, but found $shards")
-              val actorDisp = dispatcherForShard(shards.head, forceInProcess = false)
-              return Seq(LocalPartitionDistConcatExec(qContext, actorDisp, plans))
-            } else {
-              return plans
-            }
-          }
-        case BinaryOperator.LUnless =>
-          // when this holds, the join will return the "unless" is effectively a no-op
-          if (lhsPlans.nonEmpty && rhsPlans.isEmpty) {
-            if (!forceInProcess && forceChildrenInProcess) {
-              // Children were materialized with in-process dispatchers, but we need to artificially add our own.
-              assert(shards.size == 1, s"expected single shard since forceChildrenInProcess=true, but found $shards")
-              val actorDisp = dispatcherForShard(shards.head, forceInProcess = false)
-              return Seq(LocalPartitionDistConcatExec(qContext, actorDisp, lhsPlans))
-            } else {
-              return lhsPlans
-            }
-          }
-        case _ => { /* Continue below... */}
+    // step through the shards, and materialize a plan for each
+    val plans = shards.toSeq.flatMap{ shard =>
+      val dispatcher = dispatcherForShard(shard, forceInProcess)
+      val qContextWithShardOverride = {
+        val shardOverridePlannerParams = qContext.plannerParams.copy(shardOverrides = Some(Seq(shard)))
+        qContext.copy(plannerParams = shardOverridePlannerParams)
       }
-
-      // All below code is the default case; single join ExecPlan will be returned
-      if (lhsPlans.isEmpty || rhsPlans.isEmpty) {
-        return Seq.empty
-      }
-      // since we can't pick the dispatcher from the children (all will be InProcessPlanDispatchers)
-      val targetActor = if (forceInProcess) inProcessPlanDispatcher
-      else dispatcherForShard(shards.toSeq(Random.nextInt(shards.size)), false)
-      val joinExecPlan = lp.operator match {
-        case _: SetOperator => exec.SetOperatorExec(qContext, targetActor, lhsPlans, rhsPlans, lp.operator,
-          LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
-          LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
-          dsOptions.metricColumn,
-          rvRangeFromPlan(lp))
-        case _ => BinaryJoinExec(qContext, targetActor, lhsPlans, rhsPlans, lp.operator, lp.cardinality,
-          LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
-          LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
-          LogicalPlanUtils.renameLabels(lp.include, dsOptions.metricColumn),
-          dsOptions.metricColumn,
-          rvRangeFromPlan(lp))
-      }
-      Seq(joinExecPlan)
+      materializeBinaryJoinNoPushdown(qContextWithShardOverride, lp, true, Some(dispatcher)).plans
     }
-
-    // Force in-process dispatchers for children iff we can confirm lhs and rhs ExecPlans
-    //   will each draw data from only one shard.
-    val forceChildrenInProcess = forceInProcess || {
-      val lhsShards = getShardSpanGroupsFromLp(lp.lhs, qContext)
-      val rhsShards = getShardSpanGroupsFromLp(lp.rhs, qContext)
-      lhsShards.isDefined && rhsShards.isDefined &&
-        lhsShards.get.forall(_.size == 1) && rhsShards.get.forall(_.size == 1)
-    }
-
-    val lhs = walkLogicalPlanTree(lp.lhs, qContext, forceChildrenInProcess)
-    val rhs = walkLogicalPlanTree(lp.rhs, qContext, forceChildrenInProcess)
-
-    // TODO(a_theimer): remove this and/or handle stitching here
-    assert(!lhs.needsStitch && !rhs.needsStitch)
-
-    // For each side of the join, map shards to sets of ExecPlans with shard-local data.
-    //   If an ExecPlan spans more than one shard, a mapping is maintained from only one shard.
-    val lhsShardMap = new mutable.HashMap[Int, mutable.ArrayBuffer[ExecPlan]]
-    val rhsShardMap = new mutable.HashMap[Int, mutable.ArrayBuffer[ExecPlan]]
-
-    // Also keep a list of the shards spanned by each ExecPlan.
-    val shardGroups = new mutable.ArrayBuffer[Set[Int]]
-
-    lhs.plans.map(ep => (ep, PlannerUtil.getShardSpanFromEp(ep)))
-      .foreach{ case (plan, shards) =>
-        shards.take(1).foreach {shard =>
-          lhsShardMap.getOrElseUpdate(shard, new ArrayBuffer[ExecPlan]()).append(plan)
-        }
-        shardGroups.append(shards)
-      }
-    rhs.plans.map(ep => (ep, PlannerUtil.getShardSpanFromEp(ep)))
-      .foreach{ case (plan, shards) =>
-        shards.take(1).foreach {shard =>
-          rhsShardMap.getOrElseUpdate(shard, new ArrayBuffer[ExecPlan]()).append(plan)
-        }
-        shardGroups.append(shards)
-      }
-
-    // TODO(a_theimer): stitch anything here?
-    val joinPlans = getConnectedShards(shardGroups).flatMap{ shards =>
-      val lhsPlans = shards.toSeq.flatMap(lhsShardMap.getOrElse(_, Seq()))
-      val rhsPlans = shards.toSeq.flatMap(rhsShardMap.getOrElse(_, Seq()))
-      makePlans(lhsPlans, rhsPlans, shards, forceChildrenInProcess)
-    }
-
-    if (joinPlans.nonEmpty) {
-      PlanResult(joinPlans)
-    } else {
-      PlanResult(Seq(EmptyResultExec(qContext, dataset.ref)))
-    }
+    // TODO(a_theimer): stitch?
+    PlanResult(plans, false)
   }
   // scalastyle:on method.length
 
@@ -734,10 +529,11 @@ class SingleClusterPlanner(val dataset: Dataset,
                                      lp: BinaryJoin,
                                      forceInProcess: Boolean): PlanResult = {
     // see materializeBinaryJoinWithPushdown for details about the BinaryJoin pushdown optimization.
-    if (canPushdownBinaryJoin(qContext, lp)) {
-      materializeBinaryJoinWithPushdown(qContext, lp, forceInProcess)
+    val pushdownShards = getBinaryJoinPushdownShards(qContext, lp)
+    if (pushdownShards.isDefined) {
+      materializeBinaryJoinWithPushdown(qContext, lp, pushdownShards.get, forceInProcess)
     } else {
-      materializeBinaryJoinNoPushdown(qContext, lp, forceInProcess)
+      materializeBinaryJoinNoPushdown(qContext, lp, forceInProcess, None)
     }
   }
 
@@ -1047,103 +843,5 @@ class SingleClusterPlanner(val dataset: Dataset,
         schemaOpt, colName)
     }
     PlanResult(metaExec)
-  }
-
-  /**
-   * Suppose we had the following LogicalPlan:
-   *
-   * Aggregate([PeriodicSeries on shards 0,1])
-   *
-   * This might be materialized as follows:
-   *
-   *  T~AggregatePresenter()
-   *  -E~LocalPartitionReduceAggregateExec() on ActorPlanDispatcher
-   *  --T~AggregateMapReduce()
-   *  ---T~PeriodicSamplesMapper()
-   *  ----E~MultiSchemaPartitionsExec(shard=0) on ActorPlanDispatcher
-   *  --T~AggregateMapReduce()
-   *  ---T~PeriodicSamplesMapper()
-   *  ----E~MultiSchemaPartitionsExec(shard=1) on ActorPlanDispatcher
-   *
-   * Data is pulled from two shards, sent to the ReduceAggregateExec actor, then that single actor
-   *   needs to process all of this data.
-   *
-   * When (1) a target-schema is defined for all leaf-level filters, (2) all of these
-   *   target schemas are identical, and (3) the join-key fully-specifies the
-   *   target-schema labels, we can relieve much of this single-actor pressure.
-   *   aggregations will never occur across shards, so the following ExecPlan
-   *   would yield the same result as the above plan:
-   *
-   * E~LocalPartitionDistConcatExec() on ActorPlanDispatcher
-   * -T~AggregatePresenter()
-   * --E~LocalPartitionReduceAggregateExec() on ActorPlanDispatcher
-   * ---T~AggregateMapReduce()
-   * ----T~PeriodicSamplesMapper()
-   * -----E~MultiSchemaPartitionsExec(shard=0) on InProcessPlanDispatcher
-   * -T~AggregatePresenter()
-   * --E~LocalPartitionReduceAggregateExec() on ActorPlanDispatcher
-   * ---T~AggregateMapReduce()
-   * ----T~PeriodicSamplesMapper()
-   * -----E~MultiSchemaPartitionsExec(shard=1) on InProcessPlanDispatcher
-   *
-   * Now, data is aggregated locally and in smaller batches.
-   */
-  private def materializeAggregateWithPushdown(qContext: QueryContext,
-                                               lp: Aggregate,
-                                               forceInProcess: Boolean): PlanResult = {
-    // Force in-process dispatchers for children iff we can confirm child ExecPlans
-    //   will each draw data from only one shard.
-    val forceInProcessChildren = forceInProcess || {
-      val groups = getShardSpanGroupsFromLp(lp.vectors, qContext)
-        groups.isDefined && groups.get.forall(_.size == 1)
-    }
-
-    val childRes = walkLogicalPlanTree(lp.vectors, qContext, forceInProcessChildren)
-
-    // TODO(a_theimer): remove this and/or handle stitching here
-    assert(!childRes.needsStitch)
-
-    // Map shards to sets of ExecPlans with shard-local data. If an ExecPlan spans more than
-    //   one shard, a mapping is maintained from only one shard.
-    val shardMap = new mutable.HashMap[Int, mutable.ArrayBuffer[ExecPlan]]
-
-    // Also keep a list of the shards spanned by each ExecPlan.
-    val shardGroups = new mutable.ArrayBuffer[Set[Int]]
-
-    childRes.plans.map(ep => (ep, PlannerUtil.getShardSpanFromEp(ep)))
-      .foreach{ case (plan, shards) =>
-        shards.take(1).foreach {shard =>
-          shardMap.getOrElseUpdate(shard, new ArrayBuffer[ExecPlan]()).append(plan)
-        }
-        shardGroups.append(shards)
-      }
-
-    // Pairs of (shards, plans); all plans with data on `shards` are included.
-    // All shard sets are disjoint.
-    val joinInfos = getConnectedShards(shardGroups).map{ shards =>
-      val plans = shards.flatMap(shardMap.getOrElse(_, Seq())).toSeq
-      if (plans.nonEmpty) {
-        Some((shards, plans))
-      } else None
-    }.filter(_.isDefined).map(_.get)
-
-    val joinPlans = joinInfos.map{ case (shards, plans) =>
-      // since we can't pick the dispatcher from the children (all will be InProcessPlanDispatchers)
-      val targetActor = if (forceInProcess) inProcessPlanDispatcher
-                        else dispatcherForShard(shards.toSeq(Random.nextInt(shards.size)), false)
-      addAggregator(lp, qContext, PlanResult(plans, false), Some(targetActor))
-    }
-    PlanResult(joinPlans)
-  }
-
-  override def materializeAggregate(qContext: QueryContext,
-                                    lp: Aggregate,
-                                    forceInProcess: Boolean): PlanResult = {
-    // see materializeAggregateWithPushdown for details about the Aggregate pushdown optimization.
-    if (canPushdownAggregate(qContext, lp)) {
-      materializeAggregateWithPushdown(qContext, lp, forceInProcess)
-    } else {
-      super.materializeAggregate(qContext, lp, forceInProcess)
-    }
   }
 }
