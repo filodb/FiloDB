@@ -42,17 +42,16 @@ trait ShardAssignmentStrategy {
  * The implementation assumes the number of shards is a multiple of number of nodes and there are no
  * uneven assignments of shards to nodes
  */
-object K8sStatefulSetShardAssignmentStrategy extends ShardAssignmentStrategy with StrictLogging {
+class K8sStatefulSetShardAssignmentStrategy extends ShardAssignmentStrategy with StrictLogging {
 
   private val pat = "-\\d+$".r
 
-  private def getOrdinalFromActorRef(coord: ActorRef): Option[(String, Int)] = {
+  private[coordinator] def getOrdinalFromActorRef(coord: ActorRef): Option[(String, Int)] = {
     // if hostname is None from coordinator actor path, then its a local actor
     // If the host name does not contain an ordinal at the end (e.g filodb-host-0, filodb-host-10), it will match None
     coord.path.address.host
       .map(host => InetAddress.getByName(host).getHostName)
       .orElse(Some(InetAddress.getLocalHost.getHostName))
-      // TODO: Is there a better way? This returns from the FQDN the hostname part only
       .map(name => if (name.contains(".")) name.substring(0, name.indexOf('.')) else name)
       .flatMap(hostName => pat.findFirstIn(hostName).map(ordinal => (hostName, -Integer.parseInt(ordinal))))
   }
@@ -60,8 +59,12 @@ object K8sStatefulSetShardAssignmentStrategy extends ShardAssignmentStrategy wit
   override def shardAssignments(coord: ActorRef,
                                 dataset: DatasetRef,
                                 resources: DatasetResourceSpec,
-                                mapper: ShardMapper): Seq[Int] =
-      getOrdinalFromActorRef(coord) match {
+                                mapper: ShardMapper): Seq[Int] = {
+    if (resources.numShards % resources.minNumNodes != 0) {
+      logger.warn("For stateful shard assignment, numShards should be a multiple of nodes per shard, " +
+        "using default strategy")
+      DefaultShardAssignmentStrategy.shardAssignments(coord, dataset, resources, mapper)
+    } else getOrdinalFromActorRef(coord) match {
         case Some((hostName, ordinal)) =>
           val numShardsPerHost = resources.numShards / resources.minNumNodes
           // Suppose we have a total of 8 shards and 2 hosts, assuming the hostnames are host-0 and host-1, we will map
@@ -79,12 +82,17 @@ object K8sStatefulSetShardAssignmentStrategy extends ShardAssignmentStrategy wit
               " for coordinator {}", coord.path.address.host.getOrElse(InetAddress.getLocalHost.getHostName))
           DefaultShardAssignmentStrategy.shardAssignments(coord, dataset, resources, mapper)
       }
+  }
 
   override def remainingCapacity(coord: ActorRef,
                                  dataset: DatasetRef,
                                  resources: DatasetResourceSpec,
                                  mapper: ShardMapper): Int =
-      getOrdinalFromActorRef(coord) match {
+      if (resources.numShards % resources.minNumNodes != 0) {
+        logger.warn("For stateful shard assignment, numShards should be a multiple of nodes per shard, " +
+          "using default strategy")
+        DefaultShardAssignmentStrategy.remainingCapacity(coord, dataset, resources, mapper)
+      } else getOrdinalFromActorRef(coord) match {
         // Host name has the ordinal at the end, we can thus use the logic we use for stateful sets
         // Difference between fixed number of shards the coordinator can take and those currently assigned
         case Some(_)  => (resources.numShards / resources.minNumNodes - mapper.shardsForCoord(coord).size).max(0)

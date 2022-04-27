@@ -1,5 +1,6 @@
 package filodb.coordinator
 
+import akka.actor.ActorRef
 import akka.testkit.TestProbe
 
 import filodb.coordinator.NodeClusterActor.DatasetResourceSpec
@@ -16,6 +17,25 @@ class ShardAssignmentStrategySpec extends AkkaSpec {
   val coord3 = TestProbe()
   val coord4 = TestProbe()
   val coord5 = TestProbe()
+
+
+  object TestK8sStatefulSetStrategy extends K8sStatefulSetShardAssignmentStrategy {
+    override private[coordinator] def getOrdinalFromActorRef(coord: ActorRef) = {
+      if (coord == coord1.ref) {
+        Some(("coord1", 0))
+      } else if (coord == coord2.ref) {
+        Some(("coord2", 1))
+      } else if (coord == coord2.ref) {
+        Some(("coord3", 2))
+      } else if (coord == coord2.ref) {
+        Some(("coord4", 3))
+      } else {
+        None
+      }
+    }
+  }
+
+  val testK8sStrategy = TestK8sStatefulSetStrategy
 
   "DefaultShardAssignmentStrategy" must {
 
@@ -37,6 +57,53 @@ class ShardAssignmentStrategySpec extends AkkaSpec {
       assignment3 shouldEqual Seq(6, 7)
       mapper.registerNode(assignment3, coord3.ref)
 
+    }
+
+
+    "K8sShardAssignmentStrategy " must {
+      "delegate to DefaultStrategy if numShards not a multiple of numCoords" in {
+        val numShards = 8
+        val numCoords = 3
+        val resources = DatasetResourceSpec(numShards, numCoords)
+        val mapper = new ShardMapper(numShards)
+
+        val assignment1 = testK8sStrategy.shardAssignments(coord1.ref, dataset, resources, mapper)
+        assignment1 shouldEqual Seq(0, 1, 2)
+        mapper.registerNode(assignment1, coord1.ref)
+
+        val assignment2 = testK8sStrategy.shardAssignments(coord2.ref, dataset, resources, mapper)
+        assignment2 shouldEqual Seq(3, 4, 5)
+        mapper.registerNode(assignment2, coord2.ref)
+
+        val assignment3 = testK8sStrategy.shardAssignments(coord3.ref, dataset, resources, mapper)
+        assignment3 shouldEqual Seq(6, 7)
+        mapper.registerNode(assignment3, coord3.ref)
+
+      }
+
+      "allocate 4 shards to each coordinator" in {
+        val numShards = 16
+        val numCoords = 4
+        val resources = DatasetResourceSpec(numShards, numCoords)
+        val mapper = new ShardMapper(numShards)
+
+        val assignment1 = testK8sStrategy.shardAssignments(coord1.ref, dataset, resources, mapper)
+        assignment1 shouldEqual Seq(0, 1, 2, 3)
+        mapper.registerNode(assignment1, coord1.ref)
+
+        val assignment2 = testK8sStrategy.shardAssignments(coord2.ref, dataset, resources, mapper)
+        assignment2 shouldEqual Seq(4, 5, 6, 7)
+        mapper.registerNode(assignment2, coord2.ref)
+
+        val assignment3 = testK8sStrategy.shardAssignments(coord3.ref, dataset, resources, mapper)
+        assignment3 shouldEqual Seq(8, 9, 10, 11)
+        mapper.registerNode(assignment3, coord3.ref)
+
+        val assignment4 = testK8sStrategy.shardAssignments(coord4.ref, dataset, resources, mapper)
+        assignment4 shouldEqual Seq(12, 13, 14, 15)
+        mapper.registerNode(assignment4, coord4.ref)
+
+      }
     }
 
     "distribute shards evenly among coords - test case 2" in {
