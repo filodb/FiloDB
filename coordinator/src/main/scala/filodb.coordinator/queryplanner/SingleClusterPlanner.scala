@@ -1,5 +1,6 @@
 package filodb.coordinator.queryplanner
 
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
 
 import akka.actor.ActorRef
@@ -346,39 +347,42 @@ class SingleClusterPlanner(val dataset: Dataset,
 
     case class LeafInfo(lp: LogicalPlan,
                         filters: Set[ColumnFilter],
-                        tslabels: Option[Seq[String]])
+                        targetSchemaLabels: Option[Seq[String]])
 
-    // construct a LeafInfo for each leaf
+    // construct a LeafInfo for each leaf...
     val targetSchemaProvider = qContext.plannerParams.targetSchemaProvider
-    val leaves = findLeafLogicalPlans(lp).map{ leafPlan =>
+    val leafInfos = new ArrayBuffer[LeafInfo]()
+    for (leafPlan <- findLeafLogicalPlans(lp)) {
       val filters = getColumnFilterGroup(leafPlan)
       assert(filters.size == 1, s"expected leaf plan to yield single filter group, but got ${filters.size}")
-      if (targetSchemaProvider.isDefined) {
-        // store the target schema labels (if they're defined) into the LeafInfo
-        val tsFunc = targetSchemaProvider.get.targetSchemaFunc(filters.head.toSeq)
-        val (start, stop) = leafPlan match {
-          case rs: RawSeries => rs.rangeSelector match {
-            case is: IntervalSelector => (is.from, is.to)
-            case _ => throw new IllegalArgumentException(s"unhandled type: ${rs.rangeSelector.getClass}")
-          }
-          case _ => throw new IllegalArgumentException(s"unhandled type: ${leafPlan.getClass}")
+      leafPlan match {
+        case rs: RawSeries => {
+          // Get time params from the RangeSelector, and use them to identify a TargetSchemaChanges.
+          val tsLabels: Option[Seq[String]] = if (targetSchemaProvider.isDefined) {
+            val tsFunc = targetSchemaProvider.get.targetSchemaFunc(filters.head.toSeq)
+            rs.rangeSelector match {
+              case is: IntervalSelector => findTargetSchema(tsFunc, is.from, is.to).map(_.schema)
+              case _ => None
+            }
+          } else None
+          leafInfos.append(LeafInfo(leafPlan, filters.head, tsLabels))
         }
-        val tsLabels = findTargetSchema(tsFunc, start, stop).map(_.schema)
-        LeafInfo(leafPlan, filters.head, tsLabels)
-      } else {
-        LeafInfo(leafPlan, filters.head, None)
+        // Do nothing; not pulling data from any shards.
+        case sc: ScalarPlan => {}
+        // Note!! If an unrecognized plan type is encountered, this just pessimistically returns None.
+        case _ => return None
       }
     }
 
     // if we can't extract shards from all filters, return an empty result
-    if (!leaves.forall{ leaf =>
+    if (!leafInfos.forall{ leaf =>
       canGetShardsFromFilters(leaf.filters.toSeq, qContext)
     }) return None
 
-    Some(leaves.flatMap{ leaf =>
+    Some(leafInfos.flatMap{ leaf =>
       val colFilterLabels = leaf.filters.map(_.column)
-      val useTargetSchema = leaf.tslabels.isDefined &&
-        leaf.tslabels.get.toSet.subsetOf(colFilterLabels)
+      val useTargetSchema = leaf.targetSchemaLabels.isDefined &&
+        leaf.targetSchemaLabels.get.toSet.subsetOf(colFilterLabels)
       shardsFromFilters(leaf.filters.toSeq, qContext, useTargetSchema)
     }.toSet)
   }
@@ -422,7 +426,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       }
       case rs: RawSeries => getShardSpanFromLp(rs, qContext)
       case sc: ScalarPlan => Some(Set.empty)  // don't want a None to end shard-group propagation
-      case _ => throw new IllegalArgumentException(s"unhandled type: ${lp.getClass}")
+      case _ => None
     }
     helper(bj)
   }
