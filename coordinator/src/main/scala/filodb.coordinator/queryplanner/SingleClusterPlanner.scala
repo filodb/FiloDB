@@ -403,7 +403,8 @@ class SingleClusterPlanner(val dataset: Dataset,
         val rhsShards = helper(bj.rhs)
         val canPushdown = qContext.plannerParams.targetSchemaProvider.isDefined &&
                           lhsShards != None &&
-                          lhsShards == rhsShards &&
+                          // either the shard groups are equal, or one of lhs/rhs includes only scalars.
+                          (lhsShards == rhsShards || lhsShards.isEmpty ^ rhsShards.isEmpty) &&
                           {
                             val targetSchemaLabels =
                               getUniversalTargetSchemaLabels(bj, qContext.plannerParams.targetSchemaProvider.get)
@@ -416,10 +417,12 @@ class SingleClusterPlanner(val dataset: Dataset,
         val shardGroups = nl.children.map(helper(_))
         if (shardGroups.forall(_.isDefined)) {
           val shards = shardGroups.flatMap(_.get).toSet
-          if (shards.size == 1) Some(shards) else None
+          // if zero elements, then all children are scalars
+          if (shards.size <= 1) Some(shards) else None
         } else None
       }
       case rs: RawSeries => getShardSpanFromLp(rs, qContext)
+      case sc: ScalarPlan => Some(Set.empty)  // don't want a None to end shard-group propagation
       case _ => throw new IllegalArgumentException(s"unhandled type: ${lp.getClass}")
     }
     helper(bj)
