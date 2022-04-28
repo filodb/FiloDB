@@ -386,19 +386,20 @@ class SingleClusterPlanner(val dataset: Dataset,
   // scalastyle:off method.length
   // scalastyle:off cyclomatic.complexity
   /**
-   * Returns the set of shards to which this LogicalPlan can be pushed down.
-   * @return an occupied Option iff it is valid to perform the a pushdown optimization on this LogicalPlan.
+   * Returns the set of shards to which this BinaryJoin can be pushed down.
+   * @return an occupied Option iff it is valid to perform the a pushdown optimization on this BinaryJoin.
    */
-  private def getPushdownShards(qContext: QueryContext,
-                                lp: LogicalPlan): Option[Set[Int]] = {
-    lp match {
-      case ps: PeriodicSeries => getPushdownShards(qContext, ps.rawSeries)
-      case psw: PeriodicSeriesWithWindowing => getPushdownShards(qContext, psw.series)
-      case aif: ApplyInstantFunction => getPushdownShards(qContext, aif.vectors)
+  private def getBinaryJoinPushdownShards(qContext: QueryContext,
+                                          bj: BinaryJoin): Option[Set[Int]] = {
+    def helper(lp: LogicalPlan): Option[Set[Int]] = lp match {
+      case ps: PeriodicSeries => helper(ps.rawSeries)
+      case psw: PeriodicSeriesWithWindowing => helper(psw.series)
+      case aif: ApplyInstantFunction => helper(aif.vectors)
       case bj: BinaryJoin => {
-        // lhs/rhs must reside on the same set of shards TODO(a_theimer)...
-        val lhsShards = getPushdownShards(qContext, bj.lhs)
-        val rhsShards = getPushdownShards(qContext, bj.rhs)
+        // lhs/rhs must reside on the same set of shards, and target schema labels for all leaves must be
+        //   discoverable, equal, and preserved by join keys
+        val lhsShards = helper(bj.lhs)
+        val rhsShards = helper(bj.rhs)
         val canPushdown = qContext.plannerParams.targetSchemaProvider.isDefined &&
                           lhsShards != None &&
                           lhsShards == rhsShards &&
@@ -410,22 +411,8 @@ class SingleClusterPlanner(val dataset: Dataset,
                           }
         if (canPushdown) lhsShards else None
       }
-      case agg: Aggregate => {
-        val shards = getPushdownShards(qContext, agg.vectors)
-        val byLabelsOpt = agg.clauseOpt.filter(_.clauseType == AggregateClause.ClauseType.By).map(_.labels)
-        val canPushdown = qContext.plannerParams.targetSchemaProvider.isDefined &&
-          shards != None &&
-          byLabelsOpt.isDefined &&
-          {
-            val targetSchemaLabels =
-              getUniversalTargetSchemaLabels(agg, qContext.plannerParams.targetSchemaProvider.get)
-            targetSchemaLabels.isDefined &&
-              targetSchemaLabels.get.toSet.subsetOf(byLabelsOpt.get.toSet)
-          }
-        if (canPushdown) shards else None
-      }
       case nl: NonLeafLogicalPlan => {
-        val shardGroups = nl.children.map(getPushdownShards(qContext, _))
+        val shardGroups = nl.children.map(helper(_))
         if (shardGroups.forall(_.isDefined)) {
           val shards = shardGroups.flatMap(_.get).toSet
           if (shards.size == 1) Some(shards) else None
@@ -434,6 +421,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       case rs: RawSeries => getShardSpanFromLp(rs, qContext)
       case _ => throw new IllegalArgumentException(s"unhandled type: ${lp.getClass}")
     }
+    helper(bj)
   }
   // scalastyle:on method.length
   // scalastyle:on cyclomatic.complexity
@@ -548,88 +536,11 @@ class SingleClusterPlanner(val dataset: Dataset,
                                      lp: BinaryJoin,
                                      forceInProcess: Boolean): PlanResult = {
     // see materializeBinaryJoinWithPushdown for details about the BinaryJoin pushdown optimization.
-    val pushdownShards = getPushdownShards(qContext, lp)
+    val pushdownShards = getBinaryJoinPushdownShards(qContext, lp)
     if (pushdownShards.isDefined) {
       materializeBinaryJoinWithPushdown(qContext, lp, pushdownShards.get, forceInProcess)
     } else {
       materializeBinaryJoinNoPushdown(qContext, lp, forceInProcess, None)
-    }
-  }
-
-  /**
-   * TODO(a_theimer): adopt docs for aggregator
-   * TODO(a_theimer): reconcile with above similar method
-   * Suppose we had the following LogicalPlan:
-   *
-   * BinaryJoin(lhs=[PeriodicSeries on shards 0,1], rhs=[PeriodicSeries on shards 0,1])
-   *
-   * This might be materialized as follows:
-   *
-   * E~BinaryJoinExec(binaryOp=ADD) on ActorPlanDispatcher
-   * -T~PeriodicSamplesMapper()
-   * --E~MultiSchemaPartitionsExec(shard=0) on ActorPlanDispatcher  // lhs
-   * -T~PeriodicSamplesMapper()
-   * --E~MultiSchemaPartitionsExec(shard=1) on ActorPlanDispatcher  // lhs
-   * -T~PeriodicSamplesMapper()
-   * --E~MultiSchemaPartitionsExec(shard=0) on ActorPlanDispatcher  // rhs
-   * -T~PeriodicSamplesMapper()
-   * --E~MultiSchemaPartitionsExec(shard=1) on ActorPlanDispatcher  // rhs
-   *
-   * Data is pulled from two shards, sent to the BinaryJoin actor, then that single actor
-   *   needs to process all of this data.
-   *
-   * When (1) a target-schema is defined for all leaf-level filters, (2) all of these
-   *   target schemas are identical, and (3) the join-key fully-specifies the
-   *   target-schema labels, we can relieve much of this single-actor pressure.
-   *   Lhs/rhs values will never be joined across shards, so the following ExecPlan
-   *   would yield the same result as the above plan:
-   *
-   * E~LocalPartitionDistConcatExec()
-   * -E~BinaryJoinExec(binaryOp=ADD) on ActorPlanDispatcher
-   * --T~PeriodicSamplesMapper()
-   * ---E~MultiSchemaPartitionsExec(shard=0) on InProcessPlanDispatcher
-   * --T~PeriodicSamplesMapper()
-   * ---E~MultiSchemaPartitionsExec(shard=0) on InProcessPlanDispatcher
-   * -E~BinaryJoinExec(binaryOp=ADD) on ActorPlanDispatcher
-   * --T~PeriodicSamplesMapper()
-   * ---E~MultiSchemaPartitionsExec(shard=1) on InProcessPlanDispatcher
-   * --T~PeriodicSamplesMapper()
-   * ---E~MultiSchemaPartitionsExec(shard=1) on InProcessPlanDispatcher
-   *
-   * Now, data is joined locally and in smaller batches.
-   *
-   * For the sake of simplicity, we impose two additional prerequisites for this optimization:
-   *   (1) the ExecPlans materialized by lhs/rhs must each draw data from only a single shard
-   *   (2) the sets of shards from which lhs/rhs draw data must be identical
-   *
-   * @param shards The set of shards from which lhs/rhs both individually draw their data.
-   */
-  private def materializeAggregateWithPushdown(qContext: QueryContext,
-                                                lp: Aggregate,
-                                                shards: Set[Int],
-                                                forceInProcess: Boolean): PlanResult = {
-    // step through the shards, and materialize a plan for each
-    val plans = shards.toSeq.map{ shard =>
-      val dispatcher = dispatcherForShard(shard, forceInProcess)
-      val qContextWithShardOverride = {
-        val shardOverridePlannerParams = qContext.plannerParams.copy(shardOverrides = Some(Seq(shard)))
-        qContext.copy(plannerParams = shardOverridePlannerParams)
-      }
-      val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, qContextWithShardOverride, forceInProcess = true)
-      addAggregator(lp, qContext, toReduceLevel1, forceDispatcher = Some(dispatcher))
-    }
-    PlanResult(plans)
-  }
-
-  override def materializeAggregate(qContext: QueryContext,
-                                    lp: Aggregate,
-                                    forceInProcess: Boolean): PlanResult = {
-    // see materializeAggregateWithPushdown for details about the Aggregate pushdown optimization.
-    val pushdownShards = getPushdownShards(qContext, lp)
-    if (pushdownShards.isDefined) {
-      materializeAggregateWithPushdown(qContext, lp, pushdownShards.get, forceInProcess)
-    } else {
-      super.materializeAggregate(qContext, lp, forceInProcess)
     }
   }
 

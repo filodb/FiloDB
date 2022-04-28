@@ -180,8 +180,7 @@ trait  DefaultPlanner {
     */
    def addAggregator(lp: Aggregate,
                      qContext: QueryContext,
-                     toReduceLevel: PlanResult,
-                     forceDispatcher: Option[PlanDispatcher] = None):
+                     toReduceLevel: PlanResult):
    LocalPartitionReduceAggregateExec = {
 
     import filodb.query.AggregateClause.ClauseType
@@ -227,7 +226,7 @@ trait  DefaultPlanner {
         }.toList
       } else toReduceLevel.plans
 
-    val reduceDispatcher = forceDispatcher.getOrElse(PlannerUtil.pickDispatcher(toReduceLevel2))
+    val reduceDispatcher = PlannerUtil.pickDispatcher(toReduceLevel2)
     val reducer = LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
 
     if (!qContext.plannerParams.skipAggregatePresent)
