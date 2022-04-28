@@ -348,7 +348,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       } catch {
         case e: IllegalArgumentException =>
           // If this exception is seen, then we have not seen the label. Return empty result.
-          if (!e.getMessage.contains("was not indexed with SortedSetDocValues")) throw e;
+          if (!e.getMessage.contains("was not indexed"))
+            logger.warn(s"Got an exception when doing label-values filters=$colFilters colName=$colName", e)
       }
     }
     labelValuesQueryLatency.record(System.nanoTime() - start)
