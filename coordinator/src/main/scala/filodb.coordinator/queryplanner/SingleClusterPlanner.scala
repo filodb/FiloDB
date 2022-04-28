@@ -58,14 +58,13 @@ object SingleClusterPlanner {
 
   /**
    * Returns an occupied option with target schema labels iff they are defined and identical
-   *   for every leaf LogicalPlan.
+   *   for every leaf LogicalPlan that draws data from a shard (i.e. isn't a scalar).
    */
   private def getUniversalTargetSchemaLabels(lp: LogicalPlan,
                                     tsp: TargetSchemaProvider): Option[Seq[String]] = {
     lp match {
       case rs: RawSeries => {
         val rangeSelectorOpt: Option[(Long, Long)] = rs.rangeSelector match {
-          // TODO(a_theimer): other selectors?
           case IntervalSelector(fromMs, toMs) => Some((fromMs, toMs))
           case _ => None
         }
@@ -75,13 +74,14 @@ object SingleClusterPlanner {
         }
         if (targetSchemaOpt.isDefined) targetSchemaOpt.get else None
       }
+      case sc: ScalarPlan => Some(Seq.empty)
       case nl: NonLeafLogicalPlan => {
         val tsLabelOpts = nl.children.map(getUniversalTargetSchemaLabels(_, tsp))
         val allDefinedAndSame = tsLabelOpts.forall(_.isDefined) &&
           tsLabelOpts.drop(1).forall(_ == tsLabelOpts.head)
         if (allDefinedAndSame) tsLabelOpts.head else None
       }
-      case _ => throw new RuntimeException(s"unhandled type: ${lp.getClass}")
+      case _ => None
     }
   }
 }
@@ -357,7 +357,6 @@ class SingleClusterPlanner(val dataset: Dataset,
         // store the target schema labels (if they're defined) into the LeafInfo
         val tsFunc = targetSchemaProvider.get.targetSchemaFunc(filters.head.toSeq)
         val (start, stop) = leafPlan match {
-          // TODO(a_theimer): other leaf plan types? Range selector types?
           case rs: RawSeries => rs.rangeSelector match {
             case is: IntervalSelector => (is.from, is.to)
             case _ => throw new IllegalArgumentException(s"unhandled type: ${rs.rangeSelector.getClass}")
