@@ -270,6 +270,8 @@ trait ExecPlan extends QueryCommand {
     * structure, useful for debugging
     *
     * @param useNewline pass false if the result string needs to be in one line
+    * @param childSort: returns an integer by which to sort children before including them in the printed tree.
+    *                   Enables more-consistently printed trees for the sake of test-related string comparisons.
     */
   final def printTree(useNewline: Boolean = true,
                       level: Int = 0,

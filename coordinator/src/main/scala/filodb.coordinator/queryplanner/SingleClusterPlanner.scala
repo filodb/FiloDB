@@ -349,11 +349,12 @@ class SingleClusterPlanner(val dataset: Dataset,
                         tslabels: Option[Seq[String]])
 
     // construct a LeafInfo for each leaf
+    val targetSchemaProvider = qContext.plannerParams.targetSchemaProvider
     val leaves = findLeafLogicalPlans(lp).map{ leafPlan =>
       val filters = getColumnFilterGroup(leafPlan)
       assert(filters.size == 1, s"expected leaf plan to yield single filter group, but got ${filters.size}")
-      val targetSchemaProvider = qContext.plannerParams.targetSchemaProvider
       if (targetSchemaProvider.isDefined) {
+        // store the target schema labels (if they're defined) into the LeafInfo
         val tsFunc = targetSchemaProvider.get.targetSchemaFunc(filters.head.toSeq)
         val (start, stop) = leafPlan match {
           // TODO(a_theimer): other leaf plan types? Range selector types?
