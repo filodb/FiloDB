@@ -2,8 +2,6 @@ package filodb.coordinator.queryplanner
 
 import java.util.concurrent.ThreadLocalRandom
 
-import scala.collection.mutable
-
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
@@ -485,19 +483,5 @@ object PlannerUtil extends StrictLogging {
     val rnd = ThreadLocalRandom.current()
     childTargets.iterator.drop(rnd.nextInt(childTargets.size)).next
    }
-  }
-
-  /**
-   * Returns the set of shards that contain an ExecPlan's data.
-   */
-   def getShardSpanFromEp(ep: ExecPlan): Set[Int] = {
-    def helper(ep: ExecPlan, set: mutable.HashSet[Int]): Unit = ep match {
-      case mspe: MultiSchemaPartitionsExec => set.add(mspe.shard)
-      case nl: NonLeafExecPlan => nl.children.foreach(helper(_, set))
-      case _ => throw new IllegalArgumentException(s"unhandled type: ${ep.getClass}")
-    }
-    val set = new mutable.HashSet[Int]
-    helper(ep, set)
-    set.toSet
   }
 }

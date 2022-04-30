@@ -264,22 +264,18 @@ trait ExecPlan extends QueryCommand {
     */
   protected def args: String
 
-  // TODO(a_theimer): more generic way to handle lambda param with default?
   /**
     * Prints the ExecPlan and RangeVectorTransformer execution flow as a tree
     * structure, useful for debugging
     *
     * @param useNewline pass false if the result string needs to be in one line
-    * @param childSort: returns an integer by which to sort children before including them in the printed tree.
-    *                   Enables more-consistently printed trees for the sake of test-related string comparisons.
     */
   final def printTree(useNewline: Boolean = true,
-                      level: Int = 0,
-                      childSort: (ExecPlan) => Int = (ep) => 0): String = {
+                      level: Int = 0): String = {
     val transf = printRangeVectorTransformersForLevel(level)
     val nextLevel = rangeVectorTransformers.size + level
     val curNode = curNodeText(nextLevel)
-    val childr = children.sortBy(childSort).map(_.printTree(useNewline, nextLevel + 1))
+    val childr = children.map(_.printTree(useNewline, nextLevel + 1))
     ((transf :+ curNode) ++ childr).mkString(if (useNewline) "\n" else " @@@ ")
   }
 

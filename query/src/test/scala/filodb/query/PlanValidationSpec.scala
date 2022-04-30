@@ -13,9 +13,8 @@ trait PlanValidationSpec extends Matchers {
    * @param expected expected plan as String
    */
   def validatePlan(plan: ExecPlan,
-                   expected: String,
-                   childSort: (ExecPlan) => Int = (ep) => 0): Unit = {
-    val planString = plan.printTree(childSort = childSort)
+                   expected: String): Unit = {
+    val planString = plan.printTree()
       .replaceAll("testProbe-.*]", "testActor]")
       .replaceAll("InProcessPlanDispatcher.*\\)", "InProcessPlanDispatcher")
     val expectedString = expected.replaceAll("testProbe-.*]", "testActor]")
