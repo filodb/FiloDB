@@ -44,7 +44,12 @@ trait  DefaultPlanner {
         case s: ScalarBinaryOperation   => ExecPlanFuncArgs(materialize(s, qContext),
                                            RangeParams(s.startMs, s.stepMs, s.endMs))
     }
-
+    /**
+     * @param logicalPlan The LogicalPlan instance
+     * @param qContext The QueryContext
+     * @param forceInProcess if true, all materialized plans will dispatch via an InProcessDispatcher
+     * @return The PlanResult containing the ExecPlan
+     */
     def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                             qContext: QueryContext,
                             forceInProcess: Boolean = false): PlanResult
@@ -56,11 +61,6 @@ trait  DefaultPlanner {
      * classes to implement walkLogicalPlanTree and explicitly delegate to defaultWalkLogicalPlanTree if needed. The
      * method essentially pattern matches all LogicalPlans and invoke the default implementation in the
      * DefaultPlanner trait
-     *
-     * @param logicalPlan The LogicalPlan instance
-     * @param qContext The QueryContext
-     * @param forceInProcess if true, all materialized plans will dispatch via an InProcessDispatcher
-     * @return The PlanResult containing the ExecPlan
      */
     // scalastyle:off cyclomatic.complexity
     def defaultWalkLogicalPlanTree(logicalPlan: LogicalPlan,
