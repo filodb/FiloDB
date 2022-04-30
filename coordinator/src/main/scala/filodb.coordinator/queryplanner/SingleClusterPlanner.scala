@@ -72,7 +72,7 @@ object SingleClusterPlanner {
           // Filter out empty lists, since these arise only from scalar plans, and we don't
           //   want those to force a None return.
           val nonEmpty = tsLabelOpts.filter(_.get.nonEmpty)
-          // Check if all non-head elements equal the head.
+          // Check if all non-head elements equal the head (i.e. all are the same).
           if (nonEmpty.drop(1).forall(_ == tsLabelOpts.head)) {
             return nonEmpty.headOption.getOrElse(Some(Seq.empty))
           }
