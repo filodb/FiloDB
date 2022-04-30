@@ -66,7 +66,7 @@ object SingleClusterPlanner {
   private def getUniversalTargetSchemaLabels(lp: LogicalPlan,
                                              tsp: TargetSchemaProvider): Option[Seq[String]] = {
     lp match {
-      case nl: NonLeafLogicalPlan => {
+      case nl: NonLeafLogicalPlan =>
         val tsLabelOpts = nl.children.map(getUniversalTargetSchemaLabels(_, tsp))
         if (tsLabelOpts.forall(_.isDefined)) {
           // Filter out empty lists, since these arise only from scalar plans, and we don't
@@ -78,8 +78,7 @@ object SingleClusterPlanner {
           }
         }
         None
-      }
-      case rs: RawSeries => {
+      case rs: RawSeries =>
         val rangeSelectorOpt: Option[(Long, Long)] = rs.rangeSelector match {
           case IntervalSelector(fromMs, toMs) => Some((fromMs, toMs))
           case _ => None
@@ -93,7 +92,6 @@ object SingleClusterPlanner {
           assert(targetSchemaOpt.get.size > 0, "expected target schema labels, but none exist")
           targetSchemaOpt.get
         } else None
-      }
       // Non-leaf plans are processed above; no non-leaf scalar will reach here.
       // Return empty Seq to indicate this is a leaf-level scalar.
       case sc: ScalarPlan => Some(Seq.empty)
@@ -371,7 +369,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       val filters = getColumnFilterGroup(leafPlan)
       assert(filters.size == 1, s"expected leaf plan to yield single filter group, but got ${filters.size}")
       leafPlan match {
-        case rs: RawSeries => {
+        case rs: RawSeries =>
           // Get time params from the RangeSelector, and use them to identify a TargetSchemaChanges.
           val tsLabels: Option[Seq[String]] = if (targetSchemaProvider.isDefined) {
             val tsFunc = targetSchemaProvider.get.targetSchemaFunc(filters.head.toSeq)
@@ -381,7 +379,6 @@ class SingleClusterPlanner(val dataset: Dataset,
             }
           } else None
           leafInfos.append(LeafInfo(leafPlan, filters.head, tsLabels))
-        }
         // Do nothing; not pulling data from any shards.
         case sc: ScalarPlan => {}
         // Note!! If an unrecognized plan type is encountered, this just pessimistically returns None.
@@ -414,7 +411,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       case ps: PeriodicSeries => helper(ps.rawSeries)
       case psw: PeriodicSeriesWithWindowing => helper(psw.series)
       case aif: ApplyInstantFunction => helper(aif.vectors)
-      case bj: BinaryJoin => {
+      case bj: BinaryJoin =>
         // lhs/rhs must reside on the same set of shards, and target schema labels for all leaves must be
         //   discoverable, equal, and preserved by join keys
         val lhsShards = helper(bj.lhs)
@@ -430,15 +427,13 @@ class SingleClusterPlanner(val dataset: Dataset,
                               targetSchemaLabels.get.toSet.subsetOf(bj.on.toSet)
                           }
         if (canPushdown) lhsShards else None
-      }
-      case nl: NonLeafLogicalPlan => {
+      case nl: NonLeafLogicalPlan =>
         val shardGroups = nl.children.map(helper(_))
         if (shardGroups.forall(_.isDefined)) {
           val shards = shardGroups.flatMap(_.get).toSet
           // if zero elements, then all children are scalars
           if (shards.size <= 1) Some(shards) else None
         } else None
-      }
       case rs: RawSeries => getShardSpanFromLp(rs, qContext)
       case sc: ScalarPlan => Some(Set.empty)  // don't want a None to end shard-group propagation
       case _ => None
