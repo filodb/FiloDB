@@ -401,6 +401,10 @@ class SingleClusterPlanner(val dataset: Dataset,
 
   /**
    * Returns the set of shards to which this BinaryJoin can be pushed down.
+   * When this function returns a Some, the argument BinaryJoin can be materialized for each shard
+   *   in the result, and the concatenation of these shard-local joins will, on execute(), yield the
+   *   same RangeVectors as the non-pushed-down plan.
+   * See materializeBinaryJoinWithPushdown for details about this pushdown optimization.
    * @return an occupied Option iff it is valid to perform the a pushdown optimization on this BinaryJoin.
    */
   private def getBinaryJoinPushdownShards(qContext: QueryContext,
@@ -431,6 +435,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                           }
         if (canPushdown) lhsShards else None
       case nl: NonLeafLogicalPlan =>
+        // Pessimistically require that this entire subtree lies on one shard (or none, if all scalars).
         val shardGroups = nl.children.map(helper(_))
         if (shardGroups.forall(_.isDefined)) {
           val shards = shardGroups.flatMap(_.get).toSet
