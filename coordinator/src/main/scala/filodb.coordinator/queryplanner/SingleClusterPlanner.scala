@@ -59,11 +59,26 @@ object SingleClusterPlanner {
 
   /**
    * Returns an occupied option with target schema labels iff they are defined and identical
-   *   for every leaf LogicalPlan that draws data from a shard (i.e. isn't a scalar).
+   *   for every leaf LogicalPlan that draws data from a shard (i.e. isn't a leaf-level scalar).
+   * Plans that do not draw data from any shards do not affect the result *unless* no plan draws
+   *   data from a shard. In this case, Some(Seq.empty) is returned.
    */
   private def getUniversalTargetSchemaLabels(lp: LogicalPlan,
-                                    tsp: TargetSchemaProvider): Option[Seq[String]] = {
+                                             tsp: TargetSchemaProvider): Option[Seq[String]] = {
     lp match {
+      case nl: NonLeafLogicalPlan => {
+        val tsLabelOpts = nl.children.map(getUniversalTargetSchemaLabels(_, tsp))
+        if (tsLabelOpts.forall(_.isDefined)) {
+          // Filter out empty lists, since these arise only from scalar plans, and we don't
+          //   want those to force a None return.
+          val nonEmpty = tsLabelOpts.filter(_.get.nonEmpty)
+          // Check if all non-head elements equal the head.
+          if (nonEmpty.drop(1).forall(_ == tsLabelOpts.head)) {
+            return nonEmpty.headOption.getOrElse(Some(Seq.empty))
+          }
+        }
+        None
+      }
       case rs: RawSeries => {
         val rangeSelectorOpt: Option[(Long, Long)] = rs.rangeSelector match {
           case IntervalSelector(fromMs, toMs) => Some((fromMs, toMs))
@@ -73,15 +88,15 @@ object SingleClusterPlanner {
           val tsChanges = tsp.targetSchemaFunc(rs.filters)
           findTargetSchema(tsChanges, fromMs, toMs).map(_.schema)
         }
-        if (targetSchemaOpt.isDefined) targetSchemaOpt.get else None
+        if (targetSchemaOpt.isDefined) {
+          // make this assertion since the non-leaf case's logic requires it
+          assert(targetSchemaOpt.get.size > 0, "expected target schema labels, but none exist")
+          targetSchemaOpt.get
+        } else None
       }
+      // Non-leaf plans are processed above; no non-leaf scalar will reach here.
+      // Return empty Seq to indicate this is a leaf-level scalar.
       case sc: ScalarPlan => Some(Seq.empty)
-      case nl: NonLeafLogicalPlan => {
-        val tsLabelOpts = nl.children.map(getUniversalTargetSchemaLabels(_, tsp))
-        val allDefinedAndSame = tsLabelOpts.forall(_.isDefined) &&
-          tsLabelOpts.drop(1).forall(_ == tsLabelOpts.head)
-        if (allDefinedAndSame) tsLabelOpts.head else None
-      }
       case _ => None
     }
   }
