@@ -399,8 +399,6 @@ class SingleClusterPlanner(val dataset: Dataset,
     }.toSet)
   }
 
-  // scalastyle:off method.length
-  // scalastyle:off cyclomatic.complexity
   /**
    * Returns the set of shards to which this BinaryJoin can be pushed down.
    * @return an occupied Option iff it is valid to perform the a pushdown optimization on this BinaryJoin.
@@ -440,8 +438,6 @@ class SingleClusterPlanner(val dataset: Dataset,
     }
     helper(bj)
   }
-  // scalastyle:on method.length
-  // scalastyle:on cyclomatic.complexity
 
   /**
    * Materialize a BinaryJoin without the pushdown optimization.
