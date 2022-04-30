@@ -406,6 +406,11 @@ class SingleClusterPlanner(val dataset: Dataset,
   private def getBinaryJoinPushdownShards(qContext: QueryContext,
                                           bj: BinaryJoin): Option[Set[Int]] = {
     def helper(lp: LogicalPlan): Option[Set[Int]] = lp match {
+      // VectorPlans can't currently be pushed down. Consider:
+      //     foo{...} or vector(0)
+      //   If foo{...} is sharded with spread=1, but both shards contain no foo{...} data,
+      //   then both pushed-down plans will yield vector(0). These will be concatenated via a DistConcatExec.
+      case vec: VectorPlan => None
       case ps: PeriodicSeries => helper(ps.rawSeries)
       case psw: PeriodicSeriesWithWindowing => helper(psw.series)
       case aif: ApplyInstantFunction => helper(aif.vectors)
