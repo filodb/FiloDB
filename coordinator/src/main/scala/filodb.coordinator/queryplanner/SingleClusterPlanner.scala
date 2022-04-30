@@ -415,7 +415,6 @@ class SingleClusterPlanner(val dataset: Dataset,
       //   If foo{...} is sharded with spread=1, but both shards contain no foo{...} data,
       //   then both pushed-down plans will yield vector(0). These will be concatenated via a DistConcatExec.
       case vec: VectorPlan => None
-      case svd: ScalarVaryingDoublePlan => helper(svd.vectors)
       case svbo: ScalarVectorBinaryOperation => helper(svbo.vector)
       case ps: PeriodicSeries => helper(ps.rawSeries)
       case psw: PeriodicSeriesWithWindowing => helper(psw.series)
