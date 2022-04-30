@@ -637,6 +637,7 @@ object LogicalPlan {
     */
   def findLeafLogicalPlans (logicalPlan: LogicalPlan) : Seq[LogicalPlan] = {
    logicalPlan match {
+     case lp: ScalarVaryingDoublePlan => findLeafLogicalPlans(lp.vectors)
      // scalarArg can have vector like scalar(http_requests_total)
      case lp: ScalarVectorBinaryOperation => findLeafLogicalPlans(lp.vector) ++ findLeafLogicalPlans(lp.scalarArg)
      // Find leaf logical plans for all children and concatenate results
