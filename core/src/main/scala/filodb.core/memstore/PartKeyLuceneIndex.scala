@@ -50,6 +50,7 @@ object PartKeyLuceneIndex {
 
   val MAX_STR_INTERN_ENTRIES = 10000
   val MAX_TERMS_TO_ITERATE = 10000
+  val FACET_FIELD_MAX_LEN = 1000
 
   val NOT_FOUND = -1
 
@@ -157,7 +158,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
     def addField(name: String, value: String): Unit = {
       // Use PartKeyIndexBenchmark to measure indexing performance before changing this
-      if (name.nonEmpty && value.nonEmpty && facetEnabledForLabel(name)) {
+      if (name.nonEmpty && value.nonEmpty && facetEnabledForLabel(name) && value.length < FACET_FIELD_MAX_LEN) {
         facetsConfig.setRequireDimensionDrillDown(name, false)
         facetsConfig.setIndexFieldName(name, FACET_FIELD_PREFIX + name)
         document.add(new SortedSetDocValuesFacetField(name, value))
@@ -347,7 +348,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       } catch {
         case e: IllegalArgumentException =>
           // If this exception is seen, then we have not seen the label. Return empty result.
-          if (!e.getMessage.contains("was not indexed with SortedSetDocValues")) throw e;
+          if (!e.getMessage.contains("was not indexed"))
+            logger.warn(s"Got an exception when doing label-values filters=$colFilters colName=$colName", e)
       }
     }
     labelValuesQueryLatency.record(System.nanoTime() - start)
