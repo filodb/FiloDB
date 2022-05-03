@@ -25,8 +25,9 @@ trait  DefaultPlanner {
     def dsOptions: DatasetOptions
     private[queryplanner] val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
     def materializeVectorPlan(qContext: QueryContext,
-                              lp: VectorPlan): PlanResult = {
-      val vectors = walkLogicalPlanTree(lp.scalars, qContext)
+                              lp: VectorPlan,
+                              forceInProcess: Boolean = false): PlanResult = {
+      val vectors = walkLogicalPlanTree(lp.scalars, qContext, forceInProcess)
       vectors.plans.foreach(_.addRangeVectorTransformer(VectorFunctionMapper()))
       vectors
     }
@@ -43,10 +44,16 @@ trait  DefaultPlanner {
         case s: ScalarBinaryOperation   => ExecPlanFuncArgs(materialize(s, qContext),
                                            RangeParams(s.startMs, s.stepMs, s.endMs))
     }
-
-    def walkLogicalPlanTree(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult
-
-
+    /**
+     * @param logicalPlan The LogicalPlan instance
+     * @param qContext The QueryContext
+     * @param forceInProcess if true, all materialized plans for this entire
+     *                       logical plan will dispatch via an InProcessDispatcher
+     * @return The PlanResult containing the ExecPlan
+     */
+    def walkLogicalPlanTree(logicalPlan: LogicalPlan,
+                            qContext: QueryContext,
+                            forceInProcess: Boolean = false): PlanResult
 
     /**
      * DefaultPlanner has logic to handle multiple LogicalPlans, classes implementing this trait may choose to override
@@ -55,32 +62,29 @@ trait  DefaultPlanner {
      * classes to implement walkLogicalPlanTree and explicitly delegate to defaultWalkLogicalPlanTree if needed. The
      * method essentially pattern matches all LogicalPlans and invoke the default implementation in the
      * DefaultPlanner trait
-     *
-     * @param logicalPlan The LogicalPlan instance
-     * @param qContext The QueryContext
-     * @return The PlanResult containing the ExecPlan
      */
     // scalastyle:off cyclomatic.complexity
     def defaultWalkLogicalPlanTree(logicalPlan: LogicalPlan,
-                            qContext: QueryContext): PlanResult = logicalPlan match {
+                                   qContext: QueryContext,
+                                   forceInProcess: Boolean = false): PlanResult = logicalPlan match {
 
-        case lp: ApplyInstantFunction        => this.materializeApplyInstantFunction(qContext, lp)
-        case lp: ApplyInstantFunctionRaw     => this.materializeApplyInstantFunctionRaw(qContext, lp)
-        case lp: Aggregate                   => this.materializeAggregate(qContext, lp)
-        case lp: BinaryJoin                  => this.materializeBinaryJoin(qContext, lp)
-        case lp: ScalarVectorBinaryOperation => this.materializeScalarVectorBinOp(qContext, lp)
+        case lp: ApplyInstantFunction        => this.materializeApplyInstantFunction(qContext, lp, forceInProcess)
+        case lp: ApplyInstantFunctionRaw     => this.materializeApplyInstantFunctionRaw(qContext, lp, forceInProcess)
+        case lp: Aggregate                   => this.materializeAggregate(qContext, lp, forceInProcess)
+        case lp: BinaryJoin                  => this.materializeBinaryJoin(qContext, lp, forceInProcess)
+        case lp: ScalarVectorBinaryOperation => this.materializeScalarVectorBinOp(qContext, lp, forceInProcess)
 
-        case lp: ApplyMiscellaneousFunction  => this.materializeApplyMiscellaneousFunction(qContext, lp)
-        case lp: ApplySortFunction           => this.materializeApplySortFunction(qContext, lp)
-        case lp: ScalarVaryingDoublePlan     => this.materializeScalarPlan(qContext, lp)
+        case lp: ApplyMiscellaneousFunction  => this.materializeApplyMiscellaneousFunction(qContext, lp, forceInProcess)
+        case lp: ApplySortFunction           => this.materializeApplySortFunction(qContext, lp, forceInProcess)
+        case lp: ScalarVaryingDoublePlan     => this.materializeScalarPlan(qContext, lp, forceInProcess)
         case lp: ScalarTimeBasedPlan         => this.materializeScalarTimeBased(qContext, lp)
-        case lp: VectorPlan                  => this.materializeVectorPlan(qContext, lp)
+        case lp: VectorPlan                  => this.materializeVectorPlan(qContext, lp, forceInProcess)
         case lp: ScalarFixedDoublePlan       => this.materializeFixedScalar(qContext, lp)
-        case lp: ApplyAbsentFunction         => this.materializeAbsentFunction(qContext, lp)
-        case lp: ApplyLimitFunction          => this.materializeLimitFunction(qContext, lp)
-        case lp: ScalarBinaryOperation       => this.materializeScalarBinaryOperation(qContext, lp)
-        case lp: SubqueryWithWindowing       => this.materializeSubqueryWithWindowing(qContext, lp)
-        case lp: TopLevelSubquery            => this.materializeTopLevelSubquery(qContext, lp)
+        case lp: ApplyAbsentFunction         => this.materializeAbsentFunction(qContext, lp, forceInProcess)
+        case lp: ApplyLimitFunction          => this.materializeLimitFunction(qContext, lp, forceInProcess)
+        case lp: ScalarBinaryOperation       => this.materializeScalarBinaryOperation(qContext, lp, forceInProcess)
+        case lp: SubqueryWithWindowing       => this.materializeSubqueryWithWindowing(qContext, lp, forceInProcess)
+        case lp: TopLevelSubquery            => this.materializeTopLevelSubquery(qContext, lp, forceInProcess)
         case _: RawSeries                   |
              _: RawChunkMeta                |
              _: PeriodicSeries              |
@@ -90,16 +94,18 @@ trait  DefaultPlanner {
     }
 
     def materializeApplyInstantFunction(qContext: QueryContext,
-                                        lp: ApplyInstantFunction): PlanResult = {
-      val vectors = walkLogicalPlanTree(lp.vectors, qContext)
+                                        lp: ApplyInstantFunction,
+                                        forceInProcess: Boolean = false): PlanResult = {
+      val vectors = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
       val paramsExec = materializeFunctionArgs(lp.functionArgs, qContext)
       vectors.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, paramsExec)))
       vectors
     }
 
     def materializeApplyMiscellaneousFunction(qContext: QueryContext,
-                                              lp: ApplyMiscellaneousFunction): PlanResult = {
-      val vectors = walkLogicalPlanTree(lp.vectors, qContext)
+                                              lp: ApplyMiscellaneousFunction,
+                                              forceInProcess: Boolean = false): PlanResult = {
+      val vectors = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
       if (lp.function == MiscellaneousFunctionId.HistToPromVectors)
         vectors.plans.foreach(_.addRangeVectorTransformer(HistToPromSeriesMapper(schemas.part)))
       else
@@ -108,24 +114,27 @@ trait  DefaultPlanner {
     }
 
     def materializeApplyInstantFunctionRaw(qContext: QueryContext,
-                                           lp: ApplyInstantFunctionRaw): PlanResult = {
-      val vectors = walkLogicalPlanTree(lp.vectors, qContext)
+                                           lp: ApplyInstantFunctionRaw,
+                                           forceInProcess: Boolean = false): PlanResult = {
+      val vectors = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
       val paramsExec = materializeFunctionArgs(lp.functionArgs, qContext)
       vectors.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, paramsExec)))
       vectors
     }
 
     def materializeScalarVectorBinOp(qContext: QueryContext,
-                                     lp: ScalarVectorBinaryOperation): PlanResult = {
-      val vectors = walkLogicalPlanTree(lp.vector, qContext)
+                                     lp: ScalarVectorBinaryOperation,
+                                     forceInProcess: Boolean = false): PlanResult = {
+      val vectors = walkLogicalPlanTree(lp.vector, qContext, forceInProcess)
       val funcArg = materializeFunctionArgs(Seq(lp.scalarArg), qContext)
       vectors.plans.foreach(_.addRangeVectorTransformer(ScalarOperationMapper(lp.operator, lp.scalarIsLhs, funcArg)))
       vectors
     }
 
     def materializeApplySortFunction(qContext: QueryContext,
-                                     lp: ApplySortFunction): PlanResult = {
-      val vectors = walkLogicalPlanTree(lp.vectors, qContext)
+                                     lp: ApplySortFunction,
+                                     forceInProcess: Boolean = false): PlanResult = {
+      val vectors = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
       if (vectors.plans.length > 1) {
         val targetActor = PlannerUtil.pickDispatcher(vectors.plans)
         val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, vectors.plans)
@@ -138,8 +147,9 @@ trait  DefaultPlanner {
     }
 
     def materializeScalarPlan(qContext: QueryContext,
-                              lp: ScalarVaryingDoublePlan): PlanResult = {
-      val vectors = walkLogicalPlanTree(lp.vectors, qContext)
+                              lp: ScalarVaryingDoublePlan,
+                              forceInProcess: Boolean = false): PlanResult = {
+      val vectors = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
       if (vectors.plans.length > 1) {
         val targetActor = PlannerUtil.pickDispatcher(vectors.plans)
         val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, vectors.plans)
@@ -163,7 +173,9 @@ trait  DefaultPlanner {
     }
 
    // scalastyle:off method.length
-   def addAggregator(lp: Aggregate, qContext: QueryContext, toReduceLevel: PlanResult):
+   def addAggregator(lp: Aggregate,
+                     qContext: QueryContext,
+                     toReduceLevel: PlanResult):
    LocalPartitionReduceAggregateExec = {
 
     import filodb.query.AggregateClause.ClauseType
@@ -221,8 +233,9 @@ trait  DefaultPlanner {
   // scalastyle:on method.length
 
   def materializeAbsentFunction(qContext: QueryContext,
-                                  lp: ApplyAbsentFunction): PlanResult = {
-    val vectors = walkLogicalPlanTree(lp.vectors, qContext)
+                                  lp: ApplyAbsentFunction,
+                                forceInProcess: Boolean = false): PlanResult = {
+    val vectors = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
     val aggregate = Aggregate(AggregationOperator.Sum, lp, Nil, AggregateClause.byOpt(Seq("job")))
 
     // Add sum to aggregate all child responses
@@ -234,8 +247,9 @@ trait  DefaultPlanner {
   }
 
   def materializeLimitFunction(qContext: QueryContext,
-                                lp: ApplyLimitFunction): PlanResult = {
-    val vectors = walkLogicalPlanTree(lp.vectors, qContext)
+                                lp: ApplyLimitFunction,
+                               forceInProcess: Boolean = false): PlanResult = {
+    val vectors = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
     if (vectors.plans.length > 1) {
       val targetActor = PlannerUtil.pickDispatcher(vectors.plans)
       val topPlan = LocalPartitionDistConcatExec(qContext, targetActor, vectors.plans)
@@ -248,8 +262,9 @@ trait  DefaultPlanner {
   }
 
    def materializeAggregate(qContext: QueryContext,
-                                   lp: Aggregate): PlanResult = {
-    val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, qContext)
+                                   lp: Aggregate,
+                            forceInProcess: Boolean = false): PlanResult = {
+    val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
     val reducer = addAggregator(lp, qContext, toReduceLevel1)
     PlanResult(Seq(reducer)) // since we have aggregated, no stitching
   }
@@ -275,7 +290,9 @@ trait  DefaultPlanner {
    * --T~PeriodicSamplesMapper(start=((S-3m)/1m)*1m+1m, step=1m, end=(E/1m)*1m, window=None, functionId=None)
    * ---E~MultiSchemaPartitionsExec
    */
-  def materializeSubqueryWithWindowing(qContext: QueryContext, sqww: SubqueryWithWindowing): PlanResult = {
+  def materializeSubqueryWithWindowing(qContext: QueryContext,
+                                       sqww: SubqueryWithWindowing,
+                                       forceInProcess: Boolean = false): PlanResult = {
     // This physical plan will try to execute only one range query instead of a number of individual subqueries.
     // If ranges of each of the subqueries have overlap, retrieving the total range
     // is optimal, if there is no overlap and even worse significant gap between the individual subqueries, retrieving
@@ -292,7 +309,7 @@ trait  DefaultPlanner {
     // different from start/end of the inner logical plan. This is rather confusing, the intent, however, was to keep
     // query context "original" without modification, so, as to capture the original intent of the user. This, however,
     // does not hold true across the entire code base, there are a number of place where we modify query context.
-    val innerExecPlan = walkLogicalPlanTree(sqww.innerPeriodicSeries, qContext)
+    val innerExecPlan = walkLogicalPlanTree(sqww.innerPeriodicSeries, qContext, forceInProcess)
     if (sqww.functionId != RangeFunctionId.AbsentOverTime) {
       val rangeFn = InternalRangeFunction.lpToInternalFunc(sqww.functionId)
       val paramsExec = materializeFunctionArgs(sqww.functionArgs, qContext)
@@ -357,13 +374,15 @@ trait  DefaultPlanner {
     aggregatePlanResult
   }
 
-  def materializeTopLevelSubquery(qContext: QueryContext, tlsq: TopLevelSubquery): PlanResult = {
+  def materializeTopLevelSubquery(qContext: QueryContext,
+                                  tlsq: TopLevelSubquery,
+                                  forceInProcess: Boolean = false): PlanResult = {
     // This physical plan will try to execute only one range query instead of a number of individual subqueries.
     // If ranges of each of the subqueries have overlap, retrieving the total range
     // is optimal, if there is no overlap and even worse significant gap between the individual subqueries, retrieving
     // the entire range might be suboptimal, this still might be a better option than issuing and concatenating numerous
     // subqueries separately
-    walkLogicalPlanTree(tlsq.innerPeriodicSeries, qContext)
+    walkLogicalPlanTree(tlsq.innerPeriodicSeries, qContext, forceInProcess)
   }
 
   def materializeScalarTimeBased(qContext: QueryContext,
@@ -374,15 +393,16 @@ trait  DefaultPlanner {
   }
 
    def materializeScalarBinaryOperation(qContext: QueryContext,
-                                        lp: ScalarBinaryOperation): PlanResult = {
+                                        lp: ScalarBinaryOperation,
+                                        forceInProcess: Boolean = false): PlanResult = {
     val lhs = if (lp.lhs.isRight) {
       // Materialize as lhs is a logical plan
-      val lhsExec = walkLogicalPlanTree(lp.lhs.right.get, qContext)
+      val lhsExec = walkLogicalPlanTree(lp.lhs.right.get, qContext, forceInProcess)
       Right(lhsExec.plans.map(_.asInstanceOf[ScalarBinaryOperationExec]).head)
     } else Left(lp.lhs.left.get)
 
     val rhs = if (lp.rhs.isRight) {
-      val rhsExec = walkLogicalPlanTree(lp.rhs.right.get, qContext)
+      val rhsExec = walkLogicalPlanTree(lp.rhs.right.get, qContext, forceInProcess)
       Right(rhsExec.plans.map(_.asInstanceOf[ScalarBinaryOperationExec]).head)
     } else Left(lp.rhs.left.get)
 
@@ -391,15 +411,17 @@ trait  DefaultPlanner {
     PlanResult(Seq(scalarBinaryExec))
   }
 
-  def materializeBinaryJoin(qContext: QueryContext, logicalPlan: BinaryJoin): PlanResult = {
+  def materializeBinaryJoin(qContext: QueryContext,
+                            logicalPlan: BinaryJoin,
+                            forceInProcess: Boolean = false): PlanResult = {
 
     val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
     val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
 
-    val lhs = walkLogicalPlanTree(logicalPlan.lhs, lhsQueryContext)
-    val rhs = walkLogicalPlanTree(logicalPlan.rhs, rhsQueryContext)
+    val lhs = walkLogicalPlanTree(logicalPlan.lhs, lhsQueryContext, forceInProcess)
+    val rhs = walkLogicalPlanTree(logicalPlan.rhs, rhsQueryContext, forceInProcess)
 
     val dispatcher = if (!lhs.plans.head.dispatcher.isLocalCall && !rhs.plans.head.dispatcher.isLocalCall) {
       val lhsCluster = lhs.plans.head.dispatcher.clusterName

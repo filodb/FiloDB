@@ -270,7 +270,8 @@ trait ExecPlan extends QueryCommand {
     *
     * @param useNewline pass false if the result string needs to be in one line
     */
-  final def printTree(useNewline: Boolean = true, level: Int = 0): String = {
+  final def printTree(useNewline: Boolean = true,
+                      level: Int = 0): String = {
     val transf = printRangeVectorTransformersForLevel(level)
     val nextLevel = rangeVectorTransformers.size + level
     val curNode = curNodeText(nextLevel)
