@@ -19,7 +19,8 @@ import filodb.query.{QueryResponse, QueryResult}
 case class ScalarFixedDoubleExec(queryContext: QueryContext,
                                  dataset: DatasetRef,
                                  params: RangeParams,
-                                 value: Double) extends LeafExecPlan {
+                                 value: Double,
+                                 dispatcher: InProcessPlanDispatcher) extends LeafExecPlan {
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
@@ -65,12 +66,4 @@ case class ScalarFixedDoubleExec(queryContext: QueryContext,
       }.flatten
     }
   }
-
-  /**
-    * The dispatcher is used to dispatch the ExecPlan
-    * to the node where it will be executed. The Query Engine
-    * will supply this parameter
-    */
-  override def dispatcher: PlanDispatcher = InProcessPlanDispatcher(EmptyQueryConfig)
-
 }
