@@ -7,7 +7,6 @@ import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.verbs.MustVerb
 
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
@@ -21,7 +20,7 @@ import filodb.query.{LabelCardinality, PlanValidationSpec}
 import filodb.query.exec._
 
 // scalastyle:off line.size.limit
-class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationSpec with MustVerb {
+class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationSpec {
   private implicit val system: ActorSystem = ActorSystem()
   private val node = TestProbe().ref
 
