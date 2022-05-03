@@ -47,7 +47,8 @@ trait  DefaultPlanner {
     /**
      * @param logicalPlan The LogicalPlan instance
      * @param qContext The QueryContext
-     * @param forceInProcess if true, all materialized plans will dispatch via an InProcessDispatcher
+     * @param forceInProcess if true, all materialized plans for this entire
+     *                       logical plan will dispatch via an InProcessDispatcher
      * @return The PlanResult containing the ExecPlan
      */
     def walkLogicalPlanTree(logicalPlan: LogicalPlan,
