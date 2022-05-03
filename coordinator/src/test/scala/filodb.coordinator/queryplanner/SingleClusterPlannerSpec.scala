@@ -621,7 +621,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@7c3e4b1a)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@7c3e4b1a)""".stripMargin),
-      // Should pushdown scalars (except scalar(<vec>), since <vec> is expected to contain only one element).
+      // Should pushdown most scalars (see below for the exceptions).
       ("""(foo{job="bak"} + 3 + time()) + on(job, app) (baz{job="bak"} + (4 + 5))""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1563151078],raw)
           |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1563151078],raw)
@@ -648,6 +648,36 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |---E~ScalarBinaryOperationExec(params = RangeParams(20000,100,30000), operator = ADD, lhs = Left(4.0), rhs = Left(5.0)) on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@5a545b0f)
           |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(baz))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@9301672)""".stripMargin),
+      // Should not pushdown scalar(<vector>) or vector(<scalar>).
+      ("""(foo{job="bak"} + on(job, app) scalar(bar{job="bak"})) + (foo{job="bak"} + on(job, app) vector(0))""",
+        """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@6749fe50)
+          |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
+          |--FA1~
+          |--T~ScalarFunctionMapper(function=Scalar, funcParams=List())
+          |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2037240425],raw)
+          |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2037240425],raw)
+          |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2037240425],raw)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2037240425],raw)
+          |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
+          |--FA1~
+          |--T~ScalarFunctionMapper(function=Scalar, funcParams=List())
+          |---E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2037240425],raw)
+          |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2037240425],raw)
+          |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2037240425],raw)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2037240425],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@6749fe50)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=7, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2037240425],raw)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2037240425],raw)
+          |--T~VectorFunctionMapper(funcParams=List())
+          |---E~ScalarFixedDoubleExec(params = RangeParams(20000,100,30000), value = 0.0) on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@6749fe50)""".stripMargin),
       // Should only pushdown bottom / inner-most join.
       ("""(
          |  (

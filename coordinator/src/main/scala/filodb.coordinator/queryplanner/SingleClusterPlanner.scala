@@ -399,6 +399,8 @@ class SingleClusterPlanner(val dataset: Dataset,
     }.toSet)
   }
 
+  // scalastyle:off method.length
+  // scalastyle:off cyclomatic.complexity
   /**
    * Returns the set of shards to which this BinaryJoin can be pushed down.
    * When this function returns a Some, the argument BinaryJoin can be materialized for each shard
@@ -414,7 +416,21 @@ class SingleClusterPlanner(val dataset: Dataset,
       //     foo{...} or vector(0)
       //   If foo{...} is sharded with spread=1, but both shards contain no foo{...} data,
       //   then both pushed-down plans will yield vector(0). These will be concatenated via a DistConcatExec.
+      // VectorPlans can technically be pushed down when the join operation isn't a SetOperator,
+      //   but the extra logic to support that unlikely use-case isn't worth the maintenance overhead.
       case vec: VectorPlan => None
+      // SVDP's should not be pushed down. Consider:
+      //   foo{...} + scalar(bar{...})
+      // There are only three possible cases:
+      //   (1) The scalar's data lies on a single shard. If foo's data lies exclusively on the same shard,
+      //       then no pushdown is necessary. Otherwise, the scalar cannot be pushed down.
+      //   (2) The scalar's data lies on multiple shards. Even if they are the same as foo's, the scalar's
+      //       instant-vector needs to contain a single row; its data is aggregated under-the-hood.
+      //       A pushdown would break this aggregation step.
+      //   (3) The scalar's data lies on no shards. Then the scalar's selector is similar to:
+      //         scalar(vector(0))
+      //       which is not an intended use-case.
+      case svdp: ScalarVaryingDoublePlan => None
       case svbo: ScalarVectorBinaryOperation => helper(svbo.vector)
       case ps: PeriodicSeries => helper(ps.rawSeries)
       case psw: PeriodicSeriesWithWindowing => helper(psw.series)
@@ -425,16 +441,17 @@ class SingleClusterPlanner(val dataset: Dataset,
         val lhsShards = helper(bj.lhs)
         val rhsShards = helper(bj.rhs)
         val canPushdown = qContext.plannerParams.targetSchemaProvider.isDefined &&
-                          lhsShards != None &&
-                          // either the shard groups are equal, or one of lhs/rhs includes only scalars.
-                          (lhsShards == rhsShards || lhsShards.isEmpty ^ rhsShards.isEmpty) &&
+                          lhsShards != None && rhsShards != None &&
+                          // either the shard groups are equal, or either of lhs/rhs includes only scalars.
+                          (lhsShards == rhsShards || lhsShards.get.isEmpty || rhsShards.get.isEmpty) &&
                           {
                             val targetSchemaLabels =
                               getUniversalTargetSchemaLabels(bj, qContext.plannerParams.targetSchemaProvider.get)
                             targetSchemaLabels.isDefined &&
                               targetSchemaLabels.get.toSet.subsetOf(bj.on.toSet)
                           }
-        if (canPushdown) lhsShards else None
+        // union lhs/rhs shards, since one might be empty (if it's a scalar)
+        if (canPushdown) Some(lhsShards.get.union(rhsShards.get)) else None
       case nl: NonLeafLogicalPlan =>
         // Pessimistically require that this entire subtree lies on one shard (or none, if all scalars).
         val shardGroups = nl.children.map(helper(_))
@@ -449,6 +466,8 @@ class SingleClusterPlanner(val dataset: Dataset,
     }
     helper(bj)
   }
+  // scalastyle:on method.length
+  // scalastyle:on cyclomatic.complexity
 
   /**
    * Materialize a BinaryJoin without the pushdown optimization.
