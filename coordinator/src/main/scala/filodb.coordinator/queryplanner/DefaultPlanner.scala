@@ -173,10 +173,6 @@ trait  DefaultPlanner {
     }
 
    // scalastyle:off method.length
-
-   /**
-    * @param forceDispatcher forces the reducer exec plan to dispatch with the provided dispatcher
-    */
    def addAggregator(lp: Aggregate,
                      qContext: QueryContext,
                      toReduceLevel: PlanResult):
