@@ -24,4 +24,7 @@ class QueryConfig(queryConfig: Config) {
   def has(feature: String): Boolean = queryConfig.as[Option[Boolean]](feature).getOrElse(false)
 }
 
+/**
+ * IMPORTANT: Use this for testing only, using this for anything other than testing may yield undesired behavior
+ */
 object EmptyQueryConfig extends QueryConfig(queryConfig = ConfigFactory.empty())

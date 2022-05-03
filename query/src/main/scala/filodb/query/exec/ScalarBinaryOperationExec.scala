@@ -19,7 +19,8 @@ case class ScalarBinaryOperationExec(queryContext: QueryContext,
                                      params: RangeParams,
                                      lhs: Either[Double, ScalarBinaryOperationExec],
                                      rhs: Either[Double, ScalarBinaryOperationExec],
-                                     operator: BinaryOperator) extends LeafExecPlan {
+                                     operator: BinaryOperator,
+                                     dispatcher: InProcessPlanDispatcher) extends LeafExecPlan {
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
@@ -62,11 +63,4 @@ case class ScalarBinaryOperationExec(queryContext: QueryContext,
         querySession.partialResultsReason)
     }
   }
-
-  /**
-    * The dispatcher is used to dispatch the ExecPlan
-    * to the node where it will be executed. The Query Engine
-    * will supply this parameter
-    */
-  override final def dispatcher: PlanDispatcher = InProcessPlanDispatcher(EmptyQueryConfig)
 }
