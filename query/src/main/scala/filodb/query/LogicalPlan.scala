@@ -135,7 +135,8 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
                                endMs: Long) extends MetadataQueryPlan
 
 object TsCardinalities {
-  val SHARD_KEY_LABELS = Seq("_ws_", "_ns_", "__name__")
+  val LABEL_WORKSPACE = "_ws_"
+  val SHARD_KEY_LABELS = Seq(LABEL_WORKSPACE, "_ns_", "__name__")
 }
 
 /**
@@ -776,8 +777,12 @@ object LogicalPlan {
    */
   def overrideColumnFilters(base: Seq[ColumnFilter],
                             overrides: Seq[ColumnFilter]): Seq[ColumnFilter] = {
-    val overrideColumns = overrides.map(_.column)
-    base.filterNot(f => overrideColumns.contains(f.column)) ++ overrides
+    if (base.nonEmpty && !base.map(_.column).contains(TsCardinalities.LABEL_WORKSPACE)) {
+      val overrideColumns = overrides.map(_.column)
+      base.filterNot(f => overrideColumns.contains(f.column)) ++ overrides
+    } else {
+      base
+    }
   }
 }
 
