@@ -27,6 +27,8 @@ object BusterContext extends StrictLogging {
 /**
  * Requires following typesafe config properties:
  *
+ * filodb.cardbuster.cass-delete-parallelism-per-spark-thread = 1
+ *
  * filodb.cardbuster.delete-pk-filters = [
  *  {
  *     _ns_ = "bulk_ns"
