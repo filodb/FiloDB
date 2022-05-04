@@ -22,9 +22,9 @@ import filodb.downsampler.chunk.DownsamplerSettings
 import filodb.memory.format.UnsafeUtils
 
 object BusterSchedulers {
-  @transient lazy val readSched = Scheduler.io("cass-read-sched")
-  @transient lazy val writeSched = Scheduler.io("cass-write-sched")
-  @transient lazy val computeSched = Scheduler.computation(name = "buster-compute")
+  lazy val readSched = Scheduler.io("cass-read-sched")
+  lazy val writeSched = Scheduler.io("cass-write-sched")
+  lazy val computeSched = Scheduler.computation(name = "buster-compute")
 }
 
 class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
