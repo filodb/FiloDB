@@ -94,7 +94,7 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
         }
       }
       if (willDelete) {
-        BusterContext.log.info(s"Deleting part key $pkPairs from shard=$shard startTime=${pk.startTime} " +
+        BusterContext.log.debug(s"Deleting part key $pkPairs from shard=$shard startTime=${pk.startTime} " +
           s"endTime=${pk.endTime} split=$split isSimulation=$isSimulation")
       }
       numCandidateKeys += 1
