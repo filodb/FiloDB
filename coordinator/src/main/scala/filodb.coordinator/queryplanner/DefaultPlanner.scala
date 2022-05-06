@@ -238,7 +238,8 @@ trait  DefaultPlanner {
 
    def materializeFixedScalar(qContext: QueryContext,
                                      lp: ScalarFixedDoublePlan): PlanResult = {
-    val scalarFixedDoubleExec = ScalarFixedDoubleExec(qContext, dataset = dataset.ref, lp.timeStepParams, lp.scalar)
+    val scalarFixedDoubleExec = ScalarFixedDoubleExec(qContext, dataset = dataset.ref,
+      lp.timeStepParams, lp.scalar, inProcessPlanDispatcher)
     PlanResult(Seq(scalarFixedDoubleExec))
   }
 
@@ -348,7 +349,8 @@ trait  DefaultPlanner {
 
   def materializeScalarTimeBased(qContext: QueryContext,
                                   lp: ScalarTimeBasedPlan): PlanResult = {
-    val scalarTimeBasedExec = TimeScalarGeneratorExec(qContext, dataset.ref, lp.rangeParams, lp.function)
+    val scalarTimeBasedExec = TimeScalarGeneratorExec(qContext, dataset.ref,
+      lp.rangeParams, lp.function, inProcessPlanDispatcher)
     PlanResult(Seq(scalarTimeBasedExec))
   }
 
@@ -365,7 +367,8 @@ trait  DefaultPlanner {
       Right(rhsExec.plans.map(_.asInstanceOf[ScalarBinaryOperationExec]).head)
     } else Left(lp.rhs.left.get)
 
-    val scalarBinaryExec = ScalarBinaryOperationExec(qContext, dataset.ref, lp.rangeParams, lhs, rhs, lp.operator)
+    val scalarBinaryExec = ScalarBinaryOperationExec(qContext, dataset.ref,
+      lp.rangeParams, lhs, rhs, lp.operator, inProcessPlanDispatcher)
     PlanResult(Seq(scalarBinaryExec))
   }
 
