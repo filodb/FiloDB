@@ -997,4 +997,30 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case _ => fail("Expected two children")
     }
   }
+
+  it("should materialize absent function mapper correctly with implicit WS") {
+    {
+      val lp = Parser.queryToLogicalPlan("absent(sum_over_time(test{_ns_ = \"App-1\", instance = \"Inst-1\" }[5m]))",
+        1000, 1000)
+      val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
+        Seq(Seq(ColumnFilter("_ns_", Equals("App-1")), ColumnFilter("_ws_", Equals("demo"))))
+      }
+      val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+      execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].rangeVectorTransformers.head
+        .asInstanceOf[AbsentFunctionMapper].columnFilter.isEmpty shouldEqual true
+    }
+    {
+      val lp = Parser.queryToLogicalPlan(
+        "absent(sum_over_time(test{_ws_ = \"demo\", _ns_ = \"App-1\", instance = \"Inst-1\" }[5m]))",
+        1000, 1000)
+      val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
+        Seq(Seq(ColumnFilter("_ns_", Equals("App-1")), ColumnFilter("_ws_", Equals("demo"))))
+      }
+      val engine = new ShardKeyRegexPlanner(dataset, localPlanner, shardKeyMatcherFn, queryConfig)
+      val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+      execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].rangeVectorTransformers.head
+        .asInstanceOf[AbsentFunctionMapper].columnFilter.isEmpty shouldEqual true
+    }
+  }
 }
