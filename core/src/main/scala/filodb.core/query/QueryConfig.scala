@@ -23,7 +23,7 @@ class QueryConfig(private val queryConfig: Config) {
   def has(feature: String): Boolean = queryConfig.as[Option[Boolean]](feature).getOrElse(false)
 
   override def hashCode(): Int = {
-    super.hashCode()
+    queryConfig.hashCode()
   }
 
   override def equals(obj: Any): Boolean = {
