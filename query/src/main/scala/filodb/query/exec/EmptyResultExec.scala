@@ -5,7 +5,7 @@ import monix.execution.Scheduler
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.query.{ColumnInfo, QueryConfig, QueryContext, QuerySession, QueryStats, ResultSchema}
+import filodb.core.query.{ColumnInfo, QueryContext, QuerySession, QueryStats, ResultSchema}
 import filodb.core.store.ChunkSource
 import filodb.query.{QueryResponse, QueryResult}
 
