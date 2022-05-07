@@ -10,8 +10,8 @@ import filodb.core.store.ChunkSource
 import filodb.query.{QueryResponse, QueryResult}
 
 case class EmptyResultExec(queryContext: QueryContext,
-                           dataset: DatasetRef) extends LeafExecPlan {
-  override def dispatcher: PlanDispatcher = InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig)
+                           dataset: DatasetRef,
+                           dispatcher: InProcessPlanDispatcher) extends LeafExecPlan {
 
   override def execute(source: ChunkSource,
                        querySession: QuerySession)

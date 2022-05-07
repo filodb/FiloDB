@@ -170,7 +170,7 @@ class SingleClusterPlanner(val dataset: Dataset,
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     val plannerParams = qContext.plannerParams
     val updatedPlan = updateStartTime(logicalPlan)
-    if (updatedPlan.isEmpty) EmptyResultExec(qContext, dsRef)
+    if (updatedPlan.isEmpty) EmptyResultExec(qContext, dsRef, inProcessPlanDispatcher)
     else {
      val logicalPlan = updatedPlan.get
       val timeSplitConfig = if (plannerParams.timeSplitEnabled)
