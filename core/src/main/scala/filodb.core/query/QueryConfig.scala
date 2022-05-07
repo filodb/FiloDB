@@ -9,22 +9,31 @@ object QueryConfig {
   val DefaultVectorsLimit = 150
 }
 
-class QueryConfig(queryConfig: Config) {
-  lazy val askTimeout = queryConfig.as[FiniteDuration]("ask-timeout")
-  lazy val staleSampleAfterMs = queryConfig.getDuration("stale-sample-after").toMillis
-  lazy val minStepMs = queryConfig.getDuration("min-step").toMillis
-  lazy val fastReduceMaxWindows = queryConfig.getInt("fastreduce-max-windows")
-  lazy val routingConfig = queryConfig.getConfig("routing")
-  lazy val parser = queryConfig.as[String]("parser")
-  lazy val translatePromToFilodbHistogram= queryConfig.getBoolean("translate-prom-to-filodb-histogram")
-
-  /**
-   * Feature flag test: returns true if the config has an entry with "true", "t" etc
-   */
-  def has(feature: String): Boolean = queryConfig.as[Option[Boolean]](feature).getOrElse(false)
+class QueryConfig(@transient queryConfig: Config) {
+  val askTimeout = queryConfig.as[FiniteDuration]("ask-timeout")
+  val staleSampleAfterMs = queryConfig.getDuration("stale-sample-after").toMillis
+  val minStepMs = queryConfig.getDuration("min-step").toMillis
+  val fastReduceMaxWindows = queryConfig.getInt("fastreduce-max-windows")
+  val routingConfig = queryConfig.getConfig("routing")
+  val parser = queryConfig.as[String]("parser")
+  val translatePromToFilodbHistogram = queryConfig.getBoolean("translate-prom-to-filodb-histogram")
+  val fasterRateEnabled = queryConfig.as[Option[Boolean]]("faster-rate").getOrElse(false)
 }
 
 /**
  * IMPORTANT: Use this for testing only, using this for anything other than testing may yield undesired behavior
  */
-object EmptyQueryConfig extends QueryConfig(queryConfig = ConfigFactory.empty())
+object EmptyQueryConfig extends QueryConfig(queryConfig = ConfigFactory.parseString(
+  """
+    |    ask-timeout = 10 seconds
+    |    stale-sample-after = 5 minutes
+    |    sample-limit = 1000000
+    |    min-step = 1 ms
+    |    faster-rate = true
+    |    fastreduce-max-windows = 50
+    |    translate-prom-to-filodb-histogram = true
+    |    parser = "antlr"
+    |    routing {
+    |      # not currently used
+    |    }
+    |""".stripMargin))
