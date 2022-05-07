@@ -38,7 +38,7 @@ class BinaryOperatorSpec extends AnyFunSpec with Matchers with ScalaFutures {
         new TransientRow(4L, 94935.1523d)).iterator
       override def outputRange: Option[RvRange] = None
     })
-  val queryConfig = new QueryConfig(config.getConfig("query"))
+  val queryConfig = QueryConfig(config.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)
 
   val rand = new Random()
