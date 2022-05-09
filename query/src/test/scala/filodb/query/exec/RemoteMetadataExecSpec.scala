@@ -24,6 +24,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.memory.format.ZeroCopyUTF8String._
 
+
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Future
 import scala.concurrent.duration._
@@ -239,5 +240,44 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
     result.toArray shouldEqual jobQueryResult3
   }
 
+  it ("timeseries cardinality remote exec") {
+    import TsCardExec._
+    import TsCardinalities._
+
+    val samples = Seq(
+      TsCardinalitiesSampl(Map("_ws_" -> "foo", "_ns_" -> "bar", "__name__" -> "baz"), Map("active" -> 123, "total" -> 234)),
+      TsCardinalitiesSampl(Map("_ws_" -> "foo", "_ns_" -> "bar", "__name__" -> "bat"), Map("active" -> 345, "total" -> 456)),
+      TsCardinalitiesSampl(Map("_ws_" -> "foo", "_ns_" -> "bar", "__name__" -> "bak"), Map("active" -> 567, "total" -> 678)),
+    )
+
+    val testingBackendTsCard: SttpBackend[Future, Nothing] = SttpBackendStub.asynchronousFuture
+      .whenRequestMatches(_.uri.path.startsWith(List("api","v1","metering","cardinality","timeseries"))
+      )
+      .thenRespondWrapped(Future {
+        Response(Right(Right(MetadataSuccessResponse(samples, "success", Option.empty, Option.empty))), StatusCodes.PartialContent, "", Nil, Nil)
+      })
+
+    val exec: MetadataRemoteExec = MetadataRemoteExec("http://localhost:31007/api/v1/metering/cardinality/timeseries", 10000L,
+      Map("match[]" -> """{_ws_="foo", _ns_="bar"}""", "numGroupByFields" -> "3"),
+      QueryContext(origQueryParams=PromQlQueryParams("test", 123L, 234L, 15L, Option("http://localhost:31007/api/v1/metering/cardinality/timeseries"))),
+      InProcessPlanDispatcher(queryConfig), timeseriesDataset.ref, RemoteHttpClient(configBuilder.build(), testingBackendTsCard))
+
+    val resp = exec.execute(memStore, querySession).runToFuture.futureValue
+    val result = (resp: @unchecked) match {
+      case QueryResult(id, _, response, _, _, _) =>
+        // should only contain a single RV where each row describes a single group's cardinalities
+        response.size shouldEqual 1
+        val rows = response.head.rows().map{ rr =>
+          RowData.fromRowReader(rr)
+        }.toSet
+        val expRows = samples.map{ s =>
+          // order the shard keys according to precedence
+          val prefix = SHARD_KEY_LABELS.map(s.group(_))
+          val counts = CardCounts(s.cardinality("active"), s.cardinality("total"))
+          RowData(prefixToGroup(prefix), counts)
+        }.toSet
+        rows shouldEqual expRows
+    }
+  }
 }
 
