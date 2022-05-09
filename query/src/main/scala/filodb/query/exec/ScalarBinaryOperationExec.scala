@@ -25,7 +25,7 @@ case class ScalarBinaryOperationExec(queryContext: QueryContext,
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
   val resultSchema = ResultSchema(columns, 1)
-  val operatorFunction = BinaryOperatorFunction.factoryMethod(operator)
+  @transient lazy val operatorFunction = BinaryOperatorFunction.factoryMethod(operator)
 
   def evaluate: Double = {
     if (lhs.isRight  && rhs.isRight) operatorFunction.calculate(lhs.right.get.evaluate, rhs.right.get.evaluate)

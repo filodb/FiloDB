@@ -41,7 +41,7 @@ class HistogramQueryBenchmark {
   import monix.execution.Scheduler.Implicits.global
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val queryConfig = new QueryConfig(config.getConfig("query"))
+  val queryConfig = QueryConfig(config.getConfig("query"))
   val policy = new FixedMaxPartitionsEvictionPolicy(1000)
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
   val ingestConf = TestData.storeConf.copy(shardMemSize = 512 * 1024 * 1024, maxChunksSize = 200)

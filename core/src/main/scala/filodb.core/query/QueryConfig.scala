@@ -2,29 +2,41 @@ package filodb.core.query
 
 import scala.concurrent.duration.FiniteDuration
 
-import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 
 object QueryConfig {
   val DefaultVectorsLimit = 150
-}
 
-class QueryConfig(queryConfig: Config) {
-  lazy val askTimeout = queryConfig.as[FiniteDuration]("ask-timeout")
-  lazy val staleSampleAfterMs = queryConfig.getDuration("stale-sample-after").toMillis
-  lazy val minStepMs = queryConfig.getDuration("min-step").toMillis
-  lazy val fastReduceMaxWindows = queryConfig.getInt("fastreduce-max-windows")
-  lazy val routingConfig = queryConfig.getConfig("routing")
-  lazy val parser = queryConfig.as[String]("parser")
-  lazy val translatePromToFilodbHistogram= queryConfig.getBoolean("translate-prom-to-filodb-histogram")
+  def apply(queryConfig: Config): QueryConfig = {
+    val askTimeout = queryConfig.as[FiniteDuration]("ask-timeout")
+    val staleSampleAfterMs = queryConfig.getDuration("stale-sample-after").toMillis
+    val minStepMs = queryConfig.getDuration("min-step").toMillis
+    val fastReduceMaxWindows = queryConfig.getInt("fastreduce-max-windows")
+    val routingConfig = queryConfig.getConfig("routing")
+    val parser = queryConfig.as[String]("parser")
+    val translatePromToFilodbHistogram = queryConfig.getBoolean("translate-prom-to-filodb-histogram")
+    val fasterRateEnabled = queryConfig.as[Option[Boolean]]("faster-rate").getOrElse(false)
+    QueryConfig(askTimeout, staleSampleAfterMs, minStepMs, fastReduceMaxWindows, parser, translatePromToFilodbHistogram,
+      fasterRateEnabled, routingConfig.as[Option[Long]]("remote.http.timeout"),
+      routingConfig.as[Option[String]]("remote.http.endpoint"))
+  }
 
+  import scala.concurrent.duration._
   /**
-   * Feature flag test: returns true if the config has an entry with "true", "t" etc
+   * IMPORTANT: Use this for testing only, using this for anything other than testing may yield undesired behavior
    */
-  def has(feature: String): Boolean = queryConfig.as[Option[Boolean]](feature).getOrElse(false)
+  val unitTestingQueryConfig = QueryConfig(10.seconds, 5.minutes.toMillis, 1, 50, "antlr", true, true, None, None)
+
 }
 
-/**
- * IMPORTANT: Use this for testing only, using this for anything other than testing may yield undesired behavior
- */
-object EmptyQueryConfig extends QueryConfig(queryConfig = ConfigFactory.empty())
+case class QueryConfig(askTimeout: FiniteDuration,
+                       staleSampleAfterMs: Long,
+                       minStepMs: Long,
+                       fastReduceMaxWindows: Int,
+                       parser: String,
+                       translatePromToFilodbHistogram: Boolean,
+                       fasterRateEnabled: Boolean,
+                       remoteHttpTimeoutMs: Option[Long],
+                       remoteHttpEndpoint: Option[String])
+

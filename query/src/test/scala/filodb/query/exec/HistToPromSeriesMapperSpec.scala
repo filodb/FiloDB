@@ -14,7 +14,7 @@ import org.scalatest.matchers.should.Matchers
 
 class HistToPromSeriesMapperSpec extends AnyFunSpec with Matchers with ScalaFutures {
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val queryConfig = new QueryConfig(config.getConfig("query"))
+  val queryConfig = QueryConfig(config.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)
 
   import monix.execution.Scheduler.Implicits.global

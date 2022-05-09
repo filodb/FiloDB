@@ -184,7 +184,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     // Output range is from 0 to 150, o/p must have data starting from 0 to 150 with a step of 10. If data is
     // missing in the input Rvs, it should be NaN
     // null needed below since there is a require in code that prevents empty children
-    val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(EmptyQueryConfig), Some(RvRange(0, 10, 150)),
+    val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig), Some(RvRange(0, 10, 150)),
       Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
     val rs = ResultSchema(List(ColumnInfo("timestamp",
       TimestampColumn), ColumnInfo("value", DoubleColumn)), 1)
@@ -236,7 +236,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
               )
 
     // rvRange is None, this is the case when stitch is called on raw series
-    val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(EmptyQueryConfig), None,
+    val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig), None,
             Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
     val rs = ResultSchema(List(ColumnInfo("timestamp",
         TimestampColumn), ColumnInfo("value", DoubleColumn)), 1)
@@ -255,7 +255,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
   it ("should reduce result schemas with different fixedVecLengths without error") {
 
     // null needed below since there is a require in code that prevents empty children
-    val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(EmptyQueryConfig),
+    val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig),
       Some(RvRange(0, 10, 100)), Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
 
     val rs1 = ResultSchema(List(ColumnInfo("timestamp",
@@ -426,7 +426,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
   it("should fail if step is non positive number") {
     val caught = intercept[IllegalArgumentException] {
-      StitchRvsExec(QueryContext(), InProcessPlanDispatcher(EmptyQueryConfig),
+      StitchRvsExec(QueryContext(), InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig),
         Some(RvRange(startMs = 0, endMs = 100, stepMs = 0)),
         Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
     }
@@ -436,7 +436,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
   it("should fail if start > end is non positive number") {
     val caught = intercept[IllegalArgumentException] {
-      StitchRvsExec(QueryContext(), InProcessPlanDispatcher(EmptyQueryConfig),
+      StitchRvsExec(QueryContext(), InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig),
         Some(RvRange(startMs = 110, endMs = 100, stepMs = 1)),
         Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
     }

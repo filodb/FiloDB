@@ -146,7 +146,7 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
   val pubFreq = 10000L
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val queryConfig = new QueryConfig(config.getConfig("query"))
+  val queryConfig = QueryConfig(config.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)
 
   // windowSize and step are in number of elements of the data

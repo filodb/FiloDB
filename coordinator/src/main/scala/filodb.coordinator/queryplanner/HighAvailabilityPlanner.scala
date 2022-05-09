@@ -25,15 +25,14 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
                               remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient)
   extends QueryPlanner with StrictLogging {
 
-  import net.ceedubs.ficus.Ficus._
   import LogicalPlanUtils._
   import QueryFailureRoutingStrategy._
   import LogicalPlan._
 
-  val remoteHttpEndpoint: String = queryConfig.routingConfig.getString("remote.http.endpoint")
+  val remoteHttpEndpoint: String = queryConfig.remoteHttpEndpoint
+    .getOrElse(throw new IllegalArgumentException("remoteHttpEndpoint config needed"))
 
-  val remoteHttpTimeoutMs: Long =
-    queryConfig.routingConfig.config.as[Option[Long]]("remote.http.timeout").getOrElse(60000)
+  val remoteHttpTimeoutMs: Long = queryConfig.remoteHttpTimeoutMs.getOrElse(60000)
 
   val inProcessPlanDispatcher = InProcessPlanDispatcher(queryConfig)
 
