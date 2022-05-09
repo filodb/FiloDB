@@ -21,7 +21,7 @@ object Parser extends StrictLogging {
 
   val mode: Mode = {
     val conf = GlobalConfig.systemConfig
-    val queryConfig = new QueryConfig(conf.getConfig("filodb.query"))
+    val queryConfig = QueryConfig(conf.getConfig("filodb.query"))
     val parser = queryConfig.parser
     logger.info(s"Query parser mode: $parser")
     parser match {

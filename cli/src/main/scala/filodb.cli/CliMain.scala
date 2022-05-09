@@ -293,7 +293,7 @@ object CliMain extends FilodbClusterNode {
     client.getShardMapper(dsRef) match {
       case Some(mapper) =>
         def mapperRef = mapper
-        val queryConfig = new QueryConfig (config.getConfig ("query") )
+        val queryConfig = QueryConfig (config.getConfig ("query") )
         val dataset = new Dataset(dsRef.dataset, Schemas.global.schemas.get(args.schema()).get)
         val planner = new SingleClusterPlanner(dataset, Schemas.global,
           mapperRef, earliestRetainedTimestampFn = 0, queryConfig, "raw",
