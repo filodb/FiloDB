@@ -334,9 +334,9 @@ object RangeFunction {
     func match {
       case None                   => () => new LastSampleChunkedFunctionD
       case Some(Last)             => () => new LastSampleChunkedFunctionD
-      case Some(Rate)     if config.has("faster-rate") => () => new ChunkedRateFunction
-      case Some(Increase) if config.has("faster-rate") => () => new ChunkedIncreaseFunction
-      case Some(Delta)    if config.has("faster-rate") => () => new ChunkedDeltaFunction
+      case Some(Rate)     if config.fasterRateEnabled => () => new ChunkedRateFunction
+      case Some(Increase) if config.fasterRateEnabled => () => new ChunkedIncreaseFunction
+      case Some(Delta)    if config.fasterRateEnabled => () => new ChunkedDeltaFunction
       case Some(CountOverTime)    => () => new CountOverTimeChunkedFunctionD()
       case Some(SumOverTime)      => () => new SumOverTimeChunkedFunctionD
       case Some(AvgWithSumAndCountOverTime) => require(schema.columns(2).name == "count")

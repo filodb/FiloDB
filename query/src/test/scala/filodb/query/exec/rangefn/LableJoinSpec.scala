@@ -92,7 +92,7 @@ class LableJoinSpec extends AnyFunSpec with Matchers with ScalaFutures {
       override def outputRange: Option[RvRange] = None
     })
 
-  val queryConfig = new QueryConfig(config.getConfig("query"))
+  val queryConfig = QueryConfig(config.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)
 
   it("label_join joins all src values in order") {

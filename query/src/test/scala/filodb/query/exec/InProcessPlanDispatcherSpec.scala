@@ -15,7 +15,7 @@ import filodb.core.TestData
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.{Column, Dataset, Schemas}
-import filodb.core.query.{ColumnFilter, EmptyQueryConfig, Filter, QueryConfig, QueryContext, QuerySession}
+import filodb.core.query.{ColumnFilter, Filter, QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.MemFactory
 import filodb.memory.data.ChunkMap
@@ -66,7 +66,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
   val dataset: Dataset = timeseriesDataset
 
   val config: Config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val queryConfig = new QueryConfig(config.getConfig("query"))
+  val queryConfig = QueryConfig(config.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
@@ -98,7 +98,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val dispatcher: PlanDispatcher = InProcessPlanDispatcher(EmptyQueryConfig)
+    val dispatcher: PlanDispatcher = InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig)
 
     val dummyDispatcher = DummyDispatcher(memStore, querySession)
 
@@ -126,7 +126,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
     val emptyFilters = Seq (ColumnFilter("__name__", Filter.Equals("nonsense".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val dispatcher: PlanDispatcher = InProcessPlanDispatcher(EmptyQueryConfig)
+    val dispatcher: PlanDispatcher = InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig)
 
     val dummyDispatcher = DummyDispatcher(memStore, querySession)
 

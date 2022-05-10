@@ -38,7 +38,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
 
   private val config = ConfigFactory.load("application_test.conf").getConfig("filodb.query").
     withFallback(routingConfig)
-  private val queryConfig = new QueryConfig(config)
+  private val queryConfig = QueryConfig(config)
   /*
   This is the PromQL
 

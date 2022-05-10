@@ -36,7 +36,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
   private val routingConfig = ConfigFactory.parseString(routingConfigString)
 
   private val config = ConfigFactory.load("application_test.conf").getConfig("filodb.query").withFallback(routingConfig)
-  private val queryConfig = new QueryConfig(config)
+  private val queryConfig = QueryConfig(config)
 
   private val now = 1634777330000L
 
@@ -48,7 +48,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
   val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
     earliestRetainedTimestampFn = now - downsampleRetention, queryConfig, "downsample")
 
-  private def inProcessDispatcher =  InProcessPlanDispatcher(EmptyQueryConfig)
+  private def inProcessDispatcher =  InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig)
 
   private val timeToDownsample = 6.hours.toMillis
   private val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,

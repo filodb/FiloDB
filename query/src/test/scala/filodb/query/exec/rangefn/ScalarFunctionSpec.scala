@@ -27,7 +27,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
     options = DatasetOptions(Seq("__name__", "job"), "__name__")).get
 
   val config: Config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val queryConfig = new QueryConfig(config.getConfig("query"))
+  val queryConfig = QueryConfig(config.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
@@ -35,7 +35,7 @@ class ScalarFunctionSpec extends AnyFunSpec with Matchers with ScalaFutures {
   val ignoreKey = CustomRangeVectorKey(
     Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
 
-  val inProcessDispatcher = InProcessPlanDispatcher(EmptyQueryConfig)
+  val inProcessDispatcher = InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig)
 
   val testKey1 = CustomRangeVectorKey(
     Map(ZeroCopyUTF8String("src") -> ZeroCopyUTF8String("source-value-10"),

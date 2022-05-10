@@ -39,7 +39,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
   val serialization = SerializationExtension(system)
   val config = ConfigFactory.load("application_test.conf")
-  val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
+  val queryConfig = QueryConfig(config.getConfig("filodb.query"))
 
   private def roundTrip(thing: AnyRef): AnyRef = {
     val serializer = serialization.findSerializerFor(thing)
