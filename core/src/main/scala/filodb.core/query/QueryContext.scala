@@ -217,5 +217,5 @@ case class QueryStats() {
 }
 
 object QuerySession {
-  def makeForTestingOnly(): QuerySession = QuerySession(QueryContext(), EmptyQueryConfig)
+  def makeForTestingOnly(): QuerySession = QuerySession(QueryContext(), QueryConfig.unitTestingQueryConfig)
 }

@@ -45,7 +45,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   val spread = 0
   val config = ConfigFactory.load("filodb-defaults.conf")
     .withValue("filodb.memstore.ingestion-buffer-mem-size", ConfigValueFactory.fromAnyRef("1GB"))
-  val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
+  val queryConfig = QueryConfig(config.getConfig("filodb.query"))
   implicit val _ = queryConfig.askTimeout
 
   // TODO: move setup and ingestion to another trait

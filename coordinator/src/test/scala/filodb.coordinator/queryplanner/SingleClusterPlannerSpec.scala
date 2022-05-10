@@ -38,7 +38,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   private val schemas = Schemas(dataset.schema)
 
   private val config = ConfigFactory.load("application_test.conf")
-  private val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
+  private val queryConfig = QueryConfig(config.getConfig("filodb.query"))
 
   private val engine = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
     queryConfig, "raw")

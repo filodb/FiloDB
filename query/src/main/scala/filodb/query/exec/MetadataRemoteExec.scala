@@ -71,23 +71,21 @@ case class MetadataRemoteExec(queryEndpoint: String,
   }
 
   private def mapTsCardinalitiesResponse(response: MetadataSuccessResponse, id: String): QueryResponse = {
-
     import NoCloseCursor._
     import TsCardinalities._
     import TsCardExec._
 
     val RECORD_SCHEMA = SerializedRangeVector.toSchema(RESULT_SCHEMA.columns)
 
-    val data = response.data.asInstanceOf[Seq[TsCardinalitiesSampl]]
+    val rows = response.data.asInstanceOf[Seq[TsCardinalitiesSampl]]
       .map { ts =>
-        val key = CustomRangeVectorKey(ts.group.map { case (k, v) => (k.utf8, v.utf8) })
         val prefix = SHARD_KEY_LABELS.take(ts.group.size).map(l => ts.group(l))
         val counts = CardCounts(ts.cardinality("active"), ts.cardinality("total"))
-        val row = CardRowReader(prefixToGroup(prefix), counts)
-        val rv = IteratorBackedRangeVector(key, NoCloseCursor(Seq(row).iterator), None)
-        SerializedRangeVector(rv, builder, RECORD_SCHEMA, queryWithPlanName(queryContext))
+        CardRowReader(prefixToGroup(prefix), counts)
       }
-    QueryResult(id, RESULT_SCHEMA, data)
+    val rv = IteratorBackedRangeVector(CustomRangeVectorKey.empty, NoCloseCursor(rows.iterator), None)
+    val srv = SerializedRangeVector(rv, builder, RECORD_SCHEMA, queryWithPlanName(queryContext))
+    QueryResult(id, RESULT_SCHEMA, Seq(srv))
   }
 
   private def mapLabelCardinalityResponse(response: MetadataSuccessResponse, id: String): QueryResponse = {
