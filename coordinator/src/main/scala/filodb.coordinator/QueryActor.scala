@@ -73,7 +73,7 @@ final class QueryActor(memStore: TimeSeriesStore,
   val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
 
   logger.info(s"Starting QueryActor and QueryEngine for ds=$dsRef schemas=$schemas")
-  val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
+  val queryConfig = QueryConfig(config.getConfig("filodb.query"))
   val queryPlanner = new SingleClusterPlanner(dataset, schemas, shardMapFunc,
                                               earliestRawTimestampFn, queryConfig, "raw",
                                               functionalSpreadProvider)

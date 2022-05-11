@@ -21,7 +21,7 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
   import MultiSchemaPartitionsExecSpec._
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val queryConfig = new QueryConfig(config.getConfig("query"))
+  val queryConfig = QueryConfig(config.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)
   val rand = new Random()
   val error = 0.00000001d

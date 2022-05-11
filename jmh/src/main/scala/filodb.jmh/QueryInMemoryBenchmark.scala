@@ -88,7 +88,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   actorAsk(clusterActor, command) { case DatasetVerified => println(s"dataset setup") }
   coordinator ! command
 
-  val queryConfig = new QueryConfig(cluster.settings.allConfig.getConfig("filodb.query"))
+  val queryConfig = QueryConfig(cluster.settings.allConfig.getConfig("filodb.query"))
 
   import monix.execution.Scheduler.Implicits.global
 

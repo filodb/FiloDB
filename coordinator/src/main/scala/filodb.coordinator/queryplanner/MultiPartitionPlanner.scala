@@ -46,10 +46,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options
 
-  import net.ceedubs.ficus.Ficus._
-
-  val remoteHttpTimeoutMs: Long =
-    queryConfig.routingConfig.config.as[Option[Long]]("remote.http.timeout").getOrElse(60000)
+  val remoteHttpTimeoutMs: Long = queryConfig.remoteHttpTimeoutMs.getOrElse(60000)
 
   val datasetMetricColumn: String = dataset.options.metricColumn
 

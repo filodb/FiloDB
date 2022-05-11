@@ -16,7 +16,7 @@ import org.scalatest.matchers.should.Matchers
 class HistogramQuantileMapperSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val queryConfig = new QueryConfig(config.getConfig("query"))
+  val queryConfig = QueryConfig(config.getConfig("query"))
   val querySession = QuerySession(QueryContext(), queryConfig)
 
   val rangeParams =  RangeParams(100, 20, 200)

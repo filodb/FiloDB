@@ -20,7 +20,7 @@ import filodb.query.{LabelCardinality, PlanValidationSpec}
 import filodb.query.exec._
 
 // scalastyle:off line.size.limit
-class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationSpec{
+class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationSpec {
   private implicit val system: ActorSystem = ActorSystem()
   private val node = TestProbe().ref
 
@@ -36,7 +36,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
   private val routingConfig = ConfigFactory.parseString(routingConfigString)
 
   private val config = ConfigFactory.load("application_test.conf").getConfig("filodb.query").withFallback(routingConfig)
-  private val queryConfig = new QueryConfig(config)
+  private val queryConfig = QueryConfig(config)
 
   private val now = 1634777330000L
 
@@ -48,7 +48,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
   val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
     earliestRetainedTimestampFn = now - downsampleRetention, queryConfig, "downsample")
 
-  private def inProcessDispatcher =  InProcessPlanDispatcher(EmptyQueryConfig)
+  private def inProcessDispatcher =  InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig)
 
   private val timeToDownsample = 6.hours.toMillis
   private val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
@@ -819,5 +819,40 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val expectedPlan = "E~PromQlRemoteExec(PromQlQueryParams(bottomk(1.0,((min((foo{_ws_=\"demo\",_ns_=\"remoteNs\"} * on(userID) group_left(userName) bar{_ws_=\"demo\",_ns_=\"remoteNs\"})) by (userName,time) - time()) > 0.0)),1634777330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,false,86400000,86400000,false,true,false,false), queryEndpoint=remotePartition-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@570ba13)"
     validatePlan(execPlan, expectedPlan)
 
+  }
+
+  it(" must have a non empty config plans with scalar operations in") {
+      val query =
+        """min((1000 - foo{_ws_="demo",_ns_="localNs"})
+          |/
+          |(delta(foo{_ws_="demo",_ns_="localNs"}[1h]) > 0 or vector(1)))""".stripMargin
+      val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(endSeconds, step, endSeconds), Antlr)
+      val execPlan = rootPlanner.materialize(lp,
+        QueryContext(origQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(lp))))
+    val expectedPlan =
+        """T~AggregatePresenter(aggrOp=Min, aggrParams=List(), rangeParams=RangeParams(1634777330,300,1634777330))
+           |-E~LocalPartitionReduceAggregateExec(aggrOp=Min, aggrParams=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@66e21568)
+           |--T~AggregateMapReduce(aggrOp=Min, aggrParams=List(), without=List(), by=List())
+           |---E~BinaryJoinExec(binaryOp=DIV, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@66e21568)
+           |----T~ScalarOperationMapper(operator=SUB, scalarOnLhs=true)
+           |-----FA1~StaticFuncArgs(1000.0,RangeParams(1634777330,300,1634777330))
+           |-----T~PeriodicSamplesMapper(start=1634777330000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
+           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1634777030000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1012526996],raw)
+           |----T~ScalarOperationMapper(operator=SUB, scalarOnLhs=true)
+           |-----FA1~StaticFuncArgs(1000.0,RangeParams(1634777330,300,1634777330))
+           |-----T~PeriodicSamplesMapper(start=1634777330000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
+           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634777030000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1012526996],raw)
+           |----E~SetOperatorExec(binaryOp=LOR, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@66e21568)
+           |-----T~ScalarOperationMapper(operator=GTR, scalarOnLhs=false)
+           |------FA1~StaticFuncArgs(0.0,RangeParams(1634777330,300,1634777330))
+           |------T~PeriodicSamplesMapper(start=1634777330000, step=300000, end=1634777330000, window=Some(3600000), functionId=Some(Delta), rawSource=true, offsetMs=None)
+           |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1634773730000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1012526996],raw)
+           |-----T~ScalarOperationMapper(operator=GTR, scalarOnLhs=false)
+           |------FA1~StaticFuncArgs(0.0,RangeParams(1634777330,300,1634777330))
+           |------T~PeriodicSamplesMapper(start=1634777330000, step=300000, end=1634777330000, window=Some(3600000), functionId=Some(Delta), rawSource=true, offsetMs=None)
+           |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634773730000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1012526996],raw)
+           |-----T~VectorFunctionMapper(funcParams=List())
+           |------E~ScalarFixedDoubleExec(params = RangeParams(1634777330,300,1634777330), value = 1.0) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@66e21568)""".stripMargin
+    validatePlan(execPlan, expectedPlan)
   }
 }

@@ -18,7 +18,8 @@ import filodb.query.ScalarFunctionId.{DayOfMonth, DayOfWeek, DaysInMonth, Hour, 
   */
 case class TimeScalarGeneratorExec(queryContext: QueryContext,
                                    dataset: DatasetRef, params: RangeParams,
-                                   function: ScalarFunctionId) extends LeafExecPlan {
+                                   function: ScalarFunctionId,
+                                   dispatcher: InProcessPlanDispatcher) extends LeafExecPlan {
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
@@ -75,10 +76,4 @@ case class TimeScalarGeneratorExec(queryContext: QueryContext,
     }
   }
 
-  /**
-    * The dispatcher is used to dispatch the ExecPlan
-    * to the node where it will be executed. The Query Engine
-    * will supply this parameter
-    */
-  override final def dispatcher: PlanDispatcher = InProcessPlanDispatcher(EmptyQueryConfig)
 }
