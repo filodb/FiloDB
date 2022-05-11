@@ -465,8 +465,9 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
   override def isRoutable: Boolean = vectors.isRoutable
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
-    vectors.replacePeriodicSeriesFilters(filters))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(
+    vectors = vectors.replacePeriodicSeriesFilters(filters),
+    functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 }
 
 /**
@@ -535,8 +536,9 @@ final case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
   override def isRoutable: Boolean = vectors.isRoutable
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
-    vectors.replacePeriodicSeriesFilters(filters))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(
+    vectors = vectors.replacePeriodicSeriesFilters(filters),
+    functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 }
 
 /**
