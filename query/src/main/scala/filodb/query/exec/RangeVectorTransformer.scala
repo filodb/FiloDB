@@ -2,16 +2,15 @@ package filodb.query.exec
 
 import scala.collection.Iterator
 import scala.collection.mutable.ListBuffer
-
 import monix.reactive.Observable
 import spire.syntax.cfor._
-
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
+import filodb.core.query.ResultSchema.valueColumnType
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
-import filodb.memory.format.vectors.{HistogramBuckets, HistogramWithBuckets}
+import filodb.memory.format.vectors.{HistogramBuckets, HistogramWithBuckets, MutableHistogram}
 import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, SortFunctionId, _}
 import filodb.query.InstantFunctionId.HistogramQuantile
 import filodb.query.MiscellaneousFunctionId.{LabelJoin, LabelReplace}
@@ -197,36 +196,66 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
             paramResponse: Seq[Observable[ScalarRangeVector]] = Nil): Observable[RangeVector] = {
     // Multiple ExecPlanFunArgs not supported yet
     funcParams.head match {
-    case s: StaticFuncArgs   => evaluate(source, ScalarFixedDouble(s.timeStepParams, s.scalar))
-    case t: TimeFuncArgs     => evaluate(source, TimeScalar(t.timeStepParams))
+    case s: StaticFuncArgs   => evaluate(source, ScalarFixedDouble(s.timeStepParams, s.scalar), sourceSchema)
+    case t: TimeFuncArgs     => evaluate(source, TimeScalar(t.timeStepParams), sourceSchema)
     case e: ExecPlanFuncArgs => if (paramResponse.size > 1)
                                  throw new UnsupportedOperationException("Multiple ExecPlanFunArgs not supported yet")
-                                paramResponse.head.map(param => evaluate(source, param)).flatten
+                                paramResponse.head.map(param => evaluate(source, param, sourceSchema)).flatten
    }
   }
 
-  private def evaluate(source: Observable[RangeVector], scalarRangeVector: ScalarRangeVector) = {
+  // scalastyle:off method.length
+  private def evaluate(source: Observable[RangeVector],
+                       scalarRangeVector: ScalarRangeVector,
+                       sourceSchema: ResultSchema) = {
     source.map { rv =>
       val resultIterator: RangeVectorCursor = new WrappedCursor(rv.rows) {
         private val rows = rv.rows
-        private val result = new TransientRow()
+        private val result = valueColumnType(sourceSchema) match {
+          case ColumnType.DoubleColumn => new TransientRow(0, 0d)
+          // Initialize with a new MutableHistogram when we have more information about a row.
+          case ColumnType.HistogramColumn => new TransientHistRow()
+          case x => throw new UnsupportedOperationException(s"unsupported column type: $x")
+        }
 
         override def hasNext: Boolean = rows.hasNext
 
         override def doNext(): RowReader = {
           val next = rows.next()
-          val nextVal = next.getDouble(1)
           val timestamp = next.getLong(0)
           val sclrVal = scalarRangeVector.getValue(timestamp)
-          val newValue = if (scalarOnLhs) operatorFunction.calculate(sclrVal, nextVal)
-                         else operatorFunction.calculate(nextVal, sclrVal)
-          result.setValues(timestamp, newValue)
+          valueColumnType(sourceSchema) match {
+            case ColumnType.DoubleColumn =>
+              val doubleResRow = result.asInstanceOf[TransientRow]
+              val oldVal = next.getDouble(1)
+              val newVal = if (scalarOnLhs) operatorFunction.calculate(sclrVal, oldVal)
+                           else operatorFunction.calculate(oldVal, sclrVal)
+              doubleResRow.setValues(timestamp, newVal)
+            case ColumnType.HistogramColumn =>
+              val histResRow = result.asInstanceOf[TransientHistRow]
+              val oldHist = next.getHistogram(1).asInstanceOf[HistogramWithBuckets]
+              if (oldHist.numBuckets > histResRow.getHistogram(1).numBuckets) {
+                // If we don't have enough buckets in the TransientHistRow, we initialize and store
+                //   an appropriately-sized histogram. This should only happen once.
+                histResRow.setValues(0, MutableHistogram(oldHist))
+              }
+              val resHist = histResRow.getHistogram(1).asInstanceOf[MutableHistogram]
+              (0 until resHist.numBuckets).foreach{ i =>
+                val oldVal = oldHist.bucketValue(i)
+                val resVal = if (scalarOnLhs) operatorFunction.calculate(sclrVal, oldVal)
+                             else operatorFunction.calculate(oldVal, sclrVal)
+                resHist.values(i) = resVal
+              }
+              histResRow.setValues(timestamp, resHist)
+            case x => throw new UnsupportedOperationException(s"unsupported column type: $x")
+          }
           result
         }
       }
       IteratorBackedRangeVector(rv.key, resultIterator, rv.outputRange)
     }
   }
+  // scalastyle:on method.length
 }
 
 final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId, funcStringParam: Seq[String] = Nil,

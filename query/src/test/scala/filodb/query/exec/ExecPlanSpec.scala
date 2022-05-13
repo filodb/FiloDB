@@ -5,10 +5,9 @@ import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, TimeSeriesMemStor
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.DatasetRef
-import filodb.core.query.{ColumnInfo, CustomRangeVectorKey, QueryConfig, QueryContext, QuerySession,
-                          RangeParams, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange}
+import filodb.core.query.{ColumnInfo, CustomRangeVectorKey, QueryConfig, QueryContext, QuerySession, RangeParams, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange, TransientHistRow}
 import filodb.core.store.{ChunkSource, InMemoryMetaStore, NullColumnStore}
-import filodb.memory.format.vectors.{HistogramBuckets, LongHistogram}
+import filodb.memory.format.vectors.{GeometricBuckets, HistogramBuckets, LongHistogram}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query.{BinaryOperator, QueryResult}
 import monix.eval.Task
@@ -61,7 +60,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
     }
     val schemaDouble = ResultSchema(
       Seq(ColumnInfo("c0", ColumnType.TimestampColumn),
-          ColumnInfo("c1", ColumnType.DoubleColumn)),
+        ColumnInfo("c1", ColumnType.DoubleColumn)),
       0 // numRowKeyColumns
     )
 
@@ -79,7 +78,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
     }
     val schemaHist = ResultSchema(
       Seq(ColumnInfo("c0", ColumnType.TimestampColumn),
-          ColumnInfo("c1", ColumnType.HistogramColumn)),
+        ColumnInfo("c1", ColumnType.HistogramColumn)),
       0 // numRowKeyColumns
     )
 
@@ -110,17 +109,65 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     val schema = ResultSchema(
       Seq(ColumnInfo("c0", ColumnType.TimestampColumn),
-          ColumnInfo("c1", ColumnType.DoubleColumn)),
+        ColumnInfo("c1", ColumnType.DoubleColumn)),
       0 // numRowKeyColumns
     )
 
     val ep = makeFixedLeafExecPlan(Seq(rv), schema)
     ep.addRangeVectorTransformer(
       ScalarOperationMapper(BinaryOperator.EQL,
-                            scalarOnLhs = false,
-                            Seq(StaticFuncArgs(1.0, RangeParams(1000, 10, 2000)))))
+        scalarOnLhs = false,
+        Seq(StaticFuncArgs(1.0, RangeParams(1000, 10, 2000)))))
 
     ep.execute(memStore, querySession).runToFuture.futureValue
       .asInstanceOf[QueryResult].result.isEmpty shouldEqual true
+  }
+
+  it ("should correctly apply scalar operations to histogram") {
+    val scalar = 500.0
+    val buckets = GeometricBuckets(0.1, 10, 5)
+    val bucketValues = Seq(
+      Array(1L, 2L, 3L, 4L, 5L),
+      Array(1L, 3L, 4L, 5L, 6L),
+      Array(3L, 4L, 7L, 18L, 52L)
+    )
+
+    val rvHist = new RangeVector {
+      override def key: RangeVectorKey =
+        CustomRangeVectorKey(Map("foo".utf8 -> "bar".utf8))
+
+      override def rows(): RangeVectorCursor =
+        new NoCloseCursor(
+          bucketValues.zipWithIndex.map{ case (arr, i) =>
+            new TransientHistRow(i.toLong, LongHistogram(buckets, arr))
+          }.toIterator)
+
+      override def outputRange: Option[RvRange] = Some(RvRange(1000, 1, 1000))
+    }
+
+    val schemaHist = ResultSchema(
+      Seq(ColumnInfo("c0", ColumnType.TimestampColumn),
+        ColumnInfo("c1", ColumnType.HistogramColumn)),
+      1 // numRowKeyColumns
+    )
+
+    val plan = makeFixedLeafExecPlan(Seq(rvHist), schemaHist)
+    plan.addRangeVectorTransformer(
+      ScalarOperationMapper(
+        BinaryOperator.ADD,
+        scalarOnLhs = false,
+        Seq(StaticFuncArgs(scalar, RangeParams(1000, 1, 1000)))
+      )
+    )
+
+    val rows = plan.execute(memStore, querySession).runToFuture.futureValue.asInstanceOf[QueryResult].result.head.rows
+    // cannot assert size; will exhaust the iterator
+    for ((row, irow) <- rows.zipWithIndex) {
+      val hist = row.getHistogram(1)
+      val arr = bucketValues(irow)
+      (0 until hist.numBuckets).foreach{ ibucket =>
+        hist.bucketValue(ibucket) shouldEqual arr(ibucket) + scalar
+      }
+    }
   }
 }
