@@ -110,7 +110,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val schema = ResultSchema(
       Seq(ColumnInfo("c0", ColumnType.TimestampColumn),
         ColumnInfo("c1", ColumnType.DoubleColumn)),
-      0 // numRowKeyColumns
+      1 // numRowKeyColumns
     )
 
     val ep = makeFixedLeafExecPlan(Seq(rv), schema)
