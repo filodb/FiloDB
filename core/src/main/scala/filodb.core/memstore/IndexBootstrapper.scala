@@ -59,6 +59,8 @@ class IndexBootstrapper(colStore: ColumnStore) {
                      ttlMs: Long)
                     (assignPartId: PartKeyRecord => Int): Task[Long] = {
 
+    // This is where we need to only get the delta from  PartKeyLuceneIndex and fetch part keys updated after
+    // the timestamp in millis
     val recoverIndexLatency = Kamon.gauge("shard-recover-index-latency", MeasurementUnit.time.milliseconds)
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum)

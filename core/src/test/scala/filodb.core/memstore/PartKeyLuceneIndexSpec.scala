@@ -22,7 +22,8 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   import Filter._
   import GdeltTestData._
 
-  val keyIndex = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis)
+  val keyIndex = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis,
+    Some(new java.io.File(System.getProperty("java.io.tmpdir"), "part-key-lucene-index")))
   val partBuilder = new RecordBuilder(TestData.nativeMem)
 
   def partKeyOnHeap(partKeySchema: RecordSchema,
@@ -430,4 +431,52 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
   }
 
+
+  it("must clean the input directory for Index state apart from Synced") {
+    import java.io.File
+    val events = ArrayBuffer.empty[(IndexState.Value, Long)]
+    IndexState.values.foreach {
+      indexState =>
+        val indexDirectory = new File(
+          System.getProperty("java.io.tmpdir"), "part-key-lucene-index-event")
+        val shardDirectory = new File(indexDirectory, "0")
+        shardDirectory.mkdirs()
+        new File(shardDirectory, "empty").createNewFile()
+        // Validate the file named empty exists
+        assert(shardDirectory.list().exists(_.equals("empty")))
+        val index = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis,
+          Some(indexDirectory),
+          Some( new IndexLifecycleManager {
+            def currentState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) =
+              (indexState, None)
+
+            def updateState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit = {
+              events.append((state, time))
+            }
+          }))
+        index.closeIndex()
+        events.toList match {
+          case (IndexState.Empty, _) :: Nil if indexState != IndexState.Synced =>
+                                                // The file originally present must not be available
+                                                assert(!shardDirectory.list().exists(_.equals("empty")))
+                                                events.clear()
+          case Nil                          if indexState == IndexState.Synced =>
+                                                // The file originally present "must" be available
+                                                assert(shardDirectory.list().exists(_.equals("empty")))
+          case _                                                               =>
+                                                fail("Expected an index state Empty after directory cleanup")
+        }
+    }
+  }
+
+
+  it("Should update the state as empty after the cleanup is from a corrupt index") {
+
+
+  }
+
+  it("Should update the state as Unknown and throw an exception for any error other than CorruptIndexException") {
+
+
+  }
 }

@@ -81,7 +81,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                          facetEnabledSharedKeyLabels: Boolean,
                          shardNum: Int,
                          retentionMillis: Long, // only used to calculate fallback startTime
-                         diskLocation: Option[File] = None
+                         diskLocation: Option[File] = None,
+                         val lifecycleManager: Option[IndexLifecycleManager] = None
                          ) extends StrictLogging {
 
   import PartKeyLuceneIndex._
@@ -111,21 +112,47 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     .withTag("shard", shardNum)
 
   private val numPartColumns = schema.columns.length
-  private val indexDiskLocation = diskLocation.getOrElse(createTempDir(ref, shardNum)).toPath
-  private val mMapDirectory = new MMapDirectory(indexDiskLocation)
+  private val indexDiskLocation =
+                  new java.io.File(diskLocation.getOrElse(createTempDir(ref, shardNum)), s"$shardNum").toPath
+
+  lifecycleManager.foreach(listener => listener.currentState(ref, shardNum) match {
+    case (other @ _, _)  if other != IndexState.Synced  =>
+        logger.info(s"Found index state $other, this will clean up the index directory and trigger a clean build")
+      deleteRecursively(indexDiskLocation.toFile)
+        listener.updateState(ref, shardNum, IndexState.Empty, System.currentTimeMillis)
+    case _   => //NOP
+  })
+
+  val mMapDirectory = new MMapDirectory(indexDiskLocation)
   private val analyzer = new StandardAnalyzer()
 
   logger.info(s"Created lucene index for dataset=$ref shard=$shardNum facetEnabledAllLabels=$facetEnabledAllLabels " +
     s"facetEnabledSharedKeyLabels=$facetEnabledSharedKeyLabels at $indexDiskLocation")
 
-  private val config = new IndexWriterConfig(analyzer)
-  config.setInfoStream(new LuceneMetricsRouter(ref, shardNum))
-  config.setOpenMode(IndexWriterConfig.OpenMode.CREATE_OR_APPEND)
+  private def createIndexWriterConfig(): IndexWriterConfig = {
+    val config = new IndexWriterConfig(analyzer)
+    config.setInfoStream(new LuceneMetricsRouter(ref, shardNum))
+    config.setOpenMode(IndexWriterConfig.OpenMode.CREATE_OR_APPEND)
+    val endTimeSort = new Sort(new SortField(END_TIME, SortField.Type.LONG),
+      new SortField(START_TIME, SortField.Type.LONG))
+    config.setIndexSort(endTimeSort)
+  }
 
-  private val endTimeSort = new Sort(new SortField(END_TIME, SortField.Type.LONG),
-                                     new SortField(START_TIME, SortField.Type.LONG))
-  config.setIndexSort(endTimeSort)
-  private val indexWriter = new IndexWriterPlus(mMapDirectory, config, ref, shardNum)
+  private val indexWriter =
+    try {
+      new IndexWriterPlus(mMapDirectory, createIndexWriterConfig(), ref, shardNum)
+    } catch {
+      case _: CorruptIndexException =>
+        logger.warn(s"Index for dataset:${ref.dataset} and shard: $shardNum possibly corrupt," +
+          s"index directory will be cleaned up and index rebuilt")
+        deleteRecursively(indexDiskLocation.toFile)
+        // Notify the handler that the directory is now empty
+        lifecycleManager.foreach(_.updateState(ref, shardNum, IndexState.Empty, System.currentTimeMillis))
+        new IndexWriterPlus(mMapDirectory, createIndexWriterConfig(), ref, shardNum)
+      case other: Throwable =>
+        lifecycleManager.foreach(_.updateState(ref, shardNum, IndexState.Unknown, System.currentTimeMillis))
+        throw other
+    }
 
   private val utf8ToStrCache = concurrentCache[UTF8Str, String](PartKeyLuceneIndex.MAX_STR_INTERN_ENTRIES)
 
@@ -140,6 +167,15 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   private def facetEnabledForLabel(label: String) = {
     facetEnabledAllLabels || (facetEnabledSharedKeyLabels && schema.options.shardKeyColumns.contains(label))
+  }
+
+  private def deleteRecursively(f: File, deleteRoot: Boolean = false): Unit = {
+    if (f.isDirectory) f.listFiles match {
+      case xs: Array[File] if xs != null   => xs foreach ( f => deleteRecursively(f, true))
+      case _                     => //NOP
+    }
+    if (deleteRoot)
+      f.delete()
   }
 
   case class ReusableLuceneDocument() {
@@ -233,6 +269,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         NoOpIndexer
     }
   }.toArray
+
+  def getCurrentIndexState(): (IndexState.Value, Option[Long]) =
+    lifecycleManager.map(_.currentState(this.ref, this.shardNum)).getOrElse((IndexState.Unknown, None))
 
   def reset(): Unit = {
     indexWriter.deleteAll()
