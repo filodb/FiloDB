@@ -2,8 +2,10 @@ package filodb.query.exec
 
 import scala.collection.Iterator
 import scala.collection.mutable.ListBuffer
+
 import monix.reactive.Observable
 import spire.syntax.cfor._
+
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query._
