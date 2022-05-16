@@ -1312,4 +1312,37 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       }
     }
   }
+
+  it("should propagate new filters to FunctionArgs") {
+    val queries = Seq(
+//      // SubqueryWithWindowing
+//      """quantile_over_time(0.9, bar{job="foo"}[5m:1m])""",  // TODO: cannot use scalar() ??
+//      // PeriodicSeriesWithWindowing
+//      """quantile_over_time(0.9, bar{job="foo"}[5m])""",  // TODO: cannot use scalar() ??
+      // ApplyInstantFunction
+      """clamp_max(foo{job="app"}, scalar(bar{job="foo"}))""",
+//      // ApplyInstantFunctionRaw
+//      """foo{job="app", _bucket_="100.0"}[1m]""",  // TODO: cannot make FunctionArgs non-scalar
+//      // ScalarVaryingDoublePlan
+//      """scalar(foo{job="app"})""",  // TODO: cannot make FunctionArgs non-scalar
+    )
+    val newFilters = Seq(
+      ColumnFilter("lname1", Equals("lval1")),
+      ColumnFilter("lname2", Equals("lval2"))
+    )
+
+    queries.foreach{ query =>
+      val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+
+      // shouldn't initially contain any of the new filters
+      getRawSeriesFilters(lp).forall { group =>
+        newFilters.forall(!group.contains(_))
+      } shouldEqual true
+
+      // should contain all of the new filters after replaceFilters is called
+      getRawSeriesFilters(lp.replaceFilters(newFilters)).forall { group =>
+        newFilters.forall(group.contains(_))
+      } shouldEqual true
+    }
+  }
 }
