@@ -63,10 +63,15 @@ object PartKeyLuceneIndex {
       BinaryRegionLarge.numBytes(partKeyBase, partKeyOffset))
   }
 
-  private def createTempDir(ref: DatasetRef, shardNum: Int): File = {
+  def defaultTempDir(ref: DatasetRef, shardNum: Int): File = {
     val baseDir = new File(System.getProperty("java.io.tmpdir"))
     val baseName = s"partKeyIndex-$ref-$shardNum-${System.currentTimeMillis()}-"
     val tempDir = new File(baseDir, baseName)
+    tempDir
+  }
+
+  private def createTempDir(ref: DatasetRef, shardNum: Int): File = {
+    val tempDir = defaultTempDir(ref, shardNum)
     tempDir.mkdir()
     tempDir
   }
@@ -237,6 +242,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   def reset(): Unit = {
     indexWriter.deleteAll()
     indexWriter.commit()
+  }
+
+  def commit(): Unit = {
+    indexWriter.commit();
   }
 
   def startFlushThread(flushDelayMinSeconds: Int, flushDelayMaxSeconds: Int): Unit = {

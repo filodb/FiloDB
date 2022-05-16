@@ -71,8 +71,11 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   private val stats = new DownsampledTimeSeriesShardStats(rawDatasetRef, shardNum)
 
-  private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, false,
-    false, shardNum, indexTtlMs)
+  private val partKeyIndex = new PartKeyLuceneIndex(
+    indexDataset, schemas.part, false,
+    false, shardNum, indexTtlMs,
+    Option(downsampleConfig.indexLocationFile(rawDatasetRef, shardNum))
+  )
 
   private val indexUpdatedHour = new AtomicLong(0)
 
@@ -139,7 +142,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   def recoverIndex(): Future[Unit] = {
     indexBootstrapper
-      .bootstrapIndexDownsample(partKeyIndex, shardNum, indexDataset, indexTtlMs){ _ => createPartitionID() }
+      .bootstrapIndexDownsample(
+        partKeyIndex, shardNum, indexDataset, indexTtlMs, downsampleConfig.indexLocationFile(rawDatasetRef, shardNum)
+      ){ _ => createPartitionID() }
       .map { count =>
         logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
       }.map { _ =>
@@ -204,12 +209,17 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         stats.indexEntriesRefreshed.increment(count)
         logger.info(s"Refreshed downsample index with new records numRecords=$count " +
           s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour")
+        partKeyIndex.commit()
+        val hourMillis = toHour  * 1000 * 60 * 60
+        val indexLocation = downsampleConfig.indexLocationFile(indexDataset, shardNum)
+        DownsampleIndexCheckpointer.writeCheckpoint(indexLocation, hourMillis)
       }
       .onErrorHandle { e =>
         stats.indexRefreshFailed.increment()
         logger.error(s"Error occurred when refreshing downsample index " +
           s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour", e)
       }
+
   }
 
   private def startStatsUpdateTask(): Unit = {
