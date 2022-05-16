@@ -28,7 +28,6 @@ final case class DownsampleConfig(config: Config) {
     */
   val schemas = if (config.hasPath ("raw-schema-names")) config.as[Seq[String]]("raw-schema-names")
                 else Seq.empty
-
   val indexLocation = config.getOrElse[Option[String]]("index-location", None)
 
   val enablePersistentIndexing = indexLocation.isDefined
