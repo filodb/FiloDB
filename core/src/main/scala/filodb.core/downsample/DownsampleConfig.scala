@@ -32,7 +32,7 @@ final case class DownsampleConfig(config: Config) {
   val schemas = if (config.hasPath ("raw-schema-names")) config.as[Seq[String]]("raw-schema-names")
                 else Seq.empty
 
-  val indexLocation = config.getOrElse[Option[String]]("raw-schema-names", None)
+  val indexLocation = config.getOrElse[Option[String]]("index-location", None)
 
   def indexLocationFile(ref: DatasetRef, shardNum: Int): File = {
     indexLocation match {
