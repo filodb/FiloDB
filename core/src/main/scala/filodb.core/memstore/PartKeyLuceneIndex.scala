@@ -3,6 +3,7 @@ package filodb.core.memstore
 import java.io.File
 import java.io.IOException
 import java.nio.charset.StandardCharsets
+import java.util
 import java.util.PriorityQueue
 
 import scala.collection.JavaConverters._
