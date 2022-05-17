@@ -1,6 +1,7 @@
 package filodb.core.memstore
 
 import java.io.File
+import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.util.PriorityQueue
 
@@ -123,8 +124,14 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   lifecycleManager.foreach(listener => listener.currentState(ref, shardNum) match {
     case (other @ _, _)  if other != IndexState.Synced  =>
         logger.info(s"Found index state $other, this will clean up the index directory and trigger a clean build")
-      deleteRecursively(indexDiskLocation.toFile)
-        listener.updateState(ref, shardNum, IndexState.Empty, System.currentTimeMillis)
+        deleteRecursively(indexDiskLocation.toFile) match {
+          case Left(_)       => // Notify the handler that the directory is now empty
+            lifecycleManager
+              .foreach(_.updateState(ref, shardNum, IndexState.Empty, System.currentTimeMillis))
+          case Right(t)      => lifecycleManager
+            .foreach(_.updateState(ref, shardNum, IndexState.Unknown, System.currentTimeMillis))
+            throw new IllegalStateException("Unable to clean up corrupt index", t)
+        }
     case _   => //NOP
   })
 
@@ -150,9 +157,14 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       case _: CorruptIndexException =>
         logger.warn(s"Index for dataset:${ref.dataset} and shard: $shardNum possibly corrupt," +
           s"index directory will be cleaned up and index rebuilt")
-        deleteRecursively(indexDiskLocation.toFile)
-        // Notify the handler that the directory is now empty
-        lifecycleManager.foreach(_.updateState(ref, shardNum, IndexState.Empty, System.currentTimeMillis))
+        deleteRecursively(indexDiskLocation.toFile) match {
+          case Left(_)       => // Notify the handler that the directory is now empty
+                                lifecycleManager
+                                .foreach(_.updateState(ref, shardNum, IndexState.Empty, System.currentTimeMillis))
+          case Right(t)      => lifecycleManager
+                                .foreach(_.updateState(ref, shardNum, IndexState.Unknown, System.currentTimeMillis))
+                                throw new IllegalStateException("Unable to clean up corrupt index", t)
+        }
         new IndexWriterPlus(mMapDirectory, createIndexWriterConfig(), ref, shardNum)
       case other: Throwable =>
         lifecycleManager.foreach(_.updateState(ref, shardNum, IndexState.Unknown, System.currentTimeMillis))
@@ -174,13 +186,33 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     facetEnabledAllLabels || (facetEnabledSharedKeyLabels && schema.options.shardKeyColumns.contains(label))
   }
 
-  private def deleteRecursively(f: File, deleteRoot: Boolean = false): Unit = {
-    if (f.isDirectory) f.listFiles match {
-      case xs: Array[File] if xs != null   => xs foreach ( f => deleteRecursively(f, true))
-      case _                     => //NOP
+  private def deleteRecursively(f: File, deleteRoot: Boolean = false): Either[Boolean, IOException] = {
+    val subDirDeletion: Either[Boolean, IOException] =
+      if (f.isDirectory)
+        f.listFiles match {
+        case xs: Array[File] if xs != null   =>
+          val subDirDeletions: Array[Either[Boolean, IOException]] = xs map (f => deleteRecursively(f, true))
+          subDirDeletions reduce((reduced, thisOne) => {
+            thisOne match {
+              // Ensures even if one Right(_) is found, thr response will be Right(Throwable)
+              case Left(_) if reduced == Left(true)    => thisOne
+              case Right(_)                            => thisOne
+              case _                                   => reduced
+            }
+          })
+        case _                        => Left(true)
+      }
+     else
+      Left(true)
+
+    subDirDeletion match  {
+      case Left(_)        =>
+            if (deleteRoot) {
+              if (f.delete()) Left(true) else Right(new IOException(s"Unable to delete $f"))
+            } else Left(true)
+      case right @ Right(_)  => right
     }
-    if (deleteRoot)
-      f.delete()
+
   }
 
   case class ReusableLuceneDocument() {
