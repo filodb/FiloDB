@@ -1,5 +1,8 @@
 package filodb.core.memstore
 
+import java.io.{File, FileFilter}
+import java.nio.file.{Files, StandardOpenOption}
+
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
 import scala.util.Random
@@ -433,7 +436,6 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
 
   it("must clean the input directory for Index state apart from Synced") {
-    import java.io.File
     val events = ArrayBuffer.empty[(IndexState.Value, Long)]
     IndexState.values.foreach {
       indexState =>
@@ -471,12 +473,103 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
 
   it("Should update the state as empty after the cleanup is from a corrupt index") {
+    val events = ArrayBuffer.empty[(IndexState.Value, Long)]
+    IndexState.values.foreach {
+      indexState =>
+        val indexDirectory = new File(
+          System.getProperty("java.io.tmpdir"), "part-key-lucene-index-event")
+        val shardDirectory = new File(indexDirectory, "0")
+        // Delete directory to create an index from scratch
+        scala.reflect.io.Directory(shardDirectory).deleteRecursively()
+        shardDirectory.mkdirs()
+        // Validate the file named empty exists
+        val index = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis,
+          Some(indexDirectory),None)
+        // Add some index entries
+        val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8,
+          "_ns_".utf8 -> "my_ns".utf8)
+        for { i <- 0 until 1000} {
+          val counterNum = i % 10
+          val partKey = partBuilder.partKeyFromObjects(Schemas.promCounter, s"counter$counterNum",
+            seriesTags + ("instance".utf8 -> s"instance$i".utf8))
+          index.addPartKey(partKeyOnHeap(Schemas.promCounter.partition.binSchema, ZeroPointer, partKey), i, 5)()
+        }
 
+        index.closeIndex()
+        // Garble some index files to force a index corruption
+        // Just add some junk to the end of the segment files
 
+        shardDirectory.listFiles(new FileFilter {
+          override def accept(pathname: File): Boolean = pathname.toString.contains("segment")
+        }).foreach( file => {
+          Files.writeString(file.toPath, "Hello", StandardOpenOption.APPEND)
+        })
+
+        new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis,
+          Some(indexDirectory),
+          Some( new IndexLifecycleManager {
+            def currentState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) =
+              (indexState, None)
+
+            def updateState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit = {
+              assert(shardDirectory.list().length == 0)
+              events.append((state, time))
+            }
+          })).closeIndex()
+        // For all states, including states where Index is Synced because the index is corrupt,
+        // the shard directory should be cleared and the new state should be Empty
+        events.toList match {
+          case (IndexState.Empty, _) :: Nil =>
+            // The file originally present must not be available
+            assert(!shardDirectory.list().exists(_.equals("empty")))
+            events.clear()
+          case _                                                               =>
+            fail("Expected an index state Empty after directory cleanup")
+        }
+    }
   }
 
   it("Should update the state as Unknown and throw an exception for any error other than CorruptIndexException") {
+    val events = ArrayBuffer.empty[(IndexState.Value, Long)]
+    IndexState.values.foreach {
+      indexState =>
+        val indexDirectory = new File(
+          System.getProperty("java.io.tmpdir"), "part-key-lucene-index-event")
+        val shardDirectory = new File(indexDirectory, "0")
+        shardDirectory.mkdirs()
+        new File(shardDirectory, "empty").createNewFile()
+        // Make directory readonly to for an IOException when attempting to write
+        shardDirectory.setWritable(false)
+        // Validate the file named empty exists
+        assert(shardDirectory.list().exists(_.equals("empty")))
+        try {
+          val index = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis,
+            Some(indexDirectory),
+            Some( new IndexLifecycleManager {
+              def currentState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) =
+                (indexState, None)
 
+              def updateState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit = {
+                events.append((state, time))
+              }
+            }))
+          index.closeIndex()
+        } catch {
+          case is: IllegalStateException =>
+                                          assert(is.getMessage.equals("Unable to clean up corrupt index"))
+                                          events.toList match {
+                                            case (IndexState.Unknown, _) :: Nil =>
+                                              // The file originally present would still be there as the directory
+                                              // is made readonly
+                                              assert(shardDirectory.list().exists(_.equals("empty")))
+                                              events.clear()
+                                            case _                                                               =>
+                                              fail("Expected an index state Empty after directory cleanup")
+                                          }
+        } finally {
+          shardDirectory.setWritable(true)
+        }
+    }
 
   }
 }
