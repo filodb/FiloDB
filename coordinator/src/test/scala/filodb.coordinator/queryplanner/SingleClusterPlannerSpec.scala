@@ -7,7 +7,7 @@ import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, FunctionalTargetSchemaProvider, StaticSpreadProvider}
 import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange, TargetSchemaChange}
 import filodb.core.metadata.Schemas
-import filodb.core.query._
+import filodb.core.query.{ColumnFilter, _}
 import filodb.core.query.Filter.Equals
 import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
@@ -18,9 +18,10 @@ import filodb.query.exec.InternalRangeFunction.Last
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-import filodb.core.query.Filter.{Equals, NotEquals}
+import filodb.core.query.Filter.NotEquals
 import filodb.query.LogicalPlan.getRawSeriesFilters
 import org.scalatest.exceptions.TestFailedException
+
 
 import scala.concurrent.duration._
 
@@ -1314,35 +1315,102 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it("should propagate new filters to FunctionArgs") {
-    val queries = Seq(
-//      // SubqueryWithWindowing
-//      """quantile_over_time(0.9, bar{job="foo"}[5m:1m])""",  // TODO: cannot use scalar() ??
-//      // PeriodicSeriesWithWindowing
-//      """quantile_over_time(0.9, bar{job="foo"}[5m])""",  // TODO: cannot use scalar() ??
-      // ApplyInstantFunction
-      """clamp_max(foo{job="app"}, scalar(bar{job="foo"}))""",
-//      // ApplyInstantFunctionRaw
-//      """foo{job="app", _bucket_="100.0"}[1m]""",  // TODO: cannot make FunctionArgs non-scalar
-//      // ScalarVaryingDoublePlan
-//      """scalar(foo{job="app"})""",  // TODO: cannot make FunctionArgs non-scalar
+    // not intended to be all-encompassing; just specific to this test
+    def getLeafFilterGroups(plan: LogicalPlan): Seq[Seq[ColumnFilter]] = {
+      val res = plan match {
+        case sqw: SubqueryWithWindowing =>
+          sqw.functionArgs.flatMap(getLeafFilterGroups(_)) ++ getLeafFilterGroups(sqw.innerPeriodicSeries)
+        case psw: PeriodicSeriesWithWindowing =>
+          psw.functionArgs.flatMap(getLeafFilterGroups(_)) ++ getLeafFilterGroups(psw.series)
+        case aif: ApplyInstantFunction =>
+          aif.functionArgs.flatMap(getLeafFilterGroups(_)) ++ getLeafFilterGroups(aif.vectors)
+        case air: ApplyInstantFunctionRaw =>
+          air.functionArgs.flatMap(getLeafFilterGroups(_)) ++ getLeafFilterGroups(air.vectors)
+        case svd: ScalarVaryingDoublePlan =>
+          svd.functionArgs.flatMap(getLeafFilterGroups(_)) ++ getLeafFilterGroups(svd.vectors)
+        case nlp: NonLeafLogicalPlan =>
+          nlp.children.flatMap(getLeafFilterGroups(_))
+        case rs: RawSeries =>
+          Seq(rs.filters)
+        case _ => throw new IllegalArgumentException(s"unhandled type: ${plan.getClass}")
+      }
+      res.filter(_.nonEmpty)
+    }
+
+    // the filters for all plans that use them
+    val initialFilters = Seq(
+      ColumnFilter("foo", Equals("bar")),
+      ColumnFilter("lname1", Equals("lvalA"))  // should be replaced by updFilters
     )
-    val newFilters = Seq(
+    // the filters we'll pass to replaceFilters()
+    val updFilters = Seq(
+      ColumnFilter("lname1", Equals("lval1")),
+      ColumnFilter("lname2", Equals("lval2"))
+    )
+    // the filters we expect to see post-replaceFilters() in any plan that has them
+    val expFilters = Seq(
+      ColumnFilter("foo", Equals("bar")),
       ColumnFilter("lname1", Equals("lval1")),
       ColumnFilter("lname2", Equals("lval2"))
     )
 
-    queries.foreach{ query =>
-      val lp = Parser.queryToLogicalPlan(query, 1000, 1000)
+    // dummy plans
+    val rawSeries = RawSeries(
+      IntervalSelector(1, 100),
+      initialFilters,
+      Nil
+    )
+    val periodicSeries = PeriodicSeries(
+      rawSeries,
+      1, 10, 100
+    )
+    val funcArg = ScalarVaryingDoublePlan(periodicSeries, ScalarFunctionId.Scalar, Nil)
 
-      // shouldn't initially contain any of the new filters
-      getRawSeriesFilters(lp).forall { group =>
-        newFilters.forall(!group.contains(_))
-      } shouldEqual true
+    val plans = Seq(
+      SubqueryWithWindowing(
+        periodicSeries,
+        1, 10, 100,
+        RangeFunctionId.QuantileOverTime,
+        Seq(funcArg),
+        100, 50, None
+      ),
+      PeriodicSeriesWithWindowing(
+        rawSeries,
+        1, 10, 100, 50,
+        RangeFunctionId.QuantileOverTime,
+        functionArgs = Seq(funcArg)
+      ),
+      ApplyInstantFunction(
+        periodicSeries,
+        InstantFunctionId.ClampMax,
+        Seq(funcArg)
+      ),
+      ApplyInstantFunctionRaw(
+        rawSeries,
+        InstantFunctionId.ClampMax,
+        Seq(funcArg)
+      ),
+      ScalarVaryingDoublePlan(
+        periodicSeries,
+        ScalarFunctionId.Scalar,
+        Seq(funcArg)
+      )
+    )
 
-      // should contain all of the new filters after replaceFilters is called
-      getRawSeriesFilters(lp.replaceFilters(newFilters)).forall { group =>
-        newFilters.forall(group.contains(_))
-      } shouldEqual true
+    plans.foreach{ lp =>
+      // sanity check-- make sure the initial setup is as-expected
+      val filterGroups = getLeafFilterGroups(lp)
+      filterGroups.size shouldEqual 2  // "base" plan and its child func arg
+      filterGroups.foreach { group =>
+        group.toSet shouldEqual initialFilters.toSet
+      }
+
+      // should contain the new filters after replaceFilters is called
+      val updFilterGroups = getLeafFilterGroups(lp.replaceFilters(updFilters))
+      updFilterGroups.size shouldEqual 2  // same reasoning as above
+      updFilterGroups.foreach { group =>
+        group.toSet shouldEqual expFilters.toSet
+      }
     }
   }
 }
