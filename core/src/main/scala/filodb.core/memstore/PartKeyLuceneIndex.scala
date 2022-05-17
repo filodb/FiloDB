@@ -13,19 +13,18 @@ import scala.collection.mutable.ArrayBuffer
 import com.github.benmanes.caffeine.cache.{Caffeine, LoadingCache}
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
-import java.util
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.apache.lucene.analysis.standard.StandardAnalyzer
 import org.apache.lucene.document._
 import org.apache.lucene.document.Field.Store
 import org.apache.lucene.facet.{FacetsCollector, FacetsConfig}
-import org.apache.lucene.facet.sortedset.{DefaultSortedSetDocValuesReaderState,
-                     SortedSetDocValuesFacetCounts, SortedSetDocValuesFacetField}
+import org.apache.lucene.facet.sortedset.{SortedSetDocValuesFacetCounts, SortedSetDocValuesFacetField}
+import org.apache.lucene.facet.sortedset.DefaultSortedSetDocValuesReaderState
 import org.apache.lucene.index._
 import org.apache.lucene.search._
 import org.apache.lucene.search.BooleanClause.Occur
-import org.apache.lucene.store.MMapDirectory
+import org.apache.lucene.store.NIOFSDirectory
 import org.apache.lucene.util.{BytesRef, InfoStream}
 import org.apache.lucene.util.automaton.RegExp
 import spire.syntax.cfor._
@@ -118,19 +117,23 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   lifecycleManager.foreach(listener => listener.currentState(ref, shardNum) match {
     case (other @ _, _)  if other != IndexState.Synced  =>
-        logger.info(s"Found index state $other, this will clean up the index directory and trigger a clean build")
+        logger.info(s"Found index state $other, for dataset=$ref, shard=$shardNum this will " +
+                    s"clean up the index directory $indexDiskLocation and rebuild index")
         deleteRecursively(indexDiskLocation.toFile) match {
           case Left(_)       => // Notify the handler that the directory is now empty
-            lifecycleManager
-              .foreach(_.updateState(ref, shardNum, IndexState.Empty, System.currentTimeMillis))
-          case Right(t)      => lifecycleManager
-            .foreach(_.updateState(ref, shardNum, IndexState.Unknown, System.currentTimeMillis))
+            notifyLifecycleListener(IndexState.Empty, System.currentTimeMillis)
+          case Right(t)      => // Update index state as Unknown and rethrow the exception
+            notifyLifecycleListener(IndexState.Unknown, System.currentTimeMillis)
             throw new IllegalStateException("Unable to clean up corrupt index", t)
         }
-    case _   => //NOP
+    case _                                              => //NOP
   })
 
-  val mMapDirectory = new MMapDirectory(indexDiskLocation)
+  def  notifyLifecycleListener(state: IndexState.Value, time: Long): Unit =
+    lifecycleManager.foreach(_.updateState(ref, shardNum, state, time))
+
+
+  val fsDirectory = new NIOFSDirectory(indexDiskLocation)
   private val analyzer = new StandardAnalyzer()
 
   logger.info(s"Created lucene index for dataset=$ref shard=$shardNum facetEnabledAllLabels=$facetEnabledAllLabels " +
@@ -147,23 +150,20 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   private val indexWriter =
     try {
-      new IndexWriterPlus(mMapDirectory, createIndexWriterConfig(), ref, shardNum)
+      new IndexWriterPlus(fsDirectory, createIndexWriterConfig(), ref, shardNum)
     } catch {
       case _: CorruptIndexException =>
         logger.warn(s"Index for dataset:${ref.dataset} and shard: $shardNum possibly corrupt," +
           s"index directory will be cleaned up and index rebuilt")
         deleteRecursively(indexDiskLocation.toFile) match {
           case Left(_)       => // Notify the handler that the directory is now empty
-                                lifecycleManager
-                                .foreach(_.updateState(ref, shardNum, IndexState.Empty, System.currentTimeMillis))
-          case Right(t)      => lifecycleManager
-                                .foreach(_.updateState(ref, shardNum, IndexState.Unknown, System.currentTimeMillis))
+                                notifyLifecycleListener(IndexState.Empty, System.currentTimeMillis)
+          case Right(t)      => notifyLifecycleListener(IndexState.Unknown, System.currentTimeMillis)
                                 throw new IllegalStateException("Unable to clean up corrupt index", t)
         }
-        new IndexWriterPlus(mMapDirectory, createIndexWriterConfig(), ref, shardNum)
-      case other: Throwable =>
-        lifecycleManager.foreach(_.updateState(ref, shardNum, IndexState.Unknown, System.currentTimeMillis))
-        throw other
+        new IndexWriterPlus(fsDirectory, createIndexWriterConfig(), ref, shardNum)
+      case other: Throwable  => notifyLifecycleListener(IndexState.Unknown, System.currentTimeMillis)
+                                throw other
     }
 
   private val utf8ToStrCache = concurrentCache[UTF8Str, String](PartKeyLuceneIndex.MAX_STR_INTERN_ENTRIES)
@@ -584,6 +584,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     startTimeLookupLatency.record(latency)
     collector.startTimes
   }
+
+  def commit(): Long = indexWriter.commit()
 
   /**
     * Called when a document is updated with new endTime

@@ -60,7 +60,10 @@ class IndexBootstrapper(colStore: ColumnStore) {
                     (assignPartId: PartKeyRecord => Int): Task[Long] = {
 
     // This is where we need to only get the delta from  PartKeyLuceneIndex and fetch part keys updated after
-    // the timestamp in millis
+    // the timestamp in millis, based on the time, we need to invoke refreshWithDownsamplePartKeys giving
+    // the last synced time till current hour, the start hour will be max(of the time retrieved from underlying
+    // state, start - ttlMs)
+
     val recoverIndexLatency = Kamon.gauge("shard-recover-index-latency", MeasurementUnit.time.milliseconds)
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum)
@@ -119,6 +122,12 @@ class IndexBootstrapper(colStore: ColumnStore) {
      }
      .countL
      .map { count =>
+       // Forces sync with underlying filesystem, on problem is for initial index sync
+       // its all or nothing as we do not mark partial progress, but given the index
+       // update is parallel it makes sense to wait for all to be added to index
+       index.commit()
+       index.notifyLifecycleListener(IndexState.Synced, toHour * 60 * 60 * 1000L)
+       // TODO: Do we still need to refresh?
        index.refreshReadersBlocking()
        recoverIndexLatency.update(System.currentTimeMillis() - start)
        count
