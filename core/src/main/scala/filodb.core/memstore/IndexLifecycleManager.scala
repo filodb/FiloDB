@@ -4,7 +4,7 @@ import filodb.core.DatasetRef
 
 
 object IndexState extends Enumeration {
-  val Empty, Rebuilding, Built, Synced, Unknown = Value
+  val Empty, Synced, Unknown = Value
 }
 
 
