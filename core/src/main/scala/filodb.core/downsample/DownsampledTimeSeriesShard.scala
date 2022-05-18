@@ -143,7 +143,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   def recoverIndex(): Future[Unit] = {
     indexBootstrapper
       .bootstrapIndexDownsample(
-        partKeyIndex, shardNum, indexDataset, indexTtlMs, downsampleConfig.indexLocationFile(rawDatasetRef, shardNum)
+        partKeyIndex, shardNum, indexDataset, indexTtlMs,
+        downsampleConfig.indexLocation.isDefined,
+        downsampleConfig.indexLocationFile(rawDatasetRef, shardNum)
       ){ _ => createPartitionID() }
       .map { count =>
         logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
@@ -209,10 +211,12 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         stats.indexEntriesRefreshed.increment(count)
         logger.info(s"Refreshed downsample index with new records numRecords=$count " +
           s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour")
-        partKeyIndex.commit()
-        val hourMillis = toHour  * 1000 * 60 * 60
-        val indexLocation = downsampleConfig.indexLocationFile(indexDataset, shardNum)
-        DownsampleIndexCheckpointer.writeCheckpoint(indexLocation, hourMillis)
+        if (downsampleConfig.indexLocation.isDefined) {
+          partKeyIndex.commit()
+          val hourMillis = toHour  * 1000 * 60 * 60
+          val indexLocation = downsampleConfig.indexLocationFile(indexDataset, shardNum)
+          DownsampleIndexCheckpointer.writeCheckpoint(indexLocation, hourMillis)
+        }
       }
       .onErrorHandle { e =>
         stats.indexRefreshFailed.increment()

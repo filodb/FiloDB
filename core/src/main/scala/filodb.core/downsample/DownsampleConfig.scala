@@ -36,7 +36,10 @@ final case class DownsampleConfig(config: Config) {
 
   def indexLocationFile(ref: DatasetRef, shardNum: Int): File = {
     indexLocation match {
-      case Some(il) => new File(il)
+      case Some(il) => {
+        val datasetShard = s"$ref-$shardNum"
+        new File(il, datasetShard)
+      }
       case None    => PartKeyLuceneIndex.defaultTempDir(ref, shardNum)
     }
   }

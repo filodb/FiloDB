@@ -59,6 +59,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
                      shardNum: Int,
                      ref: DatasetRef,
                      ttlMs: Long,
+                     durableIndex: Boolean,
                      indexLocation: File)
                     (assignPartId: PartKeyRecord => Int): Task[Long] = {
 
@@ -68,7 +69,11 @@ class IndexBootstrapper(colStore: ColumnStore) {
     val start = System.currentTimeMillis()
     //here we need to adjust ttlMs
     //because we might already have index available on disk
-    var checkpointTime = DownsampleIndexCheckpointer.getDownsampleLastCheckpointTime(indexLocation)
+    var checkpointTime = if (durableIndex) {
+      DownsampleIndexCheckpointer.getDownsampleLastCheckpointTime(indexLocation)
+    } else {
+      0
+    }
     if (checkpointTime < start - ttlMs) {
       checkpointTime = start - ttlMs
     }
