@@ -9,7 +9,7 @@ import java.util.Properties;
 public class DownsampleIndexCheckpointer {
 
     private static Logger log =  LoggerFactory.getLogger(DownsampleIndexCheckpointer.class);
-    private static String CHECKPOINT_FILE_NAME = "filodb_checkpoint.properties";
+    public static String CHECKPOINT_FILE_NAME = "filodb_checkpoint.properties";
     private static String CHECKPOINT_MILLIS = "checkpoint_millis";
 
     public static long getDownsampleLastCheckpointTime(File indexPath) {
