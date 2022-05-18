@@ -1,5 +1,7 @@
 package filodb.core.memstore
 
+import java.io.File
+
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.eval.Task
@@ -56,15 +58,27 @@ class IndexBootstrapper(colStore: ColumnStore) {
   def bootstrapIndexDownsample(index: PartKeyLuceneIndex,
                      shardNum: Int,
                      ref: DatasetRef,
-                     ttlMs: Long)
+                     ttlMs: Long,
+                     durableIndex: Boolean,
+                     indexLocation: File)
                     (assignPartId: PartKeyRecord => Int): Task[Long] = {
 
     val recoverIndexLatency = Kamon.gauge("shard-recover-index-latency", MeasurementUnit.time.milliseconds)
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum)
     val start = System.currentTimeMillis()
+    //here we need to adjust ttlMs
+    //because we might already have index available on disk
+    var checkpointTime = if (durableIndex) {
+      DownsampleIndexCheckpointer.getDownsampleLastCheckpointTime(indexLocation)
+    } else {
+      0
+    }
+    if (checkpointTime < start - ttlMs) {
+      checkpointTime = start - ttlMs
+    }
     colStore.scanPartKeys(ref, shardNum)
-      .filter(_.endTime > start - ttlMs)
+      .filter(_.endTime > checkpointTime)
       .mapParallelUnordered(Runtime.getRuntime.availableProcessors()) { pk =>
         Task.evalAsync {
           val partId = assignPartId(pk)
