@@ -36,7 +36,7 @@ public class DownsampleIndexCheckpointer {
                 }
             }
         }
-        if (props.contains(CHECKPOINT_MILLIS)) {
+        if (props.containsKey(CHECKPOINT_MILLIS)) {
             long millis = Long.parseLong(props.getProperty(CHECKPOINT_MILLIS));
             return millis;
         }
