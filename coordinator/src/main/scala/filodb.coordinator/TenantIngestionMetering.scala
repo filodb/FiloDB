@@ -72,8 +72,8 @@ case class TenantIngestionMetering(settings: FilodbSettings,
             // publish a cardinality metric for each namespace
             val data = RowData.fromRowReader(rr)
             val prefix = data.group.toString.split(PREFIX_DELIM)
-            val tags = Map("metric_ws" -> prefix(0),
-                           "metric_ns" -> prefix(1),
+            val tags = Map("tenant_ws" -> prefix(0),
+                           "tenant_ns" -> prefix(1),
                            "dataset" -> dsRef.dataset,
                            "cluster_type" -> CLUSTER_TYPE)
             Kamon.gauge(METRIC_ACTIVE).withTags(TagSet.from(tags)).update(data.counts.active.toDouble)
