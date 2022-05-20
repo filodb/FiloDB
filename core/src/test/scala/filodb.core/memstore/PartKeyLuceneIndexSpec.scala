@@ -96,7 +96,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       .zipWithIndex.map { case (addr, i) =>
       val pk = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
       keyIndex.addPartKey(pk, i, i, i + 10)()
-        PartKeyLuceneIndexRecord(pk, i, i + 10)
+      PartKeyLuceneIndexRecord(pk, i, i + 10)
     }
     keyIndex.refreshReadersBlocking()
 
@@ -156,13 +156,13 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     result.isEmpty shouldBe true
   }
 
-    it("should upsert part keys with endtime and foreachPartKeyStillIngesting should work") {
+  it("should upsert part keys with endtime and foreachPartKeyStillIngesting should work") {
     // Add the first ten keys and row numbers
     partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
       .zipWithIndex.foreach { case (addr, i) =>
-        val time = System.currentTimeMillis()
-        keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, time)()
-        if (i%2 == 0) keyIndex.upsertPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, time, time + 300)()
+      val time = System.currentTimeMillis()
+      keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, time)()
+      if (i%2 == 0) keyIndex.upsertPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, time, time + 300)()
     }
     keyIndex.refreshReadersBlocking()
 
@@ -341,7 +341,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       keyIndex.addPartKey(partKeyBytes, i, System.currentTimeMillis())()
       keyIndex.refreshReadersBlocking()
       keyIndex.partKeyFromPartId(i).get.bytes shouldEqual partKeyBytes
-//      keyIndex.partIdFromPartKey(new BytesRef(partKeyBytes)) shouldEqual i
+      //      keyIndex.partIdFromPartKey(new BytesRef(partKeyBytes)) shouldEqual i
     }
   }
 
@@ -349,13 +349,13 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     val addedKeys = partKeyFromRecords(dataset6, records(dataset6, readers.take(100)), Some(partBuilder))
       .zipWithIndex.map { case (addr, i) =>
-        val start = Math.abs(Random.nextLong())
-        keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, start)()
-        keyIndex.refreshReadersBlocking() // updates need to be able to read startTime from index, so commit
-        val end = start + Random.nextInt()
-        keyIndex.updatePartKeyWithEndTime(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, end)()
-        (end, start, i)
-      }
+      val start = Math.abs(Random.nextLong())
+      keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, start)()
+      keyIndex.refreshReadersBlocking() // updates need to be able to read startTime from index, so commit
+      val end = start + Random.nextInt()
+      keyIndex.updatePartKeyWithEndTime(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, end)()
+      (end, start, i)
+    }
     keyIndex.refreshReadersBlocking()
 
     for {
@@ -375,13 +375,13 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val index3 = new PartKeyLuceneIndex(DatasetRef("prometheus"), Schemas.promCounter.partition,
       true, true, 0, 1.hour.toMillis)
     val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8,
-                         "_ns_".utf8 -> "my_ns".utf8)
+      "_ns_".utf8 -> "my_ns".utf8)
 
     // create 1000 time series with 10 metric names
     for { i <- 0 until 1000} {
       val counterNum = i % 10
       val partKey = partBuilder.partKeyFromObjects(Schemas.promCounter, s"counter$counterNum",
-          seriesTags + ("instance".utf8 -> s"instance$i".utf8))
+        seriesTags + ("instance".utf8 -> s"instance$i".utf8))
       index3.addPartKey(partKeyOnHeap(Schemas.promCounter.partition.binSchema, ZeroPointer, partKey), i, 5)()
     }
     index3.refreshReadersBlocking()
@@ -459,14 +459,14 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
         index.closeIndex()
         events.toList match {
           case (IndexState.Empty, _) :: Nil if indexState != IndexState.Synced && indexState != IndexState.Building =>
-                                                // The file originally present must not be available
-                                                assert(!shardDirectory.list().exists(_.equals("empty")))
-                                                events.clear()
+            // The file originally present must not be available
+            assert(!shardDirectory.list().exists(_.equals("empty")))
+            events.clear()
           case Nil                          if indexState == IndexState.Synced || indexState == IndexState.Building =>
-                                                // The file originally present "must" be available
-                                                assert(shardDirectory.list().exists(_.equals("empty")))
+            // The file originally present "must" be available
+            assert(shardDirectory.list().exists(_.equals("empty")))
           case _                                                                                                    =>
-                                                fail("Expected an index state Empty after directory cleanup")
+            fail("Expected an index state Empty after directory cleanup")
         }
     }
   }
@@ -556,16 +556,16 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
           index.closeIndex()
         } catch {
           case is: IllegalStateException =>
-                                          assert(is.getMessage.equals("Unable to clean up index directory"))
-                                          events.toList match {
-                                            case (IndexState.TriggerRebuild, _) :: Nil =>
-                                              // The file originally present would still be there as the directory
-                                              // is made readonly
-                                              assert(shardDirectory.list().exists(_.equals("empty")))
-                                              events.clear()
-                                            case _                                                               =>
-                                              fail("Expected an index state Empty after directory cleanup")
-                                          }
+            assert(is.getMessage.equals("Unable to clean up index directory"))
+            events.toList match {
+              case (IndexState.TriggerRebuild, _) :: Nil =>
+                // The file originally present would still be there as the directory
+                // is made readonly
+                assert(shardDirectory.list().exists(_.equals("empty")))
+                events.clear()
+              case _                                                               =>
+                fail("Expected an index state Empty after directory cleanup")
+            }
         } finally {
           shardDirectory.setWritable(true)
         }
