@@ -1,14 +1,11 @@
 package filodb.core.downsample
 
-import java.io.File
-
 import scala.concurrent.duration.FiniteDuration
 
 import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
 
 import filodb.core.DatasetRef
-import filodb.core.memstore.PartKeyLuceneIndex
 
 final case class DownsampleConfig(config: Config) {
   /**
@@ -34,15 +31,7 @@ final case class DownsampleConfig(config: Config) {
 
   val indexLocation = config.getOrElse[Option[String]]("index-location", None)
 
-  def indexLocationFile(ref: DatasetRef, shardNum: Int): File = {
-    indexLocation match {
-      case Some(il) => {
-        val datasetShard = s"$ref-$shardNum"
-        new File(il, datasetShard)
-      }
-      case None    => PartKeyLuceneIndex.defaultTempDir(ref, shardNum)
-    }
-  }
+  val enablePersistentIndexing = indexLocation.isDefined
 
   def downsampleDatasetRefs(rawDataset: String): Seq[DatasetRef] = {
     resolutions.map { res =>

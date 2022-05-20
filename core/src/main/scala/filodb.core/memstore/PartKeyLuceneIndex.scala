@@ -205,18 +205,17 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     val subDirDeletion: Either[Boolean, IOException] =
       if (f.isDirectory)
         f.listFiles match {
-          case xs: Array[File] if xs != null   =>
+          case xs: Array[File] if xs != null  && !xs.isEmpty  =>
             val subDirDeletions: Array[Either[Boolean, IOException]] = xs map (f => deleteRecursively(f, true))
-            subDirDeletions reduce((reduced, thisOne) => {
-              thisOne match {
-                // Ensures even if one Right(_) is found, thr response will be Right(Throwable)
-                case Left(_) if reduced == Left(true)    => thisOne
-                case Right(_)                            => thisOne
-                case _                                   => reduced
-              }
-            })
+              subDirDeletions reduce((reduced, thisOne) => {
+                thisOne match {
+                  // Ensures even if one Right(_) is found, thr response will be Right(Throwable)
+                  case Left(_) if reduced == Left(true)    => thisOne
+                  case Right(_)                            => thisOne
+                  case _                                   => reduced
+                }
+              })
           case _                               => Left(true)
-
         }
       else
         Left(true)

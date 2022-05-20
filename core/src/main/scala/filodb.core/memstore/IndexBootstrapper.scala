@@ -70,13 +70,14 @@ class IndexBootstrapper(colStore: ColumnStore) {
     val start = System.currentTimeMillis()
     //here we need to adjust ttlMs
     //because we might already have index available on disk
-    val checkpointTime = index.getCurrentIndexState() match {
-      case (IndexState.Synced, Some(ts))     => ts.max(start - ttlMs)
-      case (IndexState.Building, Some(ts))   => ts.max(start - ttlMs)
-      // Technically the only valid state here is Empty
-      case _                                 => start - ttlMs
-    }
-
+    val checkpointTime = start - ttlMs
+    // No need to check index state here, by definition bootstrap index
+    // will refresh the entire index. When entire index is rebuilt, the
+    // partIds (numeric values) which are a part of the index, monotocally
+    // increases. Bootstrap method scans all the part keys and treats them
+    // as opaque byte arrays. The assignPartId function is cheap as it simply increments
+    // a numeric value. This is ok since the index starts as a clean slate and thus the part ids too
+    // start from 0. If index for a given range is desired, refreshWithDownsamplePartKeys should be called
     index.notifyLifecycleListener(IndexState.Building, checkpointTime)
     colStore.scanPartKeys(ref, shardNum)
       .filter(_.endTime > checkpointTime)
@@ -88,8 +89,10 @@ class IndexBootstrapper(colStore: ColumnStore) {
       }
       .countL
       .map { count =>
-        index.refreshReadersBlocking()
+        // Ensures index is made durable to secondary store
+        index.commit()
         index.notifyLifecycleListener(IndexState.Synced, start)
+        index.refreshReadersBlocking()
         recoverIndexLatency.update(System.currentTimeMillis() - start)
         count
       }
@@ -113,6 +116,17 @@ class IndexBootstrapper(colStore: ColumnStore) {
                                      schemas: Schemas,
                                      parallelism: Int = Runtime.getRuntime.availableProcessors())
                                    (lookUpOrAssignPartId: Array[Byte] => Int): Task[Long] = {
+
+    // This method needs to be invoked for updating a range of time in an existing index. This assumes the
+    // Index is already present and we need to update some partKeys in it. The lookUpOrAssignPartId is expensive
+    // The part keys byte array unlike in bootstrapIndexDownsample is not opaque. The part key is broken down into
+    // key value pairs, looked up in index to find the already assigned partId if any. If no partId is found the next
+    // available value from the counter in DownsampleTimeSeriesShard is allocated. However, since partId is an integer
+    // the max value it can reach is 2^32. This is a lot of timeseries in one shard, however, with time, especially in
+    // case of durable index, and in environments with high churn, partIds evicted are not reclaimed and we may
+    // potentially exceed the limit requiring us to preiodically reclaim partIds, eliminate the notion of partIds or
+    // comeup with alternate solutions to come up a partId which can either be a long value or some string
+    // representation
     val recoverIndexLatency = Kamon.gauge("downsample-store-refresh-index-latency",
       MeasurementUnit.time.milliseconds)
       .withTag("dataset", ref.dataset)
