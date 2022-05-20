@@ -441,14 +441,14 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       indexState =>
         val indexDirectory = new File(
           System.getProperty("java.io.tmpdir"), "part-key-lucene-index-event")
-        val shardDirectory = new File(indexDirectory, "0")
+        val shardDirectory = new File(indexDirectory, dataset6.ref + File.separator + "0")
         shardDirectory.mkdirs()
         new File(shardDirectory, "empty").createNewFile()
         // Validate the file named empty exists
         assert(shardDirectory.list().exists(_.equals("empty")))
         val index = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis,
           Some(indexDirectory),
-          Some( new IndexLifecycleManager {
+          Some( new IndexMetadataStore {
             def currentState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) =
               (indexState, None)
 
@@ -458,14 +458,14 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
           }))
         index.closeIndex()
         events.toList match {
-          case (IndexState.Empty, _) :: Nil if indexState != IndexState.Synced =>
+          case (IndexState.Empty, _) :: Nil if indexState != IndexState.Synced && indexState != IndexState.Building =>
                                                 // The file originally present must not be available
                                                 assert(!shardDirectory.list().exists(_.equals("empty")))
                                                 events.clear()
-          case Nil                          if indexState == IndexState.Synced =>
+          case Nil                          if indexState == IndexState.Synced || indexState == IndexState.Building =>
                                                 // The file originally present "must" be available
                                                 assert(shardDirectory.list().exists(_.equals("empty")))
-          case _                                                               =>
+          case _                                                                                                    =>
                                                 fail("Expected an index state Empty after directory cleanup")
         }
     }
@@ -478,7 +478,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       indexState =>
         val indexDirectory = new File(
           System.getProperty("java.io.tmpdir"), "part-key-lucene-index-event")
-        val shardDirectory = new File(indexDirectory, "0")
+        val shardDirectory = new File(indexDirectory, dataset6.ref + File.separator + "0")
         // Delete directory to create an index from scratch
         scala.reflect.io.Directory(shardDirectory).deleteRecursively()
         shardDirectory.mkdirs()
@@ -507,7 +507,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
         new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis,
           Some(indexDirectory),
-          Some( new IndexLifecycleManager {
+          Some( new IndexMetadataStore {
             def currentState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) =
               (indexState, None)
 
@@ -535,7 +535,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       indexState =>
         val indexDirectory = new File(
           System.getProperty("java.io.tmpdir"), "part-key-lucene-index-event")
-        val shardDirectory = new File(indexDirectory, "0")
+        val shardDirectory = new File(indexDirectory, dataset6.ref + File.separator + "0")
         shardDirectory.mkdirs()
         new File(shardDirectory, "empty").createNewFile()
         // Make directory readonly to for an IOException when attempting to write
@@ -545,7 +545,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
         try {
           val index = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis,
             Some(indexDirectory),
-            Some( new IndexLifecycleManager {
+            Some( new IndexMetadataStore {
               def currentState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) =
                 (indexState, None)
 
@@ -556,9 +556,9 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
           index.closeIndex()
         } catch {
           case is: IllegalStateException =>
-                                          assert(is.getMessage.equals("Unable to clean up corrupt index"))
+                                          assert(is.getMessage.equals("Unable to clean up index directory"))
                                           events.toList match {
-                                            case (IndexState.Unknown, _) :: Nil =>
+                                            case (IndexState.TriggerRebuild, _) :: Nil =>
                                               // The file originally present would still be there as the directory
                                               // is made readonly
                                               assert(shardDirectory.list().exists(_.equals("empty")))

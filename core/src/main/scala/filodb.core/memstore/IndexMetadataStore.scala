@@ -1,14 +1,15 @@
 package filodb.core.memstore
 
+import scala.collection.mutable.Map
+
 import filodb.core.DatasetRef
 
-
 object IndexState extends Enumeration {
-  val Empty, Synced, Unknown = Value
+  val Empty, Building, Synced, TriggerRebuild = Value
 }
 
 
-trait IndexLifecycleManager {
+trait IndexMetadataStore {
 
   /**
    *
@@ -27,3 +28,17 @@ trait IndexLifecycleManager {
    */
   def updateState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit
 }
+
+class EphemeralIndexMetadataStore extends IndexMetadataStore {
+
+
+  private val currentState = Map.empty[(DatasetRef, Int), (IndexState.Value, Option[Long])]
+
+  override def currentState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) =
+    currentState.get((datasetRef, shard)).getOrElse((IndexState.TriggerRebuild, None))
+
+  override def updateState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit = {
+    currentState((datasetRef, shard)) = (state, Some(time))
+  }
+}
+
