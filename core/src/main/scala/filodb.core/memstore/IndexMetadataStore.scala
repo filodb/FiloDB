@@ -1,8 +1,12 @@
 package filodb.core.memstore
 
+import java.io.File
+
 import scala.collection.mutable.Map
 
 import filodb.core.DatasetRef
+
+
 
 /**                IndexState transition
  *
@@ -106,4 +110,38 @@ class EphemeralIndexMetadataStore extends IndexMetadataStore {
     initStateMap((datasetRef, shard)) = (state, Some(time))
 }
 
+/**
+ * Non thread safe in memory index state metadata store
+ */
+class FileCheckpointedIndexMetadataStore(val indexLocation: String) extends IndexMetadataStore {
+
+  private val currentState = Map.empty[(DatasetRef, Int), (IndexState.Value, Option[Long])]
+
+  override def currentState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) = {
+    currentState.get((datasetRef, shard)).getOrElse((IndexState.Empty, None))
+  }
+
+  override def updateState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit = {
+    val propertyFile = new File(indexLocation, datasetRef.dataset + "-" + shard + ".properties")
+    DownsampleIndexCheckpointer.writeCheckpoint(propertyFile, time)
+    currentState((datasetRef, shard)) = (state, Some(time))
+  }
+
+  override def initState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) = {
+    val propertyFile = new File(indexLocation, datasetRef.dataset + "-" + shard + ".properties")
+    val checkpointTime = DownsampleIndexCheckpointer.getDownsampleLastCheckpointTime(propertyFile)
+    val state = if (checkpointTime == 0) {
+      (IndexState.TriggerRebuild, None)
+    } else {
+      (IndexState.Synced, Some(checkpointTime))
+    }
+    currentState((datasetRef, shard)) = state
+    state
+  }
+
+  // NOT sure I understand why we need this call?
+  override def updateInitState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit = {
+    ???
+  }
+}
 

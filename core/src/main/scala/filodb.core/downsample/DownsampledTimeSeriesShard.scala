@@ -74,7 +74,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, false,
     false, shardNum, indexTtlMs,
     downsampleConfig.indexLocation.map(new java.io.File(_)),
-    if (downsampleConfig.enablePersistentIndexing) Some(new EphemeralIndexMetadataStore()) else None)
+    if (downsampleConfig.enablePersistentIndexing)
+      Some(new FileCheckpointedIndexMetadataStore(downsampleConfig.indexLocation.get)) else None)
 
   private val indexUpdatedHour = new AtomicLong(0)
 
@@ -139,47 +140,51 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60
 
-  def recoverIndex(): Future[Unit] = {
+  def recoverIndex(): Future[Long] = {
     if (downsampleConfig.enablePersistentIndexing) {
       partKeyIndex.getCurrentIndexState() match {
         case (IndexState.Empty, _)              =>
           logger.info("Found index state empty, bootstrapping downsample index")
-          recoverIndexInternal
+          recoverIndexInternal(None)
+        case (IndexState.Synced, checkpointMillis)             =>
+          logger.info("Found index state empty, bootstrapping downsample index")
+          recoverIndexInternal(checkpointMillis)
         case _                                  =>
           // FIXME: Part ids in case of indexRefresh are assumed to monotonically increase, however, in case recovery
           //  is done from an existing timestamp, we need a way not only to store the state of the ids recycled but
           //  latest allocated partId to avoid assigning the same id again.
-          logger.info(s"Nothing to recover the index for dataset=$indexDataset shard=$shardNum" +
-                      s" starting index refresh thread")
-          indexRefresh().runToFuture(housekeepingSched)
+          //logger.info(s"Nothing to recover the index for dataset=$indexDataset shard=$shardNum" +
+          //            s" starting index refresh thread")
+          //indexRefresh().runToFuture(housekeepingSched)
+          ???
       }
     } else {
       // Index persistence is not enabled, this will simply follow the path for existing index recovery
-      recoverIndexInternal
+      recoverIndexInternal(None)
     }
   }
 
-  private def recoverIndexInternal: Future[Unit] = {
+  private def recoverIndexInternal(checkpointMillis: Option[Long]): Future[Long] = {
     indexBootstrapper
       .bootstrapIndexDownsample(
-        partKeyIndex, shardNum, indexDataset, indexTtlMs) { _ => createPartitionID() }
+        partKeyIndex, shardNum, indexDataset, checkpointMillis, indexTtlMs) { _ => createPartitionID() }
       .map { count =>
         logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
-      }.map { _ =>
-      // need to start recovering 6 hours prior to now since last index migration could have run 6 hours ago
-      // and we'd be missing entries that would be migrated in the last 6 hours.
-      // Hence indexUpdatedHour should be: currentHour - 6
-      val indexJobIntervalInHours = (downsampleStoreConfig.maxChunkTime.toMinutes + 59) / 60 // for ceil division
-      val endHour = hour() - indexJobIntervalInHours - 1
-      indexUpdatedHour.set(endHour)
-      // The time set here in synced state should match the time we set in indexUpdatedHour
-      partKeyIndex.notifyLifecycleListener(IndexState.Synced, endHour * 3600 * 1000L)
-      stats.shardTotalRecoveryTime.update(System.currentTimeMillis() - creationTime)
-      startHousekeepingTask()
-      startStatsUpdateTask()
-      logger.info(s"Shard now ready for query dataset=$indexDataset shard=$shardNum")
-      isReadyForQuery = true
-    }.runToFuture(housekeepingSched)
+        // need to start recovering 6 hours prior to now since last index migration could have run 6 hours ago
+        // and we'd be missing entries that would be migrated in the last 6 hours.
+        // Hence indexUpdatedHour should be: currentHour - 6
+        val indexJobIntervalInHours = (downsampleStoreConfig.maxChunkTime.toMinutes + 59) / 60 // for ceil division
+        val endHour = hour() - indexJobIntervalInHours - 1
+        indexUpdatedHour.set(endHour)
+        // The time set here in synced state should match the time we set in indexUpdatedHour
+        partKeyIndex.notifyLifecycleListener(IndexState.Synced, endHour * 3600 * 1000L)
+        stats.shardTotalRecoveryTime.update(System.currentTimeMillis() - creationTime)
+        startHousekeepingTask()
+        startStatsUpdateTask()
+        logger.info(s"Shard now ready for query dataset=$indexDataset shard=$shardNum")
+        isReadyForQuery = true
+        count
+      }.runToFuture(housekeepingSched)
   }
 
   private def startHousekeepingTask(): Unit = {
@@ -217,7 +222,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     }
   }
 
-  private def indexRefresh(): Task[Unit] = {
+  def indexRefresh(): Task[Unit] = {
     // Update keys until hour()-2 hours ago. hour()-1 hours ago can cause missed records if
     // refresh was triggered exactly at end of the hour. All partKeys for the hour would need to be flushed
     // before refresh happens because we will not revist the hour again.
@@ -231,6 +236,10 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
     val toHour = hour() - 2
     val fromHour = indexUpdatedHour.get() + 1
+    indexRefresh(toHour, fromHour)
+  }
+
+  def indexRefresh(toHour: Long, fromHour: Long): Task[Unit] = {
     indexRefresher.refreshWithDownsamplePartKeys(
       partKeyIndex, shardNum, rawDatasetRef, fromHour, toHour, schemas)(lookupOrCreatePartId)
       .map { count =>
@@ -244,7 +253,6 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         logger.error(s"Error occurred when refreshing downsample index " +
           s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour", e)
       }
-
   }
 
   private def startStatsUpdateTask(): Unit = {

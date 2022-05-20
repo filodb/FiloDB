@@ -143,6 +143,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         notifyLifecycleListener(IndexState.TriggerRebuild, System.currentTimeMillis)
         throw new IllegalStateException("Unable to clean up index directory", t)
     }
+  } else {
+    //TODO here we assume there is non-empty index which we probably need to validate
   }
 
   def  notifyLifecycleListener(state: IndexState.Value, time: Long): Unit =

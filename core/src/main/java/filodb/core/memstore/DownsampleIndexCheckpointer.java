@@ -47,6 +47,9 @@ public class DownsampleIndexCheckpointer {
         Properties props = new Properties();
         props.setProperty(CHECKPOINT_MILLIS, Long.toString(millis));
         File checkpointFile = getCheckpointFile(indexPath);
+        if (!indexPath.exists()) {
+            indexPath.mkdirs();
+        }
         Writer w = null;
         try {
             w = new FileWriter(checkpointFile);
