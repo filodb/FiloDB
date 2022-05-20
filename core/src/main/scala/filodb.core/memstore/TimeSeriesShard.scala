@@ -677,13 +677,14 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   /////// START SHARD RECOVERY METHODS ///////////////////
 
-  def recoverIndex(): Future[Unit] = {
+  def recoverIndex(): Future[Long] = {
     val indexBootstrapper = new IndexBootstrapper(colStore)
     indexBootstrapper.bootstrapIndexRaw(partKeyIndex, shardNum, ref)(bootstrapPartKey)
       .executeOn(ingestSched) // to make sure bootstrapIndex task is run on ingestion thread
       .map { count =>
         startFlushingIndex()
         logger.info(s"Bootstrapped index for dataset=$ref shard=$shardNum with $count records")
+        count
       }.runToFuture(ingestSched)
   }
 

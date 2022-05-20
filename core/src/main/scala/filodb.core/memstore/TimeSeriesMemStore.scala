@@ -134,7 +134,7 @@ extends TimeSeriesStore with StrictLogging {
     shard.startIngestion(stream, cancelTask, flushSched)
   }
 
-  def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
+  def recoverIndex(dataset: DatasetRef, shard: Int): Future[Long] =
     getShardE(dataset, shard).recoverIndex()
 
   def createDataRecoveryObservable(dataset: DatasetRef,
