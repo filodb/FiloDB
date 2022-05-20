@@ -74,7 +74,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   private val partKeyIndex = new PartKeyLuceneIndex(
     indexDataset, schemas.part, false,
     false, shardNum, indexTtlMs,
-    Option(downsampleConfig.indexLocationFile(rawDatasetRef, shardNum))
+    Option(downsampleConfig.indexLocationFile(indexDataset, shardNum))
   )
 
   private val indexUpdatedHour = new AtomicLong(0)
@@ -140,16 +140,15 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60
 
-  def recoverIndex(): Future[Unit] = {
+  def recoverIndex(): Future[Long] = {
     indexBootstrapper
       .bootstrapIndexDownsample(
         partKeyIndex, shardNum, indexDataset, indexTtlMs,
         downsampleConfig.indexLocation.isDefined,
-        downsampleConfig.indexLocationFile(rawDatasetRef, shardNum)
+        downsampleConfig.indexLocationFile(indexDataset, shardNum)
       ){ _ => createPartitionID() }
       .map { count =>
         logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
-      }.map { _ =>
         // need to start recovering 6 hours prior to now since last index migration could have run 6 hours ago
         // and we'd be missing entries that would be migrated in the last 6 hours.
         // Hence indexUpdatedHour should be: currentHour - 6
@@ -160,6 +159,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         startStatsUpdateTask()
         logger.info(s"Shard now ready for query dataset=$indexDataset shard=$shardNum")
         isReadyForQuery = true
+        count
       }.runToFuture(housekeepingSched)
   }
 
@@ -204,6 +204,10 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     // before refresh happens because we will not revist the hour again.
     val toHour = hour() - 2
     val fromHour = indexUpdatedHour.get() + 1
+    indexRefresh(toHour, fromHour)
+  }
+
+  def indexRefresh(toHour: Long, fromHour: Long): Task[Unit] = {
     indexRefresher.refreshWithDownsamplePartKeys(partKeyIndex, shardNum, rawDatasetRef,
                                                  fromHour, toHour, schemas)(lookupOrCreatePartId)
       .map { count =>
