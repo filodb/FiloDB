@@ -74,8 +74,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, false,
     false, shardNum, indexTtlMs,
     downsampleConfig.indexLocation.map(new java.io.File(_)),
-    Some(new EphemeralIndexMetadataStore())
-  )
+    if (downsampleConfig.enablePersistentIndexing) Some(new EphemeralIndexMetadataStore()) else None)
 
   private val indexUpdatedHour = new AtomicLong(0)
 
