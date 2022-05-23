@@ -73,7 +73,8 @@ case class TenantIngestionMetering(settings: FilodbSettings,
             val data = RowData.fromRowReader(rr)
             val prefix = data.group.toString.split(PREFIX_DELIM)
             val tags = Map("_tenant_ws_" -> prefix(0),
-                           "tenant_ns" -> prefix(1),
+                           "_tenant_ns_" -> prefix(1),
+                           "_audience_" -> "tenants",
                            "dataset" -> dsRef.dataset,
                            "cluster_type" -> CLUSTER_TYPE)
             Kamon.gauge(METRIC_ACTIVE).withTags(TagSet.from(tags)).update(data.counts.active.toDouble)
