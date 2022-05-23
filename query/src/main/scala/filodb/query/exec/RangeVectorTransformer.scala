@@ -214,10 +214,9 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
       val resultIterator: RangeVectorCursor = new WrappedCursor(rv.rows) {
         private val rows = rv.rows
         private val result = valueColumnType(sourceSchema) match {
-          case ColumnType.DoubleColumn => new TransientRow(timestamp = 0, value = 0d)
           // Initialize with a new MutableHistogram when we have more information about a row.
           case ColumnType.HistogramColumn => new TransientHistRow()
-          case x => throw new UnsupportedOperationException(s"unsupported column type: $x")
+          case _ => new TransientRow(timestamp = 0, value = 0d)
         }
 
         override def hasNext: Boolean = rows.hasNext
@@ -227,12 +226,6 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
           val timestamp = next.getLong(columnNo = 0)
           val sclrVal = scalarRangeVector.getValue(timestamp)
           valueColumnType(sourceSchema) match {
-            case ColumnType.DoubleColumn =>
-              val doubleResRow = result.asInstanceOf[TransientRow]
-              val oldVal = next.getDouble(columnNo = 1)
-              val newVal = if (scalarOnLhs) operatorFunction.calculate(sclrVal, oldVal)
-                           else operatorFunction.calculate(oldVal, sclrVal)
-              doubleResRow.setValues(timestamp, newVal)
             case ColumnType.HistogramColumn =>
               val histResRow = result.asInstanceOf[TransientHistRow]
               val oldHist = next.getHistogram(columnNo = 1).asInstanceOf[HistogramWithBuckets]
@@ -249,7 +242,12 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
                 resHist.values(i) = resVal
               }
               histResRow.setValues(timestamp, resHist)
-            case x => throw new UnsupportedOperationException(s"unsupported column type: $x")
+            case _ =>
+              val doubleResRow = result.asInstanceOf[TransientRow]
+              val oldVal = next.getDouble(columnNo = 1)
+              val newVal = if (scalarOnLhs) operatorFunction.calculate(sclrVal, oldVal)
+              else operatorFunction.calculate(oldVal, sclrVal)
+              doubleResRow.setValues(timestamp, newVal)
           }
           result
         }
