@@ -214,7 +214,7 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
       val resultIterator: RangeVectorCursor = new WrappedCursor(rv.rows) {
         private val rows = rv.rows
         private val result = valueColumnType(sourceSchema) match {
-          case ColumnType.DoubleColumn => new TransientRow(0, 0d)
+          case ColumnType.DoubleColumn => new TransientRow(timestamp = 0, value = 0d)
           // Initialize with a new MutableHistogram when we have more information about a row.
           case ColumnType.HistogramColumn => new TransientHistRow()
           case x => throw new UnsupportedOperationException(s"unsupported column type: $x")
@@ -224,24 +224,24 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
 
         override def doNext(): RowReader = {
           val next = rows.next()
-          val timestamp = next.getLong(0)
+          val timestamp = next.getLong(columnNo = 0)
           val sclrVal = scalarRangeVector.getValue(timestamp)
           valueColumnType(sourceSchema) match {
             case ColumnType.DoubleColumn =>
               val doubleResRow = result.asInstanceOf[TransientRow]
-              val oldVal = next.getDouble(1)
+              val oldVal = next.getDouble(columnNo = 1)
               val newVal = if (scalarOnLhs) operatorFunction.calculate(sclrVal, oldVal)
                            else operatorFunction.calculate(oldVal, sclrVal)
               doubleResRow.setValues(timestamp, newVal)
             case ColumnType.HistogramColumn =>
               val histResRow = result.asInstanceOf[TransientHistRow]
-              val oldHist = next.getHistogram(1).asInstanceOf[HistogramWithBuckets]
-              if (oldHist.numBuckets > histResRow.getHistogram(1).numBuckets) {
+              val oldHist = next.getHistogram(columnNo = 1).asInstanceOf[HistogramWithBuckets]
+              if (oldHist.numBuckets > histResRow.getHistogram(col = 1).numBuckets) {
                 // If we don't have enough buckets in the TransientHistRow, we initialize and store
                 //   an appropriately-sized histogram. This should only happen once.
-                histResRow.setValues(0, MutableHistogram(oldHist))
+                histResRow.setValues(ts = 0, MutableHistogram(oldHist))
               }
-              val resHist = histResRow.getHistogram(1).asInstanceOf[MutableHistogram]
+              val resHist = histResRow.getHistogram(col = 1).asInstanceOf[MutableHistogram]
               (0 until resHist.numBuckets).foreach{ i =>
                 val oldVal = oldHist.bucketValue(i)
                 val resVal = if (scalarOnLhs) operatorFunction.calculate(sclrVal, oldVal)
