@@ -10,6 +10,9 @@ import scala.collection.JavaConverters._
 import scala.collection.immutable.HashSet
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+import scala.util.Failure
+import scala.util.Success
+import scala.util.Try
 
 import com.github.benmanes.caffeine.cache.{Caffeine, LoadingCache}
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
@@ -129,10 +132,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       logger.info(s"Found index state $other, for dataset=$ref, shard=$shardNum this will " +
         s"clean up the index directory $indexDiskLocation and rebuild index")
       deleteRecursively(indexDiskLocation.toFile) match {
-        case Left(_)       => // Notify the handler that the directory is now empty
+        case Success(_)       => // Notify the handler that the directory is now empty
           logger.info(s"Cleaned directory for dataset=$ref, shard=$shardNum and index directory=$indexDiskLocation")
           notifyLifecycleListener(IndexState.Empty, System.currentTimeMillis)
-        case Right(t)      => // Update index state as Unknown and rethrow the exception
+        case Failure(t)      => // Update index state as Unknown and rethrow the exception
           logger.warn(s"Exception while deleting directory for dataset=$ref, shard=$shardNum " +
             s"and index directory=$indexDiskLocation with stack trace", t)
           notifyLifecycleListener(IndexState.TriggerRebuild, System.currentTimeMillis)
@@ -173,11 +176,11 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         logger.warn(s"Index for dataset:${ref.dataset} and shard: $shardNum possibly corrupt," +
           s"index directory will be cleaned up and index rebuilt", e)
         deleteRecursively(indexDiskLocation.toFile) match {
-          case Left(_)       => // Notify the handler that the directory is now empty
+          case Success(_)       => // Notify the handler that the directory is now empty
             logger.info(s"Cleaned directory for dataset=$ref," +
               s"shard=$shardNum and index directory=$indexDiskLocation")
             notifyLifecycleListener(IndexState.Empty, System.currentTimeMillis)
-          case Right(t)      => logger.warn(s"Exception while deleting directory for dataset=$ref," +
+          case Failure(t)      => logger.warn(s"Exception while deleting directory for dataset=$ref," +
             s"shard=$shardNum and index directory=$indexDiskLocation with stack trace", t)
             notifyLifecycleListener(IndexState.TriggerRebuild, System.currentTimeMillis)
             throw new IllegalStateException("Unable to clean up index directory", t)
@@ -201,31 +204,31 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     facetEnabledAllLabels || (facetEnabledSharedKeyLabels && schema.options.shardKeyColumns.contains(label))
   }
 
-  private def deleteRecursively(f: File, deleteRoot: Boolean = false): Either[Boolean, IOException] = {
-    val subDirDeletion: Either[Boolean, IOException] =
+  private def deleteRecursively(f: File, deleteRoot: Boolean = false): Try[Boolean] = {
+    val subDirDeletion: Try[Boolean] =
       if (f.isDirectory)
         f.listFiles match {
           case xs: Array[File] if xs != null  && !xs.isEmpty  =>
-            val subDirDeletions: Array[Either[Boolean, IOException]] = xs map (f => deleteRecursively(f, true))
+            val subDirDeletions: Array[Try[Boolean]] = xs map (f => deleteRecursively(f, true))
               subDirDeletions reduce((reduced, thisOne) => {
                 thisOne match {
                   // Ensures even if one Right(_) is found, thr response will be Right(Throwable)
-                  case Left(_) if reduced == Left(true)    => thisOne
-                  case Right(_)                            => thisOne
-                  case _                                   => reduced
+                  case Success(_) if reduced == Success(true)    => thisOne
+                  case Failure(_)                                => thisOne
+                  case _                                         => reduced
                 }
               })
-          case _                               => Left(true)
+          case _                               => Success(true)
         }
       else
-        Left(true)
+        Success(true)
 
     subDirDeletion match  {
-      case Left(_)        =>
+      case Success(_)        =>
         if (deleteRoot) {
-          if (f.delete()) Left(true) else Right(new IOException(s"Unable to delete $f"))
-        } else Left(true)
-      case right @ Right(_)  => right
+          if (f.delete()) Success(true) else Failure(new IOException(s"Unable to delete $f"))
+        } else Success(true)
+      case right @ Failure(_)  => right
     }
 
   }
