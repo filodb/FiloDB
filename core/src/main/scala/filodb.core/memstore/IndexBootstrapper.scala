@@ -78,7 +78,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
     // as opaque byte arrays. The assignPartId function is cheap as it simply increments
     // a numeric value. This is ok since the index starts as a clean slate and thus the part ids too
     // start from 0. If index for a given range is desired, refreshWithDownsamplePartKeys should be called
-    index.notifyLifecycleListener(IndexState.Building, checkpointTime)
+    index.notifyLifecycleListener(IndexState.Refreshing, checkpointTime)
     colStore.scanPartKeys(ref, shardNum)
       .filter(_.endTime > checkpointTime)
       .mapParallelUnordered(Runtime.getRuntime.availableProcessors()) { pk =>
@@ -91,7 +91,8 @@ class IndexBootstrapper(colStore: ColumnStore) {
       .map { count =>
         // Ensures index is made durable to secondary store
         index.commit()
-        index.notifyLifecycleListener(IndexState.Synced, start)
+        // Note that we do not set an end time for the Synced here, instead
+        // we will do it from DownsampleTimeSeriesShard
         index.refreshReadersBlocking()
         recoverIndexLatency.update(System.currentTimeMillis() - start)
         count
@@ -132,7 +133,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum)
     val start = System.currentTimeMillis()
-    index.notifyLifecycleListener(IndexState.Building, fromHour * 3600 * 1000L)
+    index.notifyLifecycleListener(IndexState.Refreshing, fromHour * 3600 * 1000L)
     Observable.fromIterable(fromHour to toHour).flatMap { hour =>
       colStore.getPartKeysByUpdateHour(ref, shardNum, hour)
     }.mapParallelUnordered(parallelism) { pk =>

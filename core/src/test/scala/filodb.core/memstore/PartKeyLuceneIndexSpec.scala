@@ -435,7 +435,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   }
 
 
-  it("must clean the input directory for Index state apart from Synced") {
+  it("must clean the input directory for Index state apart from Synced and Refreshing") {
     val events = ArrayBuffer.empty[(IndexState.Value, Long)]
     IndexState.values.foreach {
       indexState =>
@@ -448,24 +448,32 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
         assert(shardDirectory.list().exists(_.equals("empty")))
         val index = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis,
           Some(indexDirectory),
-          Some( new IndexMetadataStore {
+          Some(new IndexMetadataStore {
             def currentState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) =
               (indexState, None)
 
             def updateState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit = {
               events.append((state, time))
             }
+
+            override def initState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) =
+              currentState(datasetRef: DatasetRef, shard: Int)
+
+            override def updateInitState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit
+            = {
+
+            }
           }))
         index.closeIndex()
         events.toList match {
-          case (IndexState.Empty, _) :: Nil if indexState != IndexState.Synced && indexState != IndexState.Building =>
+          case (IndexState.Empty, _) :: Nil if indexState != IndexState.Synced && indexState != IndexState.Refreshing =>
             // The file originally present must not be available
             assert(!shardDirectory.list().exists(_.equals("empty")))
             events.clear()
-          case Nil                          if indexState == IndexState.Synced || indexState == IndexState.Building =>
-            // The file originally present "must" be available
+          case Nil                          if indexState == IndexState.Synced || indexState == IndexState.Refreshing =>
+            // The file originally present "must" be available, which means no cleanup was done
             assert(shardDirectory.list().exists(_.equals("empty")))
-          case _                                                                                                    =>
+          case _                                                                                                      =>
             fail("Expected an index state Empty after directory cleanup")
         }
     }
@@ -515,6 +523,15 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
               assert(shardDirectory.list().length == 0)
               events.append((state, time))
             }
+
+            override def initState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) =
+              currentState(datasetRef: DatasetRef, shard: Int)
+
+            override def updateInitState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit
+            = {
+
+            }
+
           })).closeIndex()
         // For all states, including states where Index is Synced because the index is corrupt,
         // the shard directory should be cleared and the new state should be Empty
@@ -529,7 +546,8 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     }
   }
 
-  it("Should update the state as Unknown and throw an exception for any error other than CorruptIndexException") {
+  it("Should update the state as TriggerRebuild and throw an exception for any error other than CorruptIndexException")
+  {
     val events = ArrayBuffer.empty[(IndexState.Value, Long)]
     IndexState.values.foreach {
       indexState =>
@@ -552,6 +570,14 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
               def updateState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit = {
                 events.append((state, time))
               }
+
+              override def initState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) =
+                currentState(datasetRef: DatasetRef, shard: Int)
+
+              override def updateInitState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long)
+              :Unit = {
+
+              }
             }))
           index.closeIndex()
         } catch {
@@ -570,6 +596,5 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
           shardDirectory.setWritable(true)
         }
     }
-
   }
 }

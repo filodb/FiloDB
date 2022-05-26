@@ -126,24 +126,24 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   val indexDiskLocation = diskLocation.map(new File(_, ref.dataset + File.separator + shardNum))
     .getOrElse(createTempDir(ref, shardNum)).toPath
 
-  lifecycleManager.foreach(listener => listener.currentState(ref, shardNum) match {
-    case (other @ _, _)  if other != IndexState.Synced  && other != IndexState.Building  =>
+  // If index rebuild is triggered or the state is Building, simply clean up the index directory and start
+  // index rebuild
+  if (
+    lifecycleManager.forall(_.shouldTriggerRebuild(ref, shardNum)) || getCurrentIndexState()._1 == IndexState.Rebuilding
+  ) {
+    logger.info(s"Cleaning up indexDirectory=$indexDiskLocation for  dataset=$ref, shard=$shardNum")
+    deleteRecursively(indexDiskLocation.toFile) match {
+      case Success(_) => // Notify the handler that the directory is now empty
+        logger.info(s"Cleaned directory for dataset=$ref, shard=$shardNum and index directory=$indexDiskLocation")
+        notifyLifecycleListener(IndexState.Empty, System.currentTimeMillis)
 
-      logger.info(s"Found index state $other, for dataset=$ref, shard=$shardNum this will " +
-        s"clean up the index directory $indexDiskLocation and rebuild index")
-      deleteRecursively(indexDiskLocation.toFile) match {
-        case Success(_)       => // Notify the handler that the directory is now empty
-          logger.info(s"Cleaned directory for dataset=$ref, shard=$shardNum and index directory=$indexDiskLocation")
-          notifyLifecycleListener(IndexState.Empty, System.currentTimeMillis)
-        case Failure(t)      => // Update index state as Unknown and rethrow the exception
-          logger.warn(s"Exception while deleting directory for dataset=$ref, shard=$shardNum " +
-            s"and index directory=$indexDiskLocation with stack trace", t)
-          notifyLifecycleListener(IndexState.TriggerRebuild, System.currentTimeMillis)
-          throw new IllegalStateException("Unable to clean up index directory", t)
-      }
-    case _                                                                               => //NOP
-
-  })
+      case Failure(t) => // Update index state as TriggerRebuild again and rethrow the exception
+        logger.warn(s"Exception while deleting directory for dataset=$ref, shard=$shardNum " +
+          s"and index directory=$indexDiskLocation with stack trace", t)
+        notifyLifecycleListener(IndexState.TriggerRebuild, System.currentTimeMillis)
+        throw new IllegalStateException("Unable to clean up index directory", t)
+    }
+  }
 
   def  notifyLifecycleListener(state: IndexState.Value, time: Long): Unit =
     lifecycleManager.foreach(_.updateState(ref, shardNum, state, time))
@@ -173,6 +173,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       new IndexWriterPlus(fsDirectory, createIndexWriterConfig(), ref, shardNum)
     } catch {
       case e: Exception =>
+        // If an exception is thrown here there is something wrong with the index or the directory
+        // We will attempt once by cleaning the directory and try instantiating the index again
         logger.warn(s"Index for dataset:${ref.dataset} and shard: $shardNum possibly corrupt," +
           s"index directory will be cleaned up and index rebuilt", e)
         deleteRecursively(indexDiskLocation.toFile) match {
@@ -180,8 +182,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
             logger.info(s"Cleaned directory for dataset=$ref," +
               s"shard=$shardNum and index directory=$indexDiskLocation")
             notifyLifecycleListener(IndexState.Empty, System.currentTimeMillis)
-          case Failure(t)      => logger.warn(s"Exception while deleting directory for dataset=$ref," +
+          case Failure(t)       => logger.warn(s"Exception while deleting directory for dataset=$ref," +
             s"shard=$shardNum and index directory=$indexDiskLocation with stack trace", t)
+            // If we still see failure, set the TriggerRebuild and rethrow the exception
             notifyLifecycleListener(IndexState.TriggerRebuild, System.currentTimeMillis)
             throw new IllegalStateException("Unable to clean up index directory", t)
         }
@@ -325,8 +328,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     }
   }.toArray
 
+
   def getCurrentIndexState(): (IndexState.Value, Option[Long]) =
-    lifecycleManager.map(_.currentState(this.ref, this.shardNum)).getOrElse((IndexState.TriggerRebuild, None))
+    lifecycleManager.map(_.currentState(this.ref, this.shardNum)).getOrElse((IndexState.Empty, None))
 
   def reset(): Unit = {
     indexWriter.deleteAll()

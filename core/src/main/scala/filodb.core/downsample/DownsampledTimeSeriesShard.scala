@@ -142,19 +142,21 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   def recoverIndex(): Future[Unit] = {
     if (downsampleConfig.enablePersistentIndexing) {
       partKeyIndex.getCurrentIndexState() match {
-        case (IndexState.Empty, _)  =>
-          // It is important we continue to use
-          logger.info("Found index state empty, bootstrapping down sample index")
+        case (IndexState.Empty, _)              =>
+          logger.info("Found index state empty, bootstrapping downsample index")
           recoverIndexInternal
-        case _                      =>
+        case _                                  =>
           // FIXME: Part ids in case of indexRefresh are assumed to monotonically increase, however, in case recovery
           //  is done from an existing timestamp, we need a way not only to store the state of the ids recycled but
           //  latest allocated partId to avoid assigning the same id again.
-          logger.info("Found index non-empty index state, refreshing index instead of bootstrapping")
+          logger.info(s"Nothing to recover the index for dataset=$indexDataset shard=$shardNum" +
+                      s" starting index refresh thread")
           indexRefresh().runToFuture(housekeepingSched)
       }
-    } else
+    } else {
+      // Index persistence is not enabled, this will simply follow the path for existing index recovery
       recoverIndexInternal
+    }
   }
 
   private def recoverIndexInternal: Future[Unit] = {
@@ -168,7 +170,10 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       // and we'd be missing entries that would be migrated in the last 6 hours.
       // Hence indexUpdatedHour should be: currentHour - 6
       val indexJobIntervalInHours = (downsampleStoreConfig.maxChunkTime.toMinutes + 59) / 60 // for ceil division
-      indexUpdatedHour.set(hour() - indexJobIntervalInHours - 1)
+      val endHour = hour() - indexJobIntervalInHours - 1
+      indexUpdatedHour.set(endHour)
+      // The time set here in synced state should match the time we set in indexUpdatedHour
+      partKeyIndex.notifyLifecycleListener(IndexState.Synced, endHour * 3600 * 1000L)
       stats.shardTotalRecoveryTime.update(System.currentTimeMillis() - creationTime)
       startHousekeepingTask()
       startStatsUpdateTask()
@@ -218,9 +223,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     // before refresh happens because we will not revist the hour again.
     if (downsampleConfig.enablePersistentIndexing) {
       indexUpdatedHour.set(partKeyIndex.getCurrentIndexState() match {
-        case (IndexState.Synced, Some(ts))         => ts / 3600 / 1000
-        case (IndexState.Building, Some(ts))       => ts / 3600 / 1000
-        case _                                     => indexUpdatedHour.get()
+        case (IndexState.Synced, Some(ts))           => ts / 3600 / 1000
+        case (IndexState.Refreshing, Some(ts))       => ts / 3600 / 1000
+        case _                                       => indexUpdatedHour.get()
       })
     }
 
