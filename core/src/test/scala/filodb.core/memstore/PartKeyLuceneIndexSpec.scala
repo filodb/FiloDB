@@ -470,7 +470,10 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
             // The file originally present must not be available
             assert(!shardDirectory.list().exists(_.equals("empty")))
             events.clear()
-          case Nil                          if indexState == IndexState.Synced || indexState == IndexState.Refreshing =>
+          case Nil  if indexState == IndexState.Synced
+                    || indexState == IndexState.Refreshing
+                    || indexState == IndexState.Empty     =>
+            // Empty state denotes the FS is empty, it is not cleaned up again to ensure its empty
             // The file originally present "must" be available, which means no cleanup was done
             assert(shardDirectory.list().exists(_.equals("empty")))
           case _                                                                                                      =>
