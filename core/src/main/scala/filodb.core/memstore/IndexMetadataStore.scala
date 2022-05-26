@@ -18,8 +18,8 @@ import filodb.core.DatasetRef
  *        Index is already empty, no further action needed
  *   4. Process starts with Index state set to "Refreshing".
  *        The timestamp associated with Refreshing state is the time used to read the data from datastore, whenever
- *        a process restarts with index state set to Refreshing, no data is assumed to be present in index after the time
- *        set with the state. Data starting from the provided timestamp is added to index again as index addition
+ *        a process restarts with index state set to Refreshing, no data is assumed to be present in index after the
+ *        time set with the state. Data starting from the provided timestamp is added to index again as index addition
  *        is idempotent
  *   5. Process starts with IndexState set to Synced
  *        The timestamp associated with Synced indicates all data till the time associated with the IndexState is
