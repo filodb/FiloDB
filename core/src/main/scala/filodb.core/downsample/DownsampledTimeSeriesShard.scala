@@ -39,9 +39,9 @@ class DownsampledTimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val indexEntries = Kamon.gauge("downsample-store-index-entries").withTags(TagSet.from(tags))
   val indexRamBytes = Kamon.gauge("downsample-store-index-ram-bytes").withTags(TagSet.from(tags))
   val singlePartCassFetchLatency = Kamon.histogram("single-partition-cassandra-latency",
-                                        MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
   val purgeIndexEntriesLatency = Kamon.histogram("downsample-store-purge-index-entries-latency",
-                                        MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
 }
 
 class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
@@ -71,11 +71,10 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   private val stats = new DownsampledTimeSeriesShardStats(rawDatasetRef, shardNum)
 
-  private val partKeyIndex = new PartKeyLuceneIndex(
-    indexDataset, schemas.part, false,
+  private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, false,
     false, shardNum, indexTtlMs,
-    Option(downsampleConfig.indexLocationFile(rawDatasetRef, shardNum))
-  )
+    downsampleConfig.indexLocation.map(new java.io.File(_)),
+    if (downsampleConfig.enablePersistentIndexing) Some(new EphemeralIndexMetadataStore()) else None)
 
   private val indexUpdatedHour = new AtomicLong(0)
 
@@ -141,26 +140,46 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60
 
   def recoverIndex(): Future[Unit] = {
+    if (downsampleConfig.enablePersistentIndexing) {
+      partKeyIndex.getCurrentIndexState() match {
+        case (IndexState.Empty, _)              =>
+          logger.info("Found index state empty, bootstrapping downsample index")
+          recoverIndexInternal
+        case _                                  =>
+          // FIXME: Part ids in case of indexRefresh are assumed to monotonically increase, however, in case recovery
+          //  is done from an existing timestamp, we need a way not only to store the state of the ids recycled but
+          //  latest allocated partId to avoid assigning the same id again.
+          logger.info(s"Nothing to recover the index for dataset=$indexDataset shard=$shardNum" +
+                      s" starting index refresh thread")
+          indexRefresh().runToFuture(housekeepingSched)
+      }
+    } else {
+      // Index persistence is not enabled, this will simply follow the path for existing index recovery
+      recoverIndexInternal
+    }
+  }
+
+  private def recoverIndexInternal: Future[Unit] = {
     indexBootstrapper
       .bootstrapIndexDownsample(
-        partKeyIndex, shardNum, indexDataset, indexTtlMs,
-        downsampleConfig.indexLocation.isDefined,
-        downsampleConfig.indexLocationFile(rawDatasetRef, shardNum)
-      ){ _ => createPartitionID() }
+        partKeyIndex, shardNum, indexDataset, indexTtlMs) { _ => createPartitionID() }
       .map { count =>
         logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
       }.map { _ =>
-        // need to start recovering 6 hours prior to now since last index migration could have run 6 hours ago
-        // and we'd be missing entries that would be migrated in the last 6 hours.
-        // Hence indexUpdatedHour should be: currentHour - 6
-        val indexJobIntervalInHours = (downsampleStoreConfig.maxChunkTime.toMinutes + 59) / 60 // for ceil division
-        indexUpdatedHour.set(hour() - indexJobIntervalInHours - 1)
-        stats.shardTotalRecoveryTime.update(System.currentTimeMillis() - creationTime)
-        startHousekeepingTask()
-        startStatsUpdateTask()
-        logger.info(s"Shard now ready for query dataset=$indexDataset shard=$shardNum")
-        isReadyForQuery = true
-      }.runToFuture(housekeepingSched)
+      // need to start recovering 6 hours prior to now since last index migration could have run 6 hours ago
+      // and we'd be missing entries that would be migrated in the last 6 hours.
+      // Hence indexUpdatedHour should be: currentHour - 6
+      val indexJobIntervalInHours = (downsampleStoreConfig.maxChunkTime.toMinutes + 59) / 60 // for ceil division
+      val endHour = hour() - indexJobIntervalInHours - 1
+      indexUpdatedHour.set(endHour)
+      // The time set here in synced state should match the time we set in indexUpdatedHour
+      partKeyIndex.notifyLifecycleListener(IndexState.Synced, endHour * 3600 * 1000L)
+      stats.shardTotalRecoveryTime.update(System.currentTimeMillis() - creationTime)
+      startHousekeepingTask()
+      startStatsUpdateTask()
+      logger.info(s"Shard now ready for query dataset=$indexDataset shard=$shardNum")
+      isReadyForQuery = true
+    }.runToFuture(housekeepingSched)
   }
 
   private def startHousekeepingTask(): Unit = {
@@ -172,9 +191,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     // we are sure that in one raw dataset flush period, we wont get two updated part key
     // records with same part key. This is true since we update part keys only once per flush interval in raw dataset.
     logger.info(s"Starting housekeeping for downsample cluster of dataset=$rawDatasetRef shard=$shardNum " +
-                s"every ${rawStoreConfig.flushInterval}")
+      s"every ${rawStoreConfig.flushInterval}")
     houseKeepingFuture = Observable.intervalWithFixedDelay(rawStoreConfig.flushInterval,
-                                                           rawStoreConfig.flushInterval).mapEval { _ =>
+      rawStoreConfig.flushInterval).mapEval { _ =>
       purgeExpiredIndexEntries()
       indexRefresh()
     }.map { _ =>
@@ -202,21 +221,23 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     // Update keys until hour()-2 hours ago. hour()-1 hours ago can cause missed records if
     // refresh was triggered exactly at end of the hour. All partKeys for the hour would need to be flushed
     // before refresh happens because we will not revist the hour again.
+    if (downsampleConfig.enablePersistentIndexing) {
+      indexUpdatedHour.set(partKeyIndex.getCurrentIndexState() match {
+        case (IndexState.Synced, Some(ts))           => ts / 3600 / 1000
+        case (IndexState.Refreshing, Some(ts))       => ts / 3600 / 1000
+        case _                                       => indexUpdatedHour.get()
+      })
+    }
+
     val toHour = hour() - 2
     val fromHour = indexUpdatedHour.get() + 1
-    indexRefresher.refreshWithDownsamplePartKeys(partKeyIndex, shardNum, rawDatasetRef,
-                                                 fromHour, toHour, schemas)(lookupOrCreatePartId)
+    indexRefresher.refreshWithDownsamplePartKeys(
+      partKeyIndex, shardNum, rawDatasetRef, fromHour, toHour, schemas)(lookupOrCreatePartId)
       .map { count =>
         indexUpdatedHour.set(toHour)
         stats.indexEntriesRefreshed.increment(count)
         logger.info(s"Refreshed downsample index with new records numRecords=$count " +
           s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour")
-        if (downsampleConfig.indexLocation.isDefined) {
-          partKeyIndex.commit()
-          val hourMillis = toHour  * 1000 * 60 * 60
-          val indexLocation = downsampleConfig.indexLocationFile(indexDataset, shardNum)
-          DownsampleIndexCheckpointer.writeCheckpoint(indexLocation, hourMillis)
-        }
       }
       .onErrorHandle { e =>
         stats.indexRefreshFailed.increment()
@@ -243,9 +264,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   }
 
   /**
-    * Returns a new non-negative partition ID which isn't used by any existing parition. A negative
-    * partition ID wouldn't work with bitmaps.
-    */
+   * Returns a new non-negative partition ID which isn't used by any existing parition. A negative
+   * partition ID wouldn't work with bitmaps.
+   */
   private def createPartitionID(): Int = {
     val next = nextPartitionID.incrementAndGet()
     if (next == 0) {
@@ -336,11 +357,11 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         // introducing regression to the stable codebase. However, if at later point of time no duplicates are tolerated
         // we will have to revisit the logic and fix accordingly
         store.readRawPartitions(downsampledDataset,
-                                downsampleStoreConfig.maxChunkTime.toMillis,
-                                SinglePartitionScan(partRec.partKey, shardNum),
-                                TimeRangeChunkScan(
-                                  partRec.startTime.max(lookup.chunkMethod.startTime),
-                                  partRec.endTime.min(lookup.chunkMethod.endTime)))
+          downsampleStoreConfig.maxChunkTime.toMillis,
+          SinglePartitionScan(partRec.partKey, shardNum),
+          TimeRangeChunkScan(
+            partRec.startTime.max(lookup.chunkMethod.startTime),
+            partRec.endTime.min(lookup.chunkMethod.endTime)))
           .map { pd =>
             val part = makePagedPartition(pd, lookup.firstSchemaId.get, resolutionMs, colIds)
             stats.partitionsQueried.increment()
@@ -355,9 +376,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   private def capDataScannedPerShardCheck(lookup: PartLookupResult, resolution: Long) = {
     lookup.firstSchemaId.foreach { schId =>
-        schemas.ensureQueriedDataSizeWithinLimit(schId, lookup.pkRecords,
-                                    downsampleStoreConfig.flushInterval.toMillis,
-                                    resolution, lookup.chunkMethod, downsampleStoreConfig.maxDataPerShardQuery)
+      schemas.ensureQueriedDataSizeWithinLimit(schId, lookup.pkRecords,
+        downsampleStoreConfig.flushInterval.toMillis,
+        resolution, lookup.chunkMethod, downsampleStoreConfig.maxDataPerShardQuery)
     }
   }
 
@@ -405,12 +426,12 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   }
 
   /**
-    * Iterator for traversal of partIds, value for the given label will be extracted from the ParitionKey.
-    * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
-    */
+   * Iterator for traversal of partIds, value for the given label will be extracted from the ParitionKey.
+   * this implementation maps partIds to label/values eagerly, this is done inorder to dedup the results.
+   */
   case class LabelValueResultIterator(partIds: debox.Buffer[Int], labelNames: Seq[String],
                                       querySession: QuerySession, statsGroup: Seq[String], limit: Int)
-      extends Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] {
+    extends Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] {
     private lazy val rows = labelValues
     override def size: Int = rows.size
 
@@ -444,7 +465,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   case class SingleLabelValuesResultIterator(partIds: debox.Buffer[Int], label: String,
                                              querySession: QuerySession, statsGroup: Seq[String], limit: Int)
-      extends Iterator[ZeroCopyUTF8String] {
+    extends Iterator[ZeroCopyUTF8String] {
     private val rows = labels
 
     def labels: Iterator[ZeroCopyUTF8String] = {
@@ -471,13 +492,13 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   }
 
   /**
-    * Retrieve partKey for a given PartId by looking up index
-    */
+   * Retrieve partKey for a given PartId by looking up index
+   */
   private def partKeyFromPartId(partId: Int): Array[Byte] = {
     val partKeyBytes = partKeyIndex.partKeyFromPartId(partId)
     if (partKeyBytes.isDefined)
-      // make a copy because BytesRef from lucene can have additional length bytes in its array
-      // TODO small optimization for some other day
+    // make a copy because BytesRef from lucene can have additional length bytes in its array
+    // TODO small optimization for some other day
       util.Arrays.copyOfRange(partKeyBytes.get.bytes, partKeyBytes.get.offset,
         partKeyBytes.get.offset + partKeyBytes.get.length)
     else throw new IllegalStateException(s"Could not find partKey or partId $partId. This is not a expected behavior.")
