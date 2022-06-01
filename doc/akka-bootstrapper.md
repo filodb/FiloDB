@@ -55,7 +55,7 @@ Include the library in your dependencies.
 Set up neccessary configuration in your application.conf. For full list of configuration and documentation, see the 
 library's [reference.conf](../akka-bootstrapper/src/main/resources/reference.conf)
 
-For fully working example code, look at the [example application](https://github.pie.apple.com/viswanathan-ramachandran/akka-bootstrapper-app). 
+For fully working example code, look at the [use of bootstrapper in FiloDB](https://github.com/filodb/FiloDB/blob/develop/core/src/main/scala/filodb.core/memstore/PartKeyLuceneIndex.scala#L440)). 
 The key step is to invoke the AkkaBootstrapper.bootstrap() method, passing in the configuration and the Akka cluster 
 object. This call blocks and waits until seedNodeCount peers are available and the join completes. The peer discovery 
 strategy can be changed by providing an implementation of AkkaClusterSeedDiscovery class in the configuration. Included 
