@@ -822,7 +822,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job, app, inst))
           |-------T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |--------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@6848a051)""".stripMargin),
-      // Should pushdown inner aggregate when outer by columns are not TS superset.
+      // Should pushdown only inner aggregate when outer by columns are not TS superset.
       ("""sum(sum(foo{job="bar"}) by (job, app, inst)) by (job, inst)""",
         """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1071476300],raw)
@@ -884,7 +884,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
       // ============== BEGIN COMPOUND TESTS ==================
 
-      // Should not pushdown join when aggregate by/on labels are not TS label supersets.
+      // Should not pushdown join when aggregate 'by' labels are not TS label supersets.
       ("""sum(foo{job="baz"}) by (job) + on(job, app) bat{job="baz"}""",
         """E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#564777118],raw)
           |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
@@ -899,7 +899,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#564777118],raw)
           |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#564777118],raw)""".stripMargin),
-      // Should only pushdown aggregate when join by/on labels are TS label supersets.
+      // Should only pushdown aggregate when join 'on' labels are not TS label supersets.
       ("""sum(foo{job="baz"}) by (job, app) + on(job) bat{job="baz"}""",
         """E~BinaryJoinExec(binaryOp=ADD, on=List(job), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1162894714],raw)
           |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
@@ -960,7 +960,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job, app))
           |-----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@53ed80d3)""".stripMargin),
-      // Should pushdown only one aggregate when other by labels are not TS label supersets.
+      // Should pushdown only one aggregate when other 'by' labels are not TS label supersets.
       ("""sum(foo{job="baz"}) by (job, app) + on(job, app) sum(bat{job="baz"}) by (job)""",
         """E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1736249280],raw)
           |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
@@ -1000,7 +1000,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@53ed80d3)
           |-----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@53ed80d3)""".stripMargin),
-      // Should not pushdown when outer aggregate on labels are not TS superset.
+      // Should not pushdown when inner join 'on' labels are not TS superset.
       ("""sum(foo{job="baz"} + on(job) bat{job="baz"}) by (job, app)""",
         """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1835060741],raw)
@@ -1014,7 +1014,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1835060741],raw)
           |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(__name__,Equals(bat))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1835060741],raw)""".stripMargin),
-      // Should only pushdown join when aggregate on labels are not TS superset.
+      // Should only pushdown join when aggregate 'by' labels are not TS superset.
       ("""sum(foo{job="baz"} + on(job, app) bat{job="baz"}) by (job)""",
         """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
           |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2022779139],raw)
