@@ -173,12 +173,14 @@ trait  DefaultPlanner {
     }
 
    // scalastyle:off method.length
+  /**
+   * @param forceRootDispatcher if occupied, the dispatcher used at the root reducer node.
+   */
    def addAggregator(lp: Aggregate,
                      qContext: QueryContext,
-                     toReduceLevel: PlanResult):
+                     toReduceLevel: PlanResult,
+                     forceRootDispatcher: Option[PlanDispatcher] = None):
    LocalPartitionReduceAggregateExec = {
-
-    import filodb.query.AggregateClause.ClauseType
 
     // Now we have one exec plan per shard
     /*
@@ -197,12 +199,7 @@ trait  DefaultPlanner {
     val renamedLabelsClauseOpt =
       lp.clauseOpt.map{ clause =>
         val renamedLabels = LogicalPlanUtils.renameLabels(clause.labels, dsOptions.metricColumn)
-        clause.clauseType match {
-          case ClauseType.By =>
-            AggregateClause(ClauseType.By, renamedLabels)
-          case ClauseType.Without =>
-            AggregateClause(ClauseType.Without, renamedLabels)
-        }
+        AggregateClause(clause.clauseType, renamedLabels)
       }
 
     toReduceLevel.plans.foreach {
@@ -221,7 +218,7 @@ trait  DefaultPlanner {
         }.toList
       } else toReduceLevel.plans
 
-    val reduceDispatcher = PlannerUtil.pickDispatcher(toReduceLevel2)
+    val reduceDispatcher = forceRootDispatcher.getOrElse(PlannerUtil.pickDispatcher(toReduceLevel2))
     val reducer = LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
 
     if (!qContext.plannerParams.skipAggregatePresent)
@@ -262,7 +259,7 @@ trait  DefaultPlanner {
   }
 
    def materializeAggregate(qContext: QueryContext,
-                                   lp: Aggregate,
+                            lp: Aggregate,
                             forceInProcess: Boolean = false): PlanResult = {
     val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, qContext, forceInProcess)
     val reducer = addAggregator(lp, qContext, toReduceLevel1)
