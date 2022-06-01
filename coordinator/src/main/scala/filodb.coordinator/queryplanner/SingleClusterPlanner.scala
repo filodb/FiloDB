@@ -392,9 +392,10 @@ class SingleClusterPlanner(val dataset: Dataset,
     }) return None
 
     Some(leafInfos.flatMap{ leaf =>
-      val colFilterLabels = leaf.filters.map(_.column)
-      val useTargetSchema = leaf.targetSchemaLabels.isDefined &&
-        leaf.targetSchemaLabels.get.toSet.subsetOf(colFilterLabels)
+      val useTargetSchema = leaf.targetSchemaLabels.isDefined && {
+        val equalColFilterLabels = leaf.filters.filter(_.filter.isInstanceOf[Filter.Equals]).map(_.column)
+        leaf.targetSchemaLabels.get.toSet.subsetOf(equalColFilterLabels)
+      }
       shardsFromFilters(leaf.filters.toSeq, qContext, useTargetSchema)
     }.toSet)
   }

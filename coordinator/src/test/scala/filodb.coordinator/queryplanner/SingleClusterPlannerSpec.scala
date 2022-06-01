@@ -474,7 +474,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       // ============== BEGIN BINARY JOIN TESTS ==================
 
       // Binary join; same shards, join key is ts superset. Should pushdown.
-      ("""foo{job="baz"} + on(job, app) bar{job="baz"}""",
+      ("""foo{job="baz"} + on(job,app) bar{job="baz"}""",
         """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-284958332],raw)
           |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-284958332],raw)
           |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
@@ -682,6 +682,30 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=23, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bak)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2037240425],raw)
           |--T~VectorFunctionMapper(funcParams=List())
           |---E~ScalarFixedDoubleExec(params = RangeParams(20000,100,30000), value = 0.0) on InProcessPlanDispatcher(filodb.core.query.EmptyQueryConfig$@6749fe50)""".stripMargin),
+      // Should not pushdown with regex when some target-schema cols are missing from `on` clause.
+      ("""foo{job="baz",app=~"abc|123"} + on(job) bar{job="baz",app=~"abc|123"}""",
+        """E~BinaryJoinExec(binaryOp=ADD, on=List(job), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1629736397],raw)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(app,EqualsRegex(abc|123)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1629736397],raw)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(app,EqualsRegex(abc|123)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1629736397],raw)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(app,EqualsRegex(abc|123)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1629736397],raw)
+          |-T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(app,EqualsRegex(abc|123)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1629736397],raw)""".stripMargin),
+      // Should pushdown with regex when all target-schema cols are given in `on` clause.
+      ("""foo{job="baz",app=~"abc|123"} + on(job,app) bar{job="baz",app=~"abc|123"}""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-840432554],raw)
+          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-840432554],raw)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(app,EqualsRegex(abc|123)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None))
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(app,EqualsRegex(abc|123)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None))
+          |-E~BinaryJoinExec(binaryOp=ADD, on=List(job, app), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-840432554],raw)
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(app,EqualsRegex(abc|123)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None))
+          |--T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=17, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(baz)), ColumnFilter(app,EqualsRegex(abc|123)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None))""".stripMargin),
       // Should only pushdown bottom / inner-most join.
       ("""(
          |  (
@@ -881,6 +905,29 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           |----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job, app))
           |-----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None))""".stripMargin),
+      // Should pushdown with regex when all target-schema cols are given in `by` clause.
+      ("""sum(foo{job="bar",app=~"abc|def"}) by (job,app)""",
+        """E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1645725393],raw)
+          |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
+          |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1645725393],raw)
+          |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job, app))
+          |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|def)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None))
+          |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
+          |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1645725393],raw)
+          |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job, app))
+          |----T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|def)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None))""".stripMargin),
+      // Should not pushdown with regex when some target-schema cols are missing from `by` clause.
+      ("""sum(foo{job="bar",app=~"abc|def"}) by (app)""",
+        """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(20000,100,30000))
+          |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-729670835],raw)
+          |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(app))
+          |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|def)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-729670835],raw)
+          |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(app))
+          |---T~PeriodicSamplesMapper(start=20000000, step=100000, end=30000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(19700000,30000000), filters=List(ColumnFilter(job,Equals(bar)), ColumnFilter(app,EqualsRegex(abc|def)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-729670835],raw)""".stripMargin),
 
       // ============== BEGIN COMPOUND TESTS ==================
 
