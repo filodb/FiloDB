@@ -298,7 +298,7 @@ object CliMain extends FilodbClusterNode {
         val planner = new SingleClusterPlanner(dataset, Schemas.global,
           mapperRef, earliestRetainedTimestampFn = 0, queryConfig, "raw",
           StaticSpreadProvider(SpreadChange(0, args.spread())),
-          targetSchemaProvider=StaticTargetSchemaProvider(args.targetschema.getOrElse(List())))
+          _targetSchemaProvider=StaticTargetSchemaProvider(Some(args.targetschema.getOrElse(List()))))
         println(FindShardFormatStr.format("Shards", "Query"))
         args.queries().foreach(query => {
           val lp = Parser.queryToLogicalPlan(query, 100, 1)
