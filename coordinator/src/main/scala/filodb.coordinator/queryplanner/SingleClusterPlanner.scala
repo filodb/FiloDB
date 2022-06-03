@@ -362,26 +362,26 @@ class SingleClusterPlanner(val dataset: Dataset,
                                  qContext: QueryContext): Option[Set[Int]] = {
 
     case class LeafInfo(lp: LogicalPlan,
-                        filters: Set[ColumnFilter],
+                        renamedFilters: Seq[ColumnFilter],
                         targetSchemaLabels: Option[Seq[String]])
 
     // construct a LeafInfo for each leaf...
     val tsp = targetSchemaProvider(qContext)
     val leafInfos = new ArrayBuffer[LeafInfo]()
     for (leafPlan <- findLeafLogicalPlans(lp)) {
-      val filters = getColumnFilterGroup(leafPlan)
+      val filters = getColumnFilterGroup(leafPlan).map(_.toSeq)
       assert(filters.size == 1, s"expected leaf plan to yield single filter group, but got ${filters.size}")
       leafPlan match {
         case rs: RawSeries =>
           // Get time params from the RangeSelector, and use them to identify a TargetSchemaChanges.
           val tsLabels: Option[Seq[String]] = {
-            val tsFunc = tsp.targetSchemaFunc(filters.head.toSeq)
+            val tsFunc = tsp.targetSchemaFunc(filters.head)
             rs.rangeSelector match {
               case is: IntervalSelector => findTargetSchema(tsFunc, is.from, is.to).map(_.schema)
               case _ => None
             }
           }
-          leafInfos.append(LeafInfo(leafPlan, filters.head, tsLabels))
+          leafInfos.append(LeafInfo(leafPlan, renameMetricFilter(filters.head), tsLabels))
         // Do nothing; not pulling data from any shards.
         case sc: ScalarPlan => {}
         // Note!! If an unrecognized plan type is encountered, this just pessimistically returns None.
@@ -391,15 +391,15 @@ class SingleClusterPlanner(val dataset: Dataset,
 
     // if we can't extract shards from all filters, return an empty result
     if (!leafInfos.forall{ leaf =>
-      canGetShardsFromFilters(leaf.filters.toSeq, qContext)
+      canGetShardsFromFilters(leaf.renamedFilters, qContext)
     }) return None
 
     Some(leafInfos.flatMap{ leaf =>
       val useTargetSchema = leaf.targetSchemaLabels.isDefined && {
-        val equalColFilterLabels = leaf.filters.filter(_.filter.isInstanceOf[Filter.Equals]).map(_.column)
-        leaf.targetSchemaLabels.get.toSet.subsetOf(equalColFilterLabels)
+        val equalColFilterLabels = leaf.renamedFilters.filter(_.filter.isInstanceOf[Filter.Equals]).map(_.column)
+        leaf.targetSchemaLabels.get.toSet.subsetOf(equalColFilterLabels.toSet)
       }
-      shardsFromFilters(leaf.filters.toSeq, qContext, useTargetSchema)
+      shardsFromFilters(leaf.renamedFilters, qContext, useTargetSchema)
     }.toSet)
   }
 
