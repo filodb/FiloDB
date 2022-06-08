@@ -83,14 +83,16 @@ object SingleClusterPlanner {
           case IntervalSelector(fromMs, toMs) => Some((fromMs, toMs))
           case _ => None
         }
-        val targetSchemaOpt = rangeSelectorOpt.map{ case (fromMs, toMs) =>
+        val targetSchemaOpt = if (rangeSelectorOpt.isDefined) {
+          val (fromMs, toMs) = rangeSelectorOpt.get
           val tsChanges = tsp.targetSchemaFunc(rs.filters)
           findTargetSchema(tsChanges, fromMs, toMs).map(_.schema)
-        }
+        } else None
+
         if (targetSchemaOpt.isDefined) {
           // make this assertion since the non-leaf case's logic requires it
           assert(targetSchemaOpt.get.size > 0, "expected target schema labels, but none exist")
-          targetSchemaOpt.get
+          targetSchemaOpt
         } else None
       // Non-leaf plans are processed above; no non-leaf scalar will reach here.
       // Return empty Seq to indicate this is a leaf-level scalar.
@@ -117,7 +119,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                            val queryConfig: QueryConfig,
                            clusterName: String,
                            spreadProvider: SpreadProvider = StaticSpreadProvider(),
-                           targetSchemaProvider: TargetSchemaProvider = StaticTargetSchemaProvider(),
+                           _targetSchemaProvider: TargetSchemaProvider = StaticTargetSchemaProvider(),
                            timeSplitEnabled: Boolean = false,
                            minTimeRangeForSplitMs: => Long = 1.day.toMillis,
                            splitSizeMs: => Long = 1.day.toMillis)
@@ -125,6 +127,9 @@ class SingleClusterPlanner(val dataset: Dataset,
   override val dsOptions: DatasetOptions = schemas.part.options
   private val shardColumns = dsOptions.shardKeyColumns.sorted
   private val dsRef = dataset.ref
+  private def targetSchemaProvider(qContext: QueryContext): TargetSchemaProvider = {
+   qContext.plannerParams.targetSchemaProviderOverride.getOrElse(_targetSchemaProvider)
+  }
 
   import SingleClusterPlanner._
 
@@ -266,9 +271,7 @@ class SingleClusterPlanner(val dataset: Dataset,
         .getOrElse(throw new BadQueryException(s"Could not find metric value"))
       val shardValues = shardVals.filterNot(_._1 == dsOptions.metricColumn).map(_._2)
       logger.debug(s"For shardColumns $shardColumns, extracted metric $metric and shard values $shardValues")
-      val targetSchemaChange = qContext.plannerParams.targetSchemaProvider
-        .getOrElse(targetSchemaProvider)
-        .targetSchemaFunc(filters)
+      val targetSchemaChange = targetSchemaProvider(qContext).targetSchemaFunc(filters)
       val targetSchema = if (targetSchemaChange.nonEmpty) targetSchemaChange.last.schema else Seq.empty
       val shardHash = RecordBuilder.shardKeyHash(shardValues, dsOptions.metricColumn, metric, targetSchema)
       if(useTargetSchemaForShards) {
@@ -359,26 +362,26 @@ class SingleClusterPlanner(val dataset: Dataset,
                                  qContext: QueryContext): Option[Set[Int]] = {
 
     case class LeafInfo(lp: LogicalPlan,
-                        filters: Set[ColumnFilter],
+                        renamedFilters: Seq[ColumnFilter],
                         targetSchemaLabels: Option[Seq[String]])
 
     // construct a LeafInfo for each leaf...
-    val targetSchemaProvider = qContext.plannerParams.targetSchemaProvider
+    val tsp = targetSchemaProvider(qContext)
     val leafInfos = new ArrayBuffer[LeafInfo]()
     for (leafPlan <- findLeafLogicalPlans(lp)) {
-      val filters = getColumnFilterGroup(leafPlan)
+      val filters = getColumnFilterGroup(leafPlan).map(_.toSeq)
       assert(filters.size == 1, s"expected leaf plan to yield single filter group, but got ${filters.size}")
       leafPlan match {
         case rs: RawSeries =>
           // Get time params from the RangeSelector, and use them to identify a TargetSchemaChanges.
-          val tsLabels: Option[Seq[String]] = if (targetSchemaProvider.isDefined) {
-            val tsFunc = targetSchemaProvider.get.targetSchemaFunc(filters.head.toSeq)
+          val tsLabels: Option[Seq[String]] = {
+            val tsFunc = tsp.targetSchemaFunc(filters.head)
             rs.rangeSelector match {
               case is: IntervalSelector => findTargetSchema(tsFunc, is.from, is.to).map(_.schema)
               case _ => None
             }
-          } else None
-          leafInfos.append(LeafInfo(leafPlan, filters.head, tsLabels))
+          }
+          leafInfos.append(LeafInfo(leafPlan, renameMetricFilter(filters.head), tsLabels))
         // Do nothing; not pulling data from any shards.
         case sc: ScalarPlan => {}
         // Note!! If an unrecognized plan type is encountered, this just pessimistically returns None.
@@ -388,15 +391,15 @@ class SingleClusterPlanner(val dataset: Dataset,
 
     // if we can't extract shards from all filters, return an empty result
     if (!leafInfos.forall{ leaf =>
-      canGetShardsFromFilters(leaf.filters.toSeq, qContext)
+      canGetShardsFromFilters(leaf.renamedFilters, qContext)
     }) return None
 
     Some(leafInfos.flatMap{ leaf =>
       val useTargetSchema = leaf.targetSchemaLabels.isDefined && {
-        val equalColFilterLabels = leaf.filters.filter(_.filter.isInstanceOf[Filter.Equals]).map(_.column)
-        leaf.targetSchemaLabels.get.toSet.subsetOf(equalColFilterLabels)
+        val equalColFilterLabels = leaf.renamedFilters.filter(_.filter.isInstanceOf[Filter.Equals]).map(_.column)
+        leaf.targetSchemaLabels.get.toSet.subsetOf(equalColFilterLabels.toSet)
       }
-      shardsFromFilters(leaf.filters.toSeq, qContext, useTargetSchema)
+      shardsFromFilters(leaf.renamedFilters, qContext, useTargetSchema)
     }.toSet)
   }
 
@@ -441,13 +444,12 @@ class SingleClusterPlanner(val dataset: Dataset,
         //   discoverable, equal, and preserved by join keys
         val lhsShards = helper(bj.lhs)
         val rhsShards = helper(bj.rhs)
-        val canPushdown = qContext.plannerParams.targetSchemaProvider.isDefined &&
-                          lhsShards != None && rhsShards != None &&
+        val canPushdown = lhsShards != None && rhsShards != None &&
                           // either the shard groups are equal, or either of lhs/rhs includes only scalars.
                           (lhsShards == rhsShards || lhsShards.get.isEmpty || rhsShards.get.isEmpty) &&
                           {
                             val targetSchemaLabels =
-                              getUniversalTargetSchemaLabels(bj, qContext.plannerParams.targetSchemaProvider.get)
+                              getUniversalTargetSchemaLabels(bj, targetSchemaProvider(qContext))
                             targetSchemaLabels.isDefined &&
                               targetSchemaLabels.get.toSet.subsetOf(bj.on.toSet)
                           }
@@ -456,13 +458,12 @@ class SingleClusterPlanner(val dataset: Dataset,
       case agg: Aggregate =>
         // target schema labels for all leaves must be discoverable, equal, and preserved by join keys
         val shards = helper(agg.vectors)
-        val canPushdown = qContext.plannerParams.targetSchemaProvider.isDefined &&
-                          shards != None &&
+        val canPushdown = shards != None &&
                           agg.clauseOpt.isDefined &&
                           agg.clauseOpt.get.clauseType == AggregateClause.ClauseType.By &&
                           {
                             val targetSchemaLabels =
-                              getUniversalTargetSchemaLabels(agg, qContext.plannerParams.targetSchemaProvider.get)
+                              getUniversalTargetSchemaLabels(agg, targetSchemaProvider(qContext))
                             targetSchemaLabels.isDefined &&
                             {
                               val byLabels = agg.clauseOpt.get.labels
@@ -790,9 +791,8 @@ class SingleClusterPlanner(val dataset: Dataset,
     val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))
     val spreadChanges = spreadProvToUse.spreadFunc(renamedFilters)
 
-    val targetSchemaChanges = qContext.plannerParams.targetSchemaProvider
-      .getOrElse(targetSchemaProvider)
-      .targetSchemaFunc(renamedFilters)
+    val targetSchemaChanges = targetSchemaProvider(qContext).targetSchemaFunc(renamedFilters)
+
     val rangeSelectorWithOffset = lp.rangeSelector match {
       case IntervalSelector(fromMs, toMs) => IntervalSelector(fromMs - offsetMillis - lp.lookbackMs.getOrElse(
                                              queryConfig.staleSampleAfterMs), toMs - offsetMillis)
@@ -916,9 +916,8 @@ class SingleClusterPlanner(val dataset: Dataset,
     // NOTE: _type_ filter support currently isn't there in series keys queries
     val (renamedFilters, _) = extractSchemaFilter(renameMetricFilter(lp.filters))
 
-    val targetSchemaChanges = qContext.plannerParams.targetSchemaProvider
-      .getOrElse(targetSchemaProvider)
-      .targetSchemaFunc(renamedFilters)
+    val targetSchemaChanges = targetSchemaProvider(qContext).targetSchemaFunc(renamedFilters)
+
     // Change in Target Schema in query window, do not use target schema to find query shards
     val tsChangeExists = isTargetSchemaChanging(targetSchemaChanges, lp.startMs, lp.endMs)
     val targetSchemaOpt = findTargetSchema(targetSchemaChanges, lp.startMs, lp.endMs)
