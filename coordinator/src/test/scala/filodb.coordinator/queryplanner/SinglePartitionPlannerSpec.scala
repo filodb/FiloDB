@@ -82,8 +82,7 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
   val plannerSelector = (metricName: String) => { if (metricName.equals("rr1")) "rules1"
   else if (metricName.equals("rr2")) "rules2" else "local" }
 
-  val engine = new SinglePartitionPlanner(planners, "local", plannerSelector,
-                       "_metric_", queryConfig)
+  val engine = new SinglePartitionPlanner(planners, "local", plannerSelector, dataset, queryConfig)
 
   it("should generate Exec plan for simple query") {
     val lp = Parser.queryToLogicalPlan("test{job = \"app\"}", 1000, 1000)
@@ -168,8 +167,7 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     val localPlanner = new SingleClusterPlanner(
       dataset, schemas, localMapper, earliestRetainedTimestampFn = 0, queryConfig, "raw-temp")
     val planners = Map("raw-temp" -> localPlanner, "rules1" -> rrPlanner1, "rules2" -> rrPlanner2)
-    val engine = new SinglePartitionPlanner(planners, "raw-temp", plannerSelector,
-                         "_metric_", queryConfig)
+    val engine = new SinglePartitionPlanner(planners, "raw-temp", plannerSelector, dataset, queryConfig)
     val lp = TsCardinalities(Seq("a", "b"), 2)
 
     // Plan should just contain a single root TsCardReduceExec and its TsCardExec children.
