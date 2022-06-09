@@ -5,9 +5,8 @@ import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import filodb.core.query.QueryContext
-import filodb.core.store.ChunkSource
 import filodb.query.{LogicalPlan, QueryResponse}
-import filodb.query.exec.ExecPlan
+import filodb.query.exec.{ExecPlan, UnsupportedChunkSource}
 
 /**
   * Abstraction for Query Planning. QueryPlanners can be composed using decorator pattern to add capabilities.
@@ -27,15 +26,15 @@ trait QueryPlanner {
     * Trigger orchestration of the ExecPlan. It sends the ExecPlan to the destination where it will be executed.
     */
   def dispatchExecPlan(execPlan: ExecPlan,
-                       parentSpan: kamon.trace.Span,
-                       source: ChunkSource)
+                       parentSpan: kamon.trace.Span)
                       (implicit sched: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since
     // kamon uses thread-locals.
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(parentSpan, false) {
-      execPlan.dispatcher.dispatch(execPlan, source)
+      // UnsupportedChunkSource because leaf plans shouldn't execute in-process from a planner method call.
+      execPlan.dispatcher.dispatch(execPlan, UnsupportedChunkSource())
     }
   }
 }
