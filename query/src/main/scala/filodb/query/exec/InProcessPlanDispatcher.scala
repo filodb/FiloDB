@@ -16,11 +16,8 @@ import filodb.core.store._
 import filodb.query.QueryResponse
 
 /**
-  * Dispatcher which will make a No-Op style call to ExecPlan#excecute().
-  * Goal is that Non-Leaf plans can be executed locally in JVM and make network
-  * calls only for children.
+  * Executes an ExecPlan on the current thread.
   */
-
   case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatcher {
 
   val clusterName = InetAddress.getLocalHost().getHostName()

@@ -144,7 +144,8 @@ trait ExecPlan extends QueryCommand {
       FiloSchedulers.assertThreadName(QuerySchedName)
       val resultTask = {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
-          val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult(querySession, source))
+          val paramRangeVector: Seq[Observable[ScalarRangeVector]] =
+                transf.funcParams.map(_.getResult(querySession, source))
           val resultSchema : ResultSchema = acc._2
           if (resultSchema == ResultSchema.empty && (!transf.canHandleEmptySchemas)) {
             // It is possible a null schema is returned (due to no time series). In that case just skip the

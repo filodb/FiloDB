@@ -1,12 +1,15 @@
 package filodb.query.exec
 
 import java.util.concurrent.TimeUnit
+
 import scala.concurrent.duration.FiniteDuration
+
 import akka.actor.ActorRef
 import akka.pattern.ask
 import akka.util.Timeout
 import monix.eval.Task
 import monix.execution.Scheduler
+
 import filodb.core.QueryTimeoutException
 import filodb.core.store.ChunkSource
 import filodb.query.QueryResponse
@@ -29,6 +32,7 @@ trait PlanDispatcher extends java.io.Serializable {
 case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends PlanDispatcher {
 
   def dispatch(plan: ExecPlan, source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
+    // "source" is unused (the param exists to support InProcessDispatcher).
     val queryTimeElapsed = System.currentTimeMillis() - plan.queryContext.submitTime
     val remainingTime = plan.queryContext.plannerParams.queryTimeoutMillis - queryTimeElapsed
     // Don't send if time left is very small
