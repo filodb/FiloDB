@@ -225,6 +225,12 @@ trait ExecPlan extends QueryCommand {
             val numDataBytes = builder.allContainers.map(_.numBytes).sum
             val numKeyBytes = r.foldLeft(0)(_ + _.key.keySize)
             val resultSize = numDataBytes + numKeyBytes
+            if (resultSize > queryContext.plannerParams.resultByteLimit) {
+              throw new BadQueryException(
+                s"Maximum result size exceeded. Try to apply more filters or reduce the time range.\n" +
+                s"result size: $resultSize bytes\n" +
+                s"maximum size: ${queryContext.plannerParams.resultByteLimit} bytes")
+            }
             SerializedRangeVector.queryResultBytes.record(resultSize)
             querySession.queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
             span.mark(s"resultBytes=$resultSize")
