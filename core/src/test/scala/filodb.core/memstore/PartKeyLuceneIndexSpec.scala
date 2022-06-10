@@ -1,18 +1,6 @@
 package filodb.core.memstore
 
-import java.io.{File, FileFilter}
-import java.nio.file.{Files, StandardOpenOption}
-
-import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.duration._
-import scala.util.Random
-
 import com.googlecode.javaewah.IntIterator
-import org.apache.lucene.util.BytesRef
-import org.scalatest.BeforeAndAfter
-import org.scalatest.funspec.AnyFunSpec
-import org.scalatest.matchers.should.Matchers
-
 import filodb.core._
 import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
 import filodb.core.metadata.Schemas
@@ -20,6 +8,16 @@ import filodb.core.query.{ColumnFilter, Filter}
 import filodb.memory.format.UnsafeUtils.ZeroPointer
 import filodb.memory.format.UTF8Wrapper
 import filodb.memory.format.ZeroCopyUTF8String._
+import org.apache.lucene.util.BytesRef
+import org.scalatest.BeforeAndAfter
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
+
+import java.io.{File, FileFilter}
+import java.nio.file.{Files, StandardOpenOption}
+import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.duration._
+import scala.util.Random
 
 class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfter {
   import Filter._
@@ -27,6 +25,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
   val keyIndex = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis,
     Some(new java.io.File(System.getProperty("java.io.tmpdir"), "part-key-lucene-index")))
+
   val partBuilder = new RecordBuilder(TestData.nativeMem)
 
   def partKeyOnHeap(partKeySchema: RecordSchema,
@@ -434,6 +433,68 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
   }
 
+  // Testcases to test additionalFacet config
+
+  it("should be able to fetch label values efficiently using additonal facets") {
+    val facetIndex = new PartKeyLuceneIndex(dataset7.ref, dataset7.schema.partition,
+      true, true, 0, 1.hour.toMillis)
+    val addedKeys = partKeyFromRecords(dataset7, records(dataset7, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val start = Math.abs(Random.nextLong())
+      facetIndex.addPartKey(partKeyOnHeap(dataset7.partKeySchema, ZeroPointer, addr), i, start)()
+    }
+    facetIndex.refreshReadersBlocking()
+    val filters1 = Seq.empty
+
+    val partNums1 = facetIndex.partIdsFromFilters(filters1, 0, Long.MaxValue)
+    partNums1.length shouldEqual 10
+
+    val labelValues1 = facetIndex.labelValuesEfficient(filters1, 0, Long.MaxValue, "Actor2Code")
+    labelValues1.length shouldEqual 7
+
+    val labelValues2 = facetIndex.labelValuesEfficient(filters1, 0, Long.MaxValue, "Actor2Code-Actor2Name")
+    labelValues2.length shouldEqual 8
+
+    val labelValues3 = facetIndex.labelValuesEfficient(filters1, 0, Long.MaxValue, "Actor2Name-Actor2Code")
+    labelValues3.length shouldEqual 8
+
+    labelValues1.sorted.toSet shouldEqual labelValues2.map(_.split("\u03C0")(0)).sorted.toSet
+    labelValues1.sorted.toSet shouldEqual labelValues3.map(_.split("\u03C0")(1)).sorted.toSet
+
+    val filters2 = Seq(ColumnFilter("Actor2Code", Equals("GOV")))
+
+    val labelValues12 = facetIndex.labelValuesEfficient(filters2, 0, Long.MaxValue, "Actor2Name")
+    labelValues12.length shouldEqual 2
+
+    val labelValues22 = facetIndex.labelValuesEfficient(filters2, 0, Long.MaxValue, "Actor2Code-Actor2Name")
+    labelValues22.length shouldEqual 2
+
+    val labelValues32 = facetIndex.labelValuesEfficient(filters2, 0, Long.MaxValue, "Actor2Name-Actor2Code")
+    labelValues32.length shouldEqual 2
+
+    labelValues12.sorted shouldEqual labelValues22.map(_.split("\u03C0")(1)).sorted
+    labelValues12.sorted shouldEqual labelValues32.map(_.split("\u03C0")(0)).sorted
+
+  }
+
+  it("should be able to do regular operations when faceting is disabled and additional faceting in dataset") {
+    val facetIndex = new PartKeyLuceneIndex(dataset7.ref, dataset7.schema.partition,
+      false, true, 0, 1.hour.toMillis)
+    val addedKeys = partKeyFromRecords(dataset7, records(dataset7, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val start = Math.abs(Random.nextLong())
+      facetIndex.addPartKey(partKeyOnHeap(dataset7.partKeySchema, ZeroPointer, addr), i, start)()
+    }
+    facetIndex.refreshReadersBlocking()
+    val filters1 = Seq.empty
+
+    val partNums1 = facetIndex.partIdsFromFilters(filters1, 0, Long.MaxValue)
+    partNums1.length shouldEqual 10
+
+    the [IllegalArgumentException] thrownBy {
+      facetIndex.labelValuesEfficient(filters1, 0, Long.MaxValue, "Actor2Code-Actor2Name")
+    } should have message "requirement failed: Faceting not enabled for label Actor2Code-Actor2Name; labelValuesEfficient should not have been called"
+  }
 
   it("must clean the input directory for Index state apart from Synced and Refreshing") {
     val events = ArrayBuffer.empty[(IndexState.Value, Long)]
