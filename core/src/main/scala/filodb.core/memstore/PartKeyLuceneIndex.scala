@@ -579,22 +579,23 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     luceneDocument.get().document
   }
 
+  private final val emptyStr = ""
   // Multi-column facets to be created on "partition-schema" columns
   private def createMultiColumnFacets(partKeyOnHeapBytes: Array[Byte], partKeyBytesRefOffset: Int): Unit = {
     schema.options.multiColumnFacets.foreach(facetCols => {
       facetCols match {
         case (name, cols) => {
-          val concatFacetValue = cols.flatMap { col =>
-            val (columnInfo, pos) = schema.columnIdxLookup(col)
-            if (columnInfo.columnType == StringColumn) {
-              val base = partKeyOnHeapBytes
-              val offset = bytesRefToUnsafeOffset(partKeyBytesRefOffset)
-              val strOffset = schema.binSchema.blobOffset(base, offset, pos)
-              val numBytes = schema.binSchema.blobNumBytes(base, offset, pos)
-              Seq(new String(base, strOffset.toInt - UnsafeUtils.arayOffset,
-                numBytes, StandardCharsets.UTF_8))
-            } else {
-              Seq.empty
+          val concatFacetValue = cols.map { col =>
+            val colInfoOpt = schema.columnIdxLookup.get(col)
+            colInfoOpt match {
+              case Some((columnInfo, pos)) if columnInfo.columnType == StringColumn =>
+                val base = partKeyOnHeapBytes
+                val offset = bytesRefToUnsafeOffset(partKeyBytesRefOffset)
+                val strOffset = schema.binSchema.blobOffset(base, offset, pos)
+                val numBytes = schema.binSchema.blobNumBytes(base, offset, pos)
+                new String(base, strOffset.toInt - UnsafeUtils.arayOffset,
+                  numBytes, StandardCharsets.UTF_8)
+              case _ => emptyStr
             }
           }.mkString("\u03C0")
           luceneDocument.get().addFacet(name, concatFacetValue)
