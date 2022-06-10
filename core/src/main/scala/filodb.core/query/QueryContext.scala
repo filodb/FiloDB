@@ -2,8 +2,10 @@ package filodb.core.query
 
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
+
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration._
+
 import filodb.core.{GlobalConfig, SpreadChange, SpreadProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.memory.EvictionLock
 
