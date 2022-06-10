@@ -26,7 +26,7 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
 
   require(children.nonEmpty)
 
-  override def enforceLimit: Boolean = false
+  override def enforceSampleLimit: Boolean = false
 
   /**
    * Args to use for the ExecPlan for printTree purposes only.
@@ -304,7 +304,7 @@ final case class PartKeysExec(queryContext: QueryContext,
                               start: Long,
                               end: Long) extends LeafExecPlan {
 
-  override def enforceLimit: Boolean = false
+  override def enforceSampleLimit: Boolean = false
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
@@ -335,7 +335,7 @@ final case class LabelValuesExec(queryContext: QueryContext,
                                  startMs: Long,
                                  endMs: Long) extends LeafExecPlan {
 
-  override def enforceLimit: Boolean = false
+  override def enforceSampleLimit: Boolean = false
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
@@ -393,7 +393,7 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
                                  startMs: Long,
                                  endMs: Long) extends LeafExecPlan with LabelCardinalityExecPlan {
 
-  override def enforceLimit: Boolean = false
+  override def enforceSampleLimit: Boolean = false
 
   // scalastyle:off
   def doExecute(source: ChunkSource,
@@ -537,7 +537,7 @@ final case class TsCardExec(queryContext: QueryContext,
     s"numGroupByFields ($numGroupByFields) must indicate at least as many " +
     s"fields as shardKeyPrefix.size (${shardKeyPrefix.size})")
 
-  override def enforceLimit: Boolean = false
+  override def enforceSampleLimit: Boolean = false
 
   // scalastyle:off method.length
   def doExecute(source: ChunkSource,
@@ -578,7 +578,7 @@ final case class LabelNamesExec(queryContext: QueryContext,
                                  startMs: Long,
                                  endMs: Long) extends LeafExecPlan {
 
-  override def enforceLimit: Boolean = false
+  override def enforceSampleLimit: Boolean = false
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)

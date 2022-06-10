@@ -50,7 +50,7 @@ trait ExecPlan extends QueryCommand {
     * Take first n (limit) elements if the flag is false. Applicable for Metadata Queries
     * It is not in QueryContext since for some queries it should be false
     */
-  def enforceLimit: Boolean = true
+  def enforceSampleLimit: Boolean = true
 
   /**
     * Child execution plans representing sub-queries
@@ -195,7 +195,7 @@ trait ExecPlan extends QueryCommand {
             case srv: SerializableRangeVector =>
               numResultSamples += srv.numRowsSerialized
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-              if (enforceLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
+              if (enforceSampleLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
                 throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
                   sampleLimit} samples.Try applying more filters or reduce time range.")
               srv
@@ -209,7 +209,7 @@ trait ExecPlan extends QueryCommand {
 
               numResultSamples += srv.numRowsSerialized
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-              if (enforceLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
+              if (enforceSampleLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
                 throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
                   sampleLimit} samples. Try applying more filters or reduce time range.")
               srv
