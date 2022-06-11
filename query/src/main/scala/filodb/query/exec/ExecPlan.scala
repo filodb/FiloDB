@@ -222,17 +222,18 @@ trait ExecPlan extends QueryCommand {
                   MeasurementUnit.time.milliseconds)
               .withTag("plan", getClass.getSimpleName)
               .record(Math.max(0, System.currentTimeMillis - startExecute))
+            // Does not include sizes of RV's that arrived at this node as SerializableRangeVectors.
             val numDataBytes = builder.allContainers.map(_.numBytes).sum
             val numKeyBytes = r.foldLeft(0)(_ + _.key.keySize)
             val resultSize = numDataBytes + numKeyBytes
-            if (resultSize > queryContext.plannerParams.resultByteLimit) {
+            SerializedRangeVector.queryResultBytes.record(resultSize)
+            // Includes sizes of all RV's in this subtree.
+            val totalSize = querySession.queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
+            if (totalSize > queryContext.plannerParams.resultByteLimit) {
               throw new BadQueryException(
                 s"Maximum result size exceeded. Try to apply more filters or reduce the time range.\n" +
-                s"result size: $resultSize bytes\n" +
                 s"maximum size: ${queryContext.plannerParams.resultByteLimit} bytes")
             }
-            SerializedRangeVector.queryResultBytes.record(resultSize)
-            querySession.queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
             span.mark(s"resultBytes=$resultSize")
             span.mark(s"resultSamples=$numResultSamples")
             span.mark(s"numSrv=${r.size}")
