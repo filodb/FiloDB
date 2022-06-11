@@ -231,8 +231,8 @@ trait ExecPlan extends QueryCommand {
             val totalSize = querySession.queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
             if (totalSize > queryContext.plannerParams.resultByteLimit) {
               throw new BadQueryException(
-                s"Maximum result size exceeded. Try to apply more filters or reduce the time range.\n" +
-                s"maximum size: ${queryContext.plannerParams.resultByteLimit} bytes")
+                s"Maximum result size exceeded (${queryContext.plannerParams.resultByteLimit} bytes). " +
+                s"Try to apply more filters or reduce the time range.")
             }
             span.mark(s"resultBytes=$resultSize")
             span.mark(s"resultSamples=$numResultSamples")
