@@ -37,7 +37,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              acceptDuplicateSamples: Boolean,
                              // approx data resolution, used for estimating the size of data to be scanned for
                              // answering queries, specified in milliseconds
-                             estimatedIngestResolutionMillis: Int) {
+                             estimatedIngestResolutionMillis: Int,
+                             housekeepingInterval: FiniteDuration) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
@@ -98,6 +99,7 @@ object StoreConfig {
                                            |accept-duplicate-samples = false
                                            |time-aligned-chunks-enabled = false
                                            |ingest-resolution-millis = 60000
+                                           |housekeeping-interval = 6 hours
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
   def apply(storeConfig: Config): StoreConfig = {
@@ -137,7 +139,8 @@ object StoreConfig {
                 config.getMemorySize("max-data-per-shard-query").toBytes,
                 config.getBoolean("metering-enabled"),
                 config.getBoolean("accept-duplicate-samples"),
-                config.getInt("ingest-resolution-millis"))
+                config.getInt("ingest-resolution-millis"),
+                config.as[FiniteDuration]("housekeeping-interval"))
   }
 }
 

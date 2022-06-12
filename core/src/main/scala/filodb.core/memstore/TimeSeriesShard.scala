@@ -463,6 +463,12 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private[memstore] val addPartitionsDisabled = AtomicBoolean(false)
 
+  private[memstore] val housekeepingSched = Scheduler.computation(
+    name = "housekeeping",
+    reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in Housekeeping Scheduler", _)))
+
+  private var houseKeepingFuture: CancelableFuture[Unit] = initHousekeeping()
+
   /////// END MEMBER STATE FIELDS ///////////////////
 
   /////// START INNER CLASS DEFINITIONS ///////////////////
@@ -672,6 +678,16 @@ class TimeSeriesShard(val ref: DatasetRef,
         }
       }
     }
+  }
+
+  private def initHousekeeping(): CancelableFuture[Unit] = {
+    logger.info(s"Starting housekeeping for $clusterType cluster of dataset=$ref shard=$shardNum " +
+      s"every ${storeConfig.housekeepingInterval}")
+    Observable.intervalWithFixedDelay(
+      storeConfig.housekeepingInterval,
+      storeConfig.housekeepingInterval).map { _ =>
+      partKeyIndex.refreshReadersBlocking()
+    }.onErrorRestartUnlimited.completedL.runToFuture(housekeepingSched)
   }
   /////// END INIT METHODS ///////////////////
 
