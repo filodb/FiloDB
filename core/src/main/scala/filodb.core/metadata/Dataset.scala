@@ -93,7 +93,8 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
       "ignoreShardKeyColumnSuffixes" ->
         ignoreShardKeyColumnSuffixes.mapValues(_.asJava).asJava,
       "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava,
-      "copyTags" -> copyTags.groupBy(_._2).map { case (k, v) => (k, v.map(_._1).asJava)}.asJava)
+      "copyTags" -> copyTags.groupBy(_._2).map { case (k, v) => (k, v.map(_._1).asJava)}.asJava,
+      "multiColumnFacets" -> multiColumnFacets.mapValues(_.asJava).asJava)
 
     ConfigFactory.parseMap(map.asJava)
   }
@@ -131,7 +132,8 @@ object DatasetOptions {
                    ignoreShardKeyColumnSuffixes =
                      config.as[Map[String, Seq[String]]]("ignoreShardKeyColumnSuffixes"),
                    ignoreTagsOnPartitionKeyHash = config.as[Seq[String]]("ignoreTagsOnPartitionKeyHash"),
-                   copyTags = copyTagsValue)
+                   copyTags = copyTagsValue,
+                   multiColumnFacets = config.as[Map[String, Seq[String]]]("multiColumnFacets"))
   }
 }
 
