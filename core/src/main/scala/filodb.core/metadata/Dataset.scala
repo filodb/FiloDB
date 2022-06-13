@@ -78,7 +78,9 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
                           ignoreShardKeyColumnSuffixes: Map[String, Seq[String]] = Map.empty,
                           ignoreTagsOnPartitionKeyHash: Seq[String] = Nil,
                           // For each key, copy the tag to the value if the value is absent
-                          copyTags: Seq[(String, String)] = Seq.empty) {
+                          copyTags: Seq[(String, String)] = Seq.empty,
+                          // Config to create facets for combination of partSchema columns
+                          multiColumnFacets: Map[String, Seq[String]] = Map.empty) {
   override def toString: String = {
     toConfig.root.render(ConfigRenderOptions.concise)
   }
