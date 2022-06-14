@@ -8,7 +8,7 @@ import monix.execution.Scheduler
 
 import filodb.core.query.QueryContext
 import filodb.query.{LogicalPlan, QueryResponse}
-import filodb.query.exec.ExecPlan
+import filodb.query.exec.{ExecPlan, UnsupportedChunkSource}
 
 /**
   * Abstraction for Query Planning. QueryPlanners can be composed using decorator pattern to add capabilities.
@@ -35,7 +35,8 @@ trait QueryPlanner {
     // kamon uses thread-locals.
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(parentSpan, false) {
-      execPlan.dispatcher.dispatch(execPlan)
+      // UnsupportedChunkSource because leaf plans shouldn't execute in-process from a planner method call.
+      execPlan.dispatcher.dispatch(execPlan, UnsupportedChunkSource())
     }
   }
 }

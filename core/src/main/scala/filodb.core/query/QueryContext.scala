@@ -111,8 +111,14 @@ object QueryContext {
         case ColumnFilter(key, Filter.Equals(filtVal: String))
           if key != optionalShardKey && shardKeyNames.contains(key) => key -> filtVal
       }.toMap
-      val defaultSchema = targetSchemaMap.getOrElse(nonOptShardKeys, Seq.empty)
-      Seq(TargetSchemaChange(schema = targetSchemaMap.getOrElse(shardKeysInQuery, defaultSchema)))
+      val defaultSchema = targetSchemaMap.get(nonOptShardKeys)
+      val schema = targetSchemaMap.get(shardKeysInQuery)
+      val schemaToUse = schema.orElse(defaultSchema)
+      if (schemaToUse.isDefined) {
+        Seq(TargetSchemaChange(schema = schemaToUse.get))
+      } else {
+        Seq.empty
+      }
   }
 
   def mapTargetSchemaFunc(shardKeyNames: java.util.List[String],

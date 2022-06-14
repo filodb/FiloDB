@@ -144,7 +144,8 @@ trait ExecPlan extends QueryCommand {
       FiloSchedulers.assertThreadName(QuerySchedName)
       val resultTask = {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
-          val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult(querySession))
+          val paramRangeVector: Seq[Observable[ScalarRangeVector]] =
+                transf.funcParams.map(_.getResult(querySession, source))
           val resultSchema : ResultSchema = acc._2
           if (resultSchema == ResultSchema.empty && (!transf.canHandleEmptySchemas)) {
             // It is possible a null schema is returned (due to no time series). In that case just skip the
@@ -340,7 +341,8 @@ abstract class LeafExecPlan extends ExecPlan {
   * getResult will get the ScalarRangeVector for the FuncArg
   */
 sealed trait FuncArgs {
-  def getResult(querySession: QuerySession)(implicit sched: Scheduler) : Observable[ScalarRangeVector]
+  def getResult(querySession: QuerySession,
+                source: ChunkSource)(implicit sched: Scheduler) : Observable[ScalarRangeVector]
 }
 
 /**
@@ -348,9 +350,10 @@ sealed trait FuncArgs {
   */
 final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParams) extends FuncArgs {
 
-  override def getResult(querySession: QuerySession)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
+  override def getResult(querySession: QuerySession,
+                         source: ChunkSource)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.fromTask(
-      execPlan.dispatcher.dispatch(execPlan).onErrorHandle { case ex: Throwable =>
+      execPlan.dispatcher.dispatch(execPlan, source).onErrorHandle { case ex: Throwable =>
         QueryError(execPlan.queryContext.queryId, querySession.queryStats, ex)
       }.map {
         case QueryResult(_, _, result, qStats, isPartialResult, partialResultReason)  =>
@@ -382,7 +385,8 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
   * FuncArgs for scalar parameter
   */
 final case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) extends FuncArgs {
-  override def getResult(querySession: QuerySession)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
+  override def getResult(querySession: QuerySession,
+                         source: ChunkSource)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.now(ScalarFixedDouble(timeStepParams, scalar))
   }
 }
@@ -391,7 +395,8 @@ final case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) ext
   * FuncArgs for date and time functions
   */
 final case class TimeFuncArgs(timeStepParams: RangeParams) extends FuncArgs {
-  override def getResult(querySession: QuerySession)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
+  override def getResult(querySession: QuerySession,
+                         source: ChunkSource)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.now(TimeScalar(timeStepParams))
   }
 }
@@ -409,14 +414,14 @@ abstract class NonLeafExecPlan extends ExecPlan {
   // Use-cases include splitting longer range query into multiple smaller range queries.
   def parallelChildTasks: Boolean = true
 
-  private def dispatchRemotePlan(plan: ExecPlan, qSession: QuerySession, span: kamon.trace.Span)
+  private def dispatchRemotePlan(plan: ExecPlan, qSession: QuerySession, span: kamon.trace.Span, source: ChunkSource)
                                 (implicit sched: Scheduler) = {
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since
     // kamon uses thread-locals.
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
-      plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
+      plan.dispatcher.dispatch(plan, source).onErrorHandle { case ex: Throwable =>
         QueryError(queryContext.queryId, qSession.queryStats, ex)
       }
     }
@@ -446,7 +451,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
     val childTasks = Observable.fromIterable(children.zipWithIndex)
                                .mapParallelUnordered(parallelism) { case (plan, i) =>
-                                 val task = dispatchRemotePlan(plan, querySession, span).map((_, i))
+                                 val task = dispatchRemotePlan(plan, querySession, span, source).map((_, i))
                                  span.mark(s"child-plan-$i-dispatched-${plan.getClass.getSimpleName}")
                                  task
                                }

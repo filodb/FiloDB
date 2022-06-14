@@ -12,6 +12,7 @@ import org.scalatest.exceptions.TestFailedException
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
+import filodb.core.store.ChunkSource
 import filodb.memory.format.ZeroCopyUTF8String
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
@@ -36,7 +37,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
   val rand = new Random()
 
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)
+    override def dispatch(plan: ExecPlan, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
 
     override def clusterName: String = ???

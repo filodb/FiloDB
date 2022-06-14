@@ -15,7 +15,7 @@ import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
 import filodb.core.query._
-import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
+import filodb.core.store.{ChunkSource, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
 import filodb.query.exec.TsCardExec.CardCounts
@@ -97,7 +97,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   }
 
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)
+    override def dispatch(plan: ExecPlan, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = plan.execute(memStore,
       QuerySession(QueryContext(), queryConfig))(sched)
 
@@ -109,7 +109,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   val executeDispatcher = new PlanDispatcher {
     override def isLocalCall: Boolean = ???
     override def clusterName: String = ???
-    override def dispatch(plan: ExecPlan)
+    override def dispatch(plan: ExecPlan, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = {
       plan.execute(memStore, querySession)(sched)
     }
