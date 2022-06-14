@@ -58,6 +58,7 @@ final case class DataSchema private(name: String,
 final case class PartitionSchema(columns: Seq[Column],
                                  predefinedKeys: Seq[String],
                                  options: DatasetOptions) {
+  val columnIdxLookup = columns.zipWithIndex.map { case(col, idx) => col.name -> Tuple2(col, idx) }.toMap
   val binSchema = new RecordSchema(columns.map(c => ColumnInfo(c.name, c.columnType)), Some(0), predefinedKeys)
   val hash = Schemas.genHash(columns)
 }

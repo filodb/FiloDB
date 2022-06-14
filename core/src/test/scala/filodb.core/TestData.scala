@@ -202,6 +202,15 @@ object GdeltTestData {
     shardKeyColumns = Seq( "__name__","_ns_","_ws_"))
   val dataset6 = Dataset("gdelt", schema.slice(4, 6), schema.patch(4, Nil, 2), datasetOptions)
 
+
+  // Dataset7: partition Actor2Code,Actor2Name,NumArticles to test additional faceting
+  val datasetOptionsWithFacets = datasetOptions.copy(
+    multiColumnFacets = Map("Actor2Code-Actor2Name" -> Seq("Actor2Code", "Actor2Name"),
+                            "Actor2Name-Actor2Code" -> Seq("Actor2Name", "Actor2Code")))
+  val dataset7 = Dataset("gdelt", schema.slice(4, 7), schema.patch(4, Nil, 2), datasetOptionsWithFacets)
+
+
+
   val datasetOptionConfig = """
     options {
       shardKeyColumns = ["__name__","_ns_","_ws_"]

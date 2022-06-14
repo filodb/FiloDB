@@ -131,6 +131,7 @@ class SchemasSpec extends AnyFunSpec with Matchers {
                         ignoreTagsOnPartitionKeyHash = ["le"]
                         metricColumn = "__name__"
                         shardKeyColumns = ["__name__", "_ns"]
+                        multiColumnFacets = {}
                       }
                     }"""
 
@@ -204,16 +205,19 @@ class SchemasSpec extends AnyFunSpec with Matchers {
                           columns = ["timestamp:tsa", "code:long", "event:string"]
                           value-column = "event"
                           downsamplers = []
+                          multiColumnFacets = {}
                         }
                         prom2 {
                           columns = ["timestamp:ts", "code:long", "ev. ent:string"]
                           value-column = "foo"
                           downsamplers = []
+                          multiColumnFacets = {}
                         }
                         prom3 {
                           columns = ["timestamp:ts", "code:long", "event:string"]
                           value-column = "event"
                           downsamplers = []
+                          multiColumnFacets = {}
                         }
                       }
                     }""")
@@ -234,11 +238,13 @@ class SchemasSpec extends AnyFunSpec with Matchers {
                           columns = ["timestamp:ts", "value:double"]
                           value-column = "value"
                           downsamplers = []
+                          multiColumnFacets = {}
                         }
                         prom2 {
                           columns = ["timestamp:ts", "value:double"]
                           value-column = "timestamp"
                           downsamplers = []
+                          multiColumnFacets = {}
                         }
                       }
                     }""")
@@ -258,11 +264,13 @@ class SchemasSpec extends AnyFunSpec with Matchers {
                           value-column = "value"
                           downsamplers = ["tTime(0)", "dMin(1)"]
                           downsample-schema = "foo"
+                          multiColumnFacets = {}
                         }
                         prom-ds-gauge {
                           columns = ["timestamp:ts", "min:double"]
                           value-column = "timestamp"
                           downsamplers = []
+                          multiColumnFacets = {}
                         }
                       }
                     }""")
@@ -282,16 +290,19 @@ class SchemasSpec extends AnyFunSpec with Matchers {
                         value-column = "value"
                         downsamplers = ["tTime(0)", "dMin(1)"]
                         downsample-schema = "prom-ds-gauge"
+                        multiColumnFacets = {}
                       }
                       prom-ds-gauge {
                         columns = ["timestamp:ts", "min:double"]
                         value-column = "timestamp"
                         downsamplers = []
+                        multiColumnFacets = {}
                       }
                       hist {
                         columns = ["timestamp:ts", "count:long", "sum:long", "h:hist:counter=true"]
                         value-column = "h"
                         downsamplers = []
+                        multiColumnFacets = {}
                       }
                     }
                   }""")
@@ -323,6 +334,7 @@ class SchemasSpec extends AnyFunSpec with Matchers {
                           ignoreTagsOnPartitionKeyHash = ["le"]
                           metricColumn = "_metric_"
                           shardKeyColumns = ["_metric_", "_ns"]
+                          multiColumnFacets = {}
                         }
                       }"""
 
@@ -346,12 +358,14 @@ class SchemasSpec extends AnyFunSpec with Matchers {
                             value-column = "value"
                             downsamplers = ["tTime(0)", "dMin(1)"]
                             downsample-schema = "prom2"
+                            multiColumnFacets = {}
                           }
                           # Everything exactly the same except for column params, which are different
                           prom2 {
                             columns = ["timestamp:ts", "value:double:detectDrops=true"]
                             value-column = "timestamp"
                             downsamplers = []
+                            multiColumnFacets = {}
                           }
                         }
                       }""")
