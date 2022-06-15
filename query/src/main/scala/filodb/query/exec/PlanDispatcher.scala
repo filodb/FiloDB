@@ -1,7 +1,9 @@
 package filodb.query.exec
 
 import java.util.concurrent.TimeUnit
+
 import scala.concurrent.duration.FiniteDuration
+
 import akka.actor.ActorRef
 import akka.pattern.{AskTimeoutException, ask}
 import akka.util.Timeout

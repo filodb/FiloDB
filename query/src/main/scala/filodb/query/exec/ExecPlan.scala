@@ -354,7 +354,7 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
                          source: ChunkSource)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.fromTask(
       execPlan.dispatcher.dispatch(RunTimePlanContainer(execPlan,
-        ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis - 1000)), source)).onErrorHandle
+        ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis - 1000)), source).onErrorHandle
       { case ex: Throwable =>
         QueryError(execPlan.queryContext.queryId, querySession.queryStats, ex)
       }.map {
@@ -377,7 +377,7 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
         case QueryError(_, qStats, ex)          =>
                       querySession.queryStats.add(qStats)
                       throw ex
-      }
+      })
   }
 
   override def toString: String = execPlan.printTree() + "\n"
@@ -424,7 +424,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatch(RunTimePlanContainer(plan,
-        ClientParams(plan.queryContext.plannerParams.queryTimeoutMillis - 1000)), source).onErrorHandle { case ex: Throwable =>
+        ClientParams(plan.queryContext.plannerParams.queryTimeoutMillis - 1000)), source).onErrorHandle
+       { case ex: Throwable =>
         QueryError(queryContext.queryId, qSession.queryStats, ex)
 
       }
