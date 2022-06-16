@@ -42,7 +42,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              readerRefreshInterval: Option[FiniteDuration]) {
   import collection.JavaConverters._
   def toConfig: Config =
-    ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
+    ConfigFactory.parseMap((Map("flush-interval" -> (flushInterval.toSeconds + "s"),
                                "time-aligned-chunks-enabled" -> timeAlignedChunksEnabled,
                                "disk-time-to-live" -> (diskTTLSeconds + "s"),
                                "max-chunks-size" -> maxChunksSize,
@@ -63,8 +63,10 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity,
                                "metering-enabled" -> meteringEnabled,
                                "accept-duplicate-samples" -> acceptDuplicateSamples,
-                               "ingest-resolution-millis" -> estimatedIngestResolutionMillis,
-                               "reader-refresh-interval" -> readerRefreshInterval).asJava)
+                               "ingest-resolution-millis" -> estimatedIngestResolutionMillis) ++
+                               readerRefreshInterval.map(
+                                 _ => Map("reader-refresh-interval" -> (readerRefreshInterval.get.toSeconds + "s"))
+                               ).getOrElse(Map())).asJava)
 }
 
 final case class AssignShardConfig(address: String, shardList: Seq[Int])

@@ -49,6 +49,7 @@ object TestData {
       flush-interval = 10 minutes
       part-index-flush-max-delay = 10 seconds
       part-index-flush-min-delay = 2 seconds
+      reader-refresh-interval = 6 hours
     }
   """
   val sourceConf = ConfigFactory.parseString(sourceConfStr)
