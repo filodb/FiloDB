@@ -1,7 +1,6 @@
 package filodb.core.memstore
 
 import com.googlecode.javaewah.IntIterator
-
 import filodb.core._
 import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
 import filodb.core.metadata.Schemas
@@ -19,7 +18,6 @@ import java.nio.file.{Files, StandardOpenOption}
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
 import scala.util.Random
-
 
 class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfter {
   import Filter._
@@ -404,72 +402,6 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     val labelValues4 = index3.labelValuesEfficient(filters1, 0, Long.MaxValue, "instance", 1000)
     labelValues4.toSet shouldEqual (0 until 1000).map(c => s"instance$c").toSet
-  }
-
-  it("TODO") {
-
-    val index = new PartKeyLuceneIndex(
-      DatasetRef("prometheus"),
-      Schemas.promCounter.partition,
-      facetEnabledAllLabels = true,
-      facetEnabledSharedKeyLabels = true,
-      shardNum = 0,
-      1.hour.toMillis)
-
-    val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8,
-                         "_ns_".utf8 -> "my_ns".utf8)
-    val partKey = partBuilder.partKeyFromObjects(
-      Schemas.promCounter,
-      parts = s"counter0",
-      seriesTags + ("instance".utf8 -> s"instance0".utf8))
-
-    index.addPartKey(
-      partKeyOnHeap(Schemas.promCounter.partition.binSchema, ZeroPointer, partKey), partId = 0, startTime = 5)()
-
-    index.refreshReadersBlocking()
-
-    {
-      val filters = Seq(ColumnFilter("_ws_", Equals("my_ws")), ColumnFilter("_ns_", EqualsRegex(".*")))
-      val labelValues = index.labelValuesEfficient(filters, 0, Long.MaxValue, "_ns_")
-      println(labelValues.toSet == Set("my_ns"))
-    }
-
-    {
-      val filters = Seq(ColumnFilter("_ws_", Equals("my_ws")))
-      val labelValues = index.labelValuesEfficient(filters, 0, Long.MaxValue, "_ns_")
-      println(labelValues.toSet == Set("my_ns"))
-    }
-
-    index.removePartKeys(Buffer(0))
-    // index.refreshReadersBlocking()
-
-    Thread.sleep(5000)
-
-
-    {
-      val filters = Seq(ColumnFilter("_ws_", Equals("my_ws")), ColumnFilter("_ns_", EqualsRegex(".*")))
-      val labelValues = index.labelValuesEfficient(filters, 0, Long.MaxValue, "_ns_")
-      println(labelValues.toSet == Set())
-    }
-
-    {
-      val filters = Seq(ColumnFilter("_ws_", Equals("my_ws")))
-      val labelValues = index.labelValuesEfficient(filters, 0, Long.MaxValue, "_ns_")
-      println(labelValues.toSet == Set())
-    }
-
-
-
-//    val filters2 = Seq(ColumnFilter("_ws_", Equals("NotExist")))
-//    val labelValues2 = index3.labelValuesEfficient(filters2, 0, Long.MaxValue, "_metric_")
-//    labelValues2.size shouldEqual 0
-//
-//    val filters3 = Seq(ColumnFilter("_metric_", Equals("counter1")))
-//    val labelValues3 = index3.labelValuesEfficient(filters3, 0, Long.MaxValue, "_metric_")
-//    labelValues3 shouldEqual Seq("counter1")
-//
-//    val labelValues4 = index3.labelValuesEfficient(filters1, 0, Long.MaxValue, "instance", 1000)
-//    labelValues4.toSet shouldEqual (0 until 1000).map(c => s"instance$c").toSet
   }
 
   it("should be able to do regular operations when faceting is disabled") {
