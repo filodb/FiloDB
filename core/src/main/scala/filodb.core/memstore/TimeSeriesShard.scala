@@ -684,8 +684,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     logger.info(s"Starting reader-refresh for $clusterType cluster of dataset=$ref shard=$shardNum " +
       s"every ${storeConfig.readerRefreshInterval}")
     Observable.intervalWithFixedDelay(
-      storeConfig.readerRefreshInterval,
-      storeConfig.readerRefreshInterval).map { _ =>
+      storeConfig.readerRefreshInterval.get,
+      storeConfig.readerRefreshInterval.get).map { _ =>
       partKeyIndex.refreshReadersBlocking()
     }.onErrorRestartUnlimited.completedL.runToFuture(readerRefreshSched)
   }
