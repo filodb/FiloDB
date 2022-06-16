@@ -38,7 +38,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              // approx data resolution, used for estimating the size of data to be scanned for
                              // answering queries, specified in milliseconds
                              estimatedIngestResolutionMillis: Int,
-                             readerRefreshInterval: FiniteDuration) {
+                             // must not be defined for downsample config, since it references raw's flush interval
+                             readerRefreshInterval: Option[FiniteDuration]) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
@@ -140,7 +141,7 @@ object StoreConfig {
                 config.getBoolean("metering-enabled"),
                 config.getBoolean("accept-duplicate-samples"),
                 config.getInt("ingest-resolution-millis"),
-                config.as[FiniteDuration]("reader-refresh-interval"))
+                config.as[Option[FiniteDuration]]("reader-refresh-interval"))
   }
 }
 

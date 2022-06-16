@@ -192,6 +192,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     // records with same part key. This is true since we update part keys only once per flush interval in raw dataset.
     logger.info(s"Starting housekeeping for downsample cluster of dataset=$rawDatasetRef shard=$shardNum " +
       s"every ${rawStoreConfig.flushInterval}")
+    require(!downsampleStoreConfig.readerRefreshInterval.isDefined,
+      "cannot define the reader refresh interval for downsaple config; raw flush interval is used")
     houseKeepingFuture = Observable.intervalWithFixedDelay(rawStoreConfig.flushInterval,
       rawStoreConfig.flushInterval).mapEval { _ =>
       purgeExpiredIndexEntries()
