@@ -463,11 +463,11 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private[memstore] val addPartitionsDisabled = AtomicBoolean(false)
 
-  private[memstore] val housekeepingSched = Scheduler.computation(
-    name = "housekeeping",
-    reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in Housekeeping Scheduler", _)))
+  private[memstore] val readerRefreshSched = Scheduler.computation(
+    name = "reader-refresh",
+    reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in Reader-Refresh Scheduler", _)))
 
-  private var houseKeepingFuture: CancelableFuture[Unit] = initHousekeeping()
+  private var readerRefreshFuture: CancelableFuture[Unit] = initReaderRefresh()
 
   /////// END MEMBER STATE FIELDS ///////////////////
 
@@ -680,14 +680,14 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
-  private def initHousekeeping(): CancelableFuture[Unit] = {
-    logger.info(s"Starting housekeeping for $clusterType cluster of dataset=$ref shard=$shardNum " +
-      s"every ${storeConfig.housekeepingInterval}")
+  private def initReaderRefresh(): CancelableFuture[Unit] = {
+    logger.info(s"Starting reader-refresh for $clusterType cluster of dataset=$ref shard=$shardNum " +
+      s"every ${storeConfig.readerRefreshInterval}")
     Observable.intervalWithFixedDelay(
-      storeConfig.housekeepingInterval,
-      storeConfig.housekeepingInterval).map { _ =>
+      storeConfig.readerRefreshInterval,
+      storeConfig.readerRefreshInterval).map { _ =>
       partKeyIndex.refreshReadersBlocking()
-    }.onErrorRestartUnlimited.completedL.runToFuture(housekeepingSched)
+    }.onErrorRestartUnlimited.completedL.runToFuture(readerRefreshSched)
   }
   /////// END INIT METHODS ///////////////////
 

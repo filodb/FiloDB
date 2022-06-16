@@ -38,7 +38,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              // approx data resolution, used for estimating the size of data to be scanned for
                              // answering queries, specified in milliseconds
                              estimatedIngestResolutionMillis: Int,
-                             housekeepingInterval: FiniteDuration) {
+                             readerRefreshInterval: FiniteDuration) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
@@ -62,7 +62,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity,
                                "metering-enabled" -> meteringEnabled,
                                "accept-duplicate-samples" -> acceptDuplicateSamples,
-                               "ingest-resolution-millis" -> estimatedIngestResolutionMillis).asJava)
+                               "ingest-resolution-millis" -> estimatedIngestResolutionMillis,
+                               "reader-refresh-interval" -> readerRefreshInterval).asJava)
 }
 
 final case class AssignShardConfig(address: String, shardList: Seq[Int])
@@ -99,7 +100,6 @@ object StoreConfig {
                                            |accept-duplicate-samples = false
                                            |time-aligned-chunks-enabled = false
                                            |ingest-resolution-millis = 60000
-                                           |housekeeping-interval = 6 hours
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
   def apply(storeConfig: Config): StoreConfig = {
@@ -140,7 +140,7 @@ object StoreConfig {
                 config.getBoolean("metering-enabled"),
                 config.getBoolean("accept-duplicate-samples"),
                 config.getInt("ingest-resolution-millis"),
-                config.as[FiniteDuration]("housekeeping-interval"))
+                config.as[FiniteDuration]("reader-refresh-interval"))
   }
 }
 
