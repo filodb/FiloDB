@@ -36,7 +36,7 @@ case class PlannerParams(applicationId: String = "filodb",
                          skipAggregatePresent: Boolean = false,
                          processFailure: Boolean = true,
                          processMultiPartition: Boolean = false,
-                         allowPartialResults: Boolean = false)
+                         allowPartialResults: Boolean = true)
 object PlannerParams {
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): PlannerParams =
     PlannerParams(spreadOverride = constSpread, sampleLimit = sampleLimit)
