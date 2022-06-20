@@ -3,7 +3,7 @@ package filodb.query.exec
 import java.util.concurrent.TimeUnit
 
 import scala.concurrent.duration.FiniteDuration
-import scala.util.Failure
+import scala.util.{Failure, Success}
 
 import akka.actor.ActorRef
 import akka.pattern.ask
@@ -51,8 +51,9 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
           throw new IllegalStateException(s"Received bad response $e")
       }
       fut.onComplete{
-        case fail: Failure[Any] =>
+        case Failure(ex) =>
           Kamon.counter("actor_ask_fail_count").withTags(TagSet.from(kamonTags)).increment()
+        case Success(value) => { /* do nothing */ }
       }
       // TODO We can send partial results on timeout. Try later. Need to address QueryTimeoutException too.
 //        .recover { // if partial results allowed, then return empty result
