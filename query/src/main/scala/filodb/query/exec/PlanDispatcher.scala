@@ -33,7 +33,7 @@ trait PlanDispatcher extends java.io.Serializable {
   * using Akka Actors.
   */
 case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends PlanDispatcher {
-  val kamonTags = Map("receiver" -> target.toString())
+  val kamonTags = Map("target" -> target.toString())
 
   def dispatch(plan: ExecPlan, source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
     // "source" is unused (the param exists to support InProcessDispatcher).

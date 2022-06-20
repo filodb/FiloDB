@@ -142,9 +142,9 @@ final class QueryActor(memStore: TimeSeriesStore,
             FiloSchedulers.assertThreadName(QuerySchedName)
             querySession.close()
             replyTo ! res
-            Kamon.counter("actor_tell_count").withTags(TagSet.from(
+            Kamon.counter("actor_ask_response_count").withTags(TagSet.from(
               Map("sender" -> this.self.toString(),
-                  "receiver" -> replyTo.toString()))).increment()
+                  "target" -> replyTo.toString()))).increment()
             res match {
               case QueryResult(_, _, vectors, _, _, _) => resultVectors.record(vectors.length)
               case e: QueryError =>
@@ -177,9 +177,9 @@ final class QueryActor(memStore: TimeSeriesStore,
               s" query was ${q.queryContext.origQueryParams}", ex)
             queryExecuteSpan.finish()
             replyTo ! QueryError(q.queryContext.queryId, querySession.queryStats, ex)
-            Kamon.counter("actor_tell_count").withTags(TagSet.from(
+            Kamon.counter("actor_ask_response_count").withTags(TagSet.from(
               Map("sender" -> this.self.toString(),
-                  "receiver" -> replyTo.toString()))).increment()
+                  "target" -> replyTo.toString()))).increment()
           }(queryScheduler)
       }
     }
