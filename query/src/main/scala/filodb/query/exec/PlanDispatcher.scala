@@ -3,10 +3,13 @@ package filodb.query.exec
 import java.util.concurrent.TimeUnit
 
 import scala.concurrent.duration.FiniteDuration
+import scala.util.Failure
 
 import akka.actor.ActorRef
 import akka.pattern.ask
 import akka.util.Timeout
+import kamon.Kamon
+import kamon.tag.TagSet
 import monix.eval.Task
 import monix.execution.Scheduler
 
@@ -30,6 +33,7 @@ trait PlanDispatcher extends java.io.Serializable {
   * using Akka Actors.
   */
 case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends PlanDispatcher {
+  val kamonTags = Map("receiver" -> target.toString())
 
   def dispatch(plan: ExecPlan, source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
     // "source" is unused (the param exists to support InProcessDispatcher).
@@ -41,8 +45,14 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
     } else {
       val t = Timeout(FiniteDuration(remainingTime, TimeUnit.MILLISECONDS))
       val fut = (target ? plan)(t).map {
-        case resp: QueryResponse => resp
-        case e =>  throw new IllegalStateException(s"Received bad response $e")
+        case qresp: QueryResponse => qresp
+        case e =>
+          Kamon.counter("actor_ask_illegal_state_count").withTags(TagSet.from(kamonTags)).increment()
+          throw new IllegalStateException(s"Received bad response $e")
+      }
+      fut.onComplete{
+        case fail: Failure[Any] =>
+          Kamon.counter("actor_ask_fail_count").withTags(TagSet.from(kamonTags)).increment()
       }
       // TODO We can send partial results on timeout. Try later. Need to address QueryTimeoutException too.
 //        .recover { // if partial results allowed, then return empty result
@@ -51,6 +61,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
 //            QueryResult(plan.queryContext.queryId, ResultSchema.empty, Nil, true,
 //              Some("Result may be partial since query on some shards timed out"))
 //      }
+      Kamon.counter("actor_ask_count").withTags(TagSet.from(kamonTags)).increment()
       Task.fromFuture(fut)
     }
   }
