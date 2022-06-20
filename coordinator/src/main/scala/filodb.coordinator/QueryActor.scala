@@ -84,6 +84,7 @@ final class QueryActor(memStore: TimeSeriesStore,
   private val epRequests = Kamon.counter("queryactor-execplan-requests").withTags(TagSet.from(tags))
   private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").withTags(TagSet.from(tags))
   private val queryErrors = Kamon.counter("queryactor-query-errors").withTags(TagSet.from(tags))
+  private val uncaughtExceptions = Kamon.counter("uncaught-exceptions").withTags(TagSet.from(tags))
 
   /**
     * Instrumentation adds following metrics on the Query Scheduler
@@ -103,8 +104,10 @@ final class QueryActor(memStore: TimeSeriesStore,
                                       * sys.runtime.availableProcessors).toInt
     val schedName = s"$QuerySchedName-$dsRef"
     val exceptionHandler = new UncaughtExceptionHandler {
-      override def uncaughtException(t: Thread, e: Throwable): Unit =
+      override def uncaughtException(t: Thread, e: Throwable): Unit = {
         logger.error("Uncaught Exception in Query Scheduler", e)
+        uncaughtExceptions.increment()
+      }
     }
     val threadFactory = new ForkJoinPool.ForkJoinWorkerThreadFactory {
       def newThread(pool: ForkJoinPool): ForkJoinWorkerThread = {
