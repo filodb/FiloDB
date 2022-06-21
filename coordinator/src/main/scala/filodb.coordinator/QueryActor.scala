@@ -173,8 +173,6 @@ final class QueryActor(memStore: TimeSeriesStore,
             replyTo ! QueryError(q.queryContext.queryId, querySession.queryStats, ex)
           }(queryScheduler)
       }
-    } else {
-      println("*******check returned false")
     }
   }
 
@@ -183,8 +181,6 @@ final class QueryActor(memStore: TimeSeriesStore,
       // This is for CLI use only. Always prefer clients to materialize logical plan
       lpRequests.increment()
       try {
-
-        println("******Calling materialize with allowPartialResults: " + q.qContext.plannerParams.allowPartialResults)
         val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
         self forward execPlan
       } catch {
@@ -193,8 +189,6 @@ final class QueryActor(memStore: TimeSeriesStore,
             logger.error(s"Exception while materializing logical plan", ex)
           replyTo ! QueryError("unknown", QueryStats(), ex)
       }
-    } else {
-      println("*******check returned false")
     }
   }
 

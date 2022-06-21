@@ -69,7 +69,6 @@ trait QueryOps extends ClientBase with StrictLogging {
   def logicalPlan2Query(dataset: DatasetRef,
                        plan: LogicalPlan2,
                         qContext: QueryContext = QueryContext()): QueryResponse2 = {
-    println("logicalPlan2Query fn qContext.plannerParams.allowPartialResults: " + qContext.plannerParams.allowPartialResults)
     val qCmd = LogicalPlan2Query(dataset, plan, qContext)
     // NOTE: It's very important to extend the query timeout for the ask itself, because the queryTimeoutMillis is
     // the internal FiloDB scatter-gather timeout.  We need additional time for the proper error to get transmitted

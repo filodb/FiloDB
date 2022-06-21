@@ -125,13 +125,6 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
-    if (shard ==3) {
-      println("*******shard is 3 so sleeping")
-      Thread.sleep(180000)
-    }
-    else {
-      println("******Shard is:" + shard)
-    }
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
     finalPlan = finalizePlan(source, querySession)
