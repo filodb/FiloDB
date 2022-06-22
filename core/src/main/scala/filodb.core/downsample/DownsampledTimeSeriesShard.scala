@@ -71,11 +71,21 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   private val stats = new DownsampledTimeSeriesShardStats(rawDatasetRef, shardNum)
 
+  private val indexMetadataStore : Option[IndexMetadataStore] = {
+    downsampleConfig.indexMetastoreImplementation match {
+      case IndexMetastoreImplementation.NoImp => None
+      case IndexMetastoreImplementation.File => Some(
+        new FileCheckpointedIndexMetadataStore(downsampleConfig.indexLocation.get)
+      )
+      case IndexMetastoreImplementation.Ephemeral => Some(new EphemeralIndexMetadataStore())
+    }
+  }
+
   private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, false,
     false, shardNum, indexTtlMs,
     downsampleConfig.indexLocation.map(new java.io.File(_)),
-    if (downsampleConfig.enablePersistentIndexing)
-      Some(new FileCheckpointedIndexMetadataStore(downsampleConfig.indexLocation.get)) else None)
+    indexMetadataStore
+  )
 
   private val indexUpdatedHour = new AtomicLong(0)
 
@@ -148,15 +158,20 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           recoverIndexInternal(None)
         case (IndexState.Synced, checkpointMillis)             =>
           logger.info("Found index state empty, bootstrapping downsample index")
+          // TODO
+          // although here we provide the logic to invoke recoverIndexInternal from a particular
+          // checkpoint, recoverIndexInternal does not recover from a checkpoint properly because
+          // it would not restart from an appropriate partId and instead would start with 0.
+          // So, this code is the skeleton for the future implementation and allows us to put
+          // a unit test in the code.
           recoverIndexInternal(checkpointMillis)
         case _                                  =>
           // FIXME: Part ids in case of indexRefresh are assumed to monotonically increase, however, in case recovery
           //  is done from an existing timestamp, we need a way not only to store the state of the ids recycled but
           //  latest allocated partId to avoid assigning the same id again.
-          //logger.info(s"Nothing to recover the index for dataset=$indexDataset shard=$shardNum" +
-          //            s" starting index refresh thread")
-          //indexRefresh().runToFuture(housekeepingSched)
-          ???
+          logger.info(s"Nothing to recover the index for dataset=$indexDataset shard=$shardNum" +
+                      s" starting index refresh thread")
+          indexRefresh().runToFuture(housekeepingSched)
       }
     } else {
       // Index persistence is not enabled, this will simply follow the path for existing index recovery
@@ -164,6 +179,14 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     }
   }
 
+  // TODO
+  // This method provides in its signature the way to recover from a particular checkpoint.
+  // Currently however, it should always be called with None as it will not recover properly
+  // given a checkpoint. The reason is that it will start producing partIds from 0 while there
+  // will already be an index on disk with some number of partIds. We cannot utilize the
+  // existing logic of refreshWithDownsamplePartKey either as it will grow partIds indefinitely
+  // without any restarts and the rebuilding will be slow. Most likely we want to completely
+  // get rid of partIds for downsample shards.
   private def recoverIndexInternal(checkpointMillis: Option[Long]): Future[Long] = {
     indexBootstrapper
       .bootstrapIndexDownsample(
@@ -222,7 +245,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     }
   }
 
-  def indexRefresh(): Task[Unit] = {
+  def indexRefresh(): Task[Long] = {
     // Update keys until hour()-2 hours ago. hour()-1 hours ago can cause missed records if
     // refresh was triggered exactly at end of the hour. All partKeys for the hour would need to be flushed
     // before refresh happens because we will not revist the hour again.
@@ -239,7 +262,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     indexRefresh(toHour, fromHour)
   }
 
-  def indexRefresh(toHour: Long, fromHour: Long): Task[Unit] = {
+  def indexRefresh(toHour: Long, fromHour: Long): Task[Long] = {
     indexRefresher.refreshWithDownsamplePartKeys(
       partKeyIndex, shardNum, rawDatasetRef, fromHour, toHour, schemas)(lookupOrCreatePartId)
       .map { count =>
@@ -247,11 +270,13 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         stats.indexEntriesRefreshed.increment(count)
         logger.info(s"Refreshed downsample index with new records numRecords=$count " +
           s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour")
+        count
       }
       .onErrorHandle { e =>
         stats.indexRefreshFailed.increment()
         logger.error(s"Error occurred when refreshing downsample index " +
           s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour", e)
+        0L
       }
   }
 
