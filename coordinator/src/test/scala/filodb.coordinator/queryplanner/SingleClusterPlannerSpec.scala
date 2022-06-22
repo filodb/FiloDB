@@ -5,6 +5,7 @@ import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, FunctionalTargetSchemaProvider, StaticSpreadProvider}
+import filodb.core.metadata.Column.ColumnType
 import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange, TargetSchemaChange}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, _}
@@ -20,6 +21,7 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import filodb.core.query.Filter.NotEquals
 import filodb.query.LogicalPlan.getRawSeriesFilters
+import filodb.query.exec.aggregator.{CountRowAggregator, SumRowAggregator}
 import org.scalatest.exceptions.TestFailedException
 
 
@@ -1748,5 +1750,50 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
         group.toSet shouldEqual expFilters.toSet
       }
     }
+  }
+
+  it ("should correctly reduce LocalPartitionDistConcatExec ResultSchemas to support pushdowns") {
+    val originalResultSchema = ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+                                                ColumnInfo("value", ColumnType.DoubleColumn)),
+                                            numRowKeyColumns = 1,
+                                            fixedVectorLen = Some(123))
+    // Simulate QueryResults from two sides of a BinaryJoin: count(stuff) + sum(stuff).
+    val countQres = {
+      val redSchema = CountRowAggregator.double.reductionSchema(originalResultSchema)
+      val presSchema = CountRowAggregator.double.presentationSchema(redSchema)
+      QueryResult("foobar", presSchema, Nil)
+    }
+    val sumQres = {
+      val redSchema = SumRowAggregator.reductionSchema(originalResultSchema)
+      val presSchema = SumRowAggregator.presentationSchema(redSchema)
+      QueryResult("foobar", presSchema, Nil)
+    }
+    // If this join were pushed down, a LocalPartitionDistConcatExec would join the shard-local BinaryJoinExecs
+    val concat = {
+      val dummyLp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20900, 0, 20900))
+      val dummyEp = engine.materialize(dummyLp, QueryContext(origQueryParams = promQlQueryParams))
+      LocalPartitionDistConcatExec(QueryContext(), InProcessPlanDispatcher(queryConfig), Seq(dummyEp))
+    }
+    // initialize a BinaryJoinExec just so we can use its reduceSchemas method
+    val binaryJoin = {
+      val bjLp = Parser.queryRangeToLogicalPlan("""foo{job="bar"} + baz{job="bat"}""", TimeStepParams(20900, 0, 20900))
+      engine.materialize(bjLp, QueryContext(origQueryParams = promQlQueryParams)).asInstanceOf[BinaryJoinExec]
+    }
+    // If this join were pushed down, one of the shard-local joins might process the `count` QueryResult first...
+    val qres1 = {
+      var reduced = binaryJoin.reduceSchemas(ResultSchema.empty, countQres)
+      reduced = binaryJoin.reduceSchemas(reduced, sumQres)
+      QueryResult("foobar", reduced, Nil)
+    }
+    // ...and the other might process the `sum` QueryResult first.
+    val qres2 = {
+      var reduced = binaryJoin.reduceSchemas(ResultSchema.empty, sumQres)
+      reduced = binaryJoin.reduceSchemas(reduced, countQres)
+      QueryResult("foobar", reduced, Nil)
+    }
+
+    // When these schemas are reduced, a SchemaMismatch should not be thrown.
+    var reduced = concat.reduceSchemas(ResultSchema.empty, qres1)
+    reduced = concat.reduceSchemas(reduced, qres2)
   }
 }
