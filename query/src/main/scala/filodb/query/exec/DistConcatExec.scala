@@ -29,7 +29,12 @@ trait DistConcatExec extends NonLeafExecPlan {
   */
 final case class LocalPartitionDistConcatExec(queryContext: QueryContext,
                                               dispatcher: PlanDispatcher,
-                                              children: Seq[ExecPlan]) extends DistConcatExec
+                                              children: Seq[ExecPlan]) extends DistConcatExec {
+  // overriden since it can reduce schemas with different vector lengths as long as the columns are same
+  override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema =
+    IgnoreFixedVectorLenAndColumnNamesSchemaReducer.reduceSchema(rs, resp)
+}
+
 
 /**
   * Wrapper/Nonleaf execplan to split long range PeriodicPlan to multiple smaller execs.
