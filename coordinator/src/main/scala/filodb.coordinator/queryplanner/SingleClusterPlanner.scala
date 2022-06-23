@@ -141,7 +141,8 @@ class SingleClusterPlanner(val dataset: Dataset,
     if (targetActor == ActorRef.noSender) {
       logger.debug(s"ShardMapper: $shardMapperFunc")
       logger.debug(s"Shard: $shard is not available")
-      //throw new RuntimeException(s"Shard: $shard is not available") // TODO fix this
+      if(!queryConfig.allowPartialResults)
+        throw new RuntimeException(s"Shard: $shard is not available")
     }
     ActorPlanDispatcher(targetActor, clusterName)
   }

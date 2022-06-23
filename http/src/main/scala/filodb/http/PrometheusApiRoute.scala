@@ -15,8 +15,9 @@ import remote.RemoteStorage.ReadRequest
 import filodb.coordinator.client.IngestionCommands.UnknownDataset
 import filodb.coordinator.client.QueryCommands._
 import filodb.core.{DatasetRef, SpreadChange, SpreadProvider}
+import filodb.core.GlobalConfig.systemConfig
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
-import filodb.core.query.{PromQlQueryParams, QueryContext, TsdbQueryParams}
+import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext, TsdbQueryParams}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query._
@@ -34,6 +35,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
   import filodb.prometheus.query.PrometheusModel._
 
   val schemas = settings.filoSettings.schemas
+  val config = systemConfig.getConfig("filodb")
+  val queryConfig = QueryConfig (config.getConfig ("query") )
   val ONE_DAY_IN_SECS = 86400L
 
   val route = pathPrefix( "promql" / Segment) { dataset =>
@@ -160,10 +163,12 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
                                  spread: Option[Int], tsdbQueryParams: TsdbQueryParams, histMap: Boolean) = {
     val spreadProvider: Option[SpreadProvider] = spread.map(s => StaticSpreadProvider(SpreadChange(0, s)))
     val command = if (explainOnly) {
-      ExplainPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryContext(tsdbQueryParams, spreadProvider))
+      ExplainPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryContext(tsdbQueryParams, spreadProvider,
+        queryConfig.allowPartialResults))
     }
     else {
-      LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryContext(tsdbQueryParams, spreadProvider))
+      LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryContext(tsdbQueryParams, spreadProvider,
+        queryConfig.allowPartialResults))
     }
     onSuccess(asyncAsk(nodeCoord, command, settings.queryAskTimeout)) {
       case qr: QueryResult if logicalPlan.isInstanceOf[MetadataQueryPlan] =>
