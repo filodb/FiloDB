@@ -1,9 +1,7 @@
 package filodb.coordinator
 
 import java.net.InetAddress
-
 import scala.concurrent.duration._
-
 import akka.actor.{Actor, ActorRef, AddressFromURIString, PoisonPill, Props}
 import akka.pattern.gracefulStop
 import akka.util.Timeout
@@ -11,10 +9,10 @@ import com.typesafe.config.ConfigFactory
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.core._
 import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.metadata.{Column, Dataset}
+import filodb.core.query.Filter.NotEquals
 import filodb.core.query._
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -378,8 +376,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     // Below plan is really sum each time bucket
     val q2 = LogicalPlan2Query(ref,
                Aggregate(AggregationOperator.Sum,
-                 PeriodicSeries(  // No filters, operate on all rows.  Yes this is not a possible PromQL query. So what
-                   RawSeries(AllChunksSelector, Nil, Seq("AvgTone")), 0, 10, 99)), qOpt)
+                 PeriodicSeries(  // Should not filter out any rows.
+                   RawSeries(AllChunksSelector, Seq(ColumnFilter("notALabel", NotEquals("foo"))), Seq("AvgTone")), 0, 10, 99)), qOpt)
     probe.send(coordinatorActor, q2)
     probe.expectMsgPF() {
       case QueryResult(_, schema, vectors, _, _, _) =>

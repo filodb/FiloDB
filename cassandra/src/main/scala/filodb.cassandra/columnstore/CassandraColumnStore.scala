@@ -466,7 +466,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                                              startTimeGTE: Long,
                                              startTimeLTE: Long,
                                              endTimeGTE: Long,
-                                             endTimeLTE: Long): Iterator[Array[Byte]] = {
+                                             endTimeLTE: Long): Iterator[PartKeyRecord] = {
     val pkTable = getOrCreatePartitionKeysTable(ref, shard)
     pkTable.scanPksByStartEndTimeRangeNoAsync(split, startTimeGTE, startTimeLTE, endTimeGTE, endTimeLTE)
   }

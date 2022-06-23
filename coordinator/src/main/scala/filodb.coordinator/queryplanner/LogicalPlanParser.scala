@@ -68,17 +68,22 @@ object LogicalPlanParser {
   }
 
   private def aggregateToQuery(lp: Aggregate): String = {
+    import filodb.query.AggregateClause.ClauseType
     val periodicSeriesQuery = convertToQuery(lp.vectors)
-    val byString = if (lp.by.isEmpty) "" else s"${Space}by${Space}$OpeningRoundBracket${lp.by.mkString(Comma)}" +
-      ClosingRoundBracket
-    val withoutString = if (lp.without.isEmpty) "" else s"${Space}without$Space$OpeningRoundBracket" +
-      s"${lp.without.mkString(Comma)}$ClosingRoundBracket"
+    val clauseString = lp.clauseOpt.map { clause =>
+      val typeString = clause.clauseType match {
+        case ClauseType.By => "by"
+        case ClauseType.Without => "without"
+      }
+      val labelString = clause.labels.mkString(Comma)
+      s"${Space}${typeString}${Space}$OpeningRoundBracket${labelString}$ClosingRoundBracket"
+    }.getOrElse("")
     val params = if (lp.params.isEmpty) "" else {
       lp.params.map(p => if (p.isInstanceOf[String]) {Quotes + p + Quotes} else p).mkString(Comma) + Comma
     }
 
     val function = if (lp.operator.equals(CountValues)) "count_values" else lp.operator.toString.toLowerCase
-    s"$function$OpeningRoundBracket$params$periodicSeriesQuery$ClosingRoundBracket$byString$withoutString"
+    s"$function$OpeningRoundBracket$params$periodicSeriesQuery$ClosingRoundBracket$clauseString"
   }
 
   private def absentFnToQuery(lp: ApplyAbsentFunction): String = {

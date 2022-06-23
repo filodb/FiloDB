@@ -197,7 +197,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
     val raw1 = RawSeries(rangeSelector=intervalSelector, filters=f1, columns = Seq("count"))
     val windowed1 = PeriodicSeriesWithWindowing(raw1, from, 1000, to, 5000, RangeFunctionId.Rate)
-    val summed1 = Aggregate(AggregationOperator.Sum, windowed1, Nil, Seq("job"))
+    val summed1 = Aggregate(AggregationOperator.Sum, windowed1, Nil, AggregateClause.byOpt(Seq("job")))
 
     val f2 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_count")),
                  ColumnFilter("job", Filter.Equals("myService")),
@@ -205,7 +205,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
                  ColumnFilter("_ws_", Filter.Equals("work1")))
     val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("count"))
     val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
-    val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
+    val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, AggregateClause.byOpt(Seq("job")))
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
     val execPlan = engine.materialize(logicalPlan, QueryContext(plannerParams = PlannerParams(Some(StaticSpreadProvider
     (SpreadChange(0, 0))), 100), origQueryParams = PromQlQueryParams("", from/1000, 1000, to/1000)))

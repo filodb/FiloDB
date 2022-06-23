@@ -78,7 +78,9 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
                           ignoreShardKeyColumnSuffixes: Map[String, Seq[String]] = Map.empty,
                           ignoreTagsOnPartitionKeyHash: Seq[String] = Nil,
                           // For each key, copy the tag to the value if the value is absent
-                          copyTags: Seq[(String, String)] = Seq.empty) {
+                          copyTags: Seq[(String, String)] = Seq.empty,
+                          // Config to create facets for combination of partSchema columns
+                          multiColumnFacets: Map[String, Seq[String]] = Map.empty) {
   override def toString: String = {
     toConfig.root.render(ConfigRenderOptions.concise)
   }
@@ -91,7 +93,8 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
       "ignoreShardKeyColumnSuffixes" ->
         ignoreShardKeyColumnSuffixes.mapValues(_.asJava).asJava,
       "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava,
-      "copyTags" -> copyTags.groupBy(_._2).map { case (k, v) => (k, v.map(_._1).asJava)}.asJava)
+      "copyTags" -> copyTags.groupBy(_._2).map { case (k, v) => (k, v.map(_._1).asJava)}.asJava,
+      "multiColumnFacets" -> multiColumnFacets.mapValues(_.asJava).asJava)
 
     ConfigFactory.parseMap(map.asJava)
   }
@@ -129,7 +132,8 @@ object DatasetOptions {
                    ignoreShardKeyColumnSuffixes =
                      config.as[Map[String, Seq[String]]]("ignoreShardKeyColumnSuffixes"),
                    ignoreTagsOnPartitionKeyHash = config.as[Seq[String]]("ignoreTagsOnPartitionKeyHash"),
-                   copyTags = copyTagsValue)
+                   copyTags = copyTagsValue,
+                   multiColumnFacets = config.as[Map[String, Seq[String]]]("multiColumnFacets"))
   }
 }
 
