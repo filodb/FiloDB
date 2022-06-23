@@ -34,6 +34,9 @@ trait PlanDispatcher extends java.io.Serializable {
   */
 case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends PlanDispatcher {
   val kamonTags = Map("target" -> target.toString())
+  val askIllegalStates = Kamon.counter("queryactor_ask_illegal_states").withTags(TagSet.from(kamonTags))
+  val askFails = Kamon.counter("queryactor_ask_fails").withTags(TagSet.from(kamonTags))
+  val askCount = Kamon.counter("queryactor_asks").withTags(TagSet.from(kamonTags))
 
   def dispatch(plan: ExecPlan, source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
     // "source" is unused (the param exists to support InProcessDispatcher).
@@ -47,12 +50,11 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
       val fut = (target ? plan)(t).map {
         case qresp: QueryResponse => qresp
         case e =>
-          Kamon.counter("actor_ask_illegal_state_count").withTags(TagSet.from(kamonTags)).increment()
+          askIllegalStates.increment()
           throw new IllegalStateException(s"Received bad response $e")
       }
       fut.onComplete{
-        case Failure(ex) =>
-          Kamon.counter("actor_ask_fail_count").withTags(TagSet.from(kamonTags)).increment()
+        case Failure(ex) => askFails.increment()
         case Success(value) => { /* do nothing */ }
       }
       // TODO We can send partial results on timeout. Try later. Need to address QueryTimeoutException too.
@@ -62,7 +64,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
 //            QueryResult(plan.queryContext.queryId, ResultSchema.empty, Nil, true,
 //              Some("Result may be partial since query on some shards timed out"))
 //      }
-      Kamon.counter("actor_ask_count").withTags(TagSet.from(kamonTags)).increment()
+      askCount.increment()
       Task.fromFuture(fut)
     }
   }

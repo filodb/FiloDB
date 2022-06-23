@@ -85,10 +85,8 @@ final class QueryActor(memStore: TimeSeriesStore,
   private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").withTags(TagSet.from(tags))
   private val queryErrors = Kamon.counter("queryactor-query-errors").withTags(TagSet.from(tags))
   private val asksReceived = Kamon.counter("queryactor-asks-received").withTags(TagSet.from(tags))
-  private val askResponses = Kamon.counter("queryactor-asks-responded").withTags(TagSet.from(tags))
+  private val askResponses = Kamon.counter("queryactor-ask-responses").withTags(TagSet.from(tags))
   private val uncaughtExceptions = Kamon.counter("queryactor-uncaught-exceptions").withTags(TagSet.from(tags))
-
-  override
 
   /**
     * Instrumentation adds following metrics on the Query Scheduler
@@ -129,8 +127,7 @@ final class QueryActor(memStore: TimeSeriesStore,
 
   // scalastyle:off method.length
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
-    asksReceived.withTags(TagSet.from(Map("sender" -> replyTo.toString()),
-                                          "receiver" -> this.self.toString())).increment()
+    asksReceived.withTags(TagSet.from(Map("receiver" -> this.self.toString()))).increment()
     if (checkTimeout(q.queryContext, replyTo)) {
       epRequests.increment()
       val queryExecuteSpan = Kamon.spanBuilder(s"query-actor-exec-plan-execute-${q.getClass.getSimpleName}")
@@ -148,8 +145,7 @@ final class QueryActor(memStore: TimeSeriesStore,
             FiloSchedulers.assertThreadName(QuerySchedName)
             querySession.close()
             replyTo ! res
-            askResponses.withTags(TagSet.from(Map("sender" -> this.self.toString(),
-                                                  "target" -> replyTo.toString()))).increment()
+            askResponses.withTags(TagSet.from(Map("sender" -> this.self.toString()))).increment()
             res match {
               case QueryResult(_, _, vectors, _, _, _) => resultVectors.record(vectors.length)
               case e: QueryError =>
@@ -182,8 +178,7 @@ final class QueryActor(memStore: TimeSeriesStore,
               s" query was ${q.queryContext.origQueryParams}", ex)
             queryExecuteSpan.finish()
             replyTo ! QueryError(q.queryContext.queryId, querySession.queryStats, ex)
-            askResponses.withTags(TagSet.from(Map("sender" -> this.self.toString(),
-                                                  "target" -> replyTo.toString()))).increment()
+            askResponses.withTags(TagSet.from(Map("sender" -> this.self.toString()))).increment()
           }(queryScheduler)
       }
     }
