@@ -1125,6 +1125,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     val dirtyPartKeys = if (groupNum == dirtyPartKeysFlushGroup) {
       logger.debug(s"Switching dirty part keys in dataset=$ref shard=$shardNum out for flush. ")
       purgeExpiredPartitions()
+      ensureCapOnEvictablePartIds()
       val old = dirtyPartitionsForIndexFlush
       dirtyPartitionsForIndexFlush = debox.Buffer.empty[Int]
       old
@@ -1447,63 +1448,84 @@ class TimeSeriesShard(val ref: DatasetRef,
    *
    * @return true if able to evict enough or there was already space, false if not able to evict and not enough mem
    */
-  // scalastyle:off method.length
   private[memstore] def makeSpaceForNewPartitions(forceEvict: Boolean): Boolean = {
     assertThreadName(IngestSchedName)
     val numPartsToEvict = if (forceEvict) (targetMaxPartitions * ensureTspHeadroomPercent / 100).toInt
-    else evictionPolicy.numPartitionsToEvictForHeadroom(partSet.size, targetMaxPartitions, bufferMemoryManager)
+                          else evictionPolicy.numPartitionsToEvictForHeadroom(partSet.size, targetMaxPartitions,
+                                                                              bufferMemoryManager)
     if (numPartsToEvict > 0) {
-      val partIdsToEvict = partitionsToEvict(numPartsToEvict)
-      if (partIdsToEvict.isEmpty) {
-        logger.warn(s"dataset=$ref shard=$shardNum No partitions to evict but we are still low on space. " +
-          s"DATA WILL BE DROPPED")
-        return false
-      }
-
-      // Finally, prune partitions and keyMap data structures
-      logger.info(s"Evicting partitions from dataset=$ref shard=$shardNum ...")
-      val intIt = partIdsToEvict.iterator()
-      var numPartsEvicted = 0
-      var partsSkipped = 0
-      val successfullyEvictedParts = new EWAHCompressedBitmap()
-      while (intIt.hasNext) {
-        val partitionObj = partitions.get(intIt.next)
-        if (partitionObj != UnsafeUtils.ZeroPointer) {
-          if (!partitionObj.ingesting) { // could have started re-ingesting after it got into evictablePartIds queue
-            logger.debug(s"Evicting partId=${partitionObj.partID} ${partitionObj.stringPartition} " +
-              s"from dataset=$ref shard=$shardNum")
-            // add the evicted partKey to a bloom filter so that we are able to quickly
-            // find out if a partId has been assigned to an ingesting partKey before a more expensive lookup.
-            evictedPartKeys.synchronized {
-              if (!evictedPartKeysDisposed) {
-                evictedPartKeys.add(PartKey(partitionObj.partKeyBase, partitionObj.partKeyOffset))
-              }
-            }
-            // The previously created PartKey is just meant for bloom filter and will be GCed
-            removePartition(partitionObj)
-            successfullyEvictedParts.set(partitionObj.partID)
-            numPartsEvicted += 1
-          } else {
-            partsSkipped += 1
-          }
-        } else {
-          partsSkipped += 1
-        }
-      }
-      // Pruning group bitmaps.
-      for { group <- 0 until numGroups } {
-        partitionGroups(group) = partitionGroups(group).andNot(successfullyEvictedParts)
-      }
-      val elemCount = evictedPartKeys.synchronized {
-        if (!evictedPartKeysDisposed) evictedPartKeys.approximateElementCount() else 0
-      }
-      shardStats.evictedPkBloomFilterSize.update(elemCount)
-      logger.info(s"Eviction complete on dataset=$ref shard=$shardNum " +
-        s" numPartsEvicted=$numPartsEvicted numPartsSkipped=$partsSkipped")
-      shardStats.partitionsEvicted.increment(numPartsEvicted)
+      evictPartitions(numPartsToEvict)
     } else {
-      logger.error(s"Could not find any partition to evict when eviction is needed! Is the system overloaded?")
+      logger.error(s"Negative or Zero numPartsToEvict when eviction is needed! Is the system overloaded?")
+      false
     }
+  }
+
+  /**
+   * When purge happens faster than eviction and when eviction method is never called,
+   * the evictablePartIds list keeps growing without control. We need to ensure cap its
+   * size by removing it just enough items which in fact may already have been purged.
+   */
+  private[memstore] def ensureCapOnEvictablePartIds(): Unit = {
+    assertThreadName(IngestSchedName)
+    val numPartitions = partitions.size()
+    val evictablePartIdsSize = evictablePartIds.size
+    if (evictablePartIdsSize > numPartitions) {
+      evictPartitions(evictablePartIdsSize - numPartitions)
+    }
+  }
+
+  // scalastyle:off method.length
+  private[memstore] def evictPartitions(numPartsToEvict: Int): Boolean = {
+    assertThreadName(IngestSchedName)
+    val partIdsToEvict = partitionsToEvict(numPartsToEvict)
+    if (partIdsToEvict.isEmpty) {
+      logger.warn(s"dataset=$ref shard=$shardNum No partitions to evict but we are still low on space. " +
+        s"DATA WILL BE DROPPED")
+      return false
+    }
+    // Finally, prune partitions and keyMap data structures
+    logger.info(s"Evicting partitions from dataset=$ref shard=$shardNum ...")
+    val intIt = partIdsToEvict.iterator()
+    var numPartsEvicted = 0
+    var numPartsAlreadyEvicted = 0
+    var numPartsIngestingNotEvictable = 0
+    val successfullyEvictedParts = new EWAHCompressedBitmap()
+    while (intIt.hasNext) {
+      val partitionObj = partitions.get(intIt.next)
+      if (partitionObj != UnsafeUtils.ZeroPointer) {
+        if (!partitionObj.ingesting) { // could have started re-ingesting after it got into evictablePartIds queue
+          logger.debug(s"Evicting partId=${partitionObj.partID} ${partitionObj.stringPartition} " +
+            s"from dataset=$ref shard=$shardNum")
+          // add the evicted partKey to a bloom filter so that we are able to quickly
+          // find out if a partId has been assigned to an ingesting partKey before a more expensive lookup.
+          evictedPartKeys.synchronized {
+            if (!evictedPartKeysDisposed) {
+              evictedPartKeys.add(PartKey(partitionObj.partKeyBase, partitionObj.partKeyOffset))
+            }
+          }
+          // The previously created PartKey is just meant for bloom filter and will be GCed
+          removePartition(partitionObj)
+          successfullyEvictedParts.set(partitionObj.partID)
+          numPartsEvicted += 1
+        } else {
+          numPartsIngestingNotEvictable += 1
+        }
+      } else {
+        numPartsAlreadyEvicted += 1
+      }
+    }
+    // Pruning group bitmaps.
+    for { group <- 0 until numGroups } {
+      partitionGroups(group) = partitionGroups(group).andNot(successfullyEvictedParts)
+    }
+    val elemCount = evictedPartKeys.synchronized {
+      if (!evictedPartKeysDisposed) evictedPartKeys.approximateElementCount() else 0
+    }
+    shardStats.evictedPkBloomFilterSize.update(elemCount)
+    logger.info(s"Eviction task complete on dataset=$ref shard=$shardNum numPartsEvicted=$numPartsEvicted " +
+      s"numPartsAlreadyEvicted=$numPartsAlreadyEvicted numPartsIngestingNotEvictable=$numPartsIngestingNotEvictable")
+    shardStats.partitionsEvicted.increment(numPartsEvicted)
     true
   }
   // scalastyle:on method.length

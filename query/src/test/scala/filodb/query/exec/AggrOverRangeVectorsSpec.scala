@@ -345,7 +345,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
          (1541190780L,1.0d), (1541190840L,1.0d), (1541190900L,1.0d), (1541190960L,1.0d))
 
     val agg = RowAggregator(AggregationOperator.Avg, Nil, tvSchema)
-    val aggMR = AggregateMapReduce(AggregationOperator.Avg, Nil, Nil, Nil)
+    val aggMR = AggregateMapReduce(AggregationOperator.Avg, Nil)
     val mapped1 = aggMR(Observable.fromIterable(Seq(toRv(s1))), querySession, 1000, tvSchema)
     val mapped2 = aggMR(Observable.fromIterable(Seq(toRv(s2))), querySession, 1000, tvSchema)
 

@@ -93,7 +93,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   }
 
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
-                                   qContext: QueryContext): PlanResult = {
+                                   qContext: QueryContext,
+                                   forceInProcess: Boolean = false): PlanResult = {
     logicalPlan match {
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplyInstantFunction        => materializeApplyInstantFunction(qContext, lp)
@@ -124,7 +125,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       val newQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
       val newQueryContext = qContext.copy(origQueryParams = newQueryParams, plannerParams = qContext.plannerParams.
         copy(skipAggregatePresent = skipAggregatePresentValue))
-      queryPlanner.materialize(logicalPlan.replaceFilters(result), newQueryContext)
+      queryPlanner.materialize(newLogicalPlan, newQueryContext)
     }
   }
 

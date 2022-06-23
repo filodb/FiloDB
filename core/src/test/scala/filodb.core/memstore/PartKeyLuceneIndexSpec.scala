@@ -1,15 +1,6 @@
 package filodb.core.memstore
 
-import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.duration._
-import scala.util.Random
-
 import com.googlecode.javaewah.IntIterator
-import org.apache.lucene.util.BytesRef
-import org.scalatest.BeforeAndAfter
-import org.scalatest.funspec.AnyFunSpec
-import org.scalatest.matchers.should.Matchers
-
 import filodb.core._
 import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
 import filodb.core.metadata.Schemas
@@ -17,12 +8,24 @@ import filodb.core.query.{ColumnFilter, Filter}
 import filodb.memory.format.UnsafeUtils.ZeroPointer
 import filodb.memory.format.UTF8Wrapper
 import filodb.memory.format.ZeroCopyUTF8String._
+import org.apache.lucene.util.BytesRef
+import org.scalatest.BeforeAndAfter
+import org.scalatest.funspec.AnyFunSpec
+import org.scalatest.matchers.should.Matchers
+
+import java.io.{File, FileFilter}
+import java.nio.file.{Files, StandardOpenOption}
+import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.duration._
+import scala.util.Random
 
 class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfter {
   import Filter._
   import GdeltTestData._
 
-  val keyIndex = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis)
+  val keyIndex = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis,
+    Some(new java.io.File(System.getProperty("java.io.tmpdir"), "part-key-lucene-index")))
+
   val partBuilder = new RecordBuilder(TestData.nativeMem)
 
   def partKeyOnHeap(partKeySchema: RecordSchema,
@@ -92,7 +95,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       .zipWithIndex.map { case (addr, i) =>
       val pk = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
       keyIndex.addPartKey(pk, i, i, i + 10)()
-        PartKeyLuceneIndexRecord(pk, i, i + 10)
+      PartKeyLuceneIndexRecord(pk, i, i + 10)
     }
     keyIndex.refreshReadersBlocking()
 
@@ -152,13 +155,13 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     result.isEmpty shouldBe true
   }
 
-    it("should upsert part keys with endtime and foreachPartKeyStillIngesting should work") {
+  it("should upsert part keys with endtime and foreachPartKeyStillIngesting should work") {
     // Add the first ten keys and row numbers
     partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
       .zipWithIndex.foreach { case (addr, i) =>
-        val time = System.currentTimeMillis()
-        keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, time)()
-        if (i%2 == 0) keyIndex.upsertPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, time, time + 300)()
+      val time = System.currentTimeMillis()
+      keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, time)()
+      if (i%2 == 0) keyIndex.upsertPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, time, time + 300)()
     }
     keyIndex.refreshReadersBlocking()
 
@@ -337,7 +340,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       keyIndex.addPartKey(partKeyBytes, i, System.currentTimeMillis())()
       keyIndex.refreshReadersBlocking()
       keyIndex.partKeyFromPartId(i).get.bytes shouldEqual partKeyBytes
-//      keyIndex.partIdFromPartKey(new BytesRef(partKeyBytes)) shouldEqual i
+      //      keyIndex.partIdFromPartKey(new BytesRef(partKeyBytes)) shouldEqual i
     }
   }
 
@@ -345,13 +348,13 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     val addedKeys = partKeyFromRecords(dataset6, records(dataset6, readers.take(100)), Some(partBuilder))
       .zipWithIndex.map { case (addr, i) =>
-        val start = Math.abs(Random.nextLong())
-        keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, start)()
-        keyIndex.refreshReadersBlocking() // updates need to be able to read startTime from index, so commit
-        val end = start + Random.nextInt()
-        keyIndex.updatePartKeyWithEndTime(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, end)()
-        (end, start, i)
-      }
+      val start = Math.abs(Random.nextLong())
+      keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, start)()
+      keyIndex.refreshReadersBlocking() // updates need to be able to read startTime from index, so commit
+      val end = start + Random.nextInt()
+      keyIndex.updatePartKeyWithEndTime(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, end)()
+      (end, start, i)
+    }
     keyIndex.refreshReadersBlocking()
 
     for {
@@ -371,13 +374,13 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val index3 = new PartKeyLuceneIndex(DatasetRef("prometheus"), Schemas.promCounter.partition,
       true, true, 0, 1.hour.toMillis)
     val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8,
-                         "_ns_".utf8 -> "my_ns".utf8)
+      "_ns_".utf8 -> "my_ns".utf8)
 
     // create 1000 time series with 10 metric names
     for { i <- 0 until 1000} {
       val counterNum = i % 10
       val partKey = partBuilder.partKeyFromObjects(Schemas.promCounter, s"counter$counterNum",
-          seriesTags + ("instance".utf8 -> s"instance$i".utf8))
+        seriesTags + ("instance".utf8 -> s"instance$i".utf8))
       index3.addPartKey(partKeyOnHeap(Schemas.promCounter.partition.binSchema, ZeroPointer, partKey), i, 5)()
     }
     index3.refreshReadersBlocking()
@@ -430,4 +433,232 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
   }
 
+  // Testcases to test additionalFacet config
+
+  it("should be able to fetch label values efficiently using additonal facets") {
+    val facetIndex = new PartKeyLuceneIndex(dataset7.ref, dataset7.schema.partition,
+      true, true, 0, 1.hour.toMillis)
+    val addedKeys = partKeyFromRecords(dataset7, records(dataset7, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val start = Math.abs(Random.nextLong())
+      facetIndex.addPartKey(partKeyOnHeap(dataset7.partKeySchema, ZeroPointer, addr), i, start)()
+    }
+    facetIndex.refreshReadersBlocking()
+    val filters1 = Seq.empty
+
+    val partNums1 = facetIndex.partIdsFromFilters(filters1, 0, Long.MaxValue)
+    partNums1.length shouldEqual 10
+
+    val labelValues1 = facetIndex.labelValuesEfficient(filters1, 0, Long.MaxValue, "Actor2Code")
+    labelValues1.length shouldEqual 7
+
+    val labelValues2 = facetIndex.labelValuesEfficient(filters1, 0, Long.MaxValue, "Actor2Code-Actor2Name")
+    labelValues2.length shouldEqual 8
+
+    val labelValues3 = facetIndex.labelValuesEfficient(filters1, 0, Long.MaxValue, "Actor2Name-Actor2Code")
+    labelValues3.length shouldEqual 8
+
+    labelValues1.sorted.toSet shouldEqual labelValues2.map(_.split("\u03C0")(0)).sorted.toSet
+    labelValues1.sorted.toSet shouldEqual labelValues3.map(_.split("\u03C0")(1)).sorted.toSet
+
+    val filters2 = Seq(ColumnFilter("Actor2Code", Equals("GOV")))
+
+    val labelValues12 = facetIndex.labelValuesEfficient(filters2, 0, Long.MaxValue, "Actor2Name")
+    labelValues12.length shouldEqual 2
+
+    val labelValues22 = facetIndex.labelValuesEfficient(filters2, 0, Long.MaxValue, "Actor2Code-Actor2Name")
+    labelValues22.length shouldEqual 2
+
+    val labelValues32 = facetIndex.labelValuesEfficient(filters2, 0, Long.MaxValue, "Actor2Name-Actor2Code")
+    labelValues32.length shouldEqual 2
+
+    labelValues12.sorted shouldEqual labelValues22.map(_.split("\u03C0")(1)).sorted
+    labelValues12.sorted shouldEqual labelValues32.map(_.split("\u03C0")(0)).sorted
+
+  }
+
+  it("should be able to do regular operations when faceting is disabled and additional faceting in dataset") {
+    val facetIndex = new PartKeyLuceneIndex(dataset7.ref, dataset7.schema.partition,
+      false, true, 0, 1.hour.toMillis)
+    val addedKeys = partKeyFromRecords(dataset7, records(dataset7, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val start = Math.abs(Random.nextLong())
+      facetIndex.addPartKey(partKeyOnHeap(dataset7.partKeySchema, ZeroPointer, addr), i, start)()
+    }
+    facetIndex.refreshReadersBlocking()
+    val filters1 = Seq.empty
+
+    val partNums1 = facetIndex.partIdsFromFilters(filters1, 0, Long.MaxValue)
+    partNums1.length shouldEqual 10
+
+    the [IllegalArgumentException] thrownBy {
+      facetIndex.labelValuesEfficient(filters1, 0, Long.MaxValue, "Actor2Code-Actor2Name")
+    } should have message "requirement failed: Faceting not enabled for label Actor2Code-Actor2Name; labelValuesEfficient should not have been called"
+  }
+
+  it("must clean the input directory for Index state apart from Synced and Refreshing") {
+    val events = ArrayBuffer.empty[(IndexState.Value, Long)]
+    IndexState.values.foreach {
+      indexState =>
+        val indexDirectory = new File(
+          System.getProperty("java.io.tmpdir"), "part-key-lucene-index-event")
+        val shardDirectory = new File(indexDirectory, dataset6.ref + File.separator + "0")
+        shardDirectory.mkdirs()
+        new File(shardDirectory, "empty").createNewFile()
+        // Validate the file named empty exists
+        assert(shardDirectory.list().exists(_.equals("empty")))
+        val index = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis,
+          Some(indexDirectory),
+          Some(new IndexMetadataStore {
+            def currentState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) =
+              (indexState, None)
+
+            def updateState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit = {
+              events.append((state, time))
+            }
+
+            override def initState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) =
+              currentState(datasetRef: DatasetRef, shard: Int)
+
+            override def updateInitState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit
+            = {
+
+            }
+          }))
+        index.closeIndex()
+        events.toList match {
+          case (IndexState.Empty, _) :: Nil if indexState != IndexState.Synced && indexState != IndexState.Refreshing =>
+            // The file originally present must not be available
+            assert(!shardDirectory.list().exists(_.equals("empty")))
+            events.clear()
+          case Nil  if indexState == IndexState.Synced
+                    || indexState == IndexState.Refreshing
+                    || indexState == IndexState.Empty     =>
+            // Empty state denotes the FS is empty, it is not cleaned up again to ensure its empty
+            // The file originally present "must" be available, which means no cleanup was done
+            assert(shardDirectory.list().exists(_.equals("empty")))
+          case _                                                                                                      =>
+            fail("Expected an index state Empty after directory cleanup")
+        }
+    }
+  }
+
+
+  it("Should update the state as empty after the cleanup is from a corrupt index") {
+    val events = ArrayBuffer.empty[(IndexState.Value, Long)]
+    IndexState.values.foreach {
+      indexState =>
+        val indexDirectory = new File(
+          System.getProperty("java.io.tmpdir"), "part-key-lucene-index-event")
+        val shardDirectory = new File(indexDirectory, dataset6.ref + File.separator + "0")
+        // Delete directory to create an index from scratch
+        scala.reflect.io.Directory(shardDirectory).deleteRecursively()
+        shardDirectory.mkdirs()
+        // Validate the file named empty exists
+        val index = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis,
+          Some(indexDirectory),None)
+        // Add some index entries
+        val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8,
+          "_ns_".utf8 -> "my_ns".utf8)
+        for { i <- 0 until 1000} {
+          val counterNum = i % 10
+          val partKey = partBuilder.partKeyFromObjects(Schemas.promCounter, s"counter$counterNum",
+            seriesTags + ("instance".utf8 -> s"instance$i".utf8))
+          index.addPartKey(partKeyOnHeap(Schemas.promCounter.partition.binSchema, ZeroPointer, partKey), i, 5)()
+        }
+
+        index.closeIndex()
+        // Garble some index files to force a index corruption
+        // Just add some junk to the end of the segment files
+
+        shardDirectory.listFiles(new FileFilter {
+          override def accept(pathname: File): Boolean = pathname.toString.contains("segment")
+        }).foreach( file => {
+          Files.writeString(file.toPath, "Hello", StandardOpenOption.APPEND)
+        })
+
+        new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis,
+          Some(indexDirectory),
+          Some( new IndexMetadataStore {
+            def currentState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) =
+              (indexState, None)
+
+            def updateState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit = {
+              assert(shardDirectory.list().length == 0)
+              events.append((state, time))
+            }
+
+            override def initState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) =
+              currentState(datasetRef: DatasetRef, shard: Int)
+
+            override def updateInitState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit
+            = {
+
+            }
+
+          })).closeIndex()
+        // For all states, including states where Index is Synced because the index is corrupt,
+        // the shard directory should be cleared and the new state should be Empty
+        events.toList match {
+          case (IndexState.Empty, _) :: Nil =>
+            // The file originally present must not be available
+            assert(!shardDirectory.list().exists(_.equals("empty")))
+            events.clear()
+          case _                                                               =>
+            fail("Expected an index state Empty after directory cleanup")
+        }
+    }
+  }
+
+  it("Should update the state as TriggerRebuild and throw an exception for any error other than CorruptIndexException")
+  {
+    val events = ArrayBuffer.empty[(IndexState.Value, Long)]
+    IndexState.values.foreach {
+      indexState =>
+        val indexDirectory = new File(
+          System.getProperty("java.io.tmpdir"), "part-key-lucene-index-event")
+        val shardDirectory = new File(indexDirectory, dataset6.ref + File.separator + "0")
+        shardDirectory.mkdirs()
+        new File(shardDirectory, "empty").createNewFile()
+        // Make directory readonly to for an IOException when attempting to write
+        shardDirectory.setWritable(false)
+        // Validate the file named empty exists
+        assert(shardDirectory.list().exists(_.equals("empty")))
+        try {
+          val index = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, true, true,0, 1.hour.toMillis,
+            Some(indexDirectory),
+            Some( new IndexMetadataStore {
+              def currentState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) =
+                (indexState, None)
+
+              def updateState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit = {
+                events.append((state, time))
+              }
+
+              override def initState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) =
+                currentState(datasetRef: DatasetRef, shard: Int)
+
+              override def updateInitState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long)
+              :Unit = {
+
+              }
+            }))
+          index.closeIndex()
+        } catch {
+          case is: IllegalStateException =>
+            assert(is.getMessage.equals("Unable to clean up index directory"))
+            events.toList match {
+              case (IndexState.TriggerRebuild, _) :: Nil =>
+                // The file originally present would still be there as the directory
+                // is made readonly
+                assert(shardDirectory.list().exists(_.equals("empty")))
+                events.clear()
+              case _                                                               =>
+                fail("Expected an index state Empty after directory cleanup")
+            }
+        } finally {
+          shardDirectory.setWritable(true)
+        }
+    }
+  }
 }

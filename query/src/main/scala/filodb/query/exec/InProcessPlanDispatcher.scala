@@ -16,18 +16,12 @@ import filodb.core.store._
 import filodb.query.QueryResponse
 
 /**
-  * Dispatcher which will make a No-Op style call to ExecPlan#excecute().
-  * Goal is that Non-Leaf plans can be executed locally in JVM and make network
-  * calls only for children.
+  * Executes an ExecPlan on the current thread.
   */
-
   case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatcher {
 
   val clusterName = InetAddress.getLocalHost().getHostName()
-  override def dispatch(plan: ExecPlan)(implicit sched: Scheduler): Task[QueryResponse] = {
-    // unsupported source since its does not apply in case of non-leaf plans
-    val source = UnsupportedChunkSource()
-
+  override def dispatch(plan: ExecPlan, source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since
     // kamon uses thread-locals.

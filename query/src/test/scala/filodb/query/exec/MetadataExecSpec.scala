@@ -15,7 +15,7 @@ import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
 import filodb.core.query._
-import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
+import filodb.core.store.{ChunkSource, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
 import filodb.query.exec.TsCardExec.CardCounts
@@ -97,7 +97,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   }
 
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)
+    override def dispatch(plan: ExecPlan, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = plan.execute(memStore,
       QuerySession(QueryContext(), queryConfig))(sched)
 
@@ -109,7 +109,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   val executeDispatcher = new PlanDispatcher {
     override def isLocalCall: Boolean = ???
     override def clusterName: String = ???
-    override def dispatch(plan: ExecPlan)
+    override def dispatch(plan: ExecPlan, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = {
       plan.execute(memStore, querySession)(sched)
     }
@@ -253,86 +253,75 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   it("should be able to query label cardinality") {
     // Tests all, LabelCardinalityExec, LabelCardinalityDistConcatExec and LabelCardinalityPresenter
     // Though we will search by ns, ws and metric name, technically we can search by any label in index
-    val filters = Seq(ColumnFilter("instance", Filter.Equals("someHost:8787".utf8)))
+    val filters = Seq(ColumnFilter("_ws_", Filter.Equals("demo")),
+                      ColumnFilter("_ns_", Filter.Equals("App-0")),
+                      ColumnFilter("_metric_", Filter.Equals("http_req_total")),
+    )
+
     val qContext = QueryContext()
 
-    val leaves = (0 until shardPartKeyLabelValues.size).map{ ishard =>
+    val leaves = (0 until shardPartKeyLabelValues.size).map { ishard =>
       LabelCardinalityExec(qContext, dummyDispatcher,
         timeseriesDatasetMultipleShardKeys.ref, ishard, filters, now - 5000, now)
-    }.toSeq
+    }
 
     val execPlan = LabelCardinalityReduceExec(qContext, dummyDispatcher, leaves)
     execPlan.addRangeVectorTransformer(new LabelCardinalityPresenter())
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _) => {
-        response.size shouldEqual 2
+      case QueryResult(id, _, response, _, _, _) =>
+        response.size shouldEqual 1
         val rv1 = response(0)
-        val rv2 = response(1)
         rv1.rows.size shouldEqual 1
-        rv2.rows.size shouldEqual 1
         val record1 = rv1.rows.next().asInstanceOf[BinaryRecordRowReader]
         val result1 = rv1.asInstanceOf[SerializedRangeVector]
                           .schema.toStringPairs(record1.recordBase, record1.recordOffset).toMap
 
-        val record2 = rv2.rows.next().asInstanceOf[BinaryRecordRowReader]
-        val result2 = rv2.asInstanceOf[SerializedRangeVector]
-                            .schema.toStringPairs(record2.recordBase, record2.recordOffset).toMap
-
         result1 shouldEqual Map("_ns_" -> "1",
           "unicode_tag" -> "1",
-          "_type_" -> "1",
           "job" -> "1",
-          "instance" -> "1",
+          "instance" -> "2",
           "_metric_" -> "1",
           "_ws_" -> "1")
-
-        result2 shouldEqual Map("_ns_" -> "1",
-          "unicode_tag" -> "1",
-          "_type_" -> "1",
-          "job" -> "1",
-          "instance" -> "1",
-          "_metric_" -> "1",
-          "_ws_" -> "1")
-      }
     }
   }
 
   it ("should correctly execute TsCardExec") {
     import filodb.query.exec.TsCardExec._
 
-    case class TestSpec(shardKeyPrefix: Seq[String], numGroupByFields: Int, exp: Map[Seq[String], CardCounts])
+    case class TestSpec(shardKeyPrefix: Seq[String], numGroupByFields: Int, exp: Seq[(Seq[String], CardCounts)])
 
     // Note: expected strings are eventually concatenated with a delimiter
     //   and converted to ZeroCopyUTF8Strings.
     Seq(
-      TestSpec(Seq(), 1, Map(
-        Seq("demo-A") -> CardCounts(1,1),
-        Seq("demo") -> CardCounts(4,4))),
-      TestSpec(Seq(), 2, Map(
+      TestSpec(Seq(), 1, Seq(
+        Seq("demo") -> CardCounts(4,4),
+        Seq("demo-A") -> CardCounts(1,1)
+        )),
+      TestSpec(Seq(), 2, Seq(
         Seq("demo", "App-0") -> CardCounts(4,4),
         Seq("demo-A", "App-A") -> CardCounts(1,1))),
-      TestSpec(Seq(), 3, Map(
-        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
+      TestSpec(Seq(), 3, Seq(
         Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
-        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1),
-        Seq("demo-A", "App-A", "http_req_total-A") -> CardCounts(1,1))),
-      TestSpec(Seq("demo"), 1, Map(
+        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
+        Seq("demo-A", "App-A", "http_req_total-A") -> CardCounts(1,1),
+        Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1))),
+      TestSpec(Seq("demo"), 1, Seq(
         Seq("demo") -> CardCounts(4,4))),
-      TestSpec(Seq("demo"), 2, Map(
+      TestSpec(Seq("demo"), 2, Seq(
         Seq("demo", "App-0") -> CardCounts(4,4))),
-      TestSpec(Seq("demo"), 3, Map(
-        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
+      TestSpec(Seq("demo"), 3, Seq(
         Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
+        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
         Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1))),
-      TestSpec(Seq("demo", "App-0"), 2, Map(
+      TestSpec(Seq("demo", "App-0"), 2, Seq(
         Seq("demo", "App-0") -> CardCounts(4,4))),
-      TestSpec(Seq("demo", "App-0"), 3, Map(
-        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
+      TestSpec(Seq("demo", "App-0"), 3, Seq(
         Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
+        Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
         Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1))),
-      TestSpec(Seq("demo", "App-0", "http_req_total"), 3, Map(
+      TestSpec(Seq("demo", "App-0", "http_req_total"), 3, Seq(
         Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2)))
     ).foreach{ testSpec =>
 
@@ -352,11 +341,11 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
           val resultMap = response(0).rows().map{r =>
             val data = RowData.fromRowReader(r)
             data.group -> data.counts
-          }.toMap
+          }.toSeq
 
           resultMap shouldEqual testSpec.exp.map { case (prefix, counts) =>
             prefixToGroup(prefix) -> counts
-          }.toMap
+          }
       }
     }
   }

@@ -2,14 +2,12 @@ package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration._
 import scala.math.min
-
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, StaticSpreadProvider}
 import filodb.core.{MetricsTestData, SpreadChange}
@@ -64,13 +62,13 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
 
   val raw1 = RawSeries(rangeSelector = intervalSelector, filters= f1, columns = Seq("value"))
   val windowed1 = PeriodicSeriesWithWindowing(raw1, from, 1000, to, 5000, RangeFunctionId.Rate)
-  val summed1 = Aggregate(AggregationOperator.Sum, windowed1, Nil, Seq("job"))
+  val summed1 = Aggregate(AggregationOperator.Sum, windowed1, Nil, AggregateClause.byOpt(Seq("job")))
 
   val f2 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_count")),
     ColumnFilter("job", Filter.Equals("myService")))
   val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("value"))
   val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
-  val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
+  val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, AggregateClause.byOpt(Seq("job")))
   val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000)
   val plannerParams = PlannerParams(timeSplitEnabled = true, minTimeRangeForSplitMs = splitThresholdMs, splitSizeMs = splitSizeMs)
 
@@ -579,7 +577,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       childPlan.children.foreach { l1 =>
         l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
         l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
-        l1.rangeVectorTransformers(1).asInstanceOf[AggregateMapReduce].by shouldEqual List("_metric_")
+        l1.rangeVectorTransformers(1).asInstanceOf[AggregateMapReduce].clauseOpt shouldEqual AggregateClause.byOpt(Seq("_metric_"))
       }
     }
 
@@ -597,7 +595,7 @@ class SingleClusterPlannerSplitSpec extends AnyFunSpec with Matchers with ScalaF
       childPlan.children.foreach { l1 =>
         l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
         l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
-        l1.rangeVectorTransformers(1).asInstanceOf[AggregateMapReduce].without shouldEqual List("_metric_", "instance")
+        l1.rangeVectorTransformers(1).asInstanceOf[AggregateMapReduce].clauseOpt shouldEqual AggregateClause.withoutOpt(Seq("_metric_", "instance"))
       }
     }
   }

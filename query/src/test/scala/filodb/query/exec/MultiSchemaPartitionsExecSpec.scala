@@ -6,7 +6,7 @@ import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SchemaMismatch, S
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn, LongColumn, TimestampColumn}
 import filodb.core.metadata.Schemas
 import filodb.core.query._
-import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore, TimeRangeChunkScan}
+import filodb.core.store.{AllChunkScan, ChunkSource, InMemoryMetaStore, NullColumnStore, TimeRangeChunkScan}
 import filodb.core.{DatasetRef, QueryTimeoutException, TestData, Types}
 import filodb.memory.MemFactory
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -24,7 +24,7 @@ import scala.concurrent.duration._
 
 object MultiSchemaPartitionsExecSpec {
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)
+    override def dispatch(plan: ExecPlan, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
 
     override def clusterName: String = ???
@@ -354,7 +354,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
     val end = 185000L
     execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, Some(300 * 1000),  // [5m]
                                          Some(InternalRangeFunction.SumOverTime), QueryContext()))
-    execPlan.addRangeVectorTransformer(AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Nil))
+    execPlan.addRangeVectorTransformer(AggregateMapReduce(AggregationOperator.Sum, Nil))
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     info(execPlan.printTree())

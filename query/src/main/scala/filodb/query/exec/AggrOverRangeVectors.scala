@@ -75,15 +75,27 @@ final case class MultiPartitionReduceAggregateExec(queryContext: QueryContext,
   */
 final case class AggregateMapReduce(aggrOp: AggregationOperator,
                                     aggrParams: Seq[Any],
-                                    without: Seq[String],
-                                    by: Seq[String],
+                                    clauseOpt: Option[AggregateClause] = None,
                                     funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
-  require(without == Nil || by == Nil, "Cannot specify both without and by clause")
-  val withoutLabels = without.map(ZeroCopyUTF8String(_)).toSet
-  val byLabels = by.map(ZeroCopyUTF8String(_)).toSet
 
-  protected[exec] def args: String =
-    s"aggrOp=$aggrOp, aggrParams=$aggrParams, without=$without, by=$by"
+  import filodb.query.AggregateClause.ClauseType
+
+  val clauseLabelSet : Set[ZeroCopyUTF8String] = {
+    if (clauseOpt.isEmpty) Set()
+    else clauseOpt.get.labels.map(ZeroCopyUTF8String(_)).toSet
+  }
+
+  protected[exec] def args: String = {
+    var byLabels: Seq[String] = Nil
+    var withoutLabels: Seq[String] = Nil
+    if (clauseOpt.nonEmpty) {
+      clauseOpt.get.clauseType match {
+        case ClauseType.By => byLabels = clauseOpt.get.labels
+        case ClauseType.Without => withoutLabels = clauseOpt.get.labels
+      }
+    }
+    s"aggrOp=$aggrOp, aggrParams=$aggrParams, without=$withoutLabels, by=$byLabels"
+  }
 
   def apply(source: Observable[RangeVector],
             querySession: QuerySession,
@@ -94,15 +106,17 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
 
     def grouping(rv: RangeVector): RangeVectorKey = {
       val rvLabelValues = rv.key.labelValues
-      val groupBy: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] =
-        if (by.nonEmpty) rvLabelValues.filter(lv => byLabels.contains(lv._1))
-        else if (without.nonEmpty) rvLabelValues.filterNot(lv =>withoutLabels.contains(lv._1))
-        else Map.empty
+      val groupBy: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = clauseOpt.map { clause =>
+        clause.clauseType match {
+          case ClauseType.By => rvLabelValues.filter(lv => clauseLabelSet.contains(lv._1))
+          case ClauseType.Without => rvLabelValues.filterNot(lv => clauseLabelSet.contains(lv._1))
+        }
+      }.getOrElse(Map())
       CustomRangeVectorKey(groupBy)
     }
 
     // IF no grouping is done AND prev transformer is Periodic (has fixed length), use optimal path
-    if (without.isEmpty && by.isEmpty && sourceSchema.fixedVectorLen.isDefined) {
+    if (clauseOpt.isEmpty && sourceSchema.fixedVectorLen.isDefined) {
       sourceSchema.fixedVectorLen.filter(_ <= querySession.queryConfig.fastReduceMaxWindows).map { numWindows =>
         RangeVectorAggregator.fastReduce(aggregator, false, source, numWindows)
       }.getOrElse {
