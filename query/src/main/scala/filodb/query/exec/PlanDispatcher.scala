@@ -3,13 +3,10 @@ package filodb.query.exec
 import java.util.concurrent.TimeUnit
 
 import scala.concurrent.duration.FiniteDuration
-import scala.util.{Failure, Success}
 
 import akka.actor.ActorRef
 import akka.pattern.ask
 import akka.util.Timeout
-import kamon.Kamon
-import kamon.tag.TagSet
 import monix.eval.Task
 import monix.execution.Scheduler
 
@@ -33,10 +30,6 @@ trait PlanDispatcher extends java.io.Serializable {
   * using Akka Actors.
   */
 case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends PlanDispatcher {
-  val kamonTags = Map("target" -> target.toString())
-  val askIllegalStates = Kamon.counter("queryactor_ask_illegal_states").withTags(TagSet.from(kamonTags))
-  val askFails = Kamon.counter("queryactor_ask_fails").withTags(TagSet.from(kamonTags))
-  val askCount = Kamon.counter("queryactor_asks").withTags(TagSet.from(kamonTags))
 
   def dispatch(plan: ExecPlan, source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
     // "source" is unused (the param exists to support InProcessDispatcher).
@@ -48,14 +41,8 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
     } else {
       val t = Timeout(FiniteDuration(remainingTime, TimeUnit.MILLISECONDS))
       val fut = (target ? plan)(t).map {
-        case qresp: QueryResponse => qresp
-        case e =>
-          askIllegalStates.increment()
-          throw new IllegalStateException(s"Received bad response $e")
-      }
-      fut.onComplete{
-        case Failure(ex) => askFails.increment()
-        case Success(value) => { /* do nothing */ }
+        case resp: QueryResponse => resp
+        case e =>  throw new IllegalStateException(s"Received bad response $e")
       }
       // TODO We can send partial results on timeout. Try later. Need to address QueryTimeoutException too.
 //        .recover { // if partial results allowed, then return empty result
@@ -64,7 +51,6 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
 //            QueryResult(plan.queryContext.queryId, ResultSchema.empty, Nil, true,
 //              Some("Result may be partial since query on some shards timed out"))
 //      }
-      askCount.increment()
       Task.fromFuture(fut)
     }
   }
