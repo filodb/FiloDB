@@ -157,7 +157,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           logger.info("Found index state empty, bootstrapping downsample index")
           recoverIndexInternal(None)
         case (IndexState.Synced, checkpointMillis)             =>
-          logger.info("Found index state empty, bootstrapping downsample index")
+          logger.warn(s"Found index state synced, bootstrapping downsample index from time(ms) $checkpointMillis")
           // TODO
           // although here we provide the logic to invoke recoverIndexInternal from a particular
           // checkpoint, recoverIndexInternal does not recover from a checkpoint properly because

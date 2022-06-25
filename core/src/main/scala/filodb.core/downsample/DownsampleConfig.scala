@@ -38,9 +38,11 @@ final case class DownsampleConfig(config: Config) {
 
   val indexMetastoreImplementation = if (config.hasPath("index-metastore-implementation")) {
     val impl = config.as[String]("index-metastore-implementation")
-    impl match {
+    val lowercaseImpl = impl.toLowerCase
+    lowercaseImpl match {
       case "file" => IndexMetastoreImplementation.File
       case "ephemeral" => IndexMetastoreImplementation.Ephemeral
+      case _ => IndexMetastoreImplementation.NoImp
     }
   } else {
     IndexMetastoreImplementation.NoImp
