@@ -47,6 +47,13 @@ class IndexBootstrapper(colStore: ColumnStore) {
       }
   }
 
+  // TODO
+  // currently we cannot yet recover from a particular checkpoint, look at the comment of the method
+  // recoverIndexInternal() of DownsampleTimeSeriesShard. We, however, already have a checkpointer manager in place,
+  // so, when we fix IndexBootstrapper, the checkpointMillis passed into this method can be utilized. Currently,
+  // checkpointMillis passed to this method would always be None, as checkpointing logic can be activating only using
+  // properties index-location and index-metastore-implementation and these are only utilized while testing
+  // persistent index logic in dev.
   /**
    * Same as bootstrapIndexRaw, except that we parallelize lucene update for
    * faster bootstrap of large number of index entries in downsample cluster.
@@ -56,6 +63,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
   def bootstrapIndexDownsample(index: PartKeyLuceneIndex,
                                shardNum: Int,
                                ref: DatasetRef,
+                               checkpointMillis: Option[Long],
                                ttlMs: Long)
                               (assignPartId: PartKeyRecord => Int): Task[Long] = {
 
@@ -63,14 +71,16 @@ class IndexBootstrapper(colStore: ColumnStore) {
     // the timestamp in millis, based on the time, we need to invoke refreshWithDownsamplePartKeys giving
     // the last synced time till current hour, the start hour will be max(of the time retrieved from underlying
     // state, start - ttlMs)
-
     val recoverIndexLatency = Kamon.gauge("shard-recover-index-latency", MeasurementUnit.time.milliseconds)
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum)
     val start = System.currentTimeMillis()
-    //here we need to adjust ttlMs
-    //because we might already have index available on disk
-    val checkpointTime = start - ttlMs
+    // here we need to adjust ttlMs
+    // because we might already have index available on disk
+    var checkpointTime = checkpointMillis.getOrElse(0L)
+    if (checkpointTime < start - ttlMs) {
+      checkpointTime = start - ttlMs
+    }
     // No need to check index state here, by definition bootstrap index
     // will refresh the entire index. When entire index is rebuilt, the
     // partIds (numeric values) which are a part of the index, monotocally

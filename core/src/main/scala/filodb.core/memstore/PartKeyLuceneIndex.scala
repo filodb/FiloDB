@@ -144,6 +144,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         throw new IllegalStateException("Unable to clean up index directory", t)
     }
   }
+  //else {
+  // TODO here we assume there is non-empty index which we need to validate
+  //}
 
   def  notifyLifecycleListener(state: IndexState.Value, time: Long): Unit =
     lifecycleManager.foreach(_.updateState(ref, shardNum, state, time))

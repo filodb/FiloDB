@@ -7,7 +7,8 @@ import scala.concurrent.duration.FiniteDuration
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
-import monix.execution.{CancelableFuture, Scheduler}
+import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
+import monix.execution.schedulers.CanBlock
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
@@ -18,6 +19,7 @@ import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QuerySession, ServiceUnavailableException}
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
+
 
 /**
  * An implementation of TimeSeriesStore with data fetched from a column store
@@ -32,6 +34,7 @@ class DownsampledTimeSeriesStore(val store: ColumnStore,
                                  val filodbConfig: Config)
                                 (implicit val ioPool: ExecutionContext)
 extends TimeSeriesStore with StrictLogging {
+
   import collection.JavaConverters._
 
   private val datasets = new HashMap[DatasetRef, NonBlockingHashMapLong[DownsampledTimeSeriesShard]]
@@ -62,7 +65,7 @@ extends TimeSeriesStore with StrictLogging {
       throw ShardAlreadySetup(ref, shard)
     } else {
       val tsdb = new DownsampledTimeSeriesShard(ref, storeConf, schemas, store,
-                                                rawColStore, shard, filodbConfig, downsample)
+        rawColStore, shard, filodbConfig, downsample)
       shards.put(shard, tsdb)
     }
   }
@@ -71,6 +74,20 @@ extends TimeSeriesStore with StrictLogging {
     datasets.get(dataset).foreach(_.values().asScala.foreach { s =>
       s.refreshPartKeyIndexBlocking()
     })
+
+  def refreshIndexForTesting(dataset: DatasetRef, fromHour: Long, toHour: Long): Unit = {
+    val sched = Scheduler.computation(
+      name = "testScheduler",
+      reporter = UncaughtExceptionReporter(
+        logger.error("Uncaught Exception in Housekeeping Scheduler", _)
+      )
+    )
+    val ds = datasets.get(dataset)
+    ds.foreach(_.values().asScala.foreach { s =>
+      s.indexRefresh(fromHour, toHour).runSyncUnsafe()(sched, CanBlock.permit)
+    })
+    sched.shutdown()
+  }
 
   private[filodb] def getShard(dataset: DatasetRef, shard: Int): Option[DownsampledTimeSeriesShard] =
     datasets.get(dataset).flatMap { shards => Option(shards.get(shard)) }
@@ -81,7 +98,7 @@ extends TimeSeriesStore with StrictLogging {
             .getOrElse(throw new IllegalArgumentException(s"dataset=$dataset shard=$shard have not been set up"))
   }
 
-  def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
+  def recoverIndex(dataset: DatasetRef, shard: Int): Future[Long] =
     getShardE(dataset, shard).recoverIndex()
 
 
