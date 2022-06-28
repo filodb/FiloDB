@@ -227,7 +227,7 @@ trait ExecPlan extends QueryCommand {
             SerializedRangeVector.queryResultBytes.record(resultSize)
             // Includes sizes of all RV's in this subtree.
             val totalSize = querySession.queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
-            if (totalSize > queryContext.plannerParams.resultByteLimit) {
+            if (totalSize > querySession.qContext.plannerParams.resultByteLimit) {
               qLogger.warn(s"Maximum result size exceeded (${queryContext.plannerParams.resultByteLimit} bytes). " +
                            s"QueryContext: $queryContext")
               if (querySession.queryConfig.enforceResultByteLimit) {
