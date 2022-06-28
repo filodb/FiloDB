@@ -2,14 +2,12 @@ package filodb.query.exec
 
 import scala.collection.mutable.ArrayBuffer
 import scala.util.control.NonFatal
-
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
-
-import filodb.core.{DatasetRef, QueryTimeoutException}
+import filodb.core.{DatasetRef, GlobalConfig, QueryTimeoutException}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
@@ -230,9 +228,13 @@ trait ExecPlan extends QueryCommand {
             // Includes sizes of all RV's in this subtree.
             val totalSize = querySession.queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
             if (totalSize > queryContext.plannerParams.resultByteLimit) {
-              throw new BadQueryException(
-                s"Maximum result size exceeded (${queryContext.plannerParams.resultByteLimit} bytes). " +
-                s"Try to apply more filters or reduce the time range.")
+              qLogger.warn(s"Maximum result size exceeded (${queryContext.plannerParams.resultByteLimit} bytes). " +
+                           s"QueryContext: $queryContext")
+              if (GlobalConfig.systemConfig.getBoolean("filodb.query.enforce-result-byte-limit")) {
+                throw new BadQueryException(
+                  s"Maximum result size exceeded (${queryContext.plannerParams.resultByteLimit} bytes). " +
+                  s"Try to apply more filters or reduce the time range.")
+              }
             }
             span.mark(s"resultBytes=$resultSize")
             span.mark(s"resultSamples=$numResultSamples")
