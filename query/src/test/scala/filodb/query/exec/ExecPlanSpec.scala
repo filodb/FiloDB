@@ -185,17 +185,33 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
       override def outputRange: Option[RvRange] = Some(RvRange(1000, 10, 2000))
     }
+
     val schema = ResultSchema(
       Seq(ColumnInfo("c0", ColumnType.TimestampColumn),
-        ColumnInfo("c1", ColumnType.DoubleColumn)),
+          ColumnInfo("c1", ColumnType.DoubleColumn)),
       1 // numRowKeyColumns
     )
-    val querySession = QuerySession(QueryContext(), queryConfig)
-    val querySessionLimit = QuerySession(QueryContext(plannerParams = PlannerParams(resultByteLimit = 5)), queryConfig)
-    val plan = makeFixedLeafExecPlan(Seq(rv), schema, querySession.qContext)
-    val planLimit = makeFixedLeafExecPlan(Seq(rv), schema, querySessionLimit.qContext)
 
-    plan.execute(memStore, querySession).runToFuture.futureValue.isInstanceOf[QueryResult] shouldEqual true
-    planLimit.execute(memStore, querySessionLimit).runToFuture.futureValue.isInstanceOf[QueryError] shouldEqual true
+    val rawQueryConfig = config.getConfig("query")
+    val confEnforce = ConfigFactory.parseString("enforce-result-byte-limit = true").withFallback(rawQueryConfig)
+    val confAllow = ConfigFactory.parseString("enforce-result-byte-limit = false").withFallback(rawQueryConfig)
+
+    val qContextWithLowLimit = QueryContext(plannerParams = PlannerParams(resultByteLimit = 5))
+    val qContextWithHighLimit = QueryContext(plannerParams = PlannerParams(resultByteLimit = Long.MaxValue))
+
+    // All combos between [low, high] limit and [enforce, allow] protocol
+    val querySessionEnforceLow = QuerySession(qContextWithLowLimit, QueryConfig(confEnforce))
+    val querySessionAllowLow = QuerySession(qContextWithLowLimit, QueryConfig(confAllow))
+    val querySessionEnforceHigh = QuerySession(qContextWithHighLimit, QueryConfig(confEnforce))
+    val querySessionAllowHigh = QuerySession(qContextWithHighLimit, QueryConfig(confAllow))
+
+    // Plan's QContext is irrelevant; the QSession's QContext is used in the execution pipeline.
+    val plan = makeFixedLeafExecPlan(Seq(rv), schema, QueryContext())
+
+    // Only the low limit should yield a QueryError when enforced.
+    plan.execute(memStore, querySessionEnforceLow).runToFuture.futureValue.isInstanceOf[QueryError] shouldEqual true
+    plan.execute(memStore, querySessionEnforceHigh).runToFuture.futureValue.isInstanceOf[QueryResult] shouldEqual true
+    plan.execute(memStore, querySessionAllowLow).runToFuture.futureValue.isInstanceOf[QueryResult] shouldEqual true
+    plan.execute(memStore, querySessionAllowHigh).runToFuture.futureValue.isInstanceOf[QueryResult] shouldEqual true
   }
 }
