@@ -22,7 +22,7 @@ import filodb.query.QueryResponse
 
   val clusterName = InetAddress.getLocalHost().getHostName()
 
-  override def dispatch(plan: RunTimePlanContainer,
+  override def dispatch(plan: ExecPlanWithClientParams,
                         source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since

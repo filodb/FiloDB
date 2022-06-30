@@ -105,7 +105,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
   val executeDispatcher = new PlanDispatcher {
     override def isLocalCall: Boolean = ???
     override def clusterName: String = ???
-    override def dispatch(plan: RunTimePlanContainer, source: ChunkSource)
+    override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = {
       plan.execPlan.execute(memStore, querySession)(sched)
     }

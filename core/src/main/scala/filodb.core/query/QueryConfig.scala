@@ -17,10 +17,12 @@ object QueryConfig {
     val parser = queryConfig.as[String]("parser")
     val translatePromToFilodbHistogram = queryConfig.getBoolean("translate-prom-to-filodb-histogram")
     val fasterRateEnabled = queryConfig.as[Option[Boolean]]("faster-rate").getOrElse(false)
-    val partialResult = queryConfig.getBoolean("allow-partial-results")
+    val allowPartialResultsMetadataQuery = queryConfig.getBoolean("allow-partial-results-metadataquery")
+    val allowPartialResultsRangeQuery = queryConfig.getBoolean("allow-partial-results-rangequery")
     QueryConfig(askTimeout, staleSampleAfterMs, minStepMs, fastReduceMaxWindows, parser, translatePromToFilodbHistogram,
       fasterRateEnabled, routingConfig.as[Option[Long]]("remote.http.timeout"),
-      routingConfig.as[Option[String]]("remote.http.endpoint"), partialResult)
+      routingConfig.as[Option[String]]("remote.http.endpoint"), allowPartialResultsRangeQuery,
+      allowPartialResultsMetadataQuery )
   }
 
   import scala.concurrent.duration._
@@ -41,5 +43,6 @@ case class QueryConfig(askTimeout: FiniteDuration,
                        fasterRateEnabled: Boolean,
                        remoteHttpTimeoutMs: Option[Long],
                        remoteHttpEndpoint: Option[String],
-                       allowPartialResults: Boolean = false)
+                       allowPartialResultsRangeQuery: Boolean = false,
+                       allowPartialResultsMetadataQuery: Boolean = false)
 

@@ -23,7 +23,7 @@ import filodb.query.QueryResult
   */
 trait PlanDispatcher extends java.io.Serializable {
   def clusterName: String
-  def dispatch(plan: RunTimePlanContainer, source: ChunkSource)
+  def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
               (implicit sched: Scheduler): Task[QueryResponse]
   def isLocalCall: Boolean
 }
@@ -34,10 +34,10 @@ trait PlanDispatcher extends java.io.Serializable {
   */
 case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends PlanDispatcher {
 
-  def dispatch(plan: RunTimePlanContainer, source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
+  def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
     // "source" is unused (the param exists to support InProcessDispatcher).
     val queryTimeElapsed = System.currentTimeMillis() - plan.execPlan.queryContext.submitTime
-    val remainingTime = plan.clientParams.timeout - queryTimeElapsed
+    val remainingTime = plan.clientParams.deadline - queryTimeElapsed
     lazy val emptyPartialResult: QueryResult = QueryResult(plan.execPlan.queryContext.queryId, ResultSchema.empty, Nil,
       QueryStats(), true, Some("Result may be partial since query on some shards timed out"))
 
@@ -47,6 +47,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
     } else {
       val t = Timeout(FiniteDuration(remainingTime, TimeUnit.MILLISECONDS))
 
+      // Query Planner sets target as null when shard is down
       if (target == ActorRef.noSender) {
         Task.eval({
           qLogger.warn(s"Creating partial result as shard is not available")
@@ -61,7 +62,8 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
           .recover { // if partial results allowed, then return empty result
             case e: AskTimeoutException if (plan.execPlan.queryContext.plannerParams.allowPartialResults)
             =>
-              qLogger.warn(s"Swallowed AskTimeoutException since partial result was enabled: ${e.getMessage}")
+              qLogger.warn(s"Swallowed AskTimeoutException for query id: ${plan.execPlan.queryContext.queryId} " +
+                s"since partial result was enabled: ${e.getMessage}")
               emptyPartialResult
           }
 
