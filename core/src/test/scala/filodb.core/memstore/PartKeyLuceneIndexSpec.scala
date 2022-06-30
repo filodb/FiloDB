@@ -370,6 +370,36 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     }
   }
 
+  it("should be able to fetch label names efficiently using facets") {
+
+    val index3 = new PartKeyLuceneIndex(DatasetRef("prometheus"), Schemas.promCounter.partition,
+      true, true, 0, 1.hour.toMillis)
+    val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8,
+      "_ns_".utf8 -> "my_ns".utf8)
+
+    // create 1000 time series with 10 metric names
+    for { i <- 0 until 1000} {
+      val dynamicLabelNum = i % 5
+      val infoLabelNum = i % 10
+      val partKey = partBuilder.partKeyFromObjects(Schemas.promCounter, s"counter",
+        seriesTags + (s"dynamicLabel$dynamicLabelNum".utf8 -> s"dynamicLabelValue".utf8)
+                   + (s"infoLabel$infoLabelNum".utf8 -> s"infoLabelValue".utf8)
+      )
+      index3.addPartKey(partKeyOnHeap(Schemas.promCounter.partition.binSchema, ZeroPointer, partKey), i, 5)()
+    }
+    index3.refreshReadersBlocking()
+
+    val filters1 = Seq(ColumnFilter("_ws_", Equals("my_ws")), ColumnFilter("_metric_", Equals("counter")))
+
+    val partNums1 = index3.partIdsFromFilters(filters1, 0, Long.MaxValue)
+    partNums1.length shouldEqual 1000
+
+    val labelValues1 = index3.labelNamesEfficient(filters1, 0, Long.MaxValue)
+    labelValues1.toSet shouldEqual (0 until 5).map(c => s"dynamicLabel$c").toSet ++
+                                   (0 until 10).map(c => s"infoLabel$c").toSet ++
+                                   Set("_ns_", "_ws_", "_metric_")
+  }
+
   it("should be able to fetch label values efficiently using facets") {
     val index3 = new PartKeyLuceneIndex(DatasetRef("prometheus"), Schemas.promCounter.partition,
       true, true, 0, 1.hour.toMillis)

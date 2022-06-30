@@ -1739,7 +1739,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   def labelNames(filter: Seq[ColumnFilter],
                  endTime: Long,
                  startTime: Long): Seq[String] =
-    labelNamesFromPartKeys(partKeyIndex.labelNamesFromFilters(filter, startTime, endTime))
+    partKeyIndex.labelNamesEfficient(filter, startTime, endTime)
 
   /**
    * Iterator for traversal of partIds, value for the given label will be extracted from the ParitionKey.
