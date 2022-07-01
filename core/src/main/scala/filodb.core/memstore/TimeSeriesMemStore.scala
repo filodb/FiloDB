@@ -134,9 +134,9 @@ extends TimeSeriesStore with StrictLogging {
   }
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Long] = {
-    val shard = getShardE(dataset, shard)
-    val fut = shard.recoverIndex()
-    fut.onComplete(_ => shard.isReadyForQuery = true)
+    val shardObj = getShardE(dataset, shard)
+    val fut = shardObj.recoverIndex()
+    fut.onComplete(_ => shardObj.isReadyForQuery = true)
     fut
   }
 
