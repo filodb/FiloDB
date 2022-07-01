@@ -457,7 +457,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       QueryContext(origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true))
     )
     val expectedPlan =
-    """E~PromQlRemoteExec(PromQlQueryParams(avg_over_time(test{job = "app"}[10m:1m]),1200,100,1800,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,1000000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@4c82b5df)"""
+      """E~PromQlRemoteExec(PromQlQueryParams(avg_over_time(test{job = "app"}[10m:1m]),1200,100,1800,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,1000000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@4c82b5df)"""
 
     validatePlan(execPlan, expectedPlan)
   }

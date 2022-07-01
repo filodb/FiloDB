@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration._
 
-import filodb.core.{GlobalConfig, SpreadChange, SpreadProvider, TargetSchemaChange, TargetSchemaProvider}
+import filodb.core.{SpreadChange, SpreadProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.memory.EvictionLock
 
 trait TsdbQueryParams
@@ -26,16 +26,11 @@ case class PlannerParams(applicationId: String = "filodb",
                          spreadOverride: Option[SpreadProvider] = None,
                          shardOverrides: Option[Seq[Int]] = None,
                          targetSchemaProviderOverride: Option[TargetSchemaProvider] = None,
-                         queryTimeoutMillis: Int = GlobalConfig.systemConfig
-                           .getDuration("filodb.query.ask-timeout").toMillis.toInt,
-                         sampleLimit: Int = GlobalConfig.systemConfig
-                           .getInt("filodb.query.sample-limit"),
-                         groupByCardLimit: Int = GlobalConfig.systemConfig
-                           .getInt("filodb.query.group-by-cardinality-limit"),
-                         joinQueryCardLimit: Int = GlobalConfig.systemConfig
-                           .getInt("filodb.query.join-cardinality-limit"),
-                         resultByteLimit: Long = GlobalConfig.systemConfig
-                           .getLong("filodb.query.result-byte-limit"),
+                         queryTimeoutMillis: Int = 30000,
+                         sampleLimit: Int = 1000000,
+                         groupByCardLimit: Int = 100000,
+                         joinQueryCardLimit: Int = 100000,
+                         resultByteLimit: Long = 1000000000,
                          timeSplitEnabled: Boolean = false,
                          minTimeRangeForSplitMs: Long = 1.day.toMillis,
                          splitSizeMs: Long = 1.day.toMillis,
