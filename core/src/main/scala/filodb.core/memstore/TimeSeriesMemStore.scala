@@ -128,14 +128,17 @@ extends TimeSeriesStore with StrictLogging {
                      flushSched: Scheduler,
                      cancelTask: Task[Unit]): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
-    shard.isReadyForQuery = true
     logger.info(s"Shard now ready for query dataset=$dataset shard=$shardNum")
     shard.shardStats.shardTotalRecoveryTime.update(System.currentTimeMillis() - shard.creationTime)
     shard.startIngestion(stream, cancelTask, flushSched)
   }
 
-  def recoverIndex(dataset: DatasetRef, shard: Int): Future[Long] =
-    getShardE(dataset, shard).recoverIndex()
+  def recoverIndex(dataset: DatasetRef, shard: Int): Future[Long] = {
+    val shard = getShardE(dataset, shard)
+    val fut = shard.recoverIndex()
+    fut.onComplete(_ => shard.isReadyForQuery = true)
+    fut
+  }
 
   def createDataRecoveryObservable(dataset: DatasetRef,
                                    shardNum: Int,
