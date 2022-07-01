@@ -23,6 +23,7 @@ import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryStats}
 import filodb.core.store.CorruptVectorException
+import filodb.memory.data.Shutdown
 import filodb.query._
 import filodb.query.exec.ExecPlan
 
@@ -107,6 +108,10 @@ final class QueryActor(memStore: TimeSeriesStore,
       override def uncaughtException(t: Thread, e: Throwable): Unit = {
         logger.error("Uncaught Exception in Query Scheduler", e)
         uncaughtExceptions.increment()
+        e match {
+          case ie: InternalError => Shutdown.haltAndCatchFire(ie)
+          case _ => { /* Do nothing. */ }
+        }
       }
     }
     val threadFactory = new ForkJoinPool.ForkJoinWorkerThreadFactory {
