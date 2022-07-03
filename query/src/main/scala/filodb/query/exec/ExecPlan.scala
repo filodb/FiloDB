@@ -222,14 +222,12 @@ trait ExecPlan extends QueryCommand {
                   MeasurementUnit.time.milliseconds)
               .withTag("plan", getClass.getSimpleName)
               .record(Math.max(0, System.currentTimeMillis - startExecute))
-            // Does not include sizes of RV's that arrived at this node as SerializableRangeVectors.
             val numDataBytes = builder.allContainers.map(_.numBytes).sum
             val numKeyBytes = r.foldLeft(0)(_ + _.key.keySize)
             val resultSize = numDataBytes + numKeyBytes
             SerializedRangeVector.queryResultBytes.record(resultSize)
-            // Includes sizes of all RV's in this subtree.
-            val totalSize = querySession.queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
-            if (totalSize > querySession.qContext.plannerParams.resultByteLimit) {
+            querySession.queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
+            if (resultSize > querySession.qContext.plannerParams.resultByteLimit) {
               qLogger.warn(s"Maximum result size exceeded (${queryContext.plannerParams.resultByteLimit} bytes). " +
                            s"QueryContext: $queryContext")
               if (querySession.queryConfig.enforceResultByteLimit) {
