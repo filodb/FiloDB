@@ -41,6 +41,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
       }
       .countL
       .map { count =>
+        index.commit()
         index.refreshReadersBlocking()
         recoverIndexLatency.update(System.currentTimeMillis() - start)
         count
