@@ -324,6 +324,7 @@ final class SerializedRangeVector(val key: RangeVectorKey,
                                   override val outputRange: Option[RvRange]) extends RangeVector with
                                           SerializableRangeVector with java.io.Serializable {
 
+  def numBytes(): Int = containers.map(_.numBytes).sum
 
   override val numRows = {
     if (SerializedRangeVector.canRemoveEmptyRows(outputRange, schema)) {

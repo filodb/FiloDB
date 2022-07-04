@@ -189,6 +189,7 @@ trait ExecPlan extends QueryCommand {
       rv : Observable[RangeVector], recordSchema: RecordSchema, resultSchema: ResultSchema
     ): Task[QueryResult] = {
         @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
+        @volatile var resultSize = 0L
         val builder = SerializedRangeVector.newBuilder()
         rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
           .map {
@@ -212,6 +213,20 @@ trait ExecPlan extends QueryCommand {
               if (enforceSampleLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
                 throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
                   sampleLimit} samples. Try applying more filters or reduce time range.")
+
+              resultSize += srv.numBytes() + srv.key.keySize
+              if (resultSize > querySession.qContext.plannerParams.resultByteLimit) {
+                qLogger.warn(s"Reached maximum result size (final or intermediate) for data serialized out of a host " +
+                  s"(${queryContext.plannerParams.resultByteLimit / 1e6} MB). " +
+                  s"QueryContext: $queryContext")
+                if (querySession.queryConfig.enforceResultByteLimit) {
+                  throw new BadQueryException(
+                    s"Reached maximum result size (final or intermediate) for data serialized out of a host " +
+                      s"(${queryContext.plannerParams.resultByteLimit / 1e6} MB). " +
+                      s"Try to apply more filters or reduce the time range.")
+                }
+              }
+
               srv
           }
           .filter(_.numRowsSerialized > 0)
@@ -222,22 +237,8 @@ trait ExecPlan extends QueryCommand {
                   MeasurementUnit.time.milliseconds)
               .withTag("plan", getClass.getSimpleName)
               .record(Math.max(0, System.currentTimeMillis - startExecute))
-            val numDataBytes = builder.allContainers.map(_.numBytes).sum
-            val numKeyBytes = r.foldLeft(0)(_ + _.key.keySize)
-            val resultSize = numDataBytes + numKeyBytes
             SerializedRangeVector.queryResultBytes.record(resultSize)
             querySession.queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
-            if (resultSize > querySession.qContext.plannerParams.resultByteLimit) {
-              qLogger.warn(s"Reached maximum result size (final or intermediate) for data serialized out of a host " +
-                           s"(${queryContext.plannerParams.resultByteLimit / 1e6} MB). " +
-                           s"QueryContext: $queryContext")
-              if (querySession.queryConfig.enforceResultByteLimit) {
-                throw new BadQueryException(
-                  s"Reached maximum result size (final or intermediate) for data serialized out of a host " +
-                  s"(${queryContext.plannerParams.resultByteLimit / 1e6} MB). " +
-                  s"Try to apply more filters or reduce the time range.")
-              }
-            }
             span.mark(s"resultBytes=$resultSize")
             span.mark(s"resultSamples=$numResultSamples")
             span.mark(s"numSrv=${r.size}")
