@@ -228,11 +228,13 @@ trait ExecPlan extends QueryCommand {
             SerializedRangeVector.queryResultBytes.record(resultSize)
             querySession.queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
             if (resultSize > querySession.qContext.plannerParams.resultByteLimit) {
-              qLogger.warn(s"Maximum result size exceeded (${queryContext.plannerParams.resultByteLimit} bytes). " +
+              qLogger.warn(s"Reached maximum result size (final or intermediate) for data serialized out of a host " +
+                           s"(${queryContext.plannerParams.resultByteLimit / 1e6} MB). " +
                            s"QueryContext: $queryContext")
               if (querySession.queryConfig.enforceResultByteLimit) {
                 throw new BadQueryException(
-                  s"Maximum result size exceeded (${queryContext.plannerParams.resultByteLimit} bytes). " +
+                  s"Reached maximum result size (final or intermediate) for data serialized out of a host " +
+                  s"(${queryContext.plannerParams.resultByteLimit / 1e6} MB). " +
                   s"Try to apply more filters or reduce the time range.")
               }
             }
