@@ -110,7 +110,8 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
       0, filters, AllChunkScan,"_metric_")
 
     val sep = StitchRvsExec(QueryContext(), dispatcher, None, Seq(execPlan1, execPlan2))
-    val result = dispatcher.dispatch(sep, source).runToFuture.futureValue
+    val result = dispatcher.dispatch(ExecPlanWithClientParams(sep, ClientParams
+    (sep.queryContext.plannerParams.queryTimeoutMillis)), source).runToFuture.futureValue
 
     result match {
       case e: QueryError => throw e.t
@@ -138,7 +139,8 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
       0, emptyFilters, AllChunkScan, "_metric_")
 
     val sep = StitchRvsExec(QueryContext(), dispatcher, None, Seq(execPlan1, execPlan2))
-    val result = dispatcher.dispatch(sep, source).runToFuture.futureValue
+    val result = dispatcher.dispatch(ExecPlanWithClientParams(sep, ClientParams
+    (sep.queryContext.plannerParams.queryTimeoutMillis)), source).runToFuture.futureValue
 
     result match {
       case e: QueryError => throw e.t
@@ -150,7 +152,8 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
 
     // Switch the order and make sure it's OK if the first result doesn't have any data
     val sep2 = StitchRvsExec(QueryContext(), dispatcher, None, Seq(execPlan2, execPlan1))
-    val result2 = dispatcher.dispatch(sep2, source).runToFuture.futureValue
+    val result2 = dispatcher.dispatch(ExecPlanWithClientParams(sep2, ClientParams
+    (sep.queryContext.plannerParams.queryTimeoutMillis)), source).runToFuture.futureValue
 
     result2 match {
       case e: QueryError => throw e.t
@@ -162,7 +165,8 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
 
     // Two children none of which returns data
     val sep3 = StitchRvsExec(QueryContext(), dispatcher, None, Seq(execPlan2, execPlan2))
-    val result3 = dispatcher.dispatch(sep3, source).runToFuture.futureValue
+    val result3 = dispatcher.dispatch(ExecPlanWithClientParams(sep3, ClientParams
+    (sep.queryContext.plannerParams.queryTimeoutMillis)), source).runToFuture.futureValue
 
     result3 match {
       case e: QueryError => throw e.t
@@ -175,9 +179,9 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
 
 case class DummyDispatcher(memStore: TimeSeriesMemStore, querySession: QuerySession) extends PlanDispatcher {
   // run locally withing any check.
-  override def dispatch(plan: ExecPlan, source: ChunkSource)
+  override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
                        (implicit sched: Scheduler): Task[QueryResponse] = {
-    plan.execute(memStore, querySession)
+    plan.execPlan.execute(memStore, querySession)
   }
 
   override def clusterName: String = ???

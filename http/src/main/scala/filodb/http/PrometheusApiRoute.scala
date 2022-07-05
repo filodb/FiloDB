@@ -15,8 +15,9 @@ import remote.RemoteStorage.ReadRequest
 import filodb.coordinator.client.IngestionCommands.UnknownDataset
 import filodb.coordinator.client.QueryCommands._
 import filodb.core.{DatasetRef, SpreadChange, SpreadProvider}
+import filodb.core.GlobalConfig.systemConfig
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
-import filodb.core.query.{PromQlQueryParams, QueryContext, TsdbQueryParams}
+import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext, TsdbQueryParams}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query._
@@ -34,6 +35,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
   import filodb.prometheus.query.PrometheusModel._
 
   val schemas = settings.filoSettings.schemas
+  val config = systemConfig.getConfig("filodb")
+  val queryConfig = QueryConfig (config.getConfig ("query") )
   val ONE_DAY_IN_SECS = 86400L
 
   val route = pathPrefix( "promql" / Segment) { dataset =>
@@ -44,13 +47,15 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     path( "api" / "v1" / "query_range") {
       get {
         parameter(('query.as[String], 'start.as[Double], 'end.as[Double], 'histogramMap.as[Boolean].?,
-          'step.as[Int], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?))
-        { (query, start, end, histMap, step, explainOnly, verbose, spread) =>
+          'step.as[Int], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?,
+          'partialResults.as[Boolean].?))
+        { (query, start, end, histMap, step, explainOnly, verbose, spread, partialResults) =>
           val logicalPlan = Parser.queryRangeToLogicalPlan(query, TimeStepParams(start.toLong, step, end.toLong))
 
           // No cross-cluster failure routing in this API, hence we pass empty config
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false), verbose.getOrElse(false),
-            spread, PromQlQueryParams(query, start.toLong, step.toLong, end.toLong), histMap.getOrElse(false))
+            spread, PromQlQueryParams(query, start.toLong, step.toLong, end.toLong), histMap.getOrElse(false),
+            partialResults.getOrElse(false))
         }
       }
     } ~
@@ -61,13 +66,13 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     path( "api" / "v1" / "query") {
       get {
         parameter(('query.as[String], 'time.as[Double], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?,
-          'spread.as[Int].?, 'histogramMap.as[Boolean].?, 'step.as[Double].?))
-        { (query, time, explainOnly, verbose, spread, histMap, step) =>
+          'spread.as[Int].?, 'histogramMap.as[Boolean].?, 'step.as[Double].?, 'partialResults.as[Boolean].?))
+        { (query, time, explainOnly, verbose, spread, histMap, step, partialResults) =>
           val stepLong = step.map(_.toLong).getOrElse(0L)
           val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong, stepLong)
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
             verbose.getOrElse(false), spread, PromQlQueryParams(query, time.toLong, stepLong, time.toLong),
-            histMap.getOrElse(false))
+            histMap.getOrElse(false), partialResults.getOrElse(false))
         }
       }
     } ~
@@ -78,15 +83,15 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     path( "api" / "v1" / "labels") {
       get {
         parameter(("match[]".as[String], 'start.as[Double].?, 'end.as[Double].?,
-          'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?))
-        { (query, start, end, explainOnly, verbose, spread) =>
+          'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?, 'partialResults.as[Boolean].?))
+        { (query, start, end, explainOnly, verbose, spread, partialResults) =>
           val currentTimeInSecs = System.currentTimeMillis()/1000
           val startLong = start.map(_.toLong).getOrElse(currentTimeInSecs - ONE_DAY_IN_SECS)
           val endLong = end.map(_.toLong).getOrElse(currentTimeInSecs)
           val logicalPlan = Parser.labelNamesQueryToLogicalPlan(query, TimeStepParams(startLong, 0L, endLong))
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
             verbose.getOrElse(false), spread, PromQlQueryParams(query, startLong, 0L, endLong),
-            false)
+            false, partialResults.getOrElse(true))
         }
       }
     } ~
@@ -97,15 +102,17 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // TODO Why did we deviate from Prom by taking match param as comma separated key-values instead of PromQL selector?
     path ("api" / "v1" / "label" / Segment / "values") { label: String =>
       get {
-        parameter(("match[]".as[String].?, 'start.as[Double].?, 'end.as[Double].?, 'explainOnly.as[Boolean].?))
-        { (query, start, end, explainOnly) =>
+        parameter(("match[]".as[String].?, 'start.as[Double].?, 'end.as[Double].?, 'explainOnly.as[Boolean].?,
+          'partialResults.as[Boolean].?))
+        { (query, start, end, explainOnly, partialResults) =>
           val currentTimeInSecs = System.currentTimeMillis()/1000
           val startLong = start.map(_.toLong).getOrElse(currentTimeInSecs - ONE_DAY_IN_SECS)
           val endLong = end.map(_.toLong).getOrElse(currentTimeInSecs)
           val logicalPlan = Parser.labelValuesQueryToLogicalPlan(Seq(label), query,
                                                                  TimeStepParams(startLong, 0L, endLong))
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
-            false, None, PromQlQueryParams(query.getOrElse(""), startLong, 0L, endLong), false)
+            false, None, PromQlQueryParams(query.getOrElse(""), startLong, 0L, endLong), false,
+            partialResults.getOrElse(true))
         }
       }
     } ~
@@ -157,13 +164,21 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
   }
 
   private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan, explainOnly: Boolean, verbose: Boolean,
-                                 spread: Option[Int], tsdbQueryParams: TsdbQueryParams, histMap: Boolean) = {
+                                 spread: Option[Int], tsdbQueryParams: TsdbQueryParams, histMap: Boolean,
+                                 partialResults: Boolean) = {
+    val allowPartialResults = if (partialResults) {
+      if (logicalPlan.isInstanceOf[MetadataQueryPlan])
+         queryConfig.allowPartialResultsMetadataQuery
+      else queryConfig.allowPartialResultsRangeQuery
+    } else false
     val spreadProvider: Option[SpreadProvider] = spread.map(s => StaticSpreadProvider(SpreadChange(0, s)))
     val command = if (explainOnly) {
-      ExplainPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryContext(tsdbQueryParams, spreadProvider))
+      ExplainPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryContext(tsdbQueryParams, spreadProvider,
+        allowPartialResults))
     }
     else {
-      LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryContext(tsdbQueryParams, spreadProvider))
+      LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryContext(tsdbQueryParams, spreadProvider,
+        allowPartialResults))
     }
     onSuccess(asyncAsk(nodeCoord, command, settings.queryAskTimeout)) {
       case qr: QueryResult if logicalPlan.isInstanceOf[MetadataQueryPlan] =>

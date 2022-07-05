@@ -40,6 +40,8 @@ case class PlannerParams(applicationId: String = "filodb",
 object PlannerParams {
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): PlannerParams =
     PlannerParams(spreadOverride = constSpread, sampleLimit = sampleLimit)
+  def apply(constSpread: Option[SpreadProvider], partialResults: Boolean): PlannerParams =
+    PlannerParams(spreadOverride = constSpread, allowPartialResults = partialResults)
 }
 /**
   * This class provides general query processing parameters
@@ -54,8 +56,9 @@ object QueryContext {
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): QueryContext =
     QueryContext(plannerParams = PlannerParams(constSpread, sampleLimit))
 
-  def apply(queryParams: TsdbQueryParams, constSpread: Option[SpreadProvider]): QueryContext =
-    QueryContext(origQueryParams = queryParams, plannerParams = PlannerParams(spreadOverride = constSpread))
+  def apply(queryParams: TsdbQueryParams, constSpread: Option[SpreadProvider],
+            allowPartialResults: Boolean): QueryContext =
+    QueryContext(origQueryParams = queryParams, plannerParams = PlannerParams( constSpread, allowPartialResults))
 
   /**
     * Creates a spreadFunc that looks for a particular filter with keyName Equals a value, and then maps values

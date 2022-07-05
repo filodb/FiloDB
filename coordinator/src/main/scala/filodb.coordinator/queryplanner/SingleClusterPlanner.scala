@@ -140,7 +140,10 @@ class SingleClusterPlanner(val dataset: Dataset,
     val targetActor = shardMapperFunc.coordForShard(shard)
     if (targetActor == ActorRef.noSender) {
       logger.debug(s"ShardMapper: $shardMapperFunc")
-      throw new RuntimeException(s"Shard: $shard is not available") // TODO fix this
+      if(queryConfig.allowPartialResultsRangeQuery || queryConfig.allowPartialResultsRangeQuery)
+        logger.debug(s"Shard: $shard is not available however query is proceeding as partial results is enabled")
+      else
+        throw new RuntimeException(s"Shard: $shard is not available")
     }
     ActorPlanDispatcher(targetActor, clusterName)
   }

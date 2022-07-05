@@ -353,7 +353,9 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
   override def getResult(querySession: QuerySession,
                          source: ChunkSource)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.fromTask(
-      execPlan.dispatcher.dispatch(execPlan, source).onErrorHandle { case ex: Throwable =>
+      execPlan.dispatcher.dispatch(ExecPlanWithClientParams(execPlan,
+        ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis - 1000)), source).onErrorHandle
+      { case ex: Throwable =>
         QueryError(execPlan.queryContext.queryId, querySession.queryStats, ex)
       }.map {
         case QueryResult(_, _, result, qStats, isPartialResult, partialResultReason)  =>
@@ -421,8 +423,11 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // kamon uses thread-locals.
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
-      plan.dispatcher.dispatch(plan, source).onErrorHandle { case ex: Throwable =>
+      plan.dispatcher.dispatch(ExecPlanWithClientParams(plan,
+        ClientParams(plan.queryContext.plannerParams.queryTimeoutMillis - 1000)), source).onErrorHandle
+       { case ex: Throwable =>
         QueryError(queryContext.queryId, qSession.queryStats, ex)
+
       }
     }
   }
@@ -538,3 +543,6 @@ object IgnoreFixedVectorLenAndColumnNamesSchemaReducer {
     }
   }
 }
+// deadline is set to QueryContext.plannerParams.queryTimeoutMillis which is 30000 millisecond by default
+case class ClientParams(deadline: Long)
+case class ExecPlanWithClientParams(execPlan: ExecPlan, clientParams: ClientParams)

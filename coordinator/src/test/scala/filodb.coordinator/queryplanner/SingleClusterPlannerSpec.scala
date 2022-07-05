@@ -1214,7 +1214,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     val ep4 = planner.materialize(logicalPlan4, QueryContext())
     ep4.isInstanceOf[EmptyResultExec] shouldEqual true
     import GlobalScheduler._
-    val res = ep4.dispatcher.dispatch(ep4, UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
+    val res = ep4.dispatcher.dispatch(ExecPlanWithClientParams(ep4, ClientParams
+    (ep4.queryContext.plannerParams.queryTimeoutMillis)), UnsupportedChunkSource()).runToFuture.futureValue.asInstanceOf[QueryResult]
     res.result.isEmpty shouldEqual true
   }
 
