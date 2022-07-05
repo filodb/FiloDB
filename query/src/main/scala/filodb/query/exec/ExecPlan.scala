@@ -216,14 +216,14 @@ trait ExecPlan extends QueryCommand {
 
               resultSize += srv.numBytes() + srv.key.keySize
               if (resultSize > querySession.qContext.plannerParams.resultByteLimit) {
-                qLogger.warn(s"Reached maximum result size (final or intermediate) for data serialized out of a host " +
-                  s"(${queryContext.plannerParams.resultByteLimit / 1e6} MB). " +
-                  s"QueryContext: $queryContext")
+                val size_mib = queryContext.plannerParams.resultByteLimit / math.pow(1024, 2)
+                val msg = s"Reached maximum result size (final or intermediate) " +
+                          s"for data serialized out of a host or shard " +
+                          s"(${math.round(size_mib)} MiB)."
+                qLogger.warn(s"$msg QueryContext: $queryContext")
                 if (querySession.queryConfig.enforceResultByteLimit) {
                   throw new BadQueryException(
-                    s"Reached maximum result size (final or intermediate) for data serialized out of a host " +
-                      s"(${queryContext.plannerParams.resultByteLimit / 1e6} MB). " +
-                      s"Try to apply more filters or reduce the time range.")
+                    s"$msg Try to apply more filters or reduce the time range.")
                 }
               }
 
