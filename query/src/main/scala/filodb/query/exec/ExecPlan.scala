@@ -215,7 +215,7 @@ trait ExecPlan extends QueryCommand {
                   sampleLimit} samples. Try applying more filters or reduce time range.")
 
               resultSize += srv.numBytes() + srv.key.keySize
-              if (resultSize > querySession.qContext.plannerParams.resultByteLimit) {
+              if (resultSize > queryContext.plannerParams.resultByteLimit) {
                 val size_mib = queryContext.plannerParams.resultByteLimit / math.pow(1024, 2)
                 val msg = s"Reached maximum result size (final or intermediate) " +
                           s"for data serialized out of a host or shard " +

@@ -205,13 +205,13 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val querySessionEnforceHigh = QuerySession(qContextWithHighLimit, QueryConfig(confEnforce))
     val querySessionAllowHigh = QuerySession(qContextWithHighLimit, QueryConfig(confAllow))
 
-    // Plan's QContext is irrelevant; the QSession's QContext is used in the execution pipeline.
-    val plan = makeFixedLeafExecPlan(Seq(rv), schema, QueryContext())
+    val planLow = makeFixedLeafExecPlan(Seq(rv), schema, qContextWithLowLimit)
+    val planHigh = makeFixedLeafExecPlan(Seq(rv), schema, qContextWithHighLimit)
 
     // Only the low limit should yield a QueryError when enforced.
-    plan.execute(memStore, querySessionEnforceLow).runToFuture.futureValue.isInstanceOf[QueryError] shouldEqual true
-    plan.execute(memStore, querySessionEnforceHigh).runToFuture.futureValue.isInstanceOf[QueryResult] shouldEqual true
-    plan.execute(memStore, querySessionAllowLow).runToFuture.futureValue.isInstanceOf[QueryResult] shouldEqual true
-    plan.execute(memStore, querySessionAllowHigh).runToFuture.futureValue.isInstanceOf[QueryResult] shouldEqual true
+    planLow.execute(memStore, querySessionEnforceLow).runToFuture.futureValue.isInstanceOf[QueryError] shouldEqual true
+    planHigh.execute(memStore, querySessionEnforceHigh).runToFuture.futureValue.isInstanceOf[QueryResult] shouldEqual true
+    planLow.execute(memStore, querySessionAllowLow).runToFuture.futureValue.isInstanceOf[QueryResult] shouldEqual true
+    planHigh.execute(memStore, querySessionAllowHigh).runToFuture.futureValue.isInstanceOf[QueryResult] shouldEqual true
   }
 }
