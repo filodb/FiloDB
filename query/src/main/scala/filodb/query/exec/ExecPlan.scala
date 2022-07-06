@@ -223,7 +223,7 @@ trait ExecPlan extends QueryCommand {
                 qLogger.warn(s"$msg QueryContext: $queryContext")
                 if (querySession.queryConfig.enforceResultByteLimit) {
                   throw new BadQueryException(
-                    s"$msg Try to apply more filters or reduce the time range.")
+                    s"$msg Try to apply more filters, reduce the time range, and/or increase the step size.")
                 }
               }
 
