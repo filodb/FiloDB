@@ -148,6 +148,22 @@ trait SerializableRangeVector extends RangeVector {
    * Used to calculate number of samples sent over the wire for limiting resources used by query
    */
   def numRowsSerialized: Int
+
+  /**
+   * Estimates the total size (in bytes) of all rows after serialization.
+   */
+  def estimateSerializedRowBytes: Long
+}
+
+object SerializableRangeVector {
+  def sizeOfByte(): Int = 1
+  def sizeOfBoolean(): Int = 1
+  def sizeOfChar(): Int = 1
+  def sizeOfShort(): Int = 2
+  def sizeOfFloat(): Int = 4
+  def sizeOfInt(): Int = 4
+  def sizeOfDouble(): Int = 8
+  def sizeOfLong(): Int = 8
 }
 
 /**
@@ -169,6 +185,11 @@ final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]
   def getValue(time: Long): Double = timeValueMap(time)
 
   override def numRowsSerialized: Int = timeValueMap.size
+
+  override def estimateSerializedRowBytes: Long = {
+    // Include the size of each timestamp / value in the map.
+    timeValueMap.size * (SerializableRangeVector.sizeOfLong() + SerializableRangeVector.sizeOfDouble())
+  }
 }
 
 final case class RangeParams(startSecs: Long, stepSecs: Long, endSecs: Long)
@@ -190,6 +211,9 @@ trait ScalarSingleValue extends ScalarRangeVector {
     if (rangeParams.startSecs == rangeParams.endSecs) it.take(1)
     else it
   }
+
+  // Negligible bytes sent over-the-wire.
+  override def estimateSerializedRowBytes: Long = 0
 }
 
 /**
@@ -324,8 +348,6 @@ final class SerializedRangeVector(val key: RangeVectorKey,
                                   override val outputRange: Option[RvRange]) extends RangeVector with
                                           SerializableRangeVector with java.io.Serializable {
 
-  def numBytes(): Int = containers.map(_.numBytes).sum
-
   override val numRows = {
     if (SerializedRangeVector.canRemoveEmptyRows(outputRange, schema)) {
       Some(((outputRange.get.endMs - outputRange.get.startMs) / outputRange.get.stepMs).toInt + 1)
@@ -364,6 +386,8 @@ final class SerializedRangeVector(val key: RangeVectorKey,
       }
     } else it
   }
+
+  override def estimateSerializedRowBytes: Long = containers.map(_.numBytes).sum
 
   /**
     * Pretty prints all the elements into strings using record schema

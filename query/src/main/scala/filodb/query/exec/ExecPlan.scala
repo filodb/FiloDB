@@ -193,13 +193,7 @@ trait ExecPlan extends QueryCommand {
         val builder = SerializedRangeVector.newBuilder()
         rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
           .map {
-            case srv: SerializableRangeVector =>
-              numResultSamples += srv.numRowsSerialized
-              // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-              if (enforceSampleLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
-                throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
-                  sampleLimit} samples.Try applying more filters or reduce time range.")
-              srv
+            case srvable: SerializableRangeVector => srvable
             case rv: RangeVector =>
               // materialize, and limit rows per RV
               val execPlanString = queryWithPlanName(queryContext)
@@ -207,14 +201,16 @@ trait ExecPlan extends QueryCommand {
               if (rv.outputRange.isEmpty)
                 qLogger.debug(s"Empty rangevector found. Rv class is:  ${rv.getClass.getSimpleName}, " +
                   s"execPlan is: $execPlanString, execPlan children ${this.children}")
-
+              srv
+          }
+          .map { srv =>
               numResultSamples += srv.numRowsSerialized
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
               if (enforceSampleLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
                 throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
                   sampleLimit} samples. Try applying more filters or reduce time range.")
 
-              resultSize += srv.numBytes() + srv.key.keySize
+              resultSize += srv.estimateSerializedRowBytes + srv.key.keySize
               if (resultSize > queryContext.plannerParams.resultByteLimit) {
                 val size_mib = queryContext.plannerParams.resultByteLimit / math.pow(1024, 2)
                 val msg = s"Reached maximum result size (final or intermediate) " +
