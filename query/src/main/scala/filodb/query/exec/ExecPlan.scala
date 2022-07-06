@@ -7,7 +7,7 @@ import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
-import filodb.core.{DatasetRef, GlobalConfig, QueryTimeoutException}
+import filodb.core.{DatasetRef, QueryTimeoutException}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
@@ -230,7 +230,7 @@ trait ExecPlan extends QueryCommand {
             if (totalSize > queryContext.plannerParams.resultByteLimit) {
               qLogger.warn(s"Maximum result size exceeded (${queryContext.plannerParams.resultByteLimit} bytes). " +
                            s"QueryContext: $queryContext")
-              if (GlobalConfig.systemConfig.getBoolean("filodb.query.enforce-result-byte-limit")) {
+              if (querySession.queryConfig.enforceResultByteLimit) {
                 throw new BadQueryException(
                   s"Maximum result size exceeded (${queryContext.plannerParams.resultByteLimit} bytes). " +
                   s"Try to apply more filters or reduce the time range.")
