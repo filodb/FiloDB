@@ -89,7 +89,7 @@ final case class PartKeyLuceneIndexRecord(partKey: Array[Byte], startTime: Long,
 class PartKeyLuceneIndex(ref: DatasetRef,
                          schema: PartitionSchema,
                          facetEnabledAllLabels: Boolean,
-                         facetEnabledSharedKeyLabels: Boolean,
+                         facetEnabledShardKeyLabels: Boolean,
                          shardNum: Int,
                          retentionMillis: Long, // only used to calculate fallback startTime
                          diskLocation: Option[File] = None,
@@ -162,7 +162,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   private val analyzer = new StandardAnalyzer()
 
   logger.info(s"Created lucene index for dataset=$ref shard=$shardNum facetEnabledAllLabels=$facetEnabledAllLabels " +
-    s"facetEnabledSharedKeyLabels=$facetEnabledSharedKeyLabels at $indexDiskLocation")
+    s"facetEnabledShardKeyLabels=$facetEnabledShardKeyLabels at $indexDiskLocation")
 
   private def createIndexWriterConfig(): IndexWriterConfig = {
     val config = new IndexWriterConfig(analyzer)
@@ -207,7 +207,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   private var flushThread: ControlledRealTimeReopenThread[IndexSearcher] = _
 
   private def facetEnabledForLabel(label: String) = {
-    facetEnabledAllLabels || (facetEnabledSharedKeyLabels && schema.options.shardKeyColumns.contains(label))
+    facetEnabledAllLabels || (facetEnabledShardKeyLabels && schema.options.shardKeyColumns.contains(label))
   }
 
   private def deleteRecursively(f: File, deleteRoot: Boolean = false): Try[Boolean] = {
@@ -265,9 +265,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
     private[PartKeyLuceneIndex] def addFacet(name: String, value: String, always: Boolean) : Unit = {
       // Use PartKeyIndexBenchmark to measure indexing performance before changing this
-      if (always ||
-          (name.nonEmpty && value.nonEmpty && facetEnabledForLabel(name) && value.length < FACET_FIELD_MAX_LEN)
-         ) {
+      if (name.nonEmpty && value.nonEmpty &&
+        (always || facetEnabledForLabel(name)) &&
+        value.length < FACET_FIELD_MAX_LEN) {
         facetsConfig.setRequireDimensionDrillDown(name, false)
         facetsConfig.setIndexFieldName(name, FACET_FIELD_PREFIX + name)
         document.add(new SortedSetDocValuesFacetField(name, value))
@@ -276,6 +276,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
     def allFieldsAdded(): Unit = {
       // this special field is to fetch label names associated with query filter quickly
+      // we do it by adding a facet of sorted labelNames to each document
+      // NOTE: one could have added multi-field document, but query api was non-stratghtforward.
+      // Improve in next iteration.
       val fieldNamesStr = fieldNames.sorted.mkString(",")
       addFacet(LABEL_LIST, fieldNamesStr, true)
     }
