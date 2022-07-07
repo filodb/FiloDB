@@ -17,21 +17,31 @@ object QueryConfig {
     val parser = queryConfig.as[String]("parser")
     val translatePromToFilodbHistogram = queryConfig.getBoolean("translate-prom-to-filodb-histogram")
     val fasterRateEnabled = queryConfig.as[Option[Boolean]]("faster-rate").getOrElse(false)
+    val enforceResultByteLimit = queryConfig.as[Boolean]("enforce-result-byte-limit")
     val allowPartialResultsMetadataQuery = queryConfig.getBoolean("allow-partial-results-metadataquery")
     val allowPartialResultsRangeQuery = queryConfig.getBoolean("allow-partial-results-rangequery")
     QueryConfig(askTimeout, staleSampleAfterMs, minStepMs, fastReduceMaxWindows, parser, translatePromToFilodbHistogram,
       fasterRateEnabled, routingConfig.as[Option[Long]]("remote.http.timeout"),
-      routingConfig.as[Option[String]]("remote.http.endpoint"), allowPartialResultsRangeQuery,
-      allowPartialResultsMetadataQuery )
+      routingConfig.as[Option[String]]("remote.http.endpoint"), enforceResultByteLimit,
+      allowPartialResultsRangeQuery, allowPartialResultsMetadataQuery)
   }
 
   import scala.concurrent.duration._
   /**
    * IMPORTANT: Use this for testing only, using this for anything other than testing may yield undesired behavior
    */
-  val unitTestingQueryConfig = QueryConfig(10.seconds, 5.minutes.toMillis, 1, 50, "antlr", true, true, None, None,
-    false)
-
+  val unitTestingQueryConfig = QueryConfig(askTimeout = 10.seconds,
+                                           staleSampleAfterMs = 5.minutes.toMillis,
+                                           minStepMs = 1,
+                                           fastReduceMaxWindows = 50,
+                                           parser = "antlr",
+                                           translatePromToFilodbHistogram = true,
+                                           fasterRateEnabled = true,
+                                           remoteHttpTimeoutMs = None,
+                                           remoteHttpEndpoint = None,
+                                           enforceResultByteLimit = false,
+                                           allowPartialResultsRangeQuery = false,
+                                           allowPartialResultsMetadataQuery = false)
 }
 
 case class QueryConfig(askTimeout: FiniteDuration,
@@ -43,6 +53,6 @@ case class QueryConfig(askTimeout: FiniteDuration,
                        fasterRateEnabled: Boolean,
                        remoteHttpTimeoutMs: Option[Long],
                        remoteHttpEndpoint: Option[String],
+                       enforceResultByteLimit: Boolean = false,
                        allowPartialResultsRangeQuery: Boolean = false,
                        allowPartialResultsMetadataQuery: Boolean = false)
-

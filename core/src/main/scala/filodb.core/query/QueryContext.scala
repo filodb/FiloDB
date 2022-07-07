@@ -30,6 +30,7 @@ case class PlannerParams(applicationId: String = "filodb",
                          sampleLimit: Int = 1000000,
                          groupByCardLimit: Int = 100000,
                          joinQueryCardLimit: Int = 100000,
+                         resultByteLimit: Long = 18000000,  // 18MB
                          timeSplitEnabled: Boolean = false,
                          minTimeRangeForSplitMs: Long = 1.day.toMillis,
                          splitSizeMs: Long = 1.day.toMillis,

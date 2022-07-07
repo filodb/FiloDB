@@ -50,7 +50,7 @@ trait ExecPlan extends QueryCommand {
     * Take first n (limit) elements if the flag is false. Applicable for Metadata Queries
     * It is not in QueryContext since for some queries it should be false
     */
-  def enforceLimit: Boolean = true
+  def enforceSampleLimit: Boolean = true
 
   /**
     * Child execution plans representing sub-queries
@@ -189,16 +189,11 @@ trait ExecPlan extends QueryCommand {
       rv : Observable[RangeVector], recordSchema: RecordSchema, resultSchema: ResultSchema
     ): Task[QueryResult] = {
         @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
+        @volatile var resultSize = 0L
         val builder = SerializedRangeVector.newBuilder()
         rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
           .map {
-            case srv: SerializableRangeVector =>
-              numResultSamples += srv.numRowsSerialized
-              // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-              if (enforceLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
-                throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
-                  sampleLimit} samples.Try applying more filters or reduce time range.")
-              srv
+            case srvable: SerializableRangeVector => srvable
             case rv: RangeVector =>
               // materialize, and limit rows per RV
               val execPlanString = queryWithPlanName(queryContext)
@@ -206,12 +201,28 @@ trait ExecPlan extends QueryCommand {
               if (rv.outputRange.isEmpty)
                 qLogger.debug(s"Empty rangevector found. Rv class is:  ${rv.getClass.getSimpleName}, " +
                   s"execPlan is: $execPlanString, execPlan children ${this.children}")
-
+              srv
+          }
+          .map { srv =>
               numResultSamples += srv.numRowsSerialized
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-              if (enforceLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
+              if (enforceSampleLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
                 throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
                   sampleLimit} samples. Try applying more filters or reduce time range.")
+
+              resultSize += srv.estimateSerializedRowBytes + srv.key.keySize
+              if (resultSize > queryContext.plannerParams.resultByteLimit) {
+                val size_mib = queryContext.plannerParams.resultByteLimit / math.pow(1024, 2)
+                val msg = s"Reached maximum result size (final or intermediate) " +
+                          s"for data serialized out of a host or shard " +
+                          s"(${math.round(size_mib)} MiB)."
+                qLogger.warn(s"$msg QueryContext: $queryContext")
+                if (querySession.queryConfig.enforceResultByteLimit) {
+                  throw new BadQueryException(
+                    s"$msg Try to apply more filters, reduce the time range, and/or increase the step size.")
+                }
+              }
+
               srv
           }
           .filter(_.numRowsSerialized > 0)
@@ -222,9 +233,6 @@ trait ExecPlan extends QueryCommand {
                   MeasurementUnit.time.milliseconds)
               .withTag("plan", getClass.getSimpleName)
               .record(Math.max(0, System.currentTimeMillis - startExecute))
-            val numDataBytes = builder.allContainers.map(_.numBytes).sum
-            val numKeyBytes = r.foldLeft(0)(_ + _.key.keySize)
-            val resultSize = numDataBytes + numKeyBytes
             SerializedRangeVector.queryResultBytes.record(resultSize)
             querySession.queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
             span.mark(s"resultBytes=$resultSize")
