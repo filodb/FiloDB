@@ -156,14 +156,14 @@ trait SerializableRangeVector extends RangeVector {
 }
 
 object SerializableRangeVector {
-  def sizeOfByte(): Int = 1
-  def sizeOfBoolean(): Int = 1
-  def sizeOfChar(): Int = 1
-  def sizeOfShort(): Int = 2
-  def sizeOfFloat(): Int = 4
-  def sizeOfInt(): Int = 4
-  def sizeOfDouble(): Int = 8
-  def sizeOfLong(): Int = 8
+  val SizeOfByte = 1
+  val SizeOfBoolean = 1
+  val SizeOfChar = 1
+  val SizeOfShort = 2
+  val SizeOfFloat = 4
+  val SizeOfInt = 4
+  val SizeOfDouble = 8
+  val SizeOfLong = 8
 }
 
 /**
@@ -188,7 +188,7 @@ final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]
 
   override def estimateSerializedRowBytes: Long = {
     // Include the size of each timestamp / value in the map.
-    timeValueMap.size * (SerializableRangeVector.sizeOfLong() + SerializableRangeVector.sizeOfDouble())
+    timeValueMap.size * (SerializableRangeVector.SizeOfLong + SerializableRangeVector.SizeOfDouble)
   }
 }
 
