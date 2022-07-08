@@ -47,6 +47,7 @@ extends RawToPartitionMaker with StrictLogging {
     tsShard.maxMetaSize, baseContext ++ Map("odp" -> "true"),
     markFullBlocksAsReclaimable = true)
 
+  //scalastyle:off method.length
   /**
    * Stores raw chunks into offheap memory and populates chunks into partition
    */
@@ -67,17 +68,21 @@ extends RawToPartitionMaker with StrictLogging {
         // to allocate a block just for storing an unnecessary metadata entry.
         if (!rawVectors.isEmpty) {
           val chunkID = ChunkSetInfo.getChunkID(infoBytes)
-
           if (!tsPart.chunkmapContains(chunkID)) {
             val chunkPtrs = new ArrayBuffer[BinaryVectorPtr](rawVectors.length)
             var metaAddr: Long = 0
+            var somethingThrown = false
             memFactory.synchronized {
               memFactory.startMetaSpan()
               try {
                 copyToOffHeap(rawVectors, memFactory, chunkPtrs)
+              } catch {
+                case _ => somethingThrown = true
               } finally {
+                // Require a metadata allocation/write only if nothing was thrown during copyToOffHeap,
+                //   since something might have been thrown before anything was written to off-heap memory.
                 metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
-                  tsPart.schema.data.blockMetaSize.toShort)
+                  tsPart.schema.data.blockMetaSize.toShort, requireMetaWrite = !somethingThrown)
               }
             }
             require(metaAddr != 0)
@@ -101,6 +106,7 @@ extends RawToPartitionMaker with StrictLogging {
         s"not found, this is bad")
     }
   }
+  //scalastyle:on method.length
 
   /**
     * Copies the onHeap contents read from ColStore into off-heap using the given memFactory.

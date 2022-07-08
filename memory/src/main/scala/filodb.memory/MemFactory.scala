@@ -277,11 +277,12 @@ class BlockMemFactory(blockStore: BlockManager,
     *
     * @param metadataWriter the function to write metadata to each block.  Param is the long metadata address.
     * @param metaSize the number of bytes the piece of metadata takes
+    * @param requireMetaWrite true iff at least one allocation/write of medatata info is required
     * @return the Long native address of the last metadata block written
     * throws IllegalStateException if startMetaSpan wasn't called, or if metaSize is larger
     * than max allowed, or if nothing was allocated
     */
-  def endMetaSpan(metadataWriter: Long => Unit, metaSize: Short): Long = {
+  def endMetaSpan(metadataWriter: Long => Unit, metaSize: Short, requireMetaWrite: Boolean = true): Long = {
     if (!metadataSpanActive) {
       throw new IllegalStateException("Not in a metadata span")
     }
@@ -309,7 +310,7 @@ class BlockMemFactory(blockStore: BlockManager,
     metadataSpan.clear()
     metadataSpanActive = false
 
-    if (metaAddr == 0) {
+    if (requireMetaWrite && metaAddr == 0) {
       throw new IllegalStateException("Nothing was allocated")
     }
 
