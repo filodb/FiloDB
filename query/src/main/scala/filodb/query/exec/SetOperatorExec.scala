@@ -82,6 +82,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
 
       Observable.fromIteratorUnsafe(results)
     }
+    // check for timeout after dealing with metadata, before dealing with numbers
+    querySession.qContext.checkQueryTimeout(this.getClass.getName)
     Observable.fromTask(taskOfResults).flatten
   }
 

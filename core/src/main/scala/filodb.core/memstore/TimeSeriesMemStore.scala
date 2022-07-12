@@ -11,7 +11,7 @@ import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
-import filodb.core.{DatasetRef, QueryTimeoutException, Response, Types}
+import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore.ratelimit.{CardinalityRecord, ConfigQuotaSource}
 import filodb.core.metadata.Schemas
@@ -214,11 +214,10 @@ extends TimeSeriesStore with StrictLogging {
     }
 
     val queryTimeElapsed = System.currentTimeMillis() - querySession.qContext.submitTime
+    querySession.qContext.checkQueryTimeout("beforeAcquireSharedLock")
     val remainingTime = querySession.qContext.plannerParams.queryTimeoutMillis - queryTimeElapsed
-    if (remainingTime <= 0) throw QueryTimeoutException(queryTimeElapsed, "beforeAcquireSharedLock")
     if (!shard.evictionLock.acquireSharedLock(remainingTime, querySession.qContext.queryId, promQl)) {
-      val queryTimeElapsed2 = System.currentTimeMillis() - querySession.qContext.submitTime
-      throw QueryTimeoutException(queryTimeElapsed2, "acquireSharedLockTimeout")
+      querySession.qContext.checkQueryTimeout("acquireSharedLockTimeout")
     }
     // we acquired lock, so add to session so it will be released
     querySession.setLock(shard.evictionLock)

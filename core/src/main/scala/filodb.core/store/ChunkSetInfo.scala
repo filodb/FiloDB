@@ -9,7 +9,6 @@ import debox.Buffer
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 
-import filodb.core.QueryTimeoutException
 import filodb.core.Types._
 import filodb.core.metadata.{Column, DataSchema}
 import filodb.core.query.{QueryContext, RawDataRangeVector}
@@ -455,9 +454,7 @@ extends Iterator[ChunkSetInfoReader] {
     // if new window end is beyond end of most recent chunkset, add more chunksets (if there are more)
     while (curWindowEnd > lastEndTime && infos.hasNext) {
       val next = infos.nextInfoReader
-      val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
-      if (queryTimeElapsed >= queryContext.plannerParams.queryTimeoutMillis)
-        throw QueryTimeoutException(queryTimeElapsed, this.getClass.getName)
+      queryContext.checkQueryTimeout(this.getClass.getName)
 
       // Add if next chunkset is within window and not empty.  Otherwise keep going
       if (curWindowStart <= next.endTime && next.numRows > 0) {
