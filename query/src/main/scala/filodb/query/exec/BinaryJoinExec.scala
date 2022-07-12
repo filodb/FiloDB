@@ -138,10 +138,10 @@ final case class BinaryJoinExec(queryContext: QueryContext,
           results.put(resKey, ResultVal(IteratorBackedRangeVector(resKey, res, period), rvOtherCorrect))
         }
       }
+      // check for timeout after dealing with metadata, before dealing with numbers
+      querySession.qContext.checkQueryTimeout(this.getClass.getName)
       Observable.fromIterable(results.values.map(_.resultRv))
     }
-    // check for timeout after dealing with metadata, before dealing with numbers
-    querySession.qContext.checkQueryTimeout(this.getClass.getName)
     Observable.fromTask(taskOfResults).flatten
   }
 

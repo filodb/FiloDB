@@ -79,11 +79,10 @@ final case class SetOperatorExec(queryContext: QueryContext,
         case LUnless => setOpUnless(lhsRvs, rhsRvs)
         case _       => throw new IllegalArgumentException("requirement failed: Only and, or and unless are supported ")
       }
-
+      // check for timeout after dealing with metadata, before dealing with numbers
+      querySession.qContext.checkQueryTimeout(this.getClass.getName)
       Observable.fromIteratorUnsafe(results)
     }
-    // check for timeout after dealing with metadata, before dealing with numbers
-    querySession.qContext.checkQueryTimeout(this.getClass.getName)
     Observable.fromTask(taskOfResults).flatten
   }
 
