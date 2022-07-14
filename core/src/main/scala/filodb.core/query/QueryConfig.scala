@@ -41,7 +41,7 @@ object QueryConfig {
                                            remoteHttpEndpoint = None,
                                            enforceResultByteLimit = false,
                                            allowPartialResultsRangeQuery = false,
-                                           allowPartialResultsMetadataQuery = false)
+                                           allowPartialResultsMetadataQuery = true)
 }
 
 case class QueryConfig(askTimeout: FiniteDuration,
@@ -55,4 +55,4 @@ case class QueryConfig(askTimeout: FiniteDuration,
                        remoteHttpEndpoint: Option[String],
                        enforceResultByteLimit: Boolean = false,
                        allowPartialResultsRangeQuery: Boolean = false,
-                       allowPartialResultsMetadataQuery: Boolean = false)
+                       allowPartialResultsMetadataQuery: Boolean = true)

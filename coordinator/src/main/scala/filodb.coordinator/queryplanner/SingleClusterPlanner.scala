@@ -133,14 +133,14 @@ class SingleClusterPlanner(val dataset: Dataset,
 
   import SingleClusterPlanner._
 
-  private def dispatcherForShard(shard: Int, forceInProcess: Boolean): PlanDispatcher = {
+  private def dispatcherForShard(shard: Int, forceInProcess: Boolean, queryContext: QueryContext): PlanDispatcher = {
     if (forceInProcess) {
       return inProcessPlanDispatcher
     }
     val targetActor = shardMapperFunc.coordForShard(shard)
     if (targetActor == ActorRef.noSender) {
       logger.debug(s"ShardMapper: $shardMapperFunc")
-      if(queryConfig.allowPartialResultsRangeQuery || queryConfig.allowPartialResultsRangeQuery)
+      if (queryContext.plannerParams.allowPartialResults)
         logger.debug(s"Shard: $shard is not available however query is proceeding as partial results is enabled")
       else
         throw new RuntimeException(s"Shard: $shard is not available")
@@ -617,7 +617,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                                       forceInProcess: Boolean): PlanResult = {
     // step through the shards, and materialize a plan for each
     val plans = shards.toSeq.flatMap{ shard =>
-      val dispatcher = dispatcherForShard(shard, forceInProcess)
+      val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
       val qContextWithShardOverride = {
         val shardOverridePlannerParams = qContext.plannerParams.copy(shardOverrides = Some(Seq(shard)))
         qContext.copy(plannerParams = shardOverridePlannerParams)
@@ -825,7 +825,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     val useTSForQueryShards = !tsChangeExists && allTSLabelsPresent
 
     val execPlans = shardsFromFilters(renamedFilters, qContext, useTSForQueryShards).map { shard =>
-      val dispatcher = dispatcherForShard(shard, forceInProcess)
+      val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
       MultiSchemaPartitionsExec(qContext, dispatcher, dsRef, shard, renamedFilters,
         toChunkScanMethod(rangeSelectorWithOffset), dsOptions.metricColumn, schemaOpt, colName)
     }
@@ -851,7 +851,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       shardMapperFunc.assignedShards
     }
     val metaExec = shardsToHit.map { shard =>
-      val dispatcher = dispatcherForShard(shard, forceInProcess)
+      val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
       exec.LabelValuesExec(qContext, dispatcher, dsRef, shard, renamedFilters, labelNames, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec)
@@ -884,7 +884,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     }
 
     val metaExec = shardsToHit.map { shard =>
-      val dispatcher = dispatcherForShard(shard, forceInProcess)
+      val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
       exec.LabelNamesExec(qContext, dispatcher, dsRef, shard, renamedFilters, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec)
@@ -897,7 +897,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     val shardsToHit = shardsFromFilters(renamedFilters, qContext)
 
     val metaExec = shardsToHit.map { shard =>
-      val dispatcher = dispatcherForShard(shard, forceInProcess)
+      val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
       exec.LabelCardinalityExec(qContext, dispatcher, dsRef, shard, renamedFilters, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec)
@@ -907,7 +907,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                                          lp: TsCardinalities,
                                          forceInProcess: Boolean): PlanResult = {
     val metaExec = shardMapperFunc.assignedShards.map{ shard =>
-      val dispatcher = dispatcherForShard(shard, forceInProcess)
+      val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
       exec.TsCardExec(qContext, dispatcher, dsRef, shard, lp.shardKeyPrefix, lp.numGroupByFields)
     }
     PlanResult(metaExec)
@@ -935,7 +935,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       shardMapperFunc.assignedShards
     }
     val metaExec = shardsToHit.map { shard =>
-      val dispatcher = dispatcherForShard(shard, forceInProcess)
+      val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
       PartKeysExec(qContext, dispatcher, dsRef, shard, renamedFilters,
                    lp.fetchFirstLastSampleTimes, lp.startMs, lp.endMs)
     }
@@ -949,7 +949,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     val colName = if (lp.column.isEmpty) None else Some(lp.column)
     val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))
     val metaExec = shardsFromFilters(renamedFilters, qContext).map { shard =>
-      val dispatcher = dispatcherForShard(shard, forceInProcess)
+      val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
       SelectChunkInfosExec(qContext, dispatcher, dsRef, shard, renamedFilters, toChunkScanMethod(lp.rangeSelector),
         schemaOpt, colName)
     }

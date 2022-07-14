@@ -55,7 +55,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
           // No cross-cluster failure routing in this API, hence we pass empty config
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false), verbose.getOrElse(false),
             spread, PromQlQueryParams(query, start.toLong, step.toLong, end.toLong), histMap.getOrElse(false),
-            partialResults.getOrElse(false))
+            partialResults.getOrElse(queryConfig.allowPartialResultsRangeQuery))
         }
       }
     } ~
@@ -72,7 +72,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
           val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong, stepLong)
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
             verbose.getOrElse(false), spread, PromQlQueryParams(query, time.toLong, stepLong, time.toLong),
-            histMap.getOrElse(false), partialResults.getOrElse(false))
+            histMap.getOrElse(false), partialResults.getOrElse(queryConfig.allowPartialResultsRangeQuery))
         }
       }
     } ~
@@ -91,7 +91,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
           val logicalPlan = Parser.labelNamesQueryToLogicalPlan(query, TimeStepParams(startLong, 0L, endLong))
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
             verbose.getOrElse(false), spread, PromQlQueryParams(query, startLong, 0L, endLong),
-            false, partialResults.getOrElse(true))
+            false, partialResults.getOrElse(queryConfig.allowPartialResultsMetadataQuery))
         }
       }
     } ~
@@ -112,7 +112,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
                                                                  TimeStepParams(startLong, 0L, endLong))
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
             false, None, PromQlQueryParams(query.getOrElse(""), startLong, 0L, endLong), false,
-            partialResults.getOrElse(true))
+            partialResults.getOrElse(queryConfig.allowPartialResultsMetadataQuery))
         }
       }
     } ~
@@ -166,20 +166,15 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
   private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan, explainOnly: Boolean, verbose: Boolean,
                                  spread: Option[Int], tsdbQueryParams: TsdbQueryParams, histMap: Boolean,
                                  partialResults: Boolean) = {
-    val allowPartialResults = if (partialResults) {
-      if (logicalPlan.isInstanceOf[MetadataQueryPlan])
-         queryConfig.allowPartialResultsMetadataQuery
-      else queryConfig.allowPartialResultsRangeQuery
-    } else false
     val spreadProvider: Option[SpreadProvider] = spread.map(s => StaticSpreadProvider(SpreadChange(0, s)))
     val command = if (explainOnly) {
-      ExplainPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryContext(tsdbQueryParams, spreadProvider,
-        allowPartialResults))
+      ExplainPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryContext(tsdbQueryParams,
+        spreadProvider, partialResults))
+    } else {
+      LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryContext(tsdbQueryParams,
+        spreadProvider, partialResults))
     }
-    else {
-      LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryContext(tsdbQueryParams, spreadProvider,
-        allowPartialResults))
-    }
+
     onSuccess(asyncAsk(nodeCoord, command, settings.queryAskTimeout)) {
       case qr: QueryResult if logicalPlan.isInstanceOf[MetadataQueryPlan] =>
         if (qr.resultSchema.columns.length == 1 && qr.resultSchema.columns(0).colType == StringColumn)
