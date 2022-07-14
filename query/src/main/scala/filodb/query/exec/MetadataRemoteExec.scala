@@ -38,7 +38,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
     import PromCirceSupport._
     import io.circe.parser
     remoteExecHttpClient.httpMetadataPost(queryEndpoint, httpTimeoutMs,
-      queryContext.submitTime, getUrlParams(queryContext.plannerParams.allowPartialResults), queryContext.traceInfo)
+      queryContext.submitTime, getUrlParams(), queryContext.traceInfo)
       .map { response =>
         // Error response from remote partition is a nested json present in response.body
         // as response status code is not 2xx
