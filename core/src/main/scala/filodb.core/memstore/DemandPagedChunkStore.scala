@@ -80,7 +80,7 @@ extends RawToPartitionMaker with StrictLogging {
                 case t: Throwable =>
                   // Failure above may indicate data corruption. At the very least,
                   //   something has gone remarkably wrong.
-                  logger.error(s"Unexpected error; shutting down. $t")
+                  logger.error(s"Unexpected error when doing on-demand paging; shutting down.", t)
                   Shutdown.haltAndCatchFire(t)
               }
               metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
