@@ -9,7 +9,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import filodb.core.{DatasetRef, QueryTimeoutException}
+import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
@@ -105,17 +105,10 @@ trait ExecPlan extends QueryCommand {
     // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
     // we don't want these to happen in a single thread.
 
-    def checkTimeout(timeoutAt: String): Unit = {
-      val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
-      if (queryTimeElapsed >= queryContext.plannerParams.queryTimeoutMillis) {
-        throw QueryTimeoutException(queryTimeElapsed, timeoutAt)
-      }
-    }
-
     // Step 1: initiate doExecute: make result schema and set up the async monix pipeline to create RVs
     lazy val step1: Task[ExecResult] = Task.evalAsync {
       // avoid any work when plan has waited in executor queue for long
-      checkTimeout(s"step1-${this.getClass.getSimpleName}")
+      queryContext.checkQueryTimeout(s"step1-${this.getClass.getSimpleName}")
       span.mark(s"execute-step1-start-${getClass.getSimpleName}")
       FiloSchedulers.assertThreadName(QuerySchedName)
       // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
@@ -136,7 +129,7 @@ trait ExecPlan extends QueryCommand {
     // Step 2: Append transformer execution to step1 result, materialize the final result
     def step2(res: ExecResult): Task[QueryResponse] = res.schema.map { resSchema =>
       // avoid any work when plan has waited in executor queue for long
-      checkTimeout(s"step2-${this.getClass.getSimpleName}")
+      queryContext.checkQueryTimeout(s"step2-${this.getClass.getSimpleName}")
       Kamon.histogram("query-execute-time-elapsed-step2-start", MeasurementUnit.time.milliseconds)
         .withTag("plan", getClass.getSimpleName)
         .record(Math.max(0, System.currentTimeMillis - startExecute))

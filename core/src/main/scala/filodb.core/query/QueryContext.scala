@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration._
 
-import filodb.core.{SpreadChange, SpreadProvider, TargetSchemaChange, TargetSchemaProvider}
+import filodb.core.{QueryTimeoutException, SpreadChange, SpreadProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.memory.EvictionLock
 
 trait TsdbQueryParams
@@ -51,9 +51,23 @@ final case class QueryContext(origQueryParams: TsdbQueryParams = UnavailableProm
                               queryId: String = UUID.randomUUID().toString,
                               submitTime: Long = System.currentTimeMillis(),
                               plannerParams: PlannerParams = PlannerParams(),
-                              traceInfo: Map[String, String] = Map.empty[String, String])
+                              traceInfo: Map[String, String] = Map.empty[String, String]) {
+
+  /**
+   * Check timeout. If shouldThrow is true, exception is thrown. Otherwise exception is returned as return value.
+   */
+  def checkQueryTimeout(checkingFrom: String, shouldThrow: Boolean = true): Option[QueryTimeoutException] = {
+    val queryTimeElapsed = System.currentTimeMillis() - submitTime
+    if (queryTimeElapsed >= plannerParams.queryTimeoutMillis) {
+      val ex = QueryTimeoutException(queryTimeElapsed, checkingFrom)
+      if (shouldThrow) throw ex
+      else Some(ex)
+    } else None
+  }
+}
 
 object QueryContext {
+
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): QueryContext =
     QueryContext(plannerParams = PlannerParams(constSpread, sampleLimit))
 

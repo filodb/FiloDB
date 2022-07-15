@@ -23,6 +23,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   val histSchema = ResultSchema(MMD.histDataset.schema.infosFromIDs(Seq(0, 3)), 1)
   val histMaxSchema = ResultSchema(MMD.histMaxDS.schema.infosFromIDs(Seq(0, 4, 3)), 1, colIDs = Seq(0, 4, 3))
 
+  val qc = QueryContext()
+  
   it ("should work without grouping") {
     val ignoreKey = CustomRangeVectorKey(
       Map(("ignore").utf8 -> ("ignore").utf8))
@@ -44,7 +46,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Sum
     val agg1 = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
-    val resultObs = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping, queryContext = qc)
     val result = resultObs.toListL.runToFuture.futureValue
     result.size shouldEqual 1
     result(0).key shouldEqual noKey
@@ -53,7 +55,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Min
     val agg2 = RowAggregator(AggregationOperator.Min, Nil, tvSchema)
-    val resultObs2 = RangeVectorAggregator.mapReduce(agg2, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs2 = RangeVectorAggregator.mapReduce(agg2, false, Observable.fromIterable(samples), noGrouping, queryContext = qc)
     val result2 = resultObs2.toListL.runToFuture.futureValue
     result2.size shouldEqual 1
     result2(0).key shouldEqual noKey
@@ -62,8 +64,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Count
     val agg3 = RowAggregator(AggregationOperator.Count, Nil, tvSchema)
-    val resultObs3a = RangeVectorAggregator.mapReduce(agg3, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs3 = RangeVectorAggregator.mapReduce(agg3, true, resultObs3a, rv=>rv.key)
+    val resultObs3a = RangeVectorAggregator.mapReduce(agg3, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs3 = RangeVectorAggregator.mapReduce(agg3, true, resultObs3a, rv=>rv.key,  queryContext = qc)
     val result3 = resultObs3.toListL.runToFuture.futureValue
     result3.size shouldEqual 1
     result3(0).key shouldEqual noKey
@@ -72,8 +74,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Avg
     val agg4 = RowAggregator(AggregationOperator.Avg, Nil, tvSchema)
-    val resultObs4a = RangeVectorAggregator.mapReduce(agg4, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs4 = RangeVectorAggregator.mapReduce(agg4, true, resultObs4a, rv=>rv.key)
+    val resultObs4a = RangeVectorAggregator.mapReduce(agg4, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg4, true, resultObs4a, rv=>rv.key,  queryContext = qc)
     val result4 = resultObs4.toListL.runToFuture.futureValue
     result4.size shouldEqual 1
     result4(0).key shouldEqual noKey
@@ -84,8 +86,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // BottomK
     val agg5 = RowAggregator(AggregationOperator.BottomK, Seq(3.0), tvSchema)
-    val resultObs5a = RangeVectorAggregator.mapReduce(agg5, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs5 = RangeVectorAggregator.mapReduce(agg5, true, resultObs5a, rv=>rv.key)
+    val resultObs5a = RangeVectorAggregator.mapReduce(agg5, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs5 = RangeVectorAggregator.mapReduce(agg5, true, resultObs5a, rv=>rv.key,  queryContext = qc)
     val result5 = resultObs5.toListL.runToFuture.futureValue
     result5.size shouldEqual 1
     result5(0).key shouldEqual noKey
@@ -97,8 +99,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // TopK
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(3.0), tvSchema)
-    val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv.key)
+    val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv.key,  queryContext = qc)
     val result6 = resultObs6.toListL.runToFuture.futureValue
     result6.size shouldEqual 1
     result6(0).key shouldEqual noKey
@@ -110,8 +112,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Quantile
     val agg7 = RowAggregator(AggregationOperator.Quantile, Seq(0.70), tvSchema)
-    val resultObs7a = RangeVectorAggregator.mapReduce(agg7, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs7 = RangeVectorAggregator.mapReduce(agg7, true, resultObs7a, rv=>rv.key)
+    val resultObs7a = RangeVectorAggregator.mapReduce(agg7, false, Observable.fromIterable(samples), noGrouping, queryContext = qc)
+    val resultObs7 = RangeVectorAggregator.mapReduce(agg7, true, resultObs7a, rv=>rv.key, queryContext = qc)
     val resultObs7b = RangeVectorAggregator.present(agg7, resultObs7, 1000, rangeParams)
     val result7 = resultObs7b.toListL.runToFuture.futureValue
     result7.size shouldEqual 1
@@ -123,8 +125,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Stdvar
     val agg8 = RowAggregator(AggregationOperator.Stdvar, Nil, tvSchema)
-    val resultObs8a = RangeVectorAggregator.mapReduce(agg8, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs8 = RangeVectorAggregator.mapReduce(agg8, true, resultObs8a, rv=>rv.key)
+    val resultObs8a = RangeVectorAggregator.mapReduce(agg8, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs8 = RangeVectorAggregator.mapReduce(agg8, true, resultObs8a, rv=>rv.key, queryContext = qc)
     val result8 = resultObs8.toListL.runToFuture.futureValue
     result8.size shouldEqual 1
     result8(0).key shouldEqual noKey
@@ -136,8 +138,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Stddev
     val agg9 = RowAggregator(AggregationOperator.Stddev, Nil, tvSchema)
-    val resultObs9a = RangeVectorAggregator.mapReduce(agg9, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs9 = RangeVectorAggregator.mapReduce(agg9, true, resultObs9a, rv=>rv.key)
+    val resultObs9a = RangeVectorAggregator.mapReduce(agg9, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs9 = RangeVectorAggregator.mapReduce(agg9, true, resultObs9a, rv=>rv.key, queryContext = qc)
     val result9 = resultObs9.toListL.runToFuture.futureValue
     result9.size shouldEqual 1
     result9(0).key shouldEqual noKey
@@ -149,8 +151,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Group
     val agg10 = RowAggregator(AggregationOperator.Group, Nil, tvSchema)
-    val resultObs10a = RangeVectorAggregator.mapReduce(agg10, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs10 = RangeVectorAggregator.mapReduce(agg10, true, resultObs10a, rv=>rv.key)
+    val resultObs10a = RangeVectorAggregator.mapReduce(agg10, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs10 = RangeVectorAggregator.mapReduce(agg10, true, resultObs10a, rv=>rv.key, queryContext = qc)
     val result10 = resultObs10.toListL.runToFuture.futureValue
     result10.size shouldEqual 1
     result10(0).key shouldEqual noKey
@@ -196,7 +198,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Sum
     val agg1 = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
-    val resultObs = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
     val result = resultObs.toListL.runToFuture.futureValue
     result.size shouldEqual 1
     result(0).key shouldEqual noKey
@@ -204,7 +206,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Min
     val agg2 = RowAggregator(AggregationOperator.Min, Nil, tvSchema)
-    val resultObs2 = RangeVectorAggregator.mapReduce(agg2, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs2 = RangeVectorAggregator.mapReduce(agg2, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
     val result2 = resultObs2.toListL.runToFuture.futureValue
     result2.size shouldEqual 1
     result2(0).key shouldEqual noKey
@@ -212,8 +214,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Count
     val agg3 = RowAggregator(AggregationOperator.Count, Nil, tvSchema)
-    val resultObs3a = RangeVectorAggregator.mapReduce(agg3, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs3 = RangeVectorAggregator.mapReduce(agg3, true, resultObs3a, rv=>rv.key)
+    val resultObs3a = RangeVectorAggregator.mapReduce(agg3, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs3 = RangeVectorAggregator.mapReduce(agg3, true, resultObs3a, rv=>rv.key,  queryContext = qc)
     val result3 = resultObs3.toListL.runToFuture.futureValue
     result3.size shouldEqual 1
     result3(0).key shouldEqual noKey
@@ -221,8 +223,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Avg
     val agg4 = RowAggregator(AggregationOperator.Avg, Nil, tvSchema)
-    val resultObs4a = RangeVectorAggregator.mapReduce(agg4, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs4 = RangeVectorAggregator.mapReduce(agg4, true, resultObs4a, rv=>rv.key)
+    val resultObs4a = RangeVectorAggregator.mapReduce(agg4, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg4, true, resultObs4a, rv=>rv.key,  queryContext = qc)
     val result4 = resultObs4.toListL.runToFuture.futureValue
     result4.size shouldEqual 1
     result4(0).key shouldEqual noKey
@@ -230,8 +232,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // BottomK
     val agg5 = RowAggregator(AggregationOperator.BottomK, Seq(2.0), tvSchema)
-    val resultObs5a = RangeVectorAggregator.mapReduce(agg5, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs5 = RangeVectorAggregator.mapReduce(agg5,true, resultObs5a, rv=>rv.key)
+    val resultObs5a = RangeVectorAggregator.mapReduce(agg5, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs5 = RangeVectorAggregator.mapReduce(agg5,true, resultObs5a, rv=>rv.key,  queryContext = qc)
     val resultObs5b = RangeVectorAggregator.present(agg5, resultObs5, 1000, rangeParams)
     val result5 = resultObs5.toListL.runToFuture.futureValue
     result5.size shouldEqual 1
@@ -248,8 +250,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // TopK
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(2.0), tvSchema)
-    val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv.key)
+    val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv.key,  queryContext = qc)
     val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000, rangeParams)
     val result6 = resultObs6.toListL.runToFuture.futureValue
     result6.size shouldEqual 1
@@ -268,8 +270,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Quantile
     val agg7 = RowAggregator(AggregationOperator.Quantile, Seq(0.5), tvSchema)
-    val resultObs7a = RangeVectorAggregator.mapReduce(agg7, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs7 = RangeVectorAggregator.mapReduce(agg7, true, resultObs7a, rv=>rv.key)
+    val resultObs7a = RangeVectorAggregator.mapReduce(agg7, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs7 = RangeVectorAggregator.mapReduce(agg7, true, resultObs7a, rv=>rv.key,  queryContext = qc)
     val resultObs7b = RangeVectorAggregator.present(agg7, resultObs7, 1000, rangeParams)
     val result7 = resultObs7b.toListL.runToFuture.futureValue
     result7.size shouldEqual 1
@@ -278,8 +280,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Stdvar
     val agg8 = RowAggregator(AggregationOperator.Stdvar, Nil, tvSchema)
-    val resultObs8a = RangeVectorAggregator.mapReduce(agg8, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs8 = RangeVectorAggregator.mapReduce(agg8, true, resultObs8a, rv=>rv.key)
+    val resultObs8a = RangeVectorAggregator.mapReduce(agg8, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs8 = RangeVectorAggregator.mapReduce(agg8, true, resultObs8a, rv=>rv.key,  queryContext = qc)
     val result8 = resultObs8.toListL.runToFuture.futureValue
     result8.size shouldEqual 1
     result8(0).key shouldEqual noKey
@@ -287,8 +289,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Stddev
     val agg9 = RowAggregator(AggregationOperator.Stddev, Nil, tvSchema)
-    val resultObs9a = RangeVectorAggregator.mapReduce(agg9, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs9 = RangeVectorAggregator.mapReduce(agg9, true, resultObs9a, rv=>rv.key)
+    val resultObs9a = RangeVectorAggregator.mapReduce(agg9, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs9 = RangeVectorAggregator.mapReduce(agg9, true, resultObs9a, rv=>rv.key,  queryContext = qc)
     val result9 = resultObs9.toListL.runToFuture.futureValue
     result9.size shouldEqual 1
     result9(0).key shouldEqual noKey
@@ -296,8 +298,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Group
     val agg10 = RowAggregator(AggregationOperator.Group, Nil, tvSchema)
-    val resultObs10a = RangeVectorAggregator.mapReduce(agg10, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs10 = RangeVectorAggregator.mapReduce(agg10, true, resultObs10a, rv=>rv.key)
+    val resultObs10a = RangeVectorAggregator.mapReduce(agg10, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs10 = RangeVectorAggregator.mapReduce(agg10, true, resultObs10a, rv=>rv.key,  queryContext = qc)
     val result10 = resultObs10.toListL.runToFuture.futureValue
     result10.size shouldEqual 1
     result10(0).key shouldEqual noKey
@@ -313,8 +315,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Quantile
     val agg7 = RowAggregator(AggregationOperator.Quantile, Seq(0.5), tvSchema)
-    val resultObs7a = RangeVectorAggregator.mapReduce(agg7, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs7 = RangeVectorAggregator.mapReduce(agg7, true, resultObs7a, rv=>rv.key)
+    val resultObs7a = RangeVectorAggregator.mapReduce(agg7, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs7 = RangeVectorAggregator.mapReduce(agg7, true, resultObs7a, rv=>rv.key, queryContext = qc)
     val result7 = resultObs7.toListL.runToFuture.futureValue
     result7.size shouldEqual 1
 
@@ -349,7 +351,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val mapped1 = aggMR(Observable.fromIterable(Seq(toRv(s1))), querySession, 1000, tvSchema)
     val mapped2 = aggMR(Observable.fromIterable(Seq(toRv(s2))), querySession, 1000, tvSchema)
 
-    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped1 ++ mapped2, rv=>rv.key)
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped1 ++ mapped2, rv=>rv.key, queryContext = qc)
     val result4 = resultObs4.toListL.runToFuture.futureValue
     result4.size shouldEqual 1
     result4(0).key shouldEqual noKey
@@ -374,8 +376,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Stdvar
     val agg1 = RowAggregator(AggregationOperator.Stdvar, Nil, tvSchema)
-    val resultObs1a = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs1 = RangeVectorAggregator.mapReduce(agg1, true, resultObs1a, rv => rv.key)
+    val resultObs1a = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs1 = RangeVectorAggregator.mapReduce(agg1, true, resultObs1a, rv=>rv.key,  queryContext = qc)
     val result1 = resultObs1.toListL.runToFuture.futureValue
     result1.size shouldEqual 1
     result1(0).key shouldEqual noKey
@@ -383,8 +385,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Stddev
     val agg2 = RowAggregator(AggregationOperator.Stddev, Nil, tvSchema)
-    val resultObs2a = RangeVectorAggregator.mapReduce(agg2, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs2 = RangeVectorAggregator.mapReduce(agg2, true, resultObs2a, rv => rv.key)
+    val resultObs2a = RangeVectorAggregator.mapReduce(agg2, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs2 = RangeVectorAggregator.mapReduce(agg2, true, resultObs2a, rv=>rv.key,  queryContext = qc)
     val result2 = resultObs2.toListL.runToFuture.futureValue
     result2.size shouldEqual 1
     result2(0).key shouldEqual noKey
@@ -401,7 +403,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Sum
     val agg1 = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
-    val resultObs = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
     val result = resultObs.toListL.runToFuture.futureValue
     result.size shouldEqual 1
     result(0).key shouldEqual noKey
@@ -409,7 +411,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Min
     val agg2 = RowAggregator(AggregationOperator.Min, Nil, tvSchema)
-    val resultObs2 = RangeVectorAggregator.mapReduce(agg2, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs2 = RangeVectorAggregator.mapReduce(agg2, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
     val result2 = resultObs2.toListL.runToFuture.futureValue
     result2.size shouldEqual 1
     result2(0).key shouldEqual noKey
@@ -417,8 +419,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Count
     val agg3 = RowAggregator(AggregationOperator.Count, Nil, tvSchema)
-    val resultObs3a = RangeVectorAggregator.mapReduce(agg3, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs3 = RangeVectorAggregator.mapReduce(agg3, true, resultObs3a, rv => rv.key)
+    val resultObs3a = RangeVectorAggregator.mapReduce(agg3, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs3 = RangeVectorAggregator.mapReduce(agg3, true, resultObs3a, rv=>rv.key,  queryContext = qc)
     val result3 = resultObs3.toListL.runToFuture.futureValue
     result3.size shouldEqual 1
     result3(0).key shouldEqual noKey
@@ -426,8 +428,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Avg
     val agg4 = RowAggregator(AggregationOperator.Avg, Nil, tvSchema)
-    val resultObs4a = RangeVectorAggregator.mapReduce(agg4, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs4 = RangeVectorAggregator.mapReduce(agg4, true, resultObs4a, rv => rv.key)
+    val resultObs4a = RangeVectorAggregator.mapReduce(agg4, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg4, true, resultObs4a, rv=>rv.key,  queryContext = qc)
     val result4 = resultObs4.toListL.runToFuture.futureValue
     result4.size shouldEqual 1
     result4(0).key shouldEqual noKey
@@ -435,8 +437,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // BottomK
     val agg5 = RowAggregator(AggregationOperator.BottomK, Seq(2.0), tvSchema)
-    val resultObs5a = RangeVectorAggregator.mapReduce(agg5, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs5 = RangeVectorAggregator.mapReduce(agg5, true, resultObs5a, rv=>rv.key)
+    val resultObs5a = RangeVectorAggregator.mapReduce(agg5, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs5 = RangeVectorAggregator.mapReduce(agg5, true, resultObs5a, rv=>rv.key,  queryContext = qc)
     val result5 = resultObs5.toListL.runToFuture.futureValue
     result5.size shouldEqual 1
     result5(0).key shouldEqual noKey
@@ -455,8 +457,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // TopK
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(2.0), tvSchema)
-    val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv.key)
+    val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv.key,  queryContext = qc)
     val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000, RangeParams(1,1,2))
     val result6 = resultObs6.toListL.runToFuture.futureValue
     result6.size shouldEqual 1
@@ -473,8 +475,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Stdvar
     val agg8 = RowAggregator(AggregationOperator.Stdvar, Nil, tvSchema)
-    val resultObs8a = RangeVectorAggregator.mapReduce(agg8, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs8 = RangeVectorAggregator.mapReduce(agg8, true, resultObs8a, rv => rv.key)
+    val resultObs8a = RangeVectorAggregator.mapReduce(agg8, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs8 = RangeVectorAggregator.mapReduce(agg8, true, resultObs8a, rv=>rv.key,  queryContext = qc)
     val result8 = resultObs8.toListL.runToFuture.futureValue
     result8.size shouldEqual 1
     result8(0).key shouldEqual noKey
@@ -482,8 +484,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Stddev
     val agg9 = RowAggregator(AggregationOperator.Stddev, Nil, tvSchema)
-    val resultObs9a = RangeVectorAggregator.mapReduce(agg9, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs9 = RangeVectorAggregator.mapReduce(agg9, true, resultObs9a, rv => rv.key)
+    val resultObs9a = RangeVectorAggregator.mapReduce(agg9, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs9 = RangeVectorAggregator.mapReduce(agg9, true, resultObs9a, rv=>rv.key,  queryContext = qc)
     val result9 = resultObs9.toListL.runToFuture.futureValue
     result9.size shouldEqual 1
     result9(0).key shouldEqual noKey
@@ -491,8 +493,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Group
     val agg10 = RowAggregator(AggregationOperator.Group, Nil, tvSchema)
-    val resultObs10a = RangeVectorAggregator.mapReduce(agg10, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs10 = RangeVectorAggregator.mapReduce(agg10, true, resultObs10a, rv=>rv.key)
+    val resultObs10a = RangeVectorAggregator.mapReduce(agg10, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs10 = RangeVectorAggregator.mapReduce(agg10, true, resultObs10a, rv=>rv.key,  queryContext = qc)
     val result10 = resultObs10.toListL.runToFuture.futureValue
     result10.size shouldEqual 1
     result10(0).key shouldEqual noKey
@@ -507,9 +509,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     )
 
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(5.0), tvSchema)
-    val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv
-      .key)
+    val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv.key,  queryContext = qc)
     val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000, RangeParams(1556744,1,1556745))
     val result6 = resultObs6.toListL.runToFuture.futureValue
     result6(0).key shouldEqual noKey
@@ -527,8 +528,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val samples: Array[RangeVector] = Array(rv1, rv2)
 
     val agg1 = RowAggregator(AggregationOperator.Sum, Nil, histSchema)
-    val resultObs1 = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs = RangeVectorAggregator.mapReduce(agg1, true, resultObs1, rv=>rv.key)
+    val resultObs1 = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs = RangeVectorAggregator.mapReduce(agg1, true, resultObs1, rv=>rv.key,  queryContext = qc)
 
     val result = resultObs.toListL.runToFuture.futureValue
     result.size shouldEqual 1
@@ -544,8 +545,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     // Test mapReduce of empty histogram sums
     val agg2 = RowAggregator(AggregationOperator.Sum, Nil, histSchema)
-    val emptyObs = RangeVectorAggregator.mapReduce(agg2, false, Observable.empty, noGrouping)
-    val resultObs2 = RangeVectorAggregator.mapReduce(agg2, true, emptyObs ++ resultObs1, rv=>rv.key)
+    val emptyObs = RangeVectorAggregator.mapReduce(agg2, false, Observable.empty, noGrouping,  queryContext = qc)
+    val resultObs2 = RangeVectorAggregator.mapReduce(agg2, true, emptyObs ++ resultObs1, rv=>rv.key,  queryContext = qc)
     val result2 = resultObs2.toListL.runToFuture.futureValue
     result2.size shouldEqual 1
     result2(0).key shouldEqual noKey
@@ -557,8 +558,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val samples: Array[RangeVector] = Array(rv1, rv2)
 
     val agg1 = RowAggregator(AggregationOperator.Count, Nil, histSchema)
-    val resultObs1 = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs = RangeVectorAggregator.mapReduce(agg1, true, resultObs1, rv=>rv.key)
+    val resultObs1 = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs = RangeVectorAggregator.mapReduce(agg1, true, resultObs1, rv=>rv.key,  queryContext = qc)
 
     val result = resultObs.toListL.runToFuture.futureValue
     result.size shouldEqual 1
@@ -581,8 +582,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     val agg = RowAggregator(AggregationOperator.TopK, Seq(1.0), tvSchema)
     val resultObsa = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples),
-      noGrouping)
-    val resultObsb = RangeVectorAggregator.mapReduce(agg, true, resultObsa, rv=>rv.key)
+      noGrouping,  queryContext = qc)
+    val resultObsb = RangeVectorAggregator.mapReduce(agg, true, resultObsa, rv=>rv.key,  queryContext = qc)
     val resultObsc = RangeVectorAggregator.present(agg, resultObsb, 1000, rangeParams)
     val result = resultObsc.toListL.runToFuture.futureValue
 
@@ -606,8 +607,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val samples: Array[RangeVector] = Array(rv1, rv2)
 
     val agg1 = RowAggregator(AggregationOperator.Sum, Nil, histMaxSchema)
-    val resultObs1 = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs = RangeVectorAggregator.mapReduce(agg1, true, resultObs1, rv=>rv.key)
+    val resultObs1 = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs = RangeVectorAggregator.mapReduce(agg1, true, resultObs1, rv=>rv.key,  queryContext = qc)
 
     val result = resultObs.toListL.runToFuture.futureValue
     result.size shouldEqual 1
@@ -639,8 +640,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     )
 
     val agg = RowAggregator(AggregationOperator.CountValues, Seq("freq"), tvSchema)
-    val resultObs = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs1 = RangeVectorAggregator.mapReduce(agg, true, resultObs,  rv=>rv.key)
+    val resultObs = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs1 = RangeVectorAggregator.mapReduce(agg, true, resultObs,  rv=>rv.key,  queryContext = qc)
 
     val resultObs2 = RangeVectorAggregator.present(agg, resultObs1, 1000, RangeParams(0,1,0) )
     val result = resultObs2.toListL.runToFuture.futureValue
@@ -657,9 +658,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     )
 
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(1.0), tvSchema)
-    val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv
-      .key)
+    val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv.key,  queryContext = qc)
     val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000, RangeParams(1556744, 0, 1556744))
     val result6 = resultObs6.toListL.runToFuture.futureValue
     result6(0).key shouldEqual noKey
@@ -677,8 +677,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val samples: Array[RangeVector] = Array(rv1, rv2)
 
     val agg1 = RowAggregator(AggregationOperator.Sum, Nil, histSchema)
-    val resultObs1 = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs = RangeVectorAggregator.mapReduce(agg1, true, resultObs1, rv=>rv.key)
+    val resultObs1 = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
+    val resultObs = RangeVectorAggregator.mapReduce(agg1, true, resultObs1, rv=>rv.key,  queryContext = qc)
 
     val result = resultObs.toListL.runToFuture.futureValue
     result.size shouldEqual 1
@@ -797,8 +797,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     for ((aggOp, params, presenterFunc, bValExpected) <- testTuples) {
       val agg = RowAggregator(aggOp, params, tvSchema)
-      val resultObsLeaf = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), grouping)
-      val resultObs = RangeVectorAggregator.mapReduce(agg, true, resultObsLeaf, rv=>rv.key)
+      val resultObsLeaf = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), grouping, queryContext = qc)
+      val resultObs = RangeVectorAggregator.mapReduce(agg, true, resultObsLeaf, rv=>rv.key,  queryContext = qc)
       val resultObsPresent = presenterFunc(agg, resultObs)
       val result = resultObsPresent.toListL.runToFuture.futureValue
 
