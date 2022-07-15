@@ -1,13 +1,15 @@
 package filodb.coordinator.queryplanner
 
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.query._
 import filodb.query.LogicalPlan._
 import filodb.query.exec._
+
+
+import scala.collection.mutable
 
 case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange)
 
@@ -162,6 +164,40 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
            _: RawChunkMeta |
            _: RawSeries                   => materializePeriodicAndRawSeries(logicalPlan, qContext)
     }
+  }
+
+  // TODO(a_theimer): generalize to make cleaner
+  private def mergeTimeRanges(left: Seq[TimeRange], right: Seq[TimeRange]): Seq[TimeRange] = {
+    // TODO(a_theimer): sort or assert
+    val res = new mutable.ArrayBuffer[TimeRange]
+    var ileft = 0
+    var iright = 0
+    var start = math.min(left.head.startMs, right.head.startMs)
+    while (ileft < left.size && iright < right.size) {
+      val lrange = left(ileft)
+      val rrange = right(iright)
+      if (lrange.endMs < rrange.endMs) {
+        res.append(TimeRange(start, lrange.endMs))
+        start = if (ileft == left.size - 1) math.min(left(ileft + 1).startMs, rrange.endMs) else rrange.endMs
+        ileft += 1
+      } else {
+        res.append(TimeRange(start, rrange.endMs))
+        start = if (iright == right.size - 1) math.min(right(iright + 1).startMs, lrange.endMs) else lrange.endMs
+        iright += 1
+      }
+    }
+    if (ileft < left.size) {
+      res.append(TimeRange(start, left(ileft).endMs))
+      for (i <- ileft + 1 until left.size) {
+        res.append(TimeRange(left(i).startMs, left(i).endMs))
+      }
+    } else if (iright < right.size) {
+      res.append(TimeRange(start, right(iright).endMs))
+      for (i <- iright + 1 until right.size) {
+        res.append(TimeRange(right(i).startMs, right(i).endMs))
+      }
+    }
+    res
   }
 
   private def getRoutingKeys(logicalPlan: LogicalPlan) = {
