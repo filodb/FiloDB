@@ -107,6 +107,32 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     result.map( p => (p.startTime, p.endTime)) shouldEqual expected.map( p => (p.startTime, p.endTime))
   }
 
+
+  it("should fetch part key iterator records from filters correctly") {
+    // Add the first ten keys and row numbers
+    val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val pk = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
+      keyIndex.addPartKey(pk, i, i, i + 10)()
+      PartKeyLuceneIndexRecord(pk, i, i + 10)
+    }
+    keyIndex.refreshReadersBlocking()
+
+    val filter2 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
+
+    val pks = ArrayBuffer.empty[Array[Byte]]
+    val matches = keyIndex.foreachPartKeyMatchingFilter(Seq(filter2), 0, Long.MaxValue, b => {
+
+      val copy = new Array[Byte](b.length)
+      Array.copy(b.bytes, b.offset, copy, 0, b.length)
+      pks.append(copy)
+    })
+    matches shouldEqual 3
+    pks.zip(Seq(pkrs(7), pkrs(8), pkrs(9))).foreach{
+      case (b, pk) => pk.partKey shouldEqual b
+    }
+  }
+
   it("should fetch records from filters correctly with a missing label != with a non empty value") {
     // Weird case in prometheus where if a non existent label is used with != check with an empty value,
     // the returned result includes all results where the label is missing and those where the label exists
@@ -176,6 +202,38 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
   }
 
+  it("should upsert part keys with endtime by partKey should work and return only active partkeys") {
+    // Add the first ten keys and row numbers
+    val expectedSHA256PartIds = ArrayBuffer.empty[String]
+    partKeyFromRecords(dataset6, records(dataset6, uniqueReader.take(10)), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) =>
+      val time = System.currentTimeMillis()
+      val pkOnHeap = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
+      keyIndex.addPartKey(pkOnHeap, -1, time)()
+      if (i % 2 == 0) {
+        keyIndex.upsertPartKey(pkOnHeap, -1, time, time + 300)()
+      } else {
+        expectedSHA256PartIds.append(keyIndex.partKeyByteRefToSHA256Digest(pkOnHeap, 0, pkOnHeap.length))
+      }
+    }
+    keyIndex.refreshReadersBlocking()
+
+    keyIndex.indexNumEntries shouldEqual 10
+
+    val activelyIngestingParts =
+      keyIndex.partKeyRecordsFromFilters(Nil, System.currentTimeMillis() + 500, Long.MaxValue)
+    activelyIngestingParts.size shouldBe 5
+
+
+    val actualSha256PartIds = activelyIngestingParts.map(r => {
+      keyIndex.partKeyByteRefToSHA256Digest(r.partKey, 0, r.partKey.length)
+    })
+
+    expectedSHA256PartIds.toSet shouldEqual actualSha256PartIds.toSet
+  }
+
+
+
   it("should add part keys and fetch startTimes correctly for more than 1024 keys") {
     val numPartIds = 3000 // needs to be more than 1024 to test the lucene term limit
     val start = System.currentTimeMillis()
@@ -218,6 +276,70 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     }
 
   }
+
+
+  it("should add part keys and removePartKeys (without partIds) correctly for more than 1024 keys with del count") {
+    // Identical to test
+    // it("should add part keys and fetch partIdsEndedBefore and removePartKeys correctly for more than 1024 keys")
+    // However, combines them not requiring us to get partIds and pass them tpo remove
+    val numPartIds = 3000 // needs to be more than 1024 to test the lucene term limit
+    val start = 1000
+    // we dont care much about the partKey here, but the startTime against partId.
+    val partKeys = Stream.continually(readers.head).take(numPartIds).toList
+    partKeyFromRecords(dataset6, records(dataset6, partKeys), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) =>
+      keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, start + i, start + i + 100)()
+    }
+    keyIndex.refreshReadersBlocking()
+    val pIdsList = keyIndex.partIdsEndedBefore(start + 200).toList()
+    for { i <- 0 until numPartIds} {
+      pIdsList.contains(i) shouldEqual (i <= 100)
+    }
+    val numDeleted = keyIndex.removePartitionsEndedBefore(start + 200)
+    numDeleted shouldEqual pIdsList.size
+    keyIndex.refreshReadersBlocking()
+
+    // Ensure everything expected is present or deleted
+    for { i <- 0 until numPartIds} {
+      // Everything with partId > 100 should be present
+      keyIndex.partKeyFromPartId(i).isDefined shouldEqual (i > 100)
+    }
+
+    // Important, while the unit test uses partIds to assert the presence or absence before and after deletion
+    // it is no longer required to have partIds in the index on non unit test setup
+  }
+
+  it("should add part keys and removePartKeys (without partIds) correctly for more than 1024 keys w/o del count") {
+    // identical
+    // to should add part keys and removePartKeys (without partIds) correctly for more than 1024 keys w/o del count
+    // except that this one returns 0 for numDocuments deleted
+
+    val numPartIds = 3000 // needs to be more than 1024 to test the lucene term limit
+    val start = 1000
+    val partKeys = Stream.continually(readers.head).take(numPartIds).toList
+    partKeyFromRecords(dataset6, records(dataset6, partKeys), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) =>
+      keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, start + i, start + i + 100)()
+    }
+    keyIndex.refreshReadersBlocking()
+    val pIdsList = keyIndex.partIdsEndedBefore(start + 200).toList()
+    for { i <- 0 until numPartIds} {
+      pIdsList.contains(i) shouldEqual (i <= 100)
+    }
+    val numDeleted = keyIndex.removePartitionsEndedBefore(start + 200, false)
+    numDeleted shouldEqual 0
+    keyIndex.refreshReadersBlocking()
+
+    // Ensure everything expected is present or deleted
+    for { i <- 0 until numPartIds} {
+      // Everything with partId > 100 should be present
+      keyIndex.partKeyFromPartId(i).isDefined shouldEqual (i > 100)
+    }
+
+    // Important, while the unit test uses partIds to assert the presence or absence before and after deletion
+    // it is no longer required to have partIds in the index on non unit test setup
+  }
+
 
   it("should update part keys with endtime and parse filters correctly") {
     val start = System.currentTimeMillis()

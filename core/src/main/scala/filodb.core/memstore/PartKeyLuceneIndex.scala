@@ -4,7 +4,7 @@ import java.io.File
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.util
-import java.util.PriorityQueue
+import java.util.{Base64, PriorityQueue}
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable.HashSet
@@ -125,6 +125,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   private val numPartColumns = schema.columns.length
 
+  import java.security.MessageDigest
+
+  val md: MessageDigest = MessageDigest.getInstance("SHA-256")
+
   val indexDiskLocation = diskLocation.map(new File(_, ref.dataset + File.separator + shardNum))
     .getOrElse(createTempDir(ref, shardNum)).toPath
 
@@ -244,7 +248,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     var facetsConfig: FacetsConfig = _
 
     val document = new Document()
-    private val partIdField = new StringField(PART_ID, "0", Store.NO)
+    private[memstore] val partIdField = new StringField(PART_ID, "0", Store.NO)
     private val partIdDv = new NumericDocValuesField(PART_ID, 0)
     private val partKeyDv = new BinaryDocValuesField(PART_KEY, new BytesRef())
     private val startTimeField = new LongPoint(START_TIME, 0L)
@@ -284,18 +288,28 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     }
 
     def reset(partId: Int, partKey: BytesRef, startTime: Long, endTime: Long): Document = {
+
       document.clear()
       fieldNames.clear()
       facetsConfig = new FacetsConfig
-      partIdField.setStringValue(String.valueOf(partId))
-      partIdDv.setLongValue(partId)
-      partKeyDv.setBytesValue(partKey)
+
+      if(partId > -1) {
+        partIdField.setStringValue(String.valueOf(partId))
+        partIdDv.setLongValue(partId)
+        document.add(partIdDv)
+      } else {
+        // Use partKey's SHA256 hash as the partId, this will be used while upserting the document
+        val strDigest = partKeyByteRefToSHA256Digest(partKey.bytes, partKey.offset, partKey.length)
+        partIdField.setStringValue(strDigest)
+      }
+
       startTimeField.setLongValue(startTime)
       startTimeDv.setLongValue(startTime)
       endTimeField.setLongValue(endTime)
       endTimeDv.setLongValue(endTime)
+      partKeyDv.setBytesValue(partKey)
+
       document.add(partIdField)
-      document.add(partIdDv)
       document.add(partKeyDv)
       document.add(startTimeField)
       document.add(startTimeDv)
@@ -304,6 +318,13 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       document
     }
   }
+
+  private[memstore] def partKeyByteRefToSHA256Digest(bytes: Array[Byte], offset: Int, length: Int) = {
+    md.update(bytes, offset, length)
+    val strDigest = Base64.getEncoder.encodeToString(md.digest())
+    strDigest
+  }
+
   private val luceneDocument = new ThreadLocal[ReusableLuceneDocument]() {
     override def initialValue(): ReusableLuceneDocument = new ReusableLuceneDocument
   }
@@ -379,6 +400,31 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
     withNewSearcher(s => s.search(deleteQuery, collector))
     collector.result
+  }
+
+  /**
+   * Method to delete documents from index that ended before the provided end time
+   *
+   * @param endedBefore the cutoff timestamp. All documents with time <= this time will be removed
+   * @param returnApproxDeletedCount a boolean flag that requests the return value to be an approximate count of the
+   *                                 documents that got deleted, if value is set to false, 0 is returned
+   */
+  def removePartitionsEndedBefore(endedBefore: Long, returnApproxDeletedCount: Boolean = true): Int = {
+    val deleteQuery = LongPoint.newRangeQuery(PartKeyLuceneIndex.END_TIME, 0, endedBefore)
+    // SInce delete does not return the deleted document count, we query to get the count that match the filter criteria
+    // and then delete the documents
+    val approxDeletedCount = if (returnApproxDeletedCount) {
+      val searcher = searcherManager.acquire()
+      try {
+          searcher.count(deleteQuery)
+      } finally {
+        searcherManager.release(searcher)
+      }
+    } else
+      0
+    indexWriter.deleteDocuments(deleteQuery)
+    approxDeletedCount
+
   }
 
   private def withNewSearcher(func: IndexSearcher => Unit): Unit = {
@@ -575,8 +621,17 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       s"with startTime=$startTime endTime=$endTime into dataset=$ref shard=$shardNum")
     val doc = luceneDocument.get()
     val docToAdd = doc.facetsConfig.build(doc.document)
-    indexWriter.updateDocument(new Term(PART_ID, partId.toString), docToAdd)
+    val term =
+      if (partId > -1)
+        new Term(PART_ID, partId.toString)
+      else {
+        // partIdField has the base64(SHA256(part key)), we do not calculate this value again instead use what's already
+        // computed
+        new Term(PART_ID, doc.partIdField.stringValue())
+      }
+    indexWriter.updateDocument(term, docToAdd)
   }
+
 
   private def partKeyString(partId: Int,
                             partKeyOnHeapBytes: Array[Byte],
@@ -704,6 +759,15 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     coll.numHits
   }
 
+
+  def foreachPartKeyMatchingFilter(columnFilters: Seq[ColumnFilter],
+                                   startTime: Long,
+                                   endTime: Long, func: (BytesRef) => Unit): Int = {
+    val coll = new PartKeyActionCollector(func)
+    searchFromFilters(columnFilters, startTime, endTime, coll)
+    coll.numHits
+  }
+
   def updatePartKeyWithEndTime(partKeyOnHeapBytes: Array[Byte],
                                partId: Int,
                                endTime: Long = Long.MaxValue,
@@ -804,6 +868,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     searchFromFilters(columnFilters, startTime, endTime, collector)
     collector.records
   }
+
 
   private def searchFromFilters(columnFilters: Seq[ColumnFilter],
                                 startTime: Long,
@@ -1084,6 +1149,29 @@ class ActionCollector(action: (Int, BytesRef) => Unit) extends SimpleCollector {
       counter += 1
     } else {
       throw new IllegalStateException("This shouldn't happen since every document should have a partIdDv && partKeyDv")
+    }
+  }
+
+  def numHits: Int = counter
+}
+
+class PartKeyActionCollector(action: (BytesRef) => Unit) extends SimpleCollector {
+  private var partKeyDv: BinaryDocValues = _
+  private var counter: Int = 0
+
+  override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
+
+  override def doSetNextReader(context: LeafReaderContext): Unit = {
+    partKeyDv = context.reader().getBinaryDocValues(PartKeyLuceneIndex.PART_KEY)
+  }
+
+  override def collect(doc: Int): Unit = {
+    if (partKeyDv.advanceExact(doc)) {
+      val partKey = partKeyDv.binaryValue()
+      action(partKey)
+      counter += 1
+    } else {
+      throw new IllegalStateException("This shouldn't happen since every document should have a partKeyDv")
     }
   }
 
