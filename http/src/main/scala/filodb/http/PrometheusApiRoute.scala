@@ -44,6 +44,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // Used to issue a promQL query for a time range with a `start` and `end` timestamp and at regular `step` intervals.
     // For more details, see Prometheus HTTP API Documentation
     // [Range Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#range-queries)
+    // If partialResults query parameter value is not specified, value from config is used
     path( "api" / "v1" / "query_range") {
       get {
         parameter(('query.as[String], 'start.as[Double], 'end.as[Double], 'histogramMap.as[Boolean].?,
