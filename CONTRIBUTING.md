@@ -4,7 +4,7 @@ Thank you for thinking of contributing to FiloDB!   We welcome all contributions
 When you create a new PR, please be sure to review the guidelines below. Then create a branch based on `develop` (not `main`).
 
 ## <a name="pullrequest"></a> Pull Requests Guidelines
-Pull requests are the only means by which you can contribute to this project, please follow the following steps when submitting pull requests :
+Pull requests are the only means by which you can contribute to this project, please follow the following steps when submitting pull requests:
 
 1. Create your pull request.
 2. Fill the pull request template with all of the required elements
