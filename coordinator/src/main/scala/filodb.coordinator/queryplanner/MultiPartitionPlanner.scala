@@ -1,15 +1,13 @@
 package filodb.coordinator.queryplanner
 
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
-import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RvRange}
+import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.query._
 import filodb.query.LogicalPlan._
 import filodb.query.exec._
-
-
-import scala.collection.mutable
 
 case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange)
 
@@ -52,12 +50,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   val datasetMetricColumn: String = dataset.options.metricColumn
 
-  case class PartitionedResult(startMs: Long, endMs: Long, planResult: PlanResult)
-
-  // TODO(a_theimer)
-  private def wrap(parts: Seq[PartitionedResult], qContext: QueryContext): ExecPlan = {
-    MultiPartitionDistConcatExec(qContext, inProcessPlanDispatcher, parts.flatMap(_.planResult.plans))
-  }
 
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
       // Pseudo code for the materialize
@@ -88,20 +80,15 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     ) { // Query was part of routing
       localPartitionPlanner.materialize(logicalPlan, qContext)
     } else logicalPlan match {
-//      case mqp: MetadataQueryPlan             => materializeMetadataQueryPlan(mqp, qContext).plans.head
-//      case lp: TsCardinalities                => materializeTsCardinalities(lp, qContext).plans.head
-      case _                                  => wrap(walkLogicalPlanTree2(logicalPlan, qContext), qContext)
+      case mqp: MetadataQueryPlan             => materializeMetadataQueryPlan(mqp, qContext).plans.head
+      case lp: TsCardinalities                => materializeTsCardinalities(lp, qContext).plans.head
+      case _                                  => walkLogicalPlanTree(logicalPlan, qContext).plans.head
     }
   }
 
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                    qContext: QueryContext,
-                                   forceInProcess: Boolean): PlanResult =
-    throw new RuntimeException("Should not arrive here.")
-
-  private def walkLogicalPlanTree2(logicalPlan: LogicalPlan,
-                                   qContext: QueryContext,
-                                   forceInProcess: Boolean = false): Seq[PartitionedResult] = {
+                                   forceInProcess: Boolean = false): PlanResult = {
     // Should avoid this asInstanceOf, far many places where we do this now.
     val params = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     // MultiPartitionPlanner has capability to stitch across time partitions, however, the logic is mostly broken
@@ -138,9 +125,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             httpEndpoint, remoteHttpTimeoutMs, remoteContext, inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient
           )
         }
-        Seq(PartitionedResult(startMs, endMs, PlanResult(Seq(execPlan))))
+        PlanResult(Seq(execPlan))
     } else walkMultiPartitionPlan(logicalPlan, qContext)
   }
+
 
   /**
    * Invoked when the plan tree spans multiple plans
@@ -149,26 +137,26 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
    * @param qContext the QueryContext object
    * @return
    */
-  private def walkMultiPartitionPlan(logicalPlan: LogicalPlan, qContext: QueryContext): Seq[PartitionedResult] = {
+  private def walkMultiPartitionPlan(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
     logicalPlan match {
       case lp: BinaryJoin                 => materializeMultiPartitionBinaryJoin(lp, qContext)
       case _: MetadataQueryPlan           => throw new IllegalArgumentException("MetadataQueryPlan unexpected here")
-//      case lp: ApplyInstantFunction       => super.materializeApplyInstantFunction(qContext, lp)
-//      case lp: ApplyInstantFunctionRaw    => super.materializeApplyInstantFunctionRaw(qContext, lp)
-//      case lp: Aggregate                  => super.materializeAggregate(qContext, lp)
-//      case lp: ScalarVectorBinaryOperation=> super.materializeScalarVectorBinOp(qContext, lp))
-//      case lp: ApplyMiscellaneousFunction => super.materializeApplyMiscellaneousFunction(qContext, lp))
-//      case lp: ApplySortFunction          => super.materializeApplySortFunction(qContext, lp)
-//      case lp: ScalarVaryingDoublePlan    => super.materializeScalarPlan(qContext, lp)
+      case lp: ApplyInstantFunction       => super.materializeApplyInstantFunction(qContext, lp)
+      case lp: ApplyInstantFunctionRaw    => super.materializeApplyInstantFunctionRaw(qContext, lp)
+      case lp: Aggregate                  => super.materializeAggregate(qContext, lp)
+      case lp: ScalarVectorBinaryOperation=> super.materializeScalarVectorBinOp(qContext, lp)
+      case lp: ApplyMiscellaneousFunction => super.materializeApplyMiscellaneousFunction(qContext, lp)
+      case lp: ApplySortFunction          => super.materializeApplySortFunction(qContext, lp)
+      case lp: ScalarVaryingDoublePlan    => super.materializeScalarPlan(qContext, lp)
       case _: ScalarTimeBasedPlan         => throw new IllegalArgumentException("ScalarTimeBasedPlan unexpected here")
-//      case lp: VectorPlan                 => super.materializeVectorPlan(qContext, lp)
-//      case _: ScalarFixedDoublePlan       => throw new IllegalArgumentException("ScalarFixedDoublePlan unexpected here")
-//      case lp: ApplyAbsentFunction        => super.materializeAbsentFunction(qContext, lp)
-//      case lp: ScalarBinaryOperation      => super.materializeScalarBinaryOperation(qContext, lp)
-//      case lp: ApplyLimitFunction         => super.materializeLimitFunction(qContext, lp)
-//      case lp: TsCardinalities            => materializeTsCardinalities(lp, qContext)
-//      case lp: SubqueryWithWindowing       => super.materializeSubqueryWithWindowing(qContext, lp)
-//      case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
+      case lp: VectorPlan                 => super.materializeVectorPlan(qContext, lp)
+      case _: ScalarFixedDoublePlan       => throw new IllegalArgumentException("ScalarFixedDoublePlan unexpected here")
+      case lp: ApplyAbsentFunction        => super.materializeAbsentFunction(qContext, lp)
+      case lp: ScalarBinaryOperation      => super.materializeScalarBinaryOperation(qContext, lp)
+      case lp: ApplyLimitFunction         => super.materializeLimitFunction(qContext, lp)
+      case lp: TsCardinalities            => materializeTsCardinalities(lp, qContext)
+      case lp: SubqueryWithWindowing       => super.materializeSubqueryWithWindowing(qContext, lp)
+      case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
       case _: PeriodicSeries |
            _: PeriodicSeriesWithWindowing |
            _: RawChunkMeta |
@@ -285,22 +273,19 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     (partitions, lookBackMs, offsetMs, routingKeys)
   }
 
-  // scalastyle:off method.length
   /**
     * Materialize all queries except Binary Join and Metadata
     */
-  def materializePeriodicAndRawSeries(logicalPlan: LogicalPlan, qContext: QueryContext): Seq[PartitionedResult] = {
+  def materializePeriodicAndRawSeries(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val (partitions, lookBackMs, offsetMs, routingKeys) = resolvePartitionsAndRoutingKeys(logicalPlan, queryParams)
-    if (partitions.isEmpty || routingKeys.forall(_._2.isEmpty)) {
-      val execPlan = localPartitionPlanner.materialize(logicalPlan, qContext)
-      // TODO(a_theimer): confirm
-      Seq(PartitionedResult(queryParams.startSecs * 1000, queryParams.endSecs * 1000, PlanResult(Seq(execPlan))))
-    } else {
+    val execPlan = if (partitions.isEmpty || routingKeys.forall(_._2.isEmpty))
+      localPartitionPlanner.materialize(logicalPlan, qContext)
+    else {
       val stepMs = queryParams.stepSecs * 1000
       val isInstantQuery: Boolean = if (queryParams.startSecs == queryParams.endSecs) true else false
       var prevPartitionStart = queryParams.startSecs * 1000
-      partitions.zipWithIndex.map { case (p, i) =>
+      val execPlans = partitions.zipWithIndex.map { case (p, i) =>
         // First partition should start from query start time, no need to calculate time according to step for instant
         // queries
         val startMs =
@@ -316,94 +301,52 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             if (start > (queryParams.endSecs * 1000)) queryParams.endSecs * 1000 else start
           }
         prevPartitionStart = startMs
-        val partition_end = p.timeRange.endMs + offsetMs.min
-        val query_end = queryParams.endSecs * 1000
-        val endMs = math.min(query_end, partition_end)
-        val execPlan = if (isInstantQuery && query_end > partition_end) {
-          EmptyResultExec(qContext, dataset.ref, inProcessPlanDispatcher)
+        // we assume endMs should be equal partition endMs but if the query's end is smaller than partition endMs,
+        // why would we want to stretch the query??
+        val endMs = if (isInstantQuery) queryParams.endSecs * 1000 else p.timeRange.endMs + offsetMs.min
+        logger.debug(s"partitionInfo=$p; updated startMs=$startMs, endMs=$endMs")
+        if (p.partitionName.equals(localPartitionName)) {
+          val lpWithUpdatedTime = copyLogicalPlanWithUpdatedTimeRange(logicalPlan, TimeRange(startMs, endMs))
+          localPartitionPlanner.materialize(lpWithUpdatedTime, qContext)
         } else {
-          logger.debug(s"partitionInfo=$p; updated startMs=$startMs, endMs=$endMs")
-          if (p.partitionName.equals(localPartitionName)) {
-            val lpWithUpdatedTime = copyLogicalPlanWithUpdatedTimeRange(logicalPlan, TimeRange(startMs, endMs))
-            localPartitionPlanner.materialize(lpWithUpdatedTime, qContext)
-          } else {
-            val httpEndpoint = p.endPoint + queryParams.remoteQueryPath.getOrElse("")
-            PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, generateRemoteExecParams(qContext, startMs, endMs),
-              inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
-          }
+          val httpEndpoint = p.endPoint + queryParams.remoteQueryPath.getOrElse("")
+          PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, generateRemoteExecParams(qContext, startMs, endMs),
+            inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
         }
-        PartitionedResult(startMs, endMs, PlanResult(Seq(execPlan)))
       }
+      if (execPlans.size == 1) execPlans.head
+      else {
+        // TODO: Do we pass in QueryContext in LogicalPlan's helper rvRangeForPlan?
+        StitchRvsExec(qContext, inProcessPlanDispatcher, rvRangeFromPlan(logicalPlan),
+          execPlans.sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec]))
+      }
+      // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
+      // Sort to move RemoteExec in end as it does not have schema
     }
-  }
-  // scalastyle:on method.length
-
-  // TODO(a_theimer): generalize to make cleaner
-  private def mergeTimeRanges(left: Seq[TimeRange], right: Seq[TimeRange]): Seq[TimeRange] = {
-    // TODO(a_theimer): sort or assert
-    val res = new mutable.ArrayBuffer[TimeRange]
-    var ileft = 0
-    var iright = 0
-    var start = math.min(left.head.startMs, right.head.startMs)
-    while (ileft < left.size && iright < right.size) {
-      val lrange = left(ileft)
-      val rrange = right(iright)
-      if (lrange.endMs < rrange.endMs) {
-        res.append(TimeRange(start, lrange.endMs))
-        start = if (ileft == left.size - 1) math.min(left(ileft + 1).startMs, rrange.endMs) else rrange.endMs
-        ileft += 1
-      } else {
-        res.append(TimeRange(start, rrange.endMs))
-        start = if (iright == right.size - 1) math.min(right(iright + 1).startMs, lrange.endMs) else lrange.endMs
-        iright += 1
-      }
-    }
-    if (ileft < left.size) {
-      res.append(TimeRange(start, left(ileft).endMs))
-      for (i <- ileft + 1 until left.size) {
-        res.append(TimeRange(left(i).startMs, left(i).endMs))
-      }
-    } else if (iright < right.size) {
-      res.append(TimeRange(start, right(iright).endMs))
-      for (i <- iright + 1 until right.size) {
-        res.append(TimeRange(right(i).startMs, right(i).endMs))
-      }
-    }
-    res
+    PlanResult(execPlan:: Nil)
   }
 
-  private def materializeMultiPartitionBinaryJoin(logicalPlan: BinaryJoin,
-                                                  qContext: QueryContext): Seq[PartitionedResult] = {
+  private def materializeMultiPartitionBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): PlanResult = {
     val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
     val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
 
-    val lhsParts = walkMultiPartitionPlan(logicalPlan.lhs, lhsQueryContext)
-    val rhsParts = walkMultiPartitionPlan(logicalPlan.rhs, rhsQueryContext)
+    val lhsExec = this.materialize(logicalPlan.lhs, lhsQueryContext)
+    val rhsExec = this.materialize(logicalPlan.rhs, rhsQueryContext)
 
-    val ranges = mergeTimeRanges(lhsParts.map(p => TimeRange(p.startMs, p.endMs)), rhsParts.map(p => TimeRange(p.startMs, p.endMs)))
-
-    val lhsExec = if (lhsParts.size == 1) { lhsParts.head.planResult.plans } else Seq(wrap(lhsParts, qContext))
-    val rhsExec = if (rhsParts.size == 1) { rhsParts.head.planResult.plans } else Seq(wrap(rhsParts, qContext))
-    val rvRange = rvRangeFromPlan(logicalPlan)
-    ranges.map{ r =>
-      val rvRangeInner = rvRange.map { range =>
-        RvRange(r.startMs, range.stepMs, r.endMs)
-      }
-      val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
-        SetOperatorExec(qContext, InProcessPlanDispatcher(queryConfig), lhsExec, rhsExec, logicalPlan.operator,
-          LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
-          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn,
-          rvRangeInner)
-      else
-        BinaryJoinExec(qContext, inProcessPlanDispatcher, lhsExec, rhsExec, logicalPlan.operator,
-          logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
-          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
-          LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn,
-          rvRangeInner)
-      PartitionedResult(r.startMs, r.endMs, PlanResult(execPlan :: Nil))
-    }
+    val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
+      SetOperatorExec(qContext, InProcessPlanDispatcher(queryConfig), Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+        LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
+        LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn,
+        rvRangeFromPlan(logicalPlan))
+    else
+      BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+        logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
+        LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
+        LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn,
+        rvRangeFromPlan(logicalPlan))
+    PlanResult(execPlan :: Nil)
   }
 
   private def copy(lp: MetadataQueryPlan, startMs: Long, endMs: Long): MetadataQueryPlan = lp match {
