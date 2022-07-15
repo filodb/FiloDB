@@ -59,7 +59,7 @@ object QueryContext {
 
   def apply(queryParams: TsdbQueryParams, constSpread: Option[SpreadProvider],
             allowPartialResults: Boolean): QueryContext =
-    QueryContext(origQueryParams = queryParams, plannerParams = PlannerParams( constSpread, allowPartialResults))
+    QueryContext(origQueryParams = queryParams, plannerParams = PlannerParams(constSpread, allowPartialResults))
 
   /**
     * Creates a spreadFunc that looks for a particular filter with keyName Equals a value, and then maps values
