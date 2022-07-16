@@ -853,6 +853,19 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     collector.result
   }
 
+  def singlePartKeyFromFilters(columnFilters: Seq[ColumnFilter],
+                               startTime: Long,
+                               endTime: Long): Option[Array[Byte]] = {
+
+    val collector = new SinglePartKeyCollector() // passing zero for unlimited results
+    searchFromFilters(columnFilters, startTime, endTime, collector)
+    val pkBytesRef = collector.singleResult
+    if (pkBytesRef == null)
+      None
+    else Some(util.Arrays.copyOfRange(pkBytesRef.bytes, pkBytesRef.offset, pkBytesRef.offset + pkBytesRef.length))
+
+  }
+
   def labelNamesFromFilters(columnFilters: Seq[ColumnFilter],
                             startTime: Long,
                             endTime: Long): Int = {
@@ -965,6 +978,8 @@ class SinglePartKeyCollector extends SimpleCollector {
   override def collect(doc: Int): Unit = {
     if (partKeyDv.advanceExact(doc)) {
       singleResult = partKeyDv.binaryValue()
+      // Stop further collection from this segment
+      throw new CollectionTerminatedException
     } else {
       throw new IllegalStateException("This shouldn't happen since every document should have a partKeyDv")
     }

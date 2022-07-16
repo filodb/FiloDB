@@ -762,6 +762,26 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     }
   }
 
+  it("should get a single match for part keys by a filter") {
+
+    val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val pk = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
+      keyIndex.addPartKey(pk, -1, i, i + 10)()
+      PartKeyLuceneIndexRecord(pk, i, i + 10)
+    }
+    keyIndex.refreshReadersBlocking()
+
+    val filter1 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
+    val partKeyOpt = keyIndex.singlePartKeyFromFilters(Seq(filter1), 4, 10)
+
+    partKeyOpt.isDefined shouldBe true
+    partKeyOpt.get shouldEqual pkrs(7).partKey
+
+    val filter2 = ColumnFilter("Actor2Code", Equals("NonExist".utf8))
+    keyIndex.singlePartKeyFromFilters(Seq(filter2), 4, 10) shouldBe None
+  }
+
   it("Should update the state as TriggerRebuild and throw an exception for any error other than CorruptIndexException")
   {
     val events = ArrayBuffer.empty[(IndexState.Value, Long)]

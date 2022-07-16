@@ -127,11 +127,10 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     SingleLabelValuesResultIterator(filters, startTime, endTime, label, querySession, metricGroupBy, limit)
   }
 
-  // TODO: Remove dependency on partId here
   def labelNames(filter: Seq[ColumnFilter],
                  endTime: Long,
                  startTime: Long): Seq[String] =
-    labelNamesFromPartKeys(partKeyIndex.labelNamesFromFilters(filter, startTime, endTime))
+    labelNamesFromPartKeys(partKeyIndex.singlePartKeyFromFilters(filter, startTime, endTime))
 
   def partKeysWithFilters(filter: Seq[ColumnFilter],
                           fetchFirstLastSampleTimes: Boolean,
@@ -244,7 +243,6 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     if (downsampleConfig.enablePersistentIndexing) {
       indexUpdatedHour.set(partKeyIndex.getCurrentIndexState() match {
         case (IndexState.Synced, Some(ts))           => ts / 3600 / 1000
-        case (IndexState.Refreshing, Some(ts))       => ts / 3600 / 1000
         case _                                       => indexUpdatedHour.get()
       })
     }
@@ -421,15 +419,11 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   }
 
 
-  private def labelNamesFromPartKeys(partId: Int): Seq[String] = {
-    val results = new mutable.HashSet[String]
-    if (PartKeyLuceneIndex.NOT_FOUND == partId) Seq.empty
-    else {
-      val partKey = partKeyFromPartId(partId)
-      results ++ schemas.part.binSchema.colNames(partKey, UnsafeUtils.arayOffset)
-      results.toSeq
+  private def labelNamesFromPartKeys(partKeyOption: Option[Array[Byte]]): Seq[String] = partKeyOption match {
+      // Is to set needed as label name for a given part key is always unique?
+      case Some(partKey)    => schemas.part.binSchema.colNames(partKey, UnsafeUtils.arayOffset).toSet.toSeq
+      case None             => Seq.empty
     }
-  }
 
   private def shardKeyValuesFromFilter(shardKeyColumns: Seq[String], filters: Seq[ColumnFilter]): Seq[String] = {
     shardKeyColumns.map { col =>
