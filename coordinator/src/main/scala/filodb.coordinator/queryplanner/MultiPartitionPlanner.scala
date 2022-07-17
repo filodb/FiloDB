@@ -210,7 +210,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     case lp: ApplyMiscellaneousFunction  => getInvalidRanges(lp.vectors, promQlQueryParams)
     case lp: ApplySortFunction           => getInvalidRanges(lp.vectors, promQlQueryParams)
     case lp: ScalarVaryingDoublePlan     => (lp.functionArgs ++ Seq(lp.vectors)).flatMap(getInvalidRanges(_, promQlQueryParams))
-    case _: ScalarTimeBasedPlan          => throw new IllegalArgumentException("ScalarTimeBasedPlan unexpected here")
+    case _: ScalarTimeBasedPlan          => Seq()
     case lp: VectorPlan                  => getInvalidRanges(lp.scalars, promQlQueryParams)
     case _: ScalarFixedDoublePlan        => throw new IllegalArgumentException("ScalarFixedDoublePlan unexpected here")
     case lp: ApplyAbsentFunction         => (lp.functionArgs ++ Seq(lp.vectors)).map(_.asInstanceOf[LogicalPlan]).flatMap(getInvalidRanges(_, promQlQueryParams))  // TODO(a_theimer): why [Any]?
