@@ -256,6 +256,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     while (irange < invalidRanges.size && invalidRanges(irange).endMs < totalRange.endMs) {
       res(res.size - 1) = TimeRange(res.last.startMs, invalidRanges(irange).startMs)
       res.append(TimeRange(invalidRanges(irange).endMs, totalRange.endMs))
+      irange += 1
     }
     // check if an invalid range overlaps the totalRange end
     if (irange < invalidRanges.size && invalidRanges(irange).startMs < totalRange.endMs) {
