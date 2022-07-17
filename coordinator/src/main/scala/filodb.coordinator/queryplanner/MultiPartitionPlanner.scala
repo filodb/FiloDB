@@ -437,16 +437,16 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
 
-    val lhsExec = this.materialize(logicalPlan.lhs, lhsQueryContext)
-    val rhsExec = this.materialize(logicalPlan.rhs, rhsQueryContext)
+    val lhsExec = walkLogicalPlanTree(logicalPlan.lhs, lhsQueryContext).plans
+    val rhsExec = walkLogicalPlanTree(logicalPlan.rhs, rhsQueryContext).plans
 
     val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
-      SetOperatorExec(qContext, InProcessPlanDispatcher(queryConfig), Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+      SetOperatorExec(qContext, InProcessPlanDispatcher(queryConfig), lhsExec, rhsExec, logicalPlan.operator,
         LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn,
         rvRangeFromPlan(logicalPlan))
     else
-      BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+      BinaryJoinExec(qContext, inProcessPlanDispatcher, lhsExec, rhsExec, logicalPlan.operator,
         logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn,
