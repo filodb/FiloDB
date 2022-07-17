@@ -98,7 +98,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           walkLogicalPlanTree(updLogicalPlan, qContext).plans.head
         }
         // TODO(a_theimer): validate these args
-        StitchRvsExec(qContext, inProcessPlanDispatcher, None, plans)
+        if (plans.size == 1) {
+          plans.head
+        } else {
+          StitchRvsExec(qContext, inProcessPlanDispatcher, None, plans)
+        }
       }
     }
   }
