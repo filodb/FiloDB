@@ -86,10 +86,19 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case mqp: MetadataQueryPlan  => materializeMetadataQueryPlan(mqp, qContext).plans.head
       case lp: TsCardinalities     => materializeTsCardinalities(lp, qContext).plans.head
       case lp                       => {
-        val invalidRanges = getInvalidRanges(lp, qContext.origQueryParams.asInstanceOf[PromQlQueryParams])
-        val mergedInvalidRanges = mergeInvalidRanges(invalidRanges)
-        // TODO(a_theimer): incomplete
-        walkLogicalPlanTree(lp, qContext).plans.head
+        val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+        val timeRanges = {
+          val invalidRanges = getInvalidRanges(lp, queryParams)
+          val mergedInvalidRanges = mergeInvalidRanges(invalidRanges)
+          invertInvalidRanges(mergedInvalidRanges, TimeRange(1000 * queryParams.startSecs, 1000 * queryParams.endSecs))
+        }
+        val plans = timeRanges.map{ range =>
+          val updLogicalPlan = copyLogicalPlanWithUpdatedTimeRange(lp, range)
+          // TODO(a_theimer): need to update qContext, too?
+          walkLogicalPlanTree(updLogicalPlan, qContext).plans.head
+        }
+        // TODO(a_theimer): validate these args
+        StitchRvsExec(qContext, inProcessPlanDispatcher, None, plans)
       }
     }
   }
@@ -187,7 +196,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   // TODO(a_theimer)
   private def getInvalidRanges(logicalPlan: LogicalPlan,
-                        promQlQueryParams: PromQlQueryParams) : Seq[TimeRange] = {
+                               promQlQueryParams: PromQlQueryParams) : Seq[TimeRange] = logicalPlan match {
     case lp: BinaryJoin                  => Seq(lp.lhs, lp.rhs).flatMap(getInvalidRanges(_, promQlQueryParams))
     case _: MetadataQueryPlan            => throw new IllegalArgumentException("MetadataQueryPlan unexpected here")
     case lp: ApplyInstantFunction        => (lp.functionArgs ++ Seq(lp.vectors)).flatMap(getInvalidRanges(_, promQlQueryParams))
