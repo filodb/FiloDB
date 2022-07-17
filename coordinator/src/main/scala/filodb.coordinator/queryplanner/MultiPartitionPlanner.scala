@@ -10,6 +10,7 @@ import filodb.query.exec._
 
 
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 
 case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange)
 
@@ -82,9 +83,14 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     ) { // Query was part of routing
       localPartitionPlanner.materialize(logicalPlan, qContext)
     } else logicalPlan match {
-      case mqp: MetadataQueryPlan             => materializeMetadataQueryPlan(mqp, qContext).plans.head
-      case lp: TsCardinalities                => materializeTsCardinalities(lp, qContext).plans.head
-      case _                                  => walkLogicalPlanTree(logicalPlan, qContext).plans.head
+      case mqp: MetadataQueryPlan  => materializeMetadataQueryPlan(mqp, qContext).plans.head
+      case lp: TsCardinalities     => materializeTsCardinalities(lp, qContext).plans.head
+      case lp                       => {
+        val invalidRanges = getInvalidRanges(lp, qContext.origQueryParams.asInstanceOf[PromQlQueryParams])
+        val mergedInvalidRanges = mergeInvalidRanges(invalidRanges)
+        // TODO(a_theimer): incomplete
+        walkLogicalPlanTree(lp, qContext).plans.head
+      }
     }
   }
 
@@ -219,6 +225,32 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       } else {
         res(res.size - 1) = TimeRange(res.last.startMs, math.max(res.last.endMs, range.endMs))
       }
+    }
+    res
+  }
+
+  private def invertInvalidRanges(invalidRanges: Seq[TimeRange],
+                                  totalRange: TimeRange): Seq[TimeRange] = {
+    // TODO(a_theimer): expects sorted input
+    val res = new ArrayBuffer[TimeRange]()
+    var irange = 0
+    // get rid of all before query range
+    while (irange < invalidRanges.size && invalidRanges(irange).endMs < totalRange.startMs) { irange += 1 }
+    // check if first invalidRange overlaps totalRange
+    // TODO(a_theimer): handle entire range invalidated
+    if (irange < invalidRanges.size && invalidRanges(irange).startMs < totalRange.startMs) {
+      res.append(TimeRange(invalidRanges(irange).endMs, totalRange.endMs))
+    } else {
+      res.append(totalRange)
+    }
+    // append valid ranges between the invalid ranges
+    while (irange < invalidRanges.size && invalidRanges(irange).endMs < totalRange.endMs) {
+      res(res.size - 1) = TimeRange(res.last.startMs, invalidRanges(irange).startMs)
+      res.append(TimeRange(invalidRanges(irange).endMs, totalRange.endMs))
+    }
+    // check if an invalid range overlaps the totalRange end
+    if (irange < invalidRanges.size && invalidRanges(irange).startMs < totalRange.endMs) {
+      res(res.size - 1) = TimeRange(res.last.startMs, invalidRanges(irange).startMs)
     }
     res
   }
