@@ -160,8 +160,14 @@ object LogicalPlanUtils extends StrictLogging {
   private def copyTopLevelSubqueryWithUpdatedTimeRange(
     timeRange: TimeRange, topLevelSubquery: TopLevelSubquery
   ): TopLevelSubquery = {
-    val newInner = copyWithUpdatedTimeRange(topLevelSubquery.innerPeriodicSeries, timeRange)
-    topLevelSubquery.copy(innerPeriodicSeries = newInner, startMs = timeRange.startMs, endMs = timeRange.endMs)
+    require(timeRange.startMs == timeRange.endMs,
+      s"expected same start/end evaluation times for TopLevelSubquery, " +
+      s"but found start=${timeRange.startMs}, end=${timeRange.endMs}")
+    val windowMs = topLevelSubquery.endMs - topLevelSubquery.startMs
+    val newStart = timeRange.endMs - windowMs
+    val newRange = TimeRange(newStart, timeRange.endMs)
+    val newInner = copyWithUpdatedTimeRange(topLevelSubquery.innerPeriodicSeries, newRange)
+    topLevelSubquery.copy(innerPeriodicSeries = newInner, startMs = newStart, endMs = timeRange.endMs)
   }
 
   def copySubqueryWithWindowingWithUpdatedTimeRange(
