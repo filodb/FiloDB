@@ -166,6 +166,46 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     }
   }
 
+  private def getInvalidRangesLeaf(logicalPlan: LogicalPlan,
+                           queryParams: PromQlQueryParams): Seq[TimeRange] = {
+    val (partitions, lookBackMs, offsetMs, routingKeys) = resolvePartitionsAndRoutingKeys(logicalPlan, queryParams)
+    // TODO(a_theimer): fix this-- this is just a placeholder
+    val assignmentsSorted = partitions.sortBy(pa => pa.timeRange.startMs)
+    val res = new mutable.ArrayBuffer[TimeRange]
+    for (i <- 1 until assignmentsSorted.size) {
+      res.append(TimeRange(assignmentsSorted(i-1).timeRange.endMs,
+                           assignmentsSorted(i).timeRange.startMs))
+    }
+    res
+  }
+
+  // TODO(a_theimer)
+  private def getInvalidRanges(logicalPlan: LogicalPlan,
+                        promQlQueryParams: PromQlQueryParams) : Seq[TimeRange] = {
+    case lp: BinaryJoin                  => Seq(lp.lhs, lp.rhs).flatMap(getInvalidRanges(_, promQlQueryParams))
+    case _: MetadataQueryPlan            => throw new IllegalArgumentException("MetadataQueryPlan unexpected here")
+    case lp: ApplyInstantFunction        => (lp.functionArgs ++ Seq(lp.vectors)).flatMap(getInvalidRanges(_, promQlQueryParams))
+    case lp: ApplyInstantFunctionRaw     => (lp.functionArgs ++ Seq(lp.vectors)).flatMap(getInvalidRanges(_, promQlQueryParams))
+    case lp: Aggregate                   => getInvalidRanges(lp.vectors, promQlQueryParams)
+    case lp: ScalarVectorBinaryOperation => Seq(lp.vector, lp.scalarArg).flatMap(getInvalidRanges(_, promQlQueryParams))
+    case lp: ApplyMiscellaneousFunction  => getInvalidRanges(lp.vectors, promQlQueryParams)
+    case lp: ApplySortFunction           => getInvalidRanges(lp.vectors, promQlQueryParams)
+    case lp: ScalarVaryingDoublePlan     => (lp.functionArgs ++ Seq(lp.vectors)).flatMap(getInvalidRanges(_, promQlQueryParams))
+    case _: ScalarTimeBasedPlan          => throw new IllegalArgumentException("ScalarTimeBasedPlan unexpected here")
+    case lp: VectorPlan                  => getInvalidRanges(lp.scalars, promQlQueryParams)
+    case _: ScalarFixedDoublePlan        => throw new IllegalArgumentException("ScalarFixedDoublePlan unexpected here")
+    case lp: ApplyAbsentFunction         => (lp.functionArgs ++ Seq(lp.vectors)).map(_.asInstanceOf[LogicalPlan]).flatMap(getInvalidRanges(_, promQlQueryParams))  // TODO(a_theimer): why [Any]?
+    case lp: ScalarBinaryOperation       => Seq.empty
+    case lp: ApplyLimitFunction          => getInvalidRanges(lp.vectors, promQlQueryParams)
+    case lp: TsCardinalities             => Seq.empty  // TODO(a_theimer): confirm
+    case lp: SubqueryWithWindowing       => (lp.functionArgs ++ Seq(lp.innerPeriodicSeries)).flatMap(getInvalidRanges(_, promQlQueryParams))
+    case lp: TopLevelSubquery            => getInvalidRanges(lp.innerPeriodicSeries, promQlQueryParams)
+    case _: PeriodicSeries |
+         _: PeriodicSeriesWithWindowing |
+         _: RawChunkMeta |
+         _: RawSeries                    => getInvalidRangesLeaf(logicalPlan, promQlQueryParams)
+  }
+
   // TODO(a_theimer): generalize to make cleaner
   private def mergeTimeRanges(left: Seq[TimeRange], right: Seq[TimeRange]): Seq[TimeRange] = {
     // TODO(a_theimer): sort or assert
