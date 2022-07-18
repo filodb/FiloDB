@@ -94,8 +94,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         }
         val plans = timeRanges.map{ range =>
           val updLogicalPlan = copyLogicalPlanWithUpdatedTimeRange(lp, range)
-          // TODO(a_theimer): need to update qContext, too?
-          walkLogicalPlanTree(updLogicalPlan, qContext).plans.head
+          val updQueryContext = qContext.copy(origQueryParams =
+            queryParams.copy(startSecs = range.startMs / 1000, endSecs = range.endMs / 1000))
+          walkLogicalPlanTree(updLogicalPlan, updQueryContext).plans.head
         }
         // TODO(a_theimer): validate these args
         if (plans.size == 1) {
@@ -187,7 +188,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   private def getInvalidRangesLeaf(logicalPlan: LogicalPlan,
                            queryParams: PromQlQueryParams): Seq[TimeRange] = {
-    val (partitions, lookBackMs, offsetMs, routingKeys) = resolvePartitionsAndRoutingKeys(logicalPlan, queryParams)
+    val partitions = getPartitions(logicalPlan, queryParams)
     // TODO(a_theimer): fix this-- this is just a placeholder
     val assignmentsSorted = partitions.sortBy(pa => pa.timeRange.startMs)
     val res = new mutable.ArrayBuffer[TimeRange]
