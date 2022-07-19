@@ -1,16 +1,16 @@
 package filodb.coordinator.queryplanner
 
+import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
+
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.query._
 import filodb.query.LogicalPlan._
 import filodb.query.exec._
-
-
-import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
 
 case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange)
 
@@ -53,7 +53,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   val datasetMetricColumn: String = dataset.options.metricColumn
 
-
+  // scalastyle:off method.length
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
       // Pseudo code for the materialize
       //
@@ -109,6 +109,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       }
     }
   }
+  // scalastyle:on method.length
 
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                    qContext: QueryContext,
@@ -204,44 +205,49 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   private def getInvalidRangesPeriodicSeries(logicalPlan: PeriodicSeries,
                                              queryParams: PromQlQueryParams) : Seq[TimeRange] = {
-    def snapGreater(ts: Long, step: Long, start: Long, max: Long): Long = {
-      val diff = ts - start
-      val remain = diff % step
-      val add = if (remain == 0) { step } else { remain }
-      math.min(max, ts + add)
-    }
-
     val invalidRanges = getInvalidRanges(logicalPlan.rawSeries, queryParams)
-    val snappedRanges = invalidRanges.map(r => TimeRange(r.startMs, snapGreater(r.endMs, logicalPlan.stepMs, logicalPlan.startMs, logicalPlan.endMs)))
+    val snappedRanges = invalidRanges.map(r => {
+      val diff = r.endMs - logicalPlan.startMs
+      val remain = diff % logicalPlan.stepMs
+      val add = if (remain == 0) logicalPlan.stepMs else remain
+      TimeRange(r.startMs, math.min(logicalPlan.endMs, r.endMs + add))
+    })
     mergeInvalidRanges(snappedRanges)
   }
 
+  // scalastyle:off cyclomatic.complexity
   // TODO(a_theimer)
   private def getInvalidRanges(logicalPlan: LogicalPlan,
                                promQlQueryParams: PromQlQueryParams) : Seq[TimeRange] = logicalPlan match {
     case lp: BinaryJoin                  => Seq(lp.lhs, lp.rhs).flatMap(getInvalidRanges(_, promQlQueryParams))
     case _: MetadataQueryPlan            => throw new IllegalArgumentException("MetadataQueryPlan unexpected here")
-    case lp: ApplyInstantFunction        => (lp.functionArgs ++ Seq(lp.vectors)).flatMap(getInvalidRanges(_, promQlQueryParams))
-    case lp: ApplyInstantFunctionRaw     => (lp.functionArgs ++ Seq(lp.vectors)).flatMap(getInvalidRanges(_, promQlQueryParams))
+    case lp: ApplyInstantFunction        => (lp.functionArgs ++ Seq(lp.vectors))
+                                                .flatMap(getInvalidRanges(_, promQlQueryParams))
+    case lp: ApplyInstantFunctionRaw     => (lp.functionArgs ++ Seq(lp.vectors))
+                                                .flatMap(getInvalidRanges(_, promQlQueryParams))
     case lp: Aggregate                   => getInvalidRanges(lp.vectors, promQlQueryParams)
     case lp: ScalarVectorBinaryOperation => Seq(lp.vector, lp.scalarArg).flatMap(getInvalidRanges(_, promQlQueryParams))
     case lp: ApplyMiscellaneousFunction  => getInvalidRanges(lp.vectors, promQlQueryParams)
     case lp: ApplySortFunction           => getInvalidRanges(lp.vectors, promQlQueryParams)
-    case lp: ScalarVaryingDoublePlan     => (lp.functionArgs ++ Seq(lp.vectors)).flatMap(getInvalidRanges(_, promQlQueryParams))
+    case lp: ScalarVaryingDoublePlan     => (lp.functionArgs ++ Seq(lp.vectors))
+                                                .flatMap(getInvalidRanges(_, promQlQueryParams))
     case _: ScalarTimeBasedPlan          => Seq()
     case lp: VectorPlan                  => getInvalidRanges(lp.scalars, promQlQueryParams)
     case _: ScalarFixedDoublePlan        => throw new IllegalArgumentException("ScalarFixedDoublePlan unexpected here")
-    case lp: ApplyAbsentFunction         => (lp.functionArgs ++ Seq(lp.vectors)).map(_.asInstanceOf[LogicalPlan]).flatMap(getInvalidRanges(_, promQlQueryParams))  // TODO(a_theimer): why [Any]?
+    case lp: ApplyAbsentFunction         => (lp.functionArgs ++ Seq(lp.vectors)).map(_.asInstanceOf[LogicalPlan])
+                                                .flatMap(getInvalidRanges(_, promQlQueryParams))
     case lp: ScalarBinaryOperation       => Seq.empty
     case lp: ApplyLimitFunction          => getInvalidRanges(lp.vectors, promQlQueryParams)
     case lp: TsCardinalities             => Seq.empty  // TODO(a_theimer): confirm
-    case lp: SubqueryWithWindowing       => (lp.functionArgs ++ Seq(lp.innerPeriodicSeries)).flatMap(getInvalidRanges(_, promQlQueryParams))
+    case lp: SubqueryWithWindowing       => (lp.functionArgs ++ Seq(lp.innerPeriodicSeries))
+                                                .flatMap(getInvalidRanges(_, promQlQueryParams))
     case lp: TopLevelSubquery            => getInvalidRanges(lp.innerPeriodicSeries, promQlQueryParams)
     case lp: PeriodicSeries              => getInvalidRangesPeriodicSeries(lp, promQlQueryParams)
     case _: PeriodicSeriesWithWindowing |
          _: RawChunkMeta |
          _: RawSeries                    => getInvalidRangesLeaf(logicalPlan, promQlQueryParams)
   }
+  // scalastyle:on cyclomatic.complexity
 
   private def mergeInvalidRanges(ranges: Seq[TimeRange]): Seq[TimeRange] = {
     if (ranges.isEmpty) {
@@ -271,7 +277,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     // check if first invalidRange overlaps totalRange
     // TODO(a_theimer): handle entire range invalidated
     if (irange < invalidRanges.size) {
-      if(invalidRanges(irange).startMs < totalRange.startMs) {
+      if (invalidRanges(irange).startMs < totalRange.startMs) {
         if (invalidRanges(irange).endMs < totalRange.endMs) {
           res(0) = TimeRange(invalidRanges(irange).endMs, totalRange.endMs)
           irange += 1
