@@ -46,6 +46,16 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   val lookbackMs = 300000
   val step = 100
 
+  def partitionsInRange(partitions: List[PartitionAssignment], timeRange: TimeRange): List[PartitionAssignment] = {
+    partitions.filter(p => {
+      if (timeRange.startMs < p.timeRange.startMs) {
+        timeRange.endMs >= p.timeRange.startMs
+      } else {
+        timeRange.startMs <= p.timeRange.endMs
+      }
+    })
+  }
+
   def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("local", "local-url",
     TimeRange(timeRange.startMs, timeRange.endMs)))
 
@@ -78,10 +88,12 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   // a hole in them, ie the data returned will be incomplete
   it ("should generate all PromQlRemoteExec plan") {
 
-    def twoPartitions(timeRange: TimeRange): List[PartitionAssignment] = List(
-      PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
+    def twoPartitions(timeRange: TimeRange): List[PartitionAssignment] = {
+      val parts = List(PartitionAssignment("remote", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
         localPartitionStart * 1000 - 1)), PartitionAssignment("remote2", "remote-url2",
         TimeRange(localPartitionStart * 1000, endSeconds * 1000)))
+      partitionsInRange(parts, timeRange)
+    }
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
@@ -808,12 +820,14 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val step = 100
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
-        if (routingKey.equals(Map("job" -> "app")))
-          List(PartitionAssignment("remote1", "remote-url1", TimeRange(startSeconds * 1000 - lookbackMs,
+        if (routingKey.equals(Map("job" -> "app"))) {
+          val partitions = List(PartitionAssignment("remote1", "remote-url1", TimeRange(startSeconds * 1000 - lookbackMs,
              secondPartitionStart * 1000 - 1)),
             PartitionAssignment("remote2", "remote-url2", TimeRange(secondPartitionStart * 1000,
               thirdPartitionStart * 1000 - 1)),
             PartitionAssignment("remote3", "remote-url3", TimeRange(thirdPartitionStart * 1000, endSeconds * 1000)))
+          partitionsInRange(partitions, timeRange)
+        }
         else Nil
       }
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
@@ -879,10 +893,12 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
-        if (routingKey.equals(Map("job" -> "app")))
-          List(PartitionAssignment("remote1", "remote-url1", TimeRange(startSeconds * 1000 - lookbackMs,
+        if (routingKey.equals(Map("job" -> "app"))) {
+          val partitions = List(PartitionAssignment("remote1", "remote-url1", TimeRange(startSeconds * 1000 - lookbackMs,
             localPartitionStartSec * 1000 - 1)), PartitionAssignment("remote2", "remote-url2",
             TimeRange(localPartitionStartSec * 1000, endSeconds * 1000)))
+          partitionsInRange(partitions, timeRange)
+        }
         else Nil
       }
 
@@ -894,93 +910,73 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}[100s]", TimeStepParams(startSeconds, step, endSeconds))
 
-    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
+    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}[100s]", startSeconds, step, endSeconds)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,
       plannerParams = PlannerParams(processMultiPartition = true)))
 
-    val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
-    stitchRvsExec.children.size shouldEqual (2)
-    stitchRvsExec.children(0).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
-    stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
-
-
-    // Instant/Raw queries will have same start and end point in all partitions as we want to fetch raw data
-    val remoteExec1 = stitchRvsExec.children(0).asInstanceOf[PromQlRemoteExec]
-    val queryParams1 = remoteExec1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryParams1.startSecs shouldEqual startSeconds
-    queryParams1.endSecs shouldEqual endSeconds
-    queryParams1.stepSecs shouldEqual step
-    remoteExec1.queryContext.plannerParams.processFailure shouldEqual true
-    remoteExec1.queryContext.plannerParams.processMultiPartition shouldEqual false
-    remoteExec1.queryEndpoint shouldEqual "remote-url1"
-
-    val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
-    val queryParams2 = remoteExec1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryParams2.startSecs shouldEqual startSeconds
-    queryParams2.endSecs shouldEqual endSeconds
-    queryParams2.stepSecs shouldEqual step
-    remoteExec2.queryContext.plannerParams.processFailure shouldEqual true
-    remoteExec2.queryContext.plannerParams.processMultiPartition shouldEqual false
-    remoteExec2.queryEndpoint shouldEqual "remote-url2"
-
+    // any plan with an evaluation window that crosses a partition split should not be evaluated
+    execPlan.isInstanceOf[EmptyResultExec] shouldEqual true
   }
 
-  it ("should generate second Exec with start and end time equal to query end time when query duration is less" +
-    "than or equal to lookback ") {
-
-    val startSeconds = 1594309980L
-    val endSeconds = 1594310280L
-    val localPartitionStartMs: Long = 1594309980001L
-    val step = 15L
-
-    val partitionLocationProvider = new PartitionLocationProvider {
-      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
-        if (routingKey.equals(Map("job" -> "app"))) List(
-          PartitionAssignment("remote1", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
-            localPartitionStartMs - 1)), PartitionAssignment("remote2", "remote-url",
-            TimeRange(localPartitionStartMs, endSeconds * 1000)))
-        else Nil
-      }
-
-      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = List(
-        PartitionAssignment("remote1", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
-          localPartitionStartMs - 1)), PartitionAssignment("remote2", "remote-url",
-          TimeRange(localPartitionStartMs, endSeconds * 1000)))
-
-    }
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
-    val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
-
-    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
-
-    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
-      PlannerParams(processMultiPartition = true)))
-    val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
-    stitchRvsExec.children.size shouldEqual (2)
-    stitchRvsExec.children(0).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
-    stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
-
-
-    val remoteExec = stitchRvsExec.children(0).asInstanceOf[PromQlRemoteExec]
-    val queryParams = remoteExec.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryParams.startSecs shouldEqual startSeconds
-    queryParams.endSecs shouldEqual (localPartitionStartMs - 1) / 1000
-    queryParams.stepSecs shouldEqual step
-    remoteExec.queryContext.plannerParams.processFailure shouldEqual true
-    remoteExec.queryContext.plannerParams.processMultiPartition shouldEqual false
-    remoteExec.queryEndpoint shouldEqual "remote-url"
-
-    val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
-    val queryParams2 = remoteExec2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryParams2.startSecs shouldEqual endSeconds
-    queryParams2.endSecs shouldEqual endSeconds
-    queryParams2.stepSecs shouldEqual step
-    remoteExec2.queryContext.plannerParams.processFailure shouldEqual true
-    remoteExec2.queryContext.plannerParams.processMultiPartition shouldEqual false
-    remoteExec2.queryEndpoint shouldEqual "remote-url"
-
-  }
+  // TODO(a_theimer): unsure why this exists
+//  it ("should generate second Exec with start and end time equal to query end time when query duration is less" +
+//    "than or equal to lookback ") {
+//
+//    val startSeconds = 1594309980L
+//    val endSeconds = 1594310280L
+//    val localPartitionStartMs: Long = 1594309980001L
+//    val step = 15L
+//
+//    val partitionLocationProvider = new PartitionLocationProvider {
+//      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+//        if (routingKey.equals(Map("job" -> "app"))) {
+//          val partitions = List(PartitionAssignment("remote1", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
+//            localPartitionStartMs - 1)), PartitionAssignment("remote2", "remote-url",
+//            TimeRange(localPartitionStartMs, endSeconds * 1000)))
+//          partitionsInRange(partitions, timeRange)
+//        } else Nil
+//      }
+//
+//      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] = List(
+//        PartitionAssignment("remote1", "remote-url", TimeRange(startSeconds * 1000 - lookbackMs,
+//          localPartitionStartMs - 1)), PartitionAssignment("remote2", "remote-url",
+//          TimeRange(localPartitionStartMs, endSeconds * 1000)))
+//
+//    }
+//    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+//    val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
+//
+//    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
+//
+//    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
+//      PlannerParams(processMultiPartition = true)))
+//
+//    val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
+//    stitchRvsExec.children.size shouldEqual (2)
+//    stitchRvsExec.children(0).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+//    stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+//
+//
+//    val remoteExec = stitchRvsExec.children(0).asInstanceOf[PromQlRemoteExec]
+//    val queryParams = remoteExec.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+//    queryParams.startSecs shouldEqual startSeconds
+//    queryParams.endSecs shouldEqual (localPartitionStartMs - 1) / 1000
+//    queryParams.stepSecs shouldEqual step
+//    remoteExec.queryContext.plannerParams.processFailure shouldEqual true
+//    remoteExec.queryContext.plannerParams.processMultiPartition shouldEqual false
+//    remoteExec.queryEndpoint shouldEqual "remote-url"
+//
+//    val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
+//    val queryParams2 = remoteExec2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+//    queryParams2.startSecs shouldEqual endSeconds
+//    queryParams2.endSecs shouldEqual endSeconds
+//    queryParams2.stepSecs shouldEqual step
+//    remoteExec2.queryContext.plannerParams.processFailure shouldEqual true
+//    remoteExec2.queryContext.plannerParams.processMultiPartition shouldEqual false
+//    remoteExec2.queryEndpoint shouldEqual "remote-url"
+//
+//  }
 
   it ("should generate Exec plan for Metadata Label values query") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] =
