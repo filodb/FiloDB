@@ -99,7 +99,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           walkLogicalPlanTree(updLogicalPlan, updQueryContext).plans.head
         }
         // TODO(a_theimer): validate these args
-        if (plans.size == 1) {
+        if (plans.isEmpty) {
+          EmptyResultExec(qContext, dataset.ref, inProcessPlanDispatcher)
+        } else if (plans.size == 1) {
           plans.head
         } else {
           StitchRvsExec(qContext, inProcessPlanDispatcher, None, plans)
@@ -187,16 +189,31 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   }
 
   private def getInvalidRangesLeaf(logicalPlan: LogicalPlan,
-                           queryParams: PromQlQueryParams): Seq[TimeRange] = {
+                                   queryParams: PromQlQueryParams): Seq[TimeRange] = {
     val partitions = getPartitions(logicalPlan, queryParams)
     // TODO(a_theimer): fix this-- this is just a placeholder
     val assignmentsSorted = partitions.sortBy(pa => pa.timeRange.startMs)
     val res = new mutable.ArrayBuffer[TimeRange]
+    val lookbackMs = getLookBackMillis(logicalPlan).fold(0L)((a: Long, b: Long) => math.max(a, b))
     for (i <- 1 until assignmentsSorted.size) {
       res.append(TimeRange(assignmentsSorted(i-1).timeRange.endMs,
-                           assignmentsSorted(i).timeRange.startMs))
+                           assignmentsSorted(i).timeRange.startMs + lookbackMs))
     }
     res
+  }
+
+  private def getInvalidRangesPeriodicSeries(logicalPlan: PeriodicSeries,
+                                             queryParams: PromQlQueryParams) : Seq[TimeRange] = {
+    def snapGreater(ts: Long, step: Long, start: Long, max: Long): Long = {
+      val diff = ts - start
+      val remain = diff % step
+      val add = if (remain == 0) { step } else { remain }
+      math.min(max, ts + add)
+    }
+
+    val invalidRanges = getInvalidRanges(logicalPlan.rawSeries, queryParams)
+    val snappedRanges = invalidRanges.map(r => TimeRange(r.startMs, snapGreater(r.endMs, logicalPlan.stepMs, logicalPlan.startMs, logicalPlan.endMs)))
+    mergeInvalidRanges(snappedRanges)
   }
 
   // TODO(a_theimer)
@@ -220,8 +237,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     case lp: TsCardinalities             => Seq.empty  // TODO(a_theimer): confirm
     case lp: SubqueryWithWindowing       => (lp.functionArgs ++ Seq(lp.innerPeriodicSeries)).flatMap(getInvalidRanges(_, promQlQueryParams))
     case lp: TopLevelSubquery            => getInvalidRanges(lp.innerPeriodicSeries, promQlQueryParams)
-    case _: PeriodicSeries |
-         _: PeriodicSeriesWithWindowing |
+    case lp: PeriodicSeries              => getInvalidRangesPeriodicSeries(lp, promQlQueryParams)
+    case _: PeriodicSeriesWithWindowing |
          _: RawChunkMeta |
          _: RawSeries                    => getInvalidRangesLeaf(logicalPlan, promQlQueryParams)
   }
