@@ -243,19 +243,25 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     res
   }
 
-  private def invertInvalidRanges(invalidRanges: Seq[TimeRange],
-                                  totalRange: TimeRange): Seq[TimeRange] = {
+  def invertInvalidRanges(invalidRanges: Seq[TimeRange],
+                          totalRange: TimeRange): Seq[TimeRange] = {
     // TODO(a_theimer): expects sorted input
     val res = new ArrayBuffer[TimeRange]()
+    res.append(totalRange)
     var irange = 0
     // get rid of all before query range
     while (irange < invalidRanges.size && invalidRanges(irange).endMs < totalRange.startMs) { irange += 1 }
     // check if first invalidRange overlaps totalRange
     // TODO(a_theimer): handle entire range invalidated
-    if (irange < invalidRanges.size && invalidRanges(irange).startMs < totalRange.startMs) {
-      res.append(TimeRange(invalidRanges(irange).endMs, totalRange.endMs))
-    } else {
-      res.append(totalRange)
+    if (irange < invalidRanges.size) {
+      if(invalidRanges(irange).startMs < totalRange.startMs) {
+        if (invalidRanges(irange).endMs < totalRange.endMs) {
+          res(0) = TimeRange(invalidRanges(irange).endMs, totalRange.endMs)
+          irange += 1
+        } else {
+          return Nil
+        }
+      }
     }
     // append valid ranges between the invalid ranges
     while (irange < invalidRanges.size && invalidRanges(irange).endMs < totalRange.endMs) {
