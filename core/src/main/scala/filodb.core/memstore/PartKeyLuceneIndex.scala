@@ -320,9 +320,11 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   }
 
   private[memstore] def partKeyByteRefToSHA256Digest(bytes: Array[Byte], offset: Int, length: Int) = {
-    md.update(bytes, offset, length)
-    val strDigest = Base64.getEncoder.encodeToString(md.digest())
-    strDigest
+    synchronized {
+      md.update(bytes, offset, length)
+      val strDigest = Base64.getEncoder.encodeToString(md.digest())
+      strDigest
+    }
   }
 
   private val luceneDocument = new ThreadLocal[ReusableLuceneDocument]() {
