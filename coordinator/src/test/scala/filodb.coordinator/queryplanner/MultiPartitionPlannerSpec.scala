@@ -1636,14 +1636,14 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         val params = exec.asInstanceOf[PromQlRemoteExec].getUrlParams()
         TimeRangeSec(params("start").toLong, params("end").toLong)
       }
-      assertResult(2, s"${test.query}\n${execPlan.printTree()}") {childRemoteExecs.size}
+      assertResult(2, s"${test.query}\n$lp\n${execPlan.printTree()}") {childRemoteExecs.size}
 
       val expectedRanges = Set(
         TimeRangeSec(startSec, partitionRangesSec.head.end),
         TimeRangeSec(snap(partitionRangesSec.last.start + test.invalidDiff, stepSec, startSec, endSec), endSec)
       )
 
-      assertResult(expectedRanges, s"${test.query}\n${execPlan.printTree()}") {childRemoteExecs.toSet}
+      assertResult(expectedRanges, s"${test.query}\n$lp\n${execPlan.printTree()}") {childRemoteExecs.toSet}
     }
   }
 
@@ -1704,7 +1704,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         val promQlQueryParams = PromQlQueryParams(test.query, evalSec, 1, evalSec)
         val execPlan = engine.materialize(lp, QueryContext(
           origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true)))
-        assertResult(shouldBeEmpty, s"${test.query}\n${execPlan.printTree()}") {execPlan.isInstanceOf[EmptyResultExec]}
+        assertResult(shouldBeEmpty, s"${test.query}\n$lp\n${execPlan.printTree()}") {execPlan.isInstanceOf[EmptyResultExec]}
       }
     }
   }
