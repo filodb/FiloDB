@@ -1619,14 +1619,13 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       Test(s"""left{job="app"} + right{job="app"}""", staleLookbackSec),
       Test(s"""group(left{job="app"}) + sum(right{job="app"})""", staleLookbackSec),
       Test(s"""group(left{job="app"}) or sum(right{job="app"})""", staleLookbackSec),
-      // Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s])""", windowSec),
-      // Test(s"""histogram_quantile(0.9, test{job="app"}[${windowSec}s:${stepSec}s])""", windowSec),
-       Test(s"""histogram_quantile(0.9, test{job="app"})""", staleLookbackSec),
-      // Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s])""", windowEvalSec),
+      Test(s"""histogram_quantile(0.9, test{job="app"})""", staleLookbackSec),
       Test(s"""sum_over_time(test{job="app"}[${windowSec}s])""", windowSec),
       Test(s"""rate(test{job="app"}[${windowSec}s]) + test{job="app"}""", windowSec),
       Test(s"""holt_winters(test{job="app"}[${windowSec}s], 0.9, 0.9)""", windowSec),
-      // Test(s"""holt_winters(test1{job="app"}[1m], scalar(test2{job="app"}), 0.9)""", staleLookbackSec),  // TODO: unsupported
+      // TODO(a_theimer): why only these need the lookback?
+      Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s])""", windowSec + staleLookbackSec),
+      Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s])""", windowSec + staleLookbackSec),
     )
     for (test <- tests) {
       val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
@@ -1659,8 +1658,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
                     evalSec: Long)
 
     val partitionRangesSec = Seq(
-      TimeRangeSec(0,999),
-      TimeRangeSec(1000,1999),
+      TimeRangeSec(0,9999),
+      TimeRangeSec(10000,19999),
     )
 
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = {
@@ -1686,9 +1685,10 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
     val windowSec = 10 * 60  // 10m
     val staleLookbackSec = 5 * 60  // 5m
-    val staleEvalSec = partitionRangesSec.last.start + staleLookbackSec
-    val windowEvalSec = partitionRangesSec.last.start + windowSec
+    val staleEvalSec = staleLookbackSec
+    val windowEvalSec = windowSec
     val tests = Seq(
+      // subqueries excluded; exact start/end might change for the sake of performance
       Test(s"""test{job="app"}""", staleEvalSec),
       Test(s"""sum(test{job="app"})""", staleEvalSec),
       Test(s"""rate(test{job="app"}[${windowSec}s])""", windowEvalSec),
@@ -1696,19 +1696,15 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       Test(s"""left{job="app"} + right{job="app"}""", staleEvalSec),
       Test(s"""group(left{job="app"}) + sum(right{job="app"})""", staleEvalSec),
       Test(s"""group(left{job="app"}) or sum(right{job="app"})""", staleEvalSec),
-//      Test(s"""rate(test{job="app"}[${windowSec}s:10s])""", windowEvalSec),
-//      Test(s"""histogram_quantile(0.9, test{job="app"}[${windowSec}s:10s])""", windowEvalSec),
-//      Test(s"""histogram_quantile(0.9, test{job="app"}[${windowSec}s])""", windowEvalSec),  // TODO(a_theimer): weird parser error
+      Test(s"""histogram_quantile(0.9, test{job="app"})""", staleEvalSec),
       Test(s"""test{job="app"}[${windowSec}s]""", windowEvalSec),
-//      Test(s"""sum(test{job="app"})[${windowSec}s:10s]""", windowEvalSec),
-//      Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s])""", windowEvalSec),
       Test(s"""sum_over_time(test{job="app"}[${windowSec}s])""", windowEvalSec),
       Test(s"""rate(test{job="app"}[${windowSec}s]) + test{job="app"}""", windowEvalSec),
       Test(s"""holt_winters(test{job="app"}[${windowSec}s], 0.9, 0.9)""", windowEvalSec),
     )
     for (test <- tests) {
       for ((diff, shouldBeEmpty) <- Seq((0, false), (-1, true))) {
-        val evalSec = test.evalSec + diff
+        val evalSec = partitionRangesSec.last.start + test.evalSec + diff
         val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
         val lp = Parser.queryRangeToLogicalPlan(test.query, TimeStepParams(evalSec, 1, evalSec))
         val promQlQueryParams = PromQlQueryParams(test.query, evalSec, 1, evalSec)
