@@ -1619,11 +1619,14 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       Test(s"""left{job="app"} + right{job="app"}""", staleLookbackSec),
       Test(s"""group(left{job="app"}) + sum(right{job="app"})""", staleLookbackSec),
       Test(s"""group(left{job="app"}) or sum(right{job="app"})""", staleLookbackSec),
-//      Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s])""", windowSec),
-//      Test(s"""histogram_quantile(0.9, test{job="app"}[${windowSec}s:${stepSec}s])""", windowSec),
-      // Test(s"""histogram_quantile(0.9, test{job="app"}[${windowSec}s])""", windowEvalSec),  // TODO(a_theimer): weird parser error
-      //      Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s])""", windowEvalSec),
+      // Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s])""", windowSec),
+      // Test(s"""histogram_quantile(0.9, test{job="app"}[${windowSec}s:${stepSec}s])""", windowSec),
+       Test(s"""histogram_quantile(0.9, test{job="app"})""", staleLookbackSec),
+      // Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s])""", windowEvalSec),
       Test(s"""sum_over_time(test{job="app"}[${windowSec}s])""", windowSec),
+      Test(s"""rate(test{job="app"}[${windowSec}s]) + test{job="app"}""", windowSec),
+      Test(s"""holt_winters(test{job="app"}[${windowSec}s], 0.9, 0.9)""", windowSec),
+      // Test(s"""holt_winters(test1{job="app"}[1m], scalar(test2{job="app"}), 0.9)""", staleLookbackSec),  // TODO: unsupported
     )
     for (test <- tests) {
       val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
@@ -1700,6 +1703,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 //      Test(s"""sum(test{job="app"})[${windowSec}s:10s]""", windowEvalSec),
 //      Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s])""", windowEvalSec),
       Test(s"""sum_over_time(test{job="app"}[${windowSec}s])""", windowEvalSec),
+      Test(s"""rate(test{job="app"}[${windowSec}s]) + test{job="app"}""", windowEvalSec),
+      Test(s"""holt_winters(test{job="app"}[${windowSec}s], 0.9, 0.9)""", windowEvalSec),
     )
     for (test <- tests) {
       for ((diff, shouldBeEmpty) <- Seq((0, false), (-1, true))) {
