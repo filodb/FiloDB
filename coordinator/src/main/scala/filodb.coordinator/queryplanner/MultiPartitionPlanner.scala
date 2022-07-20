@@ -209,10 +209,19 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val snappedRanges = invalidRanges.map(r => {
       val diff = r.endMs - logicalPlan.startMs
       val remain = diff % logicalPlan.stepMs
-      val add = if (remain == 0) logicalPlan.stepMs else remain
-      TimeRange(r.startMs, math.min(logicalPlan.endMs, r.endMs + add))
+      TimeRange(r.startMs, math.min(logicalPlan.endMs, r.endMs + remain))
     })
     mergeInvalidRanges(snappedRanges)
+  }
+
+  private def getInvalidRangesSubqueryWithWindowing(logicalPlan: SubqueryWithWindowing,
+                                                    queryParams: PromQlQueryParams): Seq[TimeRange] = {
+    val invaldRangesInner = getInvalidRanges(logicalPlan.innerPeriodicSeries, queryParams)
+    val invaldRangesArgs = logicalPlan.functionArgs.flatMap(getInvalidRanges(_, queryParams))
+    val res = invaldRangesArgs ++ invaldRangesInner.map{range =>
+      TimeRange(range.startMs, range.startMs + logicalPlan.subqueryWindowMs)
+    }
+    res
   }
 
   // scalastyle:off cyclomatic.complexity
@@ -239,8 +248,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     case lp: ScalarBinaryOperation       => Seq.empty
     case lp: ApplyLimitFunction          => getInvalidRanges(lp.vectors, promQlQueryParams)
     case lp: TsCardinalities             => Seq.empty  // TODO(a_theimer): confirm
-    case lp: SubqueryWithWindowing       => (lp.functionArgs ++ Seq(lp.innerPeriodicSeries))
-                                                .flatMap(getInvalidRanges(_, promQlQueryParams))
+    case lp: SubqueryWithWindowing       => getInvalidRangesSubqueryWithWindowing(lp, promQlQueryParams)
     case lp: TopLevelSubquery            => getInvalidRanges(lp.innerPeriodicSeries, promQlQueryParams)
     case lp: PeriodicSeries              => getInvalidRangesPeriodicSeries(lp, promQlQueryParams)
     case _: PeriodicSeriesWithWindowing |
