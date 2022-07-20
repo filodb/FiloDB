@@ -196,9 +196,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val assignmentsSorted = partitions.sortBy(pa => pa.timeRange.startMs)
     val res = new mutable.ArrayBuffer[TimeRange]
     val lookbackMs = getLookBackMillis(logicalPlan).fold(0L)((a: Long, b: Long) => math.max(a, b))
+    val offsetMs = getOffsetMillis(logicalPlan).headOption.getOrElse(0L)
     for (i <- 1 until assignmentsSorted.size) {
-      res.append(TimeRange(assignmentsSorted(i-1).timeRange.endMs,
-                           assignmentsSorted(i).timeRange.startMs + lookbackMs))
+      res.append(TimeRange(assignmentsSorted(i-1).timeRange.endMs - offsetMs,
+                           assignmentsSorted(i).timeRange.startMs - offsetMs + lookbackMs))
     }
     res
   }
