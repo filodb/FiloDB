@@ -219,7 +219,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val invaldRangesInner = getInvalidRanges(logicalPlan.innerPeriodicSeries, queryParams)
     val invaldRangesArgs = logicalPlan.functionArgs.flatMap(getInvalidRanges(_, queryParams))
     val res = invaldRangesArgs ++ invaldRangesInner.map{range =>
-      TimeRange(range.startMs, range.startMs + logicalPlan.subqueryWindowMs)
+      TimeRange(range.startMs, range.endMs + logicalPlan.subqueryWindowMs)
     }
     res
   }
@@ -240,9 +240,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     case lp: ApplySortFunction           => getInvalidRanges(lp.vectors, promQlQueryParams)
     case lp: ScalarVaryingDoublePlan     => (lp.functionArgs ++ Seq(lp.vectors))
                                                 .flatMap(getInvalidRanges(_, promQlQueryParams))
-    case _: ScalarTimeBasedPlan          => Seq()
+    case _: ScalarTimeBasedPlan          => Seq.empty
     case lp: VectorPlan                  => getInvalidRanges(lp.scalars, promQlQueryParams)
-    case _: ScalarFixedDoublePlan        => Seq()
+    case _: ScalarFixedDoublePlan        => Seq.empty
     case lp: ApplyAbsentFunction         => (lp.functionArgs ++ Seq(lp.vectors)).map(_.asInstanceOf[LogicalPlan])
                                                 .flatMap(getInvalidRanges(_, promQlQueryParams))
     case lp: ScalarBinaryOperation       => Seq.empty
@@ -251,8 +251,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     case lp: SubqueryWithWindowing       => getInvalidRangesSubqueryWithWindowing(lp, promQlQueryParams)
     case lp: TopLevelSubquery            => getInvalidRanges(lp.innerPeriodicSeries, promQlQueryParams)
     case lp: PeriodicSeries              => getInvalidRangesPeriodicSeries(lp, promQlQueryParams)
-    case _: PeriodicSeriesWithWindowing |
-         _: RawChunkMeta |
+    case lp: PeriodicSeriesWithWindowing => (lp.functionArgs ++ Seq(lp.series))
+                                                .flatMap(getInvalidRanges(_, promQlQueryParams))
+    case _: RawChunkMeta |
          _: RawSeries                    => getInvalidRangesLeaf(logicalPlan, promQlQueryParams)
   }
   // scalastyle:on cyclomatic.complexity
