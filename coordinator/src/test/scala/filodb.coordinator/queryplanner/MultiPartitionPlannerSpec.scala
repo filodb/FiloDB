@@ -1571,8 +1571,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   it ("should not use/return data in invalid ranges") {
     case class TimeRangeSec(start: Long,
                             end: Long)
-    case class Test(query: String,
-                    invalidDiff: Long)
+    case class Test(query: String, invalidDiff: Long, offsetSec: Long)
 
     val partitionRangesSec = Seq(
       TimeRangeSec(0,999),
@@ -1611,21 +1610,38 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val endSec = partitionRangesSec.last.end
     val windowSec = 10 * 60  // 10m
     val staleLookbackSec = 5 * 60  // 5m
+    val offsetSec = 1 * 60  // 1m
     val tests = Seq(
-      Test(s"""test{job="app"}""", staleLookbackSec),
-      Test(s"""sum(test{job="app"})""", staleLookbackSec),
-      Test(s"""rate(test{job="app"}[${windowSec}s])""", windowSec),
-      Test(s"""group(test{job="app"})""", staleLookbackSec),
-      Test(s"""left{job="app"} + right{job="app"}""", staleLookbackSec),
-      Test(s"""group(left{job="app"}) + sum(right{job="app"})""", staleLookbackSec),
-      Test(s"""group(left{job="app"}) or sum(right{job="app"})""", staleLookbackSec),
-      Test(s"""histogram_quantile(0.9, test{job="app"})""", staleLookbackSec),
-      Test(s"""sum_over_time(test{job="app"}[${windowSec}s])""", windowSec),
-      Test(s"""rate(test{job="app"}[${windowSec}s]) + test{job="app"}""", windowSec),
-      Test(s"""holt_winters(test{job="app"}[${windowSec}s], 0.9, 0.9)""", windowSec),
+      Test(s"""test{job="app"}""", staleLookbackSec, 0L),
+      Test(s"""sum(test{job="app"})""", staleLookbackSec, 0L),
+      Test(s"""rate(test{job="app"}[${windowSec}s])""", windowSec, 0L),
+      Test(s"""group(test{job="app"})""", staleLookbackSec, 0L),
+      Test(s"""left{job="app"} + right{job="app"}""", staleLookbackSec, 0L),
+      Test(s"""group(left{job="app"}) + sum(right{job="app"})""", staleLookbackSec, 0L),
+      Test(s"""group(left{job="app"}) or sum(right{job="app"})""", staleLookbackSec, 0L),
+      Test(s"""histogram_quantile(0.9, test{job="app"})""", staleLookbackSec, 0L),
+      Test(s"""sum_over_time(test{job="app"}[${windowSec}s])""", windowSec, 0L),
+      Test(s"""rate(test{job="app"}[${windowSec}s]) + test{job="app"}""", windowSec, 0L),
+      Test(s"""holt_winters(test{job="app"}[${windowSec}s], 0.9, 0.9)""", windowSec, 0L),
       // TODO(a_theimer): why only these need the lookback?
-      Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s])""", windowSec + staleLookbackSec),
-      Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s])""", windowSec + staleLookbackSec),
+      Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s])""", windowSec + staleLookbackSec, 0L),
+      Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s])""", windowSec + staleLookbackSec, 0L),
+
+      // offset queries
+      Test(s"""test{job="app"} offset ${offsetSec}s""", staleLookbackSec, offsetSec),
+      Test(s"""sum(test{job="app"} offset ${offsetSec}s)""", staleLookbackSec, offsetSec),
+      Test(s"""rate(test{job="app"}[${windowSec}s] offset ${offsetSec}s)""", windowSec, offsetSec),
+      Test(s"""group(test{job="app"} offset ${offsetSec}s)""", staleLookbackSec, offsetSec),
+      Test(s"""left{job="app"} offset ${offsetSec}s + right{job="app"} offset ${offsetSec}s""", staleLookbackSec, offsetSec),
+      Test(s"""group(left{job="app"} offset ${offsetSec}s) + sum(right{job="app"} offset ${offsetSec}s)""", staleLookbackSec, offsetSec),
+      Test(s"""group(left{job="app"} offset ${offsetSec}s) or sum(right{job="app"} offset ${offsetSec}s)""", staleLookbackSec, offsetSec),
+      Test(s"""histogram_quantile(0.9, test{job="app"} offset ${offsetSec}s)""", staleLookbackSec, offsetSec),
+      Test(s"""sum_over_time(test{job="app"}[${windowSec}s] offset ${offsetSec}s)""", windowSec, offsetSec),
+      Test(s"""rate(test{job="app"}[${windowSec}s] offset ${offsetSec}s) + test{job="app"} offset ${offsetSec}s""", windowSec, offsetSec),
+      Test(s"""holt_winters(test{job="app"}[${windowSec}s] offset ${offsetSec}s, 0.9, 0.9)""", windowSec, offsetSec),
+      // TODO(a_theimer): why do these fail to parse?
+//      Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s] offset ${offsetSec}s)""", windowSec + staleLookbackSec, offsetSec),
+//      Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s] offset ${offsetSec}s)""", windowSec + staleLookbackSec, offsetSec),
     )
     for (test <- tests) {
       val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
@@ -1643,8 +1659,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       assertResult(2, s"${test.query}\n$lp\n${execPlan.printTree()}") {childRemoteExecs.size}
 
       val expectedRanges = Set(
-        TimeRangeSec(startSec, partitionRangesSec.head.end),
-        TimeRangeSec(snap(partitionRangesSec.last.start + test.invalidDiff, stepSec, startSec, endSec), endSec)
+        TimeRangeSec(startSec, partitionRangesSec.head.end + test.offsetSec),
+        TimeRangeSec(snap(partitionRangesSec.last.start + test.invalidDiff + test.offsetSec, stepSec, startSec, endSec), endSec)
       )
 
       assertResult(expectedRanges, s"${test.query}\n$lp\n${execPlan.printTree()}") {childRemoteExecs.toSet}
@@ -1687,6 +1703,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val staleLookbackSec = 5 * 60  // 5m
     val staleEvalSec = staleLookbackSec
     val windowEvalSec = windowSec
+    val offsetSec = 1 * 60  // 1m
     val tests = Seq(
       // subqueries excluded; exact start/end might change for the sake of performance
       Test(s"""test{job="app"}""", staleEvalSec),
@@ -1701,6 +1718,20 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       Test(s"""sum_over_time(test{job="app"}[${windowSec}s])""", windowEvalSec),
       Test(s"""rate(test{job="app"}[${windowSec}s]) + test{job="app"}""", windowEvalSec),
       Test(s"""holt_winters(test{job="app"}[${windowSec}s], 0.9, 0.9)""", windowEvalSec),
+
+      // offset queries
+      Test(s"""test{job="app"} offset ${offsetSec}s""", staleEvalSec + offsetSec),
+      Test(s"""sum(test{job="app"} offset ${offsetSec}s)""", staleEvalSec + offsetSec),
+      Test(s"""rate(test{job="app"}[${windowSec}s] offset ${offsetSec}s)""", windowEvalSec + offsetSec),
+      Test(s"""group(test{job="app"} offset ${offsetSec}s)""", staleEvalSec + offsetSec),
+      Test(s"""left{job="app"} offset ${offsetSec}s + right{job="app"} offset ${offsetSec}s""", staleEvalSec + offsetSec),
+      Test(s"""group(left{job="app"} offset ${offsetSec}s) + sum(right{job="app"} offset ${offsetSec}s)""", staleEvalSec + offsetSec),
+      Test(s"""group(left{job="app"} offset ${offsetSec}s) or sum(right{job="app"} offset ${offsetSec}s)""", staleEvalSec + offsetSec),
+      Test(s"""histogram_quantile(0.9, test{job="app"} offset ${offsetSec}s)""", staleEvalSec + offsetSec),
+      Test(s"""test{job="app"}[${windowSec}s] offset ${offsetSec}s""", windowEvalSec + offsetSec),
+      Test(s"""sum_over_time(test{job="app"}[${windowSec}s] offset ${offsetSec}s)""", windowEvalSec + offsetSec),
+      Test(s"""rate(test{job="app"}[${windowSec}s] offset ${offsetSec}s) + test{job="app"}""", windowEvalSec + offsetSec),
+      Test(s"""holt_winters(test{job="app"}[${windowSec}s] offset ${offsetSec}s, 0.9, 0.9)""", windowEvalSec + offsetSec),
     )
     for (test <- tests) {
       for ((diff, shouldBeEmpty) <- Seq((0, false), (-1, true))) {
