@@ -242,7 +242,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                                                 .flatMap(getInvalidRanges(_, promQlQueryParams))
     case _: ScalarTimeBasedPlan          => Seq()
     case lp: VectorPlan                  => getInvalidRanges(lp.scalars, promQlQueryParams)
-    case _: ScalarFixedDoublePlan        => throw new IllegalArgumentException("ScalarFixedDoublePlan unexpected here")
+    case _: ScalarFixedDoublePlan        => Seq()
     case lp: ApplyAbsentFunction         => (lp.functionArgs ++ Seq(lp.vectors)).map(_.asInstanceOf[LogicalPlan])
                                                 .flatMap(getInvalidRanges(_, promQlQueryParams))
     case lp: ScalarBinaryOperation       => Seq.empty
