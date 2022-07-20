@@ -1714,4 +1714,86 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       }
     }
   }
+
+  it ("should correctly handle binary joins with disjoint time ranges") {
+    case class TimeRangeSec(start: Long,
+                            end: Long)
+    case class Test(query: String,
+                    invalidDiff: Long)
+
+    val partitionRangesSec = Seq(
+      TimeRangeSec(0,9999),
+      TimeRangeSec(10000,19999),
+    )
+
+    def snap(timestamp: Long, step: Long, origin: Long, max: Long): Long = {
+      val diff = timestamp - origin
+      val remain = diff % step
+      math.min(max, timestamp + remain)
+    }
+
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] = {
+      val parts = partitionRangesSec.zipWithIndex.map{ case (rangeSec, i) =>
+        PartitionAssignment(s"name$i", s"url$i", TimeRange(1000 * rangeSec.start, 1000 * rangeSec.end))
+      }.toList
+      partitionsInRange(parts, timeRange)
+    }
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String],
+                                 timeRange: TimeRange): List[PartitionAssignment] = {
+        if (routingKey.equals(Map("job" -> "app")))
+          partitions(timeRange)
+        else Nil
+      }
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                         timeRange: TimeRange): List[PartitionAssignment] = {
+        partitions(timeRange)
+      }
+    }
+
+    val startSec = partitionRangesSec.head.start
+    val stepSec = 10
+    val endSec = partitionRangesSec.last.end
+    val windowSec = 5 * 60  // 5m
+    val offsetSec = 10 * 60  // 10m
+    val query = s"""rate(foo{job="app"}[${windowSec}s] offset ${offsetSec}s) + rate(foo{job="app"}[${windowSec}s])"""
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(startSec, stepSec, endSec))
+
+    val promQlQueryParams = PromQlQueryParams(query, startSec, stepSec, endSec)
+
+    val execPlan = engine.materialize(lp, QueryContext(
+      origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true)))
+
+    val root = execPlan.asInstanceOf[StitchRvsExec]
+    assertResult(3, s"$query\n$lp\n${execPlan.printTree()}") {root.children.size}
+
+    val remoteExecs = root.children.filter(_.isInstanceOf[PromQlRemoteExec])
+    assertResult(2, s"$query\n$lp\n${execPlan.printTree()}") {remoteExecs.size}
+
+    val binaryJoinsExecs = root.children.filter(_.isInstanceOf[BinaryJoinExec])
+    assertResult(1, s"$query\n$lp\n${execPlan.printTree()}") {binaryJoinsExecs.size}
+
+    val ranges = remoteExecs.map { exec =>
+      val params = exec.asInstanceOf[PromQlRemoteExec].getUrlParams()
+      TimeRangeSec(params("start").toLong, params("end").toLong)
+    } ++ binaryJoinsExecs.flatMap{ exec =>
+      exec.children.map{ child =>
+        val params = child.asInstanceOf[PromQlRemoteExec].getUrlParams()
+        TimeRangeSec(params("start").toLong, params("end").toLong)
+      }.toSet
+    }
+
+    val expectedRanges = Set(
+      TimeRangeSec(startSec, partitionRangesSec.head.end),
+      TimeRangeSec(snap(partitionRangesSec.last.start + windowSec, stepSec, startSec, endSec), partitionRangesSec.head.end + (offsetSec - windowSec) + windowSec),
+      TimeRangeSec(snap(partitionRangesSec.last.start + windowSec +  (offsetSec - windowSec) + windowSec, stepSec, startSec, endSec), endSec),
+    )
+
+    assertResult(expectedRanges, s"$query\n$lp\n${execPlan.printTree()}") {ranges.toSet}
+  }
 }
