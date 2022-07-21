@@ -114,7 +114,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
   private val endSeconds = now / 1000
   private val step = 300
 
-  private val queryParams = PromQlQueryParams("notUsedQuery", 100, 1, 1000)
+  private val queryParams = PromQlQueryParams("notUsedQuery", startSeconds, step, endSeconds)
 
 
   it("should generate plan for one namespace query across raw/downsample") {
@@ -811,7 +811,8 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
     val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(endSeconds, step, endSeconds), Antlr)
     val execPlan = rootPlanner.materialize(
-      lp, QueryContext(origQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(lp)),
+      lp, QueryContext(origQueryParams = queryParams.copy(
+        promQl = LogicalPlanParser.convertToQuery(lp), startSecs = endSeconds),
         plannerParams = PlannerParams(processMultiPartition = true)))
 
     val expectedPlan = "E~PromQlRemoteExec(PromQlQueryParams(bottomk(1.0,((min((foo{_ws_=\"demo\",_ns_=\"remoteNs\"} * on(userID) group_left(userName) bar{_ws_=\"demo\",_ns_=\"remoteNs\"})) by (userName,time) - time()) > 0.0)),1634777330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remotePartition-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@570ba13)"
