@@ -93,7 +93,13 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           invertInvalidRanges(mergedInvalidRanges, TimeRange(1000 * queryParams.startSecs, 1000 * queryParams.endSecs))
         }
         val plans = timeRanges.map{ range =>
-          val updLogicalPlan = copyLogicalPlanWithUpdatedTimeRange(lp, range)
+          // TODO(a_theimer): refactor this mess
+          // hack to support subqueries
+          val updLogicalPlan = if (timeRanges.size == 1 && range.startMs == range.endMs) {
+            lp
+          } else {
+            copyLogicalPlanWithUpdatedTimeRange(lp, range)
+          }
           val updQueryContext = qContext.copy(origQueryParams =
             queryParams.copy(startSecs = range.startMs / 1000, endSecs = range.endMs / 1000))
           walkLogicalPlanTree(updLogicalPlan, updQueryContext).plans.head
