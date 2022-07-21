@@ -87,14 +87,20 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case lp: TsCardinalities     => materializeTsCardinalities(lp, qContext).plans.head
       case lp                       => {
         val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+        // Get all the valid time-ranges to query.
+        //   For example, cross-partition lookback is unsupported. These time-ranges would
+        //   indicate queryable ranges where all involved lookbacks (range-selector windows,
+        //   stale-data lookbacks, etc) do not cross partitions.
         val timeRanges = {
           val invalidRanges = getInvalidRanges(lp, queryParams)
-          val mergedInvalidRanges = mergeInvalidRanges(invalidRanges)
-          invertInvalidRanges(mergedInvalidRanges, TimeRange(1000 * queryParams.startSecs, 1000 * queryParams.endSecs))
+          val mergedInvalidRanges = mergeRanges(invalidRanges)
+          val totalTimeRange = TimeRange(1000 * queryParams.startSecs, 1000 * queryParams.endSecs)
+          invertRanges(mergedInvalidRanges, totalTimeRange)
         }
+        // Materialize an ExecPlan for each of the above time-ranges.
         val plans = timeRanges.map{ range =>
-          // TODO(a_theimer): refactor this mess
-          // hack to support subqueries
+          // TODO(a_theimer): hack to support TopLevelSubqueries in shardKeyRegexPlanner.
+          //   Need to update the logic there so this isn't necessary.
           val updLogicalPlan = if (timeRanges.size == 1 && range.startMs == range.endMs) {
             lp
           } else {
@@ -104,8 +110,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             queryParams.copy(startSecs = range.startMs / 1000, endSecs = range.endMs / 1000))
           walkLogicalPlanTree(updLogicalPlan, updQueryContext).plans.head
         }
-        // TODO(a_theimer): validate these args
         if (plans.isEmpty) {
+          // No time-range was marked valid.
           EmptyResultExec(qContext, dataset.ref, inProcessPlanDispatcher)
         } else if (plans.size == 1) {
           plans.head
@@ -197,42 +203,45 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   private def getInvalidRangesLeaf(logicalPlan: LogicalPlan,
                                    queryParams: PromQlQueryParams): Seq[TimeRange] = {
-    val partitions = getPartitions(logicalPlan, queryParams)
-    // TODO(a_theimer): fix this-- this is just a placeholder
-    val assignmentsSorted = partitions.sortBy(pa => pa.timeRange.startMs)
-    val res = new mutable.ArrayBuffer[TimeRange]
+    // Invalidate ranges at/after partition splits.
+    // Invalidation only occurs at the splits; a plan that spans only one partition has no invalid ranges.
+    val assignmentsSorted = getPartitions(logicalPlan, queryParams).sortBy(pa => pa.timeRange.startMs)
+    val invalidRanges = new mutable.ArrayBuffer[TimeRange]
     val lookbackMs = getLookBackMillis(logicalPlan).fold(0L)((a: Long, b: Long) => math.max(a, b))
     val offsetMs = getOffsetMillis(logicalPlan).headOption.getOrElse(0L)
     for (i <- 1 until assignmentsSorted.size) {
-      res.append(TimeRange(assignmentsSorted(i-1).timeRange.endMs + offsetMs,
-                           assignmentsSorted(i).timeRange.startMs + offsetMs + lookbackMs))
+      invalidRanges.append(TimeRange(assignmentsSorted(i-1).timeRange.endMs + offsetMs,
+                                     assignmentsSorted(i).timeRange.startMs + offsetMs + lookbackMs))
     }
-    res
+    invalidRanges
   }
 
   private def getInvalidRangesPeriodicSeries(logicalPlan: PeriodicSeries,
                                              queryParams: PromQlQueryParams) : Seq[TimeRange] = {
+    // Snap the ends of child invalid ranges to periodic steps.
+    //   This means valid ranges will also begin at periodic steps.
     val invalidRanges = getInvalidRanges(logicalPlan.rawSeries, queryParams)
     val snappedRanges = invalidRanges.map(r => {
-      val diff = r.endMs - logicalPlan.startMs
-      val remain = diff % logicalPlan.stepMs
-      TimeRange(r.startMs, math.min(logicalPlan.endMs, r.endMs + remain))
+      val totalDiff = r.endMs - logicalPlan.startMs
+      val diffToNextStep = totalDiff % logicalPlan.stepMs
+      TimeRange(r.startMs, math.min(logicalPlan.endMs, r.endMs + diffToNextStep))
     })
-    mergeInvalidRanges(snappedRanges)
+    mergeRanges(snappedRanges)
   }
 
   private def getInvalidRangesSubqueryWithWindowing(logicalPlan: SubqueryWithWindowing,
                                                     queryParams: PromQlQueryParams): Seq[TimeRange] = {
+    // Extend the inner plan's invalid ranges by the window size.
     val invaldRangesInner = getInvalidRanges(logicalPlan.innerPeriodicSeries, queryParams)
     val invaldRangesArgs = logicalPlan.functionArgs.flatMap(getInvalidRanges(_, queryParams))
-    val res = invaldRangesArgs ++ invaldRangesInner.map{range =>
+    invaldRangesArgs ++ invaldRangesInner.map{range =>
       TimeRange(range.startMs, range.endMs + logicalPlan.subqueryWindowMs)
     }
-    res
   }
 
   private def getInvalidRangesTopLevelSubquery(logicalPlan: TopLevelSubquery,
                                                queryParams: PromQlQueryParams): Seq[TimeRange] = {
+    // Invalidate the entire query if any child ranges are invalid.
     val innerInvalidRanges = getInvalidRanges(logicalPlan.innerPeriodicSeries, queryParams)
     if (innerInvalidRanges.isEmpty) {
       Seq.empty
@@ -243,7 +252,12 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   }
 
   // scalastyle:off cyclomatic.complexity
-  // TODO(a_theimer)
+  /**
+   * // TODO(a_theimer): inclusive? exclusive?
+   * Returns a Seq of TimeRanges where the LogicalPlan cannot be evaluated.
+   *   For example, cross-partition lookback is unsupported. These time-ranges indicate when
+   *   any involved lookbacks (range-selector windows, stale-data lookbacks, etc) cross partitions.
+   */
   private def getInvalidRanges(logicalPlan: LogicalPlan,
                                promQlQueryParams: PromQlQueryParams) : Seq[TimeRange] = logicalPlan match {
     case lp: BinaryJoin                  => Seq(lp.lhs, lp.rhs).flatMap(getInvalidRanges(_, promQlQueryParams))
@@ -265,7 +279,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                                                 .flatMap(getInvalidRanges(_, promQlQueryParams))
     case lp: ScalarBinaryOperation       => Seq.empty
     case lp: ApplyLimitFunction          => getInvalidRanges(lp.vectors, promQlQueryParams)
-    case lp: TsCardinalities             => Seq.empty  // TODO(a_theimer): confirm
+    case lp: TsCardinalities             => Seq.empty
     case lp: SubqueryWithWindowing       => getInvalidRangesSubqueryWithWindowing(lp, promQlQueryParams)
     case lp: TopLevelSubquery            => getInvalidRangesTopLevelSubquery(lp, promQlQueryParams)
     case lp: PeriodicSeries              => getInvalidRangesPeriodicSeries(lp, promQlQueryParams)
@@ -276,54 +290,77 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   }
   // scalastyle:on cyclomatic.complexity
 
-  private def mergeInvalidRanges(ranges: Seq[TimeRange]): Seq[TimeRange] = {
+  /**
+   * // TODO(a_theimer): inclusive? exclusive?
+   * Merges all overlapping ranges.
+   * All sets of overlapping ranges are combined into one range
+   *   with the min/max start/end times, respectively.
+   */
+  private def mergeRanges(ranges: Seq[TimeRange]): Seq[TimeRange] = {
     if (ranges.isEmpty) {
       return Nil
     }
-    val sorted = ranges.sortBy(r => r.startMs)
-    val res = new mutable.ArrayBuffer[TimeRange]
-    res.append(sorted.head)
-    for (range <- sorted.tail) {
-      if (range.startMs > res.last.endMs) {
-        res.append(range)
+    val sortedRanges = ranges.sortBy(r => r.startMs)
+    val mergedRanges = new mutable.ArrayBuffer[TimeRange]
+    mergedRanges.append(sortedRanges.head)
+    for (range <- sortedRanges.tail) {
+      if (range.startMs > mergedRanges.last.endMs) {
+        // Cannot overlap with any of the previous ranges; create a new range.
+        mergedRanges.append(range)
       } else {
-        res(res.size - 1) = TimeRange(res.last.startMs, math.max(res.last.endMs, range.endMs))
+        // Extend the previous range to include this range's span.
+        mergedRanges(mergedRanges.size - 1) = TimeRange(
+          mergedRanges.last.startMs,
+          math.max(mergedRanges.last.endMs, range.endMs))
       }
     }
-    res
+    mergedRanges
   }
 
-  def invertInvalidRanges(invalidRanges: Seq[TimeRange],
-                          totalRange: TimeRange): Seq[TimeRange] = {
-    // TODO(a_theimer): expects sorted input
-    val res = new ArrayBuffer[TimeRange]()
-    res.append(totalRange)
+  /**
+   * // TODO(a_theimer): inclusive? exclusive?
+   * // TODO(a_theimer): expects sorted input
+   */
+  def invertRanges(ranges: Seq[TimeRange],
+                   totalRange: TimeRange): Seq[TimeRange] = {
+    val invertedRanges = new ArrayBuffer[TimeRange]()
+    invertedRanges.append(totalRange)
     var irange = 0
-    // get rid of all before query range
-    while (irange < invalidRanges.size && invalidRanges(irange).endMs < totalRange.startMs) { irange += 1 }
-    // check if first invalidRange overlaps totalRange
-    // TODO(a_theimer): handle entire range invalidated
-    if (irange < invalidRanges.size) {
-      if (invalidRanges(irange).startMs <= totalRange.startMs) {
-        if (invalidRanges(irange).endMs < totalRange.endMs) {
-          res(0) = TimeRange(invalidRanges(irange).endMs, totalRange.endMs)
+
+    // ignore all ranges before totalRange
+    while (irange < ranges.size &&
+           ranges(irange).endMs < totalRange.startMs) {
+      irange += 1
+    }
+
+    if (irange < ranges.size) {
+      // check if the first overlapping range also overlaps the totalRange.start
+      if (ranges(irange).startMs <= totalRange.startMs) {
+        // if it does, then we either need to adjust the totalRange in the result or remove it altogether.
+        if (ranges(irange).endMs < totalRange.endMs) {
+          invertedRanges(0) = TimeRange(ranges(irange).endMs, totalRange.endMs)
           irange += 1
         } else {
           return Nil
         }
       }
     }
-    // append valid ranges between the invalid ranges
-    while (irange < invalidRanges.size && invalidRanges(irange).endMs < totalRange.endMs) {
-      res(res.size - 1) = TimeRange(res.last.startMs, invalidRanges(irange).startMs)
-      res.append(TimeRange(invalidRanges(irange).endMs, totalRange.endMs))
+
+    // add inverted ranges to the result until one crosses totalRange.endMs
+    while (irange < ranges.size && ranges(irange).endMs < totalRange.endMs) {
+      invertedRanges(invertedRanges.size - 1) =
+        TimeRange(invertedRanges.last.startMs, ranges(irange).startMs)
+      invertedRanges.append(TimeRange(ranges(irange).endMs, totalRange.endMs))
       irange += 1
     }
-    // check if an invalid range overlaps the totalRange end
-    if (irange < invalidRanges.size && invalidRanges(irange).startMs < totalRange.endMs) {
-      res(res.size - 1) = TimeRange(res.last.startMs, invalidRanges(irange).startMs)
+
+    // check if a range overlaps totalRange.endMs; if it does, adjust final inverted range
+    if (irange < ranges.size && ranges(irange).startMs < totalRange.endMs) {
+      invertedRanges(invertedRanges.size - 1) =
+        TimeRange(invertedRanges.last.startMs, ranges(irange).startMs)
     }
-    res
+
+    invertedRanges
   }
 
   private def getRoutingKeys(logicalPlan: LogicalPlan) = {

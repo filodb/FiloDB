@@ -160,14 +160,16 @@ object LogicalPlanUtils extends StrictLogging {
   private def copyTopLevelSubqueryWithUpdatedTimeRange(
     timeRange: TimeRange, topLevelSubquery: TopLevelSubquery
   ): TopLevelSubquery = {
-    // TODO(a_theimer): can't require this?
-//    require(timeRange.startMs == timeRange.endMs,
-//      s"expected same start/end evaluation times for TopLevelSubquery, " +
-//      s"but found start=${timeRange.startMs}, end=${timeRange.endMs}")
-    val windowMs = topLevelSubquery.endMs - topLevelSubquery.startMs
-    val newStart = timeRange.endMs - windowMs
-    val newRange = TimeRange(newStart, timeRange.endMs)
-    val newInner = copyWithUpdatedTimeRange(topLevelSubquery.innerPeriodicSeries, newRange)
+    require(timeRange.startMs == timeRange.endMs,
+      s"expected same start/end evaluation times for TopLevelSubquery, " +
+      s"but found start=${timeRange.startMs}, end=${timeRange.endMs}")
+    // shift the inner periodic series such that its end timestamp aligns with the new evaluation time
+    val newInner = {
+      // tls.startMs/endMs are adjusted for efficiency (hence why we don't use tls.originalLookbackMs)
+      val windowMs = topLevelSubquery.endMs - topLevelSubquery.startMs
+      val newInnerRange = TimeRange(timeRange.endMs - windowMs, timeRange.endMs)
+      copyWithUpdatedTimeRange(topLevelSubquery.innerPeriodicSeries, newInnerRange)
+    }
     topLevelSubquery.copy(innerPeriodicSeries = newInner, startMs = timeRange.startMs, endMs = timeRange.endMs)
   }
 
