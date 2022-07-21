@@ -1643,8 +1643,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 //      Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s] offset ${offsetSec}s)""", windowSec + staleLookbackSec, offsetSec),
 //      Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s] offset ${offsetSec}s)""", windowSec + staleLookbackSec, offsetSec),
     )
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     for (test <- tests) {
-      val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
       val lp = Parser.queryRangeToLogicalPlan(test.query, TimeStepParams(startSec, stepSec, endSec))
 
       val promQlQueryParams = PromQlQueryParams(test.query, startSec, stepSec, endSec)
@@ -1668,15 +1668,43 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   }
 
   it ("should succeed/fail instant queries without/with cross-partition data") {
-    case class TimeRangeSec(start: Long,
-                            end: Long)
-    case class Test(query: String,
-                    evalSec: Long)
+    case class TimeRangeSec(start: Long, end: Long)
+    case class TestSpec(evalSec: Long, shouldBeEmpty: Boolean)
 
     val partitionRangesSec = Seq(
       TimeRangeSec(0,9999),
       TimeRangeSec(10000,19999),
     )
+
+    abstract class Test(val query: String,
+                        val windowSec: Long,
+                        val offsetSec: Long = 0L) {
+      def getSpecs(): Seq[TestSpec]
+    }
+
+    case class ExactTest(override val query: String,
+                         override val windowSec: Long,
+                         override val offsetSec: Long = 0L) extends Test(query, windowSec, offsetSec) {
+      override def getSpecs(): Seq[TestSpec] = Seq(
+        TestSpec(partitionRangesSec.head.start, false),
+        TestSpec(partitionRangesSec.head.end + offsetSec, false),
+        TestSpec(partitionRangesSec.head.end + offsetSec + 1, true),
+        TestSpec(partitionRangesSec.head.end + offsetSec + windowSec/2, true),
+        TestSpec(partitionRangesSec.last.start + offsetSec + windowSec - 1, true),
+        TestSpec(partitionRangesSec.last.start + offsetSec + windowSec, false),
+        TestSpec(partitionRangesSec.last.end, false)
+      )
+    }
+
+    case class FuzzyTest(override val query: String,
+                         override val windowSec: Long,
+                         override val offsetSec: Long = 0L) extends Test(query, windowSec, offsetSec) {
+      override def getSpecs(): Seq[TestSpec] = Seq(
+        TestSpec(partitionRangesSec.head.start, false),
+        TestSpec(partitionRangesSec.head.end + offsetSec + windowSec/2, true),
+        TestSpec(partitionRangesSec.last.end, false)
+      )
+    }
 
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = {
       val parts = partitionRangesSec.zipWithIndex.map{ case (rangeSec, i) =>
@@ -1704,44 +1732,52 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val staleEvalSec = staleLookbackSec
     val windowEvalSec = windowSec
     val offsetSec = 1 * 60  // 1m
+    val stepSec = 10
     val tests = Seq(
-      // subqueries excluded; exact start/end might change for the sake of performance
-      Test(s"""test{job="app"}""", staleEvalSec),
-      Test(s"""sum(test{job="app"})""", staleEvalSec),
-      Test(s"""rate(test{job="app"}[${windowSec}s])""", windowEvalSec),
-      Test(s"""group(test{job="app"})""", staleEvalSec),
-      Test(s"""left{job="app"} + right{job="app"}""", staleEvalSec),
-      Test(s"""group(left{job="app"}) + sum(right{job="app"})""", staleEvalSec),
-      Test(s"""group(left{job="app"}) or sum(right{job="app"})""", staleEvalSec),
-      Test(s"""histogram_quantile(0.9, test{job="app"})""", staleEvalSec),
-      Test(s"""test{job="app"}[${windowSec}s]""", windowEvalSec),
-      Test(s"""sum_over_time(test{job="app"}[${windowSec}s])""", windowEvalSec),
-      Test(s"""rate(test{job="app"}[${windowSec}s]) + test{job="app"}""", windowEvalSec),
-      Test(s"""holt_winters(test{job="app"}[${windowSec}s], 0.9, 0.9)""", windowEvalSec),
+      ExactTest(s"""test{job="app"}""", staleEvalSec),
+      ExactTest(s"""sum(test{job="app"})""", staleEvalSec),
+      ExactTest(s"""rate(test{job="app"}[${windowSec}s])""", windowEvalSec),
+      ExactTest(s"""group(test{job="app"})""", staleEvalSec),
+      ExactTest(s"""left{job="app"} + right{job="app"}""", staleEvalSec),
+      ExactTest(s"""group(left{job="app"}) + sum(right{job="app"})""", staleEvalSec),
+      ExactTest(s"""group(left{job="app"}) or sum(right{job="app"})""", staleEvalSec),
+      ExactTest(s"""histogram_quantile(0.9, test{job="app"})""", staleEvalSec),
+      ExactTest(s"""test{job="app"}[${windowSec}s]""", windowEvalSec),
+      ExactTest(s"""sum_over_time(test{job="app"}[${windowSec}s])""", windowEvalSec),
+      ExactTest(s"""rate(test{job="app"}[${windowSec}s]) + test{job="app"}""", windowEvalSec),
+      ExactTest(s"""holt_winters(test{job="app"}[${windowSec}s], 0.9, 0.9)""", windowEvalSec),
 
       // offset queries
-      Test(s"""test{job="app"} offset ${offsetSec}s""", staleEvalSec + offsetSec),
-      Test(s"""sum(test{job="app"} offset ${offsetSec}s)""", staleEvalSec + offsetSec),
-      Test(s"""rate(test{job="app"}[${windowSec}s] offset ${offsetSec}s)""", windowEvalSec + offsetSec),
-      Test(s"""group(test{job="app"} offset ${offsetSec}s)""", staleEvalSec + offsetSec),
-      Test(s"""left{job="app"} offset ${offsetSec}s + right{job="app"} offset ${offsetSec}s""", staleEvalSec + offsetSec),
-      Test(s"""group(left{job="app"} offset ${offsetSec}s) + sum(right{job="app"} offset ${offsetSec}s)""", staleEvalSec + offsetSec),
-      Test(s"""group(left{job="app"} offset ${offsetSec}s) or sum(right{job="app"} offset ${offsetSec}s)""", staleEvalSec + offsetSec),
-      Test(s"""histogram_quantile(0.9, test{job="app"} offset ${offsetSec}s)""", staleEvalSec + offsetSec),
-      Test(s"""test{job="app"}[${windowSec}s] offset ${offsetSec}s""", windowEvalSec + offsetSec),
-      Test(s"""sum_over_time(test{job="app"}[${windowSec}s] offset ${offsetSec}s)""", windowEvalSec + offsetSec),
-      Test(s"""rate(test{job="app"}[${windowSec}s] offset ${offsetSec}s) + test{job="app"}""", windowEvalSec + offsetSec),
-      Test(s"""holt_winters(test{job="app"}[${windowSec}s] offset ${offsetSec}s, 0.9, 0.9)""", windowEvalSec + offsetSec),
+      ExactTest(s"""test{job="app"} offset ${offsetSec}s""", staleEvalSec, offsetSec),
+      ExactTest(s"""sum(test{job="app"} offset ${offsetSec}s)""", staleEvalSec, offsetSec),
+      ExactTest(s"""rate(test{job="app"}[${windowSec}s] offset ${offsetSec}s)""", windowEvalSec, offsetSec),
+      ExactTest(s"""group(test{job="app"} offset ${offsetSec}s)""", staleEvalSec, offsetSec),
+      ExactTest(s"""left{job="app"} offset ${offsetSec}s + right{job="app"} offset ${offsetSec}s""", staleEvalSec, offsetSec),
+      ExactTest(s"""group(left{job="app"} offset ${offsetSec}s) + sum(right{job="app"} offset ${offsetSec}s)""", staleEvalSec, offsetSec),
+      ExactTest(s"""group(left{job="app"} offset ${offsetSec}s) or sum(right{job="app"} offset ${offsetSec}s)""", staleEvalSec, offsetSec),
+      ExactTest(s"""histogram_quantile(0.9, test{job="app"} offset ${offsetSec}s)""", staleEvalSec, offsetSec),
+      ExactTest(s"""test{job="app"}[${windowSec}s] offset ${offsetSec}s""", windowEvalSec, offsetSec),
+      ExactTest(s"""sum_over_time(test{job="app"}[${windowSec}s] offset ${offsetSec}s)""", windowEvalSec, offsetSec),
+      ExactTest(s"""rate(test{job="app"}[${windowSec}s] offset ${offsetSec}s) + test{job="app"} offset ${offsetSec}s""", windowEvalSec, offsetSec),
+      ExactTest(s"""holt_winters(test{job="app"}[${windowSec}s] offset ${offsetSec}s, 0.9, 0.9)""", windowEvalSec, offsetSec),
+
+      // subqueries
+      FuzzyTest(s"""test{job="app"}[${windowSec}s:${stepSec}s]""", windowSec),
+      FuzzyTest(s"""sum(test{job="app"})[${windowSec}s:${stepSec}s]""", windowSec),
+      FuzzyTest(s"""rate(test{job="app"}[${windowSec}s])[${windowSec}s:${stepSec}s]""", 2 * windowSec),
+//      FuzzyTest(s"""test{job="app"}[${windowSec}s:${stepSec}s] offset ${offsetSec}s""", windowSec, offsetSec),
+//      FuzzyTest(s"""sum(test{job="app"})[${windowSec}s:${stepSec}s] offset ${offsetSec}s""", windowSec, offsetSec),
+//      FuzzyTest(s"""rate(test{job="app"}[${windowSec}s])[${windowSec}s:${stepSec}s] offset ${offsetSec}s""", 2 * windowSec, offsetSec),
     )
-    for (test <- tests) {
-      for ((diff, shouldBeEmpty) <- Seq((0, false), (-1, true))) {
-        val evalSec = partitionRangesSec.last.start + test.evalSec + diff
-        val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    for ((test, itest) <- tests.zipWithIndex) {
+      for ((spec, ispec) <- test.getSpecs().zipWithIndex) {
+        val evalSec = spec.evalSec
         val lp = Parser.queryRangeToLogicalPlan(test.query, TimeStepParams(evalSec, 1, evalSec))
         val promQlQueryParams = PromQlQueryParams(test.query, evalSec, 1, evalSec)
         val execPlan = engine.materialize(lp, QueryContext(
           origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true)))
-        assertResult(shouldBeEmpty, s"${test.query}\n$lp\n${execPlan.printTree()}") {execPlan.isInstanceOf[EmptyResultExec]}
+        assertResult(spec.shouldBeEmpty, s"itest:$itest,ispec:$ispec\n$spec\n${test.query}\n$lp\n${execPlan.printTree()}") {execPlan.isInstanceOf[EmptyResultExec]}
       }
     }
   }
