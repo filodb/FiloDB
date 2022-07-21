@@ -231,6 +231,17 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     res
   }
 
+  private def getInvalidRangesTopLevelSubquery(logicalPlan: TopLevelSubquery,
+                                               queryParams: PromQlQueryParams): Seq[TimeRange] = {
+    val innerInvalidRanges = getInvalidRanges(logicalPlan.innerPeriodicSeries, queryParams)
+    if (innerInvalidRanges.isEmpty) {
+      Seq.empty
+    } else {
+      Seq(TimeRange(1000 * queryParams.startSecs,
+                    1000 * queryParams.endSecs))
+    }
+  }
+
   // scalastyle:off cyclomatic.complexity
   // TODO(a_theimer)
   private def getInvalidRanges(logicalPlan: LogicalPlan,
@@ -256,7 +267,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     case lp: ApplyLimitFunction          => getInvalidRanges(lp.vectors, promQlQueryParams)
     case lp: TsCardinalities             => Seq.empty  // TODO(a_theimer): confirm
     case lp: SubqueryWithWindowing       => getInvalidRangesSubqueryWithWindowing(lp, promQlQueryParams)
-    case lp: TopLevelSubquery            => getInvalidRanges(lp.innerPeriodicSeries, promQlQueryParams)
+    case lp: TopLevelSubquery            => getInvalidRangesTopLevelSubquery(lp, promQlQueryParams)
     case lp: PeriodicSeries              => getInvalidRangesPeriodicSeries(lp, promQlQueryParams)
     case lp: PeriodicSeriesWithWindowing => (lp.functionArgs ++ Seq(lp.series))
                                                 .flatMap(getInvalidRanges(_, promQlQueryParams))
@@ -293,7 +304,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     // check if first invalidRange overlaps totalRange
     // TODO(a_theimer): handle entire range invalidated
     if (irange < invalidRanges.size) {
-      if (invalidRanges(irange).startMs < totalRange.startMs) {
+      if (invalidRanges(irange).startMs <= totalRange.startMs) {
         if (invalidRanges(irange).endMs < totalRange.endMs) {
           res(0) = TimeRange(invalidRanges(irange).endMs, totalRange.endMs)
           irange += 1
