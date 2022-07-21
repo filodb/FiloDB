@@ -49,7 +49,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
       get {
         parameter(('query.as[String], 'start.as[Double], 'end.as[Double], 'histogramMap.as[Boolean].?,
           'step.as[Int], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?,
-          'partialResults.as[Boolean].?))
+          'allowPartialResults.as[Boolean].?))
         { (query, start, end, histMap, step, explainOnly, verbose, spread, partialResults) =>
           val logicalPlan = Parser.queryRangeToLogicalPlan(query, TimeStepParams(start.toLong, step, end.toLong))
 
@@ -67,7 +67,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     path( "api" / "v1" / "query") {
       get {
         parameter(('query.as[String], 'time.as[Double], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?,
-          'spread.as[Int].?, 'histogramMap.as[Boolean].?, 'step.as[Double].?, 'partialResults.as[Boolean].?))
+          'spread.as[Int].?, 'histogramMap.as[Boolean].?, 'step.as[Double].?, 'allowPartialResults.as[Boolean].?))
         { (query, time, explainOnly, verbose, spread, histMap, step, partialResults) =>
           val stepLong = step.map(_.toLong).getOrElse(0L)
           val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong, stepLong)
@@ -84,7 +84,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     path( "api" / "v1" / "labels") {
       get {
         parameter(("match[]".as[String], 'start.as[Double].?, 'end.as[Double].?,
-          'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?, 'partialResults.as[Boolean].?))
+          'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?, 'allowPartialResults.as[Boolean].?))
         { (query, start, end, explainOnly, verbose, spread, partialResults) =>
           val currentTimeInSecs = System.currentTimeMillis()/1000
           val startLong = start.map(_.toLong).getOrElse(currentTimeInSecs - ONE_DAY_IN_SECS)
@@ -104,7 +104,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     path ("api" / "v1" / "label" / Segment / "values") { label: String =>
       get {
         parameter(("match[]".as[String].?, 'start.as[Double].?, 'end.as[Double].?, 'explainOnly.as[Boolean].?,
-          'partialResults.as[Boolean].?))
+          'allowPartialResults.as[Boolean].?))
         { (query, start, end, explainOnly, partialResults) =>
           val currentTimeInSecs = System.currentTimeMillis()/1000
           val startLong = start.map(_.toLong).getOrElse(currentTimeInSecs - ONE_DAY_IN_SECS)
