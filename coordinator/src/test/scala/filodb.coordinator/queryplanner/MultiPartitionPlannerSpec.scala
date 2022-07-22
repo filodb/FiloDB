@@ -11,11 +11,11 @@ import filodb.core.{MetricsTestData, SpreadChange}
 import filodb.core.metadata.Schemas
 import filodb.core.query.Filter.Equals
 import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
-import filodb.prometheus.ast.TimeStepParams
+import filodb.prometheus.ast.{SubqueryUtils, TimeStepParams}
 import filodb.prometheus.parse.Parser
 import filodb.query.BinaryOperator.{ADD, LAND}
 import filodb.query.InstantFunctionId.Ln
-import filodb.query.{LogicalPlan, PlanValidationSpec, SeriesKeysByFilters, LabelCardinality, TsCardinalities}
+import filodb.query.{LabelCardinality, LogicalPlan, PlanValidationSpec, SeriesKeysByFilters, TsCardinalities}
 import filodb.query.exec._
 
 class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValidationSpec{
@@ -1518,8 +1518,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       TimeRangeSec(1000,1999),
     )
 
-    // TODO(a_theimer): make this a util?
-    // snap a timestamp to a periodic step
+    // snap a timestamp to the next periodic step
     def snap(timestamp: Long, step: Long, origin: Long): Long = {
       val totalDiff = timestamp - origin
       val diffToNextStep = totalDiff % step
@@ -1563,7 +1562,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       Test(s"""sum_over_time(test{job="app"}[${windowSec}s])""", windowSec, 0L),
       Test(s"""rate(test{job="app"}[${windowSec}s]) + test{job="app"}""", windowSec, 0L),
       Test(s"""holt_winters(test{job="app"}[${windowSec}s], 0.9, 0.9)""", windowSec, 0L),
-      // TODO(a_theimer): why only these need the lookback?
+      // FIXME: subquery lookback should be consistent with others
       Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s])""", windowSec + staleLookbackSec, 0L),
       Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s])""", windowSec + staleLookbackSec, 0L),
 
@@ -1579,7 +1578,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       Test(s"""sum_over_time(test{job="app"}[${windowSec}s] offset ${offsetSec}s)""", windowSec, offsetSec),
       Test(s"""rate(test{job="app"}[${windowSec}s] offset ${offsetSec}s) + test{job="app"} offset ${offsetSec}s""", windowSec, offsetSec),
       Test(s"""holt_winters(test{job="app"}[${windowSec}s] offset ${offsetSec}s, 0.9, 0.9)""", windowSec, offsetSec),
-      // TODO(a_theimer): why do these fail to parse?
+      // FIXME: subqueries with offsets are valid promql, but these fail to parse
       // Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s] offset ${offsetSec}s)""", windowSec + staleLookbackSec, offsetSec),
       // Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s] offset ${offsetSec}s)""", windowSec + staleLookbackSec, offsetSec),
     )
@@ -1733,8 +1732,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       TimeRangeSec(10000,19999),
     )
 
-    // TODO(a_theimer): make this a util?
-    // snap a timestamp to a periodic step
+    // snap a timestamp to the next periodic step
     def snap(timestamp: Long, step: Long, origin: Long): Long = {
       val totalDiff = timestamp - origin
       val diffToNextStep = totalDiff % step

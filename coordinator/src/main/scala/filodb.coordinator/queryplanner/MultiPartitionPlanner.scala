@@ -93,7 +93,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         //   stale-data lookbacks, etc) do not cross partitions.
         val timeRanges = {
           val invalidRanges = getInvalidRanges(lp, queryParams)
-          val mergedInvalidRanges = mergeRanges(invalidRanges)
+          val mergedInvalidRanges = mergeAndSortRanges(invalidRanges)
           val totalTimeRange = TimeRange(1000 * queryParams.startSecs, 1000 * queryParams.endSecs)
           invertRanges(mergedInvalidRanges, totalTimeRange)
         }
@@ -106,8 +106,15 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           } else {
             copyLogicalPlanWithUpdatedTimeRange(lp, range)
           }
+          // Adjust start seconds in case integer division (during millis-to-seconds conversion)
+          //   gives a timestamp outside the valid range.
+          val startSec: Long = {
+            val msPastSec = range.startMs % 1000
+            (range.startMs / 1000) + { if (msPastSec > 0) 1 else 0 }
+          }
+          val endSec: Long = range.endMs / 1000
           val updQueryContext = qContext.copy(origQueryParams =
-            queryParams.copy(startSecs = range.startMs / 1000, endSecs = range.endMs / 1000))
+            queryParams.copy(startSecs = startSec, endSecs = endSec))
           walkLogicalPlanTree(updLogicalPlan, updQueryContext).plans.head
         }
         if (plans.isEmpty) {
@@ -210,8 +217,12 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val lookbackMs = getLookBackMillis(logicalPlan).fold(0L)((a: Long, b: Long) => math.max(a, b))
     val offsetMs = getOffsetMillis(logicalPlan).headOption.getOrElse(0L)
     for (i <- 1 until assignmentsSorted.size) {
-      invalidRanges.append(TimeRange(assignmentsSorted(i-1).timeRange.endMs + offsetMs,
-                                     assignmentsSorted(i).timeRange.startMs + offsetMs + lookbackMs))
+      val invalidSize = (assignmentsSorted(i).timeRange.startMs - 1 + lookbackMs) -
+                        (assignmentsSorted(i-1).timeRange.endMs + 1)
+      if (invalidSize > 0) {
+        invalidRanges.append(TimeRange(assignmentsSorted(i-1).timeRange.endMs + offsetMs + 1,
+                                       assignmentsSorted(i).timeRange.startMs + offsetMs + lookbackMs + 1))
+      }
     }
     invalidRanges
   }
@@ -226,7 +237,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       val diffToNextStep = totalDiff % logicalPlan.stepMs
       TimeRange(r.startMs, math.min(logicalPlan.endMs, r.endMs + diffToNextStep))
     })
-    mergeRanges(snappedRanges)
+    mergeAndSortRanges(snappedRanges)
   }
 
   private def getInvalidRangesSubqueryWithWindowing(logicalPlan: SubqueryWithWindowing,
@@ -253,10 +264,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   // scalastyle:off cyclomatic.complexity
   /**
-   * // TODO(a_theimer): inclusive? exclusive?
    * Returns a Seq of TimeRanges where the LogicalPlan cannot be evaluated.
    *   For example, cross-partition lookback is unsupported. These time-ranges indicate when
    *   any involved lookbacks (range-selector windows, stale-data lookbacks, etc) cross partitions.
+   * @return sequence of time-ranges with inclusive start/end points
    */
   private def getInvalidRanges(logicalPlan: LogicalPlan,
                                promQlQueryParams: PromQlQueryParams) : Seq[TimeRange] = logicalPlan match {
@@ -291,12 +302,12 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   // scalastyle:on cyclomatic.complexity
 
   /**
-   * // TODO(a_theimer): inclusive? exclusive?
-   * Merges all overlapping ranges.
-   * All sets of overlapping ranges are combined into one range
+   * Merges each set of overlapping ranges into one range
    *   with the min/max start/end times, respectively.
+   * "Overlapping" is inclusive of start and end points.
+   * @return sorted sequence of these merged ranges
    */
-  private def mergeRanges(ranges: Seq[TimeRange]): Seq[TimeRange] = {
+  private def mergeAndSortRanges(ranges: Seq[TimeRange]): Seq[TimeRange] = {
     if (ranges.isEmpty) {
       return Nil
     }
@@ -318,8 +329,16 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   }
 
   /**
-   * // TODO(a_theimer): inclusive? exclusive?
-   * // TODO(a_theimer): expects sorted input
+   * Given a sorted sequence of disjoint time-ranges and a "total" range,
+   *   inverts the ranges and crops the result to the total range.
+   * Range start/ends are inclusive.
+   *
+   * Example:
+   *       Ranges: ----   -------  ---     ---------
+   *        Total:          -------------
+   *       Result:               --   ---
+   *
+   * @param ranges: must be sorted and disjoint (range start/ends are inclusive)
    */
   def invertRanges(ranges: Seq[TimeRange],
                    totalRange: TimeRange): Seq[TimeRange] = {
@@ -338,7 +357,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       if (ranges(irange).startMs <= totalRange.startMs) {
         // if it does, then we either need to adjust the totalRange in the result or remove it altogether.
         if (ranges(irange).endMs < totalRange.endMs) {
-          invertedRanges(0) = TimeRange(ranges(irange).endMs, totalRange.endMs)
+          invertedRanges(0) = TimeRange(ranges(irange).endMs + 1, totalRange.endMs)
           irange += 1
         } else {
           return Nil
@@ -349,15 +368,15 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     // add inverted ranges to the result until one crosses totalRange.endMs
     while (irange < ranges.size && ranges(irange).endMs < totalRange.endMs) {
       invertedRanges(invertedRanges.size - 1) =
-        TimeRange(invertedRanges.last.startMs, ranges(irange).startMs)
-      invertedRanges.append(TimeRange(ranges(irange).endMs, totalRange.endMs))
+        TimeRange(invertedRanges.last.startMs, ranges(irange).startMs - 1)
+      invertedRanges.append(TimeRange(ranges(irange).endMs + 1, totalRange.endMs))
       irange += 1
     }
 
     // check if a range overlaps totalRange.endMs; if it does, adjust final inverted range
     if (irange < ranges.size && ranges(irange).startMs < totalRange.endMs) {
       invertedRanges(invertedRanges.size - 1) =
-        TimeRange(invertedRanges.last.startMs, ranges(irange).startMs)
+        TimeRange(invertedRanges.last.startMs, ranges(irange).startMs - 1)
     }
 
     invertedRanges
