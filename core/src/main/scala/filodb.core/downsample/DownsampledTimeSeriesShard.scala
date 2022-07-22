@@ -455,8 +455,11 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
             // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
             // Other strategies needs to be evaluated for making this performant - create facets for predefined fields
             // or have a centralized service/store for serving metadata
-            val currVal = schemas.part.binSchema.colValues(nextPart.bytes, nextPart.offset + UnsafeUtils.arayOffset,
-              labelNames).zipWithIndex.filter(_._1 != null)
+            // TODO: Use the BytesRef directly instead of copying to an array
+
+            val pk = util.Arrays.copyOfRange(nextPart.bytes, nextPart.offset, nextPart.offset + nextPart.length)
+            val currVal = schemas.part.binSchema.colValues(pk, UnsafeUtils.arayOffset, labelNames)
+              .zipWithIndex.filter(_._1 != null)
               .map{case(value, ind) => labelNames(ind).utf8 -> value.utf8}.toMap
 
             if (currVal.nonEmpty) rows.add(currVal)
@@ -493,13 +496,13 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       val matched = partKeyIndex.foreachPartKeyMatchingFilter(filters, startTime, endTime,
         nextPart => {
           if (rows.size < limit) {
+            val pk = util.Arrays.copyOfRange(nextPart.bytes, nextPart.offset, nextPart.offset + nextPart.length)
             if (colIndex > -1)
               rows.add(
-                schemas.part.binSchema.asZCUTF8Str(nextPart.bytes, nextPart.offset + UnsafeUtils.arayOffset, colIndex)
+                schemas.part.binSchema.asZCUTF8Str(pk, UnsafeUtils.arayOffset, colIndex)
               )
             else
-              schemas.part.binSchema.singleColValues(nextPart.bytes,
-                nextPart.offset + UnsafeUtils.arayOffset, label, rows)
+              schemas.part.binSchema.singleColValues(pk, UnsafeUtils.arayOffset, label, rows)
 
             partLoopIndex += 1
           } else throw new CollectionTerminatedException
