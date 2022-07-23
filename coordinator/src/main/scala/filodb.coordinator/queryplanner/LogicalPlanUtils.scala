@@ -97,22 +97,6 @@ object LogicalPlanUtils extends StrictLogging {
   }
 
   /**
-   * // TODO(a_theimer)
-   */
-  def copyLogicalPlanWithUpdatedEvalTime(logicalPlan: LogicalPlan,
-                                         evalTimeMs: Long): LogicalPlan = {
-    logicalPlan match {
-      case lp: PeriodicSeriesPlan       => copyWithUpdatedEvalTimePeriodic(lp, evalTimeMs)
-      case lp: RawSeriesLikePlan        => copyWithUpdatedEvalTimeNonPeriodic(lp, evalTimeMs)
-      case lp: LabelValues              => lp.copy(startMs = evalTimeMs - (lp.endMs - lp.startMs), endMs = evalTimeMs)
-      case lp: LabelNames               => lp.copy(startMs = evalTimeMs - (lp.endMs - lp.startMs), endMs = evalTimeMs)
-      case lp: LabelCardinality         => lp.copy(startMs = evalTimeMs - (lp.endMs - lp.startMs), endMs = evalTimeMs)
-      case lp: TsCardinalities          => lp  // no time ranges to update
-      case lp: SeriesKeysByFilters      => lp.copy(startMs = evalTimeMs - (lp.endMs - lp.startMs), endMs = evalTimeMs)
-    }
-  }
-
-  /**
     * Used to change start and end time(TimeRange) of LogicalPlan
     * NOTE: Plan should be PeriodicSeriesPlan
     */
@@ -172,69 +156,6 @@ object LogicalPlanUtils extends StrictLogging {
     }
   }
 
-  /**
-   * Used to change start and end time(TimeRange) of LogicalPlan
-   * NOTE: Plan should be PeriodicSeriesPlan
-   */
-  //scalastyle:off cyclomatic.complexity
-  //scalastyle:off method.length
-  def copyWithUpdatedEvalTimePeriodic(logicalPlan: PeriodicSeriesPlan,
-                                      evalTimeMs: Long): PeriodicSeriesPlan = {
-    logicalPlan match {
-      case lp: PeriodicSeries =>
-        lp.copy(startMs = evalTimeMs - (lp.endMs - lp.startMs),
-                endMs = evalTimeMs,
-                rawSeries = copyWithUpdatedEvalTimeNonPeriodic(lp.rawSeries, evalTimeMs).asInstanceOf[RawSeries])
-      case lp: PeriodicSeriesWithWindowing =>
-        lp.copy(startMs = evalTimeMs - (lp.endMs - lp.startMs),
-                endMs = evalTimeMs,
-                series = copyWithUpdatedEvalTimeNonPeriodic(lp.series, evalTimeMs))
-      case lp: ApplyInstantFunction        => lp.copy(vectors = copyWithUpdatedEvalTimePeriodic(lp.vectors, evalTimeMs))
-      case lp: Aggregate                   => lp.copy(vectors = copyWithUpdatedEvalTimePeriodic(lp.vectors, evalTimeMs))
-      case lp: BinaryJoin                  => lp.copy(lhs = copyWithUpdatedEvalTimePeriodic(lp.lhs, evalTimeMs),
-                                                      rhs = copyWithUpdatedEvalTimePeriodic(lp.rhs, evalTimeMs))
-      case lp: ScalarVectorBinaryOperation => lp.copy(vector = copyWithUpdatedEvalTimePeriodic(lp.vector, evalTimeMs))
-      case lp: ApplyMiscellaneousFunction  => lp.copy(vectors = copyWithUpdatedEvalTimePeriodic(lp.vectors, evalTimeMs))
-      case lp: ApplySortFunction           => lp.copy(vectors = copyWithUpdatedEvalTimePeriodic(lp.vectors, evalTimeMs))
-      case lp: ApplyAbsentFunction         => lp.copy(vectors = copyWithUpdatedEvalTimePeriodic(lp.vectors, evalTimeMs))
-      case lp: ApplyLimitFunction          => lp.copy(vectors = copyWithUpdatedEvalTimePeriodic(lp.vectors, evalTimeMs))
-      case lp: ScalarVaryingDoublePlan     => lp.copy(vectors = copyWithUpdatedEvalTimePeriodic(lp.vectors, evalTimeMs))
-      case lp: RawChunkMeta                => lp.rangeSelector match {
-        case is: IntervalSelector  =>
-          lp.copy(rangeSelector = is.copy(from = evalTimeMs - (is.to - is.from), to = evalTimeMs))
-        case AllChunksSelector |
-             EncodedChunksSelector |
-             InMemoryChunksSelector |
-             WriteBufferSelector     => throw new UnsupportedOperationException(
-          "Copy supported only for IntervalSelector")
-      }
-      case lp: VectorPlan => lp.copy(
-        scalars = copyWithUpdatedEvalTimePeriodic(lp.scalars, evalTimeMs).asInstanceOf[ScalarPlan])
-      case lp: ScalarTimeBasedPlan =>
-        val diffSec = lp.rangeParams.endSecs - lp.rangeParams.startSecs
-        val newRangeParams = RangeParams(evalTimeMs / 1000 - diffSec, lp.rangeParams.stepSecs, evalTimeMs / 1000)
-        lp.copy(rangeParams = newRangeParams)
-      case lp: ScalarFixedDoublePlan =>
-        val diffSec = lp.timeStepParams.endSecs - lp.timeStepParams.startSecs
-        val newRangeParams = RangeParams(evalTimeMs / 1000 - diffSec, lp.timeStepParams.stepSecs, evalTimeMs / 1000)
-        lp.copy(timeStepParams = newRangeParams)
-      case lp: ScalarBinaryOperation =>  val updatedLhs = if (lp.lhs.isRight) Right(copyWithUpdatedEvalTimePeriodic
-      (lp.lhs.right.get, evalTimeMs).asInstanceOf[ScalarBinaryOperation]) else
-        Left(lp.lhs.left.get)
-        val updatedRhs = if (lp.rhs.isRight) Right(copyWithUpdatedEvalTimePeriodic(
-          lp.rhs.right.get, evalTimeMs).asInstanceOf[ScalarBinaryOperation])
-        else Left(lp.rhs.left.get)
-        lp.copy(lhs = updatedLhs, rhs = updatedRhs, rangeParams =
-          RangeParams(evalTimeMs / 1000 - (lp.endMs - lp.startMs),
-                      lp.rangeParams.stepSecs,
-                      evalTimeMs / 1000))
-      case sq: SubqueryWithWindowing => throw new RuntimeException("AHHH")  // TODO(a_theimer)
-      case tlsq: TopLevelSubquery =>
-        val newInner = copyWithUpdatedEvalTimePeriodic(tlsq.innerPeriodicSeries, evalTimeMs)
-        tlsq.copy(innerPeriodicSeries = newInner, startMs = evalTimeMs, endMs = evalTimeMs)
-    }
-  }
-
   private def copyTopLevelSubqueryWithUpdatedTimeRange(
     timeRange: TimeRange, topLevelSubquery: TopLevelSubquery
   ): TopLevelSubquery = {
@@ -283,23 +204,6 @@ object LogicalPlanUtils extends StrictLogging {
       }
       case p: ApplyInstantFunctionRaw =>
         p.copy(vectors = copyNonPeriodicWithUpdatedTimeRange(p.vectors, timeRange)
-          .asInstanceOf[RawSeries])
-      case _ => throw new UnsupportedOperationException("Copy supported only for RawSeries")
-    }
-  }
-
-  /**
-   * // TODO(a_theimer)
-   */
-  private def copyWithUpdatedEvalTimeNonPeriodic(plan: LogicalPlan,
-                                                 evalTimeMs: Long): RawSeriesLikePlan = {
-    plan match {
-      case rs: RawSeries => rs.rangeSelector match {
-        case is: IntervalSelector => rs.copy(rangeSelector = is.copy(evalTimeMs - (is.to - is.from), evalTimeMs))
-        case _ => throw new UnsupportedOperationException("Copy supported only for IntervalSelector")
-      }
-      case p: ApplyInstantFunctionRaw =>
-        p.copy(vectors = copyWithUpdatedEvalTimeNonPeriodic(p.vectors, evalTimeMs)
           .asInstanceOf[RawSeries])
       case _ => throw new UnsupportedOperationException("Copy supported only for RawSeries")
     }
