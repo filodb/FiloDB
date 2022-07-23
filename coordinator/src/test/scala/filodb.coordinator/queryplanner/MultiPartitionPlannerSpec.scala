@@ -11,7 +11,7 @@ import filodb.core.{MetricsTestData, SpreadChange}
 import filodb.core.metadata.Schemas
 import filodb.core.query.Filter.Equals
 import filodb.core.query.{ColumnFilter, PlannerParams, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
-import filodb.prometheus.ast.TimeStepParams
+import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
 import filodb.query.BinaryOperator.{ADD, LAND}
 import filodb.query.InstantFunctionId.Ln
@@ -1544,11 +1544,11 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       }
     }
 
+    val staleLookbackSec = WindowConstants.staleDataLookbackMillis / 1000
     val startSec = partitionRanges.head.startSec
     val stepSec = 10
     val endSec = partitionRanges.last.endSec
     val windowSec = 10 * 60  // 10m
-    val staleLookbackSec = 5 * 60  // 5m
     val offsetSec = 1 * 60  // 1m
     val tests = Seq(
       Test(s"""test{job="app"}""", staleLookbackSec, 0L),
@@ -1562,7 +1562,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       Test(s"""sum_over_time(test{job="app"}[${windowSec}s])""", windowSec, 0L),
       Test(s"""rate(test{job="app"}[${windowSec}s]) + test{job="app"}""", windowSec, 0L),
       Test(s"""holt_winters(test{job="app"}[${windowSec}s], 0.9, 0.9)""", windowSec, 0L),
-      // FIXME: subquery lookback should be consistent with others
+      // FIXME: subquery lookback should be consistent with others.
       Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s])""", windowSec + staleLookbackSec, 0L),
       Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s])""", windowSec + staleLookbackSec, 0L),
 
@@ -1643,13 +1643,19 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       )
     }
 
-    case class FuzzyTest(override val query: String,
-                         override val windowSec: Long,
-                         override val offsetSec: Long = 0L) extends Test(query, windowSec, offsetSec) {
-      // TODO(a_theimer): this should be specific to subqueries.
+    case class SubqueryTest(override val query: String,
+                            override val windowSec: Long,
+                            stepSec: Long,
+                            override val offsetSec: Long = 0L) extends Test(query, windowSec, offsetSec) {
+      // Like above: evaluate at/around edges. But an extra stepSec is added/subtracted
+      //   from some of these, since subquery start/end times are adjusted by at most that much.
       override def getSpecs(): Seq[TestSpec] = Seq(
         TestSpec(partitionRangesSec.head.start, false),
+        TestSpec(partitionRangesSec.head.end + offsetSec, false),
+        TestSpec(partitionRangesSec.head.end + offsetSec + stepSec, true),
         TestSpec(partitionRangesSec.head.end + offsetSec + windowSec/2, true),
+        TestSpec(partitionRangesSec.last.start + offsetSec + windowSec - stepSec - 1, true),
+        TestSpec(partitionRangesSec.last.start + offsetSec + windowSec, false),
         TestSpec(partitionRangesSec.last.end, false)
       )
     }
@@ -1671,8 +1677,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       }
     }
 
+    val staleLookbackSec = WindowConstants.staleDataLookbackMillis / 1000
     val windowSec = 10 * 60  // 10m
-    val staleLookbackSec = 5 * 60  // 5m
     val offsetSec = 1 * 60  // 1m
     val stepSec = 10
     val tests = Seq(
@@ -1704,12 +1710,17 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       ExactTest(s"""holt_winters(test{job="app"}[${windowSec}s] offset ${offsetSec}s, 0.9, 0.9)""", windowSec, offsetSec),
 
       // subqueries
-      FuzzyTest(s"""test{job="app"}[${windowSec}s:${stepSec}s]""", windowSec),
-      FuzzyTest(s"""sum(test{job="app"})[${windowSec}s:${stepSec}s]""", windowSec),
-      FuzzyTest(s"""rate(test{job="app"}[${windowSec}s])[${windowSec}s:${stepSec}s]""", 2 * windowSec),
-//      FuzzyTest(s"""test{job="app"}[${windowSec}s:${stepSec}s] offset ${offsetSec}s""", windowSec, offsetSec),
-//      FuzzyTest(s"""sum(test{job="app"})[${windowSec}s:${stepSec}s] offset ${offsetSec}s""", windowSec, offsetSec),
-//      FuzzyTest(s"""rate(test{job="app"}[${windowSec}s])[${windowSec}s:${stepSec}s] offset ${offsetSec}s""", 2 * windowSec, offsetSec),
+      // FIXME: Subquery behavior does not match regular range-selectors; lookbacks are added to their time-range.
+      SubqueryTest(s"""test{job="app"}[${windowSec}s:${stepSec}s]""", windowSec + staleLookbackSec, stepSec),
+      SubqueryTest(s"""sum(test{job="app"})[${windowSec}s:${stepSec}s]""", windowSec + staleLookbackSec, stepSec),
+      // FIXME: this query's plan has a 10-minute window and 10-minute lookback (ostensibly to account
+      //  for the inner series). This does not match other subqueries; the inner plan should have a 20m
+      //  window and a 5m lookback.
+      SubqueryTest(s"""rate(test{job="app"}[${windowSec}s])[${windowSec}s:${stepSec}s]""", 2 * windowSec, stepSec),
+      // FIXME: subqueries with offsets are valid promql, but these fail to parse
+      // SubqueryTest(s"""test{job="app"}[${windowSec}s:${stepSec}s] offset ${offsetSec}s""", windowSec, offsetSec),
+      // SubqueryTest(s"""sum(test{job="app"})[${windowSec}s:${stepSec}s] offset ${offsetSec}s""", windowSec, offsetSec),
+      // SubqueryTest(s"""rate(test{job="app"}[${windowSec}s])[${windowSec}s:${stepSec}s] offset ${offsetSec}s""", 2 * windowSec, offsetSec),
     )
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     for ((test, itest) <- tests.zipWithIndex) {
