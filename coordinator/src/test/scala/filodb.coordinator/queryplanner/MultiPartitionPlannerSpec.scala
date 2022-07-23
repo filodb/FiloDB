@@ -1834,5 +1834,15 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
     // make sure range sets are identical
     assertResult(expectedRanges, s"$query\n$lp\n${execPlan.printTree()}") {ranges}
+
+    // visual confirmation the plan looks ok
+    val expectedPlan =
+      """|E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+         |-E~PromQlRemoteExec(PromQlQueryParams(rate(foo{job="app"}[300s] offset 600s) + rate(foo{job="app"}[300s]),0,10,9999,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url0, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+         |-E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+         |--E~PromQlRemoteExec(PromQlQueryParams(rate(foo{job="app"}[300s] offset 600s),10300,10,10599,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url0, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+         |--E~PromQlRemoteExec(PromQlQueryParams(rate(foo{job="app"}[300s]),10300,10,10599,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url1, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+         |-E~PromQlRemoteExec(PromQlQueryParams(rate(foo{job="app"}[300s] offset 600s) + rate(foo{job="app"}[300s]),10900,10,19999,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url1, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin
+    validatePlan(execPlan, expectedPlan)
   }
 }
