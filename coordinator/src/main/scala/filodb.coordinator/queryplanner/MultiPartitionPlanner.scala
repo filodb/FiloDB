@@ -100,7 +100,13 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         }
         // Materialize an ExecPlan for each of the above time-ranges.
         val plans = timeRanges.map{ range =>
-          val updLogicalPlan = copyLogicalPlanWithUpdatedTimeRange(lp, range)
+          // TODO(a_theimer): hack to support TopLevelSubqueries in shardKeyRegexPlanner.
+          //   Need to update the logic there so this isn't necessary.
+          val updLogicalPlan = if (timeRanges.size == 1 && range.startMs == range.endMs) {
+            lp
+          } else {
+            copyLogicalPlanWithUpdatedTimeRange(lp, range)
+          }
           // Adjust start seconds in case integer division (during millis-to-seconds conversion)
           //   gives a timestamp outside the valid range.
           val startSec: Long = {
