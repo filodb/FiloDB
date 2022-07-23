@@ -98,25 +98,33 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           val totalTimeRange = TimeRange(1000 * queryParams.startSecs, 1000 * queryParams.endSecs)
           invertRanges(mergedInvalidRanges, totalTimeRange)
         }
-        // Materialize an ExecPlan for each of the above time-ranges.
-        val plans = timeRanges.map{ range =>
-          // TODO(a_theimer): hack to support TopLevelSubqueries in shardKeyRegexPlanner.
-          //   Need to update the logic there so this isn't necessary.
-          val updLogicalPlan = if (timeRanges.size == 1 && range.startMs == range.endMs) {
-            lp
-          } else {
-            copyLogicalPlanWithUpdatedTimeRange(lp, range)
+        // Generate (logicalPlan, qContext) pairs for each of the above time-ranges, then materialize.
+        // If only one valid time range exists, it spans only a single second, and the range matches
+        //   the queryParams, we assume this is intentionally an instant query and do not update
+        //   the plan via "copyLogicalPlanWithUpdatedTimeRange".
+        // copyLogicalPlanWithUpdatedTimeRange would set all nested plan ranges to exactly one second,
+        //   which would break the instant query.
+        val planContextPairs = if (timeRanges.size == 1 &&
+                                   timeRanges.head.startMs == timeRanges.head.endMs &&
+                                   timeRanges.head.startMs / 1000 == queryParams.startSecs) {
+          Seq((lp, qContext))
+        } else {
+          timeRanges.map{ range =>
+            val updLogicalPlan = copyLogicalPlanWithUpdatedTimeRange(lp, range)
+            // Adjust start seconds in case integer division (during millis-to-seconds conversion)
+            //   gives a timestamp outside the valid range.
+            val startSec: Long = {
+              val msPastSec = range.startMs % 1000
+              (range.startMs / 1000) + { if (msPastSec > 0) 1 else 0 }
+            }
+            val endSec: Long = range.endMs / 1000
+            val updQueryContext = qContext.copy(origQueryParams =
+              queryParams.copy(startSecs = startSec, endSecs = endSec))
+            (updLogicalPlan, updQueryContext)
           }
-          // Adjust start seconds in case integer division (during millis-to-seconds conversion)
-          //   gives a timestamp outside the valid range.
-          val startSec: Long = {
-            val msPastSec = range.startMs % 1000
-            (range.startMs / 1000) + { if (msPastSec > 0) 1 else 0 }
-          }
-          val endSec: Long = range.endMs / 1000
-          val updQueryContext = qContext.copy(origQueryParams =
-            queryParams.copy(startSecs = startSec, endSecs = endSec))
-          walkLogicalPlanTree(updLogicalPlan, updQueryContext).plans.head
+        }
+        val plans = planContextPairs.map { case (plan, context) =>
+          walkLogicalPlanTree(plan, context).plans.head
         }
         if (plans.isEmpty) {
           // No time-range was marked valid.
