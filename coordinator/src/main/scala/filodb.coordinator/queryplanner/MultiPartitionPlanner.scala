@@ -206,7 +206,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case lp: ApplyAbsentFunction        => super.materializeAbsentFunction(qContext, lp)
       case lp: ScalarBinaryOperation      => super.materializeScalarBinaryOperation(qContext, lp)
       case lp: ApplyLimitFunction         => super.materializeLimitFunction(qContext, lp)
-      case lp: TsCardinalities            => materializeTsCardinalities(lp, qContext)
+      case lp: TsCardinalities            => throw new IllegalArgumentException("TsCardinalities unexpected here")
       case lp: SubqueryWithWindowing       => super.materializeSubqueryWithWindowing(qContext, lp)
       case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
       case _: PeriodicSeries |
@@ -301,7 +301,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                                                 .flatMap(getInvalidRanges(_, promQlQueryParams))
     case lp: ScalarBinaryOperation       => Seq.empty
     case lp: ApplyLimitFunction          => getInvalidRanges(lp.vectors, promQlQueryParams)
-    case lp: TsCardinalities             => Seq.empty
+    case _: TsCardinalities              => throw new IllegalArgumentException("TsCardinalities unexpected here")
     case lp: SubqueryWithWindowing       => getInvalidRangesSubqueryWithWindowing(lp, promQlQueryParams)
     case lp: TopLevelSubquery            => getInvalidRangesTopLevelSubquery(lp, promQlQueryParams)
     case lp: PeriodicSeries              => getInvalidRangesPeriodicSeries(lp, promQlQueryParams)
