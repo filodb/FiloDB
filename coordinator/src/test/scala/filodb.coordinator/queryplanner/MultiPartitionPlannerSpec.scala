@@ -1550,12 +1550,12 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       timestamp + diffToNextStep
     }
     case class Test(query: String, invalidWindowSec: Long, offsetSec: Long = 0L, stepSec: Long = 10L) {
-      def getExpectedValidRanges(partitionRanges: Seq[TimeRange]): Seq[TimeRange] = {
+      def getExpectedValidRanges(partitionRanges: Seq[TimeRange], queryParams: PromQlQueryParams): Seq[TimeRange] = {
         if (partitionRanges.isEmpty) {
           return Nil
         }
         val expected = new ArrayBuffer[TimeRange]()
-        expected.append(TimeRange(partitionRanges.head.startMs,
+        expected.append(TimeRange(1000 * queryParams.startSecs,  // <------ Note the queryParams
                                   partitionRanges.head.endMs + 1000 * offsetSec))
         for (range <- partitionRanges.tail) {
           // snap the range's start to a periodic step, since these are all periodic series.
@@ -1567,24 +1567,24 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
                                     range.endMs + 1000 * offsetSec))
         }
         val last = expected.last
-        expected(expected.size - 1) = TimeRange(last.startMs, partitionRanges.last.endMs)
+        expected(expected.size - 1) = TimeRange(last.startMs, 1000 * queryParams.endSecs)  // <--- Note the queryParams
         expected
       }
-      def getTimestepParams(partitionRanges: Seq[TimeRange]): TimeStepParams = {
-        if (partitionRanges.nonEmpty) {
-          TimeStepParams(partitionRanges.head.startMs / 1000,
-                         stepSec,
-                         partitionRanges.last.endMs / 1000)
-        } else {
-          TimeStepParams(0, stepSec, 10000)
+      def getQueryParams(partitionRanges: Seq[TimeRange]): Seq[PromQlQueryParams] = {
+        if (partitionRanges.isEmpty) {
+          return Seq(PromQlQueryParams(query, 0, stepSec, 10000))
+        }
+        // shift around the start/end times in case partition boundaries are a happy path
+        Seq((0, 0), (10, 0), (0, -10), (10, -10)).map { case (startDiffSec, endDiffSec) =>
+          PromQlQueryParams(query,
+                            partitionRanges.head.startMs / 1000 + startDiffSec,
+                            stepSec,
+                            partitionRanges.last.endMs / 1000 + endDiffSec)
         }
       }
-      def getQueryParams(partitionRanges: Seq[TimeRange]): PromQlQueryParams = {
-        val timeStepParams = getTimestepParams(partitionRanges)
-        PromQlQueryParams(query, timeStepParams.start, timeStepParams.step, timeStepParams.end)
-      }
-      def getLogicalPlan(partitionRanges: Seq[TimeRange]): LogicalPlan = {
-        Parser.queryRangeToLogicalPlan(query, getTimestepParams(partitionRanges))
+      def getLogicalPlan(queryParams: PromQlQueryParams): LogicalPlan = {
+        val timeParams = TimeStepParams(queryParams.startSecs, queryParams.stepSecs, queryParams.endSecs)
+        Parser.queryRangeToLogicalPlan(query, timeParams)
       }
     }
 
@@ -1666,37 +1666,40 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner,
         "local", dataset, queryConfig)
       for (test <- tests) {
-        val promQlQueryParams = test.getQueryParams(partitionRanges)
-        val lp = test.getLogicalPlan(partitionRanges)
-        val expectedRanges = test.getExpectedValidRanges(partitionRanges)
-        val execPlan = engine.materialize(lp,
-          QueryContext(
-            origQueryParams = promQlQueryParams,
-            plannerParams = PlannerParams(processMultiPartition = true)))
+        val allQueryParams = test.getQueryParams(partitionRanges)
+        for (queryParams <- allQueryParams) {
+          val lp = test.getLogicalPlan(queryParams)
+          val expectedRanges = test.getExpectedValidRanges(partitionRanges, queryParams)
+          val execPlan = engine.materialize(lp,
+            QueryContext(
+              origQueryParams = queryParams,
+              plannerParams = PlannerParams(processMultiPartition = true)))
 
-        def assertWithHint[T](expected: T, actual: T): Unit = {
-          assertResult(expected, s"\n$test}\n$partitionRanges\n$lp\n${execPlan.printTree()}") {actual}
-        }
-
-        if (expectedRanges.isEmpty) {
-          // should default to local partition planner
-          val notMppPlan = (Seq(execPlan) ++ execPlan.children).forall{ exec =>
-            !exec.isInstanceOf[MultiPartitionDistConcatExec] &&
-            !exec.isInstanceOf[MultiPartitionReduceAggregateExec] &&
-            !exec.isInstanceOf[PromQlRemoteExec]
+          def assertWithHint[T](expected: T, actual: T): Unit = {
+            val hintString = s"\n$test\n$queryParams\n$partitionRanges\n$expectedRanges\n$lp\n${execPlan.printTree()}"
+            assertResult(expected, hintString) {actual}
           }
-          assertWithHint(true, notMppPlan)
-        } else {
-          val childRemoteExecs = if (expectedRanges.size == 1) {
-            Seq(execPlan)
+
+          if (expectedRanges.isEmpty) {
+            // should default to local partition planner
+            val notMppPlan = (Seq(execPlan) ++ execPlan.children).forall{ exec =>
+              !exec.isInstanceOf[MultiPartitionDistConcatExec] &&
+                !exec.isInstanceOf[MultiPartitionReduceAggregateExec] &&
+                !exec.isInstanceOf[PromQlRemoteExec]
+            }
+            assertWithHint(true, notMppPlan)
           } else {
-            execPlan.asInstanceOf[StitchRvsExec].children
+            val childRemoteExecs = if (expectedRanges.size == 1) {
+              Seq(execPlan)
+            } else {
+              execPlan.asInstanceOf[StitchRvsExec].children
+            }
+            val childRanges = childRemoteExecs.map{ exec =>
+              val params = exec.asInstanceOf[RemoteExec].getUrlParams()
+              TimeRange(1000 * params("start").toLong, 1000 * params("end").toLong)
+            }.sortBy(_.startMs)
+            assertWithHint(expectedRanges, childRanges)
           }
-          val childRanges = childRemoteExecs.map{ exec =>
-            val params = exec.asInstanceOf[RemoteExec].getUrlParams()
-            TimeRange(1000 * params("start").toLong, 1000 * params("end").toLong)
-          }.sortBy(_.startMs)
-          assertWithHint(expectedRanges, childRanges)
         }
       }
     }
@@ -1770,7 +1773,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         } else {
           Seq(partitionRanges.head.startSec) ++ partitionRanges.flatMap{ range =>
             Seq(range.endSec + offsetSec,
-                range.startSec + offsetSec + windowSec)
+                range.startSec + offsetSec + windowSec,
+                range.startSec + offsetSec + windowSec + 100)
           }
         }
       }
