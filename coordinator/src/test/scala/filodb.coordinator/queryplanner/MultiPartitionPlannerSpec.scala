@@ -49,7 +49,12 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   val lookbackMs = 300000
   val step = 100
 
-  // TODO(a_theimer): remove
+  def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("local", "local-url",
+    TimeRange(timeRange.startMs, timeRange.endMs)))
+
+  /**
+   * Filters out partitions outside the time-range.
+   */
   def partitionsInRange(partitions: List[PartitionAssignment], timeRange: TimeRange): List[PartitionAssignment] = {
     partitions.filter(p => {
       if (timeRange.startMs < p.timeRange.startMs) {
@@ -60,9 +65,6 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     })
   }
 
-  def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("local", "local-url",
-    TimeRange(timeRange.startMs, timeRange.endMs)))
-
   /**
    * Returns a PartitionLocationProvider that returns partitions iff they overlap the TimeRange
    *   given to either getPartitions or getMetadataPartitions.
@@ -71,15 +73,10 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
    */
   def makeTimeRangeRemotePartitionLocationProvider(partitionRanges: Seq[TimeRange]): PartitionLocationProvider = {
     def makeAssignmentsForRange(range: TimeRange): List[PartitionAssignment] = {
-      partitionRanges.zipWithIndex.map { case (range, i) =>
+      val partitions = partitionRanges.zipWithIndex.map { case (range, i) =>
         PartitionAssignment(s"remote-name$i", s"remote-url$i", range)
-      }.filter(p => {
-        if (range.startMs < p.timeRange.startMs) {
-          range.endMs >= p.timeRange.startMs
-        } else {
-          range.startMs <= p.timeRange.endMs
-        }
-      }).toList
+      }.toList
+      partitionsInRange(partitions, range)
     }
 
     new PartitionLocationProvider {
@@ -1828,11 +1825,9 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   }
 
   it ("should correctly handle cross-partition binary joins where operands have disjoint time ranges") {
-    case class TimeRangeSec(start: Long, end: Long)
-
-    val partitionRangesSec = Seq(
-      TimeRangeSec(0,9999),
-      TimeRangeSec(10000,19999),
+    val partitionRanges = Seq(
+      TimeRange(0,9999000),
+      TimeRange(10000000,19999000),
     )
 
     // snap a timestamp to the next periodic step
@@ -1842,26 +1837,11 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       timestamp + diffToNextStep
     }
 
-    val partitionLocationProvider = new PartitionLocationProvider {
-      override def getPartitions(routingKey: Map[String, String],
-                                 timeRange: TimeRange): List[PartitionAssignment] = {
-        // These names do not match the planner's used while running the tests.
-        //   The url args of PromqlRemoteExecs make it easy to see the query's time range.
-        val parts = partitionRangesSec.zipWithIndex.map{ case (rangeSec, i) =>
-          PartitionAssignment(s"remote-name$i", s"remote-url$i", TimeRange(1000 * rangeSec.start, 1000 * rangeSec.end))
-        }.toList
-        partitionsInRange(parts, timeRange)
-      }
+    val partitionLocationProvider = makeTimeRangeRemotePartitionLocationProvider(partitionRanges)
 
-      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
-                                         timeRange: TimeRange): List[PartitionAssignment] = {
-        throw new RuntimeException("should not use")
-      }
-    }
-
-    val startSec = partitionRangesSec.head.start
+    val startSec = partitionRanges.head.startMs / 1000
     val stepSec = 10
-    val endSec = partitionRangesSec.last.end
+    val endSec = partitionRanges.last.endMs / 1000
     val windowSec = 5 * 60  // 5m
     val offsetSec = 10 * 60  // 10m
 
@@ -1906,22 +1886,22 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     // get time ranges for all children
     val ranges = (remoteExecs ++ binaryJoinsExecs.head.children).map { exec =>
       val params = exec.asInstanceOf[PromQlRemoteExec].getUrlParams()
-      TimeRangeSec(params("start").toLong, params("end").toLong)
+      TimeRange(1000 * params("start").toLong, 1000 * params("end").toLong)
     }.toSet
 
     val expectedRanges = {
       // snap tail range starts to periodic steps
-      val snappedMidStart = {
-        val start = partitionRangesSec.last.start + windowSec
+      val snappedMidStartSec = {
+        val start = partitionRanges.last.startMs / 1000 + windowSec
         math.min(endSec, snap(start, stepSec, startSec))
       }
-      val snappedLastStart = {
-        val start = partitionRangesSec.last.start + windowSec +  (offsetSec - windowSec) + windowSec
+      val snappedLastStartSec = {
+        val start = partitionRanges.last.startMs / 1000 + windowSec + offsetSec
         math.min(endSec, snap(start, stepSec, startSec))
       }
-      Set(TimeRangeSec(startSec, partitionRangesSec.head.end),
-          TimeRangeSec(snappedMidStart, partitionRangesSec.head.end + (offsetSec - windowSec) + windowSec),
-          TimeRangeSec(snappedLastStart, endSec))
+      Set(TimeRange(1000 * startSec, partitionRanges.head.endMs),
+          TimeRange(1000 * snappedMidStartSec, partitionRanges.head.endMs + 1000 * offsetSec),
+          TimeRange(1000 * snappedLastStartSec, 1000 * endSec))
     }
 
     // make sure range sets are identical
