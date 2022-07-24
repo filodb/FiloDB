@@ -1724,23 +1724,37 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         TimeRangeSec(10000,19999),
         TimeRangeSec(20000,29999)
       ),
-//      // |----|    |----|
-//      Seq(
-//        TimeRangeSec(0,9999),
-//        TimeRangeSec(20000,29999)
-//      ),
-//      // |----|    |----|    |----|
-//      Seq(
-//        TimeRangeSec(0,9999),
-//        TimeRangeSec(20000,29999),
-//        TimeRangeSec(40000,49999)
-//      ),
-//      // |----||----|    |----|
-//      Seq(
-//        TimeRangeSec(0,9999),
-//        TimeRangeSec(10000,19999),
-//        TimeRangeSec(40000,49999)
-//      )
+      // Consider this scenario with a simple instant selector:
+      //      P0                 P1
+      //   |------|        |------------|
+      //             |==========|  <--- query lookback
+      // Only a P1 PartitionAssignment should be returned for this query. When one
+      //   PartitionAssignment is returned, we do not know if a split has technically occurred
+      //   (or if the PartitionAssignment is the first).
+      // The below tests fail because, in these scenarios, the planner optimistically assumes
+      //   a split has not occurred; it would consider the above evaluation time valid. If
+      //   lookbacks beyond proper partition bounds need to be invalidated, then lots of other
+      //   specs would also need updates. But this is such an uncommon use-case that proper
+      //   partition-boundary invalidation is unnecessary. As of this writing, only splits
+      //   are invalidated.
+      //
+      // // |----|    |----|
+      // Seq(
+      //   TimeRangeSec(0,9999),
+      //   TimeRangeSec(20000,29999)
+      // ),
+      // // |----|    |----|    |----|
+      // Seq(
+      //   TimeRangeSec(0,9999),
+      //   TimeRangeSec(20000,29999),
+      //   TimeRangeSec(40000,49999)
+      // ),
+      // // |----||----|    |----|
+      // Seq(
+      //   TimeRangeSec(0,9999),
+      //   TimeRangeSec(10000,19999),
+      //   TimeRangeSec(40000,49999)
+      // )
     )
 
     // evaluates at/around the edges of valid/invalid ranges
