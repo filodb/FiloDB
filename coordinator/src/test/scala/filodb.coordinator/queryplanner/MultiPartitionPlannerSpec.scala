@@ -5,7 +5,6 @@ import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{MetricsTestData, SpreadChange}
@@ -18,6 +17,9 @@ import filodb.query.BinaryOperator.{ADD, LAND}
 import filodb.query.InstantFunctionId.Ln
 import filodb.query.{LabelCardinality, LogicalPlan, PlanValidationSpec, SeriesKeysByFilters, TsCardinalities}
 import filodb.query.exec._
+
+
+import scala.collection.mutable.ArrayBuffer
 
 class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValidationSpec{
   private implicit val system = ActorSystem()
@@ -47,6 +49,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   val lookbackMs = 300000
   val step = 100
 
+  // TODO(a_theimer): remove
   def partitionsInRange(partitions: List[PartitionAssignment], timeRange: TimeRange): List[PartitionAssignment] = {
     partitions.filter(p => {
       if (timeRange.startMs < p.timeRange.startMs) {
@@ -59,6 +62,37 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
   def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("local", "local-url",
     TimeRange(timeRange.startMs, timeRange.endMs)))
+
+  /**
+   * Returns a PartitionLocationProvider that returns partitions iff they overlap the TimeRange
+   *   given to either getPartitions or getMetadataPartitions.
+   *
+   * *** Routing keys are ignored. ***
+   */
+  def makeTimeRangeRemotePartitionLocationProvider(partitionRanges: Seq[TimeRange]): PartitionLocationProvider = {
+    def makeAssignmentsForRange(range: TimeRange): List[PartitionAssignment] = {
+      partitionRanges.zipWithIndex.map { case (range, i) =>
+        PartitionAssignment(s"remote-name$i", s"remote-url$i", range)
+      }.filter(p => {
+        if (range.startMs < p.timeRange.startMs) {
+          range.endMs >= p.timeRange.startMs
+        } else {
+          range.startMs <= p.timeRange.endMs
+        }
+      }).toList
+    }
+
+    new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String],
+                                 timeRange: TimeRange): List[PartitionAssignment] = {
+        makeAssignmentsForRange(timeRange)
+      }
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                         timeRange: TimeRange): List[PartitionAssignment] = {
+        makeAssignmentsForRange(timeRange)
+      }
+    }
+  }
 
   it ("should not generate PromQlExec plan when partitions are local") {
     val partitionLocationProvider = new PartitionLocationProvider {
@@ -1511,61 +1545,107 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   }
 
   it ("should not use/return data from invalid ranges") {
-    case class TimeRangeSec(startSec: Long, endSec: Long)
-    case class Test(query: String, invalidWindow: Long, offsetSec: Long)
-
-    val partitionRanges = Seq(
-      TimeRangeSec(0,999),
-      TimeRangeSec(1000,1999),
-    )
-
     // snap a timestamp to the next periodic step
     def snap(timestamp: Long, step: Long, origin: Long): Long = {
       val totalDiff = timestamp - origin
       val diffToNextStep = totalDiff % step
       timestamp + diffToNextStep
     }
-
-    // These names do not match the planner's used while running the tests.
-    //   The url args of PromqlRemoteExecs make it easy to see the query's time range.
-    val partitionLocationProvider = new PartitionLocationProvider {
-      override def getPartitions(routingKey: Map[String, String],
-                                 timeRange: TimeRange): List[PartitionAssignment] = {
-        val parts = partitionRanges.zipWithIndex.map{ case (rangeSec, i) =>
-          PartitionAssignment(
-            s"remote-name$i", s"remote-url$i",
-            TimeRange(1000 * rangeSec.startSec, 1000 * rangeSec.endSec))
-        }.toList
-        partitionsInRange(parts, timeRange)
+    case class Test(query: String, invalidWindowSec: Long, offsetSec: Long = 0L, stepSec: Long = 10L) {
+      def getExpectedValidRanges(partitionRanges: Seq[TimeRange]): Seq[TimeRange] = {
+        if (partitionRanges.isEmpty) {
+          return Nil
+        }
+        val expected = new ArrayBuffer[TimeRange]()
+        expected.append(TimeRange(partitionRanges.head.startMs,
+                                  partitionRanges.head.endMs + 1000 * offsetSec))
+        for (range <- partitionRanges.tail) {
+          // snap the range's start to a periodic step, since these are all periodic series.
+          val snappedStart = {
+            val startSec = range.startMs / 1000 + invalidWindowSec + offsetSec
+            snap(startSec, stepSec, origin = partitionRanges.head.startMs / 1000)
+          }
+          expected.append(TimeRange(1000 * snappedStart,
+                                    range.endMs + 1000 * offsetSec))
+        }
+        val last = expected.last
+        expected(expected.size - 1) = TimeRange(last.startMs, partitionRanges.last.endMs)
+        expected
       }
-
-      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
-                                         timeRange: TimeRange): List[PartitionAssignment] = {
-        throw new RuntimeException("should not use")
+      def getTimestepParams(partitionRanges: Seq[TimeRange]): TimeStepParams = {
+        if (partitionRanges.nonEmpty) {
+          TimeStepParams(partitionRanges.head.startMs / 1000,
+                         stepSec,
+                         partitionRanges.last.endMs / 1000)
+        } else {
+          TimeStepParams(0, stepSec, 10000)
+        }
+      }
+      def getQueryParams(partitionRanges: Seq[TimeRange]): PromQlQueryParams = {
+        val timeStepParams = getTimestepParams(partitionRanges)
+        PromQlQueryParams(query, timeStepParams.start, timeStepParams.step, timeStepParams.end)
+      }
+      def getLogicalPlan(partitionRanges: Seq[TimeRange]): LogicalPlan = {
+        Parser.queryRangeToLogicalPlan(query, getTimestepParams(partitionRanges))
       }
     }
 
+    val partitionRangeSetups = Seq(
+      // Should default to local partition planner.
+      Nil,
+      // Should not give any invalid ranges.
+      Seq(
+        TimeRange(0,999000),
+      ),
+      // |----||----|
+      Seq(
+        TimeRange(0,999000),
+        TimeRange(1000000,1999000)
+      ),
+      // |----||----||----|
+      Seq(
+        TimeRange(0,999000),
+        TimeRange(1000000,1999000),
+        TimeRange(2000000,2999000)
+      ),
+      // |----|    |----|
+      Seq(
+        TimeRange(0,999000),
+        TimeRange(2000000,2999000)
+      ),
+      // |----|    |----|    |----|
+      Seq(
+        TimeRange(0,999000),
+        TimeRange(2000000,2999000),
+        TimeRange(4000000,4999000)
+      ),
+      // |----||----|    |----|
+      Seq(
+        TimeRange(0,999000),
+        TimeRange(1000000,1999000),
+        TimeRange(4000000,4999000)
+      )
+    )
+
     val staleLookbackSec = WindowConstants.staleDataLookbackMillis / 1000
-    val startSec = partitionRanges.head.startSec
-    val stepSec = 10
-    val endSec = partitionRanges.last.endSec
     val windowSec = 10 * 60  // 10m
     val offsetSec = 1 * 60  // 1m
+    val stepSec = 10
     val tests = Seq(
-      Test(s"""test{job="app"}""", staleLookbackSec, 0L),
-      Test(s"""sum(test{job="app"})""", staleLookbackSec, 0L),
-      Test(s"""rate(test{job="app"}[${windowSec}s])""", windowSec, 0L),
-      Test(s"""group(test{job="app"})""", staleLookbackSec, 0L),
-      Test(s"""left{job="app"} + right{job="app"}""", staleLookbackSec, 0L),
-      Test(s"""group(left{job="app"}) + sum(right{job="app"})""", staleLookbackSec, 0L),
-      Test(s"""group(left{job="app"}) or sum(right{job="app"})""", staleLookbackSec, 0L),
-      Test(s"""histogram_quantile(0.9, test{job="app"})""", staleLookbackSec, 0L),
-      Test(s"""sum_over_time(test{job="app"}[${windowSec}s])""", windowSec, 0L),
-      Test(s"""rate(test{job="app"}[${windowSec}s]) + test{job="app"}""", windowSec, 0L),
-      Test(s"""holt_winters(test{job="app"}[${windowSec}s], 0.9, 0.9)""", windowSec, 0L),
+      Test(s"""test{job="app"}""", staleLookbackSec),
+      Test(s"""sum(test{job="app"})""", staleLookbackSec),
+      Test(s"""rate(test{job="app"}[${windowSec}s])""", windowSec),
+      Test(s"""group(test{job="app"})""", staleLookbackSec),
+      Test(s"""left{job="app"} + right{job="app"}""", staleLookbackSec),
+      Test(s"""group(left{job="app"}) + sum(right{job="app"})""", staleLookbackSec),
+      Test(s"""group(left{job="app"}) or sum(right{job="app"})""", staleLookbackSec),
+      Test(s"""histogram_quantile(0.9, test{job="app"})""", staleLookbackSec),
+      Test(s"""sum_over_time(test{job="app"}[${windowSec}s])""", windowSec),
+      Test(s"""rate(test{job="app"}[${windowSec}s]) + test{job="app"}""", windowSec),
+      Test(s"""holt_winters(test{job="app"}[${windowSec}s], 0.9, 0.9)""", windowSec),
       // FIXME: subquery lookback should be consistent with others.
-      Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s])""", windowSec + staleLookbackSec, 0L),
-      Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s])""", windowSec + staleLookbackSec, 0L),
+      Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s])""", windowSec + staleLookbackSec),
+      Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s])""", windowSec + staleLookbackSec),
 
       // offset queries
       Test(s"""test{job="app"} offset ${offsetSec}s""", staleLookbackSec, offsetSec),
@@ -1583,33 +1663,44 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       // Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s] offset ${offsetSec}s)""", windowSec + staleLookbackSec, offsetSec),
       // Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s] offset ${offsetSec}s)""", windowSec + staleLookbackSec, offsetSec),
     )
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner,
-                          "local", dataset, queryConfig)
-    for (test <- tests) {
-      val lp = Parser.queryRangeToLogicalPlan(test.query, TimeStepParams(startSec, stepSec, endSec))
-      val promQlQueryParams = PromQlQueryParams(test.query, startSec, stepSec, endSec)
-      val execPlan = engine.materialize(lp,
-        QueryContext(
-          origQueryParams = promQlQueryParams,
-          plannerParams = PlannerParams(processMultiPartition = true)))
-      val childRemoteExecs = execPlan.asInstanceOf[StitchRvsExec].children.map{ exec =>
-        val params = exec.asInstanceOf[PromQlRemoteExec].getUrlParams()
-        TimeRangeSec(params("start").toLong, params("end").toLong)
-      }
-      // make sure exactly one plan per partition
-      assertResult(2, s"${test.query}\n$lp\n${execPlan.printTree()}") {childRemoteExecs.size}
+    for (partitionRanges <- partitionRangeSetups) {
+      val partitionLocationProvider = makeTimeRangeRemotePartitionLocationProvider(partitionRanges)
+      val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner,
+        "local", dataset, queryConfig)
+      for (test <- tests) {
+        val promQlQueryParams = test.getQueryParams(partitionRanges)
+        val lp = test.getLogicalPlan(partitionRanges)
+        val expectedRanges = test.getExpectedValidRanges(partitionRanges)
+        val execPlan = engine.materialize(lp,
+          QueryContext(
+            origQueryParams = promQlQueryParams,
+            plannerParams = PlannerParams(processMultiPartition = true)))
 
-      val expectedRanges = {
-        // snap the newer range's start to a periodic step, since these are all periodic series.
-        val snappedSecondStart = {
-          val start = partitionRanges.last.startSec + test.invalidWindow + test.offsetSec
-          math.min(endSec, snap(start, stepSec, startSec))
+        def assertWithHint[T](expected: T, actual: T): Unit = {
+          assertResult(expected, s"\n$test}\n$partitionRanges\n$lp\n${execPlan.printTree()}") {actual}
         }
-        Set(TimeRangeSec(startSec, partitionRanges.head.endSec + test.offsetSec),
-            TimeRangeSec(snappedSecondStart, endSec))
+
+        if (expectedRanges.isEmpty) {
+          // should default to local partition planner
+          val notMppPlan = (Seq(execPlan) ++ execPlan.children).forall{ exec =>
+            !exec.isInstanceOf[MultiPartitionDistConcatExec] &&
+            !exec.isInstanceOf[MultiPartitionReduceAggregateExec] &&
+            !exec.isInstanceOf[PromQlRemoteExec]
+          }
+          assertWithHint(true, notMppPlan)
+        } else {
+          val childRemoteExecs = if (expectedRanges.size == 1) {
+            Seq(execPlan)
+          } else {
+            execPlan.asInstanceOf[StitchRvsExec].children
+          }
+          val childRanges = childRemoteExecs.map{ exec =>
+            val params = exec.asInstanceOf[RemoteExec].getUrlParams()
+            TimeRange(1000 * params("start").toLong, 1000 * params("end").toLong)
+          }.sortBy(_.startMs)
+          assertWithHint(expectedRanges, childRanges)
+        }
       }
-      // make sure ranges are as-expected
-      assertResult(expectedRanges, s"${test.query}\n$lp\n${execPlan.printTree()}") {childRemoteExecs.toSet}
     }
   }
 
