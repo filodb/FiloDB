@@ -56,13 +56,13 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
    * Filters out partitions outside the time-range.
    */
   def partitionsInRange(partitions: List[PartitionAssignment], timeRange: TimeRange): List[PartitionAssignment] = {
-    partitions.filter(p => {
+    partitions.filter{ p =>
       if (timeRange.startMs < p.timeRange.startMs) {
         timeRange.endMs >= p.timeRange.startMs
       } else {
         timeRange.startMs <= p.timeRange.endMs
       }
-    })
+    }
   }
 
   /**
@@ -1704,34 +1704,86 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
   it ("should succeed/fail instant queries without/with cross-partition data") {
     // Conversion between sec/ms doesn't happen super often here-- use this, instead.
-    case class TimeRangeSec(start: Long, end: Long)
+    case class TimeRangeSec(startSec: Long, endSec: Long)
 
-    val partitionRangesSec = Seq(
-      TimeRangeSec(0,9999),
-      TimeRangeSec(10000,19999),
+    val partitionRangeSetups = Seq(
+      // Should default to local partition planner.
+      Nil,
+      // Should not give any invalid ranges.
+      Seq(
+        TimeRangeSec(0,9999),
+      ),
+      // |----||----|
+      Seq(
+        TimeRangeSec(0,9999),
+        TimeRangeSec(10000,19999)
+      ),
+      // |----||----||----|
+      Seq(
+        TimeRangeSec(0,9999),
+        TimeRangeSec(10000,19999),
+        TimeRangeSec(20000,29999)
+      ),
+//      // |----|    |----|
+//      Seq(
+//        TimeRangeSec(0,9999),
+//        TimeRangeSec(20000,29999)
+//      ),
+//      // |----|    |----|    |----|
+//      Seq(
+//        TimeRangeSec(0,9999),
+//        TimeRangeSec(20000,29999),
+//        TimeRangeSec(40000,49999)
+//      ),
+//      // |----||----|    |----|
+//      Seq(
+//        TimeRangeSec(0,9999),
+//        TimeRangeSec(10000,19999),
+//        TimeRangeSec(40000,49999)
+//      )
     )
 
+    // evaluates at/around the edges of valid/invalid ranges
     abstract class Test(val query: String,
                         val windowSec: Long,
                         val offsetSec: Long = 0L) {
-      def getValidEvalSecs(): Seq[Long]
-      def getInvalidEvalSecs(): Seq[Long]
+      def getValidEvalSecs(partitionRanges: Seq[TimeRangeSec]): Seq[Long]
+      def getInvalidEvalSecs(partitionRanges: Seq[TimeRangeSec]): Seq[Long]
+      def getValidEvalSecsDefault(partitionRanges: Seq[TimeRangeSec]): Seq[Long] = {
+        if (partitionRanges.isEmpty) {
+          // should default to local planner
+          Seq(0, 123, 1000)
+        } else {
+          Seq(partitionRanges.head.startSec) ++ partitionRanges.flatMap{ range =>
+            Seq(range.endSec + offsetSec,
+                range.startSec + offsetSec + windowSec)
+          }
+        }
+      }
+      def getInvalidEvalSecsDefault(partitionRanges: Seq[TimeRangeSec], bufferSecs: Long = 0L): Seq[Long] = {
+        if (partitionRanges.size < 2) {
+          // if 0-- defaults to local planner
+          // if 1-- no eval times are invalid
+          Nil
+        } else {
+          partitionRanges.tail.flatMap{ range =>
+            Seq(range.startSec + offsetSec,
+                range.startSec + offsetSec + windowSec / 2,
+                // bufferSecs subtracted here, since start might be incremented for subqueries
+                range.startSec + offsetSec + windowSec - 1 - bufferSecs)
+          }
+        }
+      }
     }
 
-    // evaluates at/around the edges of valid/invalid ranges
     case class ExactTest(override val query: String,
                          override val windowSec: Long,
                          override val offsetSec: Long = 0L) extends Test(query, windowSec, offsetSec) {
-      override def getValidEvalSecs(): Seq[Long] = {
-        Seq(partitionRangesSec.head.start,
-            partitionRangesSec.head.end + offsetSec,
-            partitionRangesSec.last.start + offsetSec + windowSec,
-            partitionRangesSec.last.end)
+      override def getValidEvalSecs(partitionRangesSec: Seq[TimeRangeSec]): Seq[Long] = {
+        getValidEvalSecsDefault(partitionRangesSec)
       }
-      override def getInvalidEvalSecs(): Seq[Long] = {
-        Seq(partitionRangesSec.head.end + offsetSec + 1,
-            partitionRangesSec.head.end + offsetSec + windowSec/2,
-            partitionRangesSec.last.start + offsetSec + windowSec - 1)
+      override def getInvalidEvalSecs(partitionRangesSec: Seq[TimeRangeSec]): Seq[Long] = {
+        getInvalidEvalSecsDefault(partitionRangesSec)
       }
     }
 
@@ -1741,21 +1793,13 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
                             override val windowSec: Long,
                             stepSec: Long,
                             override val offsetSec: Long = 0L) extends Test(query, windowSec, offsetSec) {
-      override def getValidEvalSecs(): Seq[Long] = {
-        Seq(partitionRangesSec.head.start,
-            partitionRangesSec.head.end + offsetSec,
-            partitionRangesSec.last.start + offsetSec + windowSec,
-            partitionRangesSec.last.end)
+      override def getValidEvalSecs(partitionRangesSec: Seq[TimeRangeSec]): Seq[Long] = {
+        getValidEvalSecsDefault(partitionRangesSec)
       }
-      override def getInvalidEvalSecs(): Seq[Long] = {
-        Seq(partitionRangesSec.head.end + offsetSec + stepSec,
-            partitionRangesSec.head.end + offsetSec + windowSec/2,
-            partitionRangesSec.last.start + offsetSec + windowSec - stepSec - 1)
+      override def getInvalidEvalSecs(partitionRangesSec: Seq[TimeRangeSec]): Seq[Long] = {
+        getInvalidEvalSecsDefault(partitionRangesSec, stepSec)
       }
     }
-
-    val partitionLocationProvider = makeTimeRangeRemotePartitionLocationProvider(
-      partitionRangesSec.map(r => TimeRange(1000 * r.start, 1000 * r.end)))
 
     val staleLookbackSec = WindowConstants.staleDataLookbackMillis / 1000
     val windowSec = 10 * 60  // 10m
@@ -1802,20 +1846,26 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       // SubqueryTest(s"""sum(test{job="app"})[${windowSec}s:${stepSec}s] offset ${offsetSec}s""", windowSec, offsetSec),
       // SubqueryTest(s"""rate(test{job="app"}[${windowSec}s])[${windowSec}s:${stepSec}s] offset ${offsetSec}s""", 2 * windowSec, offsetSec),
     )
-    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
-    for ((test, itest) <- tests.zipWithIndex) {
-      // pair each valid/invalid timestamp with a boolean that indicates
-      //   whether-or-not the result should be empty
-      val validEvalSecs = test.getValidEvalSecs()
-      val invalidEvalSecs = test.getInvalidEvalSecs()
-      val pairs = validEvalSecs.map((_, false)) ++ invalidEvalSecs.map((_, true))
-      for ((evalSec, shouldBeEmpty) <- pairs) {
-        val lp = Parser.queryRangeToLogicalPlan(test.query, TimeStepParams(evalSec, 1, evalSec))
-        val promQlQueryParams = PromQlQueryParams(test.query, evalSec, 1, evalSec)
-        val execPlan = engine.materialize(lp, QueryContext(
-          origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true)))
-        // check whether-or-not this should/shouldn't give an empty result
-        assertResult(shouldBeEmpty, s"itest:$itest,evalSec:$evalSec\n${test.query}\n$lp\n${execPlan.printTree()}") {execPlan.isInstanceOf[EmptyResultExec]}
+    for (partitionRanges <- partitionRangeSetups) {
+      val partitionLocationProvider = makeTimeRangeRemotePartitionLocationProvider(
+        partitionRanges.map(r => TimeRange(1000 * r.startSec, 1000 * r.endSec)))
+      val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner,
+                            "local", dataset, queryConfig)
+      for (test <- tests) {
+        // pair each valid/invalid timestamp with a boolean that indicates
+        //   whether-or-not the result should be empty
+        val validEvalSecs = test.getValidEvalSecs(partitionRanges)
+        val invalidEvalSecs = test.getInvalidEvalSecs(partitionRanges)
+        val pairs = validEvalSecs.map((_, true)) ++ invalidEvalSecs.map((_, false))
+        for ((evalSec, isValid) <- pairs) {
+          val lp = Parser.queryRangeToLogicalPlan(test.query, TimeStepParams(evalSec, 1, evalSec))
+          val promQlQueryParams = PromQlQueryParams(test.query, evalSec, 1, evalSec)
+          val execPlan = engine.materialize(lp, QueryContext(
+            origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true)))
+          // check that we should[n't] have gotten an empty result
+          val hintString = s"evalSec:$evalSec\n$test\n$partitionRanges\n$lp\n${execPlan.printTree()}"
+          assertResult(isValid, hintString) {!execPlan.isInstanceOf[EmptyResultExec]}
+        }
       }
     }
   }
