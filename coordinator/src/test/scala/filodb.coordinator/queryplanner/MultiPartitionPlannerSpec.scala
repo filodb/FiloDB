@@ -1704,7 +1704,6 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   it ("should succeed/fail instant queries without/with cross-partition data") {
     // Conversion between sec/ms doesn't happen super often here-- use this, instead.
     case class TimeRangeSec(start: Long, end: Long)
-    case class TestSpec(evalSec: Long, shouldBeEmpty: Boolean)
 
     val partitionRangesSec = Seq(
       TimeRangeSec(0,9999),
@@ -1714,58 +1713,48 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     abstract class Test(val query: String,
                         val windowSec: Long,
                         val offsetSec: Long = 0L) {
-      def getSpecs(): Seq[TestSpec]
+      def getValidEvalSecs(): Seq[Long]
+      def getInvalidEvalSecs(): Seq[Long]
     }
 
+    // evaluates at/around the edges of valid/invalid ranges
     case class ExactTest(override val query: String,
                          override val windowSec: Long,
                          override val offsetSec: Long = 0L) extends Test(query, windowSec, offsetSec) {
-      // Evaluate at/around the edges of invalid ranges.
-      // Also evaluate in the middle for good measure.
-      override def getSpecs(): Seq[TestSpec] = Seq(
-        TestSpec(partitionRangesSec.head.start, false),
-        TestSpec(partitionRangesSec.head.end + offsetSec, false),
-        TestSpec(partitionRangesSec.head.end + offsetSec + 1, true),
-        TestSpec(partitionRangesSec.head.end + offsetSec + windowSec/2, true),
-        TestSpec(partitionRangesSec.last.start + offsetSec + windowSec - 1, true),
-        TestSpec(partitionRangesSec.last.start + offsetSec + windowSec, false),
-        TestSpec(partitionRangesSec.last.end, false)
-      )
+      override def getValidEvalSecs(): Seq[Long] = {
+        Seq(partitionRangesSec.head.start,
+            partitionRangesSec.head.end + offsetSec,
+            partitionRangesSec.last.start + offsetSec + windowSec,
+            partitionRangesSec.last.end)
+      }
+      override def getInvalidEvalSecs(): Seq[Long] = {
+        Seq(partitionRangesSec.head.end + offsetSec + 1,
+            partitionRangesSec.head.end + offsetSec + windowSec/2,
+            partitionRangesSec.last.start + offsetSec + windowSec - 1)
+      }
     }
 
+    // Like above: evaluate at/around edges. But an extra stepSec is added/subtracted
+    //   from some of these, since subquery start/end times are adjusted by at most that much.
     case class SubqueryTest(override val query: String,
                             override val windowSec: Long,
                             stepSec: Long,
                             override val offsetSec: Long = 0L) extends Test(query, windowSec, offsetSec) {
-      // Like above: evaluate at/around edges. But an extra stepSec is added/subtracted
-      //   from some of these, since subquery start/end times are adjusted by at most that much.
-      override def getSpecs(): Seq[TestSpec] = Seq(
-        TestSpec(partitionRangesSec.head.start, false),
-        TestSpec(partitionRangesSec.head.end + offsetSec, false),
-        TestSpec(partitionRangesSec.head.end + offsetSec + stepSec, true),
-        TestSpec(partitionRangesSec.head.end + offsetSec + windowSec/2, true),
-        TestSpec(partitionRangesSec.last.start + offsetSec + windowSec - stepSec - 1, true),
-        TestSpec(partitionRangesSec.last.start + offsetSec + windowSec, false),
-        TestSpec(partitionRangesSec.last.end, false)
-      )
-    }
-
-    val partitionLocationProvider = new PartitionLocationProvider {
-      override def getPartitions(routingKey: Map[String, String],
-                                 timeRange: TimeRange): List[PartitionAssignment] = {
-        // These names do not match the planner's used while running the tests.
-        //   The url args of PromqlRemoteExecs make it easy to see the query's time range.
-        val parts = partitionRangesSec.zipWithIndex.map{ case (rangeSec, i) =>
-          PartitionAssignment(s"remote-name$i", s"remote-url$i", TimeRange(1000 * rangeSec.start, 1000 * rangeSec.end))
-        }.toList
-        partitionsInRange(parts, timeRange)
+      override def getValidEvalSecs(): Seq[Long] = {
+        Seq(partitionRangesSec.head.start,
+            partitionRangesSec.head.end + offsetSec,
+            partitionRangesSec.last.start + offsetSec + windowSec,
+            partitionRangesSec.last.end)
       }
-
-      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
-                                         timeRange: TimeRange): List[PartitionAssignment] = {
-        throw new RuntimeException("should not use")
+      override def getInvalidEvalSecs(): Seq[Long] = {
+        Seq(partitionRangesSec.head.end + offsetSec + stepSec,
+            partitionRangesSec.head.end + offsetSec + windowSec/2,
+            partitionRangesSec.last.start + offsetSec + windowSec - stepSec - 1)
       }
     }
+
+    val partitionLocationProvider = makeTimeRangeRemotePartitionLocationProvider(
+      partitionRangesSec.map(r => TimeRange(1000 * r.start, 1000 * r.end)))
 
     val staleLookbackSec = WindowConstants.staleDataLookbackMillis / 1000
     val windowSec = 10 * 60  // 10m
@@ -1814,13 +1803,18 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     )
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
     for ((test, itest) <- tests.zipWithIndex) {
-      for ((spec, ispec) <- test.getSpecs().zipWithIndex) {
-        val lp = Parser.queryRangeToLogicalPlan(test.query, TimeStepParams(spec.evalSec, 1, spec.evalSec))
-        val promQlQueryParams = PromQlQueryParams(test.query, spec.evalSec, 1, spec.evalSec)
+      // pair each valid/invalid timestamp with a boolean that indicates
+      //   whether-or-not the result should be empty
+      val validEvalSecs = test.getValidEvalSecs()
+      val invalidEvalSecs = test.getInvalidEvalSecs()
+      val pairs = validEvalSecs.map((_, false)) ++ invalidEvalSecs.map((_, true))
+      for ((evalSec, shouldBeEmpty) <- pairs) {
+        val lp = Parser.queryRangeToLogicalPlan(test.query, TimeStepParams(evalSec, 1, evalSec))
+        val promQlQueryParams = PromQlQueryParams(test.query, evalSec, 1, evalSec)
         val execPlan = engine.materialize(lp, QueryContext(
           origQueryParams = promQlQueryParams, plannerParams = PlannerParams(processMultiPartition = true)))
-        // check whether-or-not this should/shouldn't be an empty result
-        assertResult(spec.shouldBeEmpty, s"itest:$itest,ispec:$ispec\n$spec\n${test.query}\n$lp\n${execPlan.printTree()}") {execPlan.isInstanceOf[EmptyResultExec]}
+        // check whether-or-not this should/shouldn't give an empty result
+        assertResult(shouldBeEmpty, s"itest:$itest,evalSec:$evalSec\n${test.query}\n$lp\n${execPlan.printTree()}") {execPlan.isInstanceOf[EmptyResultExec]}
       }
     }
   }
