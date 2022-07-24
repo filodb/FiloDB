@@ -225,11 +225,13 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val lookbackMs = getLookBackMillis(logicalPlan).fold(0L)((a: Long, b: Long) => math.max(a, b))
     val offsetMs = getOffsetMillis(logicalPlan).headOption.getOrElse(0L)
     for (i <- 1 until assignmentsSorted.size) {
-      val invalidSize = (assignmentsSorted(i).timeRange.startMs - 1 + lookbackMs) -
-                        (assignmentsSorted(i-1).timeRange.endMs + 1)
-      if (invalidSize > 0) {
-        invalidRanges.append(TimeRange(assignmentsSorted(i-1).timeRange.endMs + offsetMs + 1,
-                                       assignmentsSorted(i).timeRange.startMs + offsetMs + lookbackMs + 1))
+      val prevEndMs = assignmentsSorted(i-1).timeRange.endMs + offsetMs
+      val currStartMs = assignmentsSorted(i).timeRange.startMs + offsetMs + lookbackMs
+      val invalidRange = TimeRange(prevEndMs + 1, currStartMs - 1)
+      if (invalidRange.startMs <= invalidRange.endMs) {
+        invalidRanges.append(invalidRange)
+      } else {
+        invalidRanges.append(TimeRange(prevEndMs, currStartMs))
       }
     }
     invalidRanges
@@ -242,7 +244,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val invalidRanges = getInvalidRanges(logicalPlan.rawSeries, queryParams)
     val snappedRanges = invalidRanges.map(r => {
       val totalDiff = r.endMs - logicalPlan.startMs
-      val diffToNextStep = totalDiff % logicalPlan.stepMs
+      val partialStep = totalDiff % logicalPlan.stepMs
+      val diffToNextStep = if (partialStep > 0 ) logicalPlan.stepMs - partialStep else 0
       TimeRange(r.startMs, math.min(logicalPlan.endMs, r.endMs + diffToNextStep))
     })
     mergeAndSortRanges(snappedRanges)

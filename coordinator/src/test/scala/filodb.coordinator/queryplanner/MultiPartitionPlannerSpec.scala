@@ -1545,7 +1545,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     // snap a timestamp to the next periodic step
     def snap(timestamp: Long, step: Long, origin: Long): Long = {
       val totalDiff = timestamp - origin
-      val diffToNextStep = totalDiff % step
+      val partialStep = totalDiff % step
+      val diffToNextStep = if (partialStep > 0) step - partialStep else 0
       timestamp + diffToNextStep
     }
     case class Test(query: String, invalidWindowSec: Long, offsetSec: Long = 0L, stepSec: Long = 10L) {
@@ -1828,7 +1829,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     // snap a timestamp to the next periodic step
     def snap(timestamp: Long, step: Long, origin: Long): Long = {
       val totalDiff = timestamp - origin
-      val diffToNextStep = totalDiff % step
+      val partialStep = totalDiff % step
+      val diffToNextStep = if (partialStep > 0) step - partialStep else 0
       timestamp + diffToNextStep
     }
 
