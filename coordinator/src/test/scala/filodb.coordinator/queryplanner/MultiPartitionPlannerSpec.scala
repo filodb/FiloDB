@@ -1702,6 +1702,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   }
 
   it ("should succeed/fail instant queries without/with cross-partition data") {
+    // Conversion between sec/ms doesn't happen super often here-- use this, instead.
     case class TimeRangeSec(start: Long, end: Long)
     case class TestSpec(evalSec: Long, shouldBeEmpty: Boolean)
 
