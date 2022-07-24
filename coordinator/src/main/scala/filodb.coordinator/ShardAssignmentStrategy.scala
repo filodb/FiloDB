@@ -3,6 +3,7 @@ package filodb.coordinator
 import java.net.InetAddress
 
 import akka.actor.ActorRef
+import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.NodeClusterActor.DatasetResourceSpec
@@ -119,6 +120,22 @@ class K8sStatefulSetShardAssignmentStrategy extends ShardAssignmentStrategy with
       }
 }
 
+
+class FixedShardAssignmentStrategy(filodbConfig: Config) extends ShardAssignmentStrategy {
+
+  override def shardAssignments(coord: ActorRef,
+                       dataset: DatasetRef,
+                       resources: DatasetResourceSpec,
+                       mapper: ShardMapper): Seq[Int] = {
+    import net.ceedubs.ficus.Ficus._
+    filodbConfig.as[Seq[Int]](s"shard-manager.start-shards.$dataset")
+  }
+
+  override def remainingCapacity(coord: ActorRef,
+                                 dataset: DatasetRef,
+                                 resources: DatasetResourceSpec,
+                                 mapper: ShardMapper): Int = ??? // never called
+}
 
 object DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with StrictLogging {
 
