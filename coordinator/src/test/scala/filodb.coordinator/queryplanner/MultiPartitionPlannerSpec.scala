@@ -1644,6 +1644,10 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       // FIXME: subquery lookback should be consistent with others.
       Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s])""", windowSec + staleLookbackSec),
       Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s])""", windowSec + staleLookbackSec),
+      Test(s"""scalar(test{job="app"})""", staleLookbackSec),
+      Test(s"""scalar(sum(test{job="app"}))""", staleLookbackSec),
+      Test(s"""scalar(sum_over_time(test{job="app"}[${windowSec}s]))""", windowSec),
+      Test(s"""test{job="app"} + scalar(sum_over_time(test{job="app"}[${windowSec}s]))""", windowSec),
 
       // offset queries
       Test(s"""test{job="app"} offset ${offsetSec}s""", staleLookbackSec, offsetSec),
@@ -1660,6 +1664,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       // FIXME: subqueries with offsets are valid promql, but these fail to parse
       // Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s] offset ${offsetSec}s)""", windowSec + staleLookbackSec, offsetSec),
       // Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s] offset ${offsetSec}s)""", windowSec + staleLookbackSec, offsetSec),
+      Test(s"""scalar(test{job="app"} offset ${offsetSec}s)""", staleLookbackSec, offsetSec),
+      Test(s"""scalar(sum(test{job="app"} offset ${offsetSec}s))""", staleLookbackSec, offsetSec),
     )
     for (partitionRanges <- partitionRangeSetups) {
       val partitionLocationProvider = makeTimeRangeRemotePartitionLocationProvider(partitionRanges)
@@ -1836,6 +1842,10 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       ExactTest(s"""sum_over_time(test{job="app"}[${windowSec}s])""", windowSec),
       ExactTest(s"""rate(test{job="app"}[${windowSec}s]) + test{job="app"}""", windowSec),
       ExactTest(s"""holt_winters(test{job="app"}[${windowSec}s], 0.9, 0.9)""", windowSec),
+      ExactTest(s"""scalar(test{job="app"})""", staleLookbackSec),
+      ExactTest(s"""scalar(sum(test{job="app"}))""", staleLookbackSec),
+      ExactTest(s"""scalar(sum_over_time(test{job="app"}[${windowSec}s]))""", windowSec),
+      ExactTest(s"""test{job="app"} + scalar(sum_over_time(test{job="app"}[${windowSec}s]))""", windowSec),
 
       // offset queries
       ExactTest(s"""test{job="app"} offset ${offsetSec}s""", staleLookbackSec, offsetSec),
@@ -1850,6 +1860,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       ExactTest(s"""sum_over_time(test{job="app"}[${windowSec}s] offset ${offsetSec}s)""", windowSec, offsetSec),
       ExactTest(s"""rate(test{job="app"}[${windowSec}s] offset ${offsetSec}s) + test{job="app"} offset ${offsetSec}s""", windowSec, offsetSec),
       ExactTest(s"""holt_winters(test{job="app"}[${windowSec}s] offset ${offsetSec}s, 0.9, 0.9)""", windowSec, offsetSec),
+      ExactTest(s"""scalar(test{job="app"} offset ${offsetSec}s)""", staleLookbackSec, offsetSec),
+      ExactTest(s"""scalar(sum(test{job="app"} offset ${offsetSec}s))""", staleLookbackSec, offsetSec),
 
       // subqueries
       // FIXME: Subquery behavior does not match regular range-selectors; lookbacks are added to their time-range.
