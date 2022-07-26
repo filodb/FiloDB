@@ -379,7 +379,8 @@ final case class LimitFunctionMapper(limitToApply: Int) extends RangeVectorTrans
   override def funcParams: Seq[FuncArgs] = Nil
 }
 
-final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangeParams: RangeParams, metricColumn: String)
+final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangeParams: RangeParams, metricColumn: String,
+                                      isPresentFunction: Boolean)
   extends RangeVectorTransformer {
 
   protected[exec] def args: String =
@@ -397,7 +398,8 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
             querySession: QuerySession,
             limit: Int,
             sourceSchema: ResultSchema,
-            paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
+            paramResponse: Seq[Observable[ScalarRangeVector]],
+            isPresentFunction: Boolean): Observable[RangeVector] = {
 
     def addNonNanTimestamps(res: List[Long], cur: RangeVector): List[Long]  = {
       res ++ cur.rows.filter(!_.getDouble(1).isNaN).map(_.getLong(0)).toList
@@ -410,10 +412,12 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
       val it = Iterator.from(0, rangeParams.stepSecs.toInt)
         .takeWhile(_ <= rangeParams.endSecs - rangeParams.startSecs).map { i =>
         val timestamp = i + rangeParams.startSecs
-        if (!t.contains(timestamp * 1000))
+        if (isPresentFunction) {
+          if (t.contains(timestamp * 1000)) rowList += new TransientRow(timestamp * 1000, 1)
+          else rowList += new TransientRow(timestamp * 1000, Double.NaN)
+        } else if (!t.contains(timestamp * 1000))
           rowList += new TransientRow(timestamp * 1000, 1)
        }
-
       // address step == 0 case
       if (rangeParams.startSecs == rangeParams.endSecs || rangeParams.stepSecs == 0) it.take(1).toList else it.toList
       new RangeVector {
