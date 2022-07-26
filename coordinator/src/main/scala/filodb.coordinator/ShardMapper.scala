@@ -222,6 +222,10 @@ class ShardMapper(val numShards: Int) extends Serializable {
       statusMap(shard).minimalEvents(ref, shard, shardMap(shard))
     }
 
+  def mergeFrom(from: ShardMapper, ref: DatasetRef): Unit = {
+    from.minimalEvents(ref).foreach(updateFromEvent)
+  }
+
   /**
    * Registers a new node to the given shards.  Modifies state in place.
    * Idempotent.

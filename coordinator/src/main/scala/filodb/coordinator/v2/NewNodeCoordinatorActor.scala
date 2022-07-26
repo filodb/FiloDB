@@ -1,13 +1,14 @@
-package filodb.coordinator
+package filodb.coordinator.v2
 
 import scala.collection.mutable.HashMap
 import scala.util.{Failure, Success}
 
-import akka.actor.{ActorRef, OneForOneStrategy, PoisonPill, Props}
+import akka.actor.{ActorRef, OneForOneStrategy, Props}
 import akka.actor.SupervisorStrategy.{Restart, Stop}
 import akka.event.LoggingReceive
 import kamon.Kamon
 
+import filodb.coordinator._
 import filodb.core._
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore.TimeSeriesStore
@@ -15,28 +16,32 @@ import filodb.core.metadata._
 import filodb.core.store.{IngestionConfig, StoreConfig}
 import filodb.query.QueryCommand
 
+final case class GetShardMapScatter(ref: DatasetRef)
+
 object NewNodeCoordinatorActor {
 
   /** Clears the state of a single dataset. */
   final case class ClearState(dataset: DatasetRef)
 
   def props(memStore: TimeSeriesStore,
-            shardAssignmentStrategy: ShardAssignmentStrategy,
+            clusterDiscovery: FiloDbClusterDiscovery,
             settings: FilodbSettings): Props =
-    Props(classOf[NewNodeCoordinatorActor], memStore, shardAssignmentStrategy, settings)
+    Props(classOf[NewNodeCoordinatorActor], memStore, clusterDiscovery, settings)
 }
 
 private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
-                                                    shardAssignmentStrategy: ShardAssignmentStrategy,
+                                                    clusterDiscovery: FiloDbClusterDiscovery,
                                                     settings: FilodbSettings) extends BaseActor {
 
   import NodeClusterActor._
   import client.IngestionCommands._
 
-  val ingesters = new HashMap[DatasetRef, ActorRef]
-  val queryActors = new HashMap[DatasetRef, ActorRef]
-  val shardMaps = new HashMap[DatasetRef, ShardMapper]
+  private val ingestionActors = new HashMap[DatasetRef, ActorRef]
+  private val queryActors = new HashMap[DatasetRef, ActorRef]
+  private val shardMaps = new HashMap[DatasetRef, ShardMapper]
+  private val shardsOnThisNode = new HashMap[DatasetRef, Seq[Int]]
 
+  logger.info(s"Initializing NodeCoordActor at ${self.path}")
   logger.debug(s"Initializing stream configs: ${settings.streamConfigs}")
   settings.streamConfigs.foreach { config =>
     val dataset = settings.datasetFromStream(config)
@@ -57,7 +62,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
 
   private def withIngester(originator: ActorRef, dataset: DatasetRef)
                           (func: ActorRef => Unit): Unit = {
-    ingesters.get(dataset).map(func).getOrElse(originator ! UnknownDataset)
+    ingestionActors.get(dataset).map(func).getOrElse(originator ! UnknownDataset)
   }
 
   // For now, datasets need to be set up for ingestion before they can be queried (in-mem only)
@@ -86,10 +91,10 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
 
   private def initShards(dataset: Dataset, ic: IngestionConfig): Unit = {
     val mapper = shardMaps(dataset.ref)
-    val spc = DatasetResourceSpec(ic.numShards, ic.minNumNodes)
-    val shardsToStart = shardAssignmentStrategy.shardAssignments(self, dataset.ref, spc, mapper)
+    val shardsToStart = clusterDiscovery.shardsForLocalhost(ic.numShards)
     shardsToStart.foreach(sh => updateFromShardEvent(ShardAssignmentStarted(dataset.ref, sh, self)))
-    ingesters(dataset.ref) ! ShardIngestionState(0, dataset.ref, mapper)
+    shardsOnThisNode.put(dataset.ref, shardsToStart)
+    ingestionActors(dataset.ref) ! ShardIngestionState(0, dataset.ref, mapper)
   }
 
   private def updateFromShardEvent(event: ShardEvent): Unit = {
@@ -127,7 +132,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
                                      source, downsample, storeConf, self)
     val ingester = context.actorOf(props, s"$Ingestion-${dataset.name}")
     context.watch(ingester)
-    ingesters(ref) = ingester
+    ingestionActors(ref) = ingester
 
     val ttl = if (memStore.isDownsampleStore) downsample.ttls.last.toMillis
               else storeConf.diskTTLSeconds.toLong * 1000
@@ -149,14 +154,21 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     case QueryActor.ThrowException(dataset) =>
       val originator = sender()
       withQueryActor(originator, dataset) { _.tell(QueryActor.ThrowException(dataset), originator) }
-
   }
 
-  def shardEventHandlers: Receive = LoggingReceive {
+  def shardManagementHandlers: Receive = LoggingReceive {
+    // sent by ingestion actors when shard status changes
     case e: ShardEvent => updateFromShardEvent(e)
+
+    // requested from CLI and HTTP API
+    case g: GetShardMap =>
+      // TODO send GetShardMapScatter to every NodeCoordActor merge ShardMappers and send response
+
+    // requested from peer NewNodeCoordActors upon them receiving GetShardMap call
+    case g: GetShardMapScatter => sender() ! CurrentShardSnapshot(g.ref, shardMaps(g.ref))
   }
 
-  def receive: Receive = queryHandlers orElse shardEventHandlers
+  def receive: Receive = queryHandlers orElse shardManagementHandlers
 
 
 }
