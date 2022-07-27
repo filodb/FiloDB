@@ -40,7 +40,7 @@ import filodb.query.Query.qLogger
       plan.execPlan.execute(source, querySession).timeout(plan.clientParams.deadline.milliseconds).onErrorRecover {
         case e: TimeoutException if (plan.execPlan.queryContext.plannerParams.allowPartialResults)
         =>
-          qLogger.warn(s"Swallowed AskTimeoutException for query id: ${plan.execPlan.queryContext.queryId} " +
+          qLogger.warn(s"Swallowed TimeoutException for query id: ${plan.execPlan.queryContext.queryId} " +
             s"since partial result was enabled: ${e.getMessage}")
           emptyPartialResult
       }
