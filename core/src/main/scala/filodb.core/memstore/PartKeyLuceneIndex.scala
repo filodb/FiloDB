@@ -81,6 +81,14 @@ object PartKeyLuceneIndex {
     tempDir.mkdir()
     tempDir
   }
+
+  def partKeyByteRefToSHA256Digest(bytes: Array[Byte], offset: Int, length: Int): String = {
+    import java.security.MessageDigest
+    val md: MessageDigest = MessageDigest.getInstance("SHA-256")
+    md.update(bytes, offset, length)
+    val strDigest = Base64.getEncoder.encodeToString(md.digest())
+    strDigest
+  }
 }
 
 final case class TermInfo(term: UTF8Str, freq: Int)
@@ -125,9 +133,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   private val numPartColumns = schema.columns.length
 
-  import java.security.MessageDigest
-
-  val md: MessageDigest = MessageDigest.getInstance("SHA-256")
 
   val indexDiskLocation = diskLocation.map(new File(_, ref.dataset + File.separator + shardNum))
     .getOrElse(createTempDir(ref, shardNum)).toPath
@@ -287,21 +292,22 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       addFacet(LABEL_LIST, fieldNamesStr, true)
     }
 
-    def reset(partId: Int, partKey: BytesRef, startTime: Long, endTime: Long): Document = {
+    def reset(partId: Int, documentId: String, partKey: BytesRef, startTime: Long, endTime: Long): Document = {
 
       document.clear()
       fieldNames.clear()
       facetsConfig = new FacetsConfig
 
       if(partId > -1) {
-        partIdField.setStringValue(String.valueOf(partId))
+
         partIdDv.setLongValue(partId)
         document.add(partIdDv)
       } else {
         // Use partKey's SHA256 hash as the partId, this will be used while upserting the document
-        val strDigest = partKeyByteRefToSHA256Digest(partKey.bytes, partKey.offset, partKey.length)
-        partIdField.setStringValue(strDigest)
+//        val strDigest = partKeyByteRefToSHA256Digest(partKey.bytes, partKey.offset, partKey.length)
+//        partIdField.setStringValue(strDigest)
       }
+      partIdField.setStringValue(documentId)
 
       startTimeField.setLongValue(startTime)
       startTimeDv.setLongValue(startTime)
@@ -319,13 +325,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     }
   }
 
-  private[memstore] def partKeyByteRefToSHA256Digest(bytes: Array[Byte], offset: Int, length: Int) = {
-    synchronized {
-      md.update(bytes, offset, length)
-      val strDigest = Base64.getEncoder.encodeToString(md.digest())
-      strDigest
-    }
-  }
+
 
   private val luceneDocument = new ThreadLocal[ReusableLuceneDocument]() {
     override def initialValue(): ReusableLuceneDocument = new ReusableLuceneDocument
@@ -603,9 +603,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                  startTime: Long,
                  endTime: Long = Long.MaxValue,
                  partKeyBytesRefOffset: Int = 0)
-                (partKeyNumBytes: Int = partKeyOnHeapBytes.length): Unit = {
-    makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes, partId, startTime, endTime)
-    logger.debug(s"Adding document ${partKeyString(partId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
+                (partKeyNumBytes: Int = partKeyOnHeapBytes.length,
+                 documentId: String = partId.toString): Unit = {
+    makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes, partId, documentId, startTime, endTime)
+    logger.debug(s"Adding document ${partKeyString(documentId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
       s"with startTime=$startTime endTime=$endTime into dataset=$ref shard=$shardNum")
     val doc = luceneDocument.get()
     val docToAdd = doc.facetsConfig.build(doc.document)
@@ -617,30 +618,24 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                     startTime: Long,
                     endTime: Long = Long.MaxValue,
                     partKeyBytesRefOffset: Int = 0)
-                   (partKeyNumBytes: Int = partKeyOnHeapBytes.length): Unit = {
-    makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes, partId, startTime, endTime)
-    logger.debug(s"Upserting document ${partKeyString(partId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
+                   (partKeyNumBytes: Int = partKeyOnHeapBytes.length,
+                    documentId: String = partId.toString): Unit = {
+    makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes, partId, documentId, startTime, endTime)
+    logger.debug(s"Upserting document ${partKeyString(documentId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
       s"with startTime=$startTime endTime=$endTime into dataset=$ref shard=$shardNum")
     val doc = luceneDocument.get()
     val docToAdd = doc.facetsConfig.build(doc.document)
-    val term =
-      if (partId > -1)
-        new Term(PART_ID, partId.toString)
-      else {
-        // partIdField has the base64(SHA256(part key)), we do not calculate this value again instead use what's already
-        // computed
-        new Term(PART_ID, doc.partIdField.stringValue())
-      }
+    val term = new Term(PART_ID, documentId)
     indexWriter.updateDocument(term, docToAdd)
   }
 
 
-  private def partKeyString(partId: Int,
+  private def partKeyString(docId: String,
                             partKeyOnHeapBytes: Array[Byte],
                             partKeyBytesRefOffset: Int = 0): String = {
     val partHash = schema.binSchema.partitionHash(partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset))
     //scalastyle:off
-    s"shard=$shardNum partId=$partId partHash=$partHash [${
+    s"shard=$shardNum partId=$docId partHash=$partHash [${
       TimeSeriesPartition
         .partKeyString(schema, partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset))
     }]"
@@ -650,9 +645,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   private def makeDocument(partKeyOnHeapBytes: Array[Byte],
                            partKeyBytesRefOffset: Int,
                            partKeyNumBytes: Int,
-                           partId: Int, startTime: Long, endTime: Long): Document = {
+                           partId: Int, documentId: String, startTime: Long, endTime: Long): Document = {
     val partKeyBytesRef = new BytesRef(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes)
-    luceneDocument.get().reset(partId, partKeyBytesRef, startTime, endTime)
+    luceneDocument.get().reset(partId, documentId, partKeyBytesRef, startTime, endTime)
 
     // If configured and enabled, Multi-column facets will be created on "partition-schema" columns
     createMultiColumnFacets(partKeyOnHeapBytes, partKeyBytesRefOffset)
@@ -774,7 +769,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                                partId: Int,
                                endTime: Long = Long.MaxValue,
                                partKeyBytesRefOffset: Int = 0)
-                              (partKeyNumBytes: Int = partKeyOnHeapBytes.length): Unit = {
+                              (partKeyNumBytes: Int = partKeyOnHeapBytes.length,
+                               documentId: String = partId.toString): Unit = {
     var startTime = startTimeFromPartId(partId) // look up index for old start time
     if (startTime == NOT_FOUND) {
       startTime = System.currentTimeMillis() - retentionMillis
@@ -782,10 +778,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         s"$startTime instead.", new IllegalStateException()) // assume this time series started retention period ago
     }
     makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes,
-      partId, startTime, endTime)
+      partId, documentId, startTime, endTime)
 
     val doc = luceneDocument.get()
-    logger.debug(s"Updating document ${partKeyString(partId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
+    logger.debug(s"Updating document ${partKeyString(documentId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
                  s"with startTime=$startTime endTime=$endTime into dataset=$ref shard=$shardNum")
     val docToAdd = doc.facetsConfig.build(doc.document)
     indexWriter.updateDocument(new Term(PART_ID, partId.toString), docToAdd)

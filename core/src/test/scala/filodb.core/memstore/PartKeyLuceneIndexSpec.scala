@@ -209,11 +209,14 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       .zipWithIndex.foreach { case (addr, i) =>
       val time = System.currentTimeMillis()
       val pkOnHeap = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
-      keyIndex.addPartKey(pkOnHeap, -1, time)()
+      keyIndex.addPartKey(pkOnHeap, -1, time)(
+        pkOnHeap.length,
+        PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pkOnHeap, 0, pkOnHeap.length))
       if (i % 2 == 0) {
-        keyIndex.upsertPartKey(pkOnHeap, -1, time, time + 300)()
+        keyIndex.upsertPartKey(pkOnHeap, -1, time, time + 300)(pkOnHeap.length,
+          PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pkOnHeap, 0, pkOnHeap.length))
       } else {
-        expectedSHA256PartIds.append(keyIndex.partKeyByteRefToSHA256Digest(pkOnHeap, 0, pkOnHeap.length))
+        expectedSHA256PartIds.append(PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pkOnHeap, 0, pkOnHeap.length))
       }
     }
     keyIndex.refreshReadersBlocking()
@@ -226,7 +229,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
 
     val actualSha256PartIds = activelyIngestingParts.map(r => {
-      keyIndex.partKeyByteRefToSHA256Digest(r.partKey, 0, r.partKey.length)
+      PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(r.partKey, 0, r.partKey.length)
     })
 
     expectedSHA256PartIds.toSet shouldEqual actualSha256PartIds.toSet
@@ -767,7 +770,8 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
       .zipWithIndex.map { case (addr, i) =>
       val pk = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
-      keyIndex.addPartKey(pk, -1, i, i + 10)()
+      keyIndex.addPartKey(pk, -1, i, i + 10)(
+        pk.length, PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pk, 0, pk.length))
       PartKeyLuceneIndexRecord(pk, i, i + 10)
     }
     keyIndex.refreshReadersBlocking()

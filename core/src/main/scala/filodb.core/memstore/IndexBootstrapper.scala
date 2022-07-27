@@ -57,8 +57,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
   def bootstrapIndexDownsample(index: PartKeyLuceneIndex,
                                shardNum: Int,
                                ref: DatasetRef,
-                               ttlMs: Long)
-                              (assignPartId: PartKeyRecord => Int): Task[Long] = {
+                               ttlMs: Long): Task[Long] = {
 
     val recoverIndexLatency = Kamon.gauge("shard-recover-index-latency", MeasurementUnit.time.milliseconds)
       .withTag("dataset", ref.dataset)
@@ -68,8 +67,10 @@ class IndexBootstrapper(colStore: ColumnStore) {
       .filter(_.endTime > start)
       .mapParallelUnordered(Runtime.getRuntime.availableProcessors()) { pk =>
         Task.evalAsync {
-          val partId = assignPartId(pk)
-          index.addPartKey(pk.partKey, partId, pk.startTime, pk.endTime)()
+          index.addPartKey(pk.partKey, partId = -1, pk.startTime, pk.endTime)(
+            pk.partKey.length,
+            PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pk.partKey, 0, pk.partKey.length)
+          )
         }
       }
       .countL
@@ -100,8 +101,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
                                      fromHour: Long,
                                      toHour: Long,
                                      schemas: Schemas,
-                                     parallelism: Int = Runtime.getRuntime.availableProcessors())
-                                   (lookUpOrAssignPartId: Array[Byte] => Int): Task[Long] = {
+                                     parallelism: Int = Runtime.getRuntime.availableProcessors()): Task[Long] = {
 
     // This method needs to be invoked for updating a range of time in an existing index. This assumes the
     // Index is already present and we need to update some partKeys in it. The lookUpOrAssignPartId is expensive
@@ -126,8 +126,9 @@ class IndexBootstrapper(colStore: ColumnStore) {
       Task.evalAsync {
         val downsamplePartKey = RecordBuilder.buildDownsamplePartKey(pk.partKey, schemas)
         downsamplePartKey.foreach { dpk =>
-          val partId = lookUpOrAssignPartId(dpk)
-          index.upsertPartKey(dpk, partId, pk.startTime, pk.endTime)()
+          index.upsertPartKey(dpk, partId = -1, pk.startTime, pk.endTime)(
+            dpk.length, PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(dpk, 0, dpk.length)
+          )
         }
       }
     }

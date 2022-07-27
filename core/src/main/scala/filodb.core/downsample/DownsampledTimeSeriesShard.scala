@@ -179,7 +179,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       case None             => // No checkpoint time found, start refresh from scratch
                                 indexBootstrapper
                                   .bootstrapIndexDownsample(
-                                    partKeyIndex, shardNum, indexDataset, indexTtlMs) { _ => -1 }
+                                    partKeyIndex, shardNum, indexDataset, indexTtlMs)
     }).map { count =>
         logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
         // need to start recovering 6 hours prior to now since last index migration could have run 6 hours ago
@@ -254,7 +254,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   def indexRefresh(toHour: Long, fromHour: Long, notifyListener: Boolean = true): Task[Long] = {
     indexRefresher.refreshWithDownsamplePartKeys(
-      partKeyIndex, shardNum, rawDatasetRef, fromHour, toHour, schemas)(_ => -1)
+      partKeyIndex, shardNum, rawDatasetRef, fromHour, toHour, schemas)
       .map { count =>
         stats.indexEntriesRefreshed.increment(count)
         logger.info(s"Refreshed downsample index with new records numRecords=$count " +
