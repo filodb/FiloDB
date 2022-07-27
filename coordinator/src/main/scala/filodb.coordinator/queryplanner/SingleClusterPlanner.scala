@@ -138,6 +138,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       return inProcessPlanDispatcher
     }
     val targetActor = shardMapperFunc.coordForShard(shard)
+    println("********queryContext.plannerParams.allowPartialResults:" + queryContext.plannerParams.allowPartialResults)
     if (targetActor == ActorRef.noSender) {
       logger.debug(s"ShardMapper: $shardMapperFunc")
       if (queryContext.plannerParams.allowPartialResults)

@@ -106,6 +106,8 @@ final case class StitchRvsExec(queryContext: QueryContext,
   protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
+    println("in compose of stitch exec")
+    Thread.sleep(30000)
     qLogger.debug(s"StitchRvsExec: Stitching results:")
     val stitched = childResponses.map {
       case (QueryResult(_, _, result, _, _, _), _) => result
