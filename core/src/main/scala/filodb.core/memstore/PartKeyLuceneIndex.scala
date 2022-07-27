@@ -94,6 +94,7 @@ object PartKeyLuceneIndex {
 final case class TermInfo(term: UTF8Str, freq: Int)
 final case class PartKeyLuceneIndexRecord(partKey: Array[Byte], startTime: Long, endTime: Long)
 
+// scalastyle:off number.of.methods
 class PartKeyLuceneIndex(ref: DatasetRef,
                          schema: PartitionSchema,
                          facetEnabledAllLabels: Boolean,
@@ -299,13 +300,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       facetsConfig = new FacetsConfig
 
       if(partId > -1) {
-
         partIdDv.setLongValue(partId)
         document.add(partIdDv)
-      } else {
-        // Use partKey's SHA256 hash as the partId, this will be used while upserting the document
-//        val strDigest = partKeyByteRefToSHA256Digest(partKey.bytes, partKey.offset, partKey.length)
-//        partIdField.setStringValue(strDigest)
       }
       partIdField.setStringValue(documentId)
 
@@ -1199,3 +1195,4 @@ class LuceneMetricsRouter(ref: DatasetRef, shard: Int) extends InfoStream with S
   override def isEnabled(component: String): Boolean = true
   override def close(): Unit = {}
 }
+// scalastyle:on number.of.methods
