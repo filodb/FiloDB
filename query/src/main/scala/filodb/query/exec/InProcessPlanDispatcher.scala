@@ -1,11 +1,13 @@
 package filodb.query.exec
 
-import akka.pattern.AskTimeoutException
 import java.net.InetAddress
+
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
+import scala.concurrent.TimeoutException
+import scala.concurrent.duration.DurationLong
 
 import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.PartLookupResult
@@ -25,7 +27,7 @@ import filodb.query.Query.qLogger
 
   override def dispatch(plan: ExecPlanWithClientParams,
                         source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
-    lazy val emptyPartialResult: QueryResult = QueryResult(plan.execPlan.queryContext.queryId, ResultSchema.empty, Nil,
+    lazy val emptyPartialResult = QueryResult(plan.execPlan.queryContext.queryId, ResultSchema.empty, Nil,
       QueryStats(), true, Some("Result may be partial since query on some shards timed out"))
 
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
@@ -35,12 +37,12 @@ import filodb.query.Query.qLogger
     Kamon.runWithSpan(Kamon.currentSpan(), false) {
       // translate implicit ExecutionContext to monix.Scheduler
       val querySession = QuerySession(plan.execPlan.queryContext, queryConfig, catchMultipleLockSetErrors = true)
-      plan.execPlan.execute(source, querySession).onErrorRecover {
-        case e: AskTimeoutException if (plan.execPlan.queryContext.plannerParams.allowPartialResults)
+      plan.execPlan.execute(source, querySession).timeout(plan.clientParams.deadline.milliseconds).onErrorRecover {
+        case e: TimeoutException if (plan.execPlan.queryContext.plannerParams.allowPartialResults)
         =>
           qLogger.warn(s"Swallowed AskTimeoutException for query id: ${plan.execPlan.queryContext.queryId} " +
             s"since partial result was enabled: ${e.getMessage}")
-         emptyPartialResult
+          emptyPartialResult
       }
     }
   }
