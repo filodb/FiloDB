@@ -194,7 +194,7 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
     val sep = StitchRvsExec(QueryContext(plannerParams = PlannerParams(allowPartialResults = true)), dispatcher, None,
       Seq(execPlan1, execPlan2))
     val result = dispatcher.dispatch(ExecPlanWithClientParams(sep, ClientParams
-    (10)), source).runToFuture.futureValue
+    (2)), source).runToFuture.futureValue
 
     result match {
       case e: QueryError => throw e.t
