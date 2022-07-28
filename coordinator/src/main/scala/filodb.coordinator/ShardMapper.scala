@@ -222,8 +222,9 @@ class ShardMapper(val numShards: Int) extends Serializable {
       statusMap(shard).minimalEvents(ref, shard, shardMap(shard))
     }
 
-  def mergeFrom(from: ShardMapper, ref: DatasetRef): Unit = {
+  def mergeFrom(from: ShardMapper, ref: DatasetRef): ShardMapper = {
     from.minimalEvents(ref).foreach(updateFromEvent)
+    this
   }
 
   /**

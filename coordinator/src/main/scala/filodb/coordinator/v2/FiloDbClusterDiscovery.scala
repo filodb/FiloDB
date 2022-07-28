@@ -13,12 +13,12 @@ import filodb.core.GlobalScheduler
 
 class FiloDbClusterDiscovery(settings: FilodbSettings, system: ActorSystem) extends StrictLogging {
 
-  lazy val numNodes = settings.config.getInt("cluster-discovery.num-nodes")
-  lazy val k8sHostFormat = settings.config.as[Option[String]]("cluster-discovery.k8s-stateful-sets-hostname-format")
-  lazy val hostList = settings.config.as[Option[Seq[String]]]("cluster-discovery.host-list")
-  lazy val localhostOrdinal = settings.config.as[Option[Int]]("cluster-discovery.localhost-ordinal")
+  val numNodes = settings.config.getInt("cluster-discovery.num-nodes")
+  val k8sHostFormat = settings.config.as[Option[String]]("cluster-discovery.k8s-stateful-sets-hostname-format")
+  val hostList = settings.config.as[Option[Seq[String]]]("cluster-discovery.host-list")
+  val localhostOrdinal = settings.config.as[Option[Int]]("cluster-discovery.localhost-ordinal")
 
-  lazy val ordinalOfLocalhost = {
+  val ordinalOfLocalhost = {
     if (localhostOrdinal.isDefined) localhostOrdinal.get
     else {
       val fullHostname = InetAddress.getLocalHost.getHostName
@@ -61,7 +61,7 @@ class FiloDbClusterDiscovery(settings: FilodbSettings, system: ActorSystem) exte
 
   def shardsForLocalhost(numShards: Int): Seq[Int] = shardsForOrdinal(ordinalOfLocalhost, numShards)
 
-  lazy val ordinalToNodeCoordActors: Map[Int, ActorRef] = {
+  def ordinalToNodeCoordActors: Map[Int, ActorRef] = {
     val hostNames = if (k8sHostFormat.isDefined) {
       (0 until numNodes).map(i => String.format(k8sHostFormat.get, i.toString))
     } else if (hostList.isDefined) {
@@ -70,8 +70,8 @@ class FiloDbClusterDiscovery(settings: FilodbSettings, system: ActorSystem) exte
 
     val futs = hostNames.map { h =>
         val actorPath = s"akka.tcp://FiloDB@$h/user/NodeCoordinatorActor"
-        system.actorSelection(actorPath).resolveOne(settings.ResolveActorTimeout)
-      }
+      system.actorSelection(actorPath).resolveOne(settings.ResolveActorTimeout)
+    }
     implicit val ec = GlobalScheduler.globalImplicitScheduler
     val actorRefs = Await.result(Future.sequence(futs), settings.ResolveActorTimeout)
     (0 until numNodes).zip(actorRefs).toMap

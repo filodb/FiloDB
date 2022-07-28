@@ -1,14 +1,20 @@
 package filodb.coordinator.v2
 
+import scala.collection.mutable
 import scala.collection.mutable.HashMap
+import scala.concurrent.Future
+import scala.concurrent.duration.DurationInt
 import scala.util.{Failure, Success}
 
 import akka.actor.{ActorRef, OneForOneStrategy, Props}
-import akka.actor.SupervisorStrategy.{Restart, Stop}
+import akka.actor.SupervisorStrategy.Resume
 import akka.event.LoggingReceive
+import akka.pattern.ask
+import akka.util.Timeout
 import kamon.Kamon
 
 import filodb.coordinator._
+import filodb.coordinator.v2.NewNodeCoordinatorActor.InitNewNodeCoordinatorActor
 import filodb.core._
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore.TimeSeriesStore
@@ -20,8 +26,7 @@ final case class GetShardMapScatter(ref: DatasetRef)
 
 object NewNodeCoordinatorActor {
 
-  /** Clears the state of a single dataset. */
-  final case class ClearState(dataset: DatasetRef)
+  final case object InitNewNodeCoordinatorActor
 
   def props(memStore: TimeSeriesStore,
             clusterDiscovery: FiloDbClusterDiscovery,
@@ -40,29 +45,23 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
   private val queryActors = new HashMap[DatasetRef, ActorRef]
   private val shardMaps = new HashMap[DatasetRef, ShardMapper]
   private val shardsOnThisNode = new HashMap[DatasetRef, Seq[Int]]
+  private val ingestionConfigs = new mutable.HashMap[DatasetRef, IngestionConfig]()
 
   logger.info(s"Initializing NodeCoordActor at ${self.path}")
-  logger.debug(s"Initializing stream configs: ${settings.streamConfigs}")
-  settings.streamConfigs.foreach { config =>
-    val dataset = settings.datasetFromStream(config)
-    val ingestion = IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
-    initializeDataset(dataset, ingestion)
+
+  private def initialize() = {
+    logger.debug(s"Initializing stream configs: ${settings.streamConfigs}")
+    settings.streamConfigs.foreach { config =>
+      val dataset = settings.datasetFromStream(config)
+      val ingestion = IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
+      initializeDataset(dataset, ingestion)
+    }
   }
 
   // By default, stop children IngestionActors when something goes wrong.
   // restart query actors though
   override val supervisorStrategy = OneForOneStrategy() {
-    case exception: Exception =>
-      val stackTrace = exception.getStackTrace
-      if (stackTrace(0).getClassName equals QueryActor.getClass.getName)
-        Restart
-      else
-        Stop
-  }
-
-  private def withIngester(originator: ActorRef, dataset: DatasetRef)
-                          (func: ActorRef => Unit): Unit = {
-    ingestionActors.get(dataset).map(func).getOrElse(originator ! UnknownDataset)
+    case exception: Exception => Resume
   }
 
   // For now, datasets need to be set up for ingestion before they can be queried (in-mem only)
@@ -72,7 +71,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
 
   private def initializeDataset(dataset: Dataset, ingestConfig: IngestionConfig): Unit = {
     logger.info(s"Initializing dataset ${dataset.ref}")
-
+    ingestionConfigs.put(dataset.ref, ingestConfig)
     shardMaps.put(dataset.ref, new ShardMapper(ingestConfig.numShards))
     // FIXME initialization of cass tables below for dev environments is async - need to wait before continuing
     // for now if table is not initialized in dev on first run, simply restart server :(
@@ -162,13 +161,31 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
 
     // requested from CLI and HTTP API
     case g: GetShardMap =>
-      // TODO send GetShardMapScatter to every NodeCoordActor merge ShardMappers and send response
-
+      val replyTo = sender()
+      implicit val ec = context.system.dispatcher
+      // TODO make timeout configurable
+      val t = Timeout(60.seconds)
+      val empty = CurrentShardSnapshot(g.ref, new ShardMapper(ingestionConfigs(g.ref).numShards))
+      val futs = clusterDiscovery.ordinalToNodeCoordActors.values.map { nca =>
+        try {
+          (nca ? GetShardMapScatter(g.ref)) (t).asInstanceOf[Future[CurrentShardSnapshot]].recover { case _ => empty }
+        } catch { case e: Exception => Future.successful(empty) }
+      }.toSeq
+      Future.sequence(futs).map { snapshots =>
+        val acc = new ShardMapper(ingestionConfigs(g.ref).numShards)
+        val res = snapshots.map(_.map).fold(acc)(_.mergeFrom(_, g.ref))
+        replyTo ! CurrentShardSnapshot(g.ref, res)
+      }
     // requested from peer NewNodeCoordActors upon them receiving GetShardMap call
-    case g: GetShardMapScatter => sender() ! CurrentShardSnapshot(g.ref, shardMaps(g.ref))
+    case g: GetShardMapScatter =>
+      sender() ! CurrentShardSnapshot(g.ref, shardMaps(g.ref))
   }
 
-  def receive: Receive = queryHandlers orElse shardManagementHandlers
+  def initHandler: Receive = {
+    case InitNewNodeCoordinatorActor => initialize()
+  }
+
+  def receive: Receive = queryHandlers orElse shardManagementHandlers orElse initHandler
 
 
 }
