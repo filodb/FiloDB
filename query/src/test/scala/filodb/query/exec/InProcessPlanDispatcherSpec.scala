@@ -15,8 +15,8 @@ import filodb.core.TestData
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.{Column, Dataset, Schemas}
-import filodb.core.query.{ColumnFilter, Filter, QueryConfig, QueryContext, QuerySession}
-import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore, ChunkSource}
+import filodb.core.query.{ColumnFilter, Filter, PlannerParams, QueryConfig, QueryContext, QuerySession}
+import filodb.core.store.{AllChunkScan, ChunkSource, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.MemFactory
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -172,6 +172,35 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
       case e: QueryError => throw e.t
       case r: QueryResult =>
         r.resultSchema.columns.map(_.colType) shouldEqual Nil
+        r.result.size shouldEqual 0
+    }
+  }
+
+  it ("should generate partial results when timeout occurs") {
+    val filters = Seq(ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    val emptyFilters = Seq(ColumnFilter("__name__", Filter.Equals("nonsense".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+
+    val dispatcher: PlanDispatcher = InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig)
+
+    val dummyDispatcher = DummyDispatcher(memStore, querySession)
+
+    val execPlan1 = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, timeseriesDataset.ref,
+      0, filters, AllChunkScan, "_metric_")
+    val execPlan2 = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, timeseriesDataset.ref,
+      0, emptyFilters, AllChunkScan, "_metric_")
+
+    val sep = StitchRvsExec(QueryContext(plannerParams = PlannerParams(allowPartialResults = true)), dispatcher, None,
+      Seq(execPlan1, execPlan2))
+    val result = dispatcher.dispatch(ExecPlanWithClientParams(sep, ClientParams
+    (2)), source).runToFuture.futureValue
+
+    result match {
+      case e: QueryError => throw e.t
+      case r: QueryResult =>
+        r.partialResultReason.isDefined shouldEqual true
+        r.partialResultReason.get shouldEqual "Result may be partial since query on some shards timed out"
         r.result.size shouldEqual 0
     }
   }

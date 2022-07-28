@@ -166,10 +166,9 @@ trait  DefaultPlanner {
     def addAbsentFunctionMapper(vectors: PlanResult,
                                columnFilters: Seq[ColumnFilter],
                                rangeParams: RangeParams,
-                               queryContext: QueryContext,
-                                isPresentFunction: Boolean): PlanResult = {
+                               queryContext: QueryContext): PlanResult = {
       vectors.plans.foreach(_.addRangeVectorTransformer(AbsentFunctionMapper(columnFilters, rangeParams,
-        dsOptions.metricColumn, isPresentFunction )))
+        dsOptions.metricColumn )))
       vectors
     }
 
@@ -332,12 +331,12 @@ trait  DefaultPlanner {
   }
 
    def createAbsentOverTimePlan( innerExecPlan: PlanResult,
-                                 innerPlan: PeriodicSeriesPlan,
-                                 qContext: QueryContext,
-                                 window: Option[Long],
-                                 offsetMs : Option[Long],
-                                 sqww: SubqueryWithWindowing,
-                                 isPresentFunction: Boolean = false) : PlanResult = {
+                                        innerPlan: PeriodicSeriesPlan,
+                                        qContext: QueryContext,
+                                        window: Option[Long],
+                                        offsetMs : Option[Long],
+                                        sqww: SubqueryWithWindowing
+                                      ) : PlanResult = {
     // absent over time is essentially sum(last(series)) sent through AbsentFunctionMapper
     innerExecPlan.plans.foreach(
       _.addRangeVectorTransformer(PeriodicSamplesMapper(

@@ -352,6 +352,7 @@ object RangeFunction {
       case Some(Timestamp)        => () => new TimestampChunkedFunction()
       case Some(ZScore)           => () => new ZScoreChunkedFunctionD()
       case Some(PredictLinear)    => () => new PredictLinearChunkedFunctionD(funcParams)
+      case Some(PresentOverTime)  => () => new PresentOverTimeChunkedFunctionD()
       case _                      => iteratingFunction(func, funcParams)
     }
   }
@@ -544,7 +545,6 @@ class LastSampleChunkedFunctionL extends LastSampleChunkedFuncDblVal() {
     value = longReader(valAcc, valVector, endRowNum).toDouble
   }
 }
-
 class TimestampChunkedFunction (var value: Double = Double.NaN) extends ChunkedRangeFunction[TransientRow] {
   def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                 valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
@@ -562,5 +562,22 @@ class TimestampChunkedFunction (var value: Double = Double.NaN) extends ChunkedR
 
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, value)
+  }
+}
+
+class PresentOverTimeChunkedFunctionD extends LastSampleChunkedFuncDblVal() {
+  def updateValue(ts: Long, valAcc: MemoryReader, valVector: BinaryVectorPtr,
+                  valReader: VectorDataReader, endRowNum: Int): Unit = {
+    val dblReader = valReader.asDoubleReader
+    val doubleVal = dblReader(valAcc, valVector, endRowNum)
+    if (java.lang.Double.isNaN(doubleVal)) {
+      if (endRowNum > 0) {
+        timestamp = ts
+        value = Double.NaN
+      }
+    } else {
+      timestamp = ts
+      value = 1
+    }
   }
 }

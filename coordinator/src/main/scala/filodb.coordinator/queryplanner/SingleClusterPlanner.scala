@@ -138,7 +138,6 @@ class SingleClusterPlanner(val dataset: Dataset,
       return inProcessPlanDispatcher
     }
     val targetActor = shardMapperFunc.coordForShard(shard)
-    println("********queryContext.plannerParams.allowPartialResults:" + queryContext.plannerParams.allowPartialResults)
     if (targetActor == ActorRef.noSender) {
       logger.debug(s"ShardMapper: $shardMapperFunc")
       if (queryContext.plannerParams.allowPartialResults)
@@ -673,9 +672,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       logicalPlanWithoutBucket.stepMs, logicalPlanWithoutBucket.endMs, window, Some(execRangeFn), qContext,
       logicalPlanWithoutBucket.stepMultipleNotationUsed,
       paramsExec, logicalPlanWithoutBucket.offsetMs, rawSource)))
-    if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime ||
-      logicalPlanWithoutBucket.function == RangeFunctionId.PresentOverTime) {
-      val isPresentFunction = if (logicalPlanWithoutBucket.function == RangeFunctionId.PresentOverTime) true else false
+    if (logicalPlanWithoutBucket.function == RangeFunctionId.AbsentOverTime) {
       val aggregate = Aggregate(AggregationOperator.Sum, logicalPlanWithoutBucket, Nil,
                                 AggregateClause.byOpt(Seq("job")))
       // Add sum to aggregate all child responses
@@ -684,7 +681,7 @@ class SingleClusterPlanner(val dataset: Dataset,
         qContext.plannerParams.copy(skipAggregatePresent = true)), series)))
       addAbsentFunctionMapper(aggregatePlanResult, logicalPlanWithoutBucket.columnFilters,
         RangeParams(logicalPlanWithoutBucket.startMs / 1000, logicalPlanWithoutBucket.stepMs / 1000,
-          logicalPlanWithoutBucket.endMs / 1000), qContext, isPresentFunction)
+          logicalPlanWithoutBucket.endMs / 1000), qContext)
     } else series
   }
 
