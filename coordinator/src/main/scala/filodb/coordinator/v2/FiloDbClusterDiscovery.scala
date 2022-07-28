@@ -1,6 +1,7 @@
 package filodb.coordinator.v2
 
 import java.net.InetAddress
+import java.util.concurrent.atomic.AtomicReference
 
 import scala.concurrent.{Await, Future}
 
@@ -61,20 +62,31 @@ class FiloDbClusterDiscovery(settings: FilodbSettings, system: ActorSystem) exte
 
   def shardsForLocalhost(numShards: Int): Seq[Int] = shardsForOrdinal(ordinalOfLocalhost, numShards)
 
-  def ordinalToNodeCoordActors: Map[Int, ActorRef] = {
-    val hostNames = if (k8sHostFormat.isDefined) {
-      (0 until numNodes).map(i => String.format(k8sHostFormat.get, i.toString))
-    } else if (hostList.isDefined) {
-      hostList.get.sorted // sort to make order consistent on all nodes of cluster
-    } else throw new IllegalArgumentException("Cluster Discovery mechanism not defined")
+  private val ordToNodeCoordActor = new AtomicReference[Option[Map[Int, ActorRef]]](None)
 
-    val futs = hostNames.map { h =>
-        val actorPath = s"akka.tcp://FiloDB@$h/user/NodeCoordinatorActor"
-      system.actorSelection(actorPath).resolveOne(settings.ResolveActorTimeout)
+  def ordinalToNodeCoordActors(thisNodeCoord: ActorRef): Map[Int, ActorRef] = {
+    ordToNodeCoordActor.get() match {
+      case None =>
+        val hostNames = if (k8sHostFormat.isDefined) {
+          (0 until numNodes).map(i => String.format(k8sHostFormat.get, i.toString))
+        } else if (hostList.isDefined) {
+          hostList.get.sorted // sort to make order consistent on all nodes of cluster
+        } else throw new IllegalArgumentException("Cluster Discovery mechanism not defined")
+
+        val futs = (0 until numNodes).zip(hostNames).map { case (ord, h) =>
+          if (ordinalOfLocalhost == ord) {
+            ord -> Future.successful(thisNodeCoord)
+          } else {
+            val actorPath = s"akka.tcp://FiloDB@$h/user/NodeCoordinatorActor"
+            ord -> system.actorSelection(actorPath).resolveOne(settings.ResolveActorTimeout)
+          }
+        }
+        implicit val ec = GlobalScheduler.globalImplicitScheduler
+        futs.map { case (ord, fut) =>
+          ord -> Await.result(fut, settings.ResolveActorTimeout)
+        }.toMap
+      case Some(v) => v
     }
-    implicit val ec = GlobalScheduler.globalImplicitScheduler
-    val actorRefs = Await.result(Future.sequence(futs), settings.ResolveActorTimeout)
-    (0 until numNodes).zip(actorRefs).toMap
   }
 
 }

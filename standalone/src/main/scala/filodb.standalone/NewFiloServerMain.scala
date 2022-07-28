@@ -1,7 +1,5 @@
 package filodb.standalone
 
-import scala.concurrent.duration.DurationInt
-
 import akka.actor.ActorSystem
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.{Scheduler, UncaughtExceptionReporter}
@@ -45,13 +43,6 @@ object NewFiloServerMain extends App with StrictLogging {
     SimpleProfiler.launch(allConfig.getConfig("filodb.profiler"))
     KamonShutdownHook.registerShutdownHook()
 
-//    implicit val ec = system.dispatcher
-//    system.actorSelection("akka.tcp://FiloDB@127.0.0.1:2552/user/NodeCoordinatorActor")
-//      .resolveOne(10.seconds).foreach { ref =>
-//        val t = Timeout(60.seconds)
-//        val v = Await.result((ref ? GetShardMapScatter(DatasetRef("prometheus")))(t), settings.ResolveActorTimeout)
-//        println(v)
-//      }
   } catch { case e: Exception =>
     logger.error("Error occurred when initializing FiloDB server", e)
   }

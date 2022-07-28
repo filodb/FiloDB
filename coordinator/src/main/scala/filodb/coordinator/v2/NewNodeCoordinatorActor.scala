@@ -166,7 +166,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
       // TODO make timeout configurable
       val t = Timeout(60.seconds)
       val empty = CurrentShardSnapshot(g.ref, new ShardMapper(ingestionConfigs(g.ref).numShards))
-      val futs = clusterDiscovery.ordinalToNodeCoordActors.values.map { nca =>
+      val futs = clusterDiscovery.ordinalToNodeCoordActors(self).values.map { nca =>
         try {
           (nca ? GetShardMapScatter(g.ref)) (t).asInstanceOf[Future[CurrentShardSnapshot]].recover { case _ => empty }
         } catch { case e: Exception => Future.successful(empty) }
