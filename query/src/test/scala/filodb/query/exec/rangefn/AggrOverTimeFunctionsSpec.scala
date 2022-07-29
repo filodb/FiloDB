@@ -699,6 +699,12 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val aggregatedZscore = chunkedItZscore.map(_.getDouble(1)).toBuffer
       if (aggregatedZscore(0).isNaN) aggregatedZscore(0).isNaN shouldBe true
       else aggregatedZscore(0) shouldBe z_score(data)
+
+      // present over time
+      val chunkedItPresentOverTime = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000, new PresentOverTimeChunkedFunctionD(), querySession)
+      val aggregatedPresentOverTime = chunkedItPresentOverTime.map(_.getDouble(1)).toBuffer
+      if (aggregatedPresentOverTime(0).isNaN) aggregatedPresentOverTime(0).isNaN shouldBe true
+      else aggregatedPresentOverTime(0) shouldBe 1
     }
   }
 
