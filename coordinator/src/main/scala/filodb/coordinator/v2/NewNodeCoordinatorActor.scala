@@ -156,29 +156,45 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
   }
 
   def shardManagementHandlers: Receive = LoggingReceive {
-    // sent by ingestion actors when shard status changes
-    case e: ShardEvent => updateFromShardEvent(e)
+      // sent by ingestion actors when shard status changes
+      case e: ShardEvent => updateFromShardEvent(e)
 
-    // requested from CLI and HTTP API
-    case g: GetShardMap =>
-      val replyTo = sender()
-      implicit val ec = context.system.dispatcher
-      // TODO make timeout configurable
-      val t = Timeout(60.seconds)
-      val empty = CurrentShardSnapshot(g.ref, new ShardMapper(ingestionConfigs(g.ref).numShards))
-      val futs = clusterDiscovery.ordinalToNodeCoordActors(self).values.map { nca =>
+      // requested from CLI and HTTP API
+      case g: GetShardMap =>
         try {
-          (nca ? GetShardMapScatter(g.ref)) (t).asInstanceOf[Future[CurrentShardSnapshot]].recover { case _ => empty }
-        } catch { case e: Exception => Future.successful(empty) }
-      }.toSeq
-      Future.sequence(futs).map { snapshots =>
-        val acc = new ShardMapper(ingestionConfigs(g.ref).numShards)
-        val res = snapshots.map(_.map).fold(acc)(_.mergeFrom(_, g.ref))
-        replyTo ! CurrentShardSnapshot(g.ref, res)
-      }
+          val replyTo = sender()
+          implicit val ec = GlobalScheduler.globalImplicitScheduler
+          // TODO make timeout configurable
+          val t = Timeout(20.seconds)
+          val empty = CurrentShardSnapshot(g.ref, new ShardMapper(ingestionConfigs(g.ref).numShards))
+          val futs = clusterDiscovery.ordinalToNodeCoordActors().values.map { nca =>
+            try {
+              (nca ? GetShardMapScatter(g.ref)) (t).asInstanceOf[Future[CurrentShardSnapshot]]
+                    .recover { case e =>
+                      logger.error(s"Saw exception on ask: $e")
+                      empty
+                    }
+            } catch {
+              case e: Exception =>
+                logger.error("Saw error while asking: ")
+                Future.successful(empty)
+            }
+          }.toSeq
+          Future.sequence(futs).map { snapshots =>
+            val acc = new ShardMapper(ingestionConfigs(g.ref).numShards)
+            val res = snapshots.map(_.map).fold(acc)(_.mergeFrom(_, g.ref))
+            replyTo ! CurrentShardSnapshot(g.ref, res)
+          }
+        } catch { case e: Exception =>
+          logger.error(s"Error occurred when processing message $g", e)
+        }
     // requested from peer NewNodeCoordActors upon them receiving GetShardMap call
     case g: GetShardMapScatter =>
-      sender() ! CurrentShardSnapshot(g.ref, shardMaps(g.ref))
+      try {
+        sender() ! CurrentShardSnapshot(g.ref, shardMaps(g.ref))
+      } catch { case e: Exception =>
+        logger.error(s"Error occurred when processing message $g", e)
+      }
   }
 
   def initHandler: Receive = {

@@ -30,6 +30,7 @@ object NewFiloServerMain extends App with StrictLogging {
 
     val memStore = factory.memStore
 
+    implicit val discoveryScheduler = Scheduler.computation(name = "discovery")
     val clusterDiscovery = new FiloDbClusterDiscovery(settings, system)
 
     val nodeCoordinatorActor = system.actorOf(NewNodeCoordinatorActor.props(memStore,
