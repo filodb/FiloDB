@@ -3,24 +3,30 @@ package filodb.coordinator.v2
 import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
 
-import scala.concurrent.duration.DurationInt
+import scala.collection.mutable
+import scala.concurrent.Future
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 import akka.actor.{ActorRef, ActorSystem}
+import akka.pattern.ask
+import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
-import monix.eval.Task
-import monix.execution.Scheduler
+import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 
-import filodb.coordinator.FilodbSettings
+import filodb.coordinator.{CurrentShardSnapshot, FilodbSettings, ShardMapper}
+import filodb.core.DatasetRef
 
-class FiloDbClusterDiscovery(settings: FilodbSettings, system: ActorSystem)
+class FiloDbClusterDiscovery(settings: FilodbSettings, system: ActorSystem,
+                             failureDetectionInterval: FiniteDuration)
                             (implicit ec: Scheduler) extends StrictLogging {
 
   val numNodes = settings.config.getInt("cluster-discovery.num-nodes")
   val k8sHostFormat = settings.config.as[Option[String]]("cluster-discovery.k8s-stateful-sets-hostname-format")
   val hostList = settings.config.as[Option[Seq[String]]]("cluster-discovery.host-list")
   val localhostOrdinal = settings.config.as[Option[Int]]("cluster-discovery.localhost-ordinal")
+  val discoveryJobs = mutable.Map[DatasetRef, CancelableFuture[Unit]]()
 
   val ordinalOfLocalhost = {
     if (localhostOrdinal.isDefined) localhostOrdinal.get
@@ -74,39 +80,54 @@ class FiloDbClusterDiscovery(settings: FilodbSettings, system: ActorSystem)
   }
 
   private val nodeCoordActorSelections = {
-    (0 until numNodes).zip(hostNames).map { case (ord, h) =>
-      val actorPath = if (ordinalOfLocalhost == ord) s"akka://FiloDB/user/NodeCoordinatorActor"
-      else s"akka.tcp://FiloDB@$h/user/NodeCoordinatorActor"
-      ord -> system.actorSelection(actorPath)
+    hostNames.map { h =>
+      val actorPath = s"akka.tcp://FiloDB@$h/user/NodeCoordinatorActor"
+      system.actorSelection(actorPath)
     }
   }
 
-  private val map = new ConcurrentHashMap[Int, ActorRef]()
-  private val failureDetectionInterval = 10.seconds
-  Observable.intervalWithFixedDelay(failureDetectionInterval)
-    .flatMap { _ =>
-      logger.debug(s"Resolving peers...")
-      Observable.fromIteratorUnsafe(nodeCoordActorSelections.iterator)
+  private def askShardSnapshot(nca: ActorRef, ref: DatasetRef, numShards: Int) = {
+    val t = Timeout(20.seconds)
+    val empty = CurrentShardSnapshot(ref, new ShardMapper(numShards))
+    def fut = (nca ? GetShardMapScatter(ref)) (t).asInstanceOf[Future[CurrentShardSnapshot]]
+    Observable.fromFuture(fut).onErrorHandle { e =>
+      logger.error(s"Saw exception on ask: $e")
+      empty
     }
-    .mapEval { case (ord, actSel) =>
-      val fut = actSel.resolveOne(settings.ResolveActorTimeout)
-        .recover { case ex =>
-          logger.warn(s"Could not resolve ${actSel.pathString} ; marking as down: ${ex.getMessage}")
-          ActorRef.noSender
-        }
-        .map { actRef =>
-          if (actRef == ActorRef.noSender) map.remove(ord)
-          else map.put(ord, actRef)
-        }
-      Task.fromFuture(fut)
-    }
-    .onErrorHandle(e => logger.error("Error in NCA discovery pipeline", e))
-    .onErrorRestart(Long.MaxValue)
-    .completedL.runToFuture
+  }
 
-  def ordinalToNodeCoordActors(): Map[Int, ActorRef] = {
-    import scala.collection.JavaConverters._
-    map.asScala.toMap
+  private def reduceMappersFromAllNodes(ref: DatasetRef, numShards: Int) = {
+    val acc = new ShardMapper(numShards)
+    val snapshots = for {
+      nca <- Observable.fromIteratorUnsafe(nodeCoordActorSelections.iterator)
+      ncaRef <- Observable.fromFuture(nca.resolveOne(settings.ResolveActorTimeout).recover{case _=> ActorRef.noSender})
+      if ncaRef != ActorRef.noSender
+      snapshot <- askShardSnapshot(ncaRef, ref, numShards)
+    } yield {
+      snapshot
+    }
+    snapshots.map(_.map).foldLeft(acc)(_.mergeFrom(_, ref))
+  }
+
+  private val datasetToMapper = new ConcurrentHashMap[DatasetRef, ShardMapper]()
+  def registerDatasetForDiscovery(dataset: DatasetRef, numShards: Int): Unit = {
+    logger.info(s"Starting discovery pipeline for $dataset")
+    datasetToMapper.put(dataset, new ShardMapper(numShards))
+    val fut = for {
+      _ <- Observable.intervalWithFixedDelay(failureDetectionInterval)
+      mapper <- reduceMappersFromAllNodes(dataset, numShards)
+    } {
+      datasetToMapper.put(dataset, mapper)
+    }
+    discoveryJobs += (dataset -> fut)
+  }
+
+  def shardMapper(ref: DatasetRef): ShardMapper = {
+    datasetToMapper.get(ref)
+  }
+
+  def shutdown(): Unit = {
+    discoveryJobs.values.foreach(_.cancel())
   }
 
 }

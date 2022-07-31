@@ -2,15 +2,11 @@ package filodb.coordinator.v2
 
 import scala.collection.mutable
 import scala.collection.mutable.HashMap
-import scala.concurrent.Future
-import scala.concurrent.duration.DurationInt
 import scala.util.{Failure, Success}
 
 import akka.actor.{ActorRef, OneForOneStrategy, Props}
 import akka.actor.SupervisorStrategy.Resume
 import akka.event.LoggingReceive
-import akka.pattern.ask
-import akka.util.Timeout
 import kamon.Kamon
 
 import filodb.coordinator._
@@ -43,7 +39,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
 
   private val ingestionActors = new HashMap[DatasetRef, ActorRef]
   private val queryActors = new HashMap[DatasetRef, ActorRef]
-  private val shardMaps = new HashMap[DatasetRef, ShardMapper]
+  private val localShardMaps = new HashMap[DatasetRef, ShardMapper]
   private val shardsOnThisNode = new HashMap[DatasetRef, Seq[Int]]
   private val ingestionConfigs = new mutable.HashMap[DatasetRef, IngestionConfig]()
 
@@ -72,7 +68,8 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
   private def initializeDataset(dataset: Dataset, ingestConfig: IngestionConfig): Unit = {
     logger.info(s"Initializing dataset ${dataset.ref}")
     ingestionConfigs.put(dataset.ref, ingestConfig)
-    shardMaps.put(dataset.ref, new ShardMapper(ingestConfig.numShards))
+    localShardMaps.put(dataset.ref, new ShardMapper(ingestConfig.numShards))
+    clusterDiscovery.registerDatasetForDiscovery(dataset.ref, ingestConfig.numShards)
     // FIXME initialization of cass tables below for dev environments is async - need to wait before continuing
     // for now if table is not initialized in dev on first run, simply restart server :(
     memStore.store.initialize(dataset.ref, ingestConfig.numShards)
@@ -89,7 +86,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
   }
 
   private def initShards(dataset: Dataset, ic: IngestionConfig): Unit = {
-    val mapper = shardMaps(dataset.ref)
+    val mapper = localShardMaps(dataset.ref)
     val shardsToStart = clusterDiscovery.shardsForLocalhost(ic.numShards)
     shardsToStart.foreach(sh => updateFromShardEvent(ShardAssignmentStarted(dataset.ref, sh, self)))
     shardsOnThisNode.put(dataset.ref, shardsToStart)
@@ -97,7 +94,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
   }
 
   private def updateFromShardEvent(event: ShardEvent): Unit = {
-    shardMaps.get(event.ref).foreach { mapper =>
+    localShardMaps.get(event.ref).foreach { mapper =>
       mapper.updateFromEvent(event) match {
         case Failure(l) =>
           logger.error(s"updateFromShardEvent error for dataset=${event.ref} event $event. Mapper now: $mapper", l)
@@ -120,7 +117,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
                            source: IngestionSource,
                            downsample: DownsampleConfig,
                            schemaOverride: Boolean = false): Unit = {
-    import ActorName.{Ingestion, Query}
+    import ActorName.Ingestion
 
     logger.debug(s"Recreated dataset $dataset from string")
     val ref = dataset.ref
@@ -135,10 +132,11 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
 
     val ttl = if (memStore.isDownsampleStore) downsample.ttls.last.toMillis
               else storeConf.diskTTLSeconds.toLong * 1000
-    def earliestTimestampFn: Long = System.currentTimeMillis() - ttl
+    def earliestTimestampFn = System.currentTimeMillis() - ttl
+    def clusterShardMapperFn = clusterDiscovery.shardMapper(dataset.ref)
     logger.info(s"Creating QueryActor for dataset $ref with dataset ttlMs=$ttl")
     val queryRef = context.actorOf(QueryActor.props(memStore, dataset, schemas,
-      shardMaps(ref), earliestTimestampFn), s"$Query-$ref")
+                                                    clusterShardMapperFn, earliestTimestampFn))
     queryActors(ref) = queryRef
 
     // TODO: Send status update to cluster actor
@@ -163,35 +161,14 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
       case g: GetShardMap =>
         try {
           val replyTo = sender()
-          implicit val ec = GlobalScheduler.globalImplicitScheduler
-          // TODO make timeout configurable
-          val t = Timeout(20.seconds)
-          val empty = CurrentShardSnapshot(g.ref, new ShardMapper(ingestionConfigs(g.ref).numShards))
-          val futs = clusterDiscovery.ordinalToNodeCoordActors().values.map { nca =>
-            try {
-              (nca ? GetShardMapScatter(g.ref)) (t).asInstanceOf[Future[CurrentShardSnapshot]]
-                    .recover { case e =>
-                      logger.error(s"Saw exception on ask: $e")
-                      empty
-                    }
-            } catch {
-              case e: Exception =>
-                logger.error("Saw error while asking: ")
-                Future.successful(empty)
-            }
-          }.toSeq
-          Future.sequence(futs).map { snapshots =>
-            val acc = new ShardMapper(ingestionConfigs(g.ref).numShards)
-            val res = snapshots.map(_.map).fold(acc)(_.mergeFrom(_, g.ref))
-            replyTo ! CurrentShardSnapshot(g.ref, res)
-          }
+          sender() ! CurrentShardSnapshot(g.ref, clusterDiscovery.shardMapper(g.ref))
         } catch { case e: Exception =>
           logger.error(s"Error occurred when processing message $g", e)
         }
     // requested from peer NewNodeCoordActors upon them receiving GetShardMap call
     case g: GetShardMapScatter =>
       try {
-        sender() ! CurrentShardSnapshot(g.ref, shardMaps(g.ref))
+        sender() ! CurrentShardSnapshot(g.ref, localShardMaps(g.ref))
       } catch { case e: Exception =>
         logger.error(s"Error occurred when processing message $g", e)
       }

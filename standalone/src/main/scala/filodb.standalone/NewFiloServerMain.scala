@@ -1,5 +1,7 @@
 package filodb.standalone
 
+import scala.concurrent.duration.FiniteDuration
+
 import akka.actor.ActorSystem
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.{Scheduler, UncaughtExceptionReporter}
@@ -31,7 +33,9 @@ object NewFiloServerMain extends App with StrictLogging {
     val memStore = factory.memStore
 
     implicit val discoveryScheduler = Scheduler.computation(name = "discovery")
-    val clusterDiscovery = new FiloDbClusterDiscovery(settings, system)
+    import net.ceedubs.ficus.Ficus._
+    val failureDetectInterval = allConfig.as[FiniteDuration]("filodb.cluster-discovery.failure-detection-interval")
+    val clusterDiscovery = new FiloDbClusterDiscovery(settings, system, failureDetectInterval)
 
     val nodeCoordinatorActor = system.actorOf(NewNodeCoordinatorActor.props(memStore,
       clusterDiscovery, settings), "NodeCoordinatorActor")

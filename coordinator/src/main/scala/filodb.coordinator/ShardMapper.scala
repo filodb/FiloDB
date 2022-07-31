@@ -239,7 +239,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
         //But functional tests uncovered that sometimes the member down event is not
         //received and hence assignments were not removed first.
         val oldCoord = shardMap(shard)
-//        log.debug(s"Unassigned coordinator $oldCoord  for shard=$shard - Reassigning to $coordinator")
+//        log.debug(s"Reassigning shard=$shard from $oldCoord to $coordinator")
         shardMap(shard) = coordinator
     }
     Success(())
