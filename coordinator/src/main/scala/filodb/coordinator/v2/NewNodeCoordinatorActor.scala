@@ -53,10 +53,11 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
       val ingestion = IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
       initializeDataset(dataset, ingestion)
     }
+    if (clusterDiscovery.ordinalOfLocalhost == 0) {
+      startTenantIngestionMetering()
+    }
   }
 
-  // By default, stop children IngestionActors when something goes wrong.
-  // restart query actors though
   override val supervisorStrategy = OneForOneStrategy() {
     case exception: Exception => Resume
   }
@@ -145,6 +146,15 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
 
     // TODO: Send status update to cluster actor
     logger.info(s"Coordinator set up for ingestion and querying for $ref.")
+  }
+
+  private def startTenantIngestionMetering(): Unit = {
+    logger.info(s"Starting tenant level ingestion cardinality metering...")
+    val inst = TenantIngestionMetering(
+      settings,
+      () => { localShardMaps.keysIterator },
+      () => self)
+    inst.schedulePeriodicPublishJob()
   }
 
   def queryHandlers: Receive = LoggingReceive {
