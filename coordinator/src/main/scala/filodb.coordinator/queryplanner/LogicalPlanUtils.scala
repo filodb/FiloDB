@@ -159,18 +159,7 @@ object LogicalPlanUtils extends StrictLogging {
   private def copyTopLevelSubqueryWithUpdatedTimeRange(
     timeRange: TimeRange, topLevelSubquery: TopLevelSubquery
   ): TopLevelSubquery = {
-    // FIXME: LTRP test fails when this is required
-    // require(timeRange.startMs == timeRange.endMs,
-    //   s"expected same start/end evaluation times for TopLevelSubquery, " +
-    //   s"but found start=${timeRange.startMs}, end=${timeRange.endMs}")
-
-    // shift the inner periodic series such that its end timestamp aligns with the new evaluation time
-    val newInner = {
-      // tls.startMs/endMs are adjusted for efficiency (hence why we don't use tls.originalLookbackMs)
-      val windowMs = topLevelSubquery.endMs - topLevelSubquery.startMs
-      val newInnerRange = TimeRange(timeRange.endMs - windowMs, timeRange.endMs)
-      copyWithUpdatedTimeRange(topLevelSubquery.innerPeriodicSeries, newInnerRange)
-    }
+    val newInner = copyWithUpdatedTimeRange(topLevelSubquery.innerPeriodicSeries, timeRange)
     topLevelSubquery.copy(innerPeriodicSeries = newInner, startMs = timeRange.startMs, endMs = timeRange.endMs)
   }
 
