@@ -42,6 +42,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
   private val localShardMaps = new HashMap[DatasetRef, ShardMapper]
   private val shardsOnThisNode = new HashMap[DatasetRef, Seq[Int]]
   private val ingestionConfigs = new mutable.HashMap[DatasetRef, IngestionConfig]()
+  private val shardStats = new mutable.HashMap[DatasetRef, ShardHealthStats]()
 
   logger.info(s"Initializing NodeCoordActor at ${self.path}")
 
@@ -69,6 +70,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     logger.info(s"Initializing dataset ${dataset.ref}")
     ingestionConfigs.put(dataset.ref, ingestConfig)
     localShardMaps.put(dataset.ref, new ShardMapper(ingestConfig.numShards))
+    shardStats.put(dataset.ref, new ShardHealthStats(dataset.ref))
     clusterDiscovery.registerDatasetForDiscovery(dataset.ref, ingestConfig.numShards)
     // FIXME initialization of cass tables below for dev environments is async - need to wait before continuing
     // for now if table is not initialized in dev on first run, simply restart server :(
@@ -101,6 +103,8 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
         case Success(r) =>
           logger.debug(s"updateFromShardEvent success for dataset=${event.ref} event $event. Mapper now: $mapper")
       }
+      // update metrics
+      shardStats(event.ref).update(mapper, skipUnassigned = true)
     }
   }
 
