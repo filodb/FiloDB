@@ -23,6 +23,8 @@ object BinaryVector {
    */
   type BinaryVectorPtr = BinaryRegion.NativePointer
 
+  val isArm64 = System.getProperty("os.arch").equalsIgnoreCase("aarch64")
+
   /**
    * Returns the vector type and subtype from the WireFormat bytes of a BinaryVector
    */
@@ -265,8 +267,6 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] {
   // Native address of the appendable vector
   def addr: BinaryRegion.NativePointer
 
-  val arch = System.getProperty("os.arch")
-
   /** Max size that current buffer can grow to */
   def maxBytes: Int
 
@@ -345,8 +345,8 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] {
   def checkSize(need: Int, have: Int): AddResponse =
     if (!(need <= have)) VectorTooSmall(need, have) else Ack
 
-  @inline final def incNumBytes(inc: Int): Unit = arch match {
-    case "aarch64"  =>
+  @inline final def incNumBytes(inc: Int): Unit =
+    if (BinaryVector.isArm64) {
       // This is a temporary fix for M1 Mac till the operation
       // UnsafeUtils.unsafe.getAndAddInt(UnsafeUtils.ZeroPointer, addr, inc) works. Issue with compareAndSet
       // failing with a SIGBUS when a getAndAddInt is invoked on an address offset that is one of the three
@@ -357,8 +357,9 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] {
       // Since this code is invoked in ingestion path, ingestion performance needs benchmarking even for non M1 arch
       val newIncVal = UnsafeUtils.unsafe.getInt(UnsafeUtils.ZeroPointer, addr) + inc
       UnsafeUtils.unsafe.putInt(UnsafeUtils.ZeroPointer, addr, newIncVal)
-    case _          => UnsafeUtils.unsafe.getAndAddInt(UnsafeUtils.ZeroPointer, addr, inc)
-  }
+    } else {
+      UnsafeUtils.unsafe.getAndAddInt(UnsafeUtils.ZeroPointer, addr, inc)
+    }
 
   /**
    * Allocates a new instance of itself growing by factor growFactor.
