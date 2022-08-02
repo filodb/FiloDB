@@ -190,6 +190,14 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
       } catch { case e: Exception =>
         logger.error(s"Error occurred when processing message $g", e)
       }
+
+    case ListRegisteredDatasets =>
+      try {
+        sender() ! localShardMaps.keys.toSeq
+      } catch { case e: Exception =>
+        logger.error(s"Error occurred when processing message ListRegisteredDatasets", e)
+      }
+
   }
 
   def initHandler: Receive = {

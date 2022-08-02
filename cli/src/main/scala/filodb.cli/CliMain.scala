@@ -170,7 +170,7 @@ object CliMain extends StrictLogging {
           }
 
         case Some("list") =>
-          args.host.map { server =>
+          args.host.toOption.foreach { server =>
             listRegisteredDatasets(Client.standaloneClient(system, v2ClusterEnabled, server, args.port()))
           }
 
