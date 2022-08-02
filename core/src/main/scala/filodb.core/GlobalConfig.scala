@@ -32,4 +32,13 @@ object GlobalConfig extends StrictLogging {
   val systemConfig: Config = {
     unresolvedSystemConfig.resolve()
   }
+
+  val configToDisableAkkaCluster = ConfigFactory.parseString(
+    """
+      |akka {
+      |  extensions = []
+      |  actor.provider = "remote"
+      |}
+      |""".stripMargin)
+
 }

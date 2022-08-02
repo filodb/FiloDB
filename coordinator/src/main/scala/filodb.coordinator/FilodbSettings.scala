@@ -121,7 +121,9 @@ object ActorName {
   val Query = "query"
 
   /* Actor Paths */
-  def nodeCoordinatorPath(addr: Address): ActorPath =
-    RootActorPath(addr) / "user" / NodeGuardianName / CoordinatorName
+  def nodeCoordinatorPath(addr: Address, v2ClusterEnabled: Boolean): ActorPath = {
+    if (v2ClusterEnabled) RootActorPath(addr) / "user" / CoordinatorName
+    else RootActorPath(addr) / "user" / NodeGuardianName / CoordinatorName
+  }
 
 }

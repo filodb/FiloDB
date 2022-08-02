@@ -81,7 +81,7 @@ class FiloDbClusterDiscovery(settings: FilodbSettings, system: ActorSystem,
 
   private val nodeCoordActorSelections = {
     hostNames.map { h =>
-      val actorPath = s"akka.tcp://FiloDB@$h/user/NodeCoordinatorActor"
+      val actorPath = s"akka.tcp://filo-standalone@$h/user/coordinator"
       system.actorSelection(actorPath)
     }
   }

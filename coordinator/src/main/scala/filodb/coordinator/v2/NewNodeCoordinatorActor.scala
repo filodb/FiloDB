@@ -168,17 +168,21 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
   }
 
   def shardManagementHandlers: Receive = LoggingReceive {
-      // sent by ingestion actors when shard status changes
-      case e: ShardEvent => updateFromShardEvent(e)
+    // sent by ingestion actors when shard status changes
+    case ev: ShardEvent => try {
+      updateFromShardEvent(ev)
+    } catch { case e: Exception =>
+      logger.error(s"Error occurred when processing message $ev", e)
+    }
 
-      // requested from CLI and HTTP API
-      case g: GetShardMap =>
-        try {
-          val replyTo = sender()
-          sender() ! CurrentShardSnapshot(g.ref, clusterDiscovery.shardMapper(g.ref))
-        } catch { case e: Exception =>
-          logger.error(s"Error occurred when processing message $g", e)
-        }
+    // requested from CLI and HTTP API
+    case g: GetShardMap =>
+      try {
+        sender() ! CurrentShardSnapshot(g.ref, clusterDiscovery.shardMapper(g.ref))
+      } catch { case e: Exception =>
+        logger.error(s"Error occurred when processing message $g", e)
+      }
+
     // requested from peer NewNodeCoordActors upon them receiving GetShardMap call
     case g: GetShardMapScatter =>
       try {
@@ -193,6 +197,5 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
   }
 
   def receive: Receive = queryHandlers orElse shardManagementHandlers orElse initHandler
-
 
 }

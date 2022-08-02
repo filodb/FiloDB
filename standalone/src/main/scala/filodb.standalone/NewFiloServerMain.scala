@@ -18,12 +18,13 @@ object NewFiloServerMain extends StrictLogging {
 
   def start(): Unit = {
     try {
-      val allConfig = GlobalConfig.systemConfig
+
+      val allConfig = GlobalConfig.configToDisableAkkaCluster.withFallback(GlobalConfig.systemConfig)
       val settings = FilodbSettings.initialize(allConfig)
 
       Kamon.init()
 
-      val system = ActorSystem("FiloDB", allConfig)
+      val system = ActorSystem("filo-standalone", allConfig)
 
       lazy val ioPool = Scheduler.io(name = FiloSchedulers.IOSchedName,
         reporter = UncaughtExceptionReporter(
@@ -39,7 +40,7 @@ object NewFiloServerMain extends StrictLogging {
       val clusterDiscovery = new FiloDbClusterDiscovery(settings, system, failureDetectInterval)
 
       val nodeCoordinatorActor = system.actorOf(NewNodeCoordinatorActor.props(memStore,
-        clusterDiscovery, settings), "NodeCoordinatorActor")
+        clusterDiscovery, settings), "coordinator")
 
       nodeCoordinatorActor ! NewNodeCoordinatorActor.InitNewNodeCoordinatorActor
 
