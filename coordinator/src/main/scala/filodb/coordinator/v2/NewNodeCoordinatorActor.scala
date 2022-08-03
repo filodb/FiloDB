@@ -19,6 +19,9 @@ import filodb.core.store.{IngestionConfig, StoreConfig}
 import filodb.query.QueryCommand
 
 final case class GetShardMapScatter(ref: DatasetRef)
+case object LocalShardsHealthRequest
+case class DatasetShardHealth(dataset: DatasetRef, shard: Int, status: ShardStatus)
+case class LocalShardsHealthResponse(shardStatus: Seq[DatasetShardHealth])
 
 object NewNodeCoordinatorActor {
 
@@ -196,6 +199,18 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
         sender() ! localShardMaps.keys.toSeq
       } catch { case e: Exception =>
         logger.error(s"Error occurred when processing message ListRegisteredDatasets", e)
+      }
+
+    case LocalShardsHealthRequest =>
+      try {
+        val resp = localShardMaps.flatMap { case (ref, mapper) =>
+          mapper.statuses.zipWithIndex.filter(_._1 != ShardStatusUnassigned).map { case (status, shard) =>
+            DatasetShardHealth(ref, shard, status)
+          }
+        }.toSeq
+        sender() ! resp
+      } catch { case e: Exception =>
+        logger.error(s"Error occurred when processing message LocalShardsHealthRequest", e)
       }
 
   }

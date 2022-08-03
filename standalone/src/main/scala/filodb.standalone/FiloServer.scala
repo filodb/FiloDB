@@ -64,7 +64,7 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
     val bootstrapper = bootstrap(cluster.cluster)
     val singleton = cluster.clusterSingleton(role, watcher)
     filoHttpServer = new FiloHttpServer(cluster.system, cluster.settings)
-    filoHttpServer.start(coordinatorActor, singleton, bootstrapper.getAkkaHttpRoute())
+    filoHttpServer.start(coordinatorActor, singleton, false, bootstrapper.getAkkaHttpRoute())
     // Launch the profiler after startup, if configured.
     SimpleProfiler.launch(systemConfig.getConfig("filodb.profiler"))
     KamonShutdownHook.registerShutdownHook()

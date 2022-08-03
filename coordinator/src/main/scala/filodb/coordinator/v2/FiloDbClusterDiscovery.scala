@@ -24,9 +24,11 @@ class FiloDbClusterDiscovery(settings: FilodbSettings, system: ActorSystem,
 
   val numNodes = settings.config.getInt("cluster-discovery.num-nodes")
   val k8sHostFormat = settings.config.as[Option[String]]("cluster-discovery.k8s-stateful-sets-hostname-format")
+  val discoveryJobs = mutable.Map[DatasetRef, CancelableFuture[Unit]]()
+
+  // dev only
   val hostList = settings.config.as[Option[Seq[String]]]("cluster-discovery.host-list")
   val localhostOrdinal = settings.config.as[Option[Int]]("cluster-discovery.localhost-ordinal")
-  val discoveryJobs = mutable.Map[DatasetRef, CancelableFuture[Unit]]()
 
   val ordinalOfLocalhost = {
     if (localhostOrdinal.isDefined) localhostOrdinal.get

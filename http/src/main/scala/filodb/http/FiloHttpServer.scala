@@ -46,13 +46,14 @@ class FiloHttpServer(actorSystem: ActorSystem, filoSettings: FilodbSettings) ext
     */
   def start(coordinatorRef: ActorRef,
             clusterProxy: ActorRef,
+            v2ClusterEnabled: Boolean,
             externalRoutes: Route = reject): Unit = {
     implicit val system = actorSystem
     implicit val materializer = ActorMaterializer()
     // This is a preliminary implementation of routes. Will be enhanced later
     val defaultRoutes: List[FiloRoute] = List(AdminRoutes,
                                            new ClusterApiRoute(clusterProxy),
-                                           new HealthRoute(coordinatorRef),
+                                           new HealthRoute(coordinatorRef, v2ClusterEnabled),
                                            new PrometheusApiRoute(coordinatorRef, settings))
 
     // Load runtime api routes from class names.

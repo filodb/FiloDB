@@ -45,7 +45,7 @@ object NewFiloServerMain extends StrictLogging {
       nodeCoordinatorActor ! NewNodeCoordinatorActor.InitNewNodeCoordinatorActor
 
       val filoHttpServer = new FiloHttpServer(system, settings)
-      filoHttpServer.start(nodeCoordinatorActor, nodeCoordinatorActor)
+      filoHttpServer.start(nodeCoordinatorActor, nodeCoordinatorActor, true)
 
       SimpleProfiler.launch(allConfig.getConfig("filodb.profiler"))
       KamonShutdownHook.registerShutdownHook()
