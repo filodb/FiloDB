@@ -1661,9 +1661,8 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       Test(s"""sum_over_time(test{job="app"}[${windowSec}s] offset ${offsetSec}s)""", windowSec, offsetSec),
       Test(s"""rate(test{job="app"}[${windowSec}s] offset ${offsetSec}s) + test{job="app"} offset ${offsetSec}s""", windowSec, offsetSec),
       Test(s"""holt_winters(test{job="app"}[${windowSec}s] offset ${offsetSec}s, 0.9, 0.9)""", windowSec, offsetSec),
-      // FIXME: subqueries with offsets are valid promql, but these fail to parse
-      // Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s] offset ${offsetSec}s)""", windowSec + staleLookbackSec, offsetSec),
-      // Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s] offset ${offsetSec}s)""", windowSec + staleLookbackSec, offsetSec),
+      Test(s"""rate(test{job="app"}[${windowSec}s:${stepSec}s] offset ${offsetSec}s)""", windowSec + staleLookbackSec, offsetSec),
+      Test(s"""sum_over_time(test{job="app"}[${windowSec}s:10s] offset ${offsetSec}s)""", windowSec + staleLookbackSec, offsetSec),
       Test(s"""scalar(test{job="app"} offset ${offsetSec}s)""", staleLookbackSec, offsetSec),
       Test(s"""scalar(sum(test{job="app"} offset ${offsetSec}s))""", staleLookbackSec, offsetSec),
     )
@@ -1785,15 +1784,15 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
         }
       }
       def getInvalidEvalSecsDefault(partitionRanges: Seq[TimeRangeSec], bufferSecs: Long = 0L): Seq[Long] = {
+        // bufferSecs added/subtracted for queries where time ranges may be internally adjusted (i.e. subqueries)
         if (partitionRanges.size < 2) {
           // if 0-- defaults to local planner
           // if 1-- no eval times are invalid
           Nil
         } else {
           partitionRanges.tail.flatMap{ range =>
-            Seq(range.startSec + offsetSec,
+            Seq(range.startSec + offsetSec + bufferSecs,
                 range.startSec + offsetSec + windowSec / 2,
-                // bufferSecs subtracted here, since start might be incremented for subqueries
                 range.startSec + offsetSec + windowSec - 1 - bufferSecs)
           }
         }
@@ -1864,17 +1863,18 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       ExactTest(s"""scalar(sum(test{job="app"} offset ${offsetSec}s))""", staleLookbackSec, offsetSec),
 
       // subqueries
-      // FIXME: Subquery behavior does not match regular range-selectors; lookbacks are added to their time-range.
+      // FIXME: Subquery behavior does not match regular range-selectors; lookbacks are encoded in their time-range.
       SubqueryTest(s"""test{job="app"}[${windowSec}s:${stepSec}s]""", windowSec + staleLookbackSec, stepSec),
       SubqueryTest(s"""sum(test{job="app"})[${windowSec}s:${stepSec}s]""", windowSec + staleLookbackSec, stepSec),
       // FIXME: this query's plan has a 10-minute window and 10-minute lookback (ostensibly to account
       //  for the inner series). This does not match other subqueries; the inner plan should have a 20m
       //  window and a 5m lookback.
       SubqueryTest(s"""rate(test{job="app"}[${windowSec}s])[${windowSec}s:${stepSec}s]""", 2 * windowSec, stepSec),
-      // FIXME: subqueries with offsets are valid promql, but these fail to parse
-      // SubqueryTest(s"""test{job="app"}[${windowSec}s:${stepSec}s] offset ${offsetSec}s""", windowSec, offsetSec),
-      // SubqueryTest(s"""sum(test{job="app"})[${windowSec}s:${stepSec}s] offset ${offsetSec}s""", windowSec, offsetSec),
-      // SubqueryTest(s"""rate(test{job="app"}[${windowSec}s])[${windowSec}s:${stepSec}s] offset ${offsetSec}s""", 2 * windowSec, offsetSec),
+      SubqueryTest(s"""test{job="app"}[${windowSec}s:${stepSec}s] offset ${offsetSec}s""", windowSec + staleLookbackSec, stepSec, offsetSec),
+      SubqueryTest(s"""sum(test{job="app"})[${windowSec}s:${stepSec}s] offset ${offsetSec}s""", windowSec + staleLookbackSec, stepSec, offsetSec),
+      SubqueryTest(s"""rate(test{job="app"}[${windowSec}s])[${windowSec}s:${stepSec}s] offset ${offsetSec}s""", 2 * windowSec, stepSec, offsetSec),
+      // 4m total offset; (10m range) + (2m range) + (5m lookback) = (17m window)
+      SubqueryTest(s"""sum_over_time(heap_usage{job="app"}[10m:1m] offset 3m)[2m:1m] offset 1m""", windowSec = 17 * 60, stepSec = 1 * 60, offsetSec = 4 * 60),
     )
     for (partitionRanges <- partitionRangeSetups) {
       val partitionLocationProvider = makeTimeRangeRemotePartitionLocationProvider(

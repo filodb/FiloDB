@@ -254,11 +254,17 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   private def getInvalidRangesSubqueryWithWindowing(logicalPlan: SubqueryWithWindowing,
                                                     queryParams: PromQlQueryParams): Seq[TimeRange] = {
     // Extend the inner plan's invalid ranges by the window size.
-    val invaldRangesInner = getInvalidRanges(logicalPlan.innerPeriodicSeries, queryParams)
-    val invaldRangesArgs = logicalPlan.functionArgs.flatMap(getInvalidRanges(_, queryParams))
-    invaldRangesArgs ++ invaldRangesInner.map{ range =>
-      TimeRange(range.startMs, range.endMs + logicalPlan.subqueryWindowMs)
+    val invalidRanges = {
+      val invaldRangesInner = getInvalidRanges(logicalPlan.innerPeriodicSeries, queryParams)
+      val invaldRangesArgs = logicalPlan.functionArgs.flatMap(getInvalidRanges(_, queryParams))
+      invaldRangesArgs ++ invaldRangesInner.map{ range =>
+        TimeRange(range.startMs, range.endMs + logicalPlan.subqueryWindowMs)
+      }
     }
+    // apply the offset
+    logicalPlan.offsetMs.map { offsetMs =>
+      invalidRanges.map(r => TimeRange(r.startMs + offsetMs, r.endMs + offsetMs))
+    }.getOrElse(invalidRanges)
   }
 
   private def getInvalidRangesTopLevelSubquery(logicalPlan: TopLevelSubquery,
