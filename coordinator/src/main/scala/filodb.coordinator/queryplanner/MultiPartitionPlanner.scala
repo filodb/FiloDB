@@ -246,6 +246,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       val totalDiff = r.endMs - logicalPlan.startMs
       val partialStep = totalDiff % logicalPlan.stepMs
       val diffToNextStep = if (partialStep > 0 ) logicalPlan.stepMs - partialStep else 0
+      // The offset is ignored, since the RawSeries offset is conventionally (though not enforced to be) identical.
+      //   Re-application here would double the offset.
       TimeRange(r.startMs, math.min(logicalPlan.endMs, r.endMs + diffToNextStep))
     })
     mergeAndSortRanges(snappedRanges)
