@@ -48,7 +48,7 @@ object Dependencies {
   )
 
   lazy val memoryDeps = commonDeps ++ Seq(
-    "com.github.jnr"       %  "jnr-ffi"          % "2.1.6",
+    "com.github.jnr"       %  "jnr-ffi"          % "2.2.12",
     "joda-time"            % "joda-time"         % "2.2" withJavadoc(),
     "org.joda"             % "joda-convert"      % "1.2",
     "org.lz4"              %  "lz4-java"         % "1.4",
@@ -74,7 +74,7 @@ object Dependencies {
     "org.apache.lucene"            % "lucene-core"        % "8.8.2" withJavadoc(),
     "org.apache.lucene"            % "lucene-facet"       % "8.8.2" withJavadoc(),
     "com.github.alexandrnikitin"   %% "bloom-filter"      % "0.11.0",
-    "org.rocksdb"                  % "rocksdbjni"         % "6.11.4",
+    "org.rocksdb"                  % "rocksdbjni"         % "6.29.5",
     "com.esotericsoftware"         % "kryo"               % "4.0.0" excludeAll(excludeMinlog),
     "com.dorkbox"                  % "MinLog-SLF4J"       % "1.12",
     "com.github.ben-manes.caffeine" % "caffeine"          % "3.0.5"
@@ -152,7 +152,7 @@ object Dependencies {
     circeGeneric,
     circeParser,
     akkaHttpTestkit % Test,
-    "org.xerial.snappy" % "snappy-java" % "1.1.7.3"
+    "org.xerial.snappy" % "snappy-java" % "1.1.8.4"
   )
 
   lazy val standaloneDeps = Seq(
