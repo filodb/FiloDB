@@ -373,7 +373,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     } else {
       logger.info(s"(ws, ns) pair not provided in prefix=${lp.shardKeyPrefix};" +
                   s"dispatching to all authorized partitions")
-      getMetadataPartitions(lp.filters(), TimeRange(0, Long.MaxValue))
+      getMetadataPartitions(lp.filters(), getRealLeafTimeRange(lp).get)
     }
     val execPlan = if (partitions.isEmpty) {
       logger.warn(s"no partitions found for $lp; defaulting to local planner")
