@@ -90,7 +90,7 @@ object CliMain extends StrictLogging {
   var exitCode = 0
   val allConfig = GlobalConfig.configToDisableAkkaCluster.withFallback(GlobalConfig.systemConfig)
   val config = allConfig.getConfig("filodb")
-  val v2ClusterEnabled =  allConfig.getBoolean("filodb.new-cluster-enabled")
+  val v2ClusterEnabled =  allConfig.getBoolean("filodb.v2-cluster-enabled")
   lazy val system = ActorSystem("FiloCli", allConfig)
   lazy implicit val ioPool = Scheduler.io(name = FiloSchedulers.IOSchedName,
     reporter = UncaughtExceptionReporter(

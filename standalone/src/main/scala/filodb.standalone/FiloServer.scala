@@ -86,7 +86,7 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
 object FiloServer extends StrictLogging {
   def main(args: Array[String]): Unit = {
     val allConfig = GlobalConfig.systemConfig
-    if (allConfig.getBoolean("filodb.new-cluster-enabled")) {
+    if (allConfig.getBoolean("filodb.v2-cluster-enabled")) {
       NewFiloServerMain.start()
     } else {
       // TODO can remove once new-startup is tested and proven

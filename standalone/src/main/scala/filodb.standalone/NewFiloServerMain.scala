@@ -30,7 +30,7 @@ object NewFiloServerMain extends StrictLogging {
         reporter = UncaughtExceptionReporter(
           logger.error("Uncaught Exception in FilodbCluster.ioPool", _)))
 
-      /** Initializes columnStore and metaStore using the factory setting from config. */
+      /* Initializes columnStore and metaStore using the factory setting from config. */
       val factory = StoreFactory(settings, ioPool)
 
       val memStore = factory.memStore
