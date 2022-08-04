@@ -152,7 +152,7 @@ object Dependencies {
     circeGeneric,
     circeParser,
     akkaHttpTestkit % Test,
-    "org.xerial.snappy" % "snappy-java" % "1.1.7.3"
+    "org.xerial.snappy" % "snappy-java" % "1.1.8.4"
   )
 
   lazy val standaloneDeps = Seq(
