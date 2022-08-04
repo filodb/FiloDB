@@ -1413,8 +1413,80 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
   }
 
+  it("should materialize a multi level multi partition binary join / aggregate correctly with partition splits") {
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        val thirdMs = (timeRange.endMs - timeRange.startMs) / 3
+        val halfMs = (timeRange.endMs - timeRange.startMs) / 2
+        if (routingKey.equals(Map("job" -> "app0"))) {
+          // three partitions, time ranges overlap ends, local and remote
+          List(
+            PartitionAssignment("remote-a", "remote-url-a", TimeRange(timeRange.startMs - 10000, timeRange.startMs + thirdMs)),
+            PartitionAssignment("remote-b", "remote-url-b", TimeRange(timeRange.startMs + thirdMs, timeRange.startMs + 2 * thirdMs)),
+            PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs + 2 * thirdMs, timeRange.endMs + 1000)),
+          )
+        } else if (routingKey.equals(Map("job" -> "app1"))) {
+          // two partitions, time ranges do not cover ends, partition shared with app0
+          List(
+            PartitionAssignment("remote-a", "remote-url-a", TimeRange(timeRange.startMs + 10000, timeRange.startMs + halfMs)),
+            PartitionAssignment("remote-c", "remote-url-c", TimeRange(timeRange.startMs + halfMs, timeRange.endMs - 10000)),
+          )
+        } else throw new IllegalArgumentException(s"unhandled routing key: $routingKey")
+      }
 
-  it("should push multi-namespace portion of query when all of it is in one partition") {
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                         timeRange: TimeRange): List[PartitionAssignment] = {
+        throw new RuntimeException("should not use")
+      }
+
+    }
+
+    val query = """sum(sum(foo{job="app0"}) + bar{job="app1"}) + bar{job="app1"}"""
+    val startSec = 123456
+    val endSec = 1234567
+    val stepSec = 123
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner,
+                          "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(startSec, stepSec, endSec))
+
+    val promQlQueryParams = PromQlQueryParams(query, startSec, stepSec, endSec)
+    val queryContext = QueryContext(origQueryParams = promQlQueryParams,
+                                    plannerParams = PlannerParams(processMultiPartition = true))
+    val execPlan = engine.materialize(lp, queryContext)
+    println(execPlan.printTree())
+
+    // Check for:
+    //   (1) same start/end times for all non-MultiSchemaPartitionsExec plans
+    //   (2) a StitchRvsExec for each selector's set of partitions
+    val expectedPlan =
+      """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+        |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(123456,123,1234567))
+        |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+        |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |----E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+        |-----T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(123456,123,1234567))
+        |------E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+        |-------T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |--------E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+        |---------E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1621093426],raw)
+        |----------T~PeriodicSamplesMapper(start=123456000, step=123000, end=1234567000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-----------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(123156000,1234567000), filters=List(ColumnFilter(job,Equals(app0)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1621093426],raw)
+        |----------T~PeriodicSamplesMapper(start=123456000, step=123000, end=1234567000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-----------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=16, chunkMethod=TimeRangeChunkScan(123156000,1234567000), filters=List(ColumnFilter(job,Equals(app0)), ColumnFilter(__name__,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1621093426],raw)
+        |---------E~PromQlRemoteExec(PromQlQueryParams(sum(foo{job="app0"}),123456,123,1234567,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url-a, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+        |---------E~PromQlRemoteExec(PromQlQueryParams(sum(foo{job="app0"}),123456,123,1234567,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url-b, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+        |-----E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+        |------E~PromQlRemoteExec(PromQlQueryParams(bar{job="app1"},123456,123,1234567,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url-a, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+        |------E~PromQlRemoteExec(PromQlQueryParams(bar{job="app1"},123456,123,1234567,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url-c, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+        |-E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+        |--E~PromQlRemoteExec(PromQlQueryParams(bar{job="app1"},123456,123,1234567,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url-a, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+        |--E~PromQlRemoteExec(PromQlQueryParams(bar{job="app1"},123456,123,1234567,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote-url-c, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin
+
+    validatePlan(execPlan, expectedPlan)
+  }
+
+
+    it("should push multi-namespace portion of query when all of it is in one partition") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
       TimeRange(timeRange.startMs, timeRange.endMs)))
 
