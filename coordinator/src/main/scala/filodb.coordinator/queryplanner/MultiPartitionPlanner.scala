@@ -154,7 +154,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case lp: ApplyAbsentFunction        => super.materializeAbsentFunction(qContext, lp)
       case lp: ScalarBinaryOperation      => super.materializeScalarBinaryOperation(qContext, lp)
       case lp: ApplyLimitFunction         => super.materializeLimitFunction(qContext, lp)
-      case lp: TsCardinalities            => materializeTsCardinalities(lp, qContext)
+      case lp: TsCardinalities            => throw new IllegalArgumentException("TsCardinalities unexpected here")
       case lp: SubqueryWithWindowing       => super.materializeSubqueryWithWindowing(qContext, lp)
       case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
       case _: PeriodicSeries |
