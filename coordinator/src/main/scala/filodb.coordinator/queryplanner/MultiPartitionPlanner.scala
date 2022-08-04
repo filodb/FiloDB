@@ -282,33 +282,12 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val execPlan = if (partitions.isEmpty || routingKeys.forall(_._2.isEmpty))
       localPartitionPlanner.materialize(logicalPlan, qContext)
     else {
-      val stepMs = queryParams.stepSecs * 1000
-      val isInstantQuery: Boolean = if (queryParams.startSecs == queryParams.endSecs) true else false
-      var prevPartitionStart = queryParams.startSecs * 1000
-      val execPlans = partitions.zipWithIndex.map { case (p, i) =>
-        // First partition should start from query start time, no need to calculate time according to step for instant
-        // queries
-        val startMs =
-          if (i == 0 || isInstantQuery) {
-            queryParams.startSecs * 1000
-          } else {
-            // The logic below does not work for partitions split across time as we encounter a hole
-            // in the produced result. The size of the hole is lookBackMs + stepMs
-            val numStepsInPrevPartition = (p.timeRange.startMs - prevPartitionStart + lookBackMs) / stepMs
-            val lastPartitionInstant = prevPartitionStart + numStepsInPrevPartition * stepMs
-            val start = lastPartitionInstant + stepMs
-            // If query duration is less than or equal to lookback start will be greater than query end time
-            if (start > (queryParams.endSecs * 1000)) queryParams.endSecs * 1000 else start
-          }
-        prevPartitionStart = startMs
-        // we assume endMs should be equal partition endMs but if the query's end is smaller than partition endMs,
-        // why would we want to stretch the query??
-        val endMs = if (isInstantQuery) queryParams.endSecs * 1000 else p.timeRange.endMs + offsetMs.min
-        logger.debug(s"partitionInfo=$p; updated startMs=$startMs, endMs=$endMs")
+      val execPlans = partitions.map { p =>
         if (p.partitionName.equals(localPartitionName)) {
-          val lpWithUpdatedTime = copyLogicalPlanWithUpdatedTimeRange(logicalPlan, TimeRange(startMs, endMs))
-          localPartitionPlanner.materialize(lpWithUpdatedTime, qContext)
+          localPartitionPlanner.materialize(logicalPlan, qContext)
         } else {
+          val startMs = 1000 * queryParams.startSecs
+          val endMs = 1000 * queryParams.endSecs
           val httpEndpoint = p.endPoint + queryParams.remoteQueryPath.getOrElse("")
           PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, generateRemoteExecParams(qContext, startMs, endMs),
             inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
@@ -332,16 +311,16 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
 
-    val lhsExec = this.materialize(logicalPlan.lhs, lhsQueryContext)
-    val rhsExec = this.materialize(logicalPlan.rhs, rhsQueryContext)
+    val lhsExec = walkLogicalPlanTree(logicalPlan.lhs, lhsQueryContext).plans
+    val rhsExec = walkLogicalPlanTree(logicalPlan.rhs, rhsQueryContext).plans
 
     val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
-      SetOperatorExec(qContext, InProcessPlanDispatcher(queryConfig), Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+      SetOperatorExec(qContext, InProcessPlanDispatcher(queryConfig), lhsExec, rhsExec, logicalPlan.operator,
         LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn,
         rvRangeFromPlan(logicalPlan))
     else
-      BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+      BinaryJoinExec(qContext, inProcessPlanDispatcher, lhsExec, rhsExec, logicalPlan.operator,
         logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
         LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn,

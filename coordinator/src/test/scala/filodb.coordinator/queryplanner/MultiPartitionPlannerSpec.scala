@@ -108,21 +108,15 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val remoteExec1 = stitchRvsExec.children(0).asInstanceOf[PromQlRemoteExec]
     val queryParams1 = remoteExec1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     queryParams1.startSecs shouldEqual startSeconds
-    queryParams1.endSecs shouldEqual (localPartitionStart - 1)
+    queryParams1.endSecs shouldEqual (endSeconds)
     queryParams1.stepSecs shouldEqual step
     remoteExec1.queryContext.plannerParams.processFailure shouldEqual true
     remoteExec1.queryContext.plannerParams.processMultiPartition shouldEqual false
     remoteExec1.queryEndpoint shouldEqual "remote-url"
 
-    // expectedStarMs ends up to be 3 400 000, which does not look right to me, it is supposed to be 3 000 000
-    // kpetrov, 12/02/21
-    val expectedStartMs = ((startSeconds*1000) to (endSeconds*1000) by (step*1000)).find { instant =>
-      instant - lookbackMs > (localPartitionStart * 1000)
-    }.get
-
     val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
     val queryParams2 = remoteExec2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryParams2.startSecs shouldEqual (expectedStartMs / 1000)
+    queryParams2.startSecs shouldEqual startSeconds
     queryParams2.endSecs shouldEqual endSeconds
     queryParams2.stepSecs shouldEqual step
     remoteExec2.queryContext.plannerParams.processFailure shouldEqual true
@@ -836,24 +830,16 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val remoteExec1 = stitchRvsExec.children(0).asInstanceOf[PromQlRemoteExec]
     val queryParams1 = remoteExec1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     queryParams1.startSecs shouldEqual startSeconds
-    queryParams1.endSecs shouldEqual 3999
+    queryParams1.endSecs shouldEqual endSeconds
     queryParams1.stepSecs shouldEqual step
     remoteExec1.queryContext.plannerParams.processFailure shouldEqual true
     remoteExec1.queryContext.plannerParams.processMultiPartition shouldEqual false
     remoteExec1.queryEndpoint shouldEqual "remote-url1"
     val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
 
-    val expectedStartMs1 = ((startSeconds*1000) to (endSeconds*1000) by (step*1000)).find { instant =>
-      instant - lookbackMs > (secondPartitionStart * 1000)
-    }.get
-
-    val expectedStartMs2 = ((startSeconds*1000) to (endSeconds*1000) by (step*1000)).find { instant =>
-      instant - lookbackMs > (thirdPartitionStart * 1000)
-    }.get
-
     val queryParams2 = remoteExec2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryParams2.startSecs shouldEqual expectedStartMs1 / 1000
-    queryParams2.endSecs shouldEqual 6999
+    queryParams2.startSecs shouldEqual startSeconds
+    queryParams2.endSecs shouldEqual endSeconds
     queryParams2.stepSecs shouldEqual step
     remoteExec2.queryContext.plannerParams.processFailure shouldEqual true
     remoteExec2.queryContext.plannerParams.processMultiPartition shouldEqual false
@@ -861,7 +847,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
     val remoteExec3 = stitchRvsExec.children(2).asInstanceOf[PromQlRemoteExec]
     val queryParams3 = remoteExec3.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryParams3.startSecs shouldEqual expectedStartMs2 / 1000
+    queryParams3.startSecs shouldEqual startSeconds
     queryParams3.endSecs shouldEqual endSeconds
     queryParams3.stepSecs shouldEqual step
     remoteExec3.queryContext.plannerParams.processFailure shouldEqual true
@@ -965,7 +951,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val remoteExec = stitchRvsExec.children(0).asInstanceOf[PromQlRemoteExec]
     val queryParams = remoteExec.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     queryParams.startSecs shouldEqual startSeconds
-    queryParams.endSecs shouldEqual (localPartitionStartMs - 1) / 1000
+    queryParams.endSecs shouldEqual endSeconds
     queryParams.stepSecs shouldEqual step
     remoteExec.queryContext.plannerParams.processFailure shouldEqual true
     remoteExec.queryContext.plannerParams.processMultiPartition shouldEqual false
@@ -973,7 +959,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
     val remoteExec2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
     val queryParams2 = remoteExec2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    queryParams2.startSecs shouldEqual endSeconds
+    queryParams2.startSecs shouldEqual startSeconds
     queryParams2.endSecs shouldEqual endSeconds
     queryParams2.stepSecs shouldEqual step
     remoteExec2.queryContext.plannerParams.processFailure shouldEqual true
