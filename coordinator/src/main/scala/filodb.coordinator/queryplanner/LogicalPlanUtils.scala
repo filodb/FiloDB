@@ -385,6 +385,7 @@ object LogicalPlanUtils extends StrictLogging {
       case sp: ScalarPlan =>
         Some(TimeRange(sp.startMs, sp.endMs))
       case _: TsCardinalities =>
+        // past 7 days, since this is the max retention between "active" and "total" counts
         val nowMs = System.currentTimeMillis()
         Some(TimeRange(nowMs - Duration(7, Day).millis(0), nowMs))
     }
