@@ -1486,7 +1486,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   }
 
 
-    it("should push multi-namespace portion of query when all of it is in one partition") {
+  it("should push multi-namespace portion of query when all of it is in one partition") {
     def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
       TimeRange(timeRange.startMs, timeRange.endMs)))
 

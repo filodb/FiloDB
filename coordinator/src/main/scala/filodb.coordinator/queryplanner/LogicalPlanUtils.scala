@@ -1,7 +1,9 @@
 package filodb.coordinator.queryplanner
 
 import scala.collection.mutable.ArrayBuffer
+
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.query.{QueryContext, RangeParams}
 import filodb.prometheus.ast.{Day, Duration, SubqueryUtils, WindowConstants}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
