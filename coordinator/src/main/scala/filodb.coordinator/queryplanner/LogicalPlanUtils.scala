@@ -1,13 +1,10 @@
 package filodb.coordinator.queryplanner
 
 import scala.collection.mutable.ArrayBuffer
-
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.core.query.{QueryContext, RangeParams}
-import filodb.prometheus.ast.SubqueryUtils
+import filodb.prometheus.ast.{Day, Duration, SubqueryUtils, WindowConstants}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
-import filodb.prometheus.ast.WindowConstants
 import filodb.query._
 
 object LogicalPlanUtils extends StrictLogging {
@@ -359,4 +356,35 @@ object LogicalPlanUtils extends StrictLogging {
    }
   }
 
+  /**
+   * Returns the time range of a leaf plan with all modifiers (i.e. offsets/lookbacks) applied.
+   * Example: RawSeries(start=10, end=20, offset=2, lookback=3)
+   *      --> TimeRange(start=5, end=18)
+   * @return an occupied Option iff a time range is defined for the plan
+   *         (i.e. a RawSeries with non-IntervalSelector RangeSelector will return None)
+   */
+  def getRealLeafTimeRange(logicalPlan: LogicalPlan): Option[TimeRange] = {
+    logicalPlan match {
+      case _: NonLeafLogicalPlan => throw new IllegalArgumentException(
+        s"expected NonLeafLogicalPlan, but found ${logicalPlan.getClass}")
+      case rs: RawSeries =>
+        rs.rangeSelector match {
+          case intSel: IntervalSelector =>
+            val offsetMs = rs.offsetMs.getOrElse(0L)
+            val lookbackMs = rs.lookbackMs.getOrElse(WindowConstants.staleDataLookbackMillis)
+            Some(TimeRange(intSel.from - offsetMs - lookbackMs,
+                           intSel.to - offsetMs))
+          case _ => None
+        }
+      case mq: MetadataQueryPlan =>
+        Some(TimeRange(mq.startMs, mq.endMs))
+      case rc: RawChunkMeta =>
+        Some(TimeRange(rc.startMs, rc.endMs))
+      case sp: ScalarPlan =>
+        Some(TimeRange(sp.startMs, sp.endMs))
+      case _: TsCardinalities =>
+        val nowMs = System.currentTimeMillis()
+        Some(TimeRange(nowMs - Duration(7, Day).millis(0), nowMs))
+    }
+  }
 }
