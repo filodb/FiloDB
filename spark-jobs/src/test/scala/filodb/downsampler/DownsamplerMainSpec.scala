@@ -271,6 +271,25 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
+  it("should write additional prom counter partitionKeys with start/endtimes overlapping with original partkey - " +
+      "to test partkeyIndex marge logic") {
+
+    val rawDataset = Dataset("prometheus", Schemas.promCounter)
+    val startTime = 74372801000L
+    val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
+    val partKey = partBuilder.partKeyFromObjects(Schemas.promCounter, counterName, seriesTags)
+
+    val part = new TimeSeriesPartition(0, Schemas.promCounter, partKey, shardInfo, 1)
+
+    counterPartKeyBytes = part.partKeyBytes
+    val pk1 = PartKeyRecord(counterPartKeyBytes, startTime - 3600000, currTime, Some(1))
+    val pk2 = PartKeyRecord(counterPartKeyBytes, startTime + 3600000, currTime, Some(1))
+    val pk3 = PartKeyRecord(counterPartKeyBytes, startTime, currTime + 3600000, Some(1))
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk1), 259200, pkUpdateHour + 1).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk2), 259200, pkUpdateHour + 3).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk3), 259200, pkUpdateHour + 2).futureValue
+  }
+
   it ("should write prom histogram data to cassandra") {
 
     val rawDataset = Dataset("prometheus", Schemas.promHistogram)
@@ -434,15 +453,22 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
   it("should verify bulk part key record migration and validate completeness of PK migration") {
 
-    def pkMetricName(pkr: PartKeyRecord): String = {
+    def pkMetricName(pkr: PartKeyRecord): (String, PartKeyRecord) = {
       val strPairs = batchDownsampler.schemas.part.binSchema.toStringPairs(pkr.partKey, UnsafeUtils.arayOffset)
-      strPairs.find(p => p._1 == "_metric_").head._2
+      (strPairs.find(p => p._1 == "_metric_").head._2, pkr)
     }
-    val readKeys = (0 until 4).flatMap { shard =>
+    val readPartKeys = (0 until 4).flatMap { shard =>
       val partKeys = downsampleColStore.scanPartKeys(batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
                                                      shard)
       Await.result(partKeys.map(pkMetricName).toListL.runToFuture, 1 minutes)
-    }.toSet
+    }
+
+    // partkey start/endtimes are merged such that starttime and endtime are resolved to oldest latest respectively.
+    val startTime = 74372801000L
+    val readKeys = readPartKeys.map(_._1).toSet
+    val counterPartkey = readPartKeys.filter(_._1 == counterName).head._2
+    counterPartkey.startTime shouldEqual startTime - 3600000
+    counterPartkey.endTime shouldEqual currTime + 3600000
 
     // readKeys should not contain untyped part key - we dont downsample untyped
     readKeys shouldEqual (0 to 10000).map(i => s"bulkmetric$i").toSet ++ (metricNames.toSet - untypedName)
