@@ -39,7 +39,8 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
   val noKey = CustomRangeVectorKey(Map.empty)
 
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan, source: ChunkSource)
+
+    override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
 
     override def clusterName: String = ???

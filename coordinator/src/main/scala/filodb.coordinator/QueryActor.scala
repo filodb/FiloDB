@@ -23,6 +23,7 @@ import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryStats}
 import filodb.core.store.CorruptVectorException
+import filodb.memory.data.Shutdown
 import filodb.query._
 import filodb.query.exec.ExecPlan
 
@@ -84,6 +85,7 @@ final class QueryActor(memStore: TimeSeriesStore,
   private val epRequests = Kamon.counter("queryactor-execplan-requests").withTags(TagSet.from(tags))
   private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").withTags(TagSet.from(tags))
   private val queryErrors = Kamon.counter("queryactor-query-errors").withTags(TagSet.from(tags))
+  private val uncaughtExceptions = Kamon.counter("queryactor-uncaught-exceptions").withTags(TagSet.from(tags))
 
   /**
     * Instrumentation adds following metrics on the Query Scheduler
@@ -103,8 +105,14 @@ final class QueryActor(memStore: TimeSeriesStore,
                                       * sys.runtime.availableProcessors).toInt
     val schedName = s"$QuerySchedName-$dsRef"
     val exceptionHandler = new UncaughtExceptionHandler {
-      override def uncaughtException(t: Thread, e: Throwable): Unit =
+      override def uncaughtException(t: Thread, e: Throwable): Unit = {
         logger.error("Uncaught Exception in Query Scheduler", e)
+        uncaughtExceptions.increment()
+        e match {
+          case ie: InternalError => Shutdown.haltAndCatchFire(ie)
+          case _ => { /* Do nothing. */ }
+        }
+      }
     }
     val threadFactory = new ForkJoinPool.ForkJoinWorkerThreadFactory {
       def newThread(pool: ForkJoinPool): ForkJoinWorkerThread = {
@@ -122,7 +130,7 @@ final class QueryActor(memStore: TimeSeriesStore,
 
   // scalastyle:off method.length
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
-    if (checkTimeout(q.queryContext, replyTo)) {
+    if (checkTimeoutBeforeQueryExec(q.queryContext, replyTo)) {
       epRequests.increment()
       val queryExecuteSpan = Kamon.spanBuilder(s"query-actor-exec-plan-execute-${q.getClass.getSimpleName}")
         .asChildOf(Kamon.currentSpan())
@@ -177,7 +185,7 @@ final class QueryActor(memStore: TimeSeriesStore,
   }
 
   private def processLogicalPlan2Query(q: LogicalPlan2Query, replyTo: ActorRef) = {
-    if (checkTimeout(q.qContext, replyTo)) {
+    if (checkTimeoutBeforeQueryExec(q.qContext, replyTo)) {
       // This is for CLI use only. Always prefer clients to materialize logical plan
       lpRequests.increment()
       try {
@@ -193,7 +201,7 @@ final class QueryActor(memStore: TimeSeriesStore,
   }
 
   private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef): Unit = {
-    if (checkTimeout(q.qContext, replyTo)) {
+    if (checkTimeoutBeforeQueryExec(q.qContext, replyTo)) {
       try {
         val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
         replyTo ! execPlan
@@ -238,14 +246,13 @@ final class QueryActor(memStore: TimeSeriesStore,
     }
   }
 
-  def checkTimeout(queryContext: QueryContext, replyTo: ActorRef): Boolean = {
-    // timeout can occur here if there is a build up in actor mailbox queue and delayed delivery
-    val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
-    if (queryTimeElapsed >= queryContext.plannerParams.queryTimeoutMillis) {
-      replyTo ! QueryError(queryContext.queryId, QueryStats(),
-        QueryTimeoutException(queryTimeElapsed, this.getClass.getName))
-      false
-    } else true
+  def checkTimeoutBeforeQueryExec(queryContext: QueryContext, replyTo: ActorRef): Boolean = {
+    val ex = queryContext.checkQueryTimeout(this.getClass.getName, false)
+    ex match {
+      case Some(qte) => replyTo ! QueryError(queryContext.queryId, QueryStats(), qte)
+                        false
+      case None =>      true
+    }
   }
 
   def receive: Receive = {

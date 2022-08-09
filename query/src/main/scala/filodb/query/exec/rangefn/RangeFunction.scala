@@ -352,6 +352,7 @@ object RangeFunction {
       case Some(Timestamp)        => () => new TimestampChunkedFunction()
       case Some(ZScore)           => () => new ZScoreChunkedFunctionD()
       case Some(PredictLinear)    => () => new PredictLinearChunkedFunctionD(funcParams)
+      case Some(PresentOverTime)  => () => new PresentOverTimeChunkedFunctionD()
       case _                      => iteratingFunction(func, funcParams)
     }
   }
@@ -562,5 +563,27 @@ class TimestampChunkedFunction (var value: Double = Double.NaN) extends ChunkedR
 
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, value)
+  }
+}
+
+class PresentOverTimeChunkedFunctionD extends LastSampleChunkedFuncDblVal() {
+  def updateValue(ts: Long, valAcc: MemoryReader, valVector: BinaryVectorPtr,
+                  valReader: VectorDataReader, endRowNum: Int): Unit = {
+    val dblReader = valReader.asDoubleReader
+    val doubleVal = dblReader(valAcc, valVector, endRowNum)
+    // If the last value is NaN, that may be Prometheus end of time series marker.
+    // In that case try to get the sample before last.
+    // If endRowNum==0, we are at beginning of chunk, and if the window included the last chunk, then
+    // the call to addChunks to the last chunk would have gotten the last sample value anyways.
+    if (java.lang.Double.isNaN(doubleVal)) {
+      if (endRowNum > 0) {
+        timestamp = ts
+        val lastVal = dblReader(valAcc, valVector, endRowNum - 1)
+        value = if (lastVal.isNaN) Double.NaN else 1
+      }
+    } else {
+      timestamp = ts
+      value = 1
+    }
   }
 }

@@ -677,13 +677,14 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   /////// START SHARD RECOVERY METHODS ///////////////////
 
-  def recoverIndex(): Future[Unit] = {
+  def recoverIndex(): Future[Long] = {
     val indexBootstrapper = new IndexBootstrapper(colStore)
     indexBootstrapper.bootstrapIndexRaw(partKeyIndex, shardNum, ref)(bootstrapPartKey)
       .executeOn(ingestSched) // to make sure bootstrapIndex task is run on ingestion thread
       .map { count =>
         startFlushingIndex()
         logger.info(s"Bootstrapped index for dataset=$ref shard=$shardNum with $count records")
+        count
       }.runToFuture(ingestSched)
   }
 
@@ -1738,7 +1739,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   def labelNames(filter: Seq[ColumnFilter],
                  endTime: Long,
                  startTime: Long): Seq[String] =
-    labelNamesFromPartKeys(partKeyIndex.labelNamesFromFilters(filter, startTime, endTime))
+    partKeyIndex.labelNamesEfficient(filter, startTime, endTime)
 
   /**
    * Iterator for traversal of partIds, value for the given label will be extracted from the ParitionKey.

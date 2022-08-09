@@ -3,7 +3,7 @@ package filodb.query.exec
 import kamon.Kamon
 import monix.execution.Scheduler
 
-import filodb.core.{DatasetRef, QueryTimeoutException}
+import filodb.core.DatasetRef
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QueryContext, QuerySession}
 import filodb.core.query.Filter.Equals
@@ -84,9 +84,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
 
     Kamon.currentSpan().mark("lookup-partitions-done")
 
-    val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
-    if (queryTimeElapsed >= queryContext.plannerParams.queryTimeoutMillis)
-      throw QueryTimeoutException(queryTimeElapsed, this.getClass.getName)
+    queryContext.checkQueryTimeout(this.getClass.getName)
 
     // Find the schema if one wasn't supplied
     val schemas = source.schemas(dataset).get
