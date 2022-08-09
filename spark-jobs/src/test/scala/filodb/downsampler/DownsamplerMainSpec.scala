@@ -3,10 +3,8 @@ package filodb.downsampler
 import java.io.File
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicLong
-
 import scala.concurrent.Await
 import scala.concurrent.duration._
-
 import com.typesafe.config.{ConfigException, ConfigFactory}
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -16,7 +14,6 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.cardbuster.CardinalityBuster
 import filodb.core.GlobalScheduler._
 import filodb.core.MachineMetricsData
@@ -35,6 +32,7 @@ import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.memory.format.vectors.{CustomBuckets, DoubleVector, LongHistogram}
 import filodb.query.{QueryError, QueryResult}
 import filodb.query.exec._
+import org.apache.commons.io.FileUtils
 
 /**
   * Spec tests downsampling round trip.
@@ -273,6 +271,25 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
+  it("should write additional prom counter partitionKeys with start/endtimes overlapping with original partkey - " +
+      "to test partkeyIndex marge logic") {
+
+    val rawDataset = Dataset("prometheus", Schemas.promCounter)
+    val startTime = 74372801000L
+    val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
+    val partKey = partBuilder.partKeyFromObjects(Schemas.promCounter, counterName, seriesTags)
+
+    val part = new TimeSeriesPartition(0, Schemas.promCounter, partKey, shardInfo, 1)
+
+    counterPartKeyBytes = part.partKeyBytes
+    val pk1 = PartKeyRecord(counterPartKeyBytes, startTime - 3600000, currTime, Some(1))
+    val pk2 = PartKeyRecord(counterPartKeyBytes, startTime + 3600000, currTime, Some(1))
+    val pk3 = PartKeyRecord(counterPartKeyBytes, startTime, currTime + 3600000, Some(1))
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk1), 259200, pkUpdateHour + 1).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk2), 259200, pkUpdateHour + 3).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk3), 259200, pkUpdateHour + 2).futureValue
+  }
+
   it ("should write prom histogram data to cassandra") {
 
     val rawDataset = Dataset("prometheus", Schemas.promHistogram)
@@ -436,15 +453,22 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
   it("should verify bulk part key record migration and validate completeness of PK migration") {
 
-    def pkMetricName(pkr: PartKeyRecord): String = {
+    def pkMetricName(pkr: PartKeyRecord): (String, PartKeyRecord) = {
       val strPairs = batchDownsampler.schemas.part.binSchema.toStringPairs(pkr.partKey, UnsafeUtils.arayOffset)
-      strPairs.find(p => p._1 == "_metric_").head._2
+      (strPairs.find(p => p._1 == "_metric_").head._2, pkr)
     }
-    val readKeys = (0 until 4).flatMap { shard =>
+    val readPartKeys = (0 until 4).flatMap { shard =>
       val partKeys = downsampleColStore.scanPartKeys(batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
                                                      shard)
       Await.result(partKeys.map(pkMetricName).toListL.runToFuture, 1 minutes)
-    }.toSet
+    }
+
+    // partkey start/endtimes are merged such that starttime and endtime are resolved to oldest latest respectively.
+    val startTime = 74372801000L
+    val readKeys = readPartKeys.map(_._1).toSet
+    val counterPartkey = readPartKeys.filter(_._1 == counterName).head._2
+    counterPartkey.startTime shouldEqual startTime - 3600000
+    counterPartkey.endTime shouldEqual currTime + 3600000
 
     // readKeys should not contain untyped part key - we dont downsample untyped
     readKeys shouldEqual (0 to 10000).map(i => s"bulkmetric$i").toSet ++ (metricNames.toSet - untypedName)
@@ -857,6 +881,68 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     }
 
     downsampleTSStore.shutdown()
+  }
+
+  it("should bring up DownsampledTimeSeriesShard and not rebuild index") {
+
+    var indexFolder = new File("target/tmp/downsample-index")
+    if (indexFolder.exists()) {
+      FileUtils.deleteDirectory(indexFolder)
+    }
+
+    val durableIndexConf = ConfigFactory.parseFile(
+      new File("conf/timeseries-filodb-durable-downsample-index-server.conf")
+    ).resolve()
+
+    val durableIndexSettings = new DownsamplerSettings(durableIndexConf)
+
+    val downsampleTSStore = new DownsampledTimeSeriesStore(
+      downsampleColStore, rawColStore,
+      durableIndexSettings.filodbConfig
+    )
+
+    downsampleTSStore.setup(batchDownsampler.rawDatasetRef, settings.filodbSettings.schemas,
+      0, rawDataStoreConfig, durableIndexSettings.rawDatasetIngestionConfig.downsampleConfig)
+
+    val recoveredRecords = downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
+    recoveredRecords shouldBe 5
+    val fromHour = hour(74372801000L*1000)
+    val toHour = hour(74373042000L*1000)
+    downsampleTSStore.refreshIndexForTesting(batchDownsampler.rawDatasetRef, fromHour, toHour)
+    downsampleTSStore.shutdown()
+
+    val downsampleTSStore2 = new DownsampledTimeSeriesStore(
+      downsampleColStore, rawColStore,
+      durableIndexSettings.filodbConfig
+    )
+
+    downsampleTSStore2.setup(batchDownsampler.rawDatasetRef, settings.filodbSettings.schemas,
+      0, rawDataStoreConfig, durableIndexSettings.rawDatasetIngestionConfig.downsampleConfig)
+
+    val recoveredRecords2 = downsampleTSStore2.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
+    recoveredRecords2 shouldBe 0
+
+    val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
+    val colFiltersNaN = seriesTagsNaN.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
+
+    Seq(gaugeName, gaugeLowFreqName, counterName, histNameNaN, histName).foreach { metricName =>
+      val colFltrs = if (metricName == histNameNaN) colFiltersNaN else colFilters
+      val queryFilters = colFltrs :+ ColumnFilter("_metric_", Equals(metricName))
+      val exec = MultiSchemaPartitionsExec(QueryContext(plannerParams = PlannerParams(sampleLimit = 1000)),
+        InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig), batchDownsampler.rawDatasetRef, 0, queryFilters,
+        TimeRangeChunkScan(74372801000L, 74373042000L), "_metric_")
+
+      val querySession = QuerySession(QueryContext(), queryConfig)
+      val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
+      val res = exec.execute(downsampleTSStore2, querySession)(queryScheduler)
+        .runToFuture(queryScheduler).futureValue.asInstanceOf[QueryResult]
+      queryScheduler.shutdown()
+
+      res.result.size shouldEqual 1
+      res.result.foreach(_.rows.nonEmpty shouldEqual true)
+    }
+
+    downsampleTSStore2.shutdown()
   }
 
   it("should bring up DownsampledTimeSeriesShard and be able to read data PeriodicSeriesMapper") {

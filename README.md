@@ -520,7 +520,7 @@ still yield to wrong results. The increase or decrease between the adjacent wind
 
 The solution that we have adopted to solve this is to extend the lookback window by the publish interval of the
 time series. The padding is done if the publish interval is supplied. The publish interval is supplied as an
-internal `_step_` tag within the time series tags. The intent here is to make it better over time. by making it
+internal `_step_` tag within the time series tags. The intent here is to make it better over time, by making it
 a first class column in the partition key schema. 
 
 Important to note that the lookback padding happens **only** if step multiple notation was used in the PromQL expression.

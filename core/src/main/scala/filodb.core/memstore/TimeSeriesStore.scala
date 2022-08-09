@@ -118,7 +118,7 @@ trait TimeSeriesStore extends ChunkSource {
                      flushSched: Scheduler,
                      cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit]
 
-  def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit]
+  def recoverIndex(dataset: DatasetRef, shard: Int): Future[Long]
 
   /**
    * Sets up streaming recovery of a shard from ingest records.  This is a separate API for several reasons:

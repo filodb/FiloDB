@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration._
 
-import filodb.core.{SpreadChange, SpreadProvider, TargetSchemaChange, TargetSchemaProvider}
+import filodb.core.{QueryTimeoutException, SpreadChange, SpreadProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.memory.EvictionLock
 
 trait TsdbQueryParams
@@ -30,6 +30,7 @@ case class PlannerParams(applicationId: String = "filodb",
                          sampleLimit: Int = 1000000,
                          groupByCardLimit: Int = 100000,
                          joinQueryCardLimit: Int = 100000,
+                         resultByteLimit: Long = 18000000,  // 18MB
                          timeSplitEnabled: Boolean = false,
                          minTimeRangeForSplitMs: Long = 1.day.toMillis,
                          splitSizeMs: Long = 1.day.toMillis,
@@ -40,6 +41,8 @@ case class PlannerParams(applicationId: String = "filodb",
 object PlannerParams {
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): PlannerParams =
     PlannerParams(spreadOverride = constSpread, sampleLimit = sampleLimit)
+  def apply(constSpread: Option[SpreadProvider], partialResults: Boolean): PlannerParams =
+    PlannerParams(spreadOverride = constSpread, allowPartialResults = partialResults)
 }
 /**
   * This class provides general query processing parameters
@@ -48,14 +51,29 @@ final case class QueryContext(origQueryParams: TsdbQueryParams = UnavailableProm
                               queryId: String = UUID.randomUUID().toString,
                               submitTime: Long = System.currentTimeMillis(),
                               plannerParams: PlannerParams = PlannerParams(),
-                              traceInfo: Map[String, String] = Map.empty[String, String])
+                              traceInfo: Map[String, String] = Map.empty[String, String]) {
+
+  /**
+   * Check timeout. If shouldThrow is true, exception is thrown. Otherwise exception is returned as return value.
+   */
+  def checkQueryTimeout(checkingFrom: String, shouldThrow: Boolean = true): Option[QueryTimeoutException] = {
+    val queryTimeElapsed = System.currentTimeMillis() - submitTime
+    if (queryTimeElapsed >= plannerParams.queryTimeoutMillis) {
+      val ex = QueryTimeoutException(queryTimeElapsed, checkingFrom)
+      if (shouldThrow) throw ex
+      else Some(ex)
+    } else None
+  }
+}
 
 object QueryContext {
+
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): QueryContext =
     QueryContext(plannerParams = PlannerParams(constSpread, sampleLimit))
 
-  def apply(queryParams: TsdbQueryParams, constSpread: Option[SpreadProvider]): QueryContext =
-    QueryContext(origQueryParams = queryParams, plannerParams = PlannerParams(spreadOverride = constSpread))
+  def apply(queryParams: TsdbQueryParams, constSpread: Option[SpreadProvider],
+            allowPartialResults: Boolean): QueryContext =
+    QueryContext(origQueryParams = queryParams, plannerParams = PlannerParams(constSpread, allowPartialResults))
 
   /**
     * Creates a spreadFunc that looks for a particular filter with keyName Equals a value, and then maps values

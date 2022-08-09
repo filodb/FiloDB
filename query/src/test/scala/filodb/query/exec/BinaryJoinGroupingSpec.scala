@@ -37,7 +37,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
   val rand = new Random()
 
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan, source: ChunkSource)
+    override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
 
     override def clusterName: String = ???
@@ -206,7 +206,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
                                    AggregateClause.byOpt(Seq("instance", "job")))
     val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), querySession, 1000, tvSchema)
 
-    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key, queryContext = QueryContext())
     val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
@@ -286,7 +286,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
                                    AggregateClause.byOpt(Seq("instance", "job")))
     val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), querySession, 1000, tvSchema)
 
-    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key, queryContext = QueryContext())
     val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
@@ -330,7 +330,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
   }
 
   it("should have metric name when operator is not MathOperator") {
-    
+
     val sampleLhs: Array[RangeVector] = Array(
       new RangeVector {
         val key: RangeVectorKey = CustomRangeVectorKey(
@@ -467,7 +467,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
                                    AggregateClause.byOpt(Seq("instance", "job")))
     val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), querySession, 1000, tvSchema)
 
-    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key, queryContext = QueryContext())
     val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,

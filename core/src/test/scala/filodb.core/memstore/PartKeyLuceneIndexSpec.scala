@@ -107,6 +107,32 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     result.map( p => (p.startTime, p.endTime)) shouldEqual expected.map( p => (p.startTime, p.endTime))
   }
 
+
+  it("should fetch part key iterator records from filters correctly") {
+    // Add the first ten keys and row numbers
+    val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val pk = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
+      keyIndex.addPartKey(pk, i, i, i + 10)()
+      PartKeyLuceneIndexRecord(pk, i, i + 10)
+    }
+    keyIndex.refreshReadersBlocking()
+
+    val filter2 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
+
+    val pks = ArrayBuffer.empty[Array[Byte]]
+    val matches = keyIndex.foreachPartKeyMatchingFilter(Seq(filter2), 0, Long.MaxValue, b => {
+
+      val copy = new Array[Byte](b.length)
+      Array.copy(b.bytes, b.offset, copy, 0, b.length)
+      pks.append(copy)
+    })
+    matches shouldEqual 3
+    pks.zip(Seq(pkrs(7), pkrs(8), pkrs(9))).foreach{
+      case (b, pk) => pk.partKey shouldEqual b
+    }
+  }
+
   it("should fetch records from filters correctly with a missing label != with a non empty value") {
     // Weird case in prometheus where if a non existent label is used with != check with an empty value,
     // the returned result includes all results where the label is missing and those where the label exists
@@ -176,6 +202,41 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
   }
 
+  it("should upsert part keys with endtime by partKey should work and return only active partkeys") {
+    // Add the first ten keys and row numbers
+    val expectedSHA256PartIds = ArrayBuffer.empty[String]
+    partKeyFromRecords(dataset6, records(dataset6, uniqueReader.take(10)), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) =>
+      val time = System.currentTimeMillis()
+      val pkOnHeap = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
+      keyIndex.addPartKey(pkOnHeap, -1, time)(
+        pkOnHeap.length,
+        PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pkOnHeap, 0, pkOnHeap.length))
+      if (i % 2 == 0) {
+        keyIndex.upsertPartKey(pkOnHeap, -1, time, time + 300)(pkOnHeap.length,
+          PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pkOnHeap, 0, pkOnHeap.length))
+      } else {
+        expectedSHA256PartIds.append(PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pkOnHeap, 0, pkOnHeap.length))
+      }
+    }
+    keyIndex.refreshReadersBlocking()
+
+    keyIndex.indexNumEntries shouldEqual 10
+
+    val activelyIngestingParts =
+      keyIndex.partKeyRecordsFromFilters(Nil, System.currentTimeMillis() + 500, Long.MaxValue)
+    activelyIngestingParts.size shouldBe 5
+
+
+    val actualSha256PartIds = activelyIngestingParts.map(r => {
+      PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(r.partKey, 0, r.partKey.length)
+    })
+
+    expectedSHA256PartIds.toSet shouldEqual actualSha256PartIds.toSet
+  }
+
+
+
   it("should add part keys and fetch startTimes correctly for more than 1024 keys") {
     val numPartIds = 3000 // needs to be more than 1024 to test the lucene term limit
     val start = System.currentTimeMillis()
@@ -218,6 +279,70 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     }
 
   }
+
+
+  it("should add part keys and removePartKeys (without partIds) correctly for more than 1024 keys with del count") {
+    // Identical to test
+    // it("should add part keys and fetch partIdsEndedBefore and removePartKeys correctly for more than 1024 keys")
+    // However, combines them not requiring us to get partIds and pass them tpo remove
+    val numPartIds = 3000 // needs to be more than 1024 to test the lucene term limit
+    val start = 1000
+    // we dont care much about the partKey here, but the startTime against partId.
+    val partKeys = Stream.continually(readers.head).take(numPartIds).toList
+    partKeyFromRecords(dataset6, records(dataset6, partKeys), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) =>
+      keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, start + i, start + i + 100)()
+    }
+    keyIndex.refreshReadersBlocking()
+    val pIdsList = keyIndex.partIdsEndedBefore(start + 200).toList()
+    for { i <- 0 until numPartIds} {
+      pIdsList.contains(i) shouldEqual (i <= 100)
+    }
+    val numDeleted = keyIndex.removePartitionsEndedBefore(start + 200)
+    numDeleted shouldEqual pIdsList.size
+    keyIndex.refreshReadersBlocking()
+
+    // Ensure everything expected is present or deleted
+    for { i <- 0 until numPartIds} {
+      // Everything with partId > 100 should be present
+      keyIndex.partKeyFromPartId(i).isDefined shouldEqual (i > 100)
+    }
+
+    // Important, while the unit test uses partIds to assert the presence or absence before and after deletion
+    // it is no longer required to have partIds in the index on non unit test setup
+  }
+
+  it("should add part keys and removePartKeys (without partIds) correctly for more than 1024 keys w/o del count") {
+    // identical
+    // to should add part keys and removePartKeys (without partIds) correctly for more than 1024 keys w/o del count
+    // except that this one returns 0 for numDocuments deleted
+
+    val numPartIds = 3000 // needs to be more than 1024 to test the lucene term limit
+    val start = 1000
+    val partKeys = Stream.continually(readers.head).take(numPartIds).toList
+    partKeyFromRecords(dataset6, records(dataset6, partKeys), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) =>
+      keyIndex.addPartKey(partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr), i, start + i, start + i + 100)()
+    }
+    keyIndex.refreshReadersBlocking()
+    val pIdsList = keyIndex.partIdsEndedBefore(start + 200).toList()
+    for { i <- 0 until numPartIds} {
+      pIdsList.contains(i) shouldEqual (i <= 100)
+    }
+    val numDeleted = keyIndex.removePartitionsEndedBefore(start + 200, false)
+    numDeleted shouldEqual 0
+    keyIndex.refreshReadersBlocking()
+
+    // Ensure everything expected is present or deleted
+    for { i <- 0 until numPartIds} {
+      // Everything with partId > 100 should be present
+      keyIndex.partKeyFromPartId(i).isDefined shouldEqual (i > 100)
+    }
+
+    // Important, while the unit test uses partIds to assert the presence or absence before and after deletion
+    // it is no longer required to have partIds in the index on non unit test setup
+  }
+
 
   it("should update part keys with endtime and parse filters correctly") {
     val start = System.currentTimeMillis()
@@ -368,6 +493,36 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       val untilTimePartIds = keyIndex.partIdsOrderedByEndTime(10, toEndTime = dropFrom(0)._1 - 1)
       untilTimePartIds.toArray.toSeq shouldEqual sortedKeys.take(from).map(_._3).take(10).sorted
     }
+  }
+
+  it("should be able to fetch label names efficiently using facets") {
+
+    val index3 = new PartKeyLuceneIndex(DatasetRef("prometheus"), Schemas.promCounter.partition,
+      true, true, 0, 1.hour.toMillis)
+    val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8,
+      "_ns_".utf8 -> "my_ns".utf8)
+
+    // create 1000 time series with 10 metric names
+    for { i <- 0 until 1000} {
+      val dynamicLabelNum = i % 5
+      val infoLabelNum = i % 10
+      val partKey = partBuilder.partKeyFromObjects(Schemas.promCounter, s"counter",
+        seriesTags + (s"dynamicLabel$dynamicLabelNum".utf8 -> s"dynamicLabelValue".utf8)
+                   + (s"infoLabel$infoLabelNum".utf8 -> s"infoLabelValue".utf8)
+      )
+      index3.addPartKey(partKeyOnHeap(Schemas.promCounter.partition.binSchema, ZeroPointer, partKey), i, 5)()
+    }
+    index3.refreshReadersBlocking()
+
+    val filters1 = Seq(ColumnFilter("_ws_", Equals("my_ws")), ColumnFilter("_metric_", Equals("counter")))
+
+    val partNums1 = index3.partIdsFromFilters(filters1, 0, Long.MaxValue)
+    partNums1.length shouldEqual 1000
+
+    val labelValues1 = index3.labelNamesEfficient(filters1, 0, Long.MaxValue)
+    labelValues1.toSet shouldEqual (0 until 5).map(c => s"dynamicLabel$c").toSet ++
+                                   (0 until 10).map(c => s"infoLabel$c").toSet ++
+                                   Set("_ns_", "_ws_", "_metric_")
   }
 
   it("should be able to fetch label values efficiently using facets") {
@@ -608,6 +763,27 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
             fail("Expected an index state Empty after directory cleanup")
         }
     }
+  }
+
+  it("should get a single match for part keys by a filter") {
+
+    val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val pk = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
+      keyIndex.addPartKey(pk, -1, i, i + 10)(
+        pk.length, PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pk, 0, pk.length))
+      PartKeyLuceneIndexRecord(pk, i, i + 10)
+    }
+    keyIndex.refreshReadersBlocking()
+
+    val filter1 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
+    val partKeyOpt = keyIndex.singlePartKeyFromFilters(Seq(filter1), 4, 10)
+
+    partKeyOpt.isDefined shouldBe true
+    partKeyOpt.get shouldEqual pkrs(7).partKey
+
+    val filter2 = ColumnFilter("Actor2Code", Equals("NonExist".utf8))
+    keyIndex.singlePartKeyFromFilters(Seq(filter2), 4, 10) shouldBe None
   }
 
   it("Should update the state as TriggerRebuild and throw an exception for any error other than CorruptIndexException")

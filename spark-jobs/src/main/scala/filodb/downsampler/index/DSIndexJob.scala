@@ -107,7 +107,9 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
       val eligible = hasDownsampleSchema && !blocked
       if (eligible) count += 1
       eligible
-    }.map(toDownsamplePkrWithHash)
+    }.map(pkr => dsDatasource.readMergePartkeyStartEndTime(ref = dsDatasetRef, shard = shard.toInt,
+        partKeyRecord = pkr)) // Merge with persisted (if exists) partKey.
+      .map(toDownsamplePkrWithHash)
     val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
     Await.result(dsDatasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
       partKeys = pkRecords,

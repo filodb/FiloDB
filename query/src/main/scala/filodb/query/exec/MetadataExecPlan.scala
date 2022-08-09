@@ -26,7 +26,7 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
 
   require(children.nonEmpty)
 
-  override def enforceLimit: Boolean = false
+  override def enforceSampleLimit: Boolean = false
 
   /**
    * Args to use for the ExecPlan for printTree purposes only.
@@ -256,19 +256,17 @@ final case class LabelCardinalityReduceExec(queryContext: QueryContext,
       { case (metadataResult, rv) =>
           val rangeVector = rv.head
           val key = rangeVector.key
-          if (key.keySize > 0) {
-            val sketchMap = metadataResult.getOrElseUpdate(key, MutableMap.empty[ZeroCopyUTF8String, CpcSketch])
-            rangeVector.rows().foreach { rowReader =>
-              val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
-              rv.head match {
-                case srv: SerializedRangeVector =>
-                  srv.schema.consumeMapItems(binaryRowReader.recordBase, binaryRowReader.recordOffset, index = 0,
-                    mapConsumer(sketchMap))
-                case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
-              }
+          val sketchMap = metadataResult.getOrElseUpdate(key, MutableMap.empty[ZeroCopyUTF8String, CpcSketch])
+          rangeVector.rows().foreach { rowReader =>
+            val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
+            rv.head match {
+              case srv: SerializedRangeVector =>
+                srv.schema.consumeMapItems(binaryRowReader.recordBase, binaryRowReader.recordOffset, index = 0,
+                  mapConsumer(sketchMap))
+              case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
             }
           }
-        metadataResult
+          metadataResult
       }.map (metaDataMutableMap => {
           // metaDataMutableMap is a Map of [RangeVectorKey, MutableMap[ZeroCopyUTF8String, CpcSketch]]
           // Since the key query is specific to one ws/ns/metric, we see no more than one entry in the Map
@@ -304,7 +302,7 @@ final case class PartKeysExec(queryContext: QueryContext,
                               start: Long,
                               end: Long) extends LeafExecPlan {
 
-  override def enforceLimit: Boolean = false
+  override def enforceSampleLimit: Boolean = false
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
@@ -335,7 +333,7 @@ final case class LabelValuesExec(queryContext: QueryContext,
                                  startMs: Long,
                                  endMs: Long) extends LeafExecPlan {
 
-  override def enforceLimit: Boolean = false
+  override def enforceSampleLimit: Boolean = false
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
@@ -393,7 +391,7 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
                                  startMs: Long,
                                  endMs: Long) extends LeafExecPlan with LabelCardinalityExecPlan {
 
-  override def enforceLimit: Boolean = false
+  override def enforceSampleLimit: Boolean = false
 
   // scalastyle:off
   def doExecute(source: ChunkSource,
@@ -403,31 +401,20 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
     source.acquireSharedLock(dataset, shard, querySession)
     val rvs = source match {
       case memstore: TimeSeriesStore =>
-        val shardKeyCols = memstore.schemas(dataset).get.part.options.shardKeyColumns.map(_.utf8)
-
-        // TODO: require presence of shard key in column filters
-        val matches = memstore.partKeysWithFilters(dataset, shard, filters, fetchFirstLastSampleTimes = false,
-          endMs, startMs, limit = 1).toSeq
-        if (matches.nonEmpty) {
+        // first get the list of label names, then fetch each label value and add to CPC sketch
+        val labelNames = memstore.labelNames(dataset, shard, filters, endMs, startMs)
+        if (labelNames.nonEmpty) {
           val sketchMap = scala.collection.mutable.Map[String, CpcSketch]()
-          val firstMatchLVs = matches.head
-          val shardKeyLVs = firstMatchLVs.filterKeys(shardKeyCols.contains)
-          shardKeyLVs.foreach { case (label, value) =>
-            sketchMap.getOrElseUpdate(label.toString, new CpcSketch(logK)).update(value.toString)
-          }
-
-          val nonShardKeyLVs = firstMatchLVs.filterKeys(k => !shardKeyCols.contains(k))
-          nonShardKeyLVs.foreach { case (label, _) =>
-            val labelStr = label.toString
+          labelNames.foreach { case label =>
             // GOTCHA: This approach will not catch cardinality of labels which are disabled for faceting
             // since their value lengths are > 1000. We expect the gateway to reject (or shorten) that data early on.
             memstore.singleLabelValueWithFilters(dataset, shard, filters, label.toString,
               endMs, startMs, querySession, 1000000).foreach { labelValue =>
-              sketchMap.getOrElseUpdate(labelStr, new CpcSketch(logK)).update(labelValue.toString)
+              sketchMap.getOrElseUpdate(label, new CpcSketch(logK)).update(labelValue.toString)
             }
           }
 
-          val rv = IteratorBackedRangeVector(CustomRangeVectorKey(shardKeyLVs.toMap),
+          val rv = IteratorBackedRangeVector(CustomRangeVectorKey.empty,
             UTF8MapIteratorRowReader(
               Seq(sketchMap.map {
                 case (label, cpcSketch) =>
@@ -537,7 +524,7 @@ final case class TsCardExec(queryContext: QueryContext,
     s"numGroupByFields ($numGroupByFields) must indicate at least as many " +
     s"fields as shardKeyPrefix.size (${shardKeyPrefix.size})")
 
-  override def enforceLimit: Boolean = false
+  override def enforceSampleLimit: Boolean = false
 
   // scalastyle:off method.length
   def doExecute(source: ChunkSource,
@@ -578,7 +565,7 @@ final case class LabelNamesExec(queryContext: QueryContext,
                                  startMs: Long,
                                  endMs: Long) extends LeafExecPlan {
 
-  override def enforceLimit: Boolean = false
+  override def enforceSampleLimit: Boolean = false
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)

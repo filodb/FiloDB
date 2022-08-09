@@ -97,8 +97,8 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   }
 
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan, source: ChunkSource)
-                         (implicit sched: Scheduler): Task[QueryResponse] = plan.execute(memStore,
+    override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
+                         (implicit sched: Scheduler): Task[QueryResponse] = plan.execPlan.execute(memStore,
       QuerySession(QueryContext(), queryConfig))(sched)
 
     override def clusterName: String = ???
@@ -109,9 +109,9 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
   val executeDispatcher = new PlanDispatcher {
     override def isLocalCall: Boolean = ???
     override def clusterName: String = ???
-    override def dispatch(plan: ExecPlan, source: ChunkSource)
+    override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = {
-      plan.execute(memStore, querySession)(sched)
+      plan.execPlan.execute(memStore, querySession)(sched)
     }
   }
 

@@ -51,40 +51,26 @@ class IndexBootstrapper(colStore: ColumnStore) {
    * Same as bootstrapIndexRaw, except that we parallelize lucene update for
    * faster bootstrap of large number of index entries in downsample cluster.
    * Not doing this in raw cluster since parallel TimeSeriesPartition
-   * creation requires more careful contention analysis
+   * creation requires more careful contention analysis. Bootstrap index operation
+   * builds entire index from scratch
    */
   def bootstrapIndexDownsample(index: PartKeyLuceneIndex,
                                shardNum: Int,
                                ref: DatasetRef,
-                               ttlMs: Long)
-                              (assignPartId: PartKeyRecord => Int): Task[Long] = {
-
-    // This is where we need to only get the delta from  PartKeyLuceneIndex and fetch part keys updated after
-    // the timestamp in millis, based on the time, we need to invoke refreshWithDownsamplePartKeys giving
-    // the last synced time till current hour, the start hour will be max(of the time retrieved from underlying
-    // state, start - ttlMs)
+                               ttlMs: Long): Task[Long] = {
 
     val recoverIndexLatency = Kamon.gauge("shard-recover-index-latency", MeasurementUnit.time.milliseconds)
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum)
-    val start = System.currentTimeMillis()
-    //here we need to adjust ttlMs
-    //because we might already have index available on disk
-    val checkpointTime = start - ttlMs
-    // No need to check index state here, by definition bootstrap index
-    // will refresh the entire index. When entire index is rebuilt, the
-    // partIds (numeric values) which are a part of the index, monotocally
-    // increases. Bootstrap method scans all the part keys and treats them
-    // as opaque byte arrays. The assignPartId function is cheap as it simply increments
-    // a numeric value. This is ok since the index starts as a clean slate and thus the part ids too
-    // start from 0. If index for a given range is desired, refreshWithDownsamplePartKeys should be called
-    index.notifyLifecycleListener(IndexState.Refreshing, checkpointTime)
+    val start = System.currentTimeMillis() - ttlMs
     colStore.scanPartKeys(ref, shardNum)
-      .filter(_.endTime > checkpointTime)
+      .filter(_.endTime > start)
       .mapParallelUnordered(Runtime.getRuntime.availableProcessors()) { pk =>
         Task.evalAsync {
-          val partId = assignPartId(pk)
-          index.addPartKey(pk.partKey, partId, pk.startTime, pk.endTime)()
+          index.addPartKey(pk.partKey, partId = -1, pk.startTime, pk.endTime)(
+            pk.partKey.length,
+            PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pk.partKey, 0, pk.partKey.length)
+          )
         }
       }
       .countL
@@ -115,8 +101,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
                                      fromHour: Long,
                                      toHour: Long,
                                      schemas: Schemas,
-                                     parallelism: Int = Runtime.getRuntime.availableProcessors())
-                                   (lookUpOrAssignPartId: Array[Byte] => Int): Task[Long] = {
+                                     parallelism: Int = Runtime.getRuntime.availableProcessors()): Task[Long] = {
 
     // This method needs to be invoked for updating a range of time in an existing index. This assumes the
     // Index is already present and we need to update some partKeys in it. The lookUpOrAssignPartId is expensive
@@ -133,7 +118,6 @@ class IndexBootstrapper(colStore: ColumnStore) {
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum)
     val start = System.currentTimeMillis()
-    index.notifyLifecycleListener(IndexState.Refreshing, fromHour * 3600 * 1000L)
     Observable.fromIterable(fromHour to toHour).flatMap { hour =>
       colStore.getPartKeysByUpdateHour(ref, shardNum, hour)
     }.mapParallelUnordered(parallelism) { pk =>
@@ -142,8 +126,9 @@ class IndexBootstrapper(colStore: ColumnStore) {
       Task.evalAsync {
         val downsamplePartKey = RecordBuilder.buildDownsamplePartKey(pk.partKey, schemas)
         downsamplePartKey.foreach { dpk =>
-          val partId = lookUpOrAssignPartId(dpk)
-          index.upsertPartKey(dpk, partId, pk.startTime, pk.endTime)()
+          index.upsertPartKey(dpk, partId = -1, pk.startTime, pk.endTime)(
+            dpk.length, PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(dpk, 0, dpk.length)
+          )
         }
       }
     }
@@ -153,7 +138,6 @@ class IndexBootstrapper(colStore: ColumnStore) {
         // its all or nothing as we do not mark partial progress, but given the index
         // update is parallel it makes sense to wait for all to be added to index
         index.commit()
-        index.notifyLifecycleListener(IndexState.Synced, toHour * 3600 * 1000L)
         index.refreshReadersBlocking()
         recoverIndexLatency.update(System.currentTimeMillis() - start)
         count

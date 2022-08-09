@@ -6,14 +6,17 @@ import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
+import scala.concurrent.TimeoutException
+import scala.concurrent.duration.DurationLong
 
 import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.PartLookupResult
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.Schemas
-import filodb.core.query.{QueryConfig, QuerySession}
+import filodb.core.query.{QueryConfig, QuerySession, QueryStats, ResultSchema}
 import filodb.core.store._
-import filodb.query.QueryResponse
+import filodb.query.{QueryResponse, QueryResult}
+import filodb.query.Query.qLogger
 
 /**
   * Executes an ExecPlan on the current thread.
@@ -21,15 +24,26 @@ import filodb.query.QueryResponse
   case class InProcessPlanDispatcher(queryConfig: QueryConfig) extends PlanDispatcher {
 
   val clusterName = InetAddress.getLocalHost().getHostName()
-  override def dispatch(plan: ExecPlan, source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
+
+  override def dispatch(plan: ExecPlanWithClientParams,
+                        source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
+    lazy val emptyPartialResult = QueryResult(plan.execPlan.queryContext.queryId, ResultSchema.empty, Nil,
+      QueryStats(), true, Some("Result may be partial since query on some shards timed out"))
+
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since
     // kamon uses thread-locals.
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(Kamon.currentSpan(), false) {
       // translate implicit ExecutionContext to monix.Scheduler
-      val querySession = QuerySession(plan.queryContext, queryConfig, catchMultipleLockSetErrors = true)
-      plan.execute(source, querySession)
+      val querySession = QuerySession(plan.execPlan.queryContext, queryConfig, catchMultipleLockSetErrors = true)
+      plan.execPlan.execute(source, querySession).timeout(plan.clientParams.deadline.milliseconds).onErrorRecover {
+        case e: TimeoutException if (plan.execPlan.queryContext.plannerParams.allowPartialResults)
+        =>
+          qLogger.warn(s"Swallowed TimeoutException for query id: ${plan.execPlan.queryContext.queryId} " +
+            s"since partial result was enabled: ${e.getMessage}")
+          emptyPartialResult
+      }
     }
   }
 
