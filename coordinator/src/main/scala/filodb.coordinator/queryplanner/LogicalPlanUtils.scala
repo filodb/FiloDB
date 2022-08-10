@@ -1,12 +1,13 @@
 package filodb.coordinator.queryplanner
 
 import scala.collection.mutable.ArrayBuffer
+
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.query.{QueryContext, RangeParams}
 import filodb.prometheus.ast.SubqueryUtils
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
-import filodb.query.LogicalPlan.getColumnFilterGroup
 import filodb.query._
 
 object LogicalPlanUtils extends StrictLogging {

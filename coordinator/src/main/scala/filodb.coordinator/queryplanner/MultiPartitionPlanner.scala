@@ -139,28 +139,31 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
    */
   private def walkMultiPartitionPlan(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
     logicalPlan match {
-      case lp: BinaryJoin                 => materializeMultiPartitionBinaryJoin(lp, qContext)
-      case _: MetadataQueryPlan           => throw new IllegalArgumentException("MetadataQueryPlan unexpected here")
-      case lp: ApplyInstantFunction       => super.materializeApplyInstantFunction(qContext, lp)
-      case lp: ApplyInstantFunctionRaw    => super.materializeApplyInstantFunctionRaw(qContext, lp)
-      case lp: Aggregate                  => super.materializeAggregate(qContext, lp)
-      case lp: ScalarVectorBinaryOperation=> super.materializeScalarVectorBinOp(qContext, lp)
-      case lp: ApplyMiscellaneousFunction => super.materializeApplyMiscellaneousFunction(qContext, lp)
-      case lp: ApplySortFunction          => super.materializeApplySortFunction(qContext, lp)
-      case lp: ScalarVaryingDoublePlan    => super.materializeScalarPlan(qContext, lp)
-      case _: ScalarTimeBasedPlan         => throw new IllegalArgumentException("ScalarTimeBasedPlan unexpected here")
-      case lp: VectorPlan                 => super.materializeVectorPlan(qContext, lp)
-      case _: ScalarFixedDoublePlan       => throw new IllegalArgumentException("ScalarFixedDoublePlan unexpected here")
-      case lp: ApplyAbsentFunction        => super.materializeAbsentFunction(qContext, lp)
-      case lp: ScalarBinaryOperation      => super.materializeScalarBinaryOperation(qContext, lp)
-      case lp: ApplyLimitFunction         => super.materializeLimitFunction(qContext, lp)
-      case lp: TsCardinalities            => materializeTsCardinalities(lp, qContext)
+      case lp: BinaryJoin                  => materializeMultiPartitionBinaryJoinWithSelector(lp, qContext)
+      case _: MetadataQueryPlan            => throw new IllegalArgumentException(
+                                                          "MetadataQueryPlan unexpected here")
+      case lp: ApplyInstantFunction        => super.materializeApplyInstantFunction(qContext, lp)
+      case lp: ApplyInstantFunctionRaw     => super.materializeApplyInstantFunctionRaw(qContext, lp)
+      case lp: Aggregate                   => super.materializeAggregate(qContext, lp)
+      case lp: ScalarVectorBinaryOperation => materializeMultiPartitionBinaryJoinWithSelector(lp, qContext)
+      case lp: ApplyMiscellaneousFunction  => super.materializeApplyMiscellaneousFunction(qContext, lp)
+      case lp: ApplySortFunction           => super.materializeApplySortFunction(qContext, lp)
+      case lp: ScalarVaryingDoublePlan     => super.materializeScalarPlan(qContext, lp)
+      case _: ScalarTimeBasedPlan          => throw new IllegalArgumentException(
+                                                          "ScalarTimeBasedPlan unexpected here")
+      case lp: VectorPlan                  => super.materializeVectorPlan(qContext, lp)
+      case _: ScalarFixedDoublePlan        => throw new IllegalArgumentException(
+                                                          "ScalarFixedDoublePlan unexpected here")
+      case lp: ApplyAbsentFunction         => super.materializeAbsentFunction(qContext, lp)
+      case lp: ScalarBinaryOperation       => super.materializeScalarBinaryOperation(qContext, lp)
+      case lp: ApplyLimitFunction          => super.materializeLimitFunction(qContext, lp)
+      case lp: TsCardinalities             => materializeTsCardinalities(lp, qContext)
       case lp: SubqueryWithWindowing       => super.materializeSubqueryWithWindowing(qContext, lp)
       case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
       case _: PeriodicSeries |
            _: PeriodicSeriesWithWindowing |
            _: RawChunkMeta |
-           _: RawSeries                   => materializePeriodicAndRawSeries(logicalPlan, qContext)
+           _: RawSeries                    => materializePeriodicAndRawSeries(logicalPlan, qContext)
     }
   }
 
@@ -344,17 +347,22 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   }
 
   /**
-   * Materialize a BinaryJoin with partition-split leaf data.
+   * Materialize a binary join with partition-split leaf data.
    * Throws a BadQueryException if the LogicalPlan is unsupported, i.e. it or any nested plans:
    *     - makes use of a range funciton (operates on windowed data)
    *     - queries for data with more than one non-metric shard key
    *     - contains an offset
    */
-  private def materializeMultiPartitionBinaryJoinSplit(logicalPlan: BinaryJoin,
-                                                       qContext: QueryContext): PlanResult = {
+  private def materializeMultiPartitionSplitLeafBinaryJoin(logicalPlan: LogicalPlan,
+                                                           qContext: QueryContext): PlanResult = {
+    require(logicalPlan.isInstanceOf[BinaryJoin] ||
+            logicalPlan.isInstanceOf[ScalarVectorBinaryOperation])
+    lazy val hasMoreThanOneNonMetricShardKey =
+      getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
+      .filter(_.nonEmpty).distinct.size > 1
     if (hasRangeFunction(logicalPlan) ||
-        getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns).toSet.size > 1 ||
-        getOffsetMillis(logicalPlan).find(_ > 0).nonEmpty) {
+        getOffsetMillis(logicalPlan).find(_ > 0).nonEmpty ||
+        hasMoreThanOneNonMetricShardKey) {
       throw new BadQueryException(
         "This query contains selectors that individually read data from multiple partitions. " +
         "This is likely because the selector's data was migrated between partitions. " +
@@ -365,8 +373,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       )
     }
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    // should be same partitions for lhs and rhs; can use either here
-    val partitions = getPartitions(logicalPlan.lhs, qParams)
+    // cannot use one operand, in case the chosen operand is a scalar
+    val partitions = getPartitions(logicalPlan, qParams).distinct
     // materialize a plan for each partition
     val plans = partitions.map { part =>
       val newParams = {
@@ -412,15 +420,26 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     PlanResult(execPlan :: Nil)
   }
 
-  private def materializeMultiPartitionBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): PlanResult = {
-    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+  /**
+   * Materialize any binary join that reads data from a partition.
+   * This includes both BinaryJoins and ScalarVectorBinaryOperations.
+   */
+  private def materializeMultiPartitionBinaryJoinWithSelector(logicalPlan: LogicalPlan,
+                                                queryContext: QueryContext): PlanResult = {
+    require(logicalPlan.isInstanceOf[BinaryJoin] ||
+            logicalPlan.isInstanceOf[ScalarVectorBinaryOperation])
+    val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val hasMultiPartitionLeaves = LogicalPlan.findLeafLogicalPlans(logicalPlan)
                                              .find(lp => getPartitions(lp, queryParams).size > 1)
                                              .nonEmpty
     if (hasMultiPartitionLeaves) {
-      materializeMultiPartitionBinaryJoinSplit(logicalPlan, qContext)
+      materializeMultiPartitionSplitLeafBinaryJoin(logicalPlan, queryContext)
     } else {
-      materializeMultiPartitionBinaryJoinNonsplit(logicalPlan, qContext)
+      logicalPlan match {
+        case bj: BinaryJoin => materializeMultiPartitionBinaryJoinNonsplit(bj, queryContext)
+        case sv: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(queryContext, sv)
+        case x => throw new IllegalArgumentException(s"unhandled type: ${x.getClass}")
+      }
     }
   }
 
