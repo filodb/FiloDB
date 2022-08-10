@@ -379,7 +379,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val plans = partitions.map { part =>
       val newParams = {
         qParams.copy(startSecs = math.max(qParams.startSecs, part.timeRange.startMs / 1000),
-                     endSecs = math.min(qParams.endSecs, part.timeRange.endMs / 100))
+                     endSecs = math.min(qParams.endSecs, part.timeRange.endMs / 1000))
       }
       val newContext = qContext.copy(origQueryParams = newParams)
       materializeForPartition(logicalPlan, part, newContext)
@@ -396,8 +396,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   /**
    * Materialize a BinaryJoin whose individual leaf plans do not span partitions.
    */
-  private def materializeMultiPartitionBinaryJoinNonsplit(logicalPlan: BinaryJoin,
-                                                       qContext: QueryContext): PlanResult = {
+  private def materializeMultiPartitionNonsplitLeafBinaryJoin(logicalPlan: BinaryJoin,
+                                                              qContext: QueryContext): PlanResult = {
     val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
     val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
@@ -436,7 +436,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       materializeMultiPartitionSplitLeafBinaryJoin(logicalPlan, queryContext)
     } else {
       logicalPlan match {
-        case bj: BinaryJoin => materializeMultiPartitionBinaryJoinNonsplit(bj, queryContext)
+        case bj: BinaryJoin => materializeMultiPartitionNonsplitLeafBinaryJoin(bj, queryContext)
         case sv: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(queryContext, sv)
         case x => throw new IllegalArgumentException(s"unhandled type: ${x.getClass}")
       }
