@@ -305,14 +305,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         // why would we want to stretch the query??
         val endMs = if (isInstantQuery) queryParams.endSecs * 1000 else p.timeRange.endMs + offsetMs.min
         logger.debug(s"partitionInfo=$p; updated startMs=$startMs, endMs=$endMs")
-        if (p.partitionName.equals(localPartitionName)) {
-          val lpWithUpdatedTime = copyLogicalPlanWithUpdatedTimeRange(logicalPlan, TimeRange(startMs, endMs))
-          localPartitionPlanner.materialize(lpWithUpdatedTime, qContext)
-        } else {
-          val httpEndpoint = p.endPoint + queryParams.remoteQueryPath.getOrElse("")
-          PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, generateRemoteExecParams(qContext, startMs, endMs),
-            inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
-        }
+        // TODO: playing it safe for now with the TimeRange override; the parameter can eventually be removed.
+        materializeForPartition(logicalPlan, p, qContext, timeRangeOverride = Some(TimeRange(startMs, endMs)))
       }
       if (execPlans.size == 1) execPlans.head
       else {
@@ -326,7 +320,76 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     PlanResult(execPlan:: Nil)
   }
 
-  private def materializeMultiPartitionBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): PlanResult = {
+  /**
+   * If the argument partition is local, materialize the LogicalPlan with the local planner.
+   *   Otherwise, create a PromQlRemoteExec.
+   * @param timeRangeOverride: if given, the plan will be materialized to this range. Otherwise, the
+   *                           range is computed from the PromQlQueryParams.
+   */
+  private def materializeForPartition(logicalPlan: LogicalPlan,
+                                      partition: PartitionAssignment,
+                                      queryContext: QueryContext,
+                                      timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
+    val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val timeRange = timeRangeOverride.getOrElse(TimeRange(1000 * queryParams.startSecs, 1000 * queryParams.endSecs))
+    if (partition.partitionName.equals(localPartitionName)) {
+      val lpWithUpdatedTime = copyLogicalPlanWithUpdatedTimeRange(logicalPlan, timeRange)
+      localPartitionPlanner.materialize(lpWithUpdatedTime, queryContext)
+    } else {
+      val httpEndpoint = partition.endPoint + queryParams.remoteQueryPath.getOrElse("")
+      PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
+        generateRemoteExecParams(queryContext, timeRange.startMs, timeRange.endMs),
+        inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
+    }
+  }
+
+  /**
+   * Materialize a BinaryJoin with partition-split leaf data.
+   * Throws a BadQueryException if the LogicalPlan is unsupported, i.e. it or any nested plans:
+   *     - makes use of a range funciton (operates on windowed data)
+   *     - queries for data with more than one non-metric shard key
+   *     - contains an offset
+   */
+  private def materializeMultiPartitionBinaryJoinSplit(logicalPlan: BinaryJoin,
+                                                       qContext: QueryContext): PlanResult = {
+    if (hasRangeFunction(logicalPlan) ||
+        getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns).toSet.size > 1 ||
+        getOffsetMillis(logicalPlan).find(_ > 0).nonEmpty) {
+      throw new BadQueryException(
+        "This query contains selectors that individually read data from multiple partitions. " +
+        "This is likely because the selector's data was migrated between partitions. " +
+        "These \"split\" queries are supported as long as they: " +
+        "(1) do not use any range function " +
+        "(2) do not query for data that spans multiple non-metric shard keys " +
+        "(3) do not contain an offset."
+      )
+    }
+    val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    // should be same partitions for lhs and rhs; can use either here
+    val partitions = getPartitions(logicalPlan.lhs, qParams)
+    // materialize a plan for each partition
+    val plans = partitions.map { part =>
+      val newParams = {
+        qParams.copy(startSecs = math.max(qParams.startSecs, part.timeRange.startMs / 1000),
+                     endSecs = math.min(qParams.endSecs, part.timeRange.endMs / 100))
+      }
+      val newContext = qContext.copy(origQueryParams = newParams)
+      materializeForPartition(logicalPlan, part, newContext)
+    }
+    // concat if necessary
+    val resPlan = if (plans.size == 1) {
+      plans.head
+    } else {
+      MultiPartitionDistConcatExec(qContext, inProcessPlanDispatcher, plans)
+    }
+    PlanResult(Seq(resPlan))
+  }
+
+  /**
+   * Materialize a BinaryJoin whose individual leaf plans do not span partitions.
+   */
+  private def materializeMultiPartitionBinaryJoinNonsplit(logicalPlan: BinaryJoin,
+                                                       qContext: QueryContext): PlanResult = {
     val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
     val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
@@ -347,6 +410,18 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn,
         rvRangeFromPlan(logicalPlan))
     PlanResult(execPlan :: Nil)
+  }
+
+  private def materializeMultiPartitionBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): PlanResult = {
+    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val hasMultiPartitionLeaves = LogicalPlan.findLeafLogicalPlans(logicalPlan)
+                                             .find(lp => getPartitions(lp, queryParams).size > 1)
+                                             .nonEmpty
+    if (hasMultiPartitionLeaves) {
+      materializeMultiPartitionBinaryJoinSplit(logicalPlan, qContext)
+    } else {
+      materializeMultiPartitionBinaryJoinNonsplit(logicalPlan, qContext)
+    }
   }
 
   private def copy(lp: MetadataQueryPlan, startMs: Long, endMs: Long): MetadataQueryPlan = lp match {

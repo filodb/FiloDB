@@ -1,13 +1,12 @@
 package filodb.coordinator.queryplanner
 
 import scala.collection.mutable.ArrayBuffer
-
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.core.query.{QueryContext, RangeParams}
 import filodb.prometheus.ast.SubqueryUtils
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
+import filodb.query.LogicalPlan.getColumnFilterGroup
 import filodb.query._
 
 object LogicalPlanUtils extends StrictLogging {
@@ -259,6 +258,21 @@ object LogicalPlanUtils extends StrictLogging {
     val metricName = LogicalPlan.getColumnValues(columnFilterGroup, PromMetricLabel)
     if (metricName.isEmpty) LogicalPlan.getColumnValues(columnFilterGroup, datasetMetricColumn)
     else metricName
+  }
+
+  /**
+   * Returns true iff the LogicalPlan (or any of its children) makes use of a range function.
+   */
+  def hasRangeFunction(logicalPlan: LogicalPlan): Boolean = {
+    // Only these two plans use RangeFunctions.
+    if (logicalPlan.isInstanceOf[PeriodicSeriesWithWindowing] ||
+        logicalPlan.isInstanceOf[SubqueryWithWindowing]) {
+      return true
+    }
+    logicalPlan match {
+      case nl: NonLeafLogicalPlan => nl.children.find(hasRangeFunction(_)).nonEmpty
+      case _ => false  // no windowed plan is a leaf
+    }
   }
 
   /**
