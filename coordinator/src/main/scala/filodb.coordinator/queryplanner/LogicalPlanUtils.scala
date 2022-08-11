@@ -262,6 +262,21 @@ object LogicalPlanUtils extends StrictLogging {
   }
 
   /**
+   * Returns true iff the LogicalPlan (or any of its children) makes use of a range function.
+   */
+  def hasRangeFunction(logicalPlan: LogicalPlan): Boolean = {
+    // Only these two plans use RangeFunctions.
+    if (logicalPlan.isInstanceOf[PeriodicSeriesWithWindowing] ||
+        logicalPlan.isInstanceOf[SubqueryWithWindowing]) {
+      return true
+    }
+    logicalPlan match {
+      case nl: NonLeafLogicalPlan => nl.children.find(hasRangeFunction(_)).nonEmpty
+      case _ => false  // no windowed plan is a leaf
+    }
+  }
+
+  /**
     * Renames Prom AST __name__ label to one based on the actual metric column of the dataset,
     * if it is not the prometheus standard
     */
