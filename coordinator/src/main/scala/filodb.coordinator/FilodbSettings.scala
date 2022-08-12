@@ -20,46 +20,54 @@ final class FilodbSettings(val conf: Config) {
 
   ConfigFactory.invalidateCaches()
 
-  val allConfig: Config = conf.withFallback(GlobalConfig.systemConfig).resolve()
+  lazy val allConfig: Config = conf.withFallback(GlobalConfig.systemConfig).resolve()
 
   /** The filodb configuration specifically. */
-  val config: Config = allConfig.as[Config]("filodb")
+  lazy val config: Config = allConfig.as[Config]("filodb")
 
   lazy val SeedNodes: immutable.Seq[String] =
     sys.props.get("filodb.seed-nodes")
       .map(_.trim.split(",").toList)
       .getOrElse(config.as[Seq[String]]("seed-nodes").toList)
 
-  val StorageStrategy = StoreStrategy.Configured(config.as[String]("store-factory"))
+  lazy val StorageStrategy = StoreStrategy.Configured(config.as[String]("store-factory"))
 
-  val DefaultTaskTimeout = config.as[FiniteDuration]("tasks.timeouts.default")
+  lazy val DefaultTaskTimeout = config.as[FiniteDuration]("tasks.timeouts.default")
 
-  val GracefulStopTimeout = config.as[FiniteDuration]("tasks.timeouts.graceful-stop")
+  lazy val GracefulStopTimeout = config.as[FiniteDuration]("tasks.timeouts.graceful-stop")
 
-  val InitializationTimeout = config.as[FiniteDuration]("tasks.timeouts.initialization")
+  lazy val InitializationTimeout = config.as[FiniteDuration]("tasks.timeouts.initialization")
 
-  val ShardMapPublishFrequency = config.as[FiniteDuration]("tasks.shardmap-publish-frequency")
+  lazy val ShardMapPublishFrequency = config.as[FiniteDuration]("tasks.shardmap-publish-frequency")
 
   lazy val DatasetDefinitions = config.as[Option[Map[String, Config]]]("dataset-definitions")
                                       .getOrElse(Map.empty[String, Config])
 
   /** The timeout to use to resolve an actor ref for new nodes. */
-  val ResolveActorTimeout = config.as[FiniteDuration]("tasks.timeouts.resolve-actor")
+  lazy val ResolveActorTimeout = config.as[FiniteDuration]("tasks.timeouts.resolve-actor")
 
-  val datasetConfPaths = config.as[Seq[String]]("dataset-configs")
+  lazy val datasetConfPaths = config.as[Seq[String]]("dataset-configs")
+
+  lazy val numNodes = config.getInt("cluster-discovery.num-nodes")
+  lazy val k8sHostFormat = config.as[Option[String]]("cluster-discovery.k8s-stateful-sets-hostname-format")
+
+  // used for development mode only
+  lazy val hostList = config.as[Option[Seq[String]]]("cluster-discovery.host-list")
+  lazy val localhostOrdinal = config.as[Option[Int]]("cluster-discovery.localhost-ordinal")
+
 
   /**
    * Returns IngestionConfig/dataset configuration from parsing dataset-configs file paths.
    * If those are empty, then parse the "streams" config key for inline configs.
    */
-  val streamConfigs: Seq[Config] =
+  lazy val streamConfigs: Seq[Config] =
     if (datasetConfPaths.nonEmpty) {
       datasetConfPaths.map { d => ConfigFactory.parseFile(new java.io.File(d)) }
     } else {
       config.as[Seq[Config]]("inline-dataset-configs")
     }
 
-  val schemas = Schemas.fromConfig(config) match {
+  lazy val schemas = Schemas.fromConfig(config) match {
     case Good(sch) => sch
     case Bad(errs)  => throw new RuntimeException("Errors parsing schemas:\n" +
                          errs.map { case (ds, err) => s"Schema $ds\t$err" }.mkString("\n"))

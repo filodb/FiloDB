@@ -53,7 +53,7 @@ class FiloHttpServer(actorSystem: ActorSystem, filoSettings: FilodbSettings) ext
     // This is a preliminary implementation of routes. Will be enhanced later
     val defaultRoutes: List[FiloRoute] = List(AdminRoutes,
                                            new ClusterApiRoute(clusterProxy),
-                                           new HealthRoute(coordinatorRef, v2ClusterEnabled),
+                                           new HealthRoute(coordinatorRef, v2ClusterEnabled, settings),
                                            new PrometheusApiRoute(coordinatorRef, settings))
 
     // Load runtime api routes from class names.

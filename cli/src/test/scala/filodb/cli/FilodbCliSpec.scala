@@ -11,14 +11,7 @@ class FilodbCliSpec extends RunnableSpec {
     "initialize" in {
 
       testScallopOptions()
-//      eventually(CliMain.cluster.isInitialized)
     }
-//    "create and setup the coordinatorActor and clusterActor" in {
-//      CliMain.role shouldEqual ClusterRole.Cli
-//      CliMain.system.name shouldEqual ClusterRole.Cli.systemName
-//      val coordinatorActor = CliMain.coordinatorActor
-//      coordinatorActor.path.name shouldEqual ActorName.CoordinatorName
-//    }
 
     "test hex to binary conversion, decode partkey and chunkInfo" in {
       val expectedStrPk = "b2[schema=gauge  _metric_=node_filesystem_size_bytes,tags={_ns_: us-west-2a, " +
@@ -42,12 +35,6 @@ class FilodbCliSpec extends RunnableSpec {
       chunkInfo.endTime shouldEqual 1607776883662L
     }
 
-//    "shutdown cleanly" in {
-//      CliMain.cluster.clusterActor.isEmpty shouldEqual true
-//      CliMain.shutdown()
-//      CliMain.cluster.clusterActor.isEmpty shouldEqual true
-//      eventually(CliMain.cluster.isTerminated)
-//    }
   }
 
   def testScallopOptions(): Unit = {

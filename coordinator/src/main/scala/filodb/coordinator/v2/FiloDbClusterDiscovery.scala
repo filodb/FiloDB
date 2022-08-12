@@ -13,25 +13,19 @@ import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
-import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.{CurrentShardSnapshot, FilodbSettings, ShardMapper}
 import filodb.core.DatasetRef
 
-class FiloDbClusterDiscovery(settings: FilodbSettings, system: ActorSystem,
+class FiloDbClusterDiscovery(settings: FilodbSettings,
+                             system: ActorSystem,
                              failureDetectionInterval: FiniteDuration)
                             (implicit ec: Scheduler) extends StrictLogging {
 
-  val numNodes = settings.config.getInt("cluster-discovery.num-nodes")
-  val k8sHostFormat = settings.config.as[Option[String]]("cluster-discovery.k8s-stateful-sets-hostname-format")
-  val discoveryJobs = mutable.Map[DatasetRef, CancelableFuture[Unit]]()
+  private val discoveryJobs = mutable.Map[DatasetRef, CancelableFuture[Unit]]()
 
-  // dev only
-  val hostList = settings.config.as[Option[Seq[String]]]("cluster-discovery.host-list")
-  val localhostOrdinal = settings.config.as[Option[Int]]("cluster-discovery.localhost-ordinal")
-
-  val ordinalOfLocalhost = {
-    if (localhostOrdinal.isDefined) localhostOrdinal.get
+  lazy val ordinalOfLocalhost: Int = {
+    if (settings.localhostOrdinal.isDefined) settings.localhostOrdinal.get
     else {
       val fullHostname = InetAddress.getLocalHost.getHostName
       val hostName = if (fullHostname.contains(".")) fullHostname.substring(0, fullHostname.indexOf('.'))
@@ -46,10 +40,11 @@ class FiloDbClusterDiscovery(settings: FilodbSettings, system: ActorSystem,
   }
 
   def shardsForOrdinal(ordinal: Int, numShards: Int): Seq[Int] = {
-    val numShardsPerHost = numShards / numNodes
+    require(ordinal < settings.numNodes, s"Ordinal $ordinal was not expected. Number of nodes is ${settings.numNodes}")
+    val numShardsPerHost = numShards / settings.numNodes
     // Suppose we have a total of 8 shards and 2 hosts, assuming the hostnames are host-0 and host-1, we will map
     // host-0 to shard [0,1,2,3] and host-1 to shard [4,5,6,7]
-    val numExtraShardsToAssign = numShards % numNodes
+    val numExtraShardsToAssign = numShards % settings.numNodes
     val (firstShardThisNode, numShardsThisHost) = if (numExtraShardsToAssign != 0) {
       logger.warn("For stateful shard assignment, numShards should be a multiple of nodes per shard, " +
         "using default strategy")
@@ -73,38 +68,43 @@ class FiloDbClusterDiscovery(settings: FilodbSettings, system: ActorSystem,
 
   def shardsForLocalhost(numShards: Int): Seq[Int] = shardsForOrdinal(ordinalOfLocalhost, numShards)
 
-  private val hostNames = {
-    if (k8sHostFormat.isDefined) {
-      (0 until numNodes).map(i => String.format(k8sHostFormat.get, i.toString))
-    } else if (hostList.isDefined) {
-      hostList.get.sorted // sort to make order consistent on all nodes of cluster
+  lazy private val hostNames = {
+    if (settings.k8sHostFormat.isDefined) {
+      (0 until settings.numNodes).map(i => String.format(settings.k8sHostFormat.get, i.toString))
+    } else if (settings.hostList.isDefined) {
+      settings.hostList.get.sorted // sort to make order consistent on all nodes of cluster
     } else throw new IllegalArgumentException("Cluster Discovery mechanism not defined")
   }
 
-  private val nodeCoordActorSelections = {
+  lazy private val nodeCoordActorSelections = {
     hostNames.map { h =>
       val actorPath = s"akka.tcp://filo-standalone@$h/user/coordinator"
       system.actorSelection(actorPath)
     }
   }
 
-  private def askShardSnapshot(nca: ActorRef, ref: DatasetRef, numShards: Int) = {
-    val t = Timeout(20.seconds)
+  private def askShardSnapshot(nca: ActorRef,
+                               ref: DatasetRef,
+                               numShards: Int,
+                               timeout: FiniteDuration): Observable[CurrentShardSnapshot] = {
+    val t = Timeout(timeout)
     val empty = CurrentShardSnapshot(ref, new ShardMapper(numShards))
     def fut = (nca ? GetShardMapScatter(ref)) (t).asInstanceOf[Future[CurrentShardSnapshot]]
     Observable.fromFuture(fut).onErrorHandle { e =>
-      logger.error(s"Saw exception on ask: $e")
+      logger.error(s"Saw exception on askShardSnapshot: $e")
       empty
     }
   }
 
-  private def reduceMappersFromAllNodes(ref: DatasetRef, numShards: Int) = {
+  private def reduceMappersFromAllNodes(ref: DatasetRef,
+                                        numShards: Int,
+                                        timeout: FiniteDuration): Observable[ShardMapper] = {
     val acc = new ShardMapper(numShards)
     val snapshots = for {
       nca <- Observable.fromIteratorUnsafe(nodeCoordActorSelections.iterator)
       ncaRef <- Observable.fromFuture(nca.resolveOne(settings.ResolveActorTimeout).recover{case _=> ActorRef.noSender})
       if ncaRef != ActorRef.noSender
-      snapshot <- askShardSnapshot(ncaRef, ref, numShards)
+      snapshot <- askShardSnapshot(ncaRef, ref, numShards, timeout)
     } yield {
       snapshot
     }
@@ -113,11 +113,12 @@ class FiloDbClusterDiscovery(settings: FilodbSettings, system: ActorSystem,
 
   private val datasetToMapper = new ConcurrentHashMap[DatasetRef, ShardMapper]()
   def registerDatasetForDiscovery(dataset: DatasetRef, numShards: Int): Unit = {
+    require(failureDetectionInterval.toMillis > 5000, "failure detection interval should be > 5s")
     logger.info(s"Starting discovery pipeline for $dataset")
     datasetToMapper.put(dataset, new ShardMapper(numShards))
     val fut = for {
       _ <- Observable.intervalWithFixedDelay(failureDetectionInterval)
-      mapper <- reduceMappersFromAllNodes(dataset, numShards)
+      mapper <- reduceMappersFromAllNodes(dataset, numShards, failureDetectionInterval - 5.seconds)
     } {
       datasetToMapper.put(dataset, mapper)
     }

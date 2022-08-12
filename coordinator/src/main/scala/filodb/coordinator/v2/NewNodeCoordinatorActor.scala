@@ -1,7 +1,6 @@
 package filodb.coordinator.v2
 
 import scala.collection.mutable
-import scala.collection.mutable.HashMap
 import scala.util.{Failure, Success}
 
 import akka.actor.{ActorRef, OneForOneStrategy, Props}
@@ -30,7 +29,7 @@ object NewNodeCoordinatorActor {
   def props(memStore: TimeSeriesStore,
             clusterDiscovery: FiloDbClusterDiscovery,
             settings: FilodbSettings): Props =
-    Props(classOf[NewNodeCoordinatorActor], memStore, clusterDiscovery, settings)
+    Props(new NewNodeCoordinatorActor(memStore, clusterDiscovery, settings))
 }
 
 private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
@@ -40,16 +39,16 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
   import NodeClusterActor._
   import client.IngestionCommands._
 
-  private val ingestionActors = new HashMap[DatasetRef, ActorRef]
-  private val queryActors = new HashMap[DatasetRef, ActorRef]
-  private val localShardMaps = new HashMap[DatasetRef, ShardMapper]
-  private val shardsOnThisNode = new HashMap[DatasetRef, Seq[Int]]
+  private val ingestionActors = new mutable.HashMap[DatasetRef, ActorRef]
+  private val queryActors = new mutable.HashMap[DatasetRef, ActorRef]
+  private val localShardMaps = new mutable.HashMap[DatasetRef, ShardMapper]
+  private val shardsOnThisNode = new mutable.HashMap[DatasetRef, Seq[Int]]
   private val ingestionConfigs = new mutable.HashMap[DatasetRef, IngestionConfig]()
   private val shardStats = new mutable.HashMap[DatasetRef, ShardHealthStats]()
 
   logger.info(s"Initializing NodeCoordActor at ${self.path}")
 
-  private def initialize() = {
+  private def initialize(): Unit = {
     logger.debug(s"Initializing stream configs: ${settings.streamConfigs}")
     settings.streamConfigs.foreach { config =>
       val dataset = settings.datasetFromStream(config)
@@ -61,8 +60,8 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     }
   }
 
-  override val supervisorStrategy = OneForOneStrategy() {
-    case exception: Exception => Resume
+  override val supervisorStrategy: OneForOneStrategy = OneForOneStrategy() {
+    case _: Exception => Resume
   }
 
   // For now, datasets need to be set up for ingestion before they can be queried (in-mem only)
@@ -104,7 +103,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
       mapper.updateFromEvent(event) match {
         case Failure(l) =>
           logger.error(s"updateFromShardEvent error for dataset=${event.ref} event $event. Mapper now: $mapper", l)
-        case Success(r) =>
+        case Success(_) =>
           logger.debug(s"updateFromShardEvent success for dataset=${event.ref} event $event. Mapper now: $mapper")
       }
       // update metrics
@@ -139,7 +138,7 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     ingestionActors(ref) = ingester
 
     val ttl = if (memStore.isDownsampleStore) downsample.ttls.last.toMillis
-              else storeConf.diskTTLSeconds.toLong * 1000
+              else storeConf.diskTTLSeconds * 1000
     def earliestTimestampFn = System.currentTimeMillis() - ttl
     def clusterShardMapperFn = clusterDiscovery.shardMapper(dataset.ref)
     logger.info(s"Creating QueryActor for dataset $ref with dataset ttlMs=$ttl")
@@ -147,7 +146,6 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
                                                     clusterShardMapperFn, earliestTimestampFn))
     queryActors(ref) = queryRef
 
-    // TODO: Send status update to cluster actor
     logger.info(s"Coordinator set up for ingestion and querying for $ref.")
   }
 
@@ -155,8 +153,8 @@ private[filodb] final class NewNodeCoordinatorActor(memStore: TimeSeriesStore,
     logger.info(s"Starting tenant level ingestion cardinality metering...")
     val inst = TenantIngestionMetering(
       settings,
-      () => { localShardMaps.keysIterator },
-      () => self)
+      dsIterProducer = () => { localShardMaps.keysIterator },
+      coordActorProducer = () => self)
     inst.schedulePeriodicPublishJob()
   }
 
