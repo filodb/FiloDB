@@ -16,6 +16,12 @@ object EmptyFailureProvider extends FailureProvider {
   override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = Nil
 }
 
+object TimeRange {
+  def fromSecs(startSecs: Long, endSecs: Long): TimeRange = {
+    TimeRange(1000 * startSecs, 1000 * endSecs)
+  }
+}
+
 /**
   * Time range.
   *
