@@ -11,7 +11,7 @@ import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
 import filodb.core.query._
 import filodb.core.query.Filter.{Equals, EqualsRegex}
-import filodb.prometheus.ast.TimeStepParams
+import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
 import filodb.prometheus.parse.Parser.Antlr
 import filodb.query.{BadQueryException, IntervalSelector, LabelCardinality, PlanValidationSpec, RawSeries}
@@ -1196,55 +1196,146 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     validatePlan(execPlan1, expectedPlan1)
   }
 
+  it ("should issue remote queries for the correct time-ranges when leaf plans are split across partitions") {
+    // returns a sequence of all PromqlRemoteExecs in the tree
+    def getPromqlRemoteExecs(plan: ExecPlan): Seq[PromQlRemoteExec] = {
+      plan match {
+        case nl: NonLeafExecPlan => nl.children.flatMap(getPromqlRemoteExecs(_))
+        case pql: PromQlRemoteExec => Seq(pql)
+        case _ => Nil
+      }
+    }
+    // The tests below match this scenario, where a query begins within the first partition, and it ends
+    //   somewhere in the second. The second's time-range continues for a substantially long time.
+    //      Query:   |-----------|---------------|
+    // Partitions: |-------------|------------------------------------------------>
+    //                   p0                               p1
+
+    // query params
+    val startSec = 123
+    val stepSec = 45
+    val endSec = 6789
+
+    val partitions = {
+      val midSec = (startSec + endSec) / 2
+      List(PartitionAssignment("remote0", "remote0-url", TimeRange.fromSecs(startSec - 10, midSec)),
+           PartitionAssignment("remote1", "remote1-url", TimeRange.fromSecs(midSec, Long.MaxValue / 1000)))
+    }
+    val expectedRanges = {
+      require(partitions.size == 2)
+      val secondStart = (partitions.head.timeRange.endMs + WindowConstants.staleDataLookbackMillis) / 1000
+      Set((startSec, partitions.head.timeRange.endMs / 1000),
+          (LogicalPlanUtils.snapToStep(secondStart, stepSec, startSec), endSec))
+    }
+    val queries = Seq(
+      // """test{job="app"}[1h]""",  // FIXME: export queries are fired identically to each partition.
+      """test{job="app"}""",
+      """sgn(test{job="app"})""",
+      """sum(test{job="app"})""",
+      """test{job="app"} + test{job="app"}""",
+      """sgn(test{job="app"}) + sum(test{job="app"})""",
+      """test{job="app"} + 111""",
+      """sum(sum(test{job="app"}) + sgn(test{job="app"}))""",
+      """sgn(sum(test{job="app"}) + sgn(test{job="app"}))""",
+    )
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String],
+                                 timeRange: TimeRange): List[PartitionAssignment] = partitions
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                         timeRange: TimeRange): List[PartitionAssignment] =
+        throw new RuntimeException("should not use")
+    }
+    val engine = new MultiPartitionPlanner(
+      partitionLocationProvider, singlePartitionPlanner, "local",
+      MetricsTestData.timeseriesDataset, queryConfig
+    )
+    for (query <- queries) {
+      val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(startSec, stepSec, endSec))
+      val promQlQueryParams = PromQlQueryParams(query, startSec, stepSec, endSec)
+      val execPlan = engine.materialize(lp,
+        QueryContext(origQueryParams = promQlQueryParams,
+                     plannerParams = PlannerParams(processMultiPartition = true))
+      )
+      // Count the # of occurrences of each query range.
+      val counts = getPromqlRemoteExecs(execPlan).map { r =>
+        val params = r.promQlQueryParams
+        (params.startSecs, params.endSecs)
+      }.foldLeft(Map[(Long, Long), Long]()) { case (counts, range) =>
+        counts ++ Map(range -> (1L + counts.getOrElse(range, 0L)))
+      }
+      // Sanity check-- all counts should be at least 1.
+      counts.values.forall(_ > 0) shouldEqual true
+      // Make sure only the expected ranges were seen.
+      counts.keySet shouldEqual expectedRanges
+      // Make sure all PromQlRemoteExecs came in pairs.
+      counts.values.toSet.size shouldEqual 1
+    }
+  }
+
   it ("should pushdown aggregations/binary-joins when leaf plans are split across partitions") {
     val startSec = 123
-    val stepSec = 456
-    val endSec = 789
+    val stepSec = 45
+    val endSec = 6789
+    // All PromqlRemoteExecs should come in pairs, where the first ends at 3306 (midpoint of 123 and 6789),
+    //   and the second starts at 3633 (midpoint + lookback; snapped to periodic step).
     val queryExpectedPairs = Seq(
       ("""sum(rate(test{job="app"}[5m]))""",
-        """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(123,456,789))
+        """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(123,45,6789))
           |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
           |---E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-          |----E~PromQlRemoteExec(PromQlQueryParams(sum(rate(test{job="app"}[5m])),123,456,306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-          |----E~PromQlRemoteExec(PromQlQueryParams(sum(rate(test{job="app"}[5m])),789,456,789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
+          |----E~PromQlRemoteExec(PromQlQueryParams(sum(rate(test{job="app"}[5m])),123,45,3306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+          |----E~PromQlRemoteExec(PromQlQueryParams(sum(rate(test{job="app"}[5m])),3633,45,6789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
       ("""sum(test{job="app"})""",
-        """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(123,456,789))
+        """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(123,45,6789))
           |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
           |---E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-          |----E~PromQlRemoteExec(PromQlQueryParams(sum(test{job="app"}),123,456,306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-          |----E~PromQlRemoteExec(PromQlQueryParams(sum(test{job="app"}),789,456,789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
+          |----E~PromQlRemoteExec(PromQlQueryParams(sum(test{job="app"}),123,45,3306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+          |----E~PromQlRemoteExec(PromQlQueryParams(sum(test{job="app"}),3633,45,6789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
       ("""sum(sum(test{job="app"}))""",
-        """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(123,456,789))
+        """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(123,45,6789))
           |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
           |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-          |---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(123,456,789))
+          |---T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(123,45,6789))
           |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
           |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
           |------E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-          |-------E~PromQlRemoteExec(PromQlQueryParams(sum(sum(test{job="app"})),123,456,306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-          |-------E~PromQlRemoteExec(PromQlQueryParams(sum(sum(test{job="app"})),789,456,789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
+          |-------E~PromQlRemoteExec(PromQlQueryParams(sum(sum(test{job="app"})),123,45,3306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+          |-------E~PromQlRemoteExec(PromQlQueryParams(sum(sum(test{job="app"})),3633,45,6789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
       ("""test{job="app"} + test{job="app"}""",
         """E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-          |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"} + test{job="app"},123,456,306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-          |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"} + test{job="app"},306,456,789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
+          |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"} + test{job="app"},123,45,3306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+          |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"} + test{job="app"},3633,45,6789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
       ("""count(test{job="app"}) + ln(test{job="app"})""",
         """E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-          |-E~PromQlRemoteExec(PromQlQueryParams(count(test{job="app"}) + ln(test{job="app"}),123,456,306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-          |-E~PromQlRemoteExec(PromQlQueryParams(count(test{job="app"}) + ln(test{job="app"}),306,456,789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
+          |-E~PromQlRemoteExec(PromQlQueryParams(count(test{job="app"}) + ln(test{job="app"}),123,45,3306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+          |-E~PromQlRemoteExec(PromQlQueryParams(count(test{job="app"}) + ln(test{job="app"}),3633,45,6789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
       ("""123 + test{job="app"}""",
         """E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-          |-E~PromQlRemoteExec(PromQlQueryParams(123 + test{job="app"},123,456,306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-          |-E~PromQlRemoteExec(PromQlQueryParams(123 + test{job="app"},306,456,789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
+          |-E~PromQlRemoteExec(PromQlQueryParams(123 + test{job="app"},123,45,3306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+          |-E~PromQlRemoteExec(PromQlQueryParams(123 + test{job="app"},3633,45,6789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
       ("""sum(test{job="app"}) + 123""",
         """E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-          |-E~PromQlRemoteExec(PromQlQueryParams(sum(test{job="app"}) + 123,123,456,306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-          |-E~PromQlRemoteExec(PromQlQueryParams(sum(test{job="app"}) + 123,306,456,789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
+          |-E~PromQlRemoteExec(PromQlQueryParams(sum(test{job="app"}) + 123,123,45,3306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+          |-E~PromQlRemoteExec(PromQlQueryParams(sum(test{job="app"}) + 123,3633,45,6789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
       ("""sgn(test{job="app"}) + 123""",
         """E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-          |-E~PromQlRemoteExec(PromQlQueryParams(sgn(test{job="app"}) + 123,123,456,306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-          |-E~PromQlRemoteExec(PromQlQueryParams(sgn(test{job="app"}) + 123,306,456,789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
+          |-E~PromQlRemoteExec(PromQlQueryParams(sgn(test{job="app"}) + 123,123,45,3306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+          |-E~PromQlRemoteExec(PromQlQueryParams(sgn(test{job="app"}) + 123,3633,45,6789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
+      ("""sgn(sgn(test{job="app"}) + sum(test{job="app"}))""",
+        """T~InstantVectorFunctionMapper(function=Sgn)
+          |-E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+          |--E~PromQlRemoteExec(PromQlQueryParams(sgn(sgn(test{job="app"}) + sum(test{job="app"})),123,45,3306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+          |--E~PromQlRemoteExec(PromQlQueryParams(sgn(sgn(test{job="app"}) + sum(test{job="app"})),3633,45,6789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
+      ("""sum(sgn(test{job="app"}) + sum(test{job="app"}))""",
+        """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(123,45,6789))
+          |-E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+          |--T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+          |---E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+          |----E~PromQlRemoteExec(PromQlQueryParams(sum(sgn(test{job="app"}) + sum(test{job="app"})),123,45,3306,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+          |----E~PromQlRemoteExec(PromQlQueryParams(sum(sgn(test{job="app"}) + sum(test{job="app"})),3633,45,6789,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
       // BUG: Should sum without stitching
       // ("""sum_over_time(test{job="app"}[5m])""",
       //   """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
@@ -1272,7 +1363,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       val promQlQueryParams = PromQlQueryParams(query, startSec, stepSec, endSec)
       val execPlan = engine.materialize(lp,
         QueryContext(origQueryParams = promQlQueryParams,
-          plannerParams = PlannerParams(processMultiPartition = true))
+                     plannerParams = PlannerParams(processMultiPartition = true))
       )
       validatePlan(execPlan, expected)
     }
