@@ -289,16 +289,16 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
    */
   def getPartitionRanges(partitions: Seq[PartitionAssignment], range: TimeRange,
                          lookbackMs: Long = 0L, offsetMs: Long = 0L,
-                         stepMsOpt: Option[Long] = None): Map[PartitionAssignment, TimeRange] = {
+                         stepMsOpt: Option[Long] = None): Seq[(PartitionAssignment, TimeRange)] = {
     // Construct a sequence of Option[TimeRange]; the ith range is None iff the ith partition has no range to query.
     // First partition doesn't need its start snapped to a periodic step, so deal with it separately.
-    val head = {
+    val headRange = {
       val pRange = partitions.head.timeRange
       Some(TimeRange(math.max(range.startMs, pRange.startMs) + offsetMs,
                      math.min(range.endMs, pRange.endMs) + offsetMs))
     }
     // Snap remaining range starts to a step (if a step is provided).
-    val tail = partitions.tail.map { part =>
+    val tailRanges = partitions.tail.map { part =>
       val startMs = if (stepMsOpt.nonEmpty) {
         snapToStep(timestamp = part.timeRange.startMs + lookbackMs + offsetMs,
                    step = stepMsOpt.get,
@@ -311,10 +311,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         Some(TimeRange(startMs, endMs))
       } else None
     }
-    // Convert the pairs to a map; filter out the Nones.
-    (Seq(head) ++ tail).zip(partitions).filter(_._1.nonEmpty).map{ case (rangeOpt, part) =>
-      part -> rangeOpt.get
-    }.toMap
+    // Filter out the Nones and flatten the Somes.
+    (Seq(headRange) ++ tailRanges).zip(partitions).filter(_._1.nonEmpty).map{ case (rangeOpt, part) =>
+      (part, rangeOpt.get)
+    }
   }
 
   /**
@@ -330,11 +330,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       val stepMs = 1000 * queryParams.stepSecs
       val endMs = 1000 * queryParams.endSecs
       val isInstantQuery: Boolean = startMs == endMs
-      // Map partitions to the time-ranges to be queried.
+      // Pair partitions with time-ranges to be queried.
       val partitionRanges = if (isInstantQuery) {
         // Just query against each partition with the original timestamp.
         // FIXME: this really just mirrors/supports existing behavior. We should have a smarter solution.
-        partitions.map(_ -> TimeRange(endMs, endMs)).toMap
+        partitions.map((_, TimeRange(endMs, endMs)))
       } else {
         getPartitionRanges(partitions, TimeRange(startMs, endMs), lookBackMs, offsetMs.max, Some(stepMs))
       }
@@ -342,7 +342,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         logger.debug(s"partitionInfo=$p; updated startMs=${range.startMs}, endMs=${range.endMs}")
         // TODO: playing it safe for now with the TimeRange override; the parameter can eventually be removed.
         materializeForPartition(logicalPlan, p, qContext, timeRangeOverride = Some(range))
-      }.toSeq
+      }
       if (execPlans.size == 1) execPlans.head
       else {
         // TODO: Do we pass in QueryContext in LogicalPlan's helper rvRangeForPlan?
@@ -408,17 +408,17 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     // cannot resolve one operand, in case the chosen operand is a scalar
     val (partitions, lookbackMs, offsetMs, routingKeys) = resolvePartitionsAndRoutingKeys(logicalPlan, qParams)
     assert(offsetMs.max == 0L, s"expected 0 offset, but found ${offsetMs.max}")
-    // Map partitions to time-ranges; materialize a plan for each pair.
-    val partitionRangeMap = getPartitionRanges(partitions, TimeRange.fromSecs(qParams.startSecs, qParams.endSecs),
-                                               lookbackMs, stepMsOpt = Some(1000 * qParams.stepSecs))
-    val plans = partitionRangeMap.map { case (part, range) =>
+    // Pair partitions with time-ranges; materialize a plan for each.
+    val partitionRanges = getPartitionRanges(partitions, TimeRange.fromSecs(qParams.startSecs, qParams.endSecs),
+                                             lookbackMs, stepMsOpt = Some(1000 * qParams.stepSecs))
+    val plans = partitionRanges.map { case (part, range) =>
       val newParams = {
         qParams.copy(startSecs = range.startMs / 1000,
                      endSecs = range.endMs / 1000)
       }
       val newContext = qContext.copy(origQueryParams = newParams)
       materializeForPartition(logicalPlan, part, newContext)
-    }.toSeq
+    }
     // concat if necessary
     val resPlan = if (plans.size == 1) {
       plans.head
