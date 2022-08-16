@@ -16,7 +16,6 @@ import filodb.core.DatasetRef
  * @param reportingInterval the interval at which the shard health stats are gathered
  */
 class ShardHealthStats(ref: DatasetRef,
-                       shardMapFunc: => ShardMapper,
                        reportingInterval: FiniteDuration = 5.seconds) {
 
   val numActive = Kamon.gauge(s"num-active-shards").withTag("dataset", ref.toString)
@@ -31,14 +30,14 @@ class ShardHealthStats(ref: DatasetRef,
   val numErrorReassignmentsSkipped = Kamon.counter(s"num-error-reassignments-skipped")
                       .withTag("dataset", ref.toString)
 
-  def update(mapper: ShardMapper): Unit = {
-    numActive.update(shardMapFunc.statuses.count(_ == ShardStatusActive))
-    numRecovering.update(shardMapFunc.statuses.count(_.isInstanceOf[ShardStatusRecovery]))
-    numUnassigned.update(shardMapFunc.statuses.count(_ == ShardStatusUnassigned))
-    numAssigned.update(shardMapFunc.statuses.count(_ == ShardStatusAssigned))
-    numError.update(shardMapFunc.statuses.count(_ == ShardStatusError))
-    numStopped.update(shardMapFunc.statuses.count(_ == ShardStatusStopped))
-    numDown.update(shardMapFunc.statuses.count(_ == ShardStatusDown))
+  def update(mapper: ShardMapper, skipUnassigned: Boolean = false): Unit = {
+    numActive.update(mapper.statuses.count(_ == ShardStatusActive))
+    numRecovering.update(mapper.statuses.count(_.isInstanceOf[ShardStatusRecovery]))
+    numUnassigned.update(mapper.statuses.count(_ == ShardStatusUnassigned))
+    if (!skipUnassigned) numAssigned.update(mapper.statuses.count(_ == ShardStatusAssigned))
+    numError.update(mapper.statuses.count(_ == ShardStatusError))
+    numStopped.update(mapper.statuses.count(_ == ShardStatusStopped))
+    numDown.update(mapper.statuses.count(_ == ShardStatusDown))
   }
 
    /**

@@ -22,6 +22,7 @@ import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesStore}
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
 import filodb.core.store.StoreConfig
+import filodb.memory.data.Shutdown
 
 object IngestionActor {
   final case class IngestRows(ackTo: ActorRef, shard: Int, records: SomeData)
@@ -386,6 +387,9 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
     removeAndReleaseResources(ref, shard)
     statusActor ! IngestionError(ref, shard, err)
     logger.error(s"Stopped dataset=$ref shard=$shard after error was thrown")
+    // This is uncommon. Instead of having other shards be reassigned to other nodes, fail fast and shutdown
+    // the node and force all shards to be reassigned to new nodes of the cluster.
+    Shutdown.haltAndCatchFire(err)
   }
 
   private def removeAndReleaseResources(ref: DatasetRef, shardNum: Int): Unit = {

@@ -256,7 +256,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     }
 
   private def memberUp(member: Member): Future[Unit] = {
-    val memberCoordActor = nodeCoordinatorPath(member.address)
+    val memberCoordActor = nodeCoordinatorPath(member.address, false)
     context.actorSelection(memberCoordActor).resolveOne(ResolveActorTimeout)
       .map { ref => self ! AddCoordinator(member.roles, member.address, ref) }
       .recover {

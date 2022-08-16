@@ -119,7 +119,6 @@ class K8sStatefulSetShardAssignmentStrategy extends ShardAssignmentStrategy with
       }
 }
 
-
 object DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with StrictLogging {
 
   def shardAssignments(coord: ActorRef,

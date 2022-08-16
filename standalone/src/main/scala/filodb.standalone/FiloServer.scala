@@ -9,6 +9,7 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.akkabootstrapper.AkkaBootstrapper
 import filodb.coordinator._
 import filodb.coordinator.client.LocalClient
+import filodb.core.GlobalConfig
 import filodb.http.FiloHttpServer
 
 /**
@@ -63,7 +64,7 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
     val bootstrapper = bootstrap(cluster.cluster)
     val singleton = cluster.clusterSingleton(role, watcher)
     filoHttpServer = new FiloHttpServer(cluster.system, cluster.settings)
-    filoHttpServer.start(coordinatorActor, singleton, bootstrapper.getAkkaHttpRoute())
+    filoHttpServer.start(coordinatorActor, singleton, false, bootstrapper.getAkkaHttpRoute())
     // Launch the profiler after startup, if configured.
     SimpleProfiler.launch(systemConfig.getConfig("filodb.profiler"))
     KamonShutdownHook.registerShutdownHook()
@@ -84,17 +85,24 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
 
 object FiloServer extends StrictLogging {
   def main(args: Array[String]): Unit = {
-    var filoServer: Option[FiloServer] = None
-    try {
-      filoServer = Some(new FiloServer())
-      filoServer.get.start()
-    } catch { case e: Exception =>
-      // if there is an error in the initialization, we need to fail fast so that the process can be rescheduled
-      logger.error("Could not start FiloDB server", e)
-      if (filoServer.isDefined) {
-        filoServer.get.shutdown()
+    val allConfig = GlobalConfig.systemConfig
+    if (allConfig.getBoolean("filodb.v2-cluster-enabled")) {
+      NewFiloServerMain.start()
+    } else {
+      // TODO can remove once new-startup is tested and proven
+      var filoServer: Option[FiloServer] = None
+      try {
+        filoServer = Some(new FiloServer())
+        filoServer.get.start()
+      } catch {
+        case e: Exception =>
+          // if there is an error in the initialization, we need to fail fast so that the process can be rescheduled
+          logger.error("Could not start FiloDB server", e)
+          if (filoServer.isDefined) {
+            filoServer.get.shutdown()
+          }
+          sys.exit(1)
       }
-      sys.exit(1)
     }
   }
 }
