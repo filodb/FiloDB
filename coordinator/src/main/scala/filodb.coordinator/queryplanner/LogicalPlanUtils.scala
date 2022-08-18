@@ -374,4 +374,16 @@ object LogicalPlanUtils extends StrictLogging {
    }
   }
 
+  /**
+   * Snap a timestamp to the next periodic step.
+   * @param timestamp the timestamp to snap.
+   * @param step the size of each periodic step.
+   * @param origin where steps began.
+   */
+  def snapToStep(timestamp: Long, step: Long, origin: Long): Long = {
+    val totalDiff = timestamp - origin
+    val partialStep = totalDiff % step
+    val diffToNextStep = if (partialStep > 0) step - partialStep else 0
+    timestamp + diffToNextStep
+  }
 }

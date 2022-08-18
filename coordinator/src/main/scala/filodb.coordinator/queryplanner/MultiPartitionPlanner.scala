@@ -139,13 +139,13 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
    */
   private def walkMultiPartitionPlan(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
     logicalPlan match {
-      case lp: BinaryJoin                  => materializeMultiPartitionBinaryJoinWithSelector(lp, qContext)
+      case lp: BinaryJoin                  => materializeMultiPartitionSplitLeafRestrictedPlan(lp, qContext)
       case _: MetadataQueryPlan            => throw new IllegalArgumentException(
                                                           "MetadataQueryPlan unexpected here")
       case lp: ApplyInstantFunction        => super.materializeApplyInstantFunction(qContext, lp)
       case lp: ApplyInstantFunctionRaw     => super.materializeApplyInstantFunctionRaw(qContext, lp)
-      case lp: Aggregate                   => super.materializeAggregate(qContext, lp)
-      case lp: ScalarVectorBinaryOperation => materializeMultiPartitionBinaryJoinWithSelector(lp, qContext)
+      case lp: Aggregate                   => materializeMultiPartitionSplitLeafRestrictedPlan(lp, qContext)
+      case lp: ScalarVectorBinaryOperation => materializeMultiPartitionSplitLeafRestrictedPlan(lp, qContext)
       case lp: ApplyMiscellaneousFunction  => super.materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplySortFunction           => super.materializeApplySortFunction(qContext, lp)
       case lp: ScalarVaryingDoublePlan     => super.materializeScalarPlan(qContext, lp)
@@ -158,10 +158,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case lp: ScalarBinaryOperation       => super.materializeScalarBinaryOperation(qContext, lp)
       case lp: ApplyLimitFunction          => super.materializeLimitFunction(qContext, lp)
       case lp: TsCardinalities             => materializeTsCardinalities(lp, qContext)
-      case lp: SubqueryWithWindowing       => super.materializeSubqueryWithWindowing(qContext, lp)
-      case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
+      case lp: SubqueryWithWindowing       => materializeMultiPartitionSplitLeafRestrictedPlan(lp, qContext)
+      case lp: TopLevelSubquery            => materializeMultiPartitionSplitLeafRestrictedPlan(lp, qContext)
+      case lp: PeriodicSeriesWithWindowing => materializeMultiPartitionSplitLeafRestrictedPlan(lp, qContext)
       case _: PeriodicSeries |
-           _: PeriodicSeriesWithWindowing |
            _: RawChunkMeta |
            _: RawSeries                    => materializePeriodicAndRawSeries(logicalPlan, qContext)
     }
@@ -347,16 +347,55 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   }
 
   /**
-   * Materialize a binary join with partition-split leaf data.
+   * Given a sequence of partitions and a time-range to query, returns (partition, range)
+   *   pairs that describe the time-ranges to be queried for each partition such that:
+   *     (a) the returned ranges span the argument time-range, and
+   *     (b) lookbacks do not cross partition splits (where the "lookback" is defined only by the argument)
+   * @param partitions time-disjoint; ordered by ascending time.
+   * @param range the complete time-range. Does not include the offset.
+   * @param lookbackMs the time to skip immediately after a partition split.
+   * @param stepMsOpt occupied iff the returned ranges should describe periodic steps
+   *                  (i.e. all range start times (except the first) should be snapped to a step)
+   */
+  def getPartitionRanges(partitions: Seq[PartitionAssignment], range: TimeRange,
+                         lookbackMs: Long = 0L, offsetMs: Long = 0L,
+                         stepMsOpt: Option[Long] = None): Seq[(PartitionAssignment, TimeRange)] = {
+    // Construct a sequence of Option[TimeRange]; the ith range is None iff the ith partition has no range to query.
+    // First partition doesn't need its start snapped to a periodic step, so deal with it separately.
+    val headRange = {
+      val pRange = partitions.head.timeRange
+      Some(TimeRange(math.max(range.startMs, pRange.startMs) + offsetMs,
+        math.min(range.endMs, pRange.endMs) + offsetMs))
+    }
+    // Snap remaining range starts to a step (if a step is provided).
+    val tailRanges = partitions.tail.map { part =>
+      val startMs = if (stepMsOpt.nonEmpty) {
+        snapToStep(timestamp = part.timeRange.startMs + lookbackMs + offsetMs,
+          step = stepMsOpt.get,
+          origin = range.startMs + offsetMs)
+      } else {
+        part.timeRange.startMs + offsetMs
+      }
+      if (startMs <= part.timeRange.endMs + offsetMs) {
+        val endMs = math.min(range.endMs + offsetMs, part.timeRange.endMs + offsetMs)
+        Some(TimeRange(startMs, endMs))
+      } else None
+    }
+    // Filter out the Nones and flatten the Somes.
+    (Seq(headRange) ++ tailRanges).zip(partitions).filter(_._1.nonEmpty).map{ case (rangeOpt, part) =>
+      (part, rangeOpt.get)
+    }
+  }
+
+  /**
+   * Materialize a "split-restricted" plan with individual leaves that span multiple partitions.
    * Throws a BadQueryException if the LogicalPlan is unsupported, i.e. it or any nested plans:
    *     - makes use of a range funciton (operates on windowed data)
    *     - queries for data with more than one non-metric shard key
    *     - contains an offset
    */
-  private def materializeMultiPartitionSplitLeafBinaryJoin(logicalPlan: LogicalPlan,
+  private def materializeMultiPartitionSplitLeafPlan(logicalPlan: LogicalPlan,
                                                            qContext: QueryContext): PlanResult = {
-    require(logicalPlan.isInstanceOf[BinaryJoin] ||
-            logicalPlan.isInstanceOf[ScalarVectorBinaryOperation])
     lazy val hasMoreThanOneNonMetricShardKey =
       getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
       .filter(_.nonEmpty).distinct.size > 1
@@ -373,14 +412,19 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       )
     }
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    // cannot use one operand, in case the chosen operand is a scalar
-    val partitions = getPartitions(logicalPlan, qParams).distinct
-    // materialize a plan for each partition
-    val plans = partitions.map { part =>
-      val newParams = {
-        qParams.copy(startSecs = math.max(qParams.startSecs, part.timeRange.startMs / 1000),
-                     endSecs = math.min(qParams.endSecs, part.timeRange.endMs / 1000))
-      }
+    val partitionRanges = {
+      // This getPartitions call is only valid due to the above restrictions.
+      //   Some other method needs to be used if any restrictions are lifted.
+      val partitions = getPartitions(logicalPlan, qParams).distinct.sortBy(_.timeRange.startMs)
+      val timeRange = TimeRange(1000 * qParams.startSecs, 1000 * qParams.endSecs)
+      val lookbackMs = getLookBackMillis(logicalPlan).max
+      val stepMsOpt = if (qParams.startSecs == qParams.endSecs) None else Some(1000 * qParams.stepSecs)
+      getPartitionRanges(partitions, timeRange, lookbackMs = lookbackMs, stepMsOpt = stepMsOpt)
+    }
+    // materialize a plan for each range/partition pair
+    val plans = partitionRanges.map { case (part, range) =>
+      val newParams = qParams.copy(startSecs = range.startMs / 1000,
+                                   endSecs = range.endMs / 1000)
       val newContext = qContext.copy(origQueryParams = newParams)
       materializeForPartition(logicalPlan, part, newContext)
     }
@@ -421,23 +465,25 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   }
 
   /**
-   * Materialize any binary join that reads data from a partition.
-   * This includes both BinaryJoins and ScalarVectorBinaryOperations.
+   * Materialize any plan whose materialization strategy is governed by whether-or-not it
+   *   contains leaves that individually span partitions.
    */
-  private def materializeMultiPartitionBinaryJoinWithSelector(logicalPlan: LogicalPlan,
-                                                queryContext: QueryContext): PlanResult = {
-    require(logicalPlan.isInstanceOf[BinaryJoin] ||
-            logicalPlan.isInstanceOf[ScalarVectorBinaryOperation])
+  private def materializeMultiPartitionSplitLeafRestrictedPlan(logicalPlan: LogicalPlan,
+                                                               queryContext: QueryContext): PlanResult = {
     val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val hasMultiPartitionLeaves = LogicalPlan.findLeafLogicalPlans(logicalPlan)
                                              .find(lp => getPartitions(lp, queryParams).size > 1)
                                              .nonEmpty
     if (hasMultiPartitionLeaves) {
-      materializeMultiPartitionSplitLeafBinaryJoin(logicalPlan, queryContext)
+      materializeMultiPartitionSplitLeafPlan(logicalPlan, queryContext)
     } else {
       logicalPlan match {
         case bj: BinaryJoin => materializeMultiPartitionNonsplitLeafBinaryJoin(bj, queryContext)
         case sv: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(queryContext, sv)
+        case agg: Aggregate => super.materializeAggregate(queryContext, agg)
+        case psw: PeriodicSeriesWithWindowing => materializePeriodicAndRawSeries(psw, queryContext)
+        case tls: TopLevelSubquery => super.materializeTopLevelSubquery(queryContext, tls)
+        case sqw: SubqueryWithWindowing => super.materializeSubqueryWithWindowing(queryContext, sqw)
         case x => throw new IllegalArgumentException(s"unhandled type: ${x.getClass}")
       }
     }
