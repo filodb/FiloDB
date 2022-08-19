@@ -351,38 +351,38 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
    *   pairs that describe the time-ranges to be queried for each assignment such that:
    *     (a) the returned ranges span the argument time-range, and
    *     (b) lookbacks do not cross partition splits (where the "lookback" is defined only by the argument)
-   * @param partitions time-disjoint; ordered by ascending time.
+   * @param assignments time-disjoint; ordered by ascending time.
    * @param range the complete time-range. Does not include the offset.
    * @param lookbackMs the time to skip immediately after a partition split.
    * @param stepMsOpt occupied iff the returned ranges should describe periodic steps
    *                  (i.e. all range start times (except the first) should be snapped to a step)
    */
-  def getAssignmentQueryRanges(partitions: Seq[PartitionAssignment], range: TimeRange,
+  def getAssignmentQueryRanges(assignments: Seq[PartitionAssignment], range: TimeRange,
                                lookbackMs: Long = 0L, offsetMs: Long = 0L,
                                stepMsOpt: Option[Long] = None): Seq[(PartitionAssignment, TimeRange)] = {
     // Construct a sequence of Option[TimeRange]; the ith range is None iff the ith partition has no range to query.
     // First partition doesn't need its start snapped to a periodic step, so deal with it separately.
     val headRange = {
-      val pRange = partitions.head.timeRange
-      Some(TimeRange(math.max(range.startMs, pRange.startMs) + offsetMs,
-        math.min(range.endMs, pRange.endMs) + offsetMs))
+      val partRange = assignments.head.timeRange
+      Some(TimeRange(math.max(range.startMs, partRange.startMs),
+                     math.min(partRange.endMs + offsetMs, range.endMs)))
     }
     // Snap remaining range starts to a step (if a step is provided).
-    val tailRanges = partitions.tail.map { part =>
+    val tailRanges = assignments.tail.map { part =>
       val startMs = if (stepMsOpt.nonEmpty) {
         snapToStep(timestamp = part.timeRange.startMs + lookbackMs + offsetMs,
                    step = stepMsOpt.get,
-                   origin = range.startMs + offsetMs)
+                   origin = range.startMs)
       } else {
-        part.timeRange.startMs + offsetMs
+        part.timeRange.startMs + lookbackMs + offsetMs
       }
-      if (startMs <= part.timeRange.endMs + offsetMs) {
-        val endMs = math.min(range.endMs + offsetMs, part.timeRange.endMs + offsetMs)
+      val endMs = math.min(range.endMs, part.timeRange.endMs + offsetMs)
+      if (startMs <= endMs) {
         Some(TimeRange(startMs, endMs))
       } else None
     }
     // Filter out the Nones and flatten the Somes.
-    (Seq(headRange) ++ tailRanges).zip(partitions).filter(_._1.nonEmpty).map{ case (rangeOpt, part) =>
+    (Seq(headRange) ++ tailRanges).zip(assignments).filter(_._1.nonEmpty).map{ case (rangeOpt, part) =>
       (part, rangeOpt.get)
     }
   }
@@ -446,8 +446,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       val partitions = getPartitions(logicalPlan, qParams).distinct.sortBy(_.timeRange.startMs)
       val timeRange = TimeRange(1000 * qParams.startSecs, 1000 * qParams.endSecs)
       val lookbackMs = getLookBackMillis(logicalPlan).max
+      val offsetMs = getOffsetMillis(logicalPlan).max
       val stepMsOpt = if (qParams.startSecs == qParams.endSecs) None else Some(1000 * qParams.stepSecs)
-      getAssignmentQueryRanges(partitions, timeRange, lookbackMs = lookbackMs, stepMsOpt = stepMsOpt)
+      getAssignmentQueryRanges(partitions, timeRange,
+        lookbackMs = lookbackMs, offsetMs = offsetMs, stepMsOpt = stepMsOpt)
     }
     // materialize a plan for each range/assignment pair
     val plans = assignmentRanges.map { case (part, range) =>
