@@ -351,7 +351,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
    *   pairs that describe the time-ranges to be queried for each assignment such that:
    *     (a) the returned ranges span the argument time-range, and
    *     (b) lookbacks do not cross partition splits (where the "lookback" is defined only by the argument)
-   * @param assignments time-disjoint; ordered by ascending time.
+   * @param assignments must be time-disjoint
    * @param range the complete time-range. Does not include the offset.
    * @param lookbackMs the time to skip immediately after a partition split.
    * @param stepMsOpt occupied iff the returned ranges should describe periodic steps
@@ -393,53 +393,62 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
    */
   private def materializePlanHandleSplitLeaf(logicalPlan: LogicalPlan,
                                              qContext: QueryContext): PlanResult = {
-    // Cannot pushdown split queries that meet this criteria.
-    def containsBinaryJoinWithNestedRangeOrOffset(logicalPlan: LogicalPlan): Boolean = {
-      logicalPlan match {
-        case _: BinaryJoin => getOffsetMillis(logicalPlan).max > 0 || hasRangeFunction(logicalPlan)
-        case nl: NonLeafLogicalPlan => nl.children.find(containsBinaryJoinWithNestedRangeOrOffset(_)).nonEmpty
-        case _ => false
-      }
-    }
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val hasMultiPartitionLeaves = LogicalPlan.findLeafLogicalPlans(logicalPlan)
-                                             .find(lp => getPartitions(lp, qParams).size > 1)
-                                             .nonEmpty
+                                             .exists(getPartitions(_, qParams).size > 1)
     if (hasMultiPartitionLeaves) {
-      if (containsBinaryJoinWithNestedRangeOrOffset(logicalPlan)) {
-        // Some join-containing plans with split leaves are rejected for the sake of performance/simplicity.
-        validateSplitLeafPlanWithJoin(logicalPlan)
-      }
-      return materializeSplitLeafPlan(logicalPlan, qContext)
-    }
-    logicalPlan match {
+      materializeSplitLeafPlan(logicalPlan, qContext)
+    } else { logicalPlan match {
       case agg: Aggregate => super.materializeAggregate(qContext, agg)
       case psw: PeriodicSeriesWithWindowing => materializePeriodicAndRawSeries(psw, qContext)
       case sqw: SubqueryWithWindowing => super.materializeSubqueryWithWindowing(qContext, sqw)
       case bj: BinaryJoin => materializeMultiPartitionBinaryJoinNoSplitLeaf(bj, qContext)
       case sv: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, sv)
       case x => throw new IllegalArgumentException(s"unhandled type: ${x.getClass}")
+    }}
+  }
+
+  /**
+   * Throws a BadQueryException if any of the following conditions hold:
+   *     (1) the plan spans more than one non-metric shard key prefix.
+   *     (2) the plan contains at least one BinaryJoin, and any of its BinaryJoins contain an offset.
+   * @param splitLeafPlan must contain leaf plans that individually span multiple partitions.
+   */
+  private def validateSplitLeafPlan(splitLeafPlan: LogicalPlan): Unit = {
+    val baseErrorMessage = "This query contains selectors that individually read data from multiple partitions. " +
+                           "This is likely because a selector's data was migrated between partitions. "
+    def containsBinaryJoin(logicalPlan: LogicalPlan): Boolean = {
+      logicalPlan match {
+        case _: BinaryJoin => true
+        case nl: NonLeafLogicalPlan => nl.children.exists(containsBinaryJoin)
+        case _ => false
+      }
+    }
+    if (containsBinaryJoin(splitLeafPlan) && getOffsetMillis(splitLeafPlan).exists(_ > 0)) {
+      throw new BadQueryException( baseErrorMessage +
+          "These \"split\" queries cannot contain binary joins with offsets."
+      )
+    }
+    lazy val hasMoreThanOneNonMetricShardKey =
+      getNonMetricShardKeyFilters(splitLeafPlan, dataset.options.nonMetricShardColumns)
+        .filter(_.nonEmpty).distinct.size > 1
+    if (hasMoreThanOneNonMetricShardKey) {
+      throw new BadQueryException( baseErrorMessage +
+          "These \"split\" queries are not supported if they contain multiple non-metric shard keys."
+      )
     }
   }
 
   /**
    * Materializes a LogicalPlan with leaves that individually span multiple partitions.
-   * For the sake of simplicity, throws a BadQueryException if the LogicalPlan queries for data
-   *   with more than one non-metric shard key.
+   * All "split-leaf" plans will fail to materialize (throw a BadQueryException) if they span more than
+   *   one non-metric shard key prefix.
+   * Split-leaf plans that contain at least one BinaryJoin will additionally fail to materialize if any
+   *   of the plan's BinaryJoins contain an offset.
    */
-  @throws(classOf[BadQueryException])
   private def materializeSplitLeafPlan(logicalPlan: LogicalPlan,
                                        qContext: QueryContext): PlanResult = {
-    lazy val hasMoreThanOneNonMetricShardKey =
-      getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
-      .filter(_.nonEmpty).distinct.size > 1
-    if (hasMoreThanOneNonMetricShardKey) {
-      throw new BadQueryException(
-        "This query contains selectors that individually read data from multiple partitions. " +
-        "This is likely because the selector's data was migrated between partitions. " +
-        "These \"split\" queries are not supported if they contain multiple non-metric shard keys."
-      )
-    }
+    validateSplitLeafPlan(logicalPlan)
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     // get a mapping of assignments to time-ranges to query
     val assignmentRanges = {
@@ -494,26 +503,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     PlanResult(execPlan :: Nil)
   }
 
-  /**
-   * Throws a BadQueryException if the BinaryJoin-containing plan is unsupported,
-   *   i.e. it or any nested plans:
-   *     - makes use of a range function (operates on windowed data)
-   *     - contains an offset
-   */
-  private def validateSplitLeafPlanWithJoin(logicalPlan: LogicalPlan): Unit = {
-    if (hasRangeFunction(logicalPlan) ||
-      getOffsetMillis(logicalPlan).find(_ > 0).nonEmpty) {
-      throw new BadQueryException(
-        "This query contains selectors that individually read data from multiple partitions. " +
-        "This is likely because the selector's data was migrated between partitions. " +
-        "These \"split\" queries can only contain binary joins if they: " +
-        "(a) do not use any range functions " +
-        "(b) do not contain any offsets."
-      )
-    }
-  }
-
-    private def copy(lp: MetadataQueryPlan, startMs: Long, endMs: Long): MetadataQueryPlan = lp match {
+  private def copy(lp: MetadataQueryPlan, startMs: Long, endMs: Long): MetadataQueryPlan = lp match {
     case sk: SeriesKeysByFilters       => sk.copy(startMs = startMs, endMs = endMs)
     case lv: LabelValues               => lv.copy(startMs = startMs, endMs = endMs)
     case ln: LabelNames                => ln.copy(startMs = startMs, endMs = endMs)
