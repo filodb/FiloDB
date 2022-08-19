@@ -1257,7 +1257,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
   }
 
-  it ("should fail to materialize unsupported split-partition binary joins") {
+  it ("should fail to materialize unsupported split-partition queries with binary joins") {
     val startSec = 123
     val stepSec = 456
     val endSec = 789
@@ -1272,6 +1272,10 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       """foo{job="app1"} * rate(count(bar{job="app1"})[1m:30s])""",
       """rate(foo{job="app1"}[30s]) unless bar{job="app1"}""",
       """count_over_time(foo{job="app1"}[5m]) unless bar{job="app1"}""",
+      """sum(foo{job="app1"} + bar{job="app2"})""",
+      """sgn(foo{job="app1"} + bar{job="app2"})""",
+      """sgn(foo{job="app1"} offset 1h + bar{job="app1"})""",
+      """sgn(rate(foo{job="app1"}[5m]) + bar{job="app1"})""",
     )
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String],
