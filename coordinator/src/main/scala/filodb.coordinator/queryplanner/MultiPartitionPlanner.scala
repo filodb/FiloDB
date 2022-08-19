@@ -243,7 +243,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     }
   }
 
-
   /**
    *
    * @param logicalPlan Logical plan
@@ -348,8 +347,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   }
 
   /**
-   * Given a sequence of partitions and a time-range to query, returns (partition, range)
-   *   pairs that describe the time-ranges to be queried for each partition such that:
+   * Given a sequence of assignments and a time-range to query, returns (assignment, range)
+   *   pairs that describe the time-ranges to be queried for each assignment such that:
    *     (a) the returned ranges span the argument time-range, and
    *     (b) lookbacks do not cross partition splits (where the "lookback" is defined only by the argument)
    * @param partitions time-disjoint; ordered by ascending time.
@@ -358,9 +357,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
    * @param stepMsOpt occupied iff the returned ranges should describe periodic steps
    *                  (i.e. all range start times (except the first) should be snapped to a step)
    */
-  def getPartitionRanges(partitions: Seq[PartitionAssignment], range: TimeRange,
-                         lookbackMs: Long = 0L, offsetMs: Long = 0L,
-                         stepMsOpt: Option[Long] = None): Seq[(PartitionAssignment, TimeRange)] = {
+  def getAssignmentQueryRanges(partitions: Seq[PartitionAssignment], range: TimeRange,
+                               lookbackMs: Long = 0L, offsetMs: Long = 0L,
+                               stepMsOpt: Option[Long] = None): Seq[(PartitionAssignment, TimeRange)] = {
     // Construct a sequence of Option[TimeRange]; the ith range is None iff the ith partition has no range to query.
     // First partition doesn't need its start snapped to a periodic step, so deal with it separately.
     val headRange = {
@@ -388,6 +387,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     }
   }
 
+  /**
+   * Materialize any plan whose materialization strategy is governed by whether-or-not it
+   *   contains leaves that individually span partitions.
+   */
   private def materializePlanHandleSplitLeaf(logicalPlan: LogicalPlan,
                                              qContext: QueryContext): PlanResult = {
     def containsBinaryJoin(logicalPlan: LogicalPlan): Boolean = {
@@ -403,10 +406,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                                              .nonEmpty
     if (hasMultiPartitionLeaves) {
       if (containsBinaryJoin(logicalPlan)) {
-        return materializeSplitLeafPlanWithJoin(logicalPlan, qContext)
-      } else {
-        return materializeSplitLeafPlan(logicalPlan, qContext)
+        // Some join-containing plans with split leaves are rejected for the sake of performance/simplicity.
+        validateSplitLeafPlanWithJoin(logicalPlan)
       }
+      return materializeSplitLeafPlan(logicalPlan, qContext)
     }
     logicalPlan match {
       case agg: Aggregate => super.materializeAggregate(qContext, agg)
@@ -420,24 +423,34 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   }
 
   /**
-   * Materialize a "split-restricted" plan with individual leaves that span multiple partitions.
-   * Throws a BadQueryException if the LogicalPlan is unsupported, i.e. it or any nested plans:
-   *     - makes use of a range function (operates on windowed data)
-   *     - queries for data with more than one non-metric shard key
-   *     - contains an offset
+   * Materializes a LogicalPlan with leaves that individually span multiple partitions.
+   * For the sake of simplicity, throws a BadQueryException if the LogicalPlan queries for data
+   *   with more than one non-metric shard key.
    */
+  @throws(classOf[BadQueryException])
   private def materializeSplitLeafPlan(logicalPlan: LogicalPlan,
-                                                     qContext: QueryContext): PlanResult = {
+                                       qContext: QueryContext): PlanResult = {
+    lazy val hasMoreThanOneNonMetricShardKey =
+      getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
+      .filter(_.nonEmpty).distinct.size > 1
+    if (hasMoreThanOneNonMetricShardKey) {
+      throw new BadQueryException(
+        "This query contains selectors that individually read data from multiple partitions. " +
+        "This is likely because the selector's data was migrated between partitions. " +
+        "These \"split\" queries are not supported if they contain multiple non-metric shard keys."
+      )
+    }
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-    val partitionRanges = {
+    // get a mapping of assignments to time-ranges to query
+    val assignmentRanges = {
       val partitions = getPartitions(logicalPlan, qParams).distinct.sortBy(_.timeRange.startMs)
       val timeRange = TimeRange(1000 * qParams.startSecs, 1000 * qParams.endSecs)
       val lookbackMs = getLookBackMillis(logicalPlan).max
       val stepMsOpt = if (qParams.startSecs == qParams.endSecs) None else Some(1000 * qParams.stepSecs)
-      getPartitionRanges(partitions, timeRange, lookbackMs = lookbackMs, stepMsOpt = stepMsOpt)
+      getAssignmentQueryRanges(partitions, timeRange, lookbackMs = lookbackMs, stepMsOpt = stepMsOpt)
     }
-    // materialize a plan for each range/partition pair
-    val plans = partitionRanges.map { case (part, range) =>
+    // materialize a plan for each range/assignment pair
+    val plans = assignmentRanges.map { case (part, range) =>
       val newParams = qParams.copy(startSecs = range.startMs / 1000,
                                    endSecs = range.endMs / 1000)
       val newContext = qContext.copy(origQueryParams = newParams)
@@ -456,7 +469,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
    * Materialize a BinaryJoin whose individual leaf plans do not span partitions.
    */
   private def materializeMultiPartitionBinaryJoinNoSplitLeaf(logicalPlan: BinaryJoin,
-                                                  qContext: QueryContext): PlanResult = {
+                                                             qContext: QueryContext): PlanResult = {
     val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
     val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
@@ -480,54 +493,23 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   }
 
   /**
-   * Materialize any plan whose materialization strategy is governed by whether-or-not it
-   *   contains leaves that individually span partitions.
+   * Throws a BadQueryException if the BinaryJoin-containing plan is unsupported,
+   *   i.e. it or any nested plans:
+   *     - makes use of a range function (operates on windowed data)
+   *     - contains an offset
    */
-  private def materializeSplitLeafPlanWithJoin(logicalPlan: LogicalPlan,
-                                               queryContext: QueryContext): PlanResult = {
-    lazy val hasMoreThanOneNonMetricShardKey =
-      getNonMetricShardKeyFilters(logicalPlan, dataset.options.nonMetricShardColumns)
-        .filter(_.nonEmpty).distinct.size > 1
+  private def validateSplitLeafPlanWithJoin(logicalPlan: LogicalPlan): Unit = {
     if (hasRangeFunction(logicalPlan) ||
-      getOffsetMillis(logicalPlan).find(_ > 0).nonEmpty ||
-      hasMoreThanOneNonMetricShardKey) {
+      getOffsetMillis(logicalPlan).find(_ > 0).nonEmpty) {
       throw new BadQueryException(
         "This query contains selectors that individually read data from multiple partitions. " +
-          "This is likely because the selector's data was migrated between partitions. " +
-          "These \"split\" queries are supported as long as they: " +
-          "(1) do not use any range function " +
-          "(2) do not query for data that spans multiple non-metric shard keys " +
-          "(3) do not contain an offset."
+        "This is likely because the selector's data was migrated between partitions. " +
+        "These \"split\" queries can only contain binary joins if they: " +
+        "(a) do not use any range functions " +
+        "(b) do not contain any offsets."
       )
     }
-    materializeSplitLeafPlan(logicalPlan, queryContext)
   }
-
-//  /**
-//   * Materialize any plan whose materialization strategy is governed by whether-or-not it
-//   *   contains leaves that individually span partitions.
-//   */
-//  private def materializeSplitLeafPlanNoJoin(logicalPlan: LogicalPlan,
-//                                                       queryContext: QueryContext): PlanResult = {
-//    if (logicalPlan.isInstanceOf[BinaryJoin] || logicalPlan.isInstanceOf[ScalarVectorBinaryOperation]) {
-//      return materializeSplitLeafPlanWithJoin(logicalPlan, queryContext)
-//    }
-//    val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-//    val hasMultiPartitionLeaves = LogicalPlan.findLeafLogicalPlans(logicalPlan)
-//      .find(lp => getPartitions(lp, queryParams).size > 1)
-//      .nonEmpty
-//    if (hasMultiPartitionLeaves) {
-//      materializeMultiPartitionSplitLeafPlan(logicalPlan, queryContext)
-//    } else {
-//      logicalPlan match {
-//        case agg: Aggregate => super.materializeAggregate(queryContext, agg)
-//        case psw: PeriodicSeriesWithWindowing => materializePeriodicAndRawSeries(psw, queryContext)
-//        case tls: TopLevelSubquery => super.materializeTopLevelSubquery(queryContext, tls)
-//        case sqw: SubqueryWithWindowing => super.materializeSubqueryWithWindowing(queryContext, sqw)
-//        case x => throw new IllegalArgumentException(s"unhandled type: ${x.getClass}")
-//      }
-//    }
-//  }
 
     private def copy(lp: MetadataQueryPlan, startMs: Long, endMs: Long): MetadataQueryPlan = lp match {
     case sk: SeriesKeysByFilters       => sk.copy(startMs = startMs, endMs = endMs)
