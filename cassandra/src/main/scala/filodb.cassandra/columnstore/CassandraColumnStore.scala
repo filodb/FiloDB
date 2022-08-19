@@ -244,14 +244,6 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       PartKeyRecord(pkRecord.partKey, pkRecord.startTime, pkRecord.endTime, partKeyHashFn(pkRecord))
     }
 
-    def compareAndGet(sourceRec: PartKeyRecord, targetRec: PartKeyRecord): PartKeyRecord = {
-      val startTime = // compare and get the oldest start time
-        if (sourceRec.startTime < targetRec.startTime) sourceRec.startTime else targetRec.startTime
-      val endTime = // compare and get the latest end time
-        if (sourceRec.endTime > targetRec.endTime) sourceRec.endTime else targetRec.endTime
-      PartKeyRecord(sourceRec.partKey, startTime, endTime, None)
-    }
-
     def copyRows(targetPartitionKeysTable: PartitionKeysTable, records: Set[PartKeyRecord], shard: Int) = {
       val partKeys = records.map(partKeyRecord =>
         targetPartitionKeysTable.readPartKey(partKeyRecord.partKey) match {
@@ -281,6 +273,14 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       if (records.nonEmpty)
         copyRows(targetPartKeysTable, records, shard)
     }
+  }
+
+  private def compareAndGet(sourceRec: PartKeyRecord, targetRec: PartKeyRecord): PartKeyRecord = {
+    val startTime = // compare and get the oldest start time
+      if (sourceRec.startTime < targetRec.startTime) sourceRec.startTime else targetRec.startTime
+    val endTime = // compare and get the latest end time
+      if (sourceRec.endTime > targetRec.endTime) sourceRec.endTime else targetRec.endTime
+    PartKeyRecord(sourceRec.partKey, startTime, endTime, None)
   }
 
   /**
@@ -430,6 +430,16 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     }
   }
 
+  // merges with persisted partkey start/endtime, by picking earliest starttime and latest endtime.
+  def readMergePartkeyStartEndTime(ref: DatasetRef,
+                                   shard: Int,
+                                   partKeyRecord: PartKeyRecord): PartKeyRecord = {
+    getOrCreatePartitionKeysTable(ref, shard).readPartKey(partKeyRecord.partKey) match {
+      case Some(targetPkr) => compareAndGet(partKeyRecord, targetPkr)
+      case None => partKeyRecord
+    }
+  }
+
   def writePartKeys(ref: DatasetRef,
                     shard: Int,
                     partKeys: Observable[PartKeyRecord],
@@ -466,7 +476,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                                              startTimeGTE: Long,
                                              startTimeLTE: Long,
                                              endTimeGTE: Long,
-                                             endTimeLTE: Long): Iterator[Array[Byte]] = {
+                                             endTimeLTE: Long): Iterator[PartKeyRecord] = {
     val pkTable = getOrCreatePartitionKeysTable(ref, shard)
     pkTable.scanPksByStartEndTimeRangeNoAsync(split, startTimeGTE, startTimeLTE, endTimeGTE, endTimeLTE)
   }

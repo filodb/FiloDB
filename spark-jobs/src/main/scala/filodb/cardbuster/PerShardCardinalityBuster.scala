@@ -3,8 +3,14 @@ package filodb.cardbuster
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 
+import scala.concurrent.Await
+
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
+import monix.eval.Task
 import monix.execution.Scheduler
+import monix.execution.atomic.AtomicInt
+import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 
 import filodb.cassandra.columnstore.CassandraColumnStore
@@ -15,16 +21,21 @@ import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.DownsamplerSettings
 import filodb.memory.format.UnsafeUtils
 
+object BusterSchedulers {
+  lazy val readSched = Scheduler.io("cass-read-sched")
+  lazy val writeSched = Scheduler.io("cass-write-sched")
+  lazy val computeSched = Scheduler.computation(name = "buster-compute")
+}
+
 class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
                                 inDownsampleTables: Boolean) extends Serializable {
 
-  @transient lazy protected val readSched = Scheduler.io("cass-read-sched")
-  @transient lazy protected val writeSched = Scheduler.io("cass-write-sched")
   @transient lazy private val session = DownsamplerContext.getOrCreateCassandraSession(dsSettings.cassandraConfig)
   @transient lazy private val schemas = Schemas.fromConfig(dsSettings.filodbConfig).get
 
   @transient lazy private[cardbuster] val colStore =
-                new CassandraColumnStore(dsSettings.filodbConfig, readSched, session, inDownsampleTables)(writeSched)
+                new CassandraColumnStore(dsSettings.filodbConfig, BusterSchedulers.readSched,
+                  session, inDownsampleTables)(BusterSchedulers.writeSched)
 
   @transient lazy private val downsampleRefsByRes = dsSettings.downsampleResolutions
                                                               .zip(dsSettings.downsampledDatasetRefs).toMap
@@ -34,6 +45,9 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
   @transient lazy private val dsDatasetRef = downsampleRefsByRes(highestDSResolution)
 
   @transient lazy private[cardbuster] val dataset = if (inDownsampleTables) dsDatasetRef else rawDatasetRef
+
+  @transient lazy val numParallelDeletesPerSparkThread = dsSettings.filodbConfig
+                      .as[Option[Int]]("cardbuster.cass-delete-parallelism-per-spark-thread")
 
   @transient lazy val deleteFilter = dsSettings.filodbConfig
     .as[Seq[Map[String, String]]]("cardbuster.delete-pk-filters").map(_.mapValues(_.r.pattern).toSeq)
@@ -50,31 +64,28 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
   @transient lazy val endTimeLTE = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(dsSettings.filodbConfig
     .as[String]("cardbuster.delete-endTimeLTE"))).toEpochMilli
 
-  def bustIndexRecords(shard: Int, split: (String, String)): Unit = {
+  // scalastyle:off method.length
+  def bustIndexRecords(shard: Int, split: (String, String), isSimulation: Boolean): Int = {
     val numPartKeysDeleted = Kamon.counter("num-partkeys-deleted").withTag("dataset", dataset.toString)
-        .withTag("shard", shard)
+        .withTag("shard", shard).withTag("simulation", isSimulation)
     val numPartKeysCouldNotDelete = Kamon.counter("num-partkeys-could-not-delete").withTag("dataset", dataset.toString)
-      .withTag("shard", shard)
+      .withTag("shard", shard).withTag("simulation", isSimulation)
+    val cassDeleteLatency = Kamon.histogram("pk-delete-latency", MeasurementUnit.time.nanoseconds)
+      .withTag("dataset", dataset.toString)
+      .withTag("shard", shard).withTag("simulation", isSimulation)
     require(deleteFilter.nonEmpty, "cardbuster.delete-pk-filters should be non-empty")
-    BusterContext.log.info(s"Starting to bust cardinality in shard=$shard with " +
-      s"filter=$deleteFilter " +
-      s"inDownsampleTables=$inDownsampleTables " +
-      s"startTimeGTE=$startTimeGTE " +
-      s"startTimeLTE=$startTimeLTE " +
-      s"endTimeGTE=$endTimeGTE " +
-      s"endTimeLTE=$endTimeLTE " +
-      s"split=$split"
-    )
+    BusterContext.log.info(s"Starting to bust cardinality in shard=$shard with isSimulation=$isSimulation " +
+      s"filter=$deleteFilter inDownsampleTables=$inDownsampleTables startTimeGTE=$startTimeGTE " +
+      s"startTimeLTE=$startTimeLTE endTimeGTE=$endTimeGTE  endTimeLTE=$endTimeLTE split=$split")
     val candidateKeys = colStore.scanPartKeysByStartEndTimeRangeNoAsync(dataset, shard,
-      split, startTimeGTE, startTimeLTE,
-      endTimeGTE, endTimeLTE)
-
-    var numDeleted = 0
-    var numCouldNotDelete = 0
-    candidateKeys.filter { pk =>
-      val rawSchemaId = RecordSchema.schemaID(pk, UnsafeUtils.arayOffset)
+      split, startTimeGTE, startTimeLTE, endTimeGTE, endTimeLTE)
+    val numDeleted = AtomicInt(0)
+    val numCouldNotDelete = AtomicInt(0)
+    val numCandidateKeys = AtomicInt(0)
+    val keysToDelete = candidateKeys.filter { pk =>
+      val rawSchemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
       val schema = schemas(rawSchemaId)
-      val pkPairs = schema.partKeySchema.toStringPairs(pk, UnsafeUtils.arayOffset)
+      val pkPairs = schema.partKeySchema.toStringPairs(pk.partKey, UnsafeUtils.arayOffset)
       val willDelete = deleteFilter.exists { filter => // at least one filter should match
         filter.forall { case (filterKey, filterValRegex) => // should match all tags in this filter
           pkPairs.exists { case (pkKey, pkVal) =>
@@ -83,22 +94,40 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
         }
       }
       if (willDelete) {
-        BusterContext.log.debug(s"Deleting part key $pkPairs from shard=$shard")
+        BusterContext.log.debug(s"Deleting part key $pkPairs from shard=$shard startTime=${pk.startTime} " +
+          s"endTime=${pk.endTime} split=$split isSimulation=$isSimulation")
       }
+      numCandidateKeys += 1
       willDelete
-    }.foreach { pk =>
-      try {
-        colStore.deletePartKeyNoAsync(dataset, shard, pk)
-        numPartKeysDeleted.increment()
-        numDeleted += 1
-      } catch { case e: Exception =>
-        BusterContext.log.error(s"Could not delete a part key: ${e.getMessage}")
-        numPartKeysCouldNotDelete.increment()
-        numCouldNotDelete += 1
-      }
-      Unit
     }
-    BusterContext.log.info(s"Finished deleting keys from shard shard=$shard " +
-      s"numDeleted=$numDeleted numCouldNotDelete=$numCouldNotDelete")
+    val fut = Observable.fromIteratorUnsafe(keysToDelete)
+                        .mapParallelUnordered(numParallelDeletesPerSparkThread.getOrElse(1)) { pk =>
+      Task.eval {
+        try {
+          if (!isSimulation) {
+            val startNs = System.nanoTime()
+            try {
+              colStore.deletePartKeyNoAsync(dataset, shard, pk.partKey)
+            } finally {
+              cassDeleteLatency.record(System.nanoTime() - startNs)
+            }
+          }
+          numPartKeysDeleted.increment()
+          numDeleted += 1
+        } catch {
+          case e: Exception =>
+            BusterContext.log.error(s"Could not delete a part key: ${e.getMessage}")
+            numPartKeysCouldNotDelete.increment()
+            numCouldNotDelete += 1
+        }
+        Unit
+      }
+    }.completedL.runToFuture(BusterSchedulers.computeSched)
+    import scala.concurrent.duration._
+    Await.result(fut, 1.day)
+    BusterContext.log.info(s"Finished deleting keys from a shard split in shard=$shard " +
+      s"numCandidateKeys=${numCandidateKeys.get()} numDeleted=${numDeleted.get()} " +
+      s"numCouldNotDelete=${numCouldNotDelete.get()} isSimulation=$isSimulation")
+    numDeleted.get()
   }
 }

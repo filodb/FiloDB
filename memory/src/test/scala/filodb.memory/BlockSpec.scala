@@ -1,7 +1,8 @@
 package filodb.memory
 
-import scala.language.reflectiveCalls
+import com.kenai.jffi.PageManager
 
+import scala.language.reflectiveCalls
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -11,7 +12,9 @@ class BlockSpec extends AnyFlatSpec with Matchers with BeforeAndAfter with Befor
 
   val evictionLock = new EvictionLock
   val stats = new MemoryStats(Map("test1" -> "test1"))
-  val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1, evictionLock)
+  val numPagesPerBlock = 1
+  val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, numPagesPerBlock, evictionLock)
+  val expectedEmptyBlockSize = numPagesPerBlock * PageManager.getInstance().pageSize()
 
   before {
     testReclaimer.reclaimedBytes = 0
@@ -24,27 +27,28 @@ class BlockSpec extends AnyFlatSpec with Matchers with BeforeAndAfter with Befor
 
   it should "allocate metadata and report remaining bytes accurately" in {
     val block = blockManager.requestBlock(false).get
-    block.capacity shouldEqual 4096
-    block.remaining shouldEqual 4096
+    block.capacity shouldEqual expectedEmptyBlockSize
+    block.remaining shouldEqual expectedEmptyBlockSize
 
     // Now change the position
     block.position(200)
-    block.remaining shouldEqual 3896
+    block.remaining shouldEqual (expectedEmptyBlockSize - 200)
 
     // Now allocate some metadata and watch remaining bytes shrink
     block.allocMetadata(40)
-    block.remaining shouldEqual 3854
+    block.remaining shouldEqual (expectedEmptyBlockSize - 200 - 40 - 2)
   }
 
   it should "return null when allocate metadata if not enough space" in {
     val block = blockManager.requestBlock(false).get
-    block.capacity shouldEqual 4096
-    block.remaining shouldEqual 4096
+    block.capacity shouldEqual expectedEmptyBlockSize
+    block.remaining shouldEqual expectedEmptyBlockSize
 
-    block.position(3800)
-    block.remaining shouldEqual (4096-3800)
+    val newPosition  = PageManager.getInstance().pageSize().toInt - 299
+    block.position(newPosition)
+    block.remaining shouldEqual (expectedEmptyBlockSize-newPosition)
     intercept[OutOfOffheapMemoryException] { block.allocMetadata(300) }
-    block.remaining shouldEqual (4096-3800)   // still same space remaining
+    block.remaining shouldEqual (expectedEmptyBlockSize-newPosition)   // still same space remaining
   }
 
   it should "not reclaim when block has not been marked reclaimable" in {
@@ -55,14 +59,14 @@ class BlockSpec extends AnyFlatSpec with Matchers with BeforeAndAfter with Befor
 
   it should "call reclaimListener with address of all allocated metadatas" in {
     val block = blockManager.requestBlock(false).get
-    block.capacity shouldEqual 4096
-    block.remaining shouldEqual 4096
+    block.capacity shouldEqual expectedEmptyBlockSize
+    block.remaining shouldEqual expectedEmptyBlockSize
 
     block.position(200)
     val addr1 = block.allocMetadata(30)
     val addr2 = block.allocMetadata(40)
 
-    block.remaining shouldEqual 3822
+    block.remaining shouldEqual (expectedEmptyBlockSize - 200 - 30 - 2 - 40 - 2)
 
     //XXX for debugging
     println(block.detailedDebugString)

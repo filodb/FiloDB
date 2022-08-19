@@ -17,14 +17,14 @@ class BlockMemFactorySpec extends AnyFlatSpec with Matchers {
     val stats = new MemoryStats(Map("test1" -> "test1"))
     val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1, evictionLock)
     val bmf = new BlockMemFactory(blockManager, 50, Map("test" -> "val"), false)
-
+    val allocationSize = 1000 * PageManager.getInstance().pageSize().toInt / 4096
     // simulate encoding of multiple ts partitions in flush group
 
     for { flushGroup <- 0 to 1 } {
       for {tsParts <- 0 to 5} {
         bmf.startMetaSpan()
         for {chunks <- 0 to 3} {
-          bmf.allocateOffheap(1000)
+          bmf.allocateOffheap(allocationSize)
         }
         bmf.endMetaSpan(d => {}, 45)
       }
@@ -50,7 +50,7 @@ class BlockMemFactorySpec extends AnyFlatSpec with Matchers {
   it should "Mark all blocks of BlockMemFactory as reclaimable when used in ODP by DemandPagedChunkStore" in {
     val stats = new MemoryStats(Map("test1" -> "test1"))
     val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1, evictionLock)
-
+    val allocationSize = 1000 * PageManager.getInstance().pageSize().toInt / 4096
     // create block mem factories for different time buckets
     val bmf = new BlockMemFactory(blockManager, 50, Map("test" -> "val"), true)
 
@@ -58,7 +58,7 @@ class BlockMemFactorySpec extends AnyFlatSpec with Matchers {
       for {tsParts <- 0 to 10} {
         bmf.startMetaSpan()
         for {chunks <- 0 to 3} {
-          bmf.allocateOffheap(1000)
+          bmf.allocateOffheap(allocationSize)
         }
         bmf.endMetaSpan(d => {}, 45)
       }
@@ -96,13 +96,13 @@ class BlockMemFactorySpec extends AnyFlatSpec with Matchers {
 
     // create block mem factories for different time buckets
     val odpFactory = new BlockMemFactory(blockManager, 50, Map("test" -> "val"), true)
-
+    val allocationSize = 1000 * PageManager.getInstance().pageSize().toInt / 4096
     // simulate encoding of multiple ts partitions in flush group
     for { flushGroup <- 0 to 1 } {
       for {tsParts <- 0 to 5} {
         ingestionFactory.startMetaSpan()
         for {chunks <- 0 to 3} {
-          ingestionFactory.allocateOffheap(1000)
+          ingestionFactory.allocateOffheap(allocationSize)
         }
         ingestionFactory.endMetaSpan(d => {}, 45)
       }
@@ -119,7 +119,7 @@ class BlockMemFactorySpec extends AnyFlatSpec with Matchers {
     for {tsParts <- 0 to 10} {
       odpFactory.startMetaSpan()
       for {chunks <- 0 to 3} {
-        odpFactory.allocateOffheap(1000)
+        odpFactory.allocateOffheap(allocationSize)
       }
       odpFactory.endMetaSpan(d => {}, 45)
     }

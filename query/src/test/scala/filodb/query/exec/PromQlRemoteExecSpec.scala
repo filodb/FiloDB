@@ -8,6 +8,7 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.query.{PromQlQueryParams, QueryContext}
+import filodb.core.store.ChunkSource
 import filodb.memory.format.vectors.MutableHistogram
 import filodb.query
 import filodb.query.{Data, HistSampl, MetadataMapSampl, MetadataSuccessResponse, QueryResponse, QueryResult, Sampl, SuccessResponse}
@@ -20,7 +21,7 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     options = DatasetOptions(Seq("__name__", "job"), "__name__")).get
 
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)
+    override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
 
     override def clusterName: String = ???

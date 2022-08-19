@@ -12,6 +12,7 @@ import org.scalatest.exceptions.TestFailedException
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
+import filodb.core.store.ChunkSource
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import org.scalatest.funspec.AnyFunSpec
@@ -33,7 +34,8 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
   val tvSchemaTask = Task.eval(tvSchema)
 
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)
+
+    override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
 
     override def clusterName: String = ???

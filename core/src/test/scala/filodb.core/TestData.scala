@@ -129,6 +129,9 @@ object GdeltTestData {
   val gdeltLines = Source.fromURL(getClass.getResource("/GDELT-sample-test.csv"))
                          .getLines.toSeq.drop(1)     // drop the header line
 
+  val gdeltUniqueLines = Source.fromURL(getClass.getResource("/GDELT-unique-samples.csv"))
+    .getLines.toSeq.drop(1)     // drop the header line
+
   val gdeltLines3 = Source.fromURL(getClass.getResource("/GDELT-sample-test3.csv"))
     .getLines.toSeq.drop(1)     // drop the header line
 
@@ -145,6 +148,8 @@ object GdeltTestData {
   // WARNING: do not use these directly with toChunkSetStream, you won't get the right fields.
   // Please go through records() / IngestRecords for proper field routing
   val readers = gdeltLines.map { line => ArrayStringRowReader(line.split(",")) }
+
+  val uniqueReader = gdeltUniqueLines.map { line => ArrayStringRowReader(line.split(",")) }
 
   // Routes input records to the dataset schema correctly
   def records(ds: Dataset, readerSeq: Seq[RowReader] = readers): SomeData = {
@@ -201,7 +206,6 @@ object GdeltTestData {
   val datasetOptions = DatasetOptions.DefaultOptions.copy(
     shardKeyColumns = Seq( "__name__","_ns_","_ws_"))
   val dataset6 = Dataset("gdelt", schema.slice(4, 6), schema.patch(4, Nil, 2), datasetOptions)
-
 
   // Dataset7: partition Actor2Code,Actor2Name,NumArticles to test additional faceting
   val datasetOptionsWithFacets = datasetOptions.copy(

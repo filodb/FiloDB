@@ -132,7 +132,6 @@ The association of ShardEvents to ShardStatus (api in progress) starting with Sh
   case RecoveryStarted(dataset, shard, node)        => // ShardStatusRecovery
   case ShardDown(dataset, shard, node)              => // ShardStatusDown (changing, breaking out to more granular)
   case ShardMemberRemoved(dataset, shard, node)     => // ShardMemberRemoved (also changing)
-}
 ```
  
 ##### Shard Status and Shard Status Events

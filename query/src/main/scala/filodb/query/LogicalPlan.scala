@@ -135,7 +135,8 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
                                endMs: Long) extends MetadataQueryPlan
 
 object TsCardinalities {
-  val SHARD_KEY_LABELS = Seq("_ws_", "_ns_", "__name__")
+  val LABEL_WORKSPACE = "_ws_"
+  val SHARD_KEY_LABELS = Seq(LABEL_WORKSPACE, "_ns_", "__name__")
 }
 
 /**
@@ -289,7 +290,8 @@ case class SubqueryWithWindowing(
 
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = {
     val updatedInnerPeriodicSeries = innerPeriodicSeries.replacePeriodicSeriesFilters(filters)
-    this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries)
+    val updatedFunctionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan])
+    this.copy(innerPeriodicSeries = updatedInnerPeriodicSeries, functionArgs = updatedFunctionArgs)
   }
 }
 
@@ -356,21 +358,48 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
 
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan =
     this.copy(columnFilters = LogicalPlan.overrideColumnFilters(columnFilters, filters),
-              series = series.replaceRawSeriesFilters(filters))
+              series = series.replaceRawSeriesFilters(filters),
+              functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
+}
+
+/**
+  * Identifies the by/without clause used with an aggregator.
+  */
+case class AggregateClause(clauseType: AggregateClause.ClauseType.Value,
+                           labels: Seq[String] = Nil)
+
+case object AggregateClause {
+
+  case object ClauseType extends Enumeration {
+    val By, Without = Value
+  }
+
+  /**
+    * Returns an Optional-wrapped "by" AggregateClause.
+    */
+  def byOpt(labels: Seq[String] = Nil) : Option[AggregateClause] = {
+    Option(new AggregateClause(ClauseType.By, labels))
+  }
+
+  /**
+   * Returns an Optional-wrapped "without" AggregateClause.
+   */
+  def withoutOpt(labels: Seq[String] = Nil) : Option[AggregateClause] = {
+    Option(new AggregateClause(ClauseType.Without, labels))
+  }
 }
 
 /**
   * Aggregate data across partitions (not in the time dimension).
   * Aggregation can be done only on range vectors with consistent
   * sampling interval.
-  * @param by columns to group by
-  * @param without columns to leave out while grouping
+  * @param clauseOpt columns to group by/without.
+  *     None indicates no by/without clause is specified.
   */
 case class Aggregate(operator: AggregationOperator,
                      vectors: PeriodicSeriesPlan,
                      params: Seq[Any] = Nil,
-                     by: Seq[String] = Nil,
-                     without: Seq[String] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                     clauseOpt: Option[AggregateClause] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
   override def startMs: Long = vectors.startMs
   override def stepMs: Long = vectors.stepMs
@@ -438,8 +467,9 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
   override def isRoutable: Boolean = vectors.isRoutable
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
-    vectors.replacePeriodicSeriesFilters(filters))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(
+    vectors = vectors.replacePeriodicSeriesFilters(filters),
+    functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 }
 
 /**
@@ -451,8 +481,10 @@ case class ApplyInstantFunctionRaw(vectors: RawSeries,
                                    functionArgs: Seq[FunctionArgsPlan] = Nil) extends RawSeriesLikePlan
   with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
-  override def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan = this.copy(vectors =
-    vectors.replaceRawSeriesFilters(newFilters).asInstanceOf[RawSeries])
+  override def replaceRawSeriesFilters(newFilters: Seq[ColumnFilter]): RawSeriesLikePlan = this.copy(
+    vectors = vectors.replaceRawSeriesFilters(newFilters).asInstanceOf[RawSeries],
+    functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(newFilters).asInstanceOf[FunctionArgsPlan]))
+
 }
 
 /**
@@ -508,8 +540,9 @@ final case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
   override def isRoutable: Boolean = vectors.isRoutable
-  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(vectors =
-    vectors.replacePeriodicSeriesFilters(filters))
+  override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(
+    vectors = vectors.replacePeriodicSeriesFilters(filters),
+    functionArgs = functionArgs.map(_.replacePeriodicSeriesFilters(filters).asInstanceOf[FunctionArgsPlan]))
 }
 
 /**
@@ -611,6 +644,7 @@ object LogicalPlan {
     */
   def findLeafLogicalPlans (logicalPlan: LogicalPlan) : Seq[LogicalPlan] = {
    logicalPlan match {
+     case lp: ScalarVaryingDoublePlan => findLeafLogicalPlans(lp.vectors)
      // scalarArg can have vector like scalar(http_requests_total)
      case lp: ScalarVectorBinaryOperation => findLeafLogicalPlans(lp.vector) ++ findLeafLogicalPlans(lp.scalarArg)
      // Find leaf logical plans for all children and concatenate results
@@ -749,8 +783,12 @@ object LogicalPlan {
    */
   def overrideColumnFilters(base: Seq[ColumnFilter],
                             overrides: Seq[ColumnFilter]): Seq[ColumnFilter] = {
-    val overrideColumns = overrides.map(_.column)
-    base.filterNot(f => overrideColumns.contains(f.column)) ++ overrides
+    if (base.nonEmpty && !base.map(_.column).contains(TsCardinalities.LABEL_WORKSPACE)) {
+      val overrideColumns = overrides.map(_.column)
+      base.filterNot(f => overrideColumns.contains(f.column)) ++ overrides
+    } else {
+      base
+    }
   }
 }
 

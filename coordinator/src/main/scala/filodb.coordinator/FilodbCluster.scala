@@ -77,7 +77,10 @@ final class FilodbCluster(val system: ExtendedActorSystem, overrideConfig: Confi
     * All actions are idempotent. It manages the underlying lifecycle of all node actors.
     */
   private[coordinator] lazy val guardian = system.actorOf(NodeGuardian.props(
-    settings, metaStore, memStore, DefaultShardAssignmentStrategy), guardianName)
+    settings, metaStore, memStore,
+    if (settings.config.getBoolean("shard-manager.enable-k8s-stateful-shard-strategy"))
+      new K8sStatefulSetShardAssignmentStrategy else DefaultShardAssignmentStrategy)
+    , guardianName)
 
   def isInitialized: Boolean = _isInitialized.get
 

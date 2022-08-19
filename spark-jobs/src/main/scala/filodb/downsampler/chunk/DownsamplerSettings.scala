@@ -62,6 +62,8 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val downsampleChunkDuration = downsampleStoreConfig.flushInterval.toMillis
 
+  @transient lazy val shouldSleepForMetricsFlush = downsamplerConfig.as[Boolean]("should-sleep-for-metrics-flush")
+
   @transient lazy val allow = downsamplerConfig.as[Seq[Map[String, String]]]("allow-filters").map(_.toSeq)
 
   @transient lazy val block = downsamplerConfig.as[Seq[Map[String, String]]]("block-filters").map(_.toSeq)

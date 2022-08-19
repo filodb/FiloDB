@@ -186,7 +186,9 @@ import filodb.query.exec._
   }
 
   // scalastyle:off cyclomatic.complexity
-  override def walkLogicalPlanTree(logicalPlan: LogicalPlan, qContext: QueryContext): PlanResult = {
+  override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
+                                   qContext: QueryContext,
+                                   forceInProcess: Boolean = false): PlanResult = {
 
     if (!LogicalPlanUtils.hasBinaryJoin(logicalPlan)) {
       logicalPlan match {

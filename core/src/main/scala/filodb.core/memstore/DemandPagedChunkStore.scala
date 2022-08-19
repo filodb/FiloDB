@@ -11,6 +11,7 @@ import spire.syntax.cfor._
 
 import filodb.core.store._
 import filodb.memory.{BlockManager, BlockMemFactory}
+import filodb.memory.data.Shutdown
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.UnsafeUtils
 
@@ -47,6 +48,7 @@ extends RawToPartitionMaker with StrictLogging {
     tsShard.maxMetaSize, baseContext ++ Map("odp" -> "true"),
     markFullBlocksAsReclaimable = true)
 
+  // scalastyle:off method.length
   /**
    * Stores raw chunks into offheap memory and populates chunks into partition
    */
@@ -67,7 +69,6 @@ extends RawToPartitionMaker with StrictLogging {
         // to allocate a block just for storing an unnecessary metadata entry.
         if (!rawVectors.isEmpty) {
           val chunkID = ChunkSetInfo.getChunkID(infoBytes)
-
           if (!tsPart.chunkmapContains(chunkID)) {
             val chunkPtrs = new ArrayBuffer[BinaryVectorPtr](rawVectors.length)
             var metaAddr: Long = 0
@@ -75,10 +76,15 @@ extends RawToPartitionMaker with StrictLogging {
               memFactory.startMetaSpan()
               try {
                 copyToOffHeap(rawVectors, memFactory, chunkPtrs)
-              } finally {
-                metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
-                  tsPart.schema.data.blockMetaSize.toShort)
+              } catch {
+                case t: Throwable =>
+                  // Failure above may indicate data corruption. At the very least,
+                  //   something has gone remarkably wrong.
+                  logger.error(s"Unexpected error when doing on-demand paging; shutting down.", t)
+                  Shutdown.haltAndCatchFire(t)
               }
+              metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
+                tsPart.schema.data.blockMetaSize.toShort)
             }
             require(metaAddr != 0)
             val infoAddr = metaAddr + 4 // Important: don't point at partID
@@ -101,6 +107,7 @@ extends RawToPartitionMaker with StrictLogging {
         s"not found, this is bad")
     }
   }
+  // scalastyle:on method.length
 
   /**
     * Copies the onHeap contents read from ColStore into off-heap using the given memFactory.
