@@ -11,7 +11,7 @@ import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
 import filodb.core.query._
 import filodb.core.query.Filter.{Equals, EqualsRegex}
-import filodb.prometheus.ast.TimeStepParams
+import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
 import filodb.prometheus.parse.Parser.Antlr
 import filodb.query.{BadQueryException, IntervalSelector, LabelCardinality, PlanValidationSpec, RawSeries}
@@ -1196,32 +1196,45 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     validatePlan(execPlan1, expectedPlan1)
   }
 
-  it ("should pushdown aggregations/binary-joins when leaf plans are split across partitions") {
+  it ("should pushdown when leaf plans are split across partitions") {
     val startSec = 123
     val stepSec = 45
     val endSec = 6789
-    // All PromqlRemoteExecs should come in pairs (since there are two partitions), where the first
-    //   ends at 3306 (midpoint of 123 and 6789), and the second starts at 3633
-    //   (midpoint + lookback; snapped to periodic step).
-    val expectedQueryParams = Set(
-      ("remote0-url", TimeStepParams(startSec, stepSec, 3306)),
-      ("remote1-url", TimeStepParams(3633, stepSec, endSec))
-    )
-    val queries = Seq(
-      """sum(test{job="app"})""",
-      """sum(sum(test{job="app"}))""",
-      """test{job="app"} + test{job="app"}""",
-      """count(test{job="app"}) + ln(test{job="app"})""",
-      """123 + test{job="app"}""",
-      """sum(test{job="app"}) + 123""",
-      """sgn(test{job="app"}) + 123""",
+    val splitSec = (startSec + endSec) / 2
+    val expectedUrls = Seq("remote0-url", "remote1-url")
+
+    case class Test(query: String, lookbackSec: Long = WindowConstants.staleDataLookbackMillis / 1000, offsetSec: Long = 0) {
+      def getExpectedRangesSec(): Seq[(Long, Long)] = {
+        val snappedSecondStart = LogicalPlanUtils.snapToStep(timestamp = splitSec + offsetSec + lookbackSec,
+                                                             step = stepSec,
+                                                             origin = startSec)
+        Seq((startSec, splitSec + offsetSec),
+            (snappedSecondStart, endSec))
+      }
+    }
+
+    val tests = Seq(
+      Test("""sum(test{job="app"})"""),
+      Test("""sum(test{job="app"} offset 10m)""", offsetSec = 600),
+      Test("""sum(sum(test{job="app"}))"""),
+      Test("""sum(sum(test{job="app"} offset 10m))""", offsetSec = 600),
+      Test("""test{job="app"} + test{job="app"}"""),
+      Test("""test{job="app"} + (test{job="app"} + test{job="app"})"""),
+      Test("""count(test{job="app"}) + ln(test{job="app"})"""),
+      Test("""123 + test{job="app"}"""),
+      Test("""sum(test{job="app"}) + 123"""),
+      Test("""sgn(test{job="app"}) + 123"""),
+      Test("""sgn(test{job="app"} offset 10m) + 123""", offsetSec = 600),
+      Test("""sum(test{job="app"} offset 10m) + 123""", offsetSec = 600),
+      Test("""count_over_time(foo{job="app1"}[15m] offset 10m)""", lookbackSec = 900, offsetSec = 600),
+      Test("""rate((foo{job="app1"} + bar{job="app1"})[5m:30s])""", lookbackSec = 300 + WindowConstants.staleDataLookbackMillis / 1000),
     )
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String],
                                  timeRange: TimeRange): List[PartitionAssignment] = {
-        val midTime = (timeRange.startMs + timeRange.endMs) / 2
-        List(PartitionAssignment("remote0", "remote0-url", TimeRange(timeRange.startMs, midTime)),
-             PartitionAssignment("remote1", "remote1-url", TimeRange(midTime, timeRange.endMs)))
+        val splitMs = 1000 * splitSec
+        List(PartitionAssignment("remote0", "remote0-url", TimeRange(timeRange.startMs, splitMs)),
+             PartitionAssignment("remote1", "remote1-url", TimeRange(splitMs + 1, timeRange.endMs)))
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
@@ -1232,9 +1245,9 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       partitionLocationProvider, singlePartitionPlanner, "local",
       MetricsTestData.timeseriesDataset, queryConfig
     )
-    for (query <- queries) {
-      val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(startSec, stepSec, endSec))
-      val promQlQueryParams = PromQlQueryParams(query, startSec, stepSec, endSec)
+    for (test <- tests) {
+      val lp = Parser.queryRangeToLogicalPlan(test.query, TimeStepParams(startSec, stepSec, endSec))
+      val promQlQueryParams = PromQlQueryParams(test.query, startSec, stepSec, endSec)
       val execPlan = engine.materialize(lp,
         QueryContext(origQueryParams = promQlQueryParams,
           plannerParams = PlannerParams(processMultiPartition = true))
@@ -1247,11 +1260,17 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       // Make sure one PromQlRemoteExec for each partition.
       root.children.size shouldEqual 2
       // Extract the endpoint/TimeStepParams and make sure they are as-expected.
+      val expectedQueryParams = {
+        val timeStepParams = test.getExpectedRangesSec().map { case (startSecExp, endSecExp) =>
+          TimeStepParams(startSecExp, stepSec, endSecExp)
+        }
+        expectedUrls.zip(timeStepParams)
+      }.toSet
       root.children.map{ child =>
         val remote = child.asInstanceOf[PromQlRemoteExec]
         val params = remote.promQlQueryParams
         // Each plan should dispatch the same query.
-        params.promQl shouldEqual query
+        params.promQl shouldEqual test.query
         (remote.queryEndpoint, TimeStepParams(params.startSecs, params.stepSecs, params.endSecs))
       }.toSet shouldEqual expectedQueryParams
     }
@@ -1266,12 +1285,14 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       """foo{job="app1"} and bar{job="app1"} offset 1m""",
       """foo{job="app1"} and sum(bar{job="app1"} offset 1m)""",
       """foo{job="app1"} and sgn(bar{job="app1"} offset 1m)""",
+      """test{job="app"} + (test{job="app"} + test{job="app2"})""",
       """sgn(foo{job="app1"}) or sgn(bar{job="app2"})""",
       // """foo{job="app1"}[1m:30s] - bar{job="app1"}""",  // BUG: parses as TopLevelSubquery
       """rate(foo{job="app1"}[1m:30s]) - bar{job="app1"}""",
       """foo{job="app1"} * rate(count(bar{job="app1"})[1m:30s])""",
       """rate(foo{job="app1"}[30s]) unless bar{job="app1"}""",
       """count_over_time(foo{job="app1"}[5m]) unless bar{job="app1"}""",
+      """count_over_time((foo{job="app1"} + bar{job="app1"} offset 1m)[1h:30s])""",
       """sum(foo{job="app1"} + bar{job="app2"})""",
       """sgn(foo{job="app1"} + bar{job="app2"})""",
       """sgn(foo{job="app1"} offset 1h + bar{job="app1"})""",
