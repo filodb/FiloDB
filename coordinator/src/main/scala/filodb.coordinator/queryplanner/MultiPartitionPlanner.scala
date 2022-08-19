@@ -159,7 +159,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case lp: ApplyLimitFunction          => super.materializeLimitFunction(qContext, lp)
       case lp: TsCardinalities             => materializeTsCardinalities(lp, qContext)
       case lp: SubqueryWithWindowing       => materializePlanHandleSplitLeaf(lp, qContext)
-      case lp: TopLevelSubquery            => materializePlanHandleSplitLeaf(lp, qContext)
+      case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
       case lp: PeriodicSeriesWithWindowing => materializePlanHandleSplitLeaf(lp, qContext)
       case _: PeriodicSeries |
            _: RawChunkMeta |
@@ -393,10 +393,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
    */
   private def materializePlanHandleSplitLeaf(logicalPlan: LogicalPlan,
                                              qContext: QueryContext): PlanResult = {
-    def containsBinaryJoin(logicalPlan: LogicalPlan): Boolean = {
+    // Cannot pushdown split queries that meet this criteria.
+    def containsBinaryJoinWithNestedRangeOrOffset(logicalPlan: LogicalPlan): Boolean = {
       logicalPlan match {
-        case _: BinaryJoin => true
-        case nl: NonLeafLogicalPlan => nl.children.find(containsBinaryJoin(_)).nonEmpty
+        case _: BinaryJoin => getOffsetMillis(logicalPlan).max > 0 || hasRangeFunction(logicalPlan)
+        case nl: NonLeafLogicalPlan => nl.children.find(containsBinaryJoinWithNestedRangeOrOffset(_)).nonEmpty
         case _ => false
       }
     }
@@ -405,7 +406,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                                              .find(lp => getPartitions(lp, qParams).size > 1)
                                              .nonEmpty
     if (hasMultiPartitionLeaves) {
-      if (containsBinaryJoin(logicalPlan)) {
+      if (containsBinaryJoinWithNestedRangeOrOffset(logicalPlan)) {
         // Some join-containing plans with split leaves are rejected for the sake of performance/simplicity.
         validateSplitLeafPlanWithJoin(logicalPlan)
       }
@@ -414,7 +415,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     logicalPlan match {
       case agg: Aggregate => super.materializeAggregate(qContext, agg)
       case psw: PeriodicSeriesWithWindowing => materializePeriodicAndRawSeries(psw, qContext)
-      case tls: TopLevelSubquery => super.materializeTopLevelSubquery(qContext, tls)
       case sqw: SubqueryWithWindowing => super.materializeSubqueryWithWindowing(qContext, sqw)
       case bj: BinaryJoin => materializeMultiPartitionBinaryJoinNoSplitLeaf(bj, qContext)
       case sv: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, sv)
