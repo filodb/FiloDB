@@ -1257,11 +1257,11 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
   }
 
-  it ("should fail to materialize unsupported split-partition aggregates / binary joins / range functions / subqueries") {
+  it ("should fail to materialize unsupported split-partition binary joins") {
     val startSec = 123
     val stepSec = 456
     val endSec = 789
-    val rangeQueries = Seq(
+    val queries = Seq(
       """foo{job="app1"} + bar{job="app2"}""",
       """foo{job="app1"} and bar{job="app1"} offset 1m""",
       """foo{job="app1"} and sum(bar{job="app1"} offset 1m)""",
@@ -1272,14 +1272,6 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       """foo{job="app1"} * rate(count(bar{job="app1"})[1m:30s])""",
       """rate(foo{job="app1"}[30s]) unless bar{job="app1"}""",
       """count_over_time(foo{job="app1"}[5m]) unless bar{job="app1"}""",
-      """sum(rate(foo{job="app1"}[5m]))""",
-      """count_over_time(foo{job="app1"}[5m])""",
-      """sum(rate(foo{job="app1"}[5m:30s]))""",
-      """count_over_time(foo{job="app1"}[5m:30s])""",
-    )
-    val instQueries = Seq(
-      """rate(foo{job="app1"}[5m:30s])[2h:30s]""",
-      """sum_over_time(foo{job="app1"}[5m])[2h:30s]""",
     )
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String],
@@ -1297,10 +1289,9 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       partitionLocationProvider, singlePartitionPlanner, "local",
       MetricsTestData.timeseriesDataset, queryConfig
     )
-    val specs = rangeQueries.map((_, startSec, stepSec, endSec)) ++ instQueries.map((_, endSec, 1, endSec))
-    for ((query, start, step, end) <-  specs) {
-      val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(start, step, end))
-      val promQlQueryParams = PromQlQueryParams(query, start, step, end)
+    for (query <- queries) {
+      val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(startSec, stepSec, endSec))
+      val promQlQueryParams = PromQlQueryParams(query, startSec, stepSec, endSec)
       assertThrows[BadQueryException] {
         engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,
           plannerParams = PlannerParams(processMultiPartition = true)))
