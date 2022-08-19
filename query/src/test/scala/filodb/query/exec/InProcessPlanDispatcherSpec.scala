@@ -15,8 +15,8 @@ import filodb.core.TestData
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.{Column, Dataset, Schemas}
-import filodb.core.query.{ColumnFilter, Filter, QueryConfig, QueryContext, QuerySession}
-import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore}
+import filodb.core.query.{ColumnFilter, Filter, PlannerParams, QueryConfig, QueryContext, QuerySession}
+import filodb.core.store.{AllChunkScan, ChunkSource, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.MemFactory
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -94,6 +94,8 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
   val histData: Stream[Seq[Any]] = MMD.linearHistSeries().take(100)
   val histMaxData: Stream[Seq[Any]] = MMD.histMax(histData)
 
+  val source = UnsupportedChunkSource()
+
   it ("inprocess dispatcher should execute and return monix task which in turn should return QueryResult") {
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
@@ -108,7 +110,8 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
       0, filters, AllChunkScan,"_metric_")
 
     val sep = StitchRvsExec(QueryContext(), dispatcher, None, Seq(execPlan1, execPlan2))
-    val result = dispatcher.dispatch(sep).runToFuture.futureValue
+    val result = dispatcher.dispatch(ExecPlanWithClientParams(sep, ClientParams
+    (sep.queryContext.plannerParams.queryTimeoutMillis)), source).runToFuture.futureValue
 
     result match {
       case e: QueryError => throw e.t
@@ -136,7 +139,8 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
       0, emptyFilters, AllChunkScan, "_metric_")
 
     val sep = StitchRvsExec(QueryContext(), dispatcher, None, Seq(execPlan1, execPlan2))
-    val result = dispatcher.dispatch(sep).runToFuture.futureValue
+    val result = dispatcher.dispatch(ExecPlanWithClientParams(sep, ClientParams
+    (sep.queryContext.plannerParams.queryTimeoutMillis)), source).runToFuture.futureValue
 
     result match {
       case e: QueryError => throw e.t
@@ -148,7 +152,8 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
 
     // Switch the order and make sure it's OK if the first result doesn't have any data
     val sep2 = StitchRvsExec(QueryContext(), dispatcher, None, Seq(execPlan2, execPlan1))
-    val result2 = dispatcher.dispatch(sep2).runToFuture.futureValue
+    val result2 = dispatcher.dispatch(ExecPlanWithClientParams(sep2, ClientParams
+    (sep.queryContext.plannerParams.queryTimeoutMillis)), source).runToFuture.futureValue
 
     result2 match {
       case e: QueryError => throw e.t
@@ -160,7 +165,8 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
 
     // Two children none of which returns data
     val sep3 = StitchRvsExec(QueryContext(), dispatcher, None, Seq(execPlan2, execPlan2))
-    val result3 = dispatcher.dispatch(sep3).runToFuture.futureValue
+    val result3 = dispatcher.dispatch(ExecPlanWithClientParams(sep3, ClientParams
+    (sep.queryContext.plannerParams.queryTimeoutMillis)), source).runToFuture.futureValue
 
     result3 match {
       case e: QueryError => throw e.t
@@ -169,13 +175,42 @@ class InProcessPlanDispatcherSpec extends AnyFunSpec
         r.result.size shouldEqual 0
     }
   }
+
+  it ("should generate partial results when timeout occurs") {
+    val filters = Seq(ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    val emptyFilters = Seq(ColumnFilter("__name__", Filter.Equals("nonsense".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+
+    val dispatcher: PlanDispatcher = InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig)
+
+    val dummyDispatcher = DummyDispatcher(memStore, querySession)
+
+    val execPlan1 = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, timeseriesDataset.ref,
+      0, filters, AllChunkScan, "_metric_")
+    val execPlan2 = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, timeseriesDataset.ref,
+      0, emptyFilters, AllChunkScan, "_metric_")
+
+    val sep = StitchRvsExec(QueryContext(plannerParams = PlannerParams(allowPartialResults = true)), dispatcher, None,
+      Seq(execPlan1, execPlan2))
+    val result = dispatcher.dispatch(ExecPlanWithClientParams(sep, ClientParams
+    (2)), source).runToFuture.futureValue
+
+    result match {
+      case e: QueryError => throw e.t
+      case r: QueryResult =>
+        r.partialResultReason.isDefined shouldEqual true
+        r.partialResultReason.get shouldEqual "Result may be partial since query on some shards timed out"
+        r.result.size shouldEqual 0
+    }
+  }
 }
 
 case class DummyDispatcher(memStore: TimeSeriesMemStore, querySession: QuerySession) extends PlanDispatcher {
   // run locally withing any check.
-  override def dispatch(plan: ExecPlan)
+  override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
                        (implicit sched: Scheduler): Task[QueryResponse] = {
-    plan.execute(memStore, querySession)
+    plan.execPlan.execute(memStore, querySession)
   }
 
   override def clusterName: String = ???

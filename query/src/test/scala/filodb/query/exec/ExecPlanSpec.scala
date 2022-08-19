@@ -5,12 +5,11 @@ import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, TimeSeriesMemStor
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.DatasetRef
-import filodb.core.query.{ColumnInfo, CustomRangeVectorKey, QueryConfig, QueryContext, QuerySession,
-                          RangeParams, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange}
+import filodb.core.query.{ColumnInfo, CustomRangeVectorKey, PlannerParams, QueryConfig, QueryContext, QuerySession, RangeParams, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange, TransientHistRow}
 import filodb.core.store.{ChunkSource, InMemoryMetaStore, NullColumnStore}
-import filodb.memory.format.vectors.{HistogramBuckets, LongHistogram}
+import filodb.memory.format.vectors.{GeometricBuckets, HistogramBuckets, LongHistogram}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
-import filodb.query.{BinaryOperator, QueryResult}
+import filodb.query.{BinaryOperator, QueryError, QueryResult}
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -29,10 +28,11 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
 
-  def makeFixedLeafExecPlan(rvs: Seq[RangeVector], schema: ResultSchema): ExecPlan = {
+  def makeFixedLeafExecPlan(rvs: Seq[RangeVector], schema: ResultSchema,
+                            qContext: QueryContext = QueryContext()): ExecPlan = {
     new LeafExecPlan {
       override protected def args: String = ???
-      override def queryContext: QueryContext = QueryContext()
+      override def queryContext: QueryContext = qContext
       override def dataset: DatasetRef = ???
       override def dispatcher: PlanDispatcher = ???
       override def doExecute(source: ChunkSource,
@@ -61,7 +61,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
     }
     val schemaDouble = ResultSchema(
       Seq(ColumnInfo("c0", ColumnType.TimestampColumn),
-          ColumnInfo("c1", ColumnType.DoubleColumn)),
+        ColumnInfo("c1", ColumnType.DoubleColumn)),
       0 // numRowKeyColumns
     )
 
@@ -79,7 +79,7 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
     }
     val schemaHist = ResultSchema(
       Seq(ColumnInfo("c0", ColumnType.TimestampColumn),
-          ColumnInfo("c1", ColumnType.HistogramColumn)),
+        ColumnInfo("c1", ColumnType.HistogramColumn)),
       0 // numRowKeyColumns
     )
 
@@ -110,17 +110,108 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
     val schema = ResultSchema(
       Seq(ColumnInfo("c0", ColumnType.TimestampColumn),
-          ColumnInfo("c1", ColumnType.DoubleColumn)),
-      0 // numRowKeyColumns
+        ColumnInfo("c1", ColumnType.DoubleColumn)),
+      1 // numRowKeyColumns
     )
 
     val ep = makeFixedLeafExecPlan(Seq(rv), schema)
     ep.addRangeVectorTransformer(
       ScalarOperationMapper(BinaryOperator.EQL,
-                            scalarOnLhs = false,
-                            Seq(StaticFuncArgs(1.0, RangeParams(1000, 10, 2000)))))
+        scalarOnLhs = false,
+        Seq(StaticFuncArgs(1.0, RangeParams(1000, 10, 2000)))))
 
     ep.execute(memStore, querySession).runToFuture.futureValue
       .asInstanceOf[QueryResult].result.isEmpty shouldEqual true
+  }
+
+  it ("should correctly apply scalar operations to histogram") {
+    val scalar = 500.0
+    val buckets = GeometricBuckets(0.1, 10, 5)
+    val bucketValues = Seq(
+      Array(1L, 2L, 3L, 4L, 5L),
+      Array(1L, 3L, 4L, 5L, 6L),
+      Array(3L, 4L, 7L, 18L, 52L)
+    )
+
+    val rvHist = new RangeVector {
+      override def key: RangeVectorKey =
+        CustomRangeVectorKey(Map("foo".utf8 -> "bar".utf8))
+
+      override def rows(): RangeVectorCursor =
+        new NoCloseCursor(
+          bucketValues.zipWithIndex.map{ case (arr, i) =>
+            new TransientHistRow(i.toLong, LongHistogram(buckets, arr))
+          }.toIterator)
+
+      override def outputRange: Option[RvRange] = Some(RvRange(1000, 1, 1000))
+    }
+
+    val schemaHist = ResultSchema(
+      Seq(ColumnInfo("c0", ColumnType.TimestampColumn),
+        ColumnInfo("c1", ColumnType.HistogramColumn)),
+      1 // numRowKeyColumns
+    )
+
+    val plan = makeFixedLeafExecPlan(Seq(rvHist), schemaHist)
+    plan.addRangeVectorTransformer(
+      ScalarOperationMapper(
+        BinaryOperator.ADD,
+        scalarOnLhs = false,
+        Seq(StaticFuncArgs(scalar, RangeParams(1000, 1, 1000)))
+      )
+    )
+
+    val rows = plan.execute(memStore, querySession).runToFuture.futureValue.asInstanceOf[QueryResult].result.head.rows
+    // cannot assert size; will exhaust the iterator
+    for ((row, irow) <- rows.zipWithIndex) {
+      val hist = row.getHistogram(1)
+      val arr = bucketValues(irow)
+      (0 until hist.numBuckets).foreach{ ibucket =>
+        hist.bucketValue(ibucket) shouldEqual arr(ibucket) + scalar
+      }
+    }
+  }
+
+  it ("should fail if result size limit is exceeded") {
+    val rv = new RangeVector {
+      override def key: RangeVectorKey =
+        CustomRangeVectorKey(Map("foo".utf8 -> "bar".utf8))
+
+      override def rows(): RangeVectorCursor =
+        new NoCloseCursor(Seq(
+          SeqRowReader(Seq[Any](1L, 17834.4)),
+          SeqRowReader(Seq[Any](2L, 999.5)),
+          SeqRowReader(Seq[Any](3L, 8765.123))).iterator)
+
+      override def outputRange: Option[RvRange] = Some(RvRange(1000, 10, 2000))
+    }
+
+    val schema = ResultSchema(
+      Seq(ColumnInfo("c0", ColumnType.TimestampColumn),
+          ColumnInfo("c1", ColumnType.DoubleColumn)),
+      1 // numRowKeyColumns
+    )
+
+    val rawQueryConfig = config.getConfig("query")
+    val confEnforce = ConfigFactory.parseString("enforce-result-byte-limit = true").withFallback(rawQueryConfig)
+    val confAllow = ConfigFactory.parseString("enforce-result-byte-limit = false").withFallback(rawQueryConfig)
+
+    val qContextWithLowLimit = QueryContext(plannerParams = PlannerParams(resultByteLimit = 5))
+    val qContextWithHighLimit = QueryContext(plannerParams = PlannerParams(resultByteLimit = Long.MaxValue))
+
+    // All combos between [low, high] limit and [enforce, allow] protocol
+    val querySessionEnforceLow = QuerySession(qContextWithLowLimit, QueryConfig(confEnforce))
+    val querySessionAllowLow = QuerySession(qContextWithLowLimit, QueryConfig(confAllow))
+    val querySessionEnforceHigh = QuerySession(qContextWithHighLimit, QueryConfig(confEnforce))
+    val querySessionAllowHigh = QuerySession(qContextWithHighLimit, QueryConfig(confAllow))
+
+    val planLow = makeFixedLeafExecPlan(Seq(rv), schema, qContextWithLowLimit)
+    val planHigh = makeFixedLeafExecPlan(Seq(rv), schema, qContextWithHighLimit)
+
+    // Only the low limit should yield a QueryError when enforced.
+    planLow.execute(memStore, querySessionEnforceLow).runToFuture.futureValue.isInstanceOf[QueryError] shouldEqual true
+    planHigh.execute(memStore, querySessionEnforceHigh).runToFuture.futureValue.isInstanceOf[QueryResult] shouldEqual true
+    planLow.execute(memStore, querySessionAllowLow).runToFuture.futureValue.isInstanceOf[QueryResult] shouldEqual true
+    planHigh.execute(memStore, querySessionAllowHigh).runToFuture.futureValue.isInstanceOf[QueryResult] shouldEqual true
   }
 }

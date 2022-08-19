@@ -12,6 +12,7 @@ import org.scalatest.exceptions.TestFailedException
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
+import filodb.core.store.ChunkSource
 import filodb.memory.format.ZeroCopyUTF8String
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
@@ -36,7 +37,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
   val rand = new Random()
 
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)
+    override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
 
     override def clusterName: String = ???
@@ -201,10 +202,11 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
   it("should join many-to-one with by and grouping without arguments") {
 
     val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
-    val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Seq("instance", "job"))
+    val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil,
+                                   AggregateClause.byOpt(Seq("instance", "job")))
     val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), querySession, 1000, tvSchema)
 
-    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key, queryContext = QueryContext())
     val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
@@ -280,10 +282,11 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
   it("should join many-to-one when group left label does not exist") {
 
     val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
-    val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Seq("instance", "job"))
+    val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil,
+                                   AggregateClause.byOpt(Seq("instance", "job")))
     val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), querySession, 1000, tvSchema)
 
-    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key, queryContext = QueryContext())
     val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
@@ -327,7 +330,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
   }
 
   it("should have metric name when operator is not MathOperator") {
-    
+
     val sampleLhs: Array[RangeVector] = Array(
       new RangeVector {
         val key: RangeVectorKey = CustomRangeVectorKey(
@@ -460,10 +463,11 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
   it("should throw BadQueryException - many-to-one with by and grouping without arguments - cardinality limit 1") {
     val queryContext = QueryContext(plannerParams= PlannerParams(joinQueryCardLimit = 3)) // set join card limit to 3
     val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
-    val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Seq("instance", "job"))
+    val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil,
+                                   AggregateClause.byOpt(Seq("instance", "job")))
     val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), querySession, 1000, tvSchema)
 
-    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key, queryContext = QueryContext())
     val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,

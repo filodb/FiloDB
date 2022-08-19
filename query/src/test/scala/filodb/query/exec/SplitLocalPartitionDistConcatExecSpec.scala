@@ -15,7 +15,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
 import filodb.core.query._
-import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore}
+import filodb.core.store.{AllChunkScan, ChunkSource, InMemoryMetaStore, NullColumnStore}
 import filodb.core.{DatasetRef, TestData}
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, TimestampColumn}
@@ -25,7 +25,7 @@ import filodb.query.{QueryResponse, QueryResult}
 
 object SplitLocalPartitionDistConcatExecSpec {
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)
+    override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
 
     override def clusterName: String = ???

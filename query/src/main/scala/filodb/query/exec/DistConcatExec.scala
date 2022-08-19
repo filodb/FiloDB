@@ -29,7 +29,28 @@ trait DistConcatExec extends NonLeafExecPlan {
   */
 final case class LocalPartitionDistConcatExec(queryContext: QueryContext,
                                               dispatcher: PlanDispatcher,
-                                              children: Seq[ExecPlan]) extends DistConcatExec
+                                              children: Seq[ExecPlan]) extends DistConcatExec {
+  override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema = {
+    // Given a pushdown-optimized BinaryJoinExec:
+    //
+    // LocalPartitionDistConcatExec
+    // |________
+    // |       |
+    // BJ      BJ
+    // |____   |____
+    // |   |   |   |
+    // L   R   L   R
+    //
+    // It's possible each BJ's reduceSchemas returns a slightly-different ResultSchema
+    //   (i.e. the left BJ reduceSchemas might process its left child first,
+    //   and the right BJ might process its right first. As of this writing, the result is
+    //   order-dependent, and the order is non-deterministic). The default reduceSchemas
+    //   implementation is too strict (essentially requires equality), and it does not work
+    //   for this use-case.
+    IgnoreFixedVectorLenAndColumnNamesSchemaReducer.reduceSchema(rs, resp)
+  }
+}
+
 
 /**
   * Wrapper/Nonleaf execplan to split long range PeriodicPlan to multiple smaller execs.

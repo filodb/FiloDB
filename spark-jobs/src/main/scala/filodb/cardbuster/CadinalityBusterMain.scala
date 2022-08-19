@@ -27,6 +27,8 @@ object BusterContext extends StrictLogging {
 /**
  * Requires following typesafe config properties:
  *
+ * filodb.cardbuster.cass-delete-parallelism-per-spark-thread = 1
+ *
  * filodb.cardbuster.delete-pk-filters = [
  *  {
  *     _ns_ = "bulk_ns"
@@ -47,14 +49,17 @@ class CardinalityBuster(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSI
       .config(conf)
       .getOrCreate()
 
-    val inDownsampleTables = spark.sparkContext.getConf.getBoolean("spark.filodb.cardbuster.inDownsampleTables",
+    val inDownsampleTables = conf.getBoolean("spark.filodb.cardbuster.inDownsampleTables",
                                                         true)
-    BusterContext.log.info(s"This is the Cardinality Buster. Starting job. inDownsampleTables=$inDownsampleTables ")
+    val isSimulation = conf.getBoolean("spark.filodb.cardbuster.isSimulation", true)
+    BusterContext.log.info(s"This is the Cardinality Buster. Starting job." +
+      s" isSimulation=$isSimulation " +
+      s" inDownsampleTables=$inDownsampleTables ")
 
     val numShards = dsIndexJobSettings.numShards
     val busterForShard = new PerShardCardinalityBuster(dsSettings, inDownsampleTables)
 
-    spark.sparkContext
+    val numPksDeleted = spark.sparkContext
       .makeRDD(0 until numShards)
       .mapPartitions { shards =>
         Kamon.init() // kamon init should be first thing in worker jvm
@@ -63,11 +68,12 @@ class CardinalityBuster(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSI
               sp <- splits.flatMap(_.asInstanceOf[CassandraTokenRangeSplit].tokens).iterator } yield {
           (sh, sp)
         }
-      }.foreach { case (shard, sp) =>
+      }.map { case (shard, sp) =>
         Kamon.init() // kamon init should be first thing in worker jvm
-        busterForShard.bustIndexRecords(shard, sp)
-      }
-    BusterContext.log.info(s"CardinalityBuster completed successfully")
+        busterForShard.bustIndexRecords(shard, sp, isSimulation)
+      }.sum()
+    BusterContext.log.info(s"CardinalityBuster completed successfully with " +
+      s"isSimulation=$isSimulation numPksDeleted=$numPksDeleted")
     spark
   }
 

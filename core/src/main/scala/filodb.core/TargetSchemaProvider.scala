@@ -6,8 +6,10 @@ trait TargetSchemaProvider {
   def targetSchemaFunc(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange]
 }
 
-final case class StaticTargetSchemaProvider(targetSchema: Seq[String] = Seq.empty) extends TargetSchemaProvider {
-  def targetSchemaFunc(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = Seq(TargetSchemaChange(0, targetSchema))
+final case class StaticTargetSchemaProvider(targetSchemaOpt: Option[Seq[String]] = None) extends TargetSchemaProvider {
+  def targetSchemaFunc(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+    targetSchemaOpt.map(tschema => Seq(TargetSchemaChange(0, tschema))).getOrElse(Nil)
+  }
 }
 
 final case class TargetSchemaChange(time: Long = 0L, schema: Seq[String])

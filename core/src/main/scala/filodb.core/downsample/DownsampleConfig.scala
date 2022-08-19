@@ -7,6 +7,10 @@ import net.ceedubs.ficus.Ficus._
 
 import filodb.core.DatasetRef
 
+object IndexMetastoreImplementation extends Enumeration {
+  val NoImp, File, Ephemeral = Value
+}
+
 final case class DownsampleConfig(config: Config) {
   /**
     * Resolutions to downsample at
@@ -28,6 +32,21 @@ final case class DownsampleConfig(config: Config) {
     */
   val schemas = if (config.hasPath ("raw-schema-names")) config.as[Seq[String]]("raw-schema-names")
                 else Seq.empty
+  val indexLocation = config.getOrElse[Option[String]]("index-location", None)
+
+  val enablePersistentIndexing = indexLocation.isDefined
+
+  val indexMetastoreImplementation = if (config.hasPath("index-metastore-implementation")) {
+    val impl = config.as[String]("index-metastore-implementation")
+    val lowercaseImpl = impl.toLowerCase
+    lowercaseImpl match {
+      case "file" => IndexMetastoreImplementation.File
+      case "ephemeral" => IndexMetastoreImplementation.Ephemeral
+      case _ => IndexMetastoreImplementation.NoImp
+    }
+  } else {
+    IndexMetastoreImplementation.NoImp
+  }
 
   def downsampleDatasetRefs(rawDataset: String): Seq[DatasetRef] = {
     resolutions.map { res =>
