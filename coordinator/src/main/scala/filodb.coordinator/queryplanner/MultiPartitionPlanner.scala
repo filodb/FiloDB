@@ -417,14 +417,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   private def validateSplitLeafPlan(splitLeafPlan: LogicalPlan): Unit = {
     val baseErrorMessage = "This query contains selectors that individually read data from multiple partitions. " +
                            "This is likely because a selector's data was migrated between partitions. "
-    def containsBinaryJoin(logicalPlan: LogicalPlan): Boolean = {
-      logicalPlan match {
-        case _: BinaryJoin => true
-        case nl: NonLeafLogicalPlan => nl.children.exists(containsBinaryJoin)
-        case _ => false
-      }
-    }
-    if (containsBinaryJoin(splitLeafPlan) && getOffsetMillis(splitLeafPlan).exists(_ > 0)) {
+    if (hasBinaryJoin(splitLeafPlan) && getOffsetMillis(splitLeafPlan).exists(_ > 0)) {
       throw new BadQueryException( baseErrorMessage +
           "These \"split\" queries cannot contain binary joins with offsets."
       )
