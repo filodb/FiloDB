@@ -1213,21 +1213,39 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       }
     }
 
+    val staleLookbackSec = WindowConstants.staleDataLookbackMillis / 1000
     val tests = Seq(
+      // aggregators
       Test("""sum(test{job="app"})"""),
-      Test("""sum(test{job="app"} offset 10m)""", offsetSec = 600),
-      Test("""sum(sum(test{job="app"}))"""),
-      Test("""sum(sum(test{job="app"} offset 10m))""", offsetSec = 600),
+      Test("""count(sum(test{job="app"}))"""),
+      Test("""group(test{job="app"} offset 10m)""", offsetSec = 600),
+      Test("""sum(sgn(test{job="app"} offset 20m))""", offsetSec = 1200),
+      Test("""count_over_time(foo{job="app1"}[15m] offset 10m)""", lookbackSec = 900, offsetSec = 600),
+      Test("""rate(foo{job="app1"}[15m] offset 10m)""", lookbackSec = 900, offsetSec = 600),
+//      Test("""rate(foo{job="app1"}[15m:30s] offset 10m)""", lookbackSec = 900 + staleLookbackSec, offsetSec = 600),
+      // binary joins
       Test("""test{job="app"} + test{job="app"}"""),
       Test("""test{job="app"} + (test{job="app"} + test{job="app"})"""),
       Test("""count(test{job="app"}) + ln(test{job="app"})"""),
+      Test("""rate(foo{job="app1"}[15m]) unless bar{job="app1"}""", lookbackSec = 900),
+      Test("""count_over_time(foo{job="app1"}[30m]) unless bar{job="app1"}""", lookbackSec = 1800),
+      Test("""sgn(rate(foo{job="app1"}[10m]) + bar{job="app1"})""", lookbackSec = 600),
+      Test("""rate((foo{job="app1"} + bar{job="app1"})[20m:30s])""", lookbackSec = 1200 + staleLookbackSec),
+      Test("""rate(foo{job="app1"}[5m]) + (rate(bar{job="app1"}[20m]) + rate(baz{job="app1"}[5m]))""", lookbackSec = 1200),
+//      Test("""rate(foo{job="app1"}[5m:30s]) + (rate(bar{job="app1"}[20m:30s]) + rate(baz{job="app1"}[5m:30s]))""", lookbackSec = 1200 + staleLookbackSec),
+      // scalar vector joins
       Test("""123 + test{job="app"}"""),
       Test("""sum(test{job="app"}) + 123"""),
       Test("""sgn(test{job="app"}) + 123"""),
       Test("""sgn(test{job="app"} offset 10m) + 123""", offsetSec = 600),
       Test("""sum(test{job="app"} offset 10m) + 123""", offsetSec = 600),
-      Test("""count_over_time(foo{job="app1"}[15m] offset 10m)""", lookbackSec = 900, offsetSec = 600),
-      Test("""rate((foo{job="app1"} + bar{job="app1"})[5m:30s])""", lookbackSec = 300 + WindowConstants.staleDataLookbackMillis / 1000),
+      Test("""rate(foo{job="app1"}[20m]) + 123""", lookbackSec = 1200),
+      Test("""sum(rate(foo{job="app1"}[10m]) + rate(foo{job="app1"}[20m])) + 123""", lookbackSec = 1200),
+//      Test("""rate(foo{job="app1"}[15m] offset 10m) + 123""", lookbackSec = 900, offsetSec = 600),
+//      Test("""rate(sgn(foo{job="app1"})[20m:30s] offset 15m) + 123""", lookbackSec = 1200, offsetSec = 900),
+//      Test("""rate(foo{job="app1"}[10m:30s]) - bar{job="app1"}""", lookbackSec = 600),
+//      Test("""foo{job="app1"} * rate(count(bar{job="app1"})[10m:30s])""", lookbackSec = 600 + WindowConstants.staleDataLookbackMillis / 1000),
+
     )
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String],
@@ -1281,22 +1299,23 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val stepSec = 456
     val endSec = 789
     val queries = Seq(
+      // aggregate
+      """sum(foo{job="app1"} + bar{job="app2"})""",
+      """sum(foo{job="app1"} offset 1m + bar{job="app1"})""",
+      // binary join
       """foo{job="app1"} + bar{job="app2"}""",
       """foo{job="app1"} and bar{job="app1"} offset 1m""",
       """foo{job="app1"} and sum(bar{job="app1"} offset 1m)""",
       """foo{job="app1"} and sgn(bar{job="app1"} offset 1m)""",
       """test{job="app"} + (test{job="app"} + test{job="app2"})""",
-      """sgn(foo{job="app1"}) or sgn(bar{job="app2"})""",
-      // """foo{job="app1"}[1m:30s] - bar{job="app1"}""",  // BUG: parses as TopLevelSubquery
-      """rate(foo{job="app1"}[1m:30s]) - bar{job="app1"}""",
-      """foo{job="app1"} * rate(count(bar{job="app1"})[1m:30s])""",
-      """rate(foo{job="app1"}[30s]) unless bar{job="app1"}""",
-      """count_over_time(foo{job="app1"}[5m]) unless bar{job="app1"}""",
-      """count_over_time((foo{job="app1"} + bar{job="app1"} offset 1m)[1h:30s])""",
-      """sum(foo{job="app1"} + bar{job="app2"})""",
+      """test{job="app"} + (test{job="app"} + test{job="app"} offset 1s)""",
       """sgn(foo{job="app1"} + bar{job="app2"})""",
-      """sgn(foo{job="app1"} offset 1h + bar{job="app1"})""",
-      """sgn(rate(foo{job="app1"}[5m]) + bar{job="app1"})""",
+      """sgn(foo{job="app1"} or bar{job="app1"} offset 1h)""",
+//      """foo{job="app1"}[1m:30s] - bar{job="app1"}""",  // BUG: parses as TopLevelSubquery
+      """rate((foo{job="app1"} + bar{job="app1"} offset 1m)[1h:30s])""",
+      // scalar vector join
+      """123 + (foo{job="app1"} - bar{job="app2"})""",
+      """(foo{job="app1"} unless bar{job="app1"} offset 1d) + 123"""
     )
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String],
