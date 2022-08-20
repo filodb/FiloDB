@@ -143,7 +143,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case _: MetadataQueryPlan            => throw new IllegalArgumentException(
                                                           "MetadataQueryPlan unexpected here")
       case lp: ApplyInstantFunction        => materializePlanHandleSplitLeaf(lp, qContext)
-      case lp: ApplyInstantFunctionRaw     => materializePlanHandleSplitLeaf(lp, qContext)
+      case lp: ApplyInstantFunctionRaw     => super.materializeApplyInstantFunctionRaw(qContext, lp)
       case lp: Aggregate                   => materializePlanHandleSplitLeaf(lp, qContext)
       case lp: ScalarVectorBinaryOperation => materializePlanHandleSplitLeaf(lp, qContext)
       case lp: ApplyMiscellaneousFunction  => super.materializeApplyMiscellaneousFunction(qContext, lp)
@@ -405,7 +405,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case bj: BinaryJoin => materializeMultiPartitionBinaryJoinNoSplitLeaf(bj, qContext)
       case sv: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, sv)
       case aif: ApplyInstantFunction => super.materializeApplyInstantFunction(qContext, aif)
-      case aifr: ApplyInstantFunctionRaw => super.materializeApplyInstantFunctionRaw(qContext, aifr)
       case svdp: ScalarVaryingDoublePlan => super.materializeScalarPlan(qContext, svdp)
       case aaf: ApplyAbsentFunction => super.materializeAbsentFunction(qContext, aaf)
       case x => throw new IllegalArgumentException(s"unhandled type: ${x.getClass}")
