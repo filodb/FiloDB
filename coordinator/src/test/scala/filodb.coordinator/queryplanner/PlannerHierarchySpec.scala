@@ -1207,10 +1207,10 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     case class Test(query: String, lookbackSec: Long = staleLookbackSec, offsetSec: Long = 0, expected: String = "") {
       def getExpectedRangesSec(): Seq[(Long, Long)] = {
         val snappedSecondStart = LogicalPlanUtils.snapToStep(timestamp = splitSec + offsetSec + lookbackSec,
-          step = stepSec,
-          origin = startSec)
+                                                             step = stepSec,
+                                                             origin = startSec)
         Seq((startSec, splitSec + offsetSec),
-          (snappedSecondStart, endSec))
+            (snappedSecondStart, endSec))
       }
     }
 
@@ -1367,14 +1367,13 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
         expected = """E~MultiPartitionDistConcatExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
                       |-E~PromQlRemoteExec(PromQlQueryParams(scalar(sum_over_time(test{job="app"}[5m]) + rate(test{job="app"}[20m])),0,3,5000,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
                       |-E~PromQlRemoteExec(PromQlQueryParams(scalar(sum_over_time(test{job="app"}[5m]) + rate(test{job="app"}[20m])),6201,3,9999,None,false), PlannerParams(filodb,None,None,None,None,30000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote1-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin),
-      // TODO(a_theimer): limit
     )
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String],
                                  timeRange: TimeRange): List[PartitionAssignment] = {
         val splitMs = 1000 * splitSec
         List(PartitionAssignment("remote0", "remote0-url", TimeRange(timeRange.startMs, splitMs)),
-          PartitionAssignment("remote1", "remote1-url", TimeRange(splitMs + 1, timeRange.endMs)))
+             PartitionAssignment("remote1", "remote1-url", TimeRange(splitMs + 1, timeRange.endMs)))
       }
 
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
@@ -1453,7 +1452,6 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       """absent(foo{job="app"} + (bar{job="app"} + baz{job="app2"}))""",
       """absent(foo{job="app"} offset 1h + bar{job="app"})""",
       """absent(foo{job="app"} + (bar{job="app"} + baz{job="app"} offset 1h))""",
-      // TODO(a_theimer): limit
     )
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String],

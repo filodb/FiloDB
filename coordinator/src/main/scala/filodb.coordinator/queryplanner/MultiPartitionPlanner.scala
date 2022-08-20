@@ -156,7 +156,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                                                           "ScalarFixedDoublePlan unexpected here")
       case lp: ApplyAbsentFunction         => materializePlanHandleSplitLeaf(lp, qContext)
       case lp: ScalarBinaryOperation       => super.materializeScalarBinaryOperation(qContext, lp)
-      case lp: ApplyLimitFunction          => materializePlanHandleSplitLeaf(lp, qContext)
+      case lp: ApplyLimitFunction          => super.materializeLimitFunction(qContext, lp)
       case lp: TsCardinalities             => materializeTsCardinalities(lp, qContext)
       case lp: SubqueryWithWindowing       => materializePlanHandleSplitLeaf(lp, qContext)
       case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
@@ -408,7 +408,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case aifr: ApplyInstantFunctionRaw => super.materializeApplyInstantFunctionRaw(qContext, aifr)
       case svdp: ScalarVaryingDoublePlan => super.materializeScalarPlan(qContext, svdp)
       case aaf: ApplyAbsentFunction => super.materializeAbsentFunction(qContext, aaf)
-      case alf: ApplyLimitFunction => super.materializeLimitFunction(qContext, alf)
       case x => throw new IllegalArgumentException(s"unhandled type: ${x.getClass}")
     }}
   }
