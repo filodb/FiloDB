@@ -1222,7 +1222,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       Test("""sum(sgn(test{job="app"} offset 20m))""", offsetSec = 1200),
       Test("""count_over_time(foo{job="app1"}[15m] offset 10m)""", lookbackSec = 900, offsetSec = 600),
       Test("""rate(foo{job="app1"}[15m] offset 10m)""", lookbackSec = 900, offsetSec = 600),
-//      Test("""rate(foo{job="app1"}[15m:30s] offset 10m)""", lookbackSec = 900 + staleLookbackSec, offsetSec = 600),
+      Test("""rate(foo{job="app1"}[15m:30s] offset 10m)""", lookbackSec = 900 + staleLookbackSec, offsetSec = 600),
       // binary joins
       Test("""test{job="app"} + test{job="app"}"""),
       Test("""test{job="app"} + (test{job="app"} + test{job="app"})"""),
@@ -1232,7 +1232,9 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       Test("""sgn(rate(foo{job="app1"}[10m]) + bar{job="app1"})""", lookbackSec = 600),
       Test("""rate((foo{job="app1"} + bar{job="app1"})[20m:30s])""", lookbackSec = 1200 + staleLookbackSec),
       Test("""rate(foo{job="app1"}[5m]) + (rate(bar{job="app1"}[20m]) + rate(baz{job="app1"}[5m]))""", lookbackSec = 1200),
-//      Test("""rate(foo{job="app1"}[5m:30s]) + (rate(bar{job="app1"}[20m:30s]) + rate(baz{job="app1"}[5m:30s]))""", lookbackSec = 1200 + staleLookbackSec),
+      Test("""rate(foo{job="app1"}[5m:30s]) + (rate(bar{job="app1"}[20m:30s]) + rate(baz{job="app1"}[5m:30s]))""", lookbackSec = 1200 + staleLookbackSec),
+      Test("""rate(foo{job="app1"}[10m:30s]) - bar{job="app1"}""", lookbackSec = 600 + staleLookbackSec),
+      Test("""foo{job="app1"} * rate(count(bar{job="app1"})[10m:30s])""", lookbackSec = 600 + staleLookbackSec),
       // scalar vector joins
       Test("""123 + test{job="app"}"""),
       Test("""sum(test{job="app"}) + 123"""),
@@ -1241,11 +1243,8 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       Test("""sum(test{job="app"} offset 10m) + 123""", offsetSec = 600),
       Test("""rate(foo{job="app1"}[20m]) + 123""", lookbackSec = 1200),
       Test("""sum(rate(foo{job="app1"}[10m]) + rate(foo{job="app1"}[20m])) + 123""", lookbackSec = 1200),
-//      Test("""rate(foo{job="app1"}[15m] offset 10m) + 123""", lookbackSec = 900, offsetSec = 600),
-//      Test("""rate(sgn(foo{job="app1"})[20m:30s] offset 15m) + 123""", lookbackSec = 1200, offsetSec = 900),
-//      Test("""rate(foo{job="app1"}[10m:30s]) - bar{job="app1"}""", lookbackSec = 600),
-//      Test("""foo{job="app1"} * rate(count(bar{job="app1"})[10m:30s])""", lookbackSec = 600 + WindowConstants.staleDataLookbackMillis / 1000),
-
+      Test("""rate(foo{job="app1"}[15m] offset 10m) + 123""", lookbackSec = 900, offsetSec = 600),
+      Test("""rate(sgn(foo{job="app1"})[20m:30s] offset 15m) + 123""", lookbackSec = 1200 + staleLookbackSec, offsetSec = 900),
     )
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String],
