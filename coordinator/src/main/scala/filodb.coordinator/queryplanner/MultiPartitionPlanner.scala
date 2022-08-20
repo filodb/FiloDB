@@ -142,21 +142,21 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case lp: BinaryJoin                  => materializePlanHandleSplitLeaf(lp, qContext)
       case _: MetadataQueryPlan            => throw new IllegalArgumentException(
                                                           "MetadataQueryPlan unexpected here")
-      case lp: ApplyInstantFunction        => super.materializeApplyInstantFunction(qContext, lp)
-      case lp: ApplyInstantFunctionRaw     => super.materializeApplyInstantFunctionRaw(qContext, lp)
+      case lp: ApplyInstantFunction        => materializePlanHandleSplitLeaf(lp, qContext)
+      case lp: ApplyInstantFunctionRaw     => materializePlanHandleSplitLeaf(lp, qContext)
       case lp: Aggregate                   => materializePlanHandleSplitLeaf(lp, qContext)
       case lp: ScalarVectorBinaryOperation => materializePlanHandleSplitLeaf(lp, qContext)
       case lp: ApplyMiscellaneousFunction  => super.materializeApplyMiscellaneousFunction(qContext, lp)
       case lp: ApplySortFunction           => super.materializeApplySortFunction(qContext, lp)
-      case lp: ScalarVaryingDoublePlan     => super.materializeScalarPlan(qContext, lp)
+      case lp: ScalarVaryingDoublePlan     => materializePlanHandleSplitLeaf(lp, qContext)
       case _: ScalarTimeBasedPlan          => throw new IllegalArgumentException(
                                                           "ScalarTimeBasedPlan unexpected here")
       case lp: VectorPlan                  => super.materializeVectorPlan(qContext, lp)
       case _: ScalarFixedDoublePlan        => throw new IllegalArgumentException(
                                                           "ScalarFixedDoublePlan unexpected here")
-      case lp: ApplyAbsentFunction         => super.materializeAbsentFunction(qContext, lp)
+      case lp: ApplyAbsentFunction         => materializePlanHandleSplitLeaf(lp, qContext)
       case lp: ScalarBinaryOperation       => super.materializeScalarBinaryOperation(qContext, lp)
-      case lp: ApplyLimitFunction          => super.materializeLimitFunction(qContext, lp)
+      case lp: ApplyLimitFunction          => materializePlanHandleSplitLeaf(lp, qContext)
       case lp: TsCardinalities             => materializeTsCardinalities(lp, qContext)
       case lp: SubqueryWithWindowing       => materializePlanHandleSplitLeaf(lp, qContext)
       case lp: TopLevelSubquery            => super.materializeTopLevelSubquery(qContext, lp)
@@ -404,6 +404,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       case sqw: SubqueryWithWindowing => super.materializeSubqueryWithWindowing(qContext, sqw)
       case bj: BinaryJoin => materializeMultiPartitionBinaryJoinNoSplitLeaf(bj, qContext)
       case sv: ScalarVectorBinaryOperation => super.materializeScalarVectorBinOp(qContext, sv)
+      case aif: ApplyInstantFunction => super.materializeApplyInstantFunction(qContext, aif)
+      case aifr: ApplyInstantFunctionRaw => super.materializeApplyInstantFunctionRaw(qContext, aifr)
+      case svdp: ScalarVaryingDoublePlan => super.materializeScalarPlan(qContext, svdp)
+      case aaf: ApplyAbsentFunction => super.materializeAbsentFunction(qContext, aaf)
+      case alf: ApplyLimitFunction => super.materializeLimitFunction(qContext, alf)
       case x => throw new IllegalArgumentException(s"unhandled type: ${x.getClass}")
     }}
   }
