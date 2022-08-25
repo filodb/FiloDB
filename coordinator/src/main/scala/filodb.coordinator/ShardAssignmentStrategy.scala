@@ -46,7 +46,7 @@ class K8sStatefulSetShardAssignmentStrategy extends ShardAssignmentStrategy with
 
   private val pat = "-\\d+$".r
 
-  private[coordinator] def getOrdinalFromActorRef(coord: ActorRef): Option[(String, Int)] = {
+  private[coordinator] def getOrdinalFromActorRef(coord: ActorRef): Option[(String, Int)] =
     // if hostname is None from coordinator actor path, then its a local actor
     // If the host name does not contain an ordinal at the end (e.g filodb-host-0, filodb-host-10), it will match None
     coord.path.address.host
@@ -54,7 +54,8 @@ class K8sStatefulSetShardAssignmentStrategy extends ShardAssignmentStrategy with
       .orElse(Some(InetAddress.getLocalHost.getHostName))
       .map(name => if (name.contains(".")) name.substring(0, name.indexOf('.')) else name)
       .flatMap(hostName => pat.findFirstIn(hostName).map(ordinal => (hostName, -Integer.parseInt(ordinal))))
-  }
+
+
 
   override def shardAssignments(coord: ActorRef,
                                 dataset: DatasetRef,
@@ -83,10 +84,17 @@ class K8sStatefulSetShardAssignmentStrategy extends ShardAssignmentStrategy with
               numShardsPerHost + (if (ordinal < numExtraShardsToAssign) 1 else 0))
           } else
             (ordinal * numShardsPerHost, numShardsPerHost)
-          val shardsMapped = (firstShardThisNode until firstShardThisNode + numShardsThisHost).toList
-          logger.info("Using hostname resolution for shard mapping, mapping host={} to shards={}",
-            hostName, shardsMapped)
-          shardsMapped
+
+          val unassignedShardSet = mapper.unassignedShards.toSet
+          val potentialShardsMappedToThisCoordinator =
+            (firstShardThisNode until firstShardThisNode + numShardsThisHost).toList.
+              filter(unassignedShardSet.contains(_))
+
+          if(potentialShardsMappedToThisCoordinator.nonEmpty) {
+            logger.info("Using hostname resolution for shard mapping, mapping host={} to shards={}",
+              hostName, potentialShardsMappedToThisCoordinator)
+          }
+          potentialShardsMappedToThisCoordinator
         case None                      =>
           // Host name does not have the ordinal at the end like a stateful set needs to have, delegate to default
           //strategy
