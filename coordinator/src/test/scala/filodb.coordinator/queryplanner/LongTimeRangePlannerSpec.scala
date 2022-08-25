@@ -1401,7 +1401,6 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
       earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
 
     val ep1 = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
-    println(ep1.printTree())
 
     // TODO: Though not bad, the plan can be optimized since one operator of this Binary operator is scalar,
     //  entire join should have been pushed down despite offset being present

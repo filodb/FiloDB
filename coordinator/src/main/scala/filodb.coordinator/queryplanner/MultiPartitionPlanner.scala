@@ -351,7 +351,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
    *   pairs that describe the time-ranges to be queried for each assignment such that:
    *     (a) the returned ranges span the argument time-range, and
    *     (b) lookbacks do not cross partition splits (where the "lookback" is defined only by the argument)
-   * @param assignments must be time-disjoint
+   * @param assignments must be sorted and time-disjoint
    * @param range the complete time-range. Does not include the offset.
    * @param lookbackMs the time to skip immediately after a partition split.
    * @param stepMsOpt occupied iff the returned ranges should describe periodic steps
@@ -448,6 +448,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val qParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     // get a mapping of assignments to time-ranges to query
     val assignmentRanges = {
+      // "distinct" in case this is a BinaryJoin
       val partitions = getPartitions(logicalPlan, qParams).distinct.sortBy(_.timeRange.startMs)
       val timeRange = TimeRange(1000 * qParams.startSecs, 1000 * qParams.endSecs)
       val lookbackMs = getLookBackMillis(logicalPlan).max
