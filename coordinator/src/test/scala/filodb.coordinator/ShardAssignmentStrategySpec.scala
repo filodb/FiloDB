@@ -69,25 +69,44 @@ class ShardAssignmentStrategySpec extends AkkaSpec {
         val resources = DatasetResourceSpec(numShards, numCoords)
         val mapper = new ShardMapper(numShards)
 
+        // After assigned to coordinator, the shardAssignment should return empty list and remainingCapacity should
+        // be 0
         val assignment1 = testK8sStrategy.shardAssignments(coord1.ref, dataset, resources, mapper)
         assignment1 shouldEqual Seq(0, 1)
+        testK8sStrategy.remainingCapacity(coord1.ref, dataset, resources, mapper) shouldEqual 2
         mapper.registerNode(assignment1, coord1.ref)
+        val assignment1a = testK8sStrategy.shardAssignments(coord1.ref, dataset, resources, mapper)
+        assignment1a shouldEqual Seq.empty
+        testK8sStrategy.remainingCapacity(coord1.ref, dataset, resources, mapper) shouldEqual 0
+
 
         val assignment2 = testK8sStrategy.shardAssignments(coord2.ref, dataset, resources, mapper)
         assignment2 shouldEqual Seq(2, 3)
         mapper.registerNode(assignment2, coord2.ref)
+        val assignment2a = testK8sStrategy.shardAssignments(coord2.ref, dataset, resources, mapper)
+        assignment2a shouldEqual Seq.empty
+        testK8sStrategy.remainingCapacity(coord2.ref, dataset, resources, mapper) shouldEqual 0
 
         val assignment3 = testK8sStrategy.shardAssignments(coord3.ref, dataset, resources, mapper)
         assignment3 shouldEqual Seq(4, 5)
         mapper.registerNode(assignment3, coord3.ref)
+        val assignment3a = testK8sStrategy.shardAssignments(coord3.ref, dataset, resources, mapper)
+        assignment3a shouldEqual Seq.empty
+        testK8sStrategy.remainingCapacity(coord3.ref, dataset, resources, mapper) shouldEqual 0
 
         val assignment4 = testK8sStrategy.shardAssignments(coord4.ref, dataset, resources, mapper)
         assignment4 shouldEqual Seq(6)
         mapper.registerNode(assignment4, coord4.ref)
+        val assignment4a = testK8sStrategy.shardAssignments(coord4.ref, dataset, resources, mapper)
+        assignment4a shouldEqual Seq.empty
+        testK8sStrategy.remainingCapacity(coord4.ref, dataset, resources, mapper) shouldEqual 0
 
         val assignment5 = testK8sStrategy.shardAssignments(coord5.ref, dataset, resources, mapper)
         assignment5 shouldEqual Seq(7)
         mapper.registerNode(assignment5, coord5.ref)
+        val assignment5a = testK8sStrategy.shardAssignments(coord5.ref, dataset, resources, mapper)
+        assignment5a shouldEqual Seq.empty
+        testK8sStrategy.remainingCapacity(coord5.ref, dataset, resources, mapper) shouldEqual 0
 
       }
 
