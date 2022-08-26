@@ -468,7 +468,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val resPlan = if (plans.size == 1) {
       plans.head
     } else {
-      MultiPartitionDistConcatExec(qContext, inProcessPlanDispatcher, plans)
+      StitchRvsExec(qContext, inProcessPlanDispatcher, outputRvRange = None, plans)
     }
     PlanResult(Seq(resPlan))
   }
