@@ -464,7 +464,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       val newContext = qContext.copy(origQueryParams = newParams)
       materializeForPartition(logicalPlan, part, newContext)
     }
-    // concat if necessary
+    // stitch if necessary
     val resPlan = if (plans.size == 1) {
       plans.head
     } else {
