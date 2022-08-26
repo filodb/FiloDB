@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
-import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RvRange}
 import filodb.query._
 import filodb.query.LogicalPlan._
 import filodb.query.exec._
@@ -468,7 +468,11 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val resPlan = if (plans.size == 1) {
       plans.head
     } else {
-      StitchRvsExec(qContext, inProcessPlanDispatcher, outputRvRange = None, plans)
+      // returns NaNs for missing timestamps
+      val rvRange = RvRange(1000 * qParams.startSecs,
+                            1000 * qParams.stepSecs,
+                            1000 * qParams.endSecs)
+      StitchRvsExec(qContext, inProcessPlanDispatcher, Some(rvRange), plans)
     }
     PlanResult(Seq(resPlan))
   }
