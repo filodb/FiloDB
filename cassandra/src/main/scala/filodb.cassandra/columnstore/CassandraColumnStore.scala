@@ -299,15 +299,23 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                                              target: CassandraColumnStore,
                                              diskTimeToLiveSeconds: Int): Unit =
   {
-    logger.debug(s"dataset=$datasetRef, ingestionTimeStart=$ingestionTimeStart, ingestionTimeEnd=$ingestionTimeEnd" +
-      s"batchSize=$batchSize, splitsSize=${splits.size}, diskTimeToLiveSeconds=$diskTimeToLiveSeconds, " +
+    logger.info(s"dataset=${datasetRef} , " +
+      s"ingestionTimeStart=${ingestionTimeStart} , " +
+      s"ingestionTimeEnd=${ingestionTimeEnd} , " +
+      s"batchSize=${batchSize} , " +
+      s"splitsSize=${splits.size} , " +
+      s"diskTimeToLiveSeconds=$diskTimeToLiveSeconds , " +
       s"target=${target.config}")
 
     val sourceIndexTable = getOrCreateIngestionTimeIndexTable(datasetRef)
     val sourceChunksTable = getOrCreateChunkTable(datasetRef)
 
+    logger.info(s"sourceIndexTable=${sourceIndexTable} , sourceChunksTable=${sourceChunksTable}")
+
     val targetIndexTable = target.getOrCreateIngestionTimeIndexTable(datasetRef)
     val targetChunksTable = target.getOrCreateChunkTable(datasetRef)
+
+    logger.info(s"targetIndexTable=${targetIndexTable} , targetChunksTable=${targetChunksTable}")
 
     val chunkInfos = new ArrayBuffer[ByteBuffer]()
     val futures = new ArrayBuffer[Future[Response]]()
@@ -317,7 +325,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
         futures += targetChunksTable.deleteChunks(partition, chunkInfos)
       } else {
         for (row <- sourceChunksTable.readChunksNoAsync(partition, chunkInfos).iterator.asScala) {
-          logger.debug(s"finishBatch, writing with chunkInfosSize=${chunkInfos.size}")
+          logger.info(s"Copying chunk rows to target")
           futures += targetChunksTable.writeChunks(partition, row, sinkStats, diskTimeToLiveSeconds)
         }
       }
@@ -341,15 +349,18 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
     for (split <- splits) {
       val tokens = split.asInstanceOf[CassandraTokenRangeSplit].tokens
+      logger.info(s"Processing split, token=${tokens}")
       val rows = sourceIndexTable.scanRowsByIngestionTimeNoAsync(tokens, ingestionTimeStart, ingestionTimeEnd)
-      logger.debug(s"Processing split, token=${tokens}, rows=${rows.size}")
+      logger.info(s"Processing rows, rows=${rows.size}")
       for (row <- rows) {
         val partition = row.getBytes(0) // partition
 
         if (!partition.equals(lastPartition)) {
           if (lastPartition != null) {
+            logger.info(s"Writing chunks for current partition with chunkInfos size ${chunkInfos.size}!")
             finishBatch(lastPartition);
           }
+          logger.info(s"Found a new partition")
           lastPartition = partition;
         }
 
@@ -358,10 +369,12 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
         if (diskTimeToLiveSeconds == 0) {
           futures += targetIndexTable.deleteIndex(row);
         } else {
+          logger.info(s"Writing row to target index table.")
           futures += targetIndexTable.writeIndex(row, sinkStats, diskTimeToLiveSeconds);
         }
 
         if (chunkInfos.size >= batchSize) {
+          logger.info(s"Writing chunks on size param for current partition with chunkInfos size ${chunkInfos.size}!")
           finishBatch(partition)
         }
       }

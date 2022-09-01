@@ -24,7 +24,7 @@ import filodb.downsampler.chunk.DownsamplerSettings
   * Contains all the objects necessary for performing worker tasks. Is constructed from SparkConf
   * and is cached.
   */
-class ChunkCopier(conf: SparkConf) {
+class ChunkCopier(conf: SparkConf) extends StrictLogging {
 
   // Get filo config from spark conf or file.
   private def getFiloConfig(valueConf: String, filePathConf: String) = {
@@ -114,14 +114,20 @@ class ChunkCopier(conf: SparkConf) {
   private[repair] def getTargetScanSplits = targetCassandraColStore.getScanSplits(datasetRef, numSplitsForScans)
 
   def copySourceToTarget(splitIter: Iterator[ScanSplit]): Unit = {
-    sourceCassandraColStore.copyOrDeleteChunksByIngestionTimeRange(
-      datasetRef,
-      splitIter,
-      copyStartTime.toEpochMilli(),
-      copyEndTime.toEpochMilli(),
-      batchSize,
-      targetCassandraColStore,
-      diskTimeToLiveSeconds)
+    try {
+      sourceCassandraColStore.copyOrDeleteChunksByIngestionTimeRange(
+        datasetRef,
+        splitIter,
+        copyStartTime.toEpochMilli(),
+        copyEndTime.toEpochMilli(),
+        batchSize,
+        targetCassandraColStore,
+        diskTimeToLiveSeconds)
+    } catch {
+      case e: Throwable =>
+        logger.error(s"Failed with exception, ", e)
+        throw e
+    }
   }
 
   def deleteFromTarget(splitIter: Iterator[ScanSplit]): Unit = {
