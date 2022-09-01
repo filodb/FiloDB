@@ -299,13 +299,12 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                                              target: CassandraColumnStore,
                                              diskTimeToLiveSeconds: Int): Unit =
   {
-    logger.info(s"dataset=${datasetRef} , " +
-      s"ingestionTimeStart=${ingestionTimeStart} , " +
-      s"ingestionTimeEnd=${ingestionTimeEnd} , " +
-      s"batchSize=${batchSize} , " +
-      s"splitsSize=${splits.size} , " +
-      s"diskTimeToLiveSeconds=$diskTimeToLiveSeconds , " +
-      s"target=${target.config}")
+    logger.info(s"dataset=${datasetRef} " +
+      s"ingestionTimeStart=${ingestionTimeStart} " +
+      s"ingestionTimeEnd=${ingestionTimeEnd} " +
+      s"batchSize=${batchSize} " +
+      s"splitsSize=${splits} " +
+      s"diskTimeToLiveSeconds=${diskTimeToLiveSeconds} ")
 
     val sourceIndexTable = getOrCreateIngestionTimeIndexTable(datasetRef)
     val sourceChunksTable = getOrCreateChunkTable(datasetRef)
@@ -347,17 +346,19 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
     var lastPartition: ByteBuffer = null
 
+    logger.info(s"before splits")
     for (split <- splits) {
+      logger.info(s"Processing split")
       val tokens = split.asInstanceOf[CassandraTokenRangeSplit].tokens
-      logger.info(s"Processing split, token=${tokens}")
+      logger.info(s"Processing token")
       val rows = sourceIndexTable.scanRowsByIngestionTimeNoAsync(tokens, ingestionTimeStart, ingestionTimeEnd)
-      logger.info(s"Processing rows, rows=${rows.size}")
+      logger.info(s"Processing rows")
       for (row <- rows) {
         val partition = row.getBytes(0) // partition
 
         if (!partition.equals(lastPartition)) {
           if (lastPartition != null) {
-            logger.info(s"Writing chunks for current partition with chunkInfos size ${chunkInfos.size}!")
+            logger.info(s"Writing chunks for current partition with chunkInfos size ${chunkInfos}!")
             finishBatch(lastPartition);
           }
           logger.info(s"Found a new partition")
@@ -374,7 +375,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
         }
 
         if (chunkInfos.size >= batchSize) {
-          logger.info(s"Writing chunks on size param for current partition with chunkInfos size ${chunkInfos.size}!")
+          logger.info(s"Writing chunks on size param for current partition with chunkInfos size ${chunkInfos}!")
           finishBatch(partition)
         }
       }
