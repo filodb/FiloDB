@@ -92,6 +92,10 @@ trait ExecPlan extends QueryCommand {
     * The returned task can be used to perform post-execution steps
     * such as sending off an asynchronous response message etc.
     *
+    * Typically the caller creates the QuerySession parameter object. Remember
+    * that the creator is also responsible for closing it with
+    * `returnTask.guarantee(Task.eval(querySession.close()))`
+    *
     */
   // scalastyle:off method.length
   def execute(source: ChunkSource,
