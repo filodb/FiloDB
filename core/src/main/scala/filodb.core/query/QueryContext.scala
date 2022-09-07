@@ -156,6 +156,10 @@ object QueryContext {
   *
   * IMPORTANT: The param catchMultipleLockSetErrors should be false
   * only in unit test code for ease of use.
+  *
+  * IMPORTANT: QuerySession object should be closed after use as such
+  * `monixTask.guarantee(Task.eval(querySession.close()))`
+  *
   */
 case class QuerySession(qContext: QueryContext,
                         queryConfig: QueryConfig,

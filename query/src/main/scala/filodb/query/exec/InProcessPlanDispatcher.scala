@@ -37,7 +37,10 @@ import filodb.query.Query.qLogger
     Kamon.runWithSpan(Kamon.currentSpan(), false) {
       // translate implicit ExecutionContext to monix.Scheduler
       val querySession = QuerySession(plan.execPlan.queryContext, queryConfig, catchMultipleLockSetErrors = true)
-      plan.execPlan.execute(source, querySession).timeout(plan.clientParams.deadline.milliseconds).onErrorRecover {
+      plan.execPlan.execute(source, querySession)
+        .timeout(plan.clientParams.deadline.milliseconds)
+        .guarantee(Task.eval(querySession.close()))
+        .onErrorRecover {
         case e: TimeoutException if (plan.execPlan.queryContext.plannerParams.allowPartialResults)
         =>
           qLogger.warn(s"Swallowed TimeoutException for query id: ${plan.execPlan.queryContext.queryId} " +
