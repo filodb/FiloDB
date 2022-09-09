@@ -38,9 +38,35 @@ class InputRecordBuilderSpec extends AnyFunSpec with Matchers {
     }
   }
 
+  it("should writeDeltaHistRecord to BR and be able to deserialize it") {
+    val buckets = Array(0.5, 1, 2.5, 5, 10, Double.PositiveInfinity)
+    val expected = LongHistogram(CustomBuckets(buckets), counts)
+
+    val bucketKVs = buckets.zip(counts).map {
+      case (Double.PositiveInfinity, c) => "+Inf" -> c.toDouble
+      case (b, c) => b.toString -> c.toDouble
+    }.toSeq
+    // 1 - sum/count at end
+    InputRecord.writeDeltaHistRecord(builder, metric, baseTags, 100000L, bucketKVs ++ sumCountKVs)
+    builder.allContainers.head.iterate(Schemas.deltaHistogram.ingestionSchema).foreach { row =>
+      row.getDouble(1) shouldEqual sum
+      row.getDouble(2) shouldEqual count
+      row.getHistogram(3) shouldEqual expected
+    }
+  }
+
   it("should skip empty histograms via writePromHistRecord, and write subsequent records") {
     builder.reset()
     InputRecord.writePromHistRecord(builder, metric, baseTags, 100000L, sumCountKVs)
+    InputRecord.writeGaugeRecord(builder, metric, baseTags, 100000L, 5.5)
+
+    // The empty histogram should have been skipped, so we should have only one record
+    builder.allContainers.head.countRecords shouldEqual 1
+  }
+
+  it("should skip empty histograms via writeDeltaHistRecord, and write subsequent records") {
+    builder.reset()
+    InputRecord.writeDeltaHistRecord(builder, metric, baseTags, 100000L, sumCountKVs)
     InputRecord.writeGaugeRecord(builder, metric, baseTags, 100000L, 5.5)
 
     // The empty histogram should have been skipped, so we should have only one record
