@@ -28,6 +28,7 @@ import org.rogach.scallop._
 import filodb.coordinator.{FilodbSettings, ShardMapper, StoreFactory}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
+import filodb.core.metadata.Schemas.{deltaHistogram, promHistogram}
 import filodb.gateway.conversion._
 import filodb.memory.MemFactory
 import filodb.timeseries.TestTimeseriesProducer
@@ -76,7 +77,8 @@ object GatewayServer extends StrictLogging {
                                     descr = "# of samples per time series")
     val numSeries = opt[Int](short = 'p', default = Some(20), descr = "# of total time series")
     val sourceConfigPath = trailArg[String](descr = "Path to source config, eg conf/timeseries-dev-source.conf")
-    val genHistData = toggle(noshort = true, descrYes = "Generate histogram-schema test data and exit")
+    val genHistData = toggle(noshort = true, descrYes = "Generate prom-histogram-schema test data and exit")
+    val genDeltaHistData = toggle(noshort = true, descrYes = "Generate delta-histogram-schema test data and exit")
     val genPromData = toggle(noshort = true, descrYes = "Generate Prometheus-schema test data and exit")
     verify()
   }
@@ -124,12 +126,15 @@ object GatewayServer extends StrictLogging {
 
     val genHist = userOpts.genHistData.getOrElse(false)
     val genProm = userOpts.genPromData.getOrElse(false)
-    if (genHist || genProm) {
+    val genDeltaHist = userOpts.genDeltaHistData.getOrElse(false)
+    var promQL = """heap_usage{_ns_="App-0",_ws_="demo"}"""
+    if (genHist || genProm || genDeltaHist) {
       val startTime = System.currentTimeMillis
       logger.info(s"Generating $numSamples samples starting at $startTime....")
 
-      val stream = if (genHist) TestTimeseriesProducer.genHistogramData(startTime, numSeries)
-                   else         TestTimeseriesProducer.timeSeriesData(startTime, numSeries)
+      val stream = if (genHist) TestTimeseriesProducer.genHistogramData(startTime, numSeries, promHistogram)
+                   else if (genDeltaHist) TestTimeseriesProducer.genHistogramData(startTime, numSeries, deltaHistogram)
+                   else TestTimeseriesProducer.timeSeriesData(startTime, numSeries)
 
       stream.take(numSamples).foreach { rec =>
         val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
@@ -140,7 +145,12 @@ object GatewayServer extends StrictLogging {
         }
       }
       Thread sleep 10000
-      TestTimeseriesProducer.logQueryHelp(numSamples, numSeries, startTime)
+      if (genHist) {
+        promQL = """http_request_latency{_ns_="App-0",_ws_="demo"}[5m]"""
+      } else if (genDeltaHist) {
+        promQL = """http_request_latency_delta{_ns_="App-0",_ws_="demo"}[5m]"""
+      }
+      TestTimeseriesProducer.logQueryHelp(numSamples, numSeries, startTime, genHist || genDeltaHist, Some(promQL))
       logger.info(s"Waited for containers to be sent, exiting...")
       sys.exit(0)
     } else {

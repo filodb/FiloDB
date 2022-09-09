@@ -72,6 +72,14 @@ object InputRecord {
                              count: Double): Unit =
     writeKVRecord(builder, metric, tags, timestamp, count, promCounter)
 
+
+  def writeDeltaCounterRecord(builder: RecordBuilder,
+                             metric: String,
+                             tags: Map[String, String],
+                             timestamp: Long,
+                             count: Double): Unit =
+    writeKVRecord(builder, metric, tags, timestamp, count, deltaCounter)
+
   def writeUntypedRecord(builder: RecordBuilder,
                          metric: String,
                          tags: Map[String, String],
@@ -113,6 +121,50 @@ object InputRecord {
 
       // Now, write out histogram
       builder.startNewRecord(promHistogram)
+      builder.addLong(timestamp)
+      builder.addDouble(sum)
+      builder.addDouble(count)
+      builder.addBlob(hist.serialize())
+
+      builder.addString(metric)
+      builder.addMap(tags.map { case (k, v) => (k.utf8, v.utf8) })
+      builder.endRecord()
+    }
+  }
+
+  /**
+   * Writes a delta non-increasing histogram record, along with the sum and count,
+   * using the delta-histogram schema, storing the entire histogram together for efficiency.
+   * The list of key-values should have "sum", "count", and bucket tops as keys, in any order.
+   * This code will sort and encode histograms correctly from those.
+   */
+  def writeDeltaHistRecord(builder: RecordBuilder,
+                          metric: String,
+                          tags: Map[String, String],
+                          timestamp: Long,
+                          kvs: Seq[(String, Double)]): Unit = {
+    var sum = Double.NaN
+    var count = Double.NaN
+
+    // Filter out sum and count, then convert and sort buckets
+    val sortedBuckets = kvs.filter {
+      case ("sum", v) => sum = v
+        false
+      case ("count", v) => count = v
+        false
+      case other => true
+    }.map {
+      case ("+Inf", v) => (Double.PositiveInfinity, v.toLong)
+      case (k, v) => (k.toDouble, v.toLong)
+    }.sorted
+
+    if (sortedBuckets.nonEmpty) {
+      // Built up custom histogram objects and scheme, then encode
+      val buckets = CustomBuckets(sortedBuckets.map(_._1).toArray)
+      val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
+
+      // Now, write out histogram
+      builder.startNewRecord(deltaHistogram)
       builder.addLong(timestamp)
       builder.addDouble(sum)
       builder.addDouble(count)
