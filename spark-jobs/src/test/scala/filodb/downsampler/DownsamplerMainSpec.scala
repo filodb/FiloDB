@@ -463,11 +463,11 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       Await.result(partKeys.map(pkMetricName).toListL.runToFuture, 1 minutes)
     }
 
-    // partkey start/endtimes are merged such that starttime and endtime are resolved to oldest latest respectively.
+    // partkey start/endtimes are merged are overridden by the latest partkey record read from raw cluster.
     val startTime = 74372801000L
     val readKeys = readPartKeys.map(_._1).toSet
     val counterPartkey = readPartKeys.filter(_._1 == counterName).head._2
-    counterPartkey.startTime shouldEqual startTime - 3600000
+    counterPartkey.startTime shouldEqual startTime
     counterPartkey.endTime shouldEqual currTime + 3600000
 
     // readKeys should not contain untyped part key - we dont downsample untyped

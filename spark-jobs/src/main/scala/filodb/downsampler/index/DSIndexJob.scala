@@ -93,6 +93,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
 
   def migrateWithDownsamplePartKeys(partKeys: Observable[PartKeyRecord], shard: Int): Int = {
     @volatile var count = 0
+    val rawDataSource = rawCassandraColStore
     val pkRecords = partKeys.filter { pk =>
       val rawSchemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
       val schema = schemas(rawSchemaId)
@@ -107,7 +108,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
       val eligible = hasDownsampleSchema && !blocked
       if (eligible) count += 1
       eligible
-    }.map(pkr => dsDatasource.readMergePartkeyStartEndTime(ref = dsDatasetRef, shard = shard.toInt,
+    }.map(pkr => rawDataSource.getPartKeyRecordOrDefault(ref = rawDatasetRef, shard = shard.toInt,
         partKeyRecord = pkr)) // Merge with persisted (if exists) partKey.
       .map(toDownsamplePkrWithHash)
     val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
