@@ -430,13 +430,13 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     }
   }
 
-  // merges with persisted partkey start/endtime, by picking earliest starttime and latest endtime.
-  def readMergePartkeyStartEndTime(ref: DatasetRef,
-                                   shard: Int,
-                                   partKeyRecord: PartKeyRecord): PartKeyRecord = {
+  // returns the persisted partKey record, or default partKey record (argument) if there is no persisted value.
+  def getPartKeyRecordOrDefault(ref: DatasetRef,
+                                shard: Int,
+                                partKeyRecord: PartKeyRecord): PartKeyRecord = {
     getOrCreatePartitionKeysTable(ref, shard).readPartKey(partKeyRecord.partKey) match {
-      case Some(targetPkr) => compareAndGet(partKeyRecord, targetPkr)
-      case None => partKeyRecord
+      case Some(targetPkr) => targetPkr
+      case None => partKeyRecord // this case is never executed since raw cluster is the source of truth.
     }
   }
 
