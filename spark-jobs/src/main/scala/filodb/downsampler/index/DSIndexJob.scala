@@ -108,7 +108,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
       val eligible = hasDownsampleSchema && !blocked
       if (eligible) count += 1
       eligible
-    }.map(pkr => rawDataSource.readMergePartkeyStartEndTime(ref = rawDatasetRef, shard = shard.toInt,
+    }.map(pkr => rawDataSource.getPartKeyRecordOrDefault(ref = rawDatasetRef, shard = shard.toInt,
         partKeyRecord = pkr)) // Merge with persisted (if exists) partKey.
       .map(toDownsamplePkrWithHash)
     val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
