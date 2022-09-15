@@ -61,12 +61,7 @@ final case class MultiPartitionReduceAggregateExec(queryContext: QueryContext,
                                                    dispatcher: PlanDispatcher,
                                                    childAggregates: Seq[ExecPlan],
                                                    aggrOp: AggregationOperator,
-                                                   aggrParams: Seq[Any]) extends ReduceAggregateExec {
-  // overriden since it can reduce schemas with different vector lengths as long as the columns are same
-  override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema =
-    IgnoreFixedVectorLenAndColumnNamesSchemaReducer.reduceSchema(rs, resp)
-}
-
+                                                   aggrParams: Seq[Any]) extends ReduceAggregateExec
 
 
 

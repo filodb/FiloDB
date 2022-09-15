@@ -1782,19 +1782,19 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     }
     // If this join were pushed down, one of the shard-local joins might process the `count` QueryResult first...
     val qres1 = {
-      var reduced = binaryJoin.reduceSchemas(ResultSchema.empty, countQres)
-      reduced = binaryJoin.reduceSchemas(reduced, sumQres)
+      var reduced = binaryJoin.reduceSchemas(ResultSchema.empty, countQres.resultSchema)
+      reduced = binaryJoin.reduceSchemas(reduced, sumQres.resultSchema)
       QueryResult("foobar", reduced, Nil)
     }
     // ...and the other might process the `sum` QueryResult first.
     val qres2 = {
-      var reduced = binaryJoin.reduceSchemas(ResultSchema.empty, sumQres)
-      reduced = binaryJoin.reduceSchemas(reduced, countQres)
+      var reduced = binaryJoin.reduceSchemas(ResultSchema.empty, sumQres.resultSchema)
+      reduced = binaryJoin.reduceSchemas(reduced, countQres.resultSchema)
       QueryResult("foobar", reduced, Nil)
     }
 
     // When these schemas are reduced, a SchemaMismatch should not be thrown.
-    var reduced = concat.reduceSchemas(ResultSchema.empty, qres1)
-    reduced = concat.reduceSchemas(reduced, qres2)
+    var reduced = concat.reduceSchemas(ResultSchema.empty, qres1.resultSchema)
+    reduced = concat.reduceSchemas(reduced, qres2.resultSchema)
   }
 }

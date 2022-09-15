@@ -121,9 +121,6 @@ final case class StitchRvsExec(queryContext: QueryContext,
     Observable.fromTask(stitched).flatten
   }
 
-  // overriden since stitch can reduce schemas with different vector lengths as long as the columns are same
-  override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema =
-    IgnoreFixedVectorLenAndColumnNamesSchemaReducer.reduceSchema(rs, resp)
 }
 
 /**
