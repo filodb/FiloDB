@@ -1,16 +1,13 @@
 package filodb.downsampler.chunk
 
 import filodb.core.binaryrecord2.RecordSchema
-import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition}
+import filodb.core.memstore.PagedReadablePartition
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.store.{AllChunkScan, ChunkSetInfoReader, RawPartData, ReadablePartition}
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.windowprocessors.{DownsampleWindowProcessor, ExportWindowProcessor}
 import filodb.memory.format.UnsafeUtils
 import kamon.Kamon
-
-
-import scala.collection.mutable.ArrayBuffer
 
 // TODO(a_theimer): docs / move
 case class ChunkRows(chunkSetInfoReader: ChunkSetInfoReader, istartRow: Int, iendRow: Int)
@@ -19,24 +16,23 @@ case class ChunkRows(chunkSetInfoReader: ChunkSetInfoReader, istartRow: Int, ien
 trait SingleWindowProcessor {
   def process(rawPartData: RawPartData,
               userEndTime: Long,
-              partitionAutoPager: PartitionAutoPager,
-              timeSeriesPartitionsToFree: ArrayBuffer[TimeSeriesPartition]): Unit
+              partitionAutoPager: PartitionAutoPager): Unit
 }
 
 // TODO(a_theimer): docs / move
 class PartitionAutoPager(rawPartData: RawPartData,
                          userTimeStart: Long,
                          userTimeEndExclusive: Long,
-                         rawPartSchema: Schema,
-                         pagedReadablePartitionsToFree: ArrayBuffer[PagedReadablePartition]) {
-  private var pagedReadablePartition: Option[PagedReadablePartition] = None
-  private lazy val chunkRows = getChunkRows(getReadablePartition)
+                         rawPartSchema: Schema) {
+  private lazy val pagedReadablePartition =
+    new PagedReadablePartition(rawPartSchema, shard = 0, partID = 0, rawPartData, minResolutionMs = 1)
+  private lazy val chunkRows = makeChunkRows(pagedReadablePartition)
 
   // TODO(a_theimer): needs larger scope
   @transient lazy val numRawChunksSkipped = Kamon.counter("num-raw-chunks-skipped").withoutTags()
 
   // TODO(a_theimer): docs
-  private def getChunkRows(rawPart: ReadablePartition): Seq[ChunkRows] = {
+  private def makeChunkRows(rawPart: ReadablePartition): Seq[ChunkRows] = {
     val timestampCol = 0
     val rawChunksets = rawPart.infos(AllChunkScan)
 
@@ -70,14 +66,12 @@ class PartitionAutoPager(rawPartData: RawPartData,
   }.toSeq
 
   def getReadablePartition(): ReadablePartition = {
-    if (pagedReadablePartition.isEmpty) {
-      pagedReadablePartition = Some(new PagedReadablePartition(
-        rawPartSchema, shard = 0, partID = 0, rawPartData, minResolutionMs = 1))
-      pagedReadablePartitionsToFree.append(pagedReadablePartition.get)
-    }
-    pagedReadablePartition.get
+    pagedReadablePartition
   }
-  def getChunkRows(): Seq[ChunkRows] = chunkRows
+
+  def getChunkRows(): Seq[ChunkRows] = {
+    chunkRows
+  }
 }
 
 // TODO(a_theimer): doc
@@ -100,15 +94,13 @@ case class BatchedWindowProcessor(schemas: Schemas, downsamplerSettings: Downsam
       s"userTimeEndExclusive=${java.time.Instant.ofEpochMilli(userTimeEndExclusive)}")
     numBatchesStarted.increment()
     val startedAt = System.currentTimeMillis()
-    val timeSeriesPartitionsToFree = new ArrayBuffer[TimeSeriesPartition]
-    val pagedReadablePartitionsToFree = new ArrayBuffer[PagedReadablePartition]
     try {
       rawPartsBatch.foreach { rawPartData =>
         val rawSchemaId = RecordSchema.schemaID(rawPartData.partitionKey, UnsafeUtils.arayOffset)
         val schema = schemas(rawSchemaId)
-        val partitionAutoPager = new PartitionAutoPager(rawPartData, userTimeStart, userTimeEndExclusive, schema, pagedReadablePartitionsToFree)
+        val partitionAutoPager = new PartitionAutoPager(rawPartData, userTimeStart, userTimeEndExclusive, schema)
         singleWindowProcessors.foreach { processor =>
-          processor.process(rawPartData, userTimeEndExclusive, partitionAutoPager, timeSeriesPartitionsToFree)
+          processor.process(rawPartData, userTimeEndExclusive, partitionAutoPager)
         }
       }
     } catch {

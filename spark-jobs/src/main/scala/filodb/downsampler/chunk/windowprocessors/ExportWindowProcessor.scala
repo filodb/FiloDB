@@ -1,15 +1,11 @@
 package filodb.downsampler.chunk.windowprocessors
 
 import filodb.core.binaryrecord2.RecordSchema
-import filodb.core.memstore.TimeSeriesPartition
 import filodb.core.metadata.Column.ColumnType.DoubleColumn
 import filodb.core.metadata.Schemas
 import filodb.core.store.{ChunkSetInfoReader, RawPartData, ReadablePartition}
 import filodb.downsampler.chunk.{DownsamplerSettings, PartitionAutoPager, SingleWindowProcessor}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
-
-
-import scala.collection.mutable.ArrayBuffer
 
 // scalastyle:off
 case class ExportWindowProcessor(schemas: Schemas,
@@ -93,8 +89,7 @@ case class ExportWindowProcessor(schemas: Schemas,
 
   override def process(rawPartData: RawPartData,
                        userEndTime: Long,
-                       partitionAutoPager: PartitionAutoPager,
-                       timeSeriesPartitionsToFree: ArrayBuffer[TimeSeriesPartition]): Unit = {
+                       partitionAutoPager: PartitionAutoPager): Unit = {
     // TODO(a_theimer)
     val rawSchemaId = RecordSchema.schemaID(rawPartData.partitionKey, UnsafeUtils.arayOffset)
     val schema = schemas(rawSchemaId)

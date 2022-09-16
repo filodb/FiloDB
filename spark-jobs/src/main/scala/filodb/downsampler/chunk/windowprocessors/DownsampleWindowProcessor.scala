@@ -102,8 +102,7 @@ class DownsampleWindowProcessor(settings: DownsamplerSettings)
   // TODO(a_theimer): rename / merge with downsamplePart
   def downsampleBatchOld(rawPartData: RawPartData,
                          userEndTimeExclusive: Long,
-                         necessaryPageThing: PartitionAutoPager,
-                         timeSeriesPartitionsToFree: ArrayBuffer[TimeSeriesPartition]): Unit = {
+                         necessaryPageThing: PartitionAutoPager): Unit = {
     val downsampledChunksToPersist = MMap[FiniteDuration, Iterator[ChunkSet]]()
     settings.downsampleResolutions.foreach { res =>
       downsampledChunksToPersist(res) = Iterator.empty
@@ -201,7 +200,6 @@ class DownsampleWindowProcessor(settings: DownsamplerSettings)
         downsampleChunks(offHeapMem, partitionAutoPager, downsamplers, periodMarker,
           downsampledParts, userTimeEndExclusive, dsRecordBuilder, shouldTrace)
 
-
         downsampledPartsToFree ++= downsampledParts.values
 
         downsampledParts.foreach { case (res, dsPartition) =>
@@ -240,6 +238,7 @@ class DownsampleWindowProcessor(settings: DownsamplerSettings)
     downsampleResToPart.foreach { case (resolution, part) =>
       val resMillis = resolution.toMillis
 
+      // TODO(a_theimer): since getChunkRows acquires a lock, should have top precedence
       partitionAutoPager.getChunkRows().foreach { cr =>
         val chunkSet = cr.chunkSetInfoReader
         val startRow = cr.istartRow
@@ -350,8 +349,7 @@ class DownsampleWindowProcessor(settings: DownsamplerSettings)
 
   override def process(rawPartData: RawPartData,
                        userEndTime: Long,
-                       partitionAutoPager: PartitionAutoPager,
-                       timeSeriesPartitionsToFree: ArrayBuffer[TimeSeriesPartition]): Unit = {
-    downsampleBatchOld(rawPartData, userEndTime, partitionAutoPager, timeSeriesPartitionsToFree)
+                       partitionAutoPager: PartitionAutoPager): Unit = {
+    downsampleBatchOld(rawPartData, userEndTime, partitionAutoPager)
   }
 }
