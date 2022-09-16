@@ -70,6 +70,12 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val trace = downsamplerConfig.as[Seq[Map[String, String]]]("trace-filters").map(_.toSeq)
 
+  // TODO(a_theimer): should this be annotated transient?
+  // TODO(a_theimer): move to more appropriate config
+  // TODO(a_theimer): figure out more appropriate type
+  lazy val exportFilters = downsamplerConfig.as[Seq[Seq[Seq[String]]]]("export-filters").map(_.toSeq)
+  lazy val exportStructure = downsamplerConfig.as[Seq[String]]("export-struct")
+
   /**
     * Two conditions should satisfy for eligibility:
     * (a) If allow list is nonEmpty partKey should match a filter in the allow list.

@@ -2,13 +2,12 @@ package filodb.downsampler.chunk
 
 import java.time.Instant
 import java.time.format.DateTimeFormatter
-
 import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
-
 import filodb.coordinator.KamonShutdownHook
 import filodb.downsampler.DownsamplerContext
+import filodb.downsampler.chunk.windowprocessors.DownsampleWindowProcessor
 
 /**
   *
@@ -43,15 +42,16 @@ import filodb.downsampler.DownsamplerContext
 object DownsamplerMain extends App {
 
   Kamon.init()  // kamon init should be first thing in driver jvm
+  // TODO(a_theimer): organize this
   val settings = new DownsamplerSettings()
-  val batchDownsampler = new BatchDownsampler(settings)
+  val batchDownsampler = new DownsampleWindowProcessor(settings)
 
   val d = new Downsampler(settings, batchDownsampler)
   val sparkConf = new SparkConf(loadDefaults = true)
   d.run(sparkConf)
 }
 
-class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsampler) extends Serializable {
+class Downsampler(settings: DownsamplerSettings, batchDownsampler: DownsampleWindowProcessor) extends Serializable {
 
   // Gotcha!! Need separate function (Cannot be within body of a class)
   // to create a closure for spark to serialize and move to executors.
@@ -121,7 +121,8 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
       .foreach { rawPartsBatch =>
         Kamon.init()
         KamonShutdownHook.registerShutdownHook()
-        batchDownsampler.downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
+        BatchedWindowProcessor(batchDownsampler.schemas, settings)
+          .process(rawPartsBatch, userTimeStart, userTimeEndExclusive)
       }
 
     DownsamplerContext.dsLogger.info(s"Chunk Downsampling Driver completed successfully for downsample period " +
@@ -136,5 +137,4 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
       Thread.sleep(62000) // quick & dirty hack to ensure that the completed metric gets published
     spark
   }
-
 }
