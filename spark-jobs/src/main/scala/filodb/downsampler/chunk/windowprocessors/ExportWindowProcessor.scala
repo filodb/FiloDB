@@ -7,12 +7,18 @@ import filodb.core.store.{ChunkSetInfoReader, RawPartData, ReadablePartition}
 import filodb.downsampler.chunk.{DownsamplerSettings, PartitionAutoPager, SingleWindowProcessor}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
 
+
+import java.security.MessageDigest
+
 // scalastyle:off
 case class ExportWindowProcessor(schemas: Schemas,
                                  downsamplerSettings: DownsamplerSettings) extends SingleWindowProcessor{
-  private def hash(partKeyBytes: Array[Byte]): Array[Byte] = {
-    // TODO(a_theimer): hash algo goes here
-    Array.empty[Byte]
+
+  private def hashToString(bytes: Array[Byte]): String = {
+    MessageDigest.getInstance("SHA-256")
+      .digest(bytes)
+      .map("%02x".format(_))
+      .mkString
   }
 
   private def getChunkColIter(part: ReadablePartition, cset: ChunkSetInfoReader, icol: Int, istart: Int): TypedIterator = {
@@ -74,7 +80,7 @@ case class ExportWindowProcessor(schemas: Schemas,
     val directories = downsamplerSettings.exportStructure.map(
       regexMatcher.replaceAllIn(_, matcher => pkPairMap(matcher.group(1))))
 
-    val fileName = hash(partitionAutoPager.getReadablePartition().partKeyBytes).toString
+    val fileName = hashToString(partitionAutoPager.getReadablePartition().partKeyBytes)
 
     val data = partitionAutoPager.getChunkRows().toIterator.flatMap{ chunkRow =>
       getData(partitionAutoPager.getReadablePartition(), chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
