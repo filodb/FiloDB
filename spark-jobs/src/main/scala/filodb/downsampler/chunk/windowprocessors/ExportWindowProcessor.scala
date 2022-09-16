@@ -1,5 +1,7 @@
 package filodb.downsampler.chunk.windowprocessors
 
+import java.security.MessageDigest
+
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType.DoubleColumn
 import filodb.core.metadata.Schemas
@@ -7,12 +9,21 @@ import filodb.core.store.{ChunkSetInfoReader, RawPartData, ReadablePartition}
 import filodb.downsampler.chunk.{DownsamplerSettings, PartitionAutoPager, SingleWindowProcessor}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
 
-
-import java.security.MessageDigest
-
-// scalastyle:off
+/**
+ * Exports a window of data to a bucket.
+ */
 case class ExportWindowProcessor(schemas: Schemas,
-                                 downsamplerSettings: DownsamplerSettings) extends SingleWindowProcessor{
+                                 downsamplerSettings: DownsamplerSettings)
+  extends SingleWindowProcessor{
+
+  // TODO(a_theimer): probably worth building this into a trie eventually
+  // TODO(a_theimer): rewrite this when better config is setup
+  val rules = downsamplerSettings.exportFilters.map{ rule =>
+    // each size-2 window is a key-value pair
+    val labelValueFilters = rule.head.sliding(2, 2).map(pair => pair.head -> pair.last).toMap
+    val publishBuckets = rule.last
+    (labelValueFilters, publishBuckets)
+  }
 
   private def hashToString(bytes: Array[Byte]): String = {
     MessageDigest.getInstance("SHA-256")
@@ -21,85 +32,97 @@ case class ExportWindowProcessor(schemas: Schemas,
       .mkString
   }
 
-  private def getChunkColIter(part: ReadablePartition, cset: ChunkSetInfoReader, icol: Int, istart: Int): TypedIterator = {
-    val tsPtr = cset.vectorAddress(icol)
-    val tsAcc = cset.vectorAccessor(icol)
-    part.chunkReader(icol, tsAcc, tsPtr).iterate(tsAcc, tsPtr, istart)
+  /**
+   * Returns an iterator of a single column of the argument partition's chunk.
+   * @param iCol the index of the column to iterate.
+   * @param iRowStart the index of the row to begin iteration from.
+   */
+  private def getChunkColIter(partition: ReadablePartition,
+                              chunkReader: ChunkSetInfoReader,
+                              iCol: Int,
+                              iRowStart: Int): TypedIterator = {
+    val tsPtr = chunkReader.vectorAddress(iCol)
+    val tsAcc = chunkReader.vectorAccessor(iCol)
+    partition.chunkReader(iCol, tsAcc, tsPtr).iterate(tsAcc, tsPtr, iRowStart)
   }
 
-  private def getData(part: ReadablePartition, cset: ChunkSetInfoReader, istart: Int, iend: Int): Seq[(Long, Double)] = {
-    val timestampCol = 0
-    // TODO(a_theimer): cleanup
-    val valueCol = part.schema.data.columns.indexWhere(_.name == part.schema.data.valueColName)
-    part.schema.data.columns(valueCol).columnType match {
+  /**
+   * Extracts and returns a sequence of (timestamp,value) pairs from the argument chunk.
+   * @param irowStart the index of the first row to include in the result.
+   * @param irowEnd the index of the final row to include in the result (exclusive).
+   */
+  private def extractRows(partition: ReadablePartition,
+                          chunkReader: ChunkSetInfoReader,
+                          irowStart: Int,
+                          irowEnd: Int): Seq[(Long, Double)] = {
+    val timestampCol = 0  // FIXME: need a more dynamic (but efficient) solution
+    val columns = partition.schema.data.columns
+    val valueCol = columns.indexWhere(_.name == partition.schema.data.valueColName)
+    columns(valueCol).columnType match {
       case DoubleColumn =>
-        val timestampReader = getChunkColIter(part, cset, timestampCol, istart).asLongIt
-        val valueReader = getChunkColIter(part, cset, valueCol, istart).asDoubleIt
-        (istart until iend).map{ _ =>
-          (timestampReader.next, valueReader.next)
+        val timestampIter = getChunkColIter(partition, chunkReader, timestampCol, irowStart).asLongIt
+        val valueIter = getChunkColIter(partition, chunkReader, valueCol, irowStart).asDoubleIt
+        (irowStart until irowEnd).map{ _ =>
+          (timestampIter.next, valueIter.next)
         }
-      case _ => Nil
+      case colType =>
+        // TODO(a_theimer): this is commented out so tests pass
+        // throw new IllegalArgumentException(s"unhandled ColumnType: $colType")
+        Nil
     }
   }
 
-  //scalastyle:off
-
-
-  private def doExport(path: Seq[String], bucket: String, data: Iterator[(Long, Double)]): Unit = {
-    // TODO(a_theimer)
+  /**
+   * Export the data to a bucket.
+   * @param path the absolute path of the file to write.
+   * @param bucket the export bucket.
+   * @param partKeyPairs label-value pairs of the partition to export.
+   * @param rows sequence of timestamp/value pairs to export.
+   */
+  private def export(path: Seq[String],
+                     bucket: String,
+                     partKeyPairs: Seq[(String, String)],
+                     rows: Iterator[(Long, Double)]): Unit = {
     println(s"======== exporting to $bucket:${path.mkString("/")}")
-    val dseq = data.toArray
-    dseq.foreach{ case (timestamp, value) =>
+    println(s"partKeyPairs: $partKeyPairs")
+    rows.foreach{ case (timestamp, value) =>
       println(s"-- $timestamp: $value")
-    }
-  }
-
-  // TODO(a_theimer): move somewhere more appropriate; make params more appropriate
-  private def export(partitionAutoPager: PartitionAutoPager,
-             filters: Seq[(String, String)],
-             downsamplerSettings: DownsamplerSettings
-            ): Unit = {
-    // load the export rules into memory
-    // TODO(a_theimer): probably worth building this into a trie eventually
-    // TODO(a_theimer): rewrite this when better config is setup
-    val rules = downsamplerSettings.exportFilters.map{ rule =>
-      val filterSet = rule.head.sliding(2, 2).map(pair => pair.head -> pair.last).toMap
-      val publishTo = rule.last
-      (filterSet, publishTo)
-    }
-    // export for all matching rules
-    val pkPairMap = filters.toMap
-    val publishTo = rules.filter{ rule =>
-      rule._1.exists{ case (name, value) =>
-        val pkVal = pkPairMap.get(name)
-        pkVal.isEmpty || pkVal.get != value
-      }
-    }.flatMap(_._2)
-    // get the path to the time-series files
-    val regexMatcher = """\{\{(.*)\}\}""".r
-    val directories = downsamplerSettings.exportStructure.map(
-      regexMatcher.replaceAllIn(_, matcher => pkPairMap(matcher.group(1))))
-
-    val fileName = hashToString(partitionAutoPager.getReadablePartition().partKeyBytes)
-
-    val data = partitionAutoPager.getChunkRows().toIterator.flatMap{ chunkRow =>
-      getData(partitionAutoPager.getReadablePartition(), chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
-    }
-
-    // TODO(a_theimer): "bucket" should be an interface with export method
-    publishTo.foreach{ bucket =>
-      // do the export
-      doExport(directories ++ Seq(fileName), bucket, data)
     }
   }
 
   override def process(rawPartData: RawPartData,
                        userEndTime: Long,
                        partitionAutoPager: PartitionAutoPager): Unit = {
-    // TODO(a_theimer)
-    val rawSchemaId = RecordSchema.schemaID(rawPartData.partitionKey, UnsafeUtils.arayOffset)
-    val schema = schemas(rawSchemaId)
-    val pkPairs = schema.partKeySchema.toStringPairs(rawPartData.partitionKey, UnsafeUtils.arayOffset)
-    export(partitionAutoPager, pkPairs, downsamplerSettings)
+    // get the label-value pairs for this partition
+    val partKeyMap = {
+      val rawSchemaId = RecordSchema.schemaID(rawPartData.partitionKey, UnsafeUtils.arayOffset)
+      val schema = schemas(rawSchemaId)
+      schema.partKeySchema.toStringPairs(rawPartData.partitionKey, UnsafeUtils.arayOffset).toMap
+    }
+
+    // find the buckets with matching rules
+    // TODO(a_theimer): this is annoying to read
+    val publishBuckets = rules.filter{ rule =>
+      rule._1.exists{ case (name, value) =>
+        val pkVal = partKeyMap.get(name)
+        pkVal.isEmpty || pkVal.get != value
+      }
+    }.flatMap(_._2)
+
+    // get the path to export to
+    val regexMatcher = """\{\{(.*)\}\}""".r
+    val directories = downsamplerSettings.exportStructure.map(
+      regexMatcher.replaceAllIn(_, matcher => partKeyMap(matcher.group(1))))
+    val fileName = hashToString(partitionAutoPager.getReadablePartition().partKeyBytes)
+
+    val rows = partitionAutoPager.getChunkRows().toIterator.flatMap{ chunkRow =>
+      extractRows(
+        partitionAutoPager.getReadablePartition(), chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
+    }
+
+    // TODO(a_theimer): bucket/rows should be interfaces
+    publishBuckets.foreach{ bucket =>
+      export(directories ++ Seq(fileName), bucket, partKeyMap.toSeq, rows)
+    }
   }
 }
