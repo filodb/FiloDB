@@ -1,5 +1,6 @@
 package filodb.downsampler.chunk
 
+import filodb.core.Instance
 import kamon.Kamon
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
@@ -26,14 +27,17 @@ trait SingleWindowProcessor {
               sharedWindowData: BatchedWindowProcessor#SharedWindowData): Unit
 }
 
-case class BatchedWindowProcessor(schemas: Schemas, downsamplerSettings: DownsamplerSettings) {
+class BatchedWindowProcessor(downsamplerSettings: DownsamplerSettings)
+  extends Instance with Serializable {
 
   @transient lazy val numBatchesStarted = Kamon.counter("num-batches-started").withoutTags()
   @transient lazy val numBatchesCompleted = Kamon.counter("num-batches-completed").withoutTags()
   @transient lazy val numBatchesFailed = Kamon.counter("num-batches-failed").withoutTags()
   @transient lazy val numRawChunksSkipped = Kamon.counter("num-raw-chunks-skipped").withoutTags()
 
-  val singleWindowProcessors: Seq[SingleWindowProcessor] =
+  @transient lazy val schemas = Schemas.fromConfig(downsamplerSettings.filodbConfig).get
+
+  @transient lazy val singleWindowProcessors: Seq[SingleWindowProcessor] =
     Seq(new DownsampleWindowProcessor(downsamplerSettings),
             ExportWindowProcessor(schemas, downsamplerSettings))
 
@@ -128,10 +132,10 @@ case class BatchedWindowProcessor(schemas: Schemas, downsamplerSettings: Downsam
         numBatchesFailed.increment()
         throw e // will be logged by spark
     }
-    // TODO(a_theimer): add "numDsChunks" replacement to below log
     numBatchesCompleted.increment()
     val endedAt = System.currentTimeMillis()
-    DownsamplerContext.dsLogger.info(s"Finished iterating through and downsampling batchSize=${rawPartsBatch.size} " +
-      s"partitions in current executor timeTakenMs=${endedAt-startedAt}")
+    DownsamplerContext.dsLogger.info(s"Finished iterating through and downsampling/exporting " +
+      s"batchSize=${rawPartsBatch.size} partitions in current executor " +
+      s"timeTakenMs=${endedAt-startedAt}")
   }
 }

@@ -99,10 +99,9 @@ class DownsampleWindowProcessor(settings: DownsamplerSettings)
    * Downsample batch of raw partitions, and store downsampled chunks to cassandra
    */
   // scalastyle:off method.length
-  // TODO(a_theimer): rename / merge with downsamplePart
-  def downsampleBatchOld(rawPartData: RawPartData,
-                         userEndTimeExclusive: Long,
-                         necessaryPageThing: BatchedWindowProcessor#SharedWindowData): Unit = {
+  def downsampleBatchWrapper(rawPartData: RawPartData,
+                             userEndTimeExclusive: Long,
+                             necessaryPageThing: BatchedWindowProcessor#SharedWindowData): Unit = {
     val downsampledChunksToPersist = MMap[FiniteDuration, Iterator[ChunkSet]]()
     settings.downsampleResolutions.foreach { res =>
       downsampledChunksToPersist(res) = Iterator.empty
@@ -139,10 +138,7 @@ class DownsampleWindowProcessor(settings: DownsamplerSettings)
       }
       numDsChunks = persistDownsampledChunks(downsampledChunksToPersist)
     } finally {
-      // TODO(a_theimer): all of this
-//      downsampleBatchLatency.record(System.currentTimeMillis() - startedAt)
       offHeapMem.free() // free offheap mem
-      // pagedPartsToFree.clear()
       downsampledPartsToFree.clear()
     }
   }
@@ -235,15 +231,14 @@ class DownsampleWindowProcessor(settings: DownsamplerSettings)
       s"Number of downsamplers for ${sharedWindowData.getReadablePartition().stringPartition} should be > 1")
 
     // for each downsample resolution
-    downsampleResToPart.foreach { case (resolution, part) =>
-      val resMillis = resolution.toMillis
+    sharedWindowData.getChunkRanges().foreach { cr =>
+      val chunkSet = cr.chunkSetInfoReader
+      val startRow = cr.istartRow
+      val endRow = cr.iendRow
+      val rawPartToDownsample = sharedWindowData.getReadablePartition()
 
-      // TODO(a_theimer): since getChunkRows acquires a lock, should have top precedence
-      sharedWindowData.getChunkRanges().foreach { cr =>
-        val chunkSet = cr.chunkSetInfoReader
-        val startRow = cr.istartRow
-        val endRow = cr.iendRow
-        val rawPartToDownsample = sharedWindowData.getReadablePartition()
+      downsampleResToPart.foreach { case (resolution, part) =>
+      val resMillis = resolution.toMillis
 
         if (shouldTrace) {
           downsamplers.zipWithIndex.foreach { case (d, i) =>
@@ -310,11 +305,10 @@ class DownsampleWindowProcessor(settings: DownsamplerSettings)
             // log debugging information and re-throw
             throw e
         }
+        dsRecordBuilder.removeAndFreeContainers(dsRecordBuilder.allContainers.size)
       }
-      dsRecordBuilder.removeAndFreeContainers(dsRecordBuilder.allContainers.size)
+      numRawChunksDownsampled.increment()
     }
-    // TODO(a_theimer): feels like this is in the wrong spot
-    numRawChunksDownsampled.increment()
   }
 
   /**
@@ -350,6 +344,6 @@ class DownsampleWindowProcessor(settings: DownsamplerSettings)
   override def process(rawPartData: RawPartData,
                        userEndTime: Long,
                        sharedWindowData: BatchedWindowProcessor#SharedWindowData): Unit = {
-    downsampleBatchOld(rawPartData, userEndTime, sharedWindowData)
+    downsampleBatchWrapper(rawPartData, userEndTime, sharedWindowData)
   }
 }

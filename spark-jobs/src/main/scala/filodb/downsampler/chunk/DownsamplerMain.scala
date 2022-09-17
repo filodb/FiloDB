@@ -45,13 +45,16 @@ object DownsamplerMain extends App {
   // TODO(a_theimer): organize this
   val settings = new DownsamplerSettings()
   val batchDownsampler = new DownsampleWindowProcessor(settings)
+  val batchedWindowProcessor = new BatchedWindowProcessor(settings)
 
-  val d = new Downsampler(settings, batchDownsampler)
+  val d = new Downsampler(settings, batchDownsampler, batchedWindowProcessor)
   val sparkConf = new SparkConf(loadDefaults = true)
   d.run(sparkConf)
 }
 
-class Downsampler(settings: DownsamplerSettings, batchDownsampler: DownsampleWindowProcessor) extends Serializable {
+class Downsampler(settings: DownsamplerSettings,
+                  batchDownsampler: DownsampleWindowProcessor,
+                  batchedWindowProcessor: BatchedWindowProcessor) extends Serializable {
 
   // Gotcha!! Need separate function (Cannot be within body of a class)
   // to create a closure for spark to serialize and move to executors.
@@ -121,8 +124,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: DownsampleWin
       .foreach { rawPartsBatch =>
         Kamon.init()
         KamonShutdownHook.registerShutdownHook()
-        BatchedWindowProcessor(batchDownsampler.schemas, settings)
-          .process(rawPartsBatch, userTimeStart, userTimeEndExclusive)
+        batchedWindowProcessor.process(rawPartsBatch, userTimeStart, userTimeEndExclusive)
       }
 
     DownsamplerContext.dsLogger.info(s"Chunk Downsampling Driver completed successfully for downsample period " +
