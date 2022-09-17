@@ -18,6 +18,26 @@ case class ChunkRange(chunkSetInfoReader: ChunkSetInfoReader,
                       istartRow: Int,
                       iendRow: Int)
 
+/**
+ * Lazily evaluated value; also requires that a lock is acquired before
+ *   evaluation (to prevent multiple and/or concurrent evaluations).
+ * @param producer produces the value to store.
+ */
+class LazySynchronized[T](producer: () => T) {
+  var value: Option[T] = None
+  def get(): T = {
+    if (value.isEmpty) {
+      value.synchronized{
+        // second check in case we acquired the lock after another thread evaluated
+        if (value.isEmpty) {
+          value = Some(producer.apply())
+        }
+      }
+    }
+    value.get
+  }
+}
+
 trait SingleWindowProcessor {
   /**
    * Process a window of data for a single partition.
@@ -50,9 +70,10 @@ class BatchedWindowProcessor(downsamplerSettings: DownsamplerSettings)
                          userTimeStart: Long,
                          userTimeEndExclusive: Long,
                          rawPartSchema: Schema) {
-    private lazy val chunkRanges = makeChunkRanges(pagedReadablePartition)
-    private lazy val pagedReadablePartition =
-      new PagedReadablePartition(rawPartSchema, shard = 0, partID = 0, rawPartData, minResolutionMs = 1)
+    private val chunkRanges = new LazySynchronized[Seq[ChunkRange]](
+        () => makeChunkRanges(pagedReadablePartition.get()))
+    private val pagedReadablePartition = new LazySynchronized[PagedReadablePartition](
+        () => new PagedReadablePartition(rawPartSchema, shard = 0, partID = 0, rawPartData, minResolutionMs = 1))
 
     /**
      * Page-in all chunks and determine, for each chunk, the range of rows with timestamps inside the time-range
@@ -95,14 +116,14 @@ class BatchedWindowProcessor(downsamplerSettings: DownsamplerSettings)
     }.toSeq
 
     def getReadablePartition(): ReadablePartition = {
-      pagedReadablePartition
+      pagedReadablePartition.get
     }
 
     /**
      * For each chunk, determine the range of rows with timestamps inside the window.
      */
     def getChunkRanges(): Seq[ChunkRange] = {
-      chunkRanges
+      chunkRanges.get
     }
   }
 
