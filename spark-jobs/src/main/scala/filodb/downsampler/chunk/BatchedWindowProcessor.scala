@@ -1,7 +1,8 @@
 package filodb.downsampler.chunk
 
-import filodb.core.Instance
 import kamon.Kamon
+
+import filodb.core.Instance
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
 import filodb.core.metadata.{Schema, Schemas}

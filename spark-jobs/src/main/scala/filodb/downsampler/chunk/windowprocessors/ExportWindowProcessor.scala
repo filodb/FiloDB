@@ -1,6 +1,7 @@
 package filodb.downsampler.chunk.windowprocessors
 
 import java.security.MessageDigest
+
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType.DoubleColumn
 import filodb.core.metadata.Schemas
@@ -82,11 +83,13 @@ case class ExportWindowProcessor(schemas: Schemas,
                      bucket: String,
                      partKeyPairs: Seq[(String, String)],
                      rows: Iterator[(Long, Double)]): Unit = {
+    // scalastyle:off
     println(s"======== exporting to $bucket:${path.mkString("/")}")
     println(s"partKeyPairs: $partKeyPairs")
     rows.foreach{ case (timestamp, value) =>
       println(s"-- $timestamp: $value")
     }
+    // scalastyle:on
   }
 
   override def process(rawPartData: RawPartData,

@@ -2,9 +2,11 @@ package filodb.downsampler.chunk
 
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+
 import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
+
 import filodb.coordinator.KamonShutdownHook
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.windowprocessors.DownsampleWindowProcessor

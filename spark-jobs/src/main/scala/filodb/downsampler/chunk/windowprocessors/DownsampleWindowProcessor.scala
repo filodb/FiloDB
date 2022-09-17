@@ -1,26 +1,27 @@
 package filodb.downsampler.chunk.windowprocessors
 
-import filodb.cassandra.columnstore.CassandraColumnStore
-import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
-import filodb.core.downsample._
-import filodb.core.memstore._
-import filodb.core.metadata.Schemas
-import filodb.core.store.{ChunkSet, RawPartData}
-import filodb.core.{DatasetRef, ErrorResponse, Instance}
-import filodb.downsampler.DownsamplerContext
-import filodb.downsampler.chunk.{BatchedWindowProcessor, DownsamplerSettings, SingleWindowProcessor}
-import filodb.memory.format.UnsafeUtils
-import filodb.memory.{BinaryRegionLarge, MemFactory}
-import filodb.query.exec.UnknownSchemaQueryErr
+import scala.collection.mutable.{ArrayBuffer, Map => MMap}
+import scala.concurrent.Await
+import scala.concurrent.duration.FiniteDuration
+
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.reactive.Observable
 import spire.syntax.cfor._
 
+import filodb.cassandra.columnstore.CassandraColumnStore
+import filodb.core.{DatasetRef, ErrorResponse, Instance}
+import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
+import filodb.core.downsample._
+import filodb.core.memstore._
+import filodb.core.metadata.Schemas
+import filodb.core.store.{ChunkSet, RawPartData}
+import filodb.downsampler.DownsamplerContext
+import filodb.downsampler.chunk.{BatchedWindowProcessor, DownsamplerSettings, SingleWindowProcessor}
+import filodb.memory.{BinaryRegionLarge, MemFactory}
+import filodb.memory.format.UnsafeUtils
+import filodb.query.exec.UnknownSchemaQueryErr
 
-import scala.collection.mutable.{ArrayBuffer, Map => MMap}
-import scala.concurrent.Await
-import scala.concurrent.duration.FiniteDuration
 
 class DownsampleWindowProcessor(settings: DownsamplerSettings)
   extends SingleWindowProcessor with Instance with Serializable {
