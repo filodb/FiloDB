@@ -62,7 +62,7 @@ final case class BinaryJoinExec(queryContext: QueryContext,
   protected def args: String = s"binaryOp=$binaryOp, on=$on, ignoring=$ignoring"
 
   //scalastyle:off method.length
-  protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],
+  protected[exec] def compose(childResponses: Observable[(QueryResult, Int)],
                               firstSchema: Task[ResultSchema],
                               querySession: QuerySession): Observable[RangeVector] = {
     val span = Kamon.currentSpan()
@@ -73,7 +73,6 @@ final case class BinaryJoinExec(queryContext: QueryContext,
           s" is more than limit of ${queryContext.plannerParams.joinQueryCardLimit}." +
           s" Try applying more filters or reduce time range.")
       case (QueryResult(_, _, result, _, _, _), i) => (result, i)
-      case (QueryError(_, _, ex), _)         => throw ex
     }.toListL.map { resp =>
       span.mark("binary-join-child-results-available")
       Kamon.histogram("query-execute-time-elapsed-step1-child-results-available",

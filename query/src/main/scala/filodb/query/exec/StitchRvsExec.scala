@@ -103,13 +103,12 @@ final case class StitchRvsExec(queryContext: QueryContext,
   }
   protected def args: String = ""
 
-  protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],
+  protected[exec] def compose(childResponses: Observable[(QueryResult, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"StitchRvsExec: Stitching results:")
     val stitched = childResponses.map {
       case (QueryResult(_, _, result, _, _, _), _) => result
-      case (QueryError(_, _, ex), _)         => throw ex
     }.toListL.map(_.flatten).map { srvs =>
       val groups = srvs.groupBy(_.key.labelValues)
       groups.mapValues { toMerge =>

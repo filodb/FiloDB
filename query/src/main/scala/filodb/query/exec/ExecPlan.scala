@@ -523,7 +523,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     *                       There is one response per child plan.
     * @param firstSchema Task for the first schema coming in from the first child
     */
-  protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  protected def compose(childResponses: Observable[(QueryResult, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector]
 

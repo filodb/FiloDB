@@ -23,12 +23,11 @@ trait ReduceAggregateExec extends NonLeafExecPlan {
 
   protected def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
-  protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  protected def compose(childResponses: Observable[(QueryResult, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     val results = childResponses.flatMap {
         case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
-        case (QueryError(_, _, ex), _)         => throw ex
     }
 
     val task = for { schema <- firstSchema}

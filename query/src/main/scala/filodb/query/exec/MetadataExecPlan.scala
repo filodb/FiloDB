@@ -37,13 +37,12 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
   /**
     * Compose the sub-query/leaf results here.
     */
-  protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  protected def compose(childResponses: Observable[(QueryResult, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
       case (QueryResult(_, _, result, _, _, _), _) => result
-      case (QueryError(_, _, ex), _)         => throw ex
     }.toListL.map { resp =>
       val metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
       resp.filter(!_.isEmpty).foreach { rv =>
@@ -98,12 +97,11 @@ final case class TsCardReduceExec(queryContext: QueryContext,
     acc
   }
 
-  override protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  override protected def compose(childResponses: Observable[(QueryResult, Int)],
                                  firstSchema: Task[ResultSchema],
                                  querySession: QuerySession): Observable[RangeVector] = {
     val taskOfResults = childResponses.map {
       case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
-      case (QueryError(_, _, ex), _)         => throw ex
     }.flatten
       .foldLeftL(new mutable.HashMap[ZeroCopyUTF8String, CardCounts])(mapFold)
       .map{ aggMap =>
@@ -122,13 +120,12 @@ final case class LabelValuesDistConcatExec(queryContext: QueryContext,
   /**
    * Compose the sub-query/leaf results here.
    */
-  override final def compose(childResponses: Observable[(QueryResponse, Int)],
+  override final def compose(childResponses: Observable[(QueryResult, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
       case (QueryResult(_, schema, result, _, _, _), _) => (schema, result)
-      case (QueryError(_, _, ex), _)         => throw ex
     }.toListL.map { resp =>
       val colType = resp.head._1.columns.head.colType
       if (colType == MapColumn) {
@@ -200,13 +197,12 @@ final case class LabelNamesDistConcatExec(queryContext: QueryContext,
   /**
    * Pick first non empty result from child.
    */
-  override final def compose(childResponses: Observable[(QueryResponse, Int)],
+  override final def compose(childResponses: Observable[(QueryResult, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     childResponses.map {
       case (QueryResult(_, _, result, _, _, _), _) => result
-      case (QueryError(_, _, ex), _)         => throw ex
     }.filter(s => s.nonEmpty && s.head.numRows.getOrElse(1) > 0).head.map(_.head)
   }
 }
@@ -244,13 +240,12 @@ final case class LabelCardinalityReduceExec(queryContext: QueryContext,
     }
   }
 
-  override protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  override protected def compose(childResponses: Observable[(QueryResult, Int)],
                                  firstSchema: Task[ResultSchema],
                                  querySession: QuerySession): Observable[RangeVector] = {
       qLogger.debug(s"LabelCardinalityDistConcatExec: Concatenating results")
       val taskOfResults: Task[Observable[RangeVector]] = childResponses.map {
         case (QueryResult(_, _, result, _, _, _), _) => result
-        case (QueryError(_, _, ex), _)         => throw ex
       }.filter(!_.isEmpty)
         .foldLeftL(MutableMap.empty[RangeVectorKey, MutableMap[ZeroCopyUTF8String, CpcSketch]])
       { case (metadataResult, rv) =>
