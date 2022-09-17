@@ -1,5 +1,6 @@
 package filodb.downsampler.chunk
 
+import kamon.Kamon
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
 import filodb.core.metadata.{Schema, Schemas}
@@ -7,84 +8,103 @@ import filodb.core.store.{AllChunkScan, ChunkSetInfoReader, RawPartData, Readabl
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.windowprocessors.{DownsampleWindowProcessor, ExportWindowProcessor}
 import filodb.memory.format.UnsafeUtils
-import kamon.Kamon
 
-// TODO(a_theimer): docs / move
-case class ChunkRows(chunkSetInfoReader: ChunkSetInfoReader, istartRow: Int, iendRow: Int)
+// TODO(a_theimer): would be nice if this could be an iterator
+/**
+ * Specifies a range of a chunk's rows.
+ */
+case class ChunkRange(chunkSetInfoReader: ChunkSetInfoReader,
+                      istartRow: Int,
+                      iendRow: Int)
 
-// TODO(a_theimer): doc
 trait SingleWindowProcessor {
+  /**
+   * Process a window of data for a single partition.
+   */
   def process(rawPartData: RawPartData,
               userEndTime: Long,
-              partitionAutoPager: PartitionAutoPager): Unit
+              sharedWindowData: BatchedWindowProcessor#SharedWindowData): Unit
 }
 
-// TODO(a_theimer): docs / move
-class PartitionAutoPager(rawPartData: RawPartData,
-                         userTimeStart: Long,
-                         userTimeEndExclusive: Long,
-                         rawPartSchema: Schema) {
-  private lazy val pagedReadablePartition =
-    new PagedReadablePartition(rawPartSchema, shard = 0, partID = 0, rawPartData, minResolutionMs = 1)
-  private lazy val chunkRows = makeChunkRows(pagedReadablePartition)
-
-  // TODO(a_theimer): needs larger scope
-  @transient lazy val numRawChunksSkipped = Kamon.counter("num-raw-chunks-skipped").withoutTags()
-
-  // TODO(a_theimer): docs
-  private def makeChunkRows(rawPart: ReadablePartition): Seq[ChunkRows] = {
-    val timestampCol = 0
-    val rawChunksets = rawPart.infos(AllChunkScan)
-
-    // TODO(a_theimer): keeping this until confirmed we don't need to return an iterator
-    val it = new Iterator[ChunkSetInfoReader]() {
-      override def hasNext: Boolean = rawChunksets.hasNext
-      override def next(): ChunkSetInfoReader = rawChunksets.nextInfoReader
-    }
-
-    it.filter(chunkset => chunkset.startTime < userTimeEndExclusive && userTimeStart <= chunkset.endTime)
-      .map { chunkset =>
-        val tsPtr = chunkset.vectorAddress(timestampCol)
-        val tsAcc = chunkset.vectorAccessor(timestampCol)
-        val tsReader = rawPart.chunkReader(timestampCol, tsAcc, tsPtr).asLongReader
-
-        val startRow = tsReader.binarySearch(tsAcc, tsPtr, userTimeStart) & 0x7fffffff
-        // userTimeEndExclusive-1 since ceilingIndex does an inclusive check
-        val endRow = Math.min(tsReader.ceilingIndex(tsAcc, tsPtr, userTimeEndExclusive - 1), chunkset.numRows - 1)
-        if (startRow > endRow) {
-          numRawChunksSkipped.increment()
-          DownsamplerContext.dsLogger.warn(s"Skipping chunk of partition since startRow lessThan endRow " +
-            s"hexPartKey=${rawPart.hexPartKey} " +
-            s"startRow=$startRow " +
-            s"endRow=$endRow " +
-            s"chunkset: ${chunkset.debugString}")
-        }
-        (chunkset, (startRow, endRow))
-      }
-      .filter{case (_, pair) => pair._1 <= pair._2}
-      .map{case (chunk, pair) => ChunkRows(chunk, pair._1, pair._2)}
-  }.toSeq
-
-  def getReadablePartition(): ReadablePartition = {
-    pagedReadablePartition
-  }
-
-  def getChunkRows(): Seq[ChunkRows] = {
-    chunkRows
-  }
-}
-
-// TODO(a_theimer): doc
 case class BatchedWindowProcessor(schemas: Schemas, downsamplerSettings: DownsamplerSettings) {
 
   @transient lazy val numBatchesStarted = Kamon.counter("num-batches-started").withoutTags()
   @transient lazy val numBatchesCompleted = Kamon.counter("num-batches-completed").withoutTags()
   @transient lazy val numBatchesFailed = Kamon.counter("num-batches-failed").withoutTags()
+  @transient lazy val numRawChunksSkipped = Kamon.counter("num-raw-chunks-skipped").withoutTags()
 
   val singleWindowProcessors: Seq[SingleWindowProcessor] =
     Seq(new DownsampleWindowProcessor(downsamplerSettings),
             ExportWindowProcessor(schemas, downsamplerSettings))
 
+  /**
+   * This class enforces that expensive computations:
+   *     (a) don't happen if they're never needed, or
+   *     (b) happen exactly once, and their results are reused across SingleWindowProcessors.
+   */
+  class SharedWindowData(rawPartData: RawPartData,
+                         userTimeStart: Long,
+                         userTimeEndExclusive: Long,
+                         rawPartSchema: Schema) {
+    private lazy val chunkRanges = makeChunkRanges(pagedReadablePartition)
+    private lazy val pagedReadablePartition =
+      new PagedReadablePartition(rawPartSchema, shard = 0, partID = 0, rawPartData, minResolutionMs = 1)
+
+    /**
+     * Page-in all chunks and determine, for each chunk, the range of rows with timestamps inside the time-range
+     *   given by userTimeStart and userTimeEndExclusive.
+     */
+    private def makeChunkRanges(rawPart: ReadablePartition): Seq[ChunkRange] = {
+      val timestampCol = 0  // FIXME: need a dynamic (but efficient) way to determine this
+      val rawChunksets = rawPart.infos(AllChunkScan)
+
+      // TODO(a_theimer): keeping this until confirmed we don't need to return an iterator
+      val it = new Iterator[ChunkSetInfoReader]() {
+        override def hasNext: Boolean = rawChunksets.hasNext
+        override def next(): ChunkSetInfoReader = rawChunksets.nextInfoReader
+      }
+
+      it.filter(chunkset => chunkset.startTime < userTimeEndExclusive && userTimeStart <= chunkset.endTime)
+        .map { chunkset =>
+          val tsPtr = chunkset.vectorAddress(timestampCol)
+          val tsAcc = chunkset.vectorAccessor(timestampCol)
+          val tsReader = rawPart.chunkReader(timestampCol, tsAcc, tsPtr).asLongReader
+
+          val startRow = tsReader.binarySearch(tsAcc, tsPtr, userTimeStart) & 0x7fffffff
+          // userTimeEndExclusive-1 since ceilingIndex does an inclusive check
+          val endRow = Math.min(tsReader.ceilingIndex(tsAcc, tsPtr, userTimeEndExclusive - 1), chunkset.numRows - 1)
+          ChunkRange(chunkset, startRow, endRow)
+        }
+        .filter{ chunkRange =>
+          val isValidChunk = chunkRange.istartRow <= chunkRange.iendRow
+          if (!isValidChunk) {
+            numRawChunksSkipped.increment()
+            // TODO(a_theimer): use DsContext?
+            DownsamplerContext.dsLogger.warn(s"Skipping chunk of partition since startRow lessThan endRow " +
+              s"hexPartKey=${rawPart.hexPartKey} " +
+              s"startRow=${chunkRange.istartRow} " +
+              s"endRow=${chunkRange.iendRow} " +
+              s"chunkset: ${chunkRange.chunkSetInfoReader.debugString}")
+          }
+          isValidChunk
+        }
+    }.toSeq
+
+    def getReadablePartition(): ReadablePartition = {
+      pagedReadablePartition
+    }
+
+    /**
+     * For each chunk, determine the range of rows with timestamps inside the window.
+     */
+    def getChunkRanges(): Seq[ChunkRange] = {
+      chunkRanges
+    }
+  }
+
+  /**
+   * Process a batch of partitions for a given time window.
+   */
   def process(rawPartsBatch: Seq[RawPartData], userTimeStart: Long, userTimeEndExclusive: Long): Unit = {
     // TODO(a_theimer): use DownsamplerContext logger?
     DownsamplerContext.dsLogger.info(s"Starting to downsample " +
@@ -98,17 +118,15 @@ case class BatchedWindowProcessor(schemas: Schemas, downsamplerSettings: Downsam
       rawPartsBatch.foreach { rawPartData =>
         val rawSchemaId = RecordSchema.schemaID(rawPartData.partitionKey, UnsafeUtils.arayOffset)
         val schema = schemas(rawSchemaId)
-        val partitionAutoPager = new PartitionAutoPager(rawPartData, userTimeStart, userTimeEndExclusive, schema)
+        val sharedWindowData = new SharedWindowData(rawPartData, userTimeStart, userTimeEndExclusive, schema)
         singleWindowProcessors.foreach { processor =>
-          processor.process(rawPartData, userTimeEndExclusive, partitionAutoPager)
+          processor.process(rawPartData, userTimeEndExclusive, sharedWindowData)
         }
       }
     } catch {
       case e: Exception =>
         numBatchesFailed.increment()
         throw e // will be logged by spark
-    } finally {
-      // TODO(a_theimer): release memory now? or after each completes?
     }
     // TODO(a_theimer): add "numDsChunks" replacement to below log
     numBatchesCompleted.increment()

@@ -1,12 +1,11 @@
 package filodb.downsampler.chunk.windowprocessors
 
 import java.security.MessageDigest
-
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType.DoubleColumn
 import filodb.core.metadata.Schemas
 import filodb.core.store.{ChunkSetInfoReader, RawPartData, ReadablePartition}
-import filodb.downsampler.chunk.{DownsamplerSettings, PartitionAutoPager, SingleWindowProcessor}
+import filodb.downsampler.chunk.{BatchedWindowProcessor, DownsamplerSettings, SingleWindowProcessor}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
 
 /**
@@ -92,7 +91,7 @@ case class ExportWindowProcessor(schemas: Schemas,
 
   override def process(rawPartData: RawPartData,
                        userEndTime: Long,
-                       partitionAutoPager: PartitionAutoPager): Unit = {
+                       sharedWindowData: BatchedWindowProcessor#SharedWindowData): Unit = {
     // get the label-value pairs for this partition
     val partKeyMap = {
       val rawSchemaId = RecordSchema.schemaID(rawPartData.partitionKey, UnsafeUtils.arayOffset)
@@ -113,11 +112,11 @@ case class ExportWindowProcessor(schemas: Schemas,
     val regexMatcher = """\{\{(.*)\}\}""".r
     val directories = downsamplerSettings.exportStructure.map(
       regexMatcher.replaceAllIn(_, matcher => partKeyMap(matcher.group(1))))
-    val fileName = hashToString(partitionAutoPager.getReadablePartition().partKeyBytes)
+    val fileName = hashToString(sharedWindowData.getReadablePartition().partKeyBytes)
 
-    val rows = partitionAutoPager.getChunkRows().toIterator.flatMap{ chunkRow =>
+    val rows = sharedWindowData.getChunkRanges().toIterator.flatMap{ chunkRow =>
       extractRows(
-        partitionAutoPager.getReadablePartition(), chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
+        sharedWindowData.getReadablePartition(), chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
     }
 
     // TODO(a_theimer): bucket/rows should be interfaces

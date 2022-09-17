@@ -8,7 +8,7 @@ import filodb.core.metadata.Schemas
 import filodb.core.store.{ChunkSet, RawPartData}
 import filodb.core.{DatasetRef, ErrorResponse, Instance}
 import filodb.downsampler.DownsamplerContext
-import filodb.downsampler.chunk.{DownsamplerSettings, PartitionAutoPager, SingleWindowProcessor}
+import filodb.downsampler.chunk.{BatchedWindowProcessor, DownsamplerSettings, SingleWindowProcessor}
 import filodb.memory.format.UnsafeUtils
 import filodb.memory.{BinaryRegionLarge, MemFactory}
 import filodb.query.exec.UnknownSchemaQueryErr
@@ -102,7 +102,7 @@ class DownsampleWindowProcessor(settings: DownsamplerSettings)
   // TODO(a_theimer): rename / merge with downsamplePart
   def downsampleBatchOld(rawPartData: RawPartData,
                          userEndTimeExclusive: Long,
-                         necessaryPageThing: PartitionAutoPager): Unit = {
+                         necessaryPageThing: BatchedWindowProcessor#SharedWindowData): Unit = {
     val downsampledChunksToPersist = MMap[FiniteDuration, Iterator[ChunkSet]]()
     settings.downsampleResolutions.foreach { res =>
       downsampledChunksToPersist(res) = Iterator.empty
@@ -162,7 +162,7 @@ class DownsampleWindowProcessor(settings: DownsamplerSettings)
   // scalastyle:off parameter.number
   private def downsamplePart(offHeapMem: OffHeapMemory,
                              rawPart: RawPartData,
-                             partitionAutoPager: PartitionAutoPager,
+                             sharedWindowData: BatchedWindowProcessor#SharedWindowData,
                              downsampledPartsToFree: ArrayBuffer[TimeSeriesPartition],
                              downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]],
                              userTimeEndExclusive: Long,
@@ -174,7 +174,7 @@ class DownsampleWindowProcessor(settings: DownsamplerSettings)
     if (rawPartSchema == Schemas.UnknownSchema) throw UnknownSchemaQueryErr(rawSchemaId)
     rawPartSchema.downsample match {
       case Some(downsampleSchema) =>
-        val rawReadablePart = partitionAutoPager.getReadablePartition()
+        val rawReadablePart = sharedWindowData.getReadablePartition()
         DownsamplerContext.dsLogger.debug(s"Downsampling partition ${rawReadablePart.stringPartition}")
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
         val periodMarker = downsamplePeriodMarkersByRawSchemaId(rawSchemaId)
@@ -197,7 +197,7 @@ class DownsampleWindowProcessor(settings: DownsamplerSettings)
         }.toMap
 
         val downsamplePartStart = System.currentTimeMillis()
-        downsampleChunks(offHeapMem, partitionAutoPager, downsamplers, periodMarker,
+        downsampleChunks(offHeapMem, sharedWindowData, downsamplers, periodMarker,
           downsampledParts, userTimeEndExclusive, dsRecordBuilder, shouldTrace)
 
         downsampledPartsToFree ++= downsampledParts.values
@@ -223,7 +223,7 @@ class DownsampleWindowProcessor(settings: DownsamplerSettings)
    * @param downsampleResToPart the downsample parts in which to ingest downsampled data
    */
   private def downsampleChunks(offHeapMem: OffHeapMemory,
-                               partitionAutoPager: PartitionAutoPager,
+                               sharedWindowData: BatchedWindowProcessor#SharedWindowData,
                                downsamplers: Seq[ChunkDownsampler],
                                periodMarker: DownsamplePeriodMarker,
                                downsampleResToPart: Map[FiniteDuration, TimeSeriesPartition],
@@ -232,18 +232,18 @@ class DownsampleWindowProcessor(settings: DownsamplerSettings)
                                shouldTrace: Boolean) = {
 
     require(downsamplers.size > 1,
-      s"Number of downsamplers for ${partitionAutoPager.getReadablePartition().stringPartition} should be > 1")
+      s"Number of downsamplers for ${sharedWindowData.getReadablePartition().stringPartition} should be > 1")
 
     // for each downsample resolution
     downsampleResToPart.foreach { case (resolution, part) =>
       val resMillis = resolution.toMillis
 
       // TODO(a_theimer): since getChunkRows acquires a lock, should have top precedence
-      partitionAutoPager.getChunkRows().foreach { cr =>
+      sharedWindowData.getChunkRanges().foreach { cr =>
         val chunkSet = cr.chunkSetInfoReader
         val startRow = cr.istartRow
         val endRow = cr.iendRow
-        val rawPartToDownsample = partitionAutoPager.getReadablePartition()
+        val rawPartToDownsample = sharedWindowData.getReadablePartition()
 
         if (shouldTrace) {
           downsamplers.zipWithIndex.foreach { case (d, i) =>
@@ -349,7 +349,7 @@ class DownsampleWindowProcessor(settings: DownsamplerSettings)
 
   override def process(rawPartData: RawPartData,
                        userEndTime: Long,
-                       partitionAutoPager: PartitionAutoPager): Unit = {
-    downsampleBatchOld(rawPartData, userEndTime, partitionAutoPager)
+                       sharedWindowData: BatchedWindowProcessor#SharedWindowData): Unit = {
+    downsampleBatchOld(rawPartData, userEndTime, sharedWindowData)
   }
 }
