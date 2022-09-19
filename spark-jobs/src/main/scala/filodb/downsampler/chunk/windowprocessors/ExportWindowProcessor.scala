@@ -1,6 +1,8 @@
 package filodb.downsampler.chunk.windowprocessors
 
 import java.security.MessageDigest
+import java.text.SimpleDateFormat
+import java.util.Date
 
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType.DoubleColumn
@@ -8,12 +10,18 @@ import filodb.core.metadata.Schemas
 import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSetInfoReader, RawPartData, ReadablePartition}
 import filodb.downsampler.chunk.{BatchedWindowProcessor, DownsamplerSettings, SingleWindowProcessor}
+import filodb.downsampler.chunk.windowprocessors.ExportWindowProcessor.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
 
 case class ExportRule(key: Seq[String],
                       bucket: String,
                       includeFilterGroups: Seq[Seq[ColumnFilter]],
                       excludeFilterGroups: Seq[Seq[ColumnFilter]])
+
+object ExportWindowProcessor {
+  val LABEL_REGEX_MATCHER = """\{\{(.*)\}\}""".r
+  val DATE_REGEX_MATCHER = """<<(.*)>>""".r
+}
 
 /**
  * Exports a window of data to a bucket.
@@ -126,10 +134,20 @@ case class ExportWindowProcessor(schemas: Schemas,
     }.map(_.bucket)
 
     if (bucket.isDefined) {
-      // get the path to export to
-      val regexMatcher = """\{\{(.*)\}\}""".r
-      val directories = downsamplerSettings.exportPathSpec.map(
-        regexMatcher.replaceAllIn(_, matcher => partKeyMap(matcher.group(1))))
+      // build the path to export to
+      val directories = {
+        val date = new Date(userEndTime)
+        downsamplerSettings.exportPathSpec
+          // replace the label {{}} strings
+          .map(LABEL_REGEX_MATCHER.replaceAllIn(_, matcher => partKeyMap(matcher.group(1))))
+          // replace the datetime <<>> strings
+          .map{ pathSpecString =>
+            DATE_REGEX_MATCHER.replaceAllIn(pathSpecString, matcher => {
+              val dateFormatter = new SimpleDateFormat(matcher.group(1))
+              dateFormatter.format(date)
+          })}
+      }
+
       val fileName = hashToString(sharedWindowData.getReadablePartition().partKeyBytes)
 
       val rows = sharedWindowData.getChunkRanges().toIterator.flatMap{ chunkRow =>
