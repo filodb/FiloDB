@@ -1,5 +1,9 @@
 package filodb.downsampler.chunk
 
+import scala.concurrent.{Await, Future}
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration.Duration
+
 import kamon.Kamon
 
 import filodb.core.Instance
@@ -145,9 +149,16 @@ class BatchedWindowProcessor(downsamplerSettings: DownsamplerSettings)
         val rawSchemaId = RecordSchema.schemaID(rawPartData.partitionKey, UnsafeUtils.arayOffset)
         val schema = schemas(rawSchemaId)
         val sharedWindowData = new SharedWindowData(rawPartData, userTimeStart, userTimeEndExclusive, schema)
-        singleWindowProcessors.foreach { processor =>
-          processor.process(rawPartData, userTimeEndExclusive, sharedWindowData)
+        // spawn threads for all processors except the first
+        val futures = singleWindowProcessors.tail.map { processor =>
+          Future[Unit] {
+            processor.process(rawPartData, userTimeEndExclusive, sharedWindowData)
+          }
         }
+        // run the first processor synchronously here
+        singleWindowProcessors.head.process(rawPartData, userTimeEndExclusive, sharedWindowData)
+        // wait on the others to get done
+        futures.foreach(Await.result(_, Duration.Inf))
       }
     } catch {
       case e: Exception =>
