@@ -8,6 +8,9 @@ import net.ceedubs.ficus.Ficus._
 import filodb.coordinator.{FilodbSettings, NodeClusterActor}
 import filodb.core.store.{IngestionConfig, StoreConfig}
 import filodb.downsampler.DownsamplerContext
+import filodb.downsampler.chunk.windowprocessors.ExportRule
+import filodb.prometheus.ast.InstantExpression
+import filodb.prometheus.parse.Parser
 
 
 /**
@@ -70,11 +73,26 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val trace = downsamplerConfig.as[Seq[Map[String, String]]]("trace-filters").map(_.toSeq)
 
-  // TODO(a_theimer): should this be annotated transient?
-  // TODO(a_theimer): move to more appropriate config
-  // TODO(a_theimer): figure out more appropriate type
-  lazy val exportFilters = downsamplerConfig.as[Seq[Seq[Seq[String]]]]("export-filters").map(_.toSeq)
-  lazy val exportStructure = downsamplerConfig.as[Seq[String]]("export-struct")
+  @transient lazy val exportRuleKey = downsamplerConfig.as[Seq[String]]("data-export.key")
+
+  @transient lazy val exportRules = {
+    downsamplerConfig.as[Seq[Config]]("data-export.rules").map{ config =>
+      val key = config.as[Seq[String]]("key")
+      val bucket = config.getString("bucket")
+      val filters = config.getConfig("filters")
+      val includeFilterGroups = filters.as[Seq[Seq[String]]]("included").map{ group =>
+        Parser.parseQuery(s"{${group.mkString(",")}}")
+          .asInstanceOf[InstantExpression].getUnvalidatedColumnFilters()
+      }
+      val excludeFilterGroups = filters.as[Seq[Seq[String]]]("excluded").map{ group =>
+        Parser.parseQuery(s"{${group.mkString(",")}}")
+          .asInstanceOf[InstantExpression].getUnvalidatedColumnFilters()
+      }
+      ExportRule(key, bucket, includeFilterGroups, excludeFilterGroups)
+    }
+  }
+
+  @transient lazy val exportPathSpec = downsamplerConfig.as[Seq[String]]("data-export.path-spec")
 
   /**
     * Two conditions should satisfy for eligibility:

@@ -5,9 +5,15 @@ import java.security.MessageDigest
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType.DoubleColumn
 import filodb.core.metadata.Schemas
+import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSetInfoReader, RawPartData, ReadablePartition}
 import filodb.downsampler.chunk.{BatchedWindowProcessor, DownsamplerSettings, SingleWindowProcessor}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
+
+case class ExportRule(key: Seq[String],
+                      bucket: String,
+                      includeFilterGroups: Seq[Seq[ColumnFilter]],
+                      excludeFilterGroups: Seq[Seq[ColumnFilter]])
 
 /**
  * Exports a window of data to a bucket.
@@ -16,14 +22,8 @@ case class ExportWindowProcessor(schemas: Schemas,
                                  downsamplerSettings: DownsamplerSettings)
   extends SingleWindowProcessor{
 
-  // TODO(a_theimer): probably worth building this into a trie eventually
-  // TODO(a_theimer): rewrite this when better config is setup
-  val rules = downsamplerSettings.exportFilters.map{ rule =>
-    // each size-2 window is a key-value pair
-    val labelValueFilters = rule.head.sliding(2, 2).map(pair => pair.head -> pair.last).toMap
-    val publishBuckets = rule.last
-    (labelValueFilters, publishBuckets)
-  }
+  // TODO(a_theimer): probably worth building this into a trie-based structure eventually
+  val rules = downsamplerSettings.exportRules.toSeq
 
   private def hashToString(bytes: Array[Byte]): String = {
     MessageDigest.getInstance("SHA-256")
@@ -92,6 +92,14 @@ case class ExportWindowProcessor(schemas: Schemas,
     // scalastyle:on
   }
 
+  private def matchAllFilters(filters: Seq[ColumnFilter],
+                              labels: Map[String, String]): Boolean = {
+    filters.forall( filt =>
+      labels.get(filt.column)
+        .exists(value => filt.filter.filterFunc(value))
+    )
+  }
+
   override def process(rawPartData: RawPartData,
                        userEndTime: Long,
                        sharedWindowData: BatchedWindowProcessor#SharedWindowData): Unit = {
@@ -102,29 +110,35 @@ case class ExportWindowProcessor(schemas: Schemas,
       schema.partKeySchema.toStringPairs(rawPartData.partitionKey, UnsafeUtils.arayOffset).toMap
     }
 
-    // find the buckets with matching rules
-    // TODO(a_theimer): this is annoying to read
-    val publishBuckets = rules.filter{ rule =>
-      rule._1.exists{ case (name, value) =>
-        val pkVal = partKeyMap.get(name)
-        pkVal.isEmpty || pkVal.get != value
+    // retrieve the bucket only if this partKey's data should be exported there
+    val bucket = rules.filter{ rule =>
+      downsamplerSettings.exportRuleKey.zipWithIndex.forall{ case (label, i) =>
+        partKeyMap.get(label).contains(rule.key(i))
       }
-    }.flatMap(_._2)
+    }.find{ rule =>
+      lazy val matchAnyIncludeGroup = rule.includeFilterGroups.exists{ group =>
+        matchAllFilters(group, partKeyMap)
+      }
+      val matchAnyExcludeGroup = rule.excludeFilterGroups.exists{ group =>
+        matchAllFilters(group, partKeyMap)
+      }
+      !matchAnyExcludeGroup && (rule.includeFilterGroups.isEmpty || matchAnyIncludeGroup)
+    }.map(_.bucket)
 
-    // get the path to export to
-    val regexMatcher = """\{\{(.*)\}\}""".r
-    val directories = downsamplerSettings.exportStructure.map(
-      regexMatcher.replaceAllIn(_, matcher => partKeyMap(matcher.group(1))))
-    val fileName = hashToString(sharedWindowData.getReadablePartition().partKeyBytes)
+    if (bucket.isDefined) {
+      // get the path to export to
+      val regexMatcher = """\{\{(.*)\}\}""".r
+      val directories = downsamplerSettings.exportPathSpec.map(
+        regexMatcher.replaceAllIn(_, matcher => partKeyMap(matcher.group(1))))
+      val fileName = hashToString(sharedWindowData.getReadablePartition().partKeyBytes)
 
-    val rows = sharedWindowData.getChunkRanges().toIterator.flatMap{ chunkRow =>
-      extractRows(
-        sharedWindowData.getReadablePartition(), chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
-    }
+      val rows = sharedWindowData.getChunkRanges().toIterator.flatMap{ chunkRow =>
+        extractRows(
+          sharedWindowData.getReadablePartition(), chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
+      }
 
-    // TODO(a_theimer): bucket/rows should be interfaces
-    publishBuckets.foreach{ bucket =>
-      export(directories ++ Seq(fileName), bucket, partKeyMap.toSeq, rows)
+      // TODO(a_theimer): bucket/rows should be interfaces
+      export(directories ++ Seq(fileName), bucket.get, partKeyMap.toSeq, rows)
     }
   }
 }
