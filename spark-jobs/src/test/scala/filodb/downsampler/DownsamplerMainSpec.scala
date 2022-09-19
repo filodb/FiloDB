@@ -421,7 +421,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
     sparkConf.set("spark.filodb.downsampler.userTimeOverride", Instant.ofEpochMilli(lastSampleTime).toString)
-    val downsampler = new Downsampler(settings, batchDownsampler, batchedWindowProcessor)
+    val downsampler = new Downsampler(settings, batchedWindowProcessor)
     downsampler.run(sparkConf).close()
   }
 

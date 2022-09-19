@@ -6,7 +6,8 @@ import scala.concurrent.duration.Duration
 
 import kamon.Kamon
 
-import filodb.core.Instance
+import filodb.cassandra.columnstore.CassandraColumnStore
+import filodb.core.{DatasetRef, Instance}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
 import filodb.core.metadata.{Schema, Schemas}
@@ -65,6 +66,19 @@ class BatchedWindowProcessor(downsamplerSettings: DownsamplerSettings)
   @transient lazy val singleWindowProcessors: Seq[SingleWindowProcessor] =
     Seq(new DownsampleWindowProcessor(downsamplerSettings),
             ExportWindowProcessor(schemas, downsamplerSettings))
+
+  @transient lazy private val session =
+    DownsamplerContext.getOrCreateCassandraSession(downsamplerSettings.cassandraConfig)
+
+  /**
+   * Raw dataset from which we downsample data
+   */
+  @transient lazy private[downsampler] val rawDatasetRef = DatasetRef(downsamplerSettings.rawDatasetName)
+
+  @transient lazy private[downsampler] val rawCassandraColStore =
+    new CassandraColumnStore(downsamplerSettings.filodbConfig, DownsamplerContext.readSched, session,
+                             downsampledData = false)(DownsamplerContext.writeSched)
+
 
   /**
    * This class enforces that expensive computations:

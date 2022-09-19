@@ -9,7 +9,6 @@ import org.apache.spark.sql.SparkSession
 
 import filodb.coordinator.KamonShutdownHook
 import filodb.downsampler.DownsamplerContext
-import filodb.downsampler.chunk.windowprocessors.DownsampleWindowProcessor
 
 /**
   *
@@ -44,18 +43,14 @@ import filodb.downsampler.chunk.windowprocessors.DownsampleWindowProcessor
 object DownsamplerMain extends App {
 
   Kamon.init()  // kamon init should be first thing in driver jvm
-  // TODO(a_theimer): organize this
   val settings = new DownsamplerSettings()
-  val batchDownsampler = new DownsampleWindowProcessor(settings)
   val batchedWindowProcessor = new BatchedWindowProcessor(settings)
-
-  val d = new Downsampler(settings, batchDownsampler, batchedWindowProcessor)
+  val d = new Downsampler(settings, batchedWindowProcessor)
   val sparkConf = new SparkConf(loadDefaults = true)
   d.run(sparkConf)
 }
 
 class Downsampler(settings: DownsamplerSettings,
-                  batchDownsampler: DownsampleWindowProcessor,
                   batchedWindowProcessor: BatchedWindowProcessor) extends Serializable {
 
   // Gotcha!! Need separate function (Cannot be within body of a class)
@@ -101,7 +96,7 @@ class Downsampler(settings: DownsamplerSettings,
     DownsamplerContext.dsLogger.info(s"To rerun this job add the following spark config: " +
       s""""spark.filodb.downsampler.userTimeOverride": "${java.time.Instant.ofEpochMilli(userTimeInPeriod)}"""")
 
-    val splits = batchDownsampler.rawCassandraColStore.getScanSplits(batchDownsampler.rawDatasetRef)
+    val splits = batchedWindowProcessor.rawCassandraColStore.getScanSplits(batchedWindowProcessor.rawDatasetRef)
     DownsamplerContext.dsLogger.info(s"Cassandra split size: ${splits.size}. We will have this many spark " +
       s"partitions. Tune num-token-range-splits-for-scans if parallelism is low or latency is high")
 
@@ -112,9 +107,9 @@ class Downsampler(settings: DownsamplerSettings,
       .mapPartitions { splitIter =>
         Kamon.init()
         KamonShutdownHook.registerShutdownHook()
-        val rawDataSource = batchDownsampler.rawCassandraColStore
+        val rawDataSource = batchedWindowProcessor.rawCassandraColStore
         val batchIter = rawDataSource.getChunksByIngestionTimeRangeNoAsync(
-          datasetRef = batchDownsampler.rawDatasetRef,
+          datasetRef = batchedWindowProcessor.rawDatasetRef,
           splits = splitIter, ingestionTimeStart = ingestionTimeStart,
           ingestionTimeEnd = ingestionTimeEnd,
           userTimeStart = userTimeStart, endTimeExclusive = userTimeEndExclusive,
