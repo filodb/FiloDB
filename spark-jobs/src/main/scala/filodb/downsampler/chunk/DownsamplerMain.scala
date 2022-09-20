@@ -106,6 +106,7 @@ class Downsampler(settings: DownsamplerSettings,
 
     KamonShutdownHook.registerShutdownHook()
 
+    import spark.implicits._
     spark.sparkContext
       .makeRDD(splits)
       .mapPartitions { splitIter =>
@@ -122,7 +123,7 @@ class Downsampler(settings: DownsamplerSettings,
           cassFetchSize = settings.cassFetchSize)
         batchIter
       }
-      .foreach { rawPartsBatch =>
+      .flatMap { rawPartsBatch =>
         Kamon.init()
         KamonShutdownHook.registerShutdownHook()
         val readablePartsBatch = rawPartsBatch.map{ rawPart =>
@@ -131,8 +132,19 @@ class Downsampler(settings: DownsamplerSettings,
           new PagedReadablePartition(rawPartSchema, shard = 0, partID = 0, partData = rawPart, minResolutionMs = 1)
         }
         batchDownsampler.downsampleBatch(readablePartsBatch, userTimeStart, userTimeEndExclusive)
-        batchExporter.exportBatch(readablePartsBatch, userTimeStart, userTimeEndExclusive)
+        val rawRows = batchExporter.prepBatchForExport(readablePartsBatch, userTimeStart, userTimeEndExclusive)
+        rawRows.map { row => (
+          row.partKeyMap("_ws_"),
+          row.partKeyMap("_ws_"),
+          row.partKeyMap.toSeq.sortBy(pair => s"${pair._1}=${pair._2}").mkString(","),
+          row.timestamp,
+          row.value,
+          "hello")}
       }
+      .toDF("_workspace", "workspace", "partition", "timestamp", "value", "_partition-only")
+      .write
+      .partitionBy("_workspace", "_partition-only")
+      .csv(settings.exportBucket)
 
     DownsamplerContext.dsLogger.info(s"Chunk Downsampling Driver completed successfully for downsample period " +
       s"$downsamplePeriodStr")

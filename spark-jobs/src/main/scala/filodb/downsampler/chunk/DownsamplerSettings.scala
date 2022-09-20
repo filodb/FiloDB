@@ -74,10 +74,11 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val exportRuleKey = downsamplerConfig.as[Seq[String]]("data-export.key")
 
+  @transient lazy val exportBucket = downsamplerConfig.as[String]("data-export.bucket")
+
   @transient lazy val exportRules = {
     downsamplerConfig.as[Seq[Config]]("data-export.rules").map{ config =>
       val key = config.as[Seq[String]]("key")
-      val bucket = config.getString("bucket")
       val filters = config.getConfig("filters")
       val includeFilterGroups = filters.as[Seq[Seq[String]]]("included").map{ group =>
         Parser.parseQuery(s"{${group.mkString(",")}}")
@@ -87,7 +88,7 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
         Parser.parseQuery(s"{${group.mkString(",")}}")
           .asInstanceOf[InstantExpression].getUnvalidatedColumnFilters()
       }
-      ExportRule(key, bucket, includeFilterGroups, excludeFilterGroups)
+      ExportRule(key, includeFilterGroups, excludeFilterGroups)
     }
   }
 
