@@ -11,8 +11,10 @@ object Utils {
                         istartRow: Int,
                         iendRow: Int)
 
-  // TODO(a_theimer): should be an interface
-  case class ExportRow(partKeyMap: Map[String, String], timestamp: Long, value: Double)
+  case class ExportRow(partKeyMap: Map[String, String],
+                       timestamp: Long,
+                       value: Double,
+                       partitionStrings: Iterator[String])
 
   /**
    * Determine, for each chunk, the range of rows with timestamps inside the time-range

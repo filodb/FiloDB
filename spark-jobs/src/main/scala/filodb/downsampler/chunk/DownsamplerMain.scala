@@ -105,9 +105,7 @@ class Downsampler(settings: DownsamplerSettings,
       s"partitions. Tune num-token-range-splits-for-scans if parallelism is low or latency is high")
 
     KamonShutdownHook.registerShutdownHook()
-
-    import spark.implicits._
-    spark.sparkContext
+    val rdd = spark.sparkContext
       .makeRDD(splits)
       .mapPartitions { splitIter =>
         Kamon.init()
@@ -132,18 +130,12 @@ class Downsampler(settings: DownsamplerSettings,
           new PagedReadablePartition(rawPartSchema, shard = 0, partID = 0, partData = rawPart, minResolutionMs = 1)
         }
         batchDownsampler.downsampleBatch(readablePartsBatch, userTimeStart, userTimeEndExclusive)
-        val rawRows = batchExporter.prepBatchForExport(readablePartsBatch, userTimeStart, userTimeEndExclusive)
-        rawRows.map { row => (
-          row.partKeyMap("_ws_"),
-          row.partKeyMap("_ws_"),
-          row.partKeyMap.toSeq.sortBy(pair => s"${pair._1}=${pair._2}").mkString(","),
-          row.timestamp,
-          row.value,
-          "hello")}
+        batchExporter.getExportRows(readablePartsBatch, userTimeStart, userTimeEndExclusive)
       }
-      .toDF("_workspace", "workspace", "partition", "timestamp", "value", "_partition-only")
+    spark.createDataFrame(rdd, batchExporter.exportSchema)
       .write
-      .partitionBy("_workspace", "_partition-only")
+      .option("header", true)
+      .partitionBy(batchExporter.partitionByCols: _*)
       .csv(settings.exportBucket)
 
     DownsamplerContext.dsLogger.info(s"Chunk Downsampling Driver completed successfully for downsample period " +

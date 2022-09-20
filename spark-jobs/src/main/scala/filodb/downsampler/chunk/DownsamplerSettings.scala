@@ -92,7 +92,8 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
     }
   }
 
-  @transient lazy val exportPathSpec = downsamplerConfig.as[Seq[String]]("data-export.path-spec")
+  @transient lazy val exportPathSpecPairs =
+    downsamplerConfig.as[Seq[String]]("data-export.path-spec").sliding(2, 2).map(seq => (seq.head, seq.last))
 
   /**
    * Two conditions should satisfy for eligibility:
