@@ -51,6 +51,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
     cols
   }
 
+  // Unused, but keeping here for convenience if needed later.
   private def hashToString(bytes: Array[Byte]): String = {
     MessageDigest.getInstance("SHA-256")
       .digest(bytes)
@@ -98,26 +99,6 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
     }
   }
 
-  /**
-   * Export the data to a bucket.
-   * @param path the absolute path of the file to write.
-   * @param bucket the export bucket.
-   * @param partKeyPairs label-value pairs of the partition to export.
-   * @param rows sequence of timestamp/value pairs to export.
-   */
-  private def export(path: Seq[String],
-                     bucket: String,
-                     partKeyPairs: Seq[(String, String)],
-                     rows: Iterator[(Long, Double)]): Unit = {
-    // scalastyle:off
-    println(s"======== exporting to $bucket:${path.mkString("/")}")
-    println(s"partKeyPairs: $partKeyPairs")
-    rows.foreach{ case (timestamp, value) =>
-      println(s"-- $timestamp: $value")
-    }
-    // scalastyle:on
-  }
-
   private def matchAllFilters(filters: Seq[ColumnFilter],
                               labels: Map[String, String]): Boolean = {
     filters.forall( filt =>
@@ -132,26 +113,40 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
     // TODO(a_theimer): use this space to update metrics / logs
     readablePartitions
       .iterator
-      .flatMap(exportPartition(_, userStartTime, userEndTime))
-      .map(presentExportRow(_))
+      .flatMap(getExportDatas(_, userStartTime, userEndTime))
+      .map(exportDataToRow(_))
   }
 
-  private def presentExportRow(exportRow: ExportRow): Row = {
+  private def exportDataToRow(exportData: ExportData): Row = {
     val dataSeq = new mutable.ArrayBuffer[Any](3 + downsamplerSettings.exportPathSpecPairs.size)
     dataSeq.append(
       // TODO(a_theimer): don't sort every time
-      exportRow.partKeyMap.toSeq.sortBy(pair => s"${pair._1}=${pair._2}").mkString(","),
-      exportRow.timestamp,
-      exportRow.value
+      exportData.partKeyMap.toSeq.sortBy(pair => s"${pair._1}=${pair._2}").mkString(","),
+      exportData.timestamp,
+      exportData.value
     )
-    dataSeq.appendAll(downsamplerSettings.exportPathSpecPairs.map(_._2))
+    dataSeq.appendAll(exportData.partitionStrings)
     Row.fromSeq(dataSeq)
   }
 
-  // scalastyle:off
-  private def exportPartition(readablePartition: ReadablePartition,
-                              userStartTime: Long,
-                              userEndTime: Long): Iterator[ExportRow] = {
+  // TODO(a_theimer): this should return an iterator, but that breaks everything
+  private def makePartitionByValues(partKeyMap: Map[String, String], userEndTime: Long): Seq[String] = {
+    // TODO(a_theimer): don't instantiate every call
+    val date = new Date(userEndTime)
+    downsamplerSettings.exportPathSpecPairs.map(_._2)
+      // replace the label {{}} strings
+      .map{LABEL_REGEX_MATCHER.replaceAllIn(_, matcher => partKeyMap(matcher.group(1)))}
+      // replace the datetime <<>> strings
+      .map{ pathSpecString =>
+        DATE_REGEX_MATCHER.replaceAllIn(pathSpecString, matcher => {
+          val dateFormatter = new SimpleDateFormat(matcher.group(1))
+          dateFormatter.format(date)
+        })}
+  }
+
+  private def getExportDatas(readablePartition: ReadablePartition,
+                             userStartTime: Long,
+                             userEndTime: Long): Iterator[ExportData] = {
 
     // get the label-value pairs for this partition
     val partKeyMap = {
@@ -177,27 +172,11 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
     }
 
     if (shouldExport) {
-      // build the path to export to
-      val directories = {
-        val date = new Date(userEndTime)
-        downsamplerSettings.exportPathSpecPairs.map(_._2)
-          // replace the label {{}} strings
-          .map(LABEL_REGEX_MATCHER.replaceAllIn(_, matcher => partKeyMap(matcher.group(1))))
-          // replace the datetime <<>> strings
-          .map{ pathSpecString =>
-            DATE_REGEX_MATCHER.replaceAllIn(pathSpecString, matcher => {
-              val dateFormatter = new SimpleDateFormat(matcher.group(1))
-              dateFormatter.format(date)
-            })}
-      }
-
-//      val fileName = hashToString(readablePartition.partKeyBytes)
-
+      val partitionByValues = makePartitionByValues(partKeyMap, userEndTime)
       getChunkRangeIter(readablePartition, userStartTime, userEndTime).flatMap{ chunkRow =>
-        extractRows(
-          readablePartition, chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
+        extractRows(readablePartition, chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
       }.map{ case (timestamp, value) =>
-        ExportRow(partKeyMap, timestamp, value, directories)
+        ExportData(partKeyMap, timestamp, value, partitionByValues.iterator)
       }
     } else Iterator.empty
   }

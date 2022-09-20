@@ -124,6 +124,7 @@ class Downsampler(settings: DownsamplerSettings,
       .flatMap { rawPartsBatch =>
         Kamon.init()
         KamonShutdownHook.registerShutdownHook()
+        // convert each RawPartData to a ReadablePartition
         val readablePartsBatch = rawPartsBatch.map{ rawPart =>
           val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
           val rawPartSchema = batchDownsampler.schemas(rawSchemaId)
@@ -132,6 +133,7 @@ class Downsampler(settings: DownsamplerSettings,
         batchDownsampler.downsampleBatch(readablePartsBatch, userTimeStart, userTimeEndExclusive)
         batchExporter.getExportRows(readablePartsBatch, userTimeStart, userTimeEndExclusive)
       }
+    // NOTE: toDF(partitionCols: _*) seems buggy
     spark.createDataFrame(rdd, batchExporter.exportSchema)
       .write
       .option("header", true)
