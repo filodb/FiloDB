@@ -25,7 +25,7 @@ import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig, TimeRangeChunkScan}
-import filodb.downsampler.chunk.{BatchDownsampler, Downsampler, DownsamplerSettings}
+import filodb.downsampler.chunk.{BatchDownsampler, BatchExporter, Downsampler, DownsamplerSettings}
 import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
 import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -48,6 +48,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   val queryConfig = QueryConfig(settings.filodbConfig.getConfig("query"))
   val dsIndexJobSettings = new DSIndexJobSettings(settings)
   val batchDownsampler = new BatchDownsampler(settings)
+  val batchExporter = new BatchExporter(settings)
 
   val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8)
   val seriesTagsNaN = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8, "nan_support".utf8 -> "yes".utf8)
@@ -419,7 +420,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
     sparkConf.set("spark.filodb.downsampler.userTimeOverride", Instant.ofEpochMilli(lastSampleTime).toString)
-    val downsampler = new Downsampler(settings, batchDownsampler)
+    val downsampler = new Downsampler(settings, batchDownsampler, batchExporter)
     downsampler.run(sparkConf).close()
   }
 

@@ -2,13 +2,14 @@ package filodb.downsampler.chunk
 
 import java.time.Instant
 import java.time.format.DateTimeFormatter
-
 import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
-
 import filodb.coordinator.KamonShutdownHook
+import filodb.core.binaryrecord2.RecordSchema
+import filodb.core.memstore.PagedReadablePartition
 import filodb.downsampler.DownsamplerContext
+import filodb.memory.format.UnsafeUtils
 
 /**
   *
@@ -45,13 +46,16 @@ object DownsamplerMain extends App {
   Kamon.init()  // kamon init should be first thing in driver jvm
   val settings = new DownsamplerSettings()
   val batchDownsampler = new BatchDownsampler(settings)
+  val batchExporter = new BatchExporter(settings)
 
-  val d = new Downsampler(settings, batchDownsampler)
+  val d = new Downsampler(settings, batchDownsampler, batchExporter)
   val sparkConf = new SparkConf(loadDefaults = true)
   d.run(sparkConf)
 }
 
-class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsampler) extends Serializable {
+class Downsampler(settings: DownsamplerSettings,
+                  batchDownsampler: BatchDownsampler,
+                  batchExporter: BatchExporter) extends Serializable {
 
   // Gotcha!! Need separate function (Cannot be within body of a class)
   // to create a closure for spark to serialize and move to executors.
@@ -121,7 +125,13 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
       .foreach { rawPartsBatch =>
         Kamon.init()
         KamonShutdownHook.registerShutdownHook()
-        batchDownsampler.downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
+        val readablePartsBatch = rawPartsBatch.map{ rawPart =>
+          val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
+          val rawPartSchema = batchDownsampler.schemas(rawSchemaId)
+          new PagedReadablePartition(rawPartSchema, shard = 0, partID = 0, partData = rawPart, minResolutionMs = 1)
+        }
+        batchDownsampler.downsampleBatch(readablePartsBatch, userTimeStart, userTimeEndExclusive)
+        batchExporter.exportBatch(readablePartsBatch, userTimeStart, userTimeEndExclusive)
       }
 
     DownsamplerContext.dsLogger.info(s"Chunk Downsampling Driver completed successfully for downsample period " +

@@ -15,7 +15,7 @@ import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
 import filodb.core.downsample._
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
-import filodb.core.store.{AllChunkScan, ChunkSet, RawPartData, ReadablePartition}
+import filodb.core.store.{AllChunkScan, ChunkSet, ReadablePartition}
 import filodb.downsampler.DownsamplerContext
 import filodb.memory.{BinaryRegionLarge, MemFactory}
 import filodb.memory.format.UnsafeUtils
@@ -115,10 +115,10 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
     * Downsample batch of raw partitions, and store downsampled chunks to cassandra
     */
   // scalastyle:off method.length
-  def downsampleBatch(rawPartsBatch: Seq[RawPartData],
+  def downsampleBatch(readablePartsBatch: Seq[ReadablePartition],
                       userTimeStart: Long,
                       userTimeEndExclusive: Long): Unit = {
-    DownsamplerContext.dsLogger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
+    DownsamplerContext.dsLogger.info(s"Starting to downsample batchSize=${readablePartsBatch.size} partitions " +
       s"rawDataset=${settings.rawDatasetName} for " +
       s"userTimeStart=${java.time.Instant.ofEpochMilli(userTimeStart)} " +
       s"userTimeEndExclusive=${java.time.Instant.ofEpochMilli(userTimeEndExclusive)}")
@@ -135,16 +135,16 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
     var numDsChunks = 0
     val dsRecordBuilder = new RecordBuilder(MemFactory.onHeapFactory)
     try {
-      numPartitionsEncountered.increment(rawPartsBatch.length)
-      rawPartsBatch.foreach { rawPart =>
-        val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
+      numPartitionsEncountered.increment(readablePartsBatch.length)
+      readablePartsBatch.foreach { part =>
+        val rawSchemaId = RecordSchema.schemaID(part.partKeyBytes, UnsafeUtils.arayOffset)
         val schema = schemas(rawSchemaId)
         if (schema != Schemas.UnknownSchema) {
-          val pkPairs = schema.partKeySchema.toStringPairs(rawPart.partitionKey, UnsafeUtils.arayOffset)
+          val pkPairs = schema.partKeySchema.toStringPairs(part.partKeyBytes, UnsafeUtils.arayOffset)
           if (settings.isEligibleForDownsample(pkPairs)) {
             try {
               val shouldTrace = settings.shouldTrace(pkPairs)
-              downsamplePart(offHeapMem, rawPart, pagedPartsToFree, downsampledPartsToFree,
+              downsamplePart(offHeapMem, part, pagedPartsToFree, downsampledPartsToFree,
                 downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder, shouldTrace)
               numPartitionsCompleted.increment()
             } catch { case e: Exception =>
@@ -167,12 +167,12 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
     } finally {
       downsampleBatchLatency.record(System.currentTimeMillis() - startedAt)
       offHeapMem.free()   // free offheap mem
-      pagedPartsToFree.clear()
       downsampledPartsToFree.clear()
     }
     numBatchesCompleted.increment()
     val endedAt = System.currentTimeMillis()
-    DownsamplerContext.dsLogger.info(s"Finished iterating through and downsampling batchSize=${rawPartsBatch.size} " +
+    DownsamplerContext.dsLogger.info(
+      s"Finished iterating through and downsampling batchSize=${readablePartsBatch.size} " +
       s"partitions in current executor timeTakenMs=${endedAt-startedAt} numDsChunks=$numDsChunks")
   }
 
@@ -190,7 +190,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
     */
   // scalastyle:off parameter.number
   private def downsamplePart(offHeapMem: OffHeapMemory,
-                             rawPart: RawPartData,
+                             readablePart: ReadablePartition,
                              pagedPartsToFree: ArrayBuffer[PagedReadablePartition],
                              downsampledPartsToFree: ArrayBuffer[TimeSeriesPartition],
                              downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]],
@@ -199,19 +199,18 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
                              dsRecordBuilder: RecordBuilder,
                              shouldTrace: Boolean) = {
 
-    val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
+    val rawSchemaId = RecordSchema.schemaID(readablePart.partKeyBytes, UnsafeUtils.arayOffset)
     val rawPartSchema = schemas(rawSchemaId)
     if (rawPartSchema == Schemas.UnknownSchema) throw UnknownSchemaQueryErr(rawSchemaId)
     rawPartSchema.downsample match {
       case Some(downsampleSchema) =>
-        val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0, rawPart, 1)
-        DownsamplerContext.dsLogger.debug(s"Downsampling partition ${rawReadablePart.stringPartition}")
+        DownsamplerContext.dsLogger.debug(s"Downsampling partition ${readablePart.stringPartition}")
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
         val periodMarker = downsamplePeriodMarkersByRawSchemaId(rawSchemaId)
         val shardInfo = TimeSeriesShardInfo(-1, shardStats, offHeapMem.bufferPools, offHeapMem.nativeMemoryManager)
 
-        val (_, partKeyPtr, _) = BinaryRegionLarge.allocateAndCopy(rawReadablePart.partKeyBase,
-                                                   rawReadablePart.partKeyOffset,
+        val (_, partKeyPtr, _) = BinaryRegionLarge.allocateAndCopy(readablePart.partKeyBase,
+                                                   readablePart.partKeyOffset,
                                                    offHeapMem.nativeMemoryManager)
 
         // update schema of the partition key to downsample schema
@@ -227,10 +226,9 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
         }.toMap
 
         val downsamplePartStart = System.currentTimeMillis()
-        downsampleChunks(offHeapMem, rawReadablePart, downsamplers, periodMarker, downsampledParts,
+        downsampleChunks(offHeapMem, readablePart, downsamplers, periodMarker, downsampledParts,
                          userTimeStart, userTimeEndExclusive, dsRecordBuilder, shouldTrace)
 
-        pagedPartsToFree += rawReadablePart
         downsampledPartsToFree ++= downsampledParts.values
 
         downsampledParts.foreach { case (res, dsPartition) =>
@@ -242,7 +240,8 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
       case None =>
         numPartitionsNoDownsampleSchema.increment()
         DownsamplerContext.dsLogger.debug(s"Skipping downsampling of partition " +
-          s"${rawPartSchema.partKeySchema.stringify(rawPart.partitionKey)} which does not have a downsample schema")
+          s"${rawPartSchema.partKeySchema.stringify(readablePart.partKeyBytes)} +" +
+          s"which does not have a downsample schema")
     }
   }
 

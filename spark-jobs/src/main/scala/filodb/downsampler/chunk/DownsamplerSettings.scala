@@ -8,12 +8,14 @@ import net.ceedubs.ficus.Ficus._
 import filodb.coordinator.{FilodbSettings, NodeClusterActor}
 import filodb.core.store.{IngestionConfig, StoreConfig}
 import filodb.downsampler.DownsamplerContext
+import filodb.prometheus.ast.InstantExpression
+import filodb.prometheus.parse.Parser
 
 
 /**
-  * DownsamplerSettings is always used in the context of an object so that it need not be serialized to a spark executor
-  * from the spark application driver.
-  */
+ * DownsamplerSettings is always used in the context of an object so that it need not be serialized to a spark executor
+ * from the spark application driver.
+ */
 class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializable {
 
   @transient lazy val filodbSettings = new FilodbSettings(conf)
@@ -70,11 +72,32 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val trace = downsamplerConfig.as[Seq[Map[String, String]]]("trace-filters").map(_.toSeq)
 
+  @transient lazy val exportRuleKey = downsamplerConfig.as[Seq[String]]("data-export.key")
+
+  @transient lazy val exportRules = {
+    downsamplerConfig.as[Seq[Config]]("data-export.rules").map{ config =>
+      val key = config.as[Seq[String]]("key")
+      val bucket = config.getString("bucket")
+      val filters = config.getConfig("filters")
+      val includeFilterGroups = filters.as[Seq[Seq[String]]]("included").map{ group =>
+        Parser.parseQuery(s"{${group.mkString(",")}}")
+          .asInstanceOf[InstantExpression].getUnvalidatedColumnFilters()
+      }
+      val excludeFilterGroups = filters.as[Seq[Seq[String]]]("excluded").map{ group =>
+        Parser.parseQuery(s"{${group.mkString(",")}}")
+          .asInstanceOf[InstantExpression].getUnvalidatedColumnFilters()
+      }
+      ExportRule(key, bucket, includeFilterGroups, excludeFilterGroups)
+    }
+  }
+
+  @transient lazy val exportPathSpec = downsamplerConfig.as[Seq[String]]("data-export.path-spec")
+
   /**
-    * Two conditions should satisfy for eligibility:
-    * (a) If allow list is nonEmpty partKey should match a filter in the allow list.
-    * (b) It should not match any filter in block
-    */
+   * Two conditions should satisfy for eligibility:
+   * (a) If allow list is nonEmpty partKey should match a filter in the allow list.
+   * (b) It should not match any filter in block
+   */
   def isEligibleForDownsample(pkPairs: Seq[(String, String)]): Boolean = {
     if (allow.nonEmpty && !allow.exists(w => w.forall(pkPairs.contains))) {
       false
@@ -86,6 +109,4 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
   def shouldTrace(pkPairs: Seq[(String, String)]): Boolean = {
     trace.exists(w => w.forall(pkPairs.contains))
   }
-
 }
-
