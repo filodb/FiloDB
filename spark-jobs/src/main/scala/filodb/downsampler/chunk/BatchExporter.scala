@@ -126,8 +126,18 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
     // TODO(a_theimer): use this space to update metrics / logs
     readablePartitions
       .iterator
-      .flatMap(getExportDatas(_, userStartTime, userEndTime))
-      .map(exportDataToRow(_))
+      .map { part =>
+        // pair each partition with a map of its label-value pairs
+        val partKeyMap = {
+          val rawSchemaId = RecordSchema.schemaID(part.partKeyBytes, UnsafeUtils.arayOffset)
+          val schema = schemas(rawSchemaId)
+          schema.partKeySchema.toStringPairs(part.partKeyBytes, UnsafeUtils.arayOffset).toMap
+        }
+        (part, partKeyMap)
+      }
+      .filter { case (part, partKeyMap) => shouldExport(partKeyMap)}
+      .flatMap {case (part, partKeyMap) => getExportDatas(part, partKeyMap, userStartTime, userEndTime)}
+      .map(exportDataToRow)
   }
 
   /**
@@ -164,22 +174,8 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
         })}
   }
 
-  /**
-   * Returns data about a single row to export.
-   * exportDataToRow will convert these into Spark Rows that conform to this.exportSchema.
-   */
-  private def getExportDatas(readablePartition: ReadablePartition,
-                             userStartTime: Long,
-                             userEndTime: Long): Iterator[ExportRowData] = {
-
-    // get the label-value pairs for this partition
-    val partKeyMap = {
-      val rawSchemaId = RecordSchema.schemaID(readablePartition.partKeyBytes, UnsafeUtils.arayOffset)
-      val schema = schemas(rawSchemaId)
-      schema.partKeySchema.toStringPairs(readablePartition.partKeyBytes, UnsafeUtils.arayOffset).toMap
-    }
-
-    val shouldExport = rules.find { rule =>
+  private def shouldExport(partKeyMap: Map[String, String]): Boolean = {
+    rules.find { rule =>
       // find the rule with a key that matches these label-values
       downsamplerSettings.exportRuleKey.zipWithIndex.forall { case (label, i) =>
         partKeyMap.get(label).contains(rule.key(i))
@@ -194,15 +190,22 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
       }
       !matchAnyExcludeGroup && (rule.includeFilterGroups.isEmpty || matchAnyIncludeGroup)
     }
+  }
 
-    if (shouldExport) {
-      val partKeyString = partKeyMap.map(pair => s"${pair._1}=${pair._2}").toSeq.sorted.mkString(",")
-      val partitionByValues = makePartitionByValues(partKeyMap, userEndTime)
-      getChunkRangeIter(readablePartition, userStartTime, userEndTime).flatMap{ chunkRow =>
-        getTimeValuePairs(readablePartition, chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
-      }.map{ case (timestamp, value) =>
-        ExportRowData(partKeyMap, partKeyString, timestamp, value, partitionByValues.iterator)
-      }
-    } else Iterator.empty
+  /**
+   * Returns data about a single row to export.
+   * exportDataToRow will convert these into Spark Rows that conform to this.exportSchema.
+   */
+  private def getExportDatas(readablePartition: ReadablePartition,
+                             partKeyMap: Map[String, String],
+                             userStartTime: Long,
+                             userEndTime: Long): Iterator[ExportRowData] = {
+    val partKeyString = partKeyMap.map(pair => s"${pair._1}=${pair._2}").toSeq.sorted.mkString(",")
+    val partitionByValues = makePartitionByValues(partKeyMap, userEndTime)
+    getChunkRangeIter(readablePartition, userStartTime, userEndTime).flatMap{ chunkRow =>
+      getTimeValuePairs(readablePartition, chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
+    }.map{ case (timestamp, value) =>
+      ExportRowData(partKeyMap, partKeyString, timestamp, value, partitionByValues.iterator)
+    }
   }
 }
