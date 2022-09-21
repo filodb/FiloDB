@@ -21,6 +21,11 @@ case class ExportRule(key: Seq[String],
                       includeFilterGroups: Seq[Seq[ColumnFilter]],
                       excludeFilterGroups: Seq[Seq[ColumnFilter]])
 
+case class ExportRowData(partKeyMap: Map[String, String],
+                         timestamp: Long,
+                         value: Double,
+                         partitionStrings: Iterator[String])
+
 object BatchExporter {
   val LABEL_REGEX_MATCHER = """\{\{(.*)\}\}""".r
   val DATE_REGEX_MATCHER = """<<(.*)>>""".r
@@ -42,6 +47,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
       StructField("timestamp", LongType),
       StructField("value", DoubleType)
     )
+    // append all partitioning columns as strings
     fields.appendAll(downsamplerSettings.exportPathSpecPairs.map(f => StructField(f._1, StringType)))
     StructType(fields)
   }
@@ -99,6 +105,9 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
     }
   }
 
+  /**
+   * Returns true iff the label map matches all filters.
+   */
   private def matchAllFilters(filters: Seq[ColumnFilter],
                               labels: Map[String, String]): Boolean = {
     filters.forall( filt =>
@@ -107,6 +116,9 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
     )
   }
 
+  /**
+   * Returns the Spark Rows to be exported.
+   */
   def getExportRows(readablePartitions: Seq[ReadablePartition],
                     userStartTime: Long,
                     userEndTime: Long): Iterator[Row] = {
@@ -117,7 +129,11 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
       .map(exportDataToRow(_))
   }
 
-  private def exportDataToRow(exportData: ExportData): Row = {
+  /**
+   * Converts an ExportData to a Spark Row.
+   * The result Row *must* match this.exportSchema.
+   */
+  private def exportDataToRow(exportData: ExportRowData): Row = {
     val dataSeq = new mutable.ArrayBuffer[Any](3 + downsamplerSettings.exportPathSpecPairs.size)
     dataSeq.append(
       // TODO(a_theimer): don't sort every time
@@ -130,6 +146,10 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
   }
 
   // TODO(a_theimer): this should return an iterator, but that breaks everything
+  /**
+   * Returns the column values used to partition the data.
+   * Value order should match the order of this.partitionByCols.
+   */
   private def makePartitionByValues(partKeyMap: Map[String, String], userEndTime: Long): Seq[String] = {
     // TODO(a_theimer): don't instantiate every call
     val date = new Date(userEndTime)
@@ -144,9 +164,13 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
         })}
   }
 
+  /**
+   * Returns data about a single row to export.
+   * exportDataToRow will convert these into Spark Rows that conform to this.exportSchema.
+   */
   private def getExportDatas(readablePartition: ReadablePartition,
                              userStartTime: Long,
-                             userEndTime: Long): Iterator[ExportData] = {
+                             userEndTime: Long): Iterator[ExportRowData] = {
 
     // get the label-value pairs for this partition
     val partKeyMap = {
@@ -176,7 +200,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
       getChunkRangeIter(readablePartition, userStartTime, userEndTime).flatMap{ chunkRow =>
         extractRows(readablePartition, chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
       }.map{ case (timestamp, value) =>
-        ExportData(partKeyMap, timestamp, value, partitionByValues.iterator)
+        ExportRowData(partKeyMap, timestamp, value, partitionByValues.iterator)
       }
     } else Iterator.empty
   }

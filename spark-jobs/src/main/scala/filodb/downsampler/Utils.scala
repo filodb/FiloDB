@@ -11,11 +11,6 @@ object Utils {
                         istartRow: Int,
                         iendRow: Int)
 
-  case class ExportData(partKeyMap: Map[String, String],
-                        timestamp: Long,
-                        value: Double,
-                        partitionStrings: Iterator[String])
-
   /**
    * Determine, for each chunk, the range of rows with timestamps inside the time-range
    *   given by userTimeStart and userTimeEndExclusive.
