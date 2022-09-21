@@ -39,7 +39,6 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
 
   @transient lazy private[downsampler] val schemas = Schemas.fromConfig(downsamplerSettings.filodbConfig).get
 
-  // TODO(a_theimer): probably worth building this into a trie-based structure eventually
   val rules = downsamplerSettings.exportRules
   val exportSchema = {
     val fields = new mutable.ArrayBuffer[StructField](3 + downsamplerSettings.exportPathSpecPairs.size)
@@ -160,13 +159,12 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
    * Returns the column values used to partition the data.
    * Value order should match the order of this.partitionByCols.
    */
-  private def makePartitionByValues(partKeyMap: Map[String, String], userEndTime: Long): Seq[String] = {
-    // TODO(a_theimer): don't instantiate every call
+  def getPartitionByValues(partKeyMap: Map[String, String], userEndTime: Long): Seq[String] = {
     val date = new Date(userEndTime)
     downsamplerSettings.exportPathSpecPairs.map(_._2)
-      // replace the label {{}} strings
+      // replace the {{}} strings with labels
       .map{LABEL_REGEX_MATCHER.replaceAllIn(_, matcher => partKeyMap(matcher.group(1)))}
-      // replace the datetime <<>> strings
+      // replace the <<>> strings with dates
       .map{ pathSpecString =>
         DATE_REGEX_MATCHER.replaceAllIn(pathSpecString, matcher => {
           val dateFormatter = new SimpleDateFormat(matcher.group(1))
@@ -174,7 +172,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
         })}
   }
 
-  private def shouldExport(partKeyMap: Map[String, String]): Boolean = {
+  def shouldExport(partKeyMap: Map[String, String]): Boolean = {
     rules.find { rule =>
       // find the rule with a key that matches these label-values
       downsamplerSettings.exportRuleKey.zipWithIndex.forall { case (label, i) =>
@@ -201,7 +199,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
                              userStartTime: Long,
                              userEndTime: Long): Iterator[ExportRowData] = {
     val partKeyString = partKeyMap.map(pair => s"${pair._1}=${pair._2}").toSeq.sorted.mkString(",")
-    val partitionByValues = makePartitionByValues(partKeyMap, userEndTime)
+    val partitionByValues = getPartitionByValues(partKeyMap, userEndTime)
     getChunkRangeIter(readablePartition, userStartTime, userEndTime).flatMap{ chunkRow =>
       getTimeValuePairs(readablePartition, chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
     }.map{ case (timestamp, value) =>
