@@ -10,6 +10,17 @@ import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
 import filodb.downsampler.DownsamplerContext
 import filodb.memory.format.UnsafeUtils
+import org.apache.spark.internal.io.HadoopMapReduceCommitProtocol
+
+
+/**
+ * When provided as Spark's spark.sql.sources.commitProtocolClass config, file names
+ *   will be written as "part-######-<overwrite-string>-c###". TODO(a_theimer)
+ * Credit: https://www.waitingforcode.com/apache-spark-sql/idempotent-file-generation-apache-spark-sql/read
+ */
+class IdempotentCommitProtocol(jobId: String, path: String,
+                               dynamicPartitionOverwrite: Boolean = false)
+  extends HadoopMapReduceCommitProtocol(jobId = "data", path, dynamicPartitionOverwrite)
 
 /**
   *
@@ -66,6 +77,8 @@ class Downsampler(settings: DownsamplerSettings,
 
     val spark = SparkSession.builder()
       .appName("FiloDBDownsampler")
+      .config("spark.sql.sources.commitProtocolClass",  // enables idempotent runs
+              "filodb.downsampler.chunk.IdempotentCommitProtocol")
       .config(sparkConf)
       .getOrCreate()
 
