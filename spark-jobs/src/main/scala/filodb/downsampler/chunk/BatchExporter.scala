@@ -85,10 +85,10 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
    * @param irowStart the index of the first row to include in the result.
    * @param irowEnd the index of the final row to include in the result (exclusive).
    */
-  private def extractRows(partition: ReadablePartition,
-                          chunkReader: ChunkSetInfoReader,
-                          irowStart: Int,
-                          irowEnd: Int): Iterator[(Long, Double)] = {
+  private def getTimeValuePairs(partition: ReadablePartition,
+                                chunkReader: ChunkSetInfoReader,
+                                irowStart: Int,
+                                irowEnd: Int): Iterator[(Long, Double)] = {
     val timestampCol = 0  // FIXME: need a more dynamic (but efficient) solution
     val columns = partition.schema.data.columns
     val valueCol = columns.indexWhere(_.name == partition.schema.data.valueColName)
@@ -199,7 +199,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
       val partKeyString = partKeyMap.toSeq.sortBy(pair => s"${pair._1}=${pair._2}").mkString(",")
       val partitionByValues = makePartitionByValues(partKeyMap, userEndTime)
       getChunkRangeIter(readablePartition, userStartTime, userEndTime).flatMap{ chunkRow =>
-        extractRows(readablePartition, chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
+        getTimeValuePairs(readablePartition, chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
       }.map{ case (timestamp, value) =>
         ExportRowData(partKeyMap, partKeyString, timestamp, value, partitionByValues.iterator)
       }

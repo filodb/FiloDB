@@ -146,6 +146,7 @@ class Downsampler(settings: DownsamplerSettings,
         batchDownsampler.downsampleBatch(readablePartsBatch, userTimeStart, userTimeEndExclusive)
         batchExporter.getExportRows(readablePartsBatch, userTimeStart, userTimeEndExclusive)
       }
+    // TODO(a_theimer): which save mode?
     // NOTE: toDF(partitionCols: _*) seems buggy
     spark.createDataFrame(rdd, batchExporter.exportSchema)
       .write
