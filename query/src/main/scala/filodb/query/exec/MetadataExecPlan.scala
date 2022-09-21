@@ -41,12 +41,10 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
-    val taskOfResults = childResponses.map {
-      case (QueryResult(_, _, result, _, _, _), _) => result
-    }.toListL.map { resp =>
+    val taskOfResults = childResponses.map(_._1.result).toListL.map { resp =>
       val metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
-      resp.filter(!_.isEmpty).foreach { rv =>
-        metadataResult ++= rv.head.rows.map { rowReader =>
+      resp.filter(_.nonEmpty).foreach { rv =>
+        metadataResult ++= rv.head.rows().map { rowReader =>
           val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
           rv.head match {
             case srv: SerializedRangeVector =>
@@ -100,9 +98,7 @@ final case class TsCardReduceExec(queryContext: QueryContext,
   override protected def compose(childResponses: Observable[(QueryResult, Int)],
                                  firstSchema: Task[ResultSchema],
                                  querySession: QuerySession): Observable[RangeVector] = {
-    val taskOfResults = childResponses.map {
-      case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
-    }.flatten
+    val taskOfResults = childResponses.flatMap(res => Observable.fromIterable(res._1.result))
       .foldLeftL(new mutable.HashMap[ZeroCopyUTF8String, CardCounts])(mapFold)
       .map{ aggMap =>
         val it = aggMap.toSeq.sortBy(-_._2.total).map{ case (group, counts) =>
@@ -201,9 +197,9 @@ final case class LabelNamesDistConcatExec(queryContext: QueryContext,
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
-    childResponses.map {
-      case (QueryResult(_, _, result, _, _, _), _) => result
-    }.filter(s => s.nonEmpty && s.head.numRows.getOrElse(1) > 0).head.map(_.head)
+    childResponses.map(_._1.result)
+                  .filter(s => s.nonEmpty && s.head.numRows.getOrElse(1) > 0)
+                  .head.map(_.head)
   }
 }
 
@@ -244,9 +240,8 @@ final case class LabelCardinalityReduceExec(queryContext: QueryContext,
                                  firstSchema: Task[ResultSchema],
                                  querySession: QuerySession): Observable[RangeVector] = {
       qLogger.debug(s"LabelCardinalityDistConcatExec: Concatenating results")
-      val taskOfResults: Task[Observable[RangeVector]] = childResponses.map {
-        case (QueryResult(_, _, result, _, _, _), _) => result
-      }.filter(!_.isEmpty)
+      val taskOfResults: Task[Observable[RangeVector]] = childResponses.map(_._1.result)
+        .filter(_.nonEmpty)
         .foldLeftL(MutableMap.empty[RangeVectorKey, MutableMap[ZeroCopyUTF8String, CpcSketch]])
       { case (metadataResult, rv) =>
           val rangeVector = rv.head

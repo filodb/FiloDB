@@ -17,9 +17,7 @@ trait DistConcatExec extends NonLeafExecPlan {
   protected def compose(childResponses: Observable[(QueryResult, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
-    childResponses.flatMap {
-      case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
-    }
+    childResponses.flatMap(res => Observable.fromIterable(res._1.result))
   }
 }
 

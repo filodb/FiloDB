@@ -5,6 +5,7 @@ import monix.eval.Task
 import monix.reactive.Observable
 import spire.syntax.cfor._
 
+import filodb.core.memstore.SchemaMismatch
 import filodb.core.query._
 import filodb.memory.format.ZeroCopyUTF8String
 import filodb.query._
@@ -23,12 +24,21 @@ trait ReduceAggregateExec extends NonLeafExecPlan {
 
   protected def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
+  /**
+   * Requiring strict result schema match for Aggregation
+   */
+  override def reduceSchemas(r1: ResultSchema, r2: ResultSchema): ResultSchema = {
+    if (r1.isEmpty) r2
+    else if (r2.isEmpty) r1
+    else if (r1 != r2)  {
+      throw SchemaMismatch(r1.toString, r2.toString)
+    } else r1
+  }
+
   protected def compose(childResponses: Observable[(QueryResult, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
-    val results = childResponses.flatMap {
-        case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
-    }
+    val results = childResponses.flatMap(res => Observable.fromIterable(res._1.result))
 
     val task = for { schema <- firstSchema}
                yield {

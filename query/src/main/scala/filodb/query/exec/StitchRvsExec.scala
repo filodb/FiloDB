@@ -107,9 +107,7 @@ final case class StitchRvsExec(queryContext: QueryContext,
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"StitchRvsExec: Stitching results:")
-    val stitched = childResponses.map {
-      case (QueryResult(_, _, result, _, _, _), _) => result
-    }.toListL.map(_.flatten).map { srvs =>
+    val stitched = childResponses.map(_._1.result).toListL.map(_.flatten).map { srvs =>
       val groups = srvs.groupBy(_.key.labelValues)
       groups.mapValues { toMerge =>
         val rows = StitchRvsExec.merge(toMerge.map(_.rows()), outputRvRange)
