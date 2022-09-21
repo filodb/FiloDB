@@ -4,7 +4,7 @@ import java.time.Instant
 import java.time.format.DateTimeFormatter
 import kamon.Kamon
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{SaveMode, SparkSession}
 import filodb.coordinator.KamonShutdownHook
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
@@ -146,10 +146,10 @@ class Downsampler(settings: DownsamplerSettings,
         batchDownsampler.downsampleBatch(readablePartsBatch, userTimeStart, userTimeEndExclusive)
         batchExporter.getExportRows(readablePartsBatch, userTimeStart, userTimeEndExclusive)
       }
-    // TODO(a_theimer): which save mode?
     // NOTE: toDF(partitionCols: _*) seems buggy
     spark.createDataFrame(rdd, batchExporter.exportSchema)
       .write
+      .mode(SaveMode.Overwrite)
       .option("header", true)
       .partitionBy(batchExporter.partitionByCols: _*)
       .csv(settings.exportBucket)
