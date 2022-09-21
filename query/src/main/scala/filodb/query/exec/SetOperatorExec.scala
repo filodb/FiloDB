@@ -50,6 +50,10 @@ final case class SetOperatorExec(queryContext: QueryContext,
 
   protected def args: String = s"binaryOp=$binaryOp, on=$on, ignoring=$ignoring"
 
+  protected def composeStreaming(childResponses: Observable[(Observable[RangeVector], Int)],
+                                 schemas: Observable[(ResultSchema, Int)],
+                                 querySession: QuerySession): Observable[RangeVector] = ???
+
   protected[exec] def compose(childResponses: Observable[(QueryResult, Int)],
                               firstSchema: Task[ResultSchema],
                               querySession: QuerySession): Observable[RangeVector] = {

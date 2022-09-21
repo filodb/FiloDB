@@ -6,6 +6,7 @@ import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
+import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -21,7 +22,7 @@ import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSer
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, TimestampColumn}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.memory.MemFactory
-import filodb.query.{QueryResponse, QueryResult}
+import filodb.query.{QueryResponse, QueryResult, StrQueryResponse}
 
 object SplitLocalPartitionDistConcatExecSpec {
   val dummyDispatcher = new PlanDispatcher {
@@ -31,6 +32,9 @@ object SplitLocalPartitionDistConcatExecSpec {
     override def clusterName: String = ???
 
     override def isLocalCall: Boolean = ???
+
+    override def dispatchStreaming(plan: ExecPlanWithClientParams,
+                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StrQueryResponse] = ???
   }
 
   val dsRef = DatasetRef("raw-metrics")

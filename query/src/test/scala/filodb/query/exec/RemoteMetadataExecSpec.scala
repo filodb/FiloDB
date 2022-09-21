@@ -3,6 +3,7 @@ package filodb.query.exec
 import com.softwaremill.sttp.{Response, StatusCodes, SttpBackend}
 import com.softwaremill.sttp.testing.SttpBackendStub
 import com.typesafe.config.ConfigFactory
+
 import filodb.core.MetricsTestData._
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
@@ -22,12 +23,13 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
+
 import filodb.memory.format.ZeroCopyUTF8String._
-
-
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Future
 import scala.concurrent.duration._
+
+import monix.reactive.Observable
 
 class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
 
@@ -108,6 +110,11 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
     override def dispatch(plan: ExecPlanWithClientParams, source: ChunkSource)
                          (implicit sched: Scheduler): Task[QueryResponse] = {
       plan.execPlan.execute(memStore, querySession)(sched)
+    }
+
+    override def dispatchStreaming(plan: ExecPlanWithClientParams,
+                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StrQueryResponse] = {
+      plan.execPlan.executeStreaming(memStore, querySession)(sched)
     }
   }
 

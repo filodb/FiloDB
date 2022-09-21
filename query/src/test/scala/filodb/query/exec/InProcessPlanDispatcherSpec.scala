@@ -1,15 +1,19 @@
 package filodb.query.exec
 
 import java.util.concurrent.{Executors, TimeUnit}
+
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
+
 import com.typesafe.config.{Config, ConfigFactory}
 import monix.eval.Task
 import monix.execution.Scheduler
+import monix.reactive.Observable
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
+
 import filodb.core.MetricsTestData.{builder, timeseriesDataset, timeseriesSchema}
 import filodb.core.TestData
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
@@ -216,4 +220,8 @@ case class DummyDispatcher(memStore: TimeSeriesMemStore, querySession: QuerySess
   override def clusterName: String = ???
 
   override def isLocalCall: Boolean = ???
+  override def dispatchStreaming(plan: ExecPlanWithClientParams,
+                                 source: ChunkSource)(implicit sched: Scheduler): Observable[StrQueryResponse] = {
+    plan.execPlan.executeStreaming(memStore, querySession)
+  }
 }

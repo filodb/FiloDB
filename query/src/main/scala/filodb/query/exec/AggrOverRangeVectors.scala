@@ -35,23 +35,37 @@ trait ReduceAggregateExec extends NonLeafExecPlan {
     } else r1
   }
 
+  protected def composeStreaming(childResponses: Observable[(Observable[RangeVector], Int)],
+                                 schemas: Observable[(ResultSchema, Int)],
+                                 querySession: QuerySession): Observable[RangeVector] = {
+    val firstSchema = schemas.map(_._1).firstOptionL.map(_.getOrElse(ResultSchema.empty))
+    val results = childResponses.flatMap(_._1)
+    reduce(results, firstSchema, querySession)
+  }
+
   protected def compose(childResponses: Observable[(QueryResult, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     val results = childResponses.flatMap(res => Observable.fromIterable(res._1.result))
+    reduce(results, firstSchema, querySession)
+  }
 
+  private def reduce(results: Observable[RangeVector],
+                     firstSchema: Task[ResultSchema],
+                     querySession: QuerySession) = {
     val task = for { schema <- firstSchema}
-               yield {
-                 // For absent function schema can be empty
-                 if (schema == ResultSchema.empty) Observable.empty
-                 else {
-                   val aggregator = RowAggregator(aggrOp, aggrParams, schema)
-                   RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key,
-                     querySession.qContext.plannerParams.groupByCardLimit, queryContext)
-                 }
-               }
+      yield {
+        // For absent function schema can be empty
+        if (schema == ResultSchema.empty) Observable.empty
+        else {
+          val aggregator = RowAggregator(aggrOp, aggrParams, schema)
+          RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key,
+            querySession.qContext.plannerParams.groupByCardLimit, queryContext)
+        }
+      }
     Observable.fromTask(task).flatten
   }
+
 }
 
 /**

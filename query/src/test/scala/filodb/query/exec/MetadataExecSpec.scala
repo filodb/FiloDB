@@ -2,13 +2,16 @@ package filodb.query.exec
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
+
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
+import monix.reactive.Observable
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
+
 import filodb.core.MetricsTestData._
 import filodb.core.TestData
 import filodb.core.binaryrecord2.BinaryRecordRowReader
@@ -104,6 +107,9 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     override def clusterName: String = ???
 
     override def isLocalCall: Boolean = ???
+
+    override def dispatchStreaming(plan: ExecPlanWithClientParams,
+                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StrQueryResponse] = ???
   }
 
   val executeDispatcher = new PlanDispatcher {
@@ -113,6 +119,9 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
                          (implicit sched: Scheduler): Task[QueryResponse] = {
       plan.execPlan.execute(memStore, querySession)(sched)
     }
+
+    override def dispatchStreaming(plan: ExecPlanWithClientParams,
+                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StrQueryResponse] = ???
   }
 
   it ("should read the job names from timeseriesindex matching the columnfilters") {

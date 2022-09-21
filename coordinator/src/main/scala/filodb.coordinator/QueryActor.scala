@@ -140,52 +140,76 @@ final class QueryActor(memStore: TimeSeriesStore,
       Kamon.runWithSpan(queryExecuteSpan, false) {
         queryExecuteSpan.tag("query", q.getClass.getSimpleName)
         queryExecuteSpan.tag("query-id", q.queryContext.queryId)
-        val querySession = QuerySession(q.queryContext, queryConfig, catchMultipleLockSetErrors = true)
+        val querySession = QuerySession(q.queryContext,
+                                        queryConfig,
+                                        streamingDispatch = false, // TODO change to true when fully ready
+                                        catchMultipleLockSetErrors = true)
         queryExecuteSpan.mark("query-actor-received-execute-start")
-        val execTask = q.execute(memStore, querySession)(queryScheduler)
-          .map { res =>
-            // below prevents from calling FiloDB directly (without Query Service)
-            FiloSchedulers.assertThreadName(QuerySchedName)
-            replyTo ! res
-            res match {
-              case QueryResult(_, _, vectors, _, _, _) => resultVectors.record(vectors.length)
-              case e: QueryError =>
-                queryErrors.increment()
-                queryExecuteSpan.fail(e.t.getMessage)
-                // error logging
-                e.t match {
-                  case _: BadQueryException => // dont log user errors
-                  case _: AskTimeoutException => // dont log ask timeouts. useless - let it simply flow up
-                  case e: QueryTimeoutException => // log just message, no need for stacktrace
-                    logger.error(s"queryId: ${q.queryContext.queryId} QueryTimeoutException: " +
-                      s"${q.queryContext.origQueryParams} ${e.getMessage}")
-                  case e: Throwable =>
-                    logger.error(s"queryId: ${q.queryContext.queryId} Query Error: " +
-                      s"${q.queryContext.origQueryParams}", e)
-                }
-                // debug logging
-                e.t match {
-                  case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dsRef, cve)
-                  case t: Throwable =>
-                }
-            }
-            queryExecuteSpan.finish()
-          }
-          .guarantee(Task.eval(querySession.close()))
 
-          logger.debug(s"Will now run query execution pipeline for $q")
-          execTask.runToFuture(queryScheduler).recover { case ex =>
-            // Unhandled exception in query, should be rare
-            logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error," +
-              s" query was ${q.queryContext.origQueryParams}", ex)
-            queryExecuteSpan.finish()
-            replyTo ! QueryError(q.queryContext.queryId, querySession.queryStats, ex)
-          }(queryScheduler)
+        val execTask = if (querySession.streamingDispatch) {
+          q.executeStreaming(memStore, querySession)(queryScheduler)
+            .onErrorHandle { t =>
+              StrQueryError(q.queryContext.queryId, querySession.queryStats, t)
+            }.map { resp =>
+              FiloSchedulers.assertThreadName(QuerySchedName)
+              resp match {
+                case e: StrQueryError => logQueryErrors(e.t)
+                case _ =>
+              }
+              replyTo ! resp
+            }.guarantee(Task.eval {
+              querySession.close()
+              queryExecuteSpan.finish()
+            }).completedL
+        } else {
+          q.execute(memStore, querySession)(queryScheduler)
+            .map { res =>
+              // below prevents from calling FiloDB directly (without Query Service)
+              FiloSchedulers.assertThreadName(QuerySchedName)
+              replyTo ! res
+              res match {
+                case QueryResult(_, _, vectors, _, _, _) => resultVectors.record(vectors.length)
+                case e: QueryError =>
+                  logQueryErrors(e.t)
+                  queryErrors.increment()
+                  queryExecuteSpan.fail(e.t.getMessage)
+              }
+            }.onErrorHandle { ex =>
+              // Unhandled exception in query, should be rare
+              logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error," +
+                s" query was ${q.queryContext.origQueryParams}", ex)
+              replyTo ! QueryError(q.queryContext.queryId, querySession.queryStats, ex)
+            }.guarantee(Task.eval {
+              queryExecuteSpan.finish()
+              querySession.close()
+            })
+        }
+        logger.debug(s"Will now run query execution pipeline for $q")
+        execTask.runToFuture(queryScheduler)
+      }
+    }
+
+    def logQueryErrors(t: Throwable): Unit = {
+      // error logging
+      t match {
+        case _: BadQueryException => // dont log user errors
+        case _: AskTimeoutException => // dont log ask timeouts. useless - let it simply flow up
+        case e: QueryTimeoutException => // log just message, no need for stacktrace
+          logger.error(s"queryId: ${q.queryContext.queryId} QueryTimeoutException: " +
+            s"${q.queryContext.origQueryParams} ${e.getMessage}")
+        case e: Throwable =>
+          logger.error(s"queryId: ${q.queryContext.queryId} Query Error: " +
+            s"${q.queryContext.origQueryParams}", e)
+      }
+      // debug logging
+      t match {
+        case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dsRef, cve)
+        case t: Throwable =>
       }
     }
   }
 
-  private def processLogicalPlan2Query(q: LogicalPlan2Query, replyTo: ActorRef) = {
+  private def processLogicalPlan2Query(q: LogicalPlan2Query, replyTo: ActorRef): Unit = {
     if (checkTimeoutBeforeQueryExec(q.qContext, replyTo)) {
       // This is for CLI use only. Always prefer clients to materialize logical plan
       lpRequests.increment()
