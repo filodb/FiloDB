@@ -22,6 +22,7 @@ case class ExportRule(key: Seq[String],
                       excludeFilterGroups: Seq[Seq[ColumnFilter]])
 
 case class ExportRowData(partKeyMap: Map[String, String],
+                         partKeyString: String,
                          timestamp: Long,
                          value: Double,
                          partitionStrings: Iterator[String])
@@ -136,8 +137,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
   private def exportDataToRow(exportData: ExportRowData): Row = {
     val dataSeq = new mutable.ArrayBuffer[Any](3 + downsamplerSettings.exportPathSpecPairs.size)
     dataSeq.append(
-      // TODO(a_theimer): don't sort every time
-      exportData.partKeyMap.toSeq.sortBy(pair => s"${pair._1}=${pair._2}").mkString(","),
+      exportData.partKeyString,
       exportData.timestamp,
       exportData.value
     )
@@ -196,11 +196,12 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
     }
 
     if (shouldExport) {
+      val partKeyString = partKeyMap.toSeq.sortBy(pair => s"${pair._1}=${pair._2}").mkString(",")
       val partitionByValues = makePartitionByValues(partKeyMap, userEndTime)
       getChunkRangeIter(readablePartition, userStartTime, userEndTime).flatMap{ chunkRow =>
         extractRows(readablePartition, chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
       }.map{ case (timestamp, value) =>
-        ExportRowData(partKeyMap, timestamp, value, partitionByValues.iterator)
+        ExportRowData(partKeyMap, partKeyString, timestamp, value, partitionByValues.iterator)
       }
     } else Iterator.empty
   }
