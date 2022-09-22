@@ -7,7 +7,7 @@ import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.Scheduler
-import monix.reactive.Observable
+import monix.reactive.{Observable, Pipe}
 
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.RecordSchema
@@ -504,12 +504,13 @@ abstract class NonLeafExecPlan extends ExecPlan {
               throw t
           }
           (respWithoutErrors, i)
-        }.publish
+        }.pipeThrough(Pipe.publish[(Observable[StrQueryResponse], Int)]) // pipeThrough helps with multiple subscribers
 
       val schemas = childResults.flatMap { obs =>
         obs._1.find(_.isInstanceOf[StrQueryResultHeader])
           .map(_.asInstanceOf[StrQueryResultHeader].resultSchema).map(rs => (rs, obs._2))
-      }.publish
+      }.pipeThrough(Pipe.publish[(ResultSchema, Int)]) // pipeThrough helps with multiple subscribers
+
       val rvs = childResults.map { obs =>
         val rvs = obs._1.collect { case s: StrQueryResult => s.result }
         (rvs, obs._2)
@@ -549,7 +550,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
             throw e.t
         }
         .filter(_._1.resultSchema != ResultSchema.empty)
-        .cache // cache caches results so that multiple subscribers can process
+        .pipeThrough(Pipe.publish[(QueryResult, Int)]) // pipeThrough helps with multiple subscribers
 
       val outputSchema = processedTasks.collect { // collect schema of first result that is nonEmpty
         case (QueryResult(_, schema, _, _, _, _), _) if schema.columns.nonEmpty => schema
