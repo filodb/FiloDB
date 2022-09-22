@@ -15,7 +15,8 @@ import org.apache.spark.internal.io.HadoopMapReduceCommitProtocol
 
 /**
  * When provided as Spark's spark.sql.sources.commitProtocolClass config, file names
- *   will be written as "part-######-<overwrite-string>-c###". TODO(a_theimer)
+ *   will be written as "part-######-data-c###". This artificially fixes the JobID
+ *   and enables idempotent runs, since the same files will be generated.
  * Credit: https://www.waitingforcode.com/apache-spark-sql/idempotent-file-generation-apache-spark-sql/read
  */
 class IdempotentCommitProtocol(jobId: String, path: String,
@@ -77,7 +78,7 @@ class Downsampler(settings: DownsamplerSettings,
 
     val spark = SparkSession.builder()
       .appName("FiloDBDownsampler")
-      .config("spark.sql.sources.commitProtocolClass",  // enables idempotent runs
+      .config("spark.sql.sources.commitProtocolClass",  // see IdempotentCommitProtocol for details.
               "filodb.downsampler.chunk.IdempotentCommitProtocol")
       .config(sparkConf)
       .getOrCreate()
@@ -146,13 +147,16 @@ class Downsampler(settings: DownsamplerSettings,
         batchDownsampler.downsampleBatch(readablePartsBatch, userTimeStart, userTimeEndExclusive)
         batchExporter.getExportRows(readablePartsBatch, userTimeStart, userTimeEndExclusive)
       }
-    // NOTE: toDF(partitionCols: _*) seems buggy
-    spark.createDataFrame(rdd, batchExporter.exportSchema)
-      .write
-      .mode(SaveMode.Overwrite)
-      .option("header", true)
-      .partitionBy(batchExporter.partitionByCols: _*)
-      .csv(settings.exportBucket)
+
+    if (!rdd.isEmpty()) {
+      // NOTE: toDF(partitionCols: _*) seems buggy
+      spark.createDataFrame(rdd, batchExporter.exportSchema)
+        .write
+        .mode(SaveMode.Overwrite)
+        .option("header", true)
+        .partitionBy(batchExporter.partitionByCols: _*)
+        .csv(settings.exportBucket)
+    }
 
     DownsamplerContext.dsLogger.info(s"Chunk Downsampling Driver completed successfully for downsample period " +
       s"$downsamplePeriodStr")

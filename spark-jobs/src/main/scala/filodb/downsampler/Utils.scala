@@ -3,7 +3,6 @@ package filodb.downsampler
 import filodb.core.store.{AllChunkScan, ChunkSetInfoReader, ReadablePartition}
 
 object Utils {
-  // TODO(a_theimer): would be nice if this could be an iterator
   /**
    * Specifies a range of a chunk's rows.
    */
@@ -16,8 +15,8 @@ object Utils {
    *   given by userTimeStart and userTimeEndExclusive.
    */
   def getChunkRangeIter(readablePart: ReadablePartition,
-                                userTimeStart: Long,
-                                userTimeEndExclusive: Long): Iterator[ChunkRange] = {
+                        userTimeStart: Long,
+                        userTimeEndExclusive: Long): Iterator[ChunkRange] = {
     val timestampCol = 0  // FIXME: need a dynamic (but efficient) way to determine this
     val rawChunksets = readablePart.infos(AllChunkScan)
 

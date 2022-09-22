@@ -6,6 +6,7 @@ import filodb.core.metadata.Column.ColumnType.DoubleColumn
 import filodb.core.metadata.Schemas
 import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}
+import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.Utils._
 import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
@@ -84,7 +85,8 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
    * @param irowStart the index of the first row to include in the result.
    * @param irowEnd the index of the final row to include in the result (exclusive).
    */
-  private def getTimeValuePairs(partition: ReadablePartition,
+  private def getTimeValuePairs(partKeyMap: Map[String, String],
+                                partition: ReadablePartition,
                                 chunkReader: ChunkSetInfoReader,
                                 irowStart: Int,
                                 irowEnd: Int): Iterator[(Long, Double)] = {
@@ -99,8 +101,8 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
           (timestampIter.next, valueIter.next)
         }
       case colType =>
-        // TODO(a_theimer): this is commented out so tests pass
-        // throw new IllegalArgumentException(s"unhandled ColumnType: $colType")
+        DownsamplerContext.dsLogger.warn(
+          s"BatchExporter encountered unhandled ColumnType=$colType; partKeyMap=$partKeyMap")
         Iterator.empty
     }
   }
@@ -201,7 +203,8 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
     val partKeyString = partKeyMap.map(pair => s"${pair._1}=${pair._2}").toSeq.sorted.mkString(",")
     val partitionByValues = getPartitionByValues(partKeyMap, userEndTime)
     getChunkRangeIter(readablePartition, userStartTime, userEndTime).flatMap{ chunkRow =>
-      getTimeValuePairs(readablePartition, chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
+      getTimeValuePairs(partKeyMap, readablePartition,
+        chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
     }.map{ case (timestamp, value) =>
       ExportRowData(partKeyMap, partKeyString, timestamp, value, partitionByValues.iterator)
     }
