@@ -325,7 +325,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       Seq("v1", "l1val-foo", "bar-2022-baz", "hello-09", "day-21", "l2val-goodbye")
 
     val batchExporter = new BatchExporter(new DownsamplerSettings(conf.withFallback(baseConf)))
-    batchExporter.getPartitionByValues(labels, time) shouldEqual expected
+    batchExporter.getPartitionByValues(labels, time).toSeq shouldEqual expected
   }
 
   it ("should write untyped data to cassandra") {

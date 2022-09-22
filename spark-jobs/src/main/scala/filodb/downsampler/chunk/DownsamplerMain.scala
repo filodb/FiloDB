@@ -10,6 +10,7 @@ import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.PagedReadablePartition
 import filodb.downsampler.DownsamplerContext
 import filodb.memory.format.UnsafeUtils
+import kamon.metric.MeasurementUnit
 import org.apache.spark.internal.io.HadoopMapReduceCommitProtocol
 
 
@@ -68,6 +69,9 @@ object DownsamplerMain extends App {
 class Downsampler(settings: DownsamplerSettings,
                   batchDownsampler: BatchDownsampler,
                   batchExporter: BatchExporter) extends Serializable {
+
+  lazy val exportLatency =
+    Kamon.histogram("export-latency", MeasurementUnit.time.milliseconds).withoutTags()
 
   // Gotcha!! Need separate function (Cannot be within body of a class)
   // to create a closure for spark to serialize and move to executors.
@@ -149,6 +153,7 @@ class Downsampler(settings: DownsamplerSettings,
       }
 
     if (!rdd.isEmpty()) {
+      val exportStartMs = System.currentTimeMillis()
       // NOTE: toDF(partitionCols: _*) seems buggy
       spark.createDataFrame(rdd, batchExporter.exportSchema)
         .write
@@ -156,6 +161,8 @@ class Downsampler(settings: DownsamplerSettings,
         .option("header", true)
         .partitionBy(batchExporter.partitionByCols: _*)
         .csv(settings.exportBucket)
+      val exportEndMs = System.currentTimeMillis()
+      exportLatency.record(exportEndMs - exportStartMs)
     }
 
     DownsamplerContext.dsLogger.info(s"Chunk Downsampling Driver completed successfully for downsample period " +

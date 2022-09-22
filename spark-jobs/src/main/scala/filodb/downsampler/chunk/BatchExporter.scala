@@ -10,6 +10,8 @@ import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.Utils._
 import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
+import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types.{DoubleType, LongType, StringType, StructField, StructType}
 
@@ -39,6 +41,9 @@ object BatchExporter {
 case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
 
   @transient lazy private[downsampler] val schemas = Schemas.fromConfig(downsamplerSettings.filodbConfig).get
+
+  @transient lazy val exportPrepBatchLatency =
+    Kamon.histogram("export-prep-batch-latency", MeasurementUnit.time.milliseconds).withoutTags()
 
   val rules = downsamplerSettings.exportRules
   val exportSchema = {
@@ -124,8 +129,8 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
   def getExportRows(readablePartitions: Seq[ReadablePartition],
                     userStartTime: Long,
                     userEndTime: Long): Iterator[Row] = {
-    // TODO(a_theimer): use this space to update metrics / logs
-    readablePartitions
+    val startMs = System.currentTimeMillis()
+    val rowIter = readablePartitions
       .iterator
       .map { part =>
         // pair each partition with a map of its label-value pairs
@@ -139,6 +144,9 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
       .filter { case (part, partKeyMap) => shouldExport(partKeyMap)}
       .flatMap {case (part, partKeyMap) => getExportDatas(part, partKeyMap, userStartTime, userEndTime)}
       .map(exportDataToRow)
+    val endMs = System.currentTimeMillis()
+    exportPrepBatchLatency.record(endMs - startMs)
+    rowIter
   }
 
   /**
@@ -156,14 +164,13 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
     Row.fromSeq(dataSeq)
   }
 
-  // TODO(a_theimer): this should return an iterator, but that breaks everything
   /**
    * Returns the column values used to partition the data.
    * Value order should match the order of this.partitionByCols.
    */
-  def getPartitionByValues(partKeyMap: Map[String, String], userEndTime: Long): Seq[String] = {
+  def getPartitionByValues(partKeyMap: Map[String, String], userEndTime: Long): Iterator[String] = {
     val date = new Date(userEndTime)
-    downsamplerSettings.exportPathSpecPairs.map(_._2)
+    downsamplerSettings.exportPathSpecPairs.iterator.map(_._2)
       // replace the {{}} strings with labels
       .map{LABEL_REGEX_MATCHER.replaceAllIn(_, matcher => partKeyMap(matcher.group(1)))}
       // replace the <<>> strings with dates
@@ -206,7 +213,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
       getTimeValuePairs(partKeyMap, readablePartition,
         chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
     }.map{ case (timestamp, value) =>
-      ExportRowData(partKeyMap, partKeyString, timestamp, value, partitionByValues.iterator)
+      ExportRowData(partKeyMap, partKeyString, timestamp, value, partitionByValues)
     }
   }
 }
