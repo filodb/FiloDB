@@ -258,7 +258,6 @@ trait ExecPlan extends QueryCommand {
     ret
   }
 
-
   /**
     * Sub classes should override this method to provide a concrete
     * implementation of the operation represented by this exec plan
@@ -365,30 +364,31 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
                          source: ChunkSource)(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.fromTask(
       execPlan.dispatcher.dispatch(ExecPlanWithClientParams(execPlan,
-        ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis - 1000)), source).onErrorHandle
-      { ex: Throwable =>
-        QueryError(execPlan.queryContext.queryId, querySession.queryStats, ex)
-      }.map {
-        case QueryResult(_, _, result, qStats, isPartialResult, partialResultReason)  =>
-                      querySession.queryStats.add(qStats)
-                      // Result is empty because of NaN so create ScalarFixedDouble with NaN
-                      if (isPartialResult) {
-                        querySession.resultCouldBePartial = true
-                        querySession.partialResultsReason = partialResultReason
-                      }
-
-                      if (result.isEmpty) {
-                          ScalarFixedDouble(timeStepParams, Double.NaN)
-                        } else {
-                          result.head match {
-                            case f: ScalarFixedDouble   => f
-                            case s: ScalarVaryingDouble => s
+        ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis - 1000)), source)
+          .onErrorHandle { ex: Throwable =>
+            QueryError(execPlan.queryContext.queryId, querySession.queryStats, ex)
+          }.map {
+            case QueryResult(_, _, result, qStats, isPartialResult, partialResultReason)  =>
+                          querySession.queryStats.add(qStats)
+                          // Result is empty because of NaN so create ScalarFixedDouble with NaN
+                          if (isPartialResult) {
+                            querySession.resultCouldBePartial = true
+                            querySession.partialResultsReason = partialResultReason
                           }
-                        }
-        case QueryError(_, qStats, ex)          =>
-                      querySession.queryStats.add(qStats)
-                      throw ex
-      })
+
+                          if (result.isEmpty) {
+                              ScalarFixedDouble(timeStepParams, Double.NaN)
+                            } else {
+                              result.head match {
+                                case f: ScalarFixedDouble   => f
+                                case s: ScalarVaryingDouble => s
+                              }
+                            }
+            case QueryError(_, qStats, ex)          =>
+                          querySession.queryStats.add(qStats)
+                          throw ex
+          }
+    )
   }
 
   override def toString: String = execPlan.printTree() + "\n"
@@ -436,10 +436,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
     Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatch(ExecPlanWithClientParams(plan,
         ClientParams(plan.queryContext.plannerParams.queryTimeoutMillis - 1000)), source)
-        .onErrorHandle { ex: Throwable =>
-        QueryError(queryContext.queryId, qSession.queryStats, ex)
-
-      }
+          .onErrorHandle { ex: Throwable =>
+            QueryError(queryContext.queryId, qSession.queryStats, ex)
+          }
     }
   }
 
@@ -453,9 +452,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
     Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatchStreaming(ExecPlanWithClientParams(plan,
         ClientParams(plan.queryContext.plannerParams.queryTimeoutMillis - 1000)), source)
-        .onErrorHandle { ex: Throwable =>
-        StrQueryError(queryContext.queryId, qSession.queryStats, ex)
-      }
+          .onErrorHandle { ex: Throwable =>
+            StrQueryError(queryContext.queryId, qSession.queryStats, ex)
+          }
     }
   }
   /**
@@ -550,7 +549,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
             throw e.t
         }
         .filter(_._1.resultSchema != ResultSchema.empty)
-        .publish
+        .cache // cache caches results so that multiple subscribers can process
 
       val outputSchema = processedTasks.collect { // collect schema of first result that is nonEmpty
         case (QueryResult(_, schema, _, _, _, _), _) if schema.columns.nonEmpty => schema
