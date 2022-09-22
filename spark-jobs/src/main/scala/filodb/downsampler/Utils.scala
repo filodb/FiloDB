@@ -1,7 +1,8 @@
 package filodb.downsampler
 
-import filodb.core.store.{AllChunkScan, ChunkSetInfoReader, ReadablePartition}
 import kamon.Kamon
+
+import filodb.core.store.{AllChunkScan, ChunkSetInfoReader, ReadablePartition}
 
 object Utils {
 

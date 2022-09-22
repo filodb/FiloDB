@@ -1,6 +1,16 @@
 package filodb.downsampler.chunk
 
 import java.security.MessageDigest
+import java.text.SimpleDateFormat
+import java.util.Date
+
+import scala.collection.mutable
+
+import kamon.Kamon
+import kamon.metric.MeasurementUnit
+import org.apache.spark.sql.Row
+import org.apache.spark.sql.types.{DoubleType, LongType, StringType, StructField, StructType}
+
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType.DoubleColumn
 import filodb.core.metadata.Schemas
@@ -10,20 +20,14 @@ import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.Utils._
 import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
-import kamon.Kamon
-import kamon.metric.MeasurementUnit
-import org.apache.spark.sql.Row
-import org.apache.spark.sql.types.{DoubleType, LongType, StringType, StructField, StructType}
-
-
-import java.text.SimpleDateFormat
-import java.util.Date
-import scala.collection.mutable
 
 case class ExportRule(key: Seq[String],
                       includeFilterGroups: Seq[Seq[ColumnFilter]],
                       excludeFilterGroups: Seq[Seq[ColumnFilter]])
 
+/**
+ * All info needed to output a result Spark Row.
+ */
 case class ExportRowData(partKeyMap: Map[String, String],
                          partKeyString: String,
                          timestamp: Long,

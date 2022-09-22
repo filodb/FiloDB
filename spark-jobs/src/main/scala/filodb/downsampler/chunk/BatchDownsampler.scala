@@ -3,10 +3,12 @@ package filodb.downsampler.chunk
 import scala.collection.mutable.{ArrayBuffer, Map => MMap}
 import scala.concurrent.Await
 import scala.concurrent.duration.FiniteDuration
+
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.reactive.Observable
 import spire.syntax.cfor._
+
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, ErrorResponse, Instance}
 import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
