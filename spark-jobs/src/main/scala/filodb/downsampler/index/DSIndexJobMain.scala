@@ -72,7 +72,7 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
 
     // since we read (for staleness check) before updating index, we don't have to catch up to current time.
     // We can run this job in cadence with Chunk Downsampler job.
-    val toHourExclDefault  = userTimeStart + dsSettings.downsampleChunkDuration
+    val toHourExclDefault  = fromHour + dsSettings.downsampleStoreConfig.flushInterval.toHours + 1
 
     // this override should almost never used by operators - only for unit testing
     val toHourExcl = spark.sparkContext.getConf
