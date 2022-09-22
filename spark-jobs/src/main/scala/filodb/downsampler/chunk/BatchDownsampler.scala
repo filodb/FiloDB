@@ -44,7 +44,6 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
                                                              .withoutTags()
   @transient lazy val numPartitionsFailed = Kamon.counter("num-partitions-failed").withoutTags()
   @transient lazy val numPartitionsSkipped = Kamon.counter("num-partitions-skipped").withoutTags()
-  @transient lazy val numRawChunksSkipped = Kamon.counter("num-raw-chunks-skipped").withoutTags()
   @transient lazy val numRawChunksDownsampled = Kamon.counter("num-raw-chunks-downsampled").withoutTags()
   @transient lazy val numDownsampledChunksWritten = Kamon.counter("num-downsampled-chunks-written").withoutTags()
 

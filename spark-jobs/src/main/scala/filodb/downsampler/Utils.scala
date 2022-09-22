@@ -1,8 +1,12 @@
 package filodb.downsampler
 
 import filodb.core.store.{AllChunkScan, ChunkSetInfoReader, ReadablePartition}
+import kamon.Kamon
 
 object Utils {
+
+  lazy val numRawChunksSkipped = Kamon.counter("num-raw-chunks-skipped").withoutTags()
+
   /**
    * Specifies a range of a chunk's rows.
    */
@@ -39,8 +43,7 @@ object Utils {
       .filter{ chunkRange =>
         val isValidChunk = chunkRange.istartRow <= chunkRange.iendRow
         if (!isValidChunk) {
-          // TODO(a_theimer): numRawChunksSkipped.increment()
-          // TODO(a_theimer): use DsContext?
+          numRawChunksSkipped.increment()
           DownsamplerContext.dsLogger.warn(s"Skipping chunk of partition since startRow lessThan endRow " +
             s"hexPartKey=${readablePart.hexPartKey} " +
             s"startRow=${chunkRange.istartRow} " +
