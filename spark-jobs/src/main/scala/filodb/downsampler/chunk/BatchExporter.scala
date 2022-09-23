@@ -22,8 +22,8 @@ import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_M
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
 
 case class ExportRule(key: Seq[String],
-                      includeFilterGroups: Seq[Seq[ColumnFilter]],
-                      excludeFilterGroups: Seq[Seq[ColumnFilter]])
+                      allowFilterGroups: Seq[Seq[ColumnFilter]],
+                      blockFilterGroups: Seq[Seq[ColumnFilter]])
 
 /**
  * All info needed to output a result Spark Row.
@@ -51,6 +51,8 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
 
   val rules = downsamplerSettings.exportRules
   val exportSchema = {
+    // NOTE: ArrayBuffers are sometimes used instead of Seq's because otherwise
+    //   ArrayIndexOutOfBoundsExceptions occur when Spark exports a batch.
     val fields = new mutable.ArrayBuffer[StructField](3 + downsamplerSettings.exportPathSpecPairs.size)
     fields.append(
       StructField("labels", StringType),
@@ -62,7 +64,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
     StructType(fields)
   }
   val partitionByCols = {
-    val cols = new mutable.ArrayBuffer[String](3 + downsamplerSettings.exportPathSpecPairs.size)
+    val cols = new mutable.ArrayBuffer[String](downsamplerSettings.exportPathSpecPairs.size)
     cols.appendAll(downsamplerSettings.exportPathSpecPairs.map(_._1))
     cols
   }
@@ -193,13 +195,13 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
       }
     }.exists { rule =>
       // decide whether-or-not to export this partition
-      lazy val matchAnyIncludeGroup = rule.includeFilterGroups.exists { group =>
+      lazy val matchAnyIncludeGroup = rule.allowFilterGroups.exists { group =>
         matchAllFilters(group, partKeyMap)
       }
-      val matchAnyExcludeGroup = rule.excludeFilterGroups.exists { group =>
+      val matchAnyExcludeGroup = rule.blockFilterGroups.exists { group =>
         matchAllFilters(group, partKeyMap)
       }
-      !matchAnyExcludeGroup && (rule.includeFilterGroups.isEmpty || matchAnyIncludeGroup)
+      !matchAnyExcludeGroup && (rule.allowFilterGroups.isEmpty || matchAnyIncludeGroup)
     }
   }
 

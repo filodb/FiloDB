@@ -113,7 +113,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val emptyConf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
-        |      key = ["l1"]
+        |      enabled = true
+        |      key-labels = ["l1"]
         |      bucket = "file:///dummy-bucket"
         |      rules = []
         |      path-spec = ["unused"]
@@ -124,15 +125,14 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val onlyKeyConf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
-        |      key = ["l1"]
+        |      enabled = true
+        |      key-labels = ["l1"]
         |      bucket = "file:///dummy-bucket"
         |      rules = [
         |        {
         |          key = ["l1a"]
-        |          filters = {
-        |            included = []
-        |            excluded = []
-        |          }
+        |          allow-filters = []
+        |          block-filters = []
         |        }
         |      ]
         |      path-spec = ["unused"]
@@ -143,26 +143,25 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val includeExcludeConf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
-        |      key = ["l1"]
+        |      enabled = true
+        |      key-labels = ["l1"]
         |      bucket = "file:///dummy-bucket"
         |      rules = [
         |        {
         |          key = ["l1a"]
-        |          filters = {
-        |            included = [
-        |              [
-        |                "l2=\"l2a\""
-        |              ],
-        |              [
-        |                "l2=~\".*b\""
-        |              ]
+        |          allow-filters = [
+        |            [
+        |              "l2=\"l2a\""
+        |            ],
+        |            [
+        |              "l2=~\".*b\""
         |            ]
-        |            excluded = [
-        |              [
-        |                "l2=\"l2c\""
-        |              ],
-        |            ]
-        |          }
+        |          ]
+        |          block-filters = [
+        |            [
+        |              "l2=\"l2c\""
+        |            ],
+        |          ]
         |        }
         |      ]
         |      path-spec = ["unused"]
@@ -173,24 +172,23 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val multiFilterConf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
-        |      key = ["l1"]
+        |      enabled = true
+        |      key-labels = ["l1"]
         |      bucket = "file:///dummy-bucket"
         |      rules = [
         |        {
         |          key = ["l1a"]
-        |          filters = {
-        |            included = [
-        |              [
-        |                "l2=\"l2a\"",
-        |                "l3=~\".*a\""
-        |              ],
-        |              [
-        |                "l2=\"l2a\"",
-        |                "l3=~\".*b\""
-        |              ]
+        |          allow-filters = [
+        |            [
+        |              "l2=\"l2a\"",
+        |              "l3=~\".*a\""
+        |            ],
+        |            [
+        |              "l2=\"l2a\"",
+        |              "l3=~\".*b\""
         |            ]
-        |            excluded = []
-        |          }
+        |          ]
+        |          block-filters = []
         |        }
         |      ]
         |      path-spec = ["unused"]
@@ -201,20 +199,19 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val contradictFilterConf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
-        |      key = ["l1"]
+        |      enabled = true
+        |      key-labels = ["l1"]
         |      bucket = "file:///dummy-bucket"
         |      rules = [
         |        {
         |          key = ["l1a"]
-        |          filters = {
-        |            included = [
-        |              [
-        |                "l2=\"l2a\"",
-        |                "l2=~\".*b\""
-        |              ]
+        |          allow-filters = [
+        |            [
+        |              "l2=\"l2a\"",
+        |              "l2=~\".*b\""
         |            ]
-        |            excluded = []
-        |          }
+        |          ]
+        |          block-filters = []
         |        }
         |      ]
         |      path-spec = ["unused"]
@@ -225,15 +222,14 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val multiKeyConf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
-        |      key = ["l1", "l2"]
+        |      enabled = true
+        |      key-labels = ["l1", "l2"]
         |      bucket = "file:///dummy-bucket"
         |      rules = [
         |        {
         |          key = ["l1a", "l2a"]
-        |          filters = {
-        |            included = []
-        |            excluded = []
-        |          }
+        |          allow-filters = []
+        |          block-filters = []
         |        }
         |      ]
         |      path-spec = ["unused"]
@@ -244,22 +240,19 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val multiRuleConf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
-        |      key = ["l1"]
+        |      enabled = true
+        |      key-labels = ["l1"]
         |      bucket = "file:///dummy-bucket"
         |      rules = [
         |        {
         |          key = ["l1a"]
-        |          filters = {
-        |            included = []
-        |            excluded = []
-        |          }
+        |          allow-filters = []
+        |          block-filters = []
         |        },
         |        {
         |          key = ["l1b"]
-        |          filters = {
-        |            included = []
-        |            excluded = []
-        |          }
+        |          allow-filters = []
+        |          block-filters = []
         |        }
         |      ]
         |      path-spec = ["unused"]
@@ -304,16 +297,17 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val conf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
-        |      key = ["l1"]
+        |      enabled = true
+        |      key-labels = ["unused"]
         |      bucket = "file:///dummy-bucket"
         |      rules = []
         |      path-spec = [
-        |        "api",  "v1",
-        |        "l1",   "{{l1}}-foo",
-        |        "year", "bar-<<YYYY>>-baz",
-        |        "month", "hello-<<MM>>"
-        |        "day",   "day-<<dd>>"
-        |        "l2-woah",   "{{l2}}-goodbye"
+        |        "api",     "v1",
+        |        "l1",      "{{l1}}-foo",
+        |        "year",    "bar-<<YYYY>>-baz",
+        |        "month",   "hello-<<MM>>"
+        |        "day",     "day-<<dd>>"
+        |        "l2-woah", "{{l2}}-goodbye"
         |      ]
         |    }
         |""".stripMargin

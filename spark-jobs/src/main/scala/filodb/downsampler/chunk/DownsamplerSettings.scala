@@ -28,6 +28,8 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
     conf
   }
 
+  @transient lazy val chunkDownsamplerIsEnabled = downsamplerConfig.getBoolean("chunk-downsampler-enabled")
+
   @transient lazy val cassandraConfig = filodbConfig.getConfig("cassandra")
 
   @transient lazy val rawDatasetName = downsamplerConfig.getString("raw-dataset-name")
@@ -72,23 +74,24 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val trace = downsamplerConfig.as[Seq[Map[String, String]]]("trace-filters").map(_.toSeq)
 
-  @transient lazy val exportRuleKey = downsamplerConfig.as[Seq[String]]("data-export.key")
+  @transient lazy val exportIsEnabled = downsamplerConfig.getBoolean("data-export.enabled")
+
+  @transient lazy val exportRuleKey = downsamplerConfig.as[Seq[String]]("data-export.key-labels")
 
   @transient lazy val exportBucket = downsamplerConfig.as[String]("data-export.bucket")
 
   @transient lazy val exportRules = {
     downsamplerConfig.as[Seq[Config]]("data-export.rules").map{ config =>
       val key = config.as[Seq[String]]("key")
-      val filters = config.getConfig("filters")
-      val includeFilterGroups = filters.as[Seq[Seq[String]]]("included").map{ group =>
+      val allowFilterGroups = config.as[Seq[Seq[String]]]("allow-filters").map{ group =>
         Parser.parseQuery(s"{${group.mkString(",")}}")
           .asInstanceOf[InstantExpression].getUnvalidatedColumnFilters()
       }
-      val excludeFilterGroups = filters.as[Seq[Seq[String]]]("excluded").map{ group =>
+      val blockFilterGroups = config.as[Seq[Seq[String]]]("block-filters").map{ group =>
         Parser.parseQuery(s"{${group.mkString(",")}}")
           .asInstanceOf[InstantExpression].getUnvalidatedColumnFilters()
       }
-      ExportRule(key, includeFilterGroups, excludeFilterGroups)
+      ExportRule(key, allowFilterGroups, blockFilterGroups)
     }
   }
 

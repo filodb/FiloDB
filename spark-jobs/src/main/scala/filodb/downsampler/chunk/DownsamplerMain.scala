@@ -150,8 +150,12 @@ class Downsampler(settings: DownsamplerSettings,
           val rawPartSchema = batchDownsampler.schemas(rawSchemaId)
           new PagedReadablePartition(rawPartSchema, shard = 0, partID = 0, partData = rawPart, minResolutionMs = 1)
         }
-        batchDownsampler.downsampleBatch(readablePartsBatch, userTimeStart, userTimeEndExclusive)
-        batchExporter.getExportRows(readablePartsBatch, userTimeStart, userTimeEndExclusive)
+        if (settings.chunkDownsamplerIsEnabled) {
+          batchDownsampler.downsampleBatch(readablePartsBatch, userTimeStart, userTimeEndExclusive)
+        }
+        if (settings.exportIsEnabled) {
+          batchExporter.getExportRows(readablePartsBatch, userTimeStart, userTimeEndExclusive)
+        } else Iterator.empty
       }
 
     if (!rdd.isEmpty()) {
