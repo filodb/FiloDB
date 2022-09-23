@@ -80,29 +80,167 @@ trait ExecPlan extends QueryCommand {
 
   protected def allTransformers: Seq[RangeVectorTransformer] = rangeVectorTransformers
 
-
+  // scalastyle:off method.length
   def executeStreaming(source: ChunkSource,
                        querySession: QuerySession)
                        (implicit sched: Scheduler): Observable[StrQueryResponse] = {
-    ???
+
+    val startExecute = querySession.qContext.submitTime
+
+    val span = Kamon.currentSpan()
+    // NOTE: we launch the preparatory steps as a Task too.  This is important because scanPartitions,
+    // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
+    // we don't want these to happen in a single thread.
+
+    // Step 1: initiate doExecute pipeline: make result schema and set up the async monix pipeline to create RVs
+    lazy val step1: Task[ExecResult] = Task.evalAsync {
+      // avoid any work when plan has waited in executor queue for long
+      queryContext.checkQueryTimeout(s"step1-${this.getClass.getSimpleName}")
+      span.mark(s"execute-step1-start-${getClass.getSimpleName}")
+      FiloSchedulers.assertThreadName(QuerySchedName)
+      // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
+      // across threads. Note that task/observable will not run on the thread where span is present since
+      // kamon uses thread-locals.
+      // Dont finish span since this code didnt create it
+      Kamon.runWithSpan(span, false) {
+        val doEx = doExecute(source, querySession)
+        Kamon.histogram("query-execute-time-elapsed-step1-done",
+          MeasurementUnit.time.milliseconds)
+          .withTag("plan", getClass.getSimpleName)
+          .record(Math.max(0, System.currentTimeMillis - startExecute))
+        span.mark(s"execute-step1-end-${getClass.getSimpleName}")
+        doEx
+      }
+    }
+
+    // Step 2: Append transformer execution to step1 result, materialize the final result
+    def step2(res: ExecResult): Observable[StrQueryResponse] = {
+      val task = res.schema.map { resSchema =>
+        // avoid any work when plan has waited in executor queue for long
+        queryContext.checkQueryTimeout(s"step2-${this.getClass.getSimpleName}")
+        Kamon.histogram("query-execute-time-elapsed-step2-start", MeasurementUnit.time.milliseconds)
+          .withTag("plan", getClass.getSimpleName)
+          .record(Math.max(0, System.currentTimeMillis - startExecute))
+        FiloSchedulers.assertThreadName(QuerySchedName)
+        //      val resultTask = {
+        val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
+          val paramRangeVector: Seq[Observable[ScalarRangeVector]] =
+            transf.funcParams.map(_.getResult(querySession, source))
+          val resultSchema : ResultSchema = acc._2
+          if (resultSchema == ResultSchema.empty && (!transf.canHandleEmptySchemas)) {
+            // It is possible a null schema is returned (due to no time series). In that case just skip the
+            // transformers that cannot handle empty results
+            (acc._1, resultSchema)
+          } else {
+            val rangeVector : Observable[RangeVector] = transf.apply(
+              acc._1, querySession, queryContext.plannerParams.sampleLimit, acc._2, paramRangeVector
+            )
+            val schema = transf.schema(resultSchema)
+            (rangeVector, schema)
+          }
+        }
+        if (finalRes._2 == ResultSchema.empty) {
+          Observable.fromIterable(Seq(StrQueryResultHeader(queryContext.queryId, finalRes._2),
+            StrQueryResultFooter(queryContext.queryId, querySession.queryStats,
+              querySession.resultCouldBePartial, querySession.partialResultsReason)))
+        } else {
+          val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
+          Kamon
+            .histogram(
+              "query-execute-time-elapsed-step2-transformer-pipeline-setup",
+              MeasurementUnit.time.milliseconds
+            )
+            .withTag("plan", getClass.getSimpleName)
+            .record(Math.max(0, System.currentTimeMillis - startExecute))
+          makeResult(finalRes._1, recSchema, finalRes._2)
+        }
+      }
+      Observable.fromTask(task).flatten
+    }
+
+    def makeResult(rv: Observable[RangeVector], recordSchema: RecordSchema,
+                   resultSchema: ResultSchema): Observable[StrQueryResponse] = {
+      @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
+      @volatile var resultSize = 0L
+      val queryResults = rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
+        .map {
+          case srvable: SerializableRangeVector => srvable
+          case rv: RangeVector =>
+            // materialize, and limit rows per RV
+            val execPlanString = queryWithPlanName(queryContext)
+            val builder = SerializedRangeVector.newBuilder()
+            val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString)
+            if (rv.outputRange.isEmpty)
+              qLogger.debug(s"Empty rangevector found. Rv class is:  ${rv.getClass.getSimpleName}, " +
+                s"execPlan is: $execPlanString, execPlan children ${this.children}")
+            srv
+        }
+        .map { srv =>
+          numResultSamples += srv.numRowsSerialized
+          // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
+          if (enforceSampleLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
+            throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
+              sampleLimit} samples. Try applying more filters or reduce time range.")
+
+          resultSize += srv.estimateSerializedRowBytes + srv.key.keySize
+          if (resultSize > queryContext.plannerParams.resultByteLimit) {
+            val size_mib = queryContext.plannerParams.resultByteLimit / math.pow(1024, 2)
+            val msg = s"Reached maximum result size (final or intermediate) " +
+              s"for data serialized out of a host or shard " +
+              s"(${math.round(size_mib)} MiB)."
+            qLogger.warn(s"$msg QueryContext: $queryContext")
+            if (querySession.queryConfig.enforceResultByteLimit) {
+              throw new BadQueryException(
+                s"$msg Try to apply more filters, reduce the time range, and/or increase the step size.")
+            }
+          }
+
+          srv
+        }
+        .filter(_.numRowsSerialized > 0)
+        .map(StrQueryResult(queryContext.queryId, _))
+        .guarantee(Task.eval {
+          Kamon.histogram("query-execute-time-elapsed-step2-result-materialized",
+            MeasurementUnit.time.milliseconds)
+            .withTag("plan", getClass.getSimpleName)
+            .record(Math.max(0, System.currentTimeMillis - startExecute))
+          SerializedRangeVector.queryResultBytes.record(resultSize)
+          querySession.queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
+          span.mark("after-last-materialized-result-rv")
+          span.mark(s"resultBytes=$resultSize")
+          span.mark(s"resultSamples=$numResultSamples")
+          span.mark(s"execute-step2-end-${this.getClass.getSimpleName}")
+        })
+
+      Observable.now(StrQueryResultHeader(queryContext.queryId, resultSchema)) ++
+        queryResults ++
+        Observable.now(StrQueryResultFooter(queryContext.queryId, querySession.queryStats,
+          querySession.resultCouldBePartial, querySession.partialResultsReason))
+    }
+
+    val qResult = step1.map(er => step2(er))
+    val ret = Observable.fromTask(qResult).flatten
+    qLogger.debug(s"Constructed monix query execution pipeline for $this")
+    ret
   }
-    /**
-    * Facade for the execution orchestration of the plan sub-tree
-    * starting from this node.
-    *
-    * The return Task must be "run" for execution to ensue. See
-    * Monix documentation for further information on Task.
-    * This first invokes the doExecute abstract method, then applies
-    * the RangeVectorMappers associated with this plan node.
-    *
-    * The returned task can be used to perform post-execution steps
-    * such as sending off an asynchronous response message etc.
-    *
-    * Typically the caller creates the QuerySession parameter object. Remember
-    * that the creator is also responsible for closing it with
-    * `returnTask.guarantee(Task.eval(querySession.close()))`
-    *
-    */
+
+  /**
+  * Facade for the execution orchestration of the plan sub-tree
+  * starting from this node.
+  *
+  * The return Task must be "run" for execution to ensue. See
+  * Monix documentation for further information on Task.
+  * This first invokes the doExecute abstract method, then applies
+  * the RangeVectorMappers associated with this plan node.
+  *
+  * The returned task can be used to perform post-execution steps
+  * such as sending off an asynchronous response message etc.
+  *
+  * Typically the caller creates the QuerySession parameter object. Remember
+  * that the creator is also responsible for closing it with
+  * `returnTask.guarantee(Task.eval(querySession.close()))`
+  *
+  */
   // scalastyle:off method.length
   def execute(source: ChunkSource,
               querySession: QuerySession)
@@ -137,7 +275,7 @@ trait ExecPlan extends QueryCommand {
     }
 
     // Step 2: Append transformer execution to step1 result, materialize the final result
-    def step2(res: ExecResult): Task[QueryResponse] = res.schema.map { resSchema =>
+    def step2(res: ExecResult): Task[QueryResponse] = res.schema.flatMap { resSchema =>
       // avoid any work when plan has waited in executor queue for long
       queryContext.checkQueryTimeout(s"step2-${this.getClass.getSimpleName}")
       Kamon.histogram("query-execute-time-elapsed-step2-start", MeasurementUnit.time.milliseconds)
@@ -186,7 +324,7 @@ trait ExecPlan extends QueryCommand {
       resultTask.onErrorHandle { case ex: Throwable =>
         QueryError(queryContext.queryId, querySession.queryStats, ex)
       }
-    }.flatten
+    }
 
     def makeResult(
       rv : Observable[RangeVector], recordSchema: RecordSchema, resultSchema: ResultSchema
