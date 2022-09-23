@@ -172,8 +172,8 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
    * Returns the column values used to partition the data.
    * Value order should match the order of this.partitionByCols.
    */
-  def getPartitionByValues(partKeyMap: Map[String, String], userEndTime: Long): Iterator[String] = {
-    val date = new Date(userEndTime)
+  def getPartitionByValues(partKeyMap: Map[String, String], userStartTime: Long): Iterator[String] = {
+    val date = new Date(userStartTime)
     downsamplerSettings.exportPathSpecPairs.iterator.map(_._2)
       // replace the {{}} strings with labels
       .map{LABEL_REGEX_MATCHER.replaceAllIn(_, matcher => partKeyMap(matcher.group(1)))}
@@ -212,7 +212,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
                              userStartTime: Long,
                              userEndTime: Long): Iterator[ExportRowData] = {
     val partKeyString = partKeyMap.map(pair => s"${pair._1}=${pair._2}").toSeq.sorted.mkString(",")
-    val partitionByValues = getPartitionByValues(partKeyMap, userEndTime)
+    val partitionByValues = getPartitionByValues(partKeyMap, userStartTime)
     getChunkRangeIter(readablePartition, userStartTime, userEndTime).flatMap{ chunkRow =>
       getTimeValuePairs(partKeyMap, readablePartition,
         chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
