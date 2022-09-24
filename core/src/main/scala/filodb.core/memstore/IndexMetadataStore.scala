@@ -164,7 +164,7 @@ class FileSystemBasedIndexMetadataStore(rootDirectory: String, expectedGeneratio
                 (IndexState.TriggerRebuild, None)
               } else if (shouldRebuildIndexForOldSnap(datasetRef, shard, snapFile)) {
                 logger.info("lastSnapTime is more than {} hours from now, " +
-                  "for dataset={} and shard={}triggering index rebuild instead of syncing the delta",
+                  "for dataset={} and shard={}. Triggering index rebuild instead of syncing the delta",
                   maxRefreshHours, datasetRef.toString, shard)
                 (IndexState.TriggerRebuild, None)
               } else
