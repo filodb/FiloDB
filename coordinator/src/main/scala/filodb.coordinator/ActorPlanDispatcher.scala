@@ -4,13 +4,13 @@ import java.util.concurrent.TimeUnit
 
 import scala.concurrent.duration.FiniteDuration
 
-import akka.actor.{Actor, ActorRef, Props}
+import akka.actor.{ActorRef, Props}
 import akka.pattern.{ask, AskTimeoutException}
 import akka.util.Timeout
-import monix.catnap.ConcurrentQueue
 import monix.eval.Task
 import monix.execution.Scheduler
-import monix.reactive.Observable
+import monix.reactive.{MulticastStrategy, Observable}
+import monix.reactive.subjects.ConcurrentSubject
 
 import filodb.coordinator.ActorSystemHolder.system
 import filodb.core.QueryTimeoutException
@@ -19,7 +19,6 @@ import filodb.core.store.ChunkSource
 import filodb.query.{QueryResponse, QueryResult, StrQueryResponse, StrQueryResultFooter}
 import filodb.query.Query.qLogger
 import filodb.query.exec.{ExecPlanWithClientParams, PlanDispatcher}
-
 
 /**
  * This implementation provides a way to distribute query execution
@@ -77,7 +76,8 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
     if (remainingTime < 1) {
       Observable.raiseError(QueryTimeoutException(queryTimeElapsed, this.getClass.getName))
     } else {
-      val t = FiniteDuration(remainingTime, TimeUnit.MILLISECONDS)
+//      val t = FiniteDuration(remainingTime, TimeUnit.MILLISECONDS)
+      // TODO timeout query
 
       // Query Planner sets target as null when shard is down
       if (target == ActorRef.noSender) {
@@ -86,26 +86,33 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
           emptyPartialResult
         })
       } else {
-        Observable.fromTask(ConcurrentQueue.unbounded[Task, StrQueryResponse]()).flatMap { queue =>
-          class ResultActor extends Actor {
-            def receive: Receive = {
-              case q: StrQueryResponse => queue.offer(q)
-            }
+        val subject = ConcurrentSubject[StrQueryResponse](MulticastStrategy.Publish)
+        class ResultActor extends BaseActor {
+          def receive: Receive = {
+            case q: StrQueryResponse =>
+              try {
+                subject.onNext(q)
+                qLogger.debug(s"Got ${q.getClass} as response from ${sender()}")
+              } catch { case e: Throwable =>
+                qLogger.error(s"Exception when processing $q", e)
+              }
+            case msg =>
+              qLogger.error(s"Unexpected message $msg in ResultActor")
           }
-          // temporary actor to get streaming results
-          val resultActor = system.actorOf(Props.create(classOf[ResultActor]))
-          target.tell(plan, resultActor) // send the query to the target
-          // deal with timeout by sending partial result flag
-          lazy val timeoutPartialResult = StrQueryResultFooter(plan.execPlan.queryContext.queryId,
-            QueryStats(), true, Some("Result may be partial since some shards did not respond in time"))
-          system.scheduler.scheduleOnce(t, resultActor, timeoutPartialResult)(system.dispatcher, Actor.noSender)
-          Observable.repeatEvalF(queue.poll)
-            .takeWhileInclusive(_.isInstanceOf[StrQueryResultFooter])
-            .guarantee(Task.eval(system.stop(resultActor)))
         }
+        val resultActor = system.actorOf(Props(new ResultActor))
+        subject
+           .doOnSubscribe(Task.eval {
+             target.tell(plan.execPlan, resultActor)
+             qLogger.debug(s"Sent to $target the plan ${plan.execPlan}")
+           })
+           .takeWhileInclusive(_.isLast)
+           .guarantee(Task.eval {
+             qLogger.debug(s"Stopping $resultActor")
+             system.stop(resultActor)
+           })
       }
     }
-
   }
 
   override def isLocalCall: Boolean = false

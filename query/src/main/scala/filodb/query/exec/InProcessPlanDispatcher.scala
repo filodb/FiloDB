@@ -37,7 +37,7 @@ import filodb.query.Query.qLogger
     Kamon.runWithSpan(Kamon.currentSpan(), false) {
       // translate implicit ExecutionContext to monix.Scheduler
       val querySession = QuerySession(plan.execPlan.queryContext, queryConfig,
-                              streamingDispatch = false,
+                              streamingDispatch = PlanDispatcher.streamingResultsEnabled,
                               catchMultipleLockSetErrors = true)
       plan.execPlan.execute(source, querySession)
         .timeout(plan.clientParams.deadline.milliseconds)

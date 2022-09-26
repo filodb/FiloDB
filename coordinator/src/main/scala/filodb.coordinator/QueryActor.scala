@@ -4,6 +4,8 @@ import java.lang.Thread.UncaughtExceptionHandler
 import java.util.concurrent.{ForkJoinPool, ForkJoinWorkerThread}
 
 import scala.collection.mutable
+import scala.concurrent.duration.DurationInt
+import scala.util.{Failure, Success}
 import scala.util.control.NonFatal
 
 import akka.actor.{ActorRef, Props}
@@ -14,6 +16,7 @@ import kamon.tag.TagSet
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.schedulers.SchedulerService
+import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
 
@@ -26,7 +29,7 @@ import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryStats}
 import filodb.core.store.CorruptVectorException
 import filodb.memory.data.Shutdown
 import filodb.query._
-import filodb.query.exec.ExecPlan
+import filodb.query.exec.{ExecPlan, PlanDispatcher}
 
 object QueryActor {
   final case class ThrowException(dataset: DatasetRef)
@@ -131,6 +134,7 @@ final class QueryActor(memStore: TimeSeriesStore,
 
   // scalastyle:off method.length
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
+    logger.debug(s"Received request to run query $q")
     if (checkTimeoutBeforeQueryExec(q.queryContext, replyTo)) {
       epRequests.increment()
       val queryExecuteSpan = Kamon.spanBuilder(s"query-actor-exec-plan-execute-${q.getClass.getSimpleName}")
@@ -142,7 +146,7 @@ final class QueryActor(memStore: TimeSeriesStore,
         queryExecuteSpan.tag("query-id", q.queryContext.queryId)
         val querySession = QuerySession(q.queryContext,
                                         queryConfig,
-                                        streamingDispatch = false, // TODO change to true when fully ready
+                                        streamingDispatch = PlanDispatcher.streamingResultsEnabled,
                                         catchMultipleLockSetErrors = true)
         queryExecuteSpan.mark("query-actor-received-execute-start")
 
@@ -156,6 +160,7 @@ final class QueryActor(memStore: TimeSeriesStore,
                 case e: StrQueryError => logQueryErrors(e.t)
                 case _ =>
               }
+              logger.debug(s"Sending response $resp to $replyTo")
               replyTo ! resp
             }.guarantee(Task.eval {
               querySession.close()
@@ -215,12 +220,41 @@ final class QueryActor(memStore: TimeSeriesStore,
       lpRequests.increment()
       try {
         val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
-        self forward execPlan
+        if (PlanDispatcher.streamingResultsEnabled) {
+          val res = queryPlanner.dispatchStreamingExecPlan(execPlan, Kamon.currentSpan())(queryScheduler, 30.seconds)
+          streamToFatQueryResponse(q.qContext, res).runToFuture(queryScheduler).onComplete {
+            case Success(resp) => replyTo ! resp
+            case Failure(e) => replyTo ! QueryError(q.qContext.queryId, QueryStats(), e)
+          }(queryScheduler)
+        } else {
+          self forward execPlan
+        }
       } catch {
         case NonFatal(ex) =>
           if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
             logger.error(s"Exception while materializing logical plan", ex)
           replyTo ! QueryError("unknown", QueryStats(), ex)
+      }
+    }
+  }
+
+  def streamToFatQueryResponse(queryContext: QueryContext, resp: Observable[StrQueryResponse]): Task[QueryResponse] = {
+    resp.takeWhileInclusive(_.isLast).toListL.map { r =>
+      r.collectFirst {
+        case StrQueryError(id, stats, t) => QueryError(id, stats, t)
+      }
+      .getOrElse {
+        val header = r.collectFirst {
+          case h: StrQueryResultHeader => h
+        }.getOrElse(throw new IllegalStateException(s"Did not get a header for query id ${queryContext.queryId}"))
+        val rvs = r.collect {
+          case StrQueryResult(id, rv) => rv
+        }
+        val footer = r.lastOption.collect {
+          case f: StrQueryResultFooter => f
+        }.getOrElse(StrQueryResultFooter(queryContext.queryId))
+        QueryResult(queryContext.queryId, header.resultSchema, rvs,
+                  footer.queryStats, footer.mayBePartial, footer.partialResultReason)
       }
     }
   }
@@ -295,6 +329,8 @@ final class QueryActor(memStore: TimeSeriesStore,
     case ThrowException(dataset) =>
       logger.warn(s"Throwing exception for dataset $dataset. QueryActor will be killed")
       throw new RuntimeException
+    case msg                     =>
+      logger.error(s"Unhandled message $msg in QueryActor")
   }
 
 }

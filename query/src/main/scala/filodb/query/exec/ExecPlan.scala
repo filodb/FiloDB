@@ -122,7 +122,6 @@ trait ExecPlan extends QueryCommand {
           .withTag("plan", getClass.getSimpleName)
           .record(Math.max(0, System.currentTimeMillis - startExecute))
         FiloSchedulers.assertThreadName(QuerySchedName)
-        //      val resultTask = {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] =
             transf.funcParams.map(_.getResult(querySession, source))
@@ -194,7 +193,6 @@ trait ExecPlan extends QueryCommand {
                 s"$msg Try to apply more filters, reduce the time range, and/or increase the step size.")
             }
           }
-
           srv
         }
         .filter(_.numRowsSerialized > 0)
@@ -624,7 +622,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
         .map { case (plan, i) =>
           val results = dispatchStreamingRemotePlan(plan, querySession, span, source)
           // find schema mismatch errors and re-throw errors
-          val respWithoutErrors: Observable[StrQueryResponse] = results.map {
+          val respWithoutErrors = results.map {
             case header @ StrQueryResultHeader(_, rs) =>
               if (rs != ResultSchema.empty) sch = reduceSchemas(sch, rs) // error on any schema mismatch
               header
@@ -646,7 +644,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
 
       val schemas = childResults.flatMap { obs =>
         obs._1.find(_.isInstanceOf[StrQueryResultHeader])
-          .map(_.asInstanceOf[StrQueryResultHeader].resultSchema).map(rs => (rs, obs._2))
+          .map(_.asInstanceOf[StrQueryResultHeader].resultSchema)
+          .map(rs => (rs, obs._2))
       }.pipeThrough(Pipe.publish[(ResultSchema, Int)]) // pipeThrough helps with multiple subscribers
 
       val rvs = childResults.map { obs =>

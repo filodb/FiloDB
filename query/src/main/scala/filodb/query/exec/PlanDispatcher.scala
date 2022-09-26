@@ -7,6 +7,10 @@ import monix.reactive.Observable
 import filodb.core.store.ChunkSource
 import filodb.query.{QueryResponse, StrQueryResponse}
 
+object PlanDispatcher {
+  val streamingResultsEnabled = false
+}
+
 /**
   * This trait externalizes distributed query execution strategy
   * from the ExecPlan.
