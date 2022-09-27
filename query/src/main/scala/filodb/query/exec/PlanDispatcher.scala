@@ -8,7 +8,7 @@ import filodb.core.store.ChunkSource
 import filodb.query.{QueryResponse, StrQueryResponse}
 
 object PlanDispatcher {
-  val streamingResultsEnabled = false
+  val streamingResultsEnabled = false // TODO enable when streaming support is complete in all non-leaf plans
 }
 
 /**

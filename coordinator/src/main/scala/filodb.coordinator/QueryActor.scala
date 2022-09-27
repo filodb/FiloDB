@@ -239,7 +239,7 @@ final class QueryActor(memStore: TimeSeriesStore,
   }
 
   def streamToFatQueryResponse(queryContext: QueryContext, resp: Observable[StrQueryResponse]): Task[QueryResponse] = {
-    resp.takeWhileInclusive(_.isLast).toListL.map { r =>
+    resp.takeWhileInclusive(!_.isLast).toListL.map { r =>
       r.collectFirst {
         case StrQueryError(id, stats, t) => QueryError(id, stats, t)
       }
