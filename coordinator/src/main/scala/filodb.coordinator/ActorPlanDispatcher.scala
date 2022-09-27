@@ -106,7 +106,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
              target.tell(plan.execPlan, resultActor)
              qLogger.debug(s"Sent to $target the plan ${plan.execPlan}")
            })
-           .takeWhileInclusive(_.isLast)
+           .takeWhileInclusive(!_.isLast)
            .guarantee(Task.eval {
              qLogger.debug(s"Stopping $resultActor")
              system.stop(resultActor)
