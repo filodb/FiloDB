@@ -214,11 +214,11 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
                              userStartTime: Long,
                              userEndTime: Long): Iterator[ExportRowData] = {
     val partKeyString = partKeyMap.map(pair => s"${pair._1}=${pair._2}").toSeq.sorted.mkString(",")
-    val partitionByValues = getPartitionByValues(partKeyMap, userStartTime)
     getChunkRangeIter(readablePartition, userStartTime, userEndTime).flatMap{ chunkRow =>
       getTimeValuePairs(partKeyMap, readablePartition,
         chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
     }.map{ case (timestamp, value) =>
+      val partitionByValues = getPartitionByValues(partKeyMap, userStartTime)
       ExportRowData(partKeyMap, partKeyString, timestamp, value, partitionByValues)
     }
   }
