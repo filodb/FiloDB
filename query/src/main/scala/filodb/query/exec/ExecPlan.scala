@@ -80,6 +80,23 @@ trait ExecPlan extends QueryCommand {
 
   protected def allTransformers: Seq[RangeVectorTransformer] = rangeVectorTransformers
 
+  /**
+   * Facade for the execution orchestration of the plan sub-tree
+   * starting from this node.
+   *
+   * This first invokes the doExecute abstract method, then applies
+   * the RangeVectorMappers associated with this plan node.
+   *
+   * The response is a stream of StrQueryResponse Observable which can
+   * be streamed out to the wire, or processed as optimally appropriate.
+   * The advantage of using this over `execute` is that this method uses
+   * much less memory than when converted to a fat response object.
+   *
+   * Typically the caller creates the QuerySession parameter object. Remember
+   * that the creator is also responsible for closing it with
+   * `returnObservable.guarantee(Task.eval(querySession.close()))`
+   *
+   */
   // scalastyle:off method.length
   def executeStreaming(source: ChunkSource,
                        querySession: QuerySession)
@@ -727,7 +744,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
 
   /**
     * Sub-class non-leaf nodes should provide their own implementation of how
-    * to compose the sub-query results here.
+    * to compose the child-query results here.
     *
     * @param childResponses observable of a pair. First element of pair is the QueryResponse for
     *                       a child ExecPlan, the second element is the index of the child plan.
@@ -738,6 +755,15 @@ abstract class NonLeafExecPlan extends ExecPlan {
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector]
 
+  /**
+   * Sub-class non-leaf nodes should provide their own implementation of how
+   * to compose the child-query results here
+   *
+   * @param childResponses stream of Observable-Int 2-tuple, one for each child plan
+   * @param schemas stream of ResultSchema-Int 2-tuple, one for each child plan
+   * @param querySession the query session for this plan execution
+   * @return Stream of result range vectors
+   */
   protected def composeStreaming(childResponses: Observable[(Observable[RangeVector], Int)],
                                  schemas: Observable[(ResultSchema, Int)],
                                  querySession: QuerySession): Observable[RangeVector]

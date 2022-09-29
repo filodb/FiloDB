@@ -76,8 +76,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
     if (remainingTime < 1) {
       Observable.raiseError(QueryTimeoutException(queryTimeElapsed, this.getClass.getName))
     } else {
-//      val t = FiniteDuration(remainingTime, TimeUnit.MILLISECONDS)
-      // TODO timeout query
+      // TODO timeout query if response stream not completed in time
 
       // Query Planner sets target as null when shard is down
       if (target == ActorRef.noSender) {

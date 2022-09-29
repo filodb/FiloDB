@@ -65,7 +65,6 @@ final case class QueryResult(id: String,
   }
 }
 
-
 sealed trait StrQueryResponse extends NodeResponse with java.io.Serializable {
   def id: String
   def isLast: Boolean = false
@@ -89,6 +88,6 @@ final case class StrQueryError(id: String,
                             queryStats: QueryStats,
                             t: Throwable) extends StrQueryResponse with filodb.core.ErrorResponse {
   override def isLast: Boolean = true
-  override def toString: String = s"QueryError id=$id ${t.getClass.getName} ${t.getMessage}\n" +
+  override def toString: String = s"StrQueryError id=$id ${t.getClass.getName} ${t.getMessage}\n" +
     t.getStackTrace.map(_.toString).mkString("\n")
 }
