@@ -221,7 +221,7 @@ case class DummyDispatcher(memStore: TimeSeriesMemStore, querySession: QuerySess
 
   override def isLocalCall: Boolean = ???
   override def dispatchStreaming(plan: ExecPlanWithClientParams,
-                                 source: ChunkSource)(implicit sched: Scheduler): Observable[StrQueryResponse] = {
+                                 source: ChunkSource)(implicit sched: Scheduler): Observable[StreamQueryResponse] = {
     plan.execPlan.executeStreaming(memStore, querySession)
   }
 }

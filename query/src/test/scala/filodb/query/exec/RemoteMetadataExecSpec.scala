@@ -113,7 +113,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
     }
 
     override def dispatchStreaming(plan: ExecPlanWithClientParams,
-                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StrQueryResponse] = {
+                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StreamQueryResponse] = {
       plan.execPlan.executeStreaming(memStore, querySession)(sched)
     }
   }

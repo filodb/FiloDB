@@ -8,7 +8,7 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.query.QueryContext
-import filodb.query.{LogicalPlan, QueryResponse, StrQueryResponse}
+import filodb.query.{LogicalPlan, QueryResponse, StreamQueryResponse}
 import filodb.query.exec.{ClientParams, ExecPlan, ExecPlanWithClientParams, UnsupportedChunkSource}
 
 /**
@@ -44,7 +44,7 @@ trait QueryPlanner {
 
   def dispatchStreamingExecPlan(execPlan: ExecPlan,
                        parentSpan: kamon.trace.Span)
-                      (implicit sched: Scheduler, timeout: FiniteDuration): Observable[StrQueryResponse] = {
+                      (implicit sched: Scheduler, timeout: FiniteDuration): Observable[StreamQueryResponse] = {
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since
     // kamon uses thread-locals.

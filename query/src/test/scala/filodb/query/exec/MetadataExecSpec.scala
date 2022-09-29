@@ -109,7 +109,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     override def isLocalCall: Boolean = ???
 
     override def dispatchStreaming(plan: ExecPlanWithClientParams,
-                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StrQueryResponse] = ???
+                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
   }
 
   val executeDispatcher = new PlanDispatcher {
@@ -121,7 +121,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     }
 
     override def dispatchStreaming(plan: ExecPlanWithClientParams,
-                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StrQueryResponse] = ???
+                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
   }
 
   it ("should read the job names from timeseriesindex matching the columnfilters") {

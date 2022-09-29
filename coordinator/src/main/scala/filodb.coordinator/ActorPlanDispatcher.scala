@@ -16,7 +16,7 @@ import filodb.coordinator.ActorSystemHolder.system
 import filodb.core.QueryTimeoutException
 import filodb.core.query.{QueryStats, ResultSchema}
 import filodb.core.store.ChunkSource
-import filodb.query.{QueryResponse, QueryResult, StrQueryResponse, StrQueryResultFooter}
+import filodb.query.{QueryResponse, QueryResult, StreamQueryError, StreamQueryResponse, StreamQueryResultFooter}
 import filodb.query.Query.qLogger
 import filodb.query.exec.{ExecPlanWithClientParams, PlanDispatcher}
 
@@ -65,11 +65,11 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
   }
 
   def dispatchStreaming(plan: ExecPlanWithClientParams, source: ChunkSource)
-                       (implicit sched: Scheduler): Observable[StrQueryResponse] = {
+                       (implicit sched: Scheduler): Observable[StreamQueryResponse] = {
     // "source" is unused (the param exists to support InProcessDispatcher).
     val queryTimeElapsed = System.currentTimeMillis() - plan.execPlan.queryContext.submitTime
     val remainingTime = plan.clientParams.deadline - queryTimeElapsed
-    lazy val emptyPartialResult = StrQueryResultFooter(plan.execPlan.queryContext.queryId,
+    lazy val emptyPartialResult = StreamQueryResultFooter(plan.execPlan.queryContext.queryId,
       QueryStats(), true, Some("Result may be partial since query on some shards timed out"))
 
     // Don't send if time left is very small
@@ -85,10 +85,10 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
           emptyPartialResult
         })
       } else {
-        val subject = ConcurrentSubject[StrQueryResponse](MulticastStrategy.Publish)
+        val subject = ConcurrentSubject[StreamQueryResponse](MulticastStrategy.Publish)
         class ResultActor extends BaseActor {
           def receive: Receive = {
-            case q: StrQueryResponse =>
+            case q: StreamQueryResponse =>
               try {
                 subject.onNext(q)
                 qLogger.debug(s"Got ${q.getClass} as response from ${sender()}")
@@ -97,6 +97,8 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
               }
             case msg =>
               qLogger.error(s"Unexpected message $msg in ResultActor")
+                subject.onNext(StreamQueryError(plan.execPlan.queryContext.queryId, QueryStats(),
+                  new IllegalStateException(s"Unexpected result type $msg")))
           }
         }
         val resultActor = system.actorOf(Props(new ResultActor))

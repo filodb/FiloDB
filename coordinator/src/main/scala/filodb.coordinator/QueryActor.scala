@@ -153,11 +153,11 @@ final class QueryActor(memStore: TimeSeriesStore,
         val execTask = if (querySession.streamingDispatch) {
           q.executeStreaming(memStore, querySession)(queryScheduler)
             .onErrorHandle { t =>
-              StrQueryError(q.queryContext.queryId, querySession.queryStats, t)
+              StreamQueryError(q.queryContext.queryId, querySession.queryStats, t)
             }.map { resp =>
               FiloSchedulers.assertThreadName(QuerySchedName)
               resp match {
-                case e: StrQueryError => logQueryErrors(e.t)
+                case e: StreamQueryError => logQueryErrors(e.t)
                 case _ =>
               }
               logger.debug(s"Sending response $resp to $replyTo")
@@ -238,21 +238,22 @@ final class QueryActor(memStore: TimeSeriesStore,
     }
   }
 
-  def streamToFatQueryResponse(queryContext: QueryContext, resp: Observable[StrQueryResponse]): Task[QueryResponse] = {
+  def streamToFatQueryResponse(queryContext: QueryContext,
+                               resp: Observable[StreamQueryResponse]): Task[QueryResponse] = {
     resp.takeWhileInclusive(!_.isLast).toListL.map { r =>
       r.collectFirst {
-        case StrQueryError(id, stats, t) => QueryError(id, stats, t)
+        case StreamQueryError(id, stats, t) => QueryError(id, stats, t)
       }
       .getOrElse {
         val header = r.collectFirst {
-          case h: StrQueryResultHeader => h
+          case h: StreamQueryResultHeader => h
         }.getOrElse(throw new IllegalStateException(s"Did not get a header for query id ${queryContext.queryId}"))
         val rvs = r.collect {
-          case StrQueryResult(id, rv) => rv
+          case StreamQueryResult(id, rv) => rv
         }
         val footer = r.lastOption.collect {
-          case f: StrQueryResultFooter => f
-        }.getOrElse(StrQueryResultFooter(queryContext.queryId))
+          case f: StreamQueryResultFooter => f
+        }.getOrElse(StreamQueryResultFooter(queryContext.queryId))
         QueryResult(queryContext.queryId, header.resultSchema, rvs,
                   footer.queryStats, footer.mayBePartial, footer.partialResultReason)
       }

@@ -5,7 +5,7 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.store.ChunkSource
-import filodb.query.{QueryResponse, StrQueryResponse}
+import filodb.query.{QueryResponse, StreamQueryResponse}
 
 object PlanDispatcher {
   val streamingResultsEnabled = false // TODO enable when streaming support is complete in all non-leaf plans
@@ -21,6 +21,6 @@ trait PlanDispatcher extends java.io.Serializable {
               (implicit sched: Scheduler): Task[QueryResponse]
 
   def dispatchStreaming(plan: ExecPlanWithClientParams, source: ChunkSource)
-                        (implicit sched: Scheduler): Observable[StrQueryResponse]
+                       (implicit sched: Scheduler): Observable[StreamQueryResponse]
   def isLocalCall: Boolean
 }

@@ -15,7 +15,7 @@ import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.Schemas
 import filodb.core.query.{QueryConfig, QuerySession, QueryStats, ResultSchema}
 import filodb.core.store._
-import filodb.query.{QueryResponse, QueryResult, StrQueryResponse}
+import filodb.query.{QueryResponse, QueryResult, StreamQueryResponse}
 import filodb.query.Query.qLogger
 
 /**
@@ -56,7 +56,7 @@ import filodb.query.Query.qLogger
 
   override def dispatchStreaming(plan: ExecPlanWithClientParams,
                                  source: ChunkSource)
-                                (implicit sched: Scheduler): Observable[StrQueryResponse] = ???
+                                (implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
 }
 
 /**

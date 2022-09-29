@@ -13,7 +13,7 @@ import filodb.core.query.{PromQlQueryParams, QueryContext}
 import filodb.core.store.ChunkSource
 import filodb.memory.format.vectors.MutableHistogram
 import filodb.query
-import filodb.query.{Data, HistSampl, MetadataMapSampl, MetadataSuccessResponse, QueryResponse, QueryResult, Sampl, StrQueryResponse, SuccessResponse}
+import filodb.query.{Data, HistSampl, MetadataMapSampl, MetadataSuccessResponse, QueryResponse, QueryResult, Sampl, StreamQueryResponse, SuccessResponse}
 
 
 class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
@@ -31,7 +31,7 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     override def isLocalCall: Boolean = ???
 
     override def dispatchStreaming(plan: ExecPlanWithClientParams,
-                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StrQueryResponse] = ???
+                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
   }
 
   val params = PromQlQueryParams("", 0, 0 , 0)

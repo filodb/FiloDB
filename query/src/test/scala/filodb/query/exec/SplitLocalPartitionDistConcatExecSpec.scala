@@ -22,7 +22,7 @@ import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSer
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, TimestampColumn}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.memory.MemFactory
-import filodb.query.{QueryResponse, QueryResult, StrQueryResponse}
+import filodb.query.{QueryResponse, QueryResult, StreamQueryResponse}
 
 object SplitLocalPartitionDistConcatExecSpec {
   val dummyDispatcher = new PlanDispatcher {
@@ -34,7 +34,7 @@ object SplitLocalPartitionDistConcatExecSpec {
     override def isLocalCall: Boolean = ???
 
     override def dispatchStreaming(plan: ExecPlanWithClientParams,
-                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StrQueryResponse] = ???
+                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
   }
 
   val dsRef = DatasetRef("raw-metrics")

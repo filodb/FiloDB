@@ -65,28 +65,27 @@ final case class QueryResult(id: String,
   }
 }
 
-sealed trait StrQueryResponse extends NodeResponse with java.io.Serializable {
+sealed trait StreamQueryResponse extends NodeResponse with java.io.Serializable {
   def id: String
   def isLast: Boolean = false
 }
 
-final case class StrQueryResultHeader(id: String,
-                                      resultSchema: ResultSchema) extends StrQueryResponse {
-}
+final case class StreamQueryResultHeader(id: String,
+                                         resultSchema: ResultSchema) extends StreamQueryResponse
 
-final case class StrQueryResult(id: String,
-                                result: RangeVector) extends StrQueryResponse
+final case class StreamQueryResult(id: String,
+                                   result: RangeVector) extends StreamQueryResponse
 
-final case class StrQueryResultFooter(id: String,
-                                      queryStats: QueryStats = QueryStats(),
-                                      mayBePartial: Boolean = false,
-                                      partialResultReason: Option[String] = None) extends StrQueryResponse {
+final case class StreamQueryResultFooter(id: String,
+                                         queryStats: QueryStats = QueryStats(),
+                                         mayBePartial: Boolean = false,
+                                         partialResultReason: Option[String] = None) extends StreamQueryResponse {
   override def isLast: Boolean = true
 }
 
-final case class StrQueryError(id: String,
-                            queryStats: QueryStats,
-                            t: Throwable) extends StrQueryResponse with filodb.core.ErrorResponse {
+final case class StreamQueryError(id: String,
+                                  queryStats: QueryStats,
+                                  t: Throwable) extends StreamQueryResponse with filodb.core.ErrorResponse {
   override def isLast: Boolean = true
   override def toString: String = s"StrQueryError id=$id ${t.getClass.getName} ${t.getMessage}\n" +
     t.getStackTrace.map(_.toString).mkString("\n")

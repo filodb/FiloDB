@@ -100,7 +100,7 @@ trait ExecPlan extends QueryCommand {
   // scalastyle:off method.length
   def executeStreaming(source: ChunkSource,
                        querySession: QuerySession)
-                       (implicit sched: Scheduler): Observable[StrQueryResponse] = {
+                       (implicit sched: Scheduler): Observable[StreamQueryResponse] = {
 
     val startExecute = querySession.qContext.submitTime
 
@@ -131,7 +131,7 @@ trait ExecPlan extends QueryCommand {
     }
 
     // Step 2: Append transformer execution to step1 result, materialize the final result
-    def step2(res: ExecResult): Observable[StrQueryResponse] = {
+    def step2(res: ExecResult): Observable[StreamQueryResponse] = {
       val task = res.schema.map { resSchema =>
         // avoid any work when plan has waited in executor queue for long
         queryContext.checkQueryTimeout(s"step2-${this.getClass.getSimpleName}")
@@ -156,8 +156,8 @@ trait ExecPlan extends QueryCommand {
           }
         }
         if (finalRes._2 == ResultSchema.empty) {
-          Observable.fromIterable(Seq(StrQueryResultHeader(queryContext.queryId, finalRes._2),
-            StrQueryResultFooter(queryContext.queryId, querySession.queryStats,
+          Observable.fromIterable(Seq(StreamQueryResultHeader(queryContext.queryId, finalRes._2),
+            StreamQueryResultFooter(queryContext.queryId, querySession.queryStats,
               querySession.resultCouldBePartial, querySession.partialResultsReason)))
         } else {
           val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
@@ -175,7 +175,7 @@ trait ExecPlan extends QueryCommand {
     }
 
     def makeResult(rv: Observable[RangeVector], recordSchema: RecordSchema,
-                   resultSchema: ResultSchema): Observable[StrQueryResponse] = {
+                   resultSchema: ResultSchema): Observable[StreamQueryResponse] = {
       @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
       @volatile var resultSize = 0L
       val queryResults = rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
@@ -213,7 +213,7 @@ trait ExecPlan extends QueryCommand {
           srv
         }
         .filter(_.numRowsSerialized > 0)
-        .map(StrQueryResult(queryContext.queryId, _))
+        .map(StreamQueryResult(queryContext.queryId, _))
         .guarantee(Task.eval {
           Kamon.histogram("query-execute-time-elapsed-step2-result-materialized",
             MeasurementUnit.time.milliseconds)
@@ -227,9 +227,9 @@ trait ExecPlan extends QueryCommand {
           span.mark(s"execute-step2-end-${this.getClass.getSimpleName}")
         })
 
-      Observable.now(StrQueryResultHeader(queryContext.queryId, resultSchema)) ++
+      Observable.now(StreamQueryResultHeader(queryContext.queryId, resultSchema)) ++
         queryResults ++
-        Observable.now(StrQueryResultFooter(queryContext.queryId, querySession.queryStats,
+        Observable.now(StreamQueryResultFooter(queryContext.queryId, querySession.queryStats,
           querySession.resultCouldBePartial, querySession.partialResultsReason))
     }
 
@@ -606,7 +606,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
       plan.dispatcher.dispatchStreaming(ExecPlanWithClientParams(plan,
         ClientParams(plan.queryContext.plannerParams.queryTimeoutMillis - 1000)), source)
           .onErrorHandle { ex: Throwable =>
-            StrQueryError(queryContext.queryId, qSession.queryStats, ex)
+            StreamQueryError(queryContext.queryId, qSession.queryStats, ex)
           }
     }
   }
@@ -640,33 +640,34 @@ abstract class NonLeafExecPlan extends ExecPlan {
           val results = dispatchStreamingRemotePlan(plan, querySession, span, source)
           // find schema mismatch errors and re-throw errors
           val respWithoutErrors = results.map {
-            case header @ StrQueryResultHeader(_, rs) =>
+            case header @ StreamQueryResultHeader(_, rs) =>
               if (rs != ResultSchema.empty) sch = reduceSchemas(sch, rs) // error on any schema mismatch
               header
-            case res @ StrQueryResult(_, _) =>
+            case res @ StreamQueryResult(_, _) =>
               res
-            case footer @ StrQueryResultFooter(_, qStats, isPartialResult, partialResultReason) =>
+            case footer @ StreamQueryResultFooter(_, qStats, isPartialResult, partialResultReason) =>
               if (isPartialResult) {
                 querySession.resultCouldBePartial = true
                 querySession.partialResultsReason = partialResultReason
               }
               querySession.queryStats.add(qStats)
               footer
-            case StrQueryError(_, queryStats, t) =>
+            case StreamQueryError(_, queryStats, t) =>
               querySession.queryStats.add(queryStats)
               throw t
           }
           (respWithoutErrors, i)
-        }.pipeThrough(Pipe.publish[(Observable[StrQueryResponse], Int)]) // pipeThrough helps with multiple subscribers
+        }.pipeThrough(Pipe.publish[(Observable[StreamQueryResponse], Int)])
+             // pipeThrough helps with multiple subscribers
 
       val schemas = childResults.flatMap { obs =>
-        obs._1.find(_.isInstanceOf[StrQueryResultHeader])
-          .map(_.asInstanceOf[StrQueryResultHeader].resultSchema)
+        obs._1.find(_.isInstanceOf[StreamQueryResultHeader])
+          .map(_.asInstanceOf[StreamQueryResultHeader].resultSchema)
           .map(rs => (rs, obs._2))
       }.pipeThrough(Pipe.publish[(ResultSchema, Int)]) // pipeThrough helps with multiple subscribers
 
       val rvs = childResults.map { obs =>
-        val rvs = obs._1.collect { case s: StrQueryResult => s.result }
+        val rvs = obs._1.collect { case s: StreamQueryResult => s.result }
         (rvs, obs._2)
       }
       val outputSchema = deriveOutputSchema(schemas)

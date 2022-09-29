@@ -34,7 +34,7 @@ object MultiSchemaPartitionsExecSpec {
     override def isLocalCall: Boolean = ???
 
     override def dispatchStreaming(plan: ExecPlanWithClientParams,
-                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StrQueryResponse] = ???
+                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
   }
 
   val dsRef = DatasetRef("raw-metrics")
