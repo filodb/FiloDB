@@ -292,14 +292,11 @@ final case class PartKeysExec(queryContext: QueryContext,
                               filters: Seq[ColumnFilter],
                               fetchFirstLastSampleTimes: Boolean,
                               start: Long,
-                              end: Long) extends LeafExecPlan {
+                              end: Long,
+                              override val maxRecordContainerSize: Int = 128 * 1024) extends LeafExecPlan {
 
   override def enforceSampleLimit: Boolean = false
 
-  /**
-   * Override the max record container size created for PartKeysExec to 8K instead of default 4K
-   */
-  override val maxRecordContainerSize: Int = 128 * 1024
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)

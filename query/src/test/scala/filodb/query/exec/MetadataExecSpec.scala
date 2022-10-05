@@ -72,6 +72,11 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
   implicit val execTimeout = 5.seconds
 
+  // Create one container greater than 8K map, we will create one metric with 50 labels, each label of 200 chars
+  val commonLabels = Map("_ws_" -> "testws", "_ns_" -> "testns", "job" ->  "myUniqueService")
+  val longLabels = ((0 to 50).map(i => (s"label$i", s"$i" * 200)).toMap ++ commonLabels)
+    .map{ case (k, v) => (k.utf8, v.utf8)}
+
   def initShard(memStore: TimeSeriesMemStore,
                 partKeyLabelValues: Seq[Tuple2[String, Map[String, String]]],
                 ishard: Int): Unit = {
@@ -85,10 +90,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     }
     memStore.setup(timeseriesDatasetMultipleShardKeys.ref, Schemas(Schemas.promCounter), ishard, TestData.storeConf)
     memStore.ingest(timeseriesDatasetMultipleShardKeys.ref, ishard, SomeData(builder.allContainers.head, 0))
-    // Create one container greater than 4K map, we will create one metric with 50 labels, each label of 100 chars
-    val commonLabels = Map("_ws_" -> "testws", "_ns_" -> "testns", "job" ->  "myUniqueService")
-    val longLabels = ((0 to 50).map(i => (s"label$i", s"$i" * 200)).toMap ++ commonLabels)
-                                  .map{ case (k, v) => (k.utf8, v.utf8)}
+
     builder.reset()
     tuples.take(10).foreach {
       case (timeStamp: Long, value: Double) =>
@@ -223,16 +225,36 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     // Reducing limit results in truncated metadata response
     val execPlan = PartKeysExec(QueryContext(plannerParams = PlannerParams(sampleLimit = limit - 1)), executeDispatcher,
-      timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now)
+      timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now, maxRecordContainerSize = 8 * 1024)
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     resp match {
-      case QueryError(_, stats, ex: IllegalArgumentException)  =>
+      case QueryError(_, _, ex: IllegalArgumentException)  =>
                                           ex.getMessage shouldEqual "requirement failed: Record too big for container"
       case _                                                   =>
                                             fail(s"Expected to see an exception for exceeding the default " +
-                                              s"container limit of ${SerializedRangeVector.MaxContainerSize}")
+                                              s"container limit of ${execPlan.maxRecordContainerSize}")
     }
+
+
+    // Default one with 128K Record container
+    val execPlan1 = PartKeysExec(QueryContext(plannerParams = PlannerParams(sampleLimit = limit - 1)), executeDispatcher,
+      timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now)
+
+    val resp1 = execPlan1.execute(memStore, querySession).runToFuture.futureValue
+    val result = resp1 match {
+      case QueryResult(id, _, response, _, _, _) => {
+        val rv = response(0)
+        rv.rows.size shouldEqual 1
+        val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
+        rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset).map {
+          case (k, v) => (k.utf8, v.utf8)
+        }
+      }
+      case _                                     => fail("Expected to see a QueryResult")
+    }
+    result.toMap shouldEqual (longLabels
+      ++ Map("_metric_".utf8 -> "long_labels_metric".utf8, "_type_".utf8 -> "prom-counter".utf8))
   }
 
   it ("should be able to query labels with filter") {
