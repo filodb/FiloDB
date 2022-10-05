@@ -53,6 +53,14 @@ trait ExecPlan extends QueryCommand {
   def enforceSampleLimit: Boolean = true
 
   /**
+   * Default max size of the containers created for the ExecPlan. Specific ExecPlans may choose to override and
+   * use different values
+   *
+   * @return
+   */
+  def maxContainerSize: Int = SerializedRangeVector.MaxContainerSize
+
+  /**
     * Child execution plans representing sub-queries
     */
   def children: Seq[ExecPlan]
@@ -187,7 +195,7 @@ trait ExecPlan extends QueryCommand {
     ): Task[QueryResult] = {
         @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
         @volatile var resultSize = 0L
-        val builder = SerializedRangeVector.newBuilder()
+        val builder = SerializedRangeVector.newBuilder(maxContainerSize)
         rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
           .map {
             case srvable: SerializableRangeVector => srvable
