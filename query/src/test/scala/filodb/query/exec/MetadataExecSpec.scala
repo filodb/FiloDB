@@ -237,7 +237,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     }
 
 
-    // Default one with 128K Record container
+    // Default one with 64K Record container
     val execPlan1 = PartKeysExec(QueryContext(plannerParams = PlannerParams(sampleLimit = limit - 1)), executeDispatcher,
       timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now)
 

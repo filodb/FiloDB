@@ -31,7 +31,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
   private val lcLabelNameField  = "label"
   private val lcLabelCountField = "count"
 
-  override val maxRecordContainerSize: Int = 128 * 1024
+  override val maxRecordContainerSize: Int = 64 * 1024
 
   private val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize)
 
