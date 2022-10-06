@@ -118,7 +118,7 @@ object QueryContext {
    * @return
    */
   def mapTargetSchemaFunc(shardKeyNames: Seq[String],
-                          targetSchemaMap: Map[Map[String, String], Seq[String]],
+                          targetSchemaMap: Map[Map[String, String], Seq[TargetSchemaChange]],
                           optionalShardKey: String)
           : Seq[ColumnFilter] => Seq[TargetSchemaChange] = {
     filters: Seq[ColumnFilter] =>
@@ -131,19 +131,18 @@ object QueryContext {
       }.toMap
       val defaultSchema = targetSchemaMap.get(nonOptShardKeys)
       val schema = targetSchemaMap.get(shardKeysInQuery)
-      val schemaToUse = schema.orElse(defaultSchema)
-      if (schemaToUse.isDefined) {
-        Seq(TargetSchemaChange(schema = schemaToUse.get))
-      } else {
-        Seq.empty
+      schema.orElse(defaultSchema) match {
+        case Some(targetSchemaChanges) => targetSchemaChanges
+        case None => Seq.empty
       }
   }
 
   def mapTargetSchemaFunc(shardKeyNames: java.util.List[String],
-                          targetSchemaMap: java.util.Map[java.util.Map[String, String], java.util.List[String]],
+                          targetSchemaMap: java.util.Map[java.util.Map[String, String],
+                          java.util.List[TargetSchemaChange]],
                           optionalShardKey: String)
           : Seq[ColumnFilter] => Seq[TargetSchemaChange] = {
-    val targetSchema: Map[Map[String, String], Seq[String]] = targetSchemaMap.asScala.map {
+    val targetSchema: Map[Map[String, String], Seq[TargetSchemaChange]] = targetSchemaMap.asScala.map {
       case (d, v) => d.asScala.toMap -> v.asScala.toSeq
     }.toMap
     mapTargetSchemaFunc(shardKeyNames.asScala, targetSchema, optionalShardKey)
