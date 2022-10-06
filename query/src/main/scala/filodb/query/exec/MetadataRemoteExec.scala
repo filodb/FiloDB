@@ -31,7 +31,9 @@ case class MetadataRemoteExec(queryEndpoint: String,
   private val lcLabelNameField  = "label"
   private val lcLabelCountField = "count"
 
-  private val builder = SerializedRangeVector.newBuilder()
+  override val maxRecordContainerSize: Int = 64 * 1024
+
+  private val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize)
 
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                               (implicit sched: Scheduler): Future[QueryResponse] = {

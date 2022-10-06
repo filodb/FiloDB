@@ -28,6 +28,8 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
 
   override def enforceSampleLimit: Boolean = false
 
+  override val maxRecordContainerSize: Int = 64 * 1024
+
   /**
    * Args to use for the ExecPlan for printTree purposes only.
    * DO NOT change to a val. Increases heap usage.
@@ -290,9 +292,11 @@ final case class PartKeysExec(queryContext: QueryContext,
                               filters: Seq[ColumnFilter],
                               fetchFirstLastSampleTimes: Boolean,
                               start: Long,
-                              end: Long) extends LeafExecPlan {
+                              end: Long,
+                              override val maxRecordContainerSize: Int = 64 * 1024) extends LeafExecPlan {
 
   override def enforceSampleLimit: Boolean = false
+
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
@@ -324,6 +328,8 @@ final case class LabelValuesExec(queryContext: QueryContext,
                                  endMs: Long) extends LeafExecPlan {
 
   override def enforceSampleLimit: Boolean = false
+
+  override val maxRecordContainerSize: Int = 64 * 1024
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
