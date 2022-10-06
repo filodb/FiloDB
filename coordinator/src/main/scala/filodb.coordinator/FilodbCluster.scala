@@ -78,9 +78,10 @@ final class FilodbCluster(val system: ExtendedActorSystem, overrideConfig: Confi
     */
   private[coordinator] lazy val guardian = system.actorOf(NodeGuardian.props(
     settings, metaStore, memStore,
-    if (settings.config.getBoolean("shard-manager.enable-k8s-stateful-shard-strategy"))
-      new K8sStatefulSetShardAssignmentStrategy else DefaultShardAssignmentStrategy)
-    , guardianName)
+    if (settings.config.getBoolean("shard-manager.enable-k8s-stateful-shard-strategy")) {
+      val maxAttempts = settings.config.getInt("shard-manager.k8s-strategy.max-hostname-lookup-attempts")
+      new K8sStatefulSetShardAssignmentStrategy(maxAttempts)
+    } else DefaultShardAssignmentStrategy), guardianName)
 
   def isInitialized: Boolean = _isInitialized.get
 
