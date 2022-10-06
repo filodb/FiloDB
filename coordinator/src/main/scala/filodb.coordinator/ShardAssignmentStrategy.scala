@@ -46,7 +46,7 @@ trait ShardAssignmentStrategy {
  * The implementation assumes the number of shards is a multiple of number of nodes and there are no
  * uneven assignments of shards to nodes
  */
-class K8sStatefulSetShardAssignmentStrategy(val maxAssignmentAttempts: Int)
+class K8sStatefulSetShardAssignmentStrategy(val maxAssignmentAttempts: Int = 8)
       extends ShardAssignmentStrategy with StrictLogging {
 
   private val pat = "-\\d+$".r
