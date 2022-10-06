@@ -36,7 +36,8 @@ object PrometheusApiRouteSpec extends ActorSpecConfig {
 }
 
 @Ignore
-class PrometheusApiRouteSpec extends AnyFunSpec with ScalatestRouteTest with AsyncTest {
+// Prevent the test from getting detected, add a constructor arg
+class PrometheusApiRouteSpec(ignore: String) extends AnyFunSpec with ScalatestRouteTest with AsyncTest {
 
   import FailFastCirceSupport._
   import io.circe.generic.auto._
@@ -64,7 +65,7 @@ class PrometheusApiRouteSpec extends AnyFunSpec with ScalatestRouteTest with Asy
   // Wait for cluster actor to start up and register datasets
   val ref = DatasetRef("prometheus")
   probe.send(clusterProxy, NodeClusterActor.GetShardMap(ref))
-  probe.expectMsgPF(60.seconds) {
+  probe.expectMsgPF(10.seconds) {
     case CurrentShardSnapshot(dsRef, mapper) => info(s"Got mapper for $dsRef => ${mapper.prettyPrint}")
   }
 
