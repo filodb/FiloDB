@@ -192,7 +192,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   }
 
   it("should use target-schema and generate ExecPlan with appropriate shards") {
-    val targetSchema = Map(Map("job" -> "myService") -> Seq("job", "instance"))
+    val targetSchema = Map(Map("job" -> "myService") -> Seq(TargetSchemaChange(schema = Seq("job", "instance"))))
 
     val filodbSpreadMap = new collection.mutable.HashMap[collection.Map[String, String], Int]
     filodbSpreadMap.put(collection.Map(("job" -> "myService")), 2)
