@@ -36,6 +36,10 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
    */
   override protected def args: String = ""
 
+  protected def composeStreaming(childResponses: Observable[(Observable[RangeVector], Int)],
+                                 schemas: Observable[(ResultSchema, Int)],
+                                 querySession: QuerySession): Observable[RangeVector] = ???
+
   /**
     * Compose the sub-query/leaf results here.
     */
@@ -96,6 +100,10 @@ final case class TsCardReduceExec(queryContext: QueryContext,
     }
     acc
   }
+
+  protected def composeStreaming(childResponses: Observable[(Observable[RangeVector], Int)],
+                                 schemas: Observable[(ResultSchema, Int)],
+                                 querySession: QuerySession): Observable[RangeVector] = ???
 
   override protected def compose(childResponses: Observable[(QueryResult, Int)],
                                  firstSchema: Task[ResultSchema],
@@ -192,6 +200,11 @@ final class LabelCardinalityPresenter(val funcParams: Seq[FuncArgs]  = Nil) exte
 final case class LabelNamesDistConcatExec(queryContext: QueryContext,
                                            dispatcher: PlanDispatcher,
                                            children: Seq[ExecPlan]) extends MetadataDistConcatExec {
+
+  override protected def composeStreaming(childResponses: Observable[(Observable[RangeVector], Int)],
+                                 schemas: Observable[(ResultSchema, Int)],
+                                 querySession: QuerySession): Observable[RangeVector] = ???
+
   /**
    * Pick first non empty result from child.
    */
@@ -213,10 +226,12 @@ trait LabelCardinalityExecPlan {
 }
 final case class LabelCardinalityReduceExec(queryContext: QueryContext,
                                             dispatcher: PlanDispatcher,
-                                            children: Seq[ExecPlan]) extends DistConcatExec
+                                            children: Seq[ExecPlan]) extends NonLeafExecPlan
                                             with LabelCardinalityExecPlan {
 
   import scala.collection.mutable.{Map => MutableMap}
+
+  protected def args: String = ""
 
   private def mapConsumer(sketchMap: MutableMap[ZeroCopyUTF8String, CpcSketch]) = new MapItemConsumer {
     def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
@@ -237,6 +252,10 @@ final case class LabelCardinalityReduceExec(queryContext: QueryContext,
       sketchMap += (key -> newSketch)
     }
   }
+
+  protected def composeStreaming(childResponses: Observable[(Observable[RangeVector], Int)],
+                                 schemas: Observable[(ResultSchema, Int)],
+                                 querySession: QuerySession): Observable[RangeVector] = ???
 
   override protected def compose(childResponses: Observable[(QueryResult, Int)],
                                  firstSchema: Task[ResultSchema],

@@ -7,7 +7,7 @@ import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 
-import filodb.coordinator.ShardMapper
+import filodb.coordinator.{ActorPlanDispatcher, ShardMapper}
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{SpreadProvider, StaticTargetSchemaProvider, TargetSchemaChange, TargetSchemaProvider}
 import filodb.core.binaryrecord2.RecordBuilder

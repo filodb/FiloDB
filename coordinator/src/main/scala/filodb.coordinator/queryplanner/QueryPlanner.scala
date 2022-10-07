@@ -5,9 +5,10 @@ import scala.concurrent.duration.FiniteDuration
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
+import monix.reactive.Observable
 
 import filodb.core.query.QueryContext
-import filodb.query.{LogicalPlan, QueryResponse}
+import filodb.query.{LogicalPlan, QueryResponse, StreamQueryResponse}
 import filodb.query.exec.{ClientParams, ExecPlan, ExecPlanWithClientParams, UnsupportedChunkSource}
 
 /**
@@ -40,4 +41,19 @@ trait QueryPlanner {
         ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis)), UnsupportedChunkSource())
     }
   }
+
+  def dispatchStreamingExecPlan(execPlan: ExecPlan,
+                       parentSpan: kamon.trace.Span)
+                      (implicit sched: Scheduler, timeout: FiniteDuration): Observable[StreamQueryResponse] = {
+    // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
+    // across threads. Note that task/observable will not run on the thread where span is present since
+    // kamon uses thread-locals.
+    // Dont finish span since this code didnt create it
+    Kamon.runWithSpan(parentSpan, false) {
+      // UnsupportedChunkSource because leaf plans shouldn't execute in-process from a planner method call.
+      execPlan.dispatcher.dispatchStreaming(ExecPlanWithClientParams(execPlan,
+        ClientParams(execPlan.queryContext.plannerParams.queryTimeoutMillis)), UnsupportedChunkSource())
+    }
+  }
+
 }

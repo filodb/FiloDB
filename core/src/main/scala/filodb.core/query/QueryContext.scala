@@ -163,6 +163,7 @@ object QueryContext {
   */
 case class QuerySession(qContext: QueryContext,
                         queryConfig: QueryConfig,
+                        streamingDispatch: Boolean = false, // TODO needs to be removed after streaming becomes stable
                         catchMultipleLockSetErrors: Boolean = false) {
 
   val queryStats: QueryStats = QueryStats()
@@ -245,5 +246,6 @@ case class QueryStats() {
 }
 
 object QuerySession {
-  def makeForTestingOnly(): QuerySession = QuerySession(QueryContext(), QueryConfig.unitTestingQueryConfig)
+  def makeForTestingOnly(): QuerySession = QuerySession(QueryContext(),
+    QueryConfig.unitTestingQueryConfig, streamingDispatch = false)
 }

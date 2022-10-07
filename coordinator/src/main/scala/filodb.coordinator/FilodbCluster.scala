@@ -265,7 +265,7 @@ private[filodb] trait FilodbClusterNode extends KamonInit with NodeConfiguration
       case _ => ConfigFactory.parseString(s"""akka.cluster.roles=["${role.roleName}"]""")
     }).withFallback(systemConfig)
 
-    ActorSystem(role.systemName, allConfig)
+    ActorSystemHolder.createActorSystem(role.systemName, allConfig)
   }
 
   lazy val cluster = FilodbCluster(system)
