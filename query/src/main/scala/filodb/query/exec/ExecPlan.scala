@@ -87,7 +87,7 @@ trait ExecPlan extends QueryCommand {
    * This first invokes the doExecute abstract method, then applies
    * the RangeVectorMappers associated with this plan node.
    *
-   * The response is a stream of StrQueryResponse Observable which can
+   * The response is a stream of StreamQueryResponse Observable which can
    * be streamed out to the wire, or processed as optimally appropriate.
    * The advantage of using this over `execute` is that this method uses
    * much less memory than when converted to a fat response object.
