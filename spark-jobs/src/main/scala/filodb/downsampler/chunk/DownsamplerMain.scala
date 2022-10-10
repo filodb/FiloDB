@@ -7,7 +7,7 @@ import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.apache.spark.SparkConf
 import org.apache.spark.internal.io.HadoopMapReduceCommitProtocol
-import org.apache.spark.sql.{SaveMode, SparkSession}
+import org.apache.spark.sql.SparkSession
 
 import filodb.coordinator.KamonShutdownHook
 import filodb.core.binaryrecord2.RecordSchema
@@ -184,8 +184,8 @@ class Downsampler(settings: DownsamplerSettings,
       // NOTE: toDF(partitionCols: _*) seems buggy
       spark.createDataFrame(rdd, batchExporter.exportSchema)
         .write
-        .mode(SaveMode.Overwrite)
-        .option("header", true)
+        .mode(settings.exportSaveMode)
+        .options(settings.exportOptions)
         .partitionBy(batchExporter.partitionByCols: _*)
         .csv(settings.exportBucket)
       val exportEndMs = System.currentTimeMillis()

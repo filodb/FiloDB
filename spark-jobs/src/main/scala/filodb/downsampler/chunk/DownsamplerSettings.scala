@@ -103,6 +103,10 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
     downsamplerConfig.as[Seq[String]]("data-export.path-spec")
       .sliding(2, 2).map(seq => (seq.head, seq.last)).toSeq
 
+  @transient lazy val exportOptions = downsamplerConfig.as[Map[String, String]]("data-export.options")
+
+  @transient lazy val exportSaveMode = downsamplerConfig.getString("data-export.save-mode")
+
   /**
    * Two conditions should satisfy for eligibility:
    * (a) If allow list is nonEmpty partKey should match a filter in the allow list.
