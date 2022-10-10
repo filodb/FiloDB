@@ -171,14 +171,17 @@ class Downsampler(settings: DownsamplerSettings,
           val rawPartSchema = batchDownsampler.schemas(rawSchemaId)
           new PagedReadablePartition(rawPartSchema, shard = 0, partID = 0, partData = rawPart, minResolutionMs = 1)
         }
+        // Downsample the data (this step does not contribute the the RDD).
         if (settings.chunkDownsamplerIsEnabled) {
           batchDownsampler.downsampleBatch(readablePartsBatch, userTimeStart, userTimeEndExclusive)
         }
+        // Generate the data for the RDD.
         if (settings.exportIsEnabled) {
           batchExporter.getExportRows(readablePartsBatch, userTimeStart, userTimeEndExclusive)
         } else Iterator.empty
       }
 
+    // Export the data produced by "getExportRows" above.
     if (!rdd.isEmpty()) {
       val exportStartMs = System.currentTimeMillis()
       // NOTE: toDF(partitionCols: _*) seems buggy
