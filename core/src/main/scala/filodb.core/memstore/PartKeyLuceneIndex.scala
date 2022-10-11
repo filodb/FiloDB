@@ -141,7 +141,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   // If index rebuild is triggered or the state is Building, simply clean up the index directory and start
   // index rebuild
   if (
-    lifecycleManager.forall(_.shouldTriggerRebuild(ref, shardNum)) || getCurrentIndexState()._1 == IndexState.Rebuilding
+    lifecycleManager.forall(_.shouldTriggerRebuild(ref, shardNum))
   ) {
     logger.info(s"Cleaning up indexDirectory=$indexDiskLocation for  dataset=$ref, shard=$shardNum")
     deleteRecursively(indexDiskLocation.toFile) match {

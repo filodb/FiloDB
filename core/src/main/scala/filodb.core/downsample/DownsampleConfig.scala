@@ -34,6 +34,8 @@ final case class DownsampleConfig(config: Config) {
                 else Seq.empty
   val indexLocation = config.getOrElse[Option[String]]("index-location", None)
 
+  val maxRefreshHours = config.getOrElse("max-refresh-hours", Long.MaxValue)
+
   val enablePersistentIndexing = indexLocation.isDefined
 
   val indexMetastoreImplementation = if (config.hasPath("index-metastore-implementation")) {
