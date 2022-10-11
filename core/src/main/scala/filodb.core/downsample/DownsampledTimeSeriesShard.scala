@@ -6,7 +6,6 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
-import scala.util.{Failure, Success, Try}
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
@@ -76,22 +75,15 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     downsampleConfig.indexMetastoreImplementation match {
       case IndexMetastoreImplementation.NoImp       => None
       case IndexMetastoreImplementation.File        =>
-        val expectedVersion = System.getenv(FileSystemBasedIndexMetadataStore.expectedGenerationEnv)
-        val expectedVersionOption = if (expectedVersion != null) {
-            logger.info("Expected version for the index from env is {}", expectedVersion)
-            Try(Integer.parseInt(expectedVersion)) match {
-              case Success(parsedVersion)   => Some(parsedVersion)
-              case Failure(e)               => logger.warn("Failed while parsing index generation", e)
-                                               None
-            }
-        } else None
         Some(new FileSystemBasedIndexMetadataStore(downsampleConfig.indexLocation.get,
-                                                    expectedVersionOption, downsampleConfig.maxRefreshHours))
+          FileSystemBasedIndexMetadataStore.expectedVersion(FileSystemBasedIndexMetadataStore.expectedGenerationEnv),
+          downsampleConfig.maxRefreshHours))
       case IndexMetastoreImplementation.Ephemeral   => Some(new EphemeralIndexMetadataStore())
     }
   }
 
-  private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, false,
+
+private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, false,
     false, shardNum, indexTtlMs,
     downsampleConfig.indexLocation.map(new java.io.File(_)),
     indexMetadataStore
@@ -163,7 +155,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       partKeyIndex.getCurrentIndexState() match {
         case (IndexState.Empty, _)   |
              (IndexState.TriggerRebuild, _)                    =>
-          logger.info("Found index state empty, bootstrapping downsample index")
+          logger.info("Found index state empty/rebuild triggered, bootstrapping downsample index")
           recoverIndexInternal(None)
         case (IndexState.Synced, checkpointMillis)             =>
           logger.warn(s"Found index state synced, bootstrapping downsample index from time(ms) $checkpointMillis")

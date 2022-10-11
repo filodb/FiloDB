@@ -91,10 +91,21 @@ trait IndexMetadataStore {
 
 }
 
-object FileSystemBasedIndexMetadataStore {
+object FileSystemBasedIndexMetadataStore extends StrictLogging {
   val genFileV1Magic = 0x5b
   val snapFileV1Magic = 0x5c
   val expectedGenerationEnv = "INDEX_GENERATION"
+
+  def expectedVersion(expectedVersion: String): Option[Int] = {
+    if (expectedVersion != null) {
+      logger.info("Expected version for the index from env is {}", expectedVersion)
+      Try(Integer.parseInt(expectedVersion)) match {
+        case Success(parsedVersion)   => Some(parsedVersion)
+        case Failure(e)               => logger.warn("Failed while parsing index generation", e)
+          None
+      }
+    } else None
+  }
 }
 /**
  * File system based metadata store that uses filesystem for storing the metadata. For rebuilds, current implementation
@@ -126,9 +137,9 @@ class FileSystemBasedIndexMetadataStore(rootDirectory: String, expectedGeneratio
    *       d. If the file is present and the content returns the current generation (a numeric version),
    *          the value is compared to an expected environment value and if the environment variable has a generation,
    *          greater than the one in the file, a rebuild is triggered.
-   *       e. If sync file is present and the time in sync file is is more than maxRefreshHours in the past than now,
-   *          a refresh will be triggered
-   *       f. If none of the above three cases trigger a rebuild, the currentState method is used to determine the state
+   *       e. If sync file is present and the time in sync file is more than maxRefreshHours in the past than now,
+   *          a rebuild will be triggered
+   *       f. If none of the above cases trigger a rebuild, the currentState method is used to determine the state
    * @param datasetRef The dataset ref
    * @param shard the shard id of index
    * @return a tuple of state and the option of time at which the state was recorded
@@ -136,6 +147,7 @@ class FileSystemBasedIndexMetadataStore(rootDirectory: String, expectedGeneratio
   override def initState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) = {
     val snapFile = new File(snapFilePathFormat.format(datasetRef.dataset, shard))
     expectedGeneration.map(expectedGen => {
+      // TODO: Simplify this code too many if else conditions.
       val genFile = new File(genFilePathFormat.format(datasetRef.dataset, shard))
       if (!genFile.exists()) {
         logger.info("Gen file {} does not exist and expectedGen is {}, triggering rebuild",
@@ -260,9 +272,9 @@ class FileSystemBasedIndexMetadataStore(rootDirectory: String, expectedGeneratio
    }
   /**
    *  Updates the state of the index, the snap file will be updated with the correct timestamp in case the state
-   *  is Synced, current implementation of updateState ignores other index states. Also when the index is updated
-   *  and synced, it is important to ensure the gen file is updated with the current generation. This guarantees that
-   *  next time the on bootstrap, the initState should return Synced and not TriggerRebuild
+   *  is Synced, on TriggerRebuild and Empty state the gen and/or snap file will be deleted. Also when the index is
+   *  updated and synced, it is important to ensure the gen file is updated with the current generation. This guarantees
+   *  that next time on the bootstrap, the initState should return Synced and not TriggerRebuild
    *
    * @param datasetRef The dataset ref
    * @param shard the shard id of index

@@ -331,5 +331,21 @@ class FileSystemBasedIndexMetadataStoreSpec extends AnyFunSpec with Matchers wit
     // as it happens only on start up. Perhaps in future iterations if the refresh overload is high, shard can
     // gracefully shutdown to rebuild the index from scratch
   }
+
+  it("should parse the expectedVersion when a numeric value as String is provided") {
+    FileSystemBasedIndexMetadataStore.expectedVersion("123") shouldEqual Some(123)
+  }
+
+  it("should return None if null string is provided") {
+    FileSystemBasedIndexMetadataStore.expectedVersion(null) shouldEqual None
+  }
+
+  it("should return None if non numeric string is provided") {
+    FileSystemBasedIndexMetadataStore.expectedVersion("test") shouldEqual None
+  }
+
+  it("should return None if overflowing numeric string is provided") {
+    FileSystemBasedIndexMetadataStore.expectedVersion("12345678686774553466 ") shouldEqual None
+  }
 }
 // scalastyle:on
