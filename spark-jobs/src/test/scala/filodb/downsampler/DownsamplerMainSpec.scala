@@ -286,7 +286,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       val batchExporter = new BatchExporter(dsSettings)
       // make sure batchExporter correctly decides when to export
       labelConfPairs.foreach { case (partKeyMap, includedConf) =>
-        batchExporter.shouldExport(partKeyMap) shouldEqual includedConf.contains(conf)
+        batchExporter.getRuleIfShouldExport(partKeyMap) shouldEqual includedConf.contains(conf)
       }
     }
   }

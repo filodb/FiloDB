@@ -3,14 +3,11 @@ package filodb.downsampler.chunk
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
-
 import scala.collection.mutable
-
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types.{DoubleType, LongType, StringType, StructField, StructType}
-
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType.DoubleColumn
 import filodb.core.metadata.Schemas
@@ -18,12 +15,12 @@ import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.Utils._
-import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER}
+import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, DEFAULT_RULE, LABEL_REGEX_MATCHER}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
 
-case class ExportRule(key: Seq[String],
-                      allowFilterGroups: Seq[Seq[ColumnFilter]],
-                      blockFilterGroups: Seq[Seq[ColumnFilter]])
+case class ExportRule(allowFilterGroups: Seq[Seq[ColumnFilter]],
+                      blockFilterGroups: Seq[Seq[ColumnFilter]],
+                      dropLabels: Seq[String])
 
 /**
  * All info needed to output a result Spark Row.
@@ -37,6 +34,8 @@ case class ExportRowData(partKeyMap: Map[String, String],
 object BatchExporter {
   val LABEL_REGEX_MATCHER = """\{\{(.*)\}\}""".r
   val DATE_REGEX_MATCHER = """<<(.*)>>""".r
+  // Applied when a group key is matched, but none of its rules are matched.
+  val DEFAULT_RULE = ExportRule(Nil, Nil, Nil)
 }
 
 /**
@@ -49,7 +48,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
   @transient lazy val exportPrepBatchLatency =
     Kamon.histogram("export-prep-batch-latency", MeasurementUnit.time.milliseconds).withoutTags()
 
-  val rules = downsamplerSettings.exportRules
+  val keyToRules = downsamplerSettings.exportKeyToRules
   val exportSchema = {
     // NOTE: ArrayBuffers are sometimes used instead of Seq's because otherwise
     //   ArrayIndexOutOfBoundsExceptions occur when Spark exports a batch.
@@ -139,16 +138,18 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
     val rowIter = readablePartitions
       .iterator
       .map { part =>
-        // pair each partition with a map of its label-value pairs
+        // package each partition with a map of its label-value pairs and a matching export rule (if it exists)
         val partKeyMap = {
           val rawSchemaId = RecordSchema.schemaID(part.partKeyBytes, UnsafeUtils.arayOffset)
           val schema = schemas(rawSchemaId)
           schema.partKeySchema.toStringPairs(part.partKeyBytes, UnsafeUtils.arayOffset).toMap
         }
-        (part, partKeyMap)
+        val rule = getRuleIfShouldExport(partKeyMap)
+        (part, partKeyMap, rule)
       }
-      .filter { case (part, partKeyMap) => shouldExport(partKeyMap)}
-      .flatMap {case (part, partKeyMap) => getExportDatas(part, partKeyMap, userStartTime, userEndTime)}
+      .filter { case (part, partKeyMap, rule) => rule.isDefined }
+      .flatMap { case (part, partKeyMap, rule) =>
+        getExportDatas(part, partKeyMap, rule.get, userStartTime, userEndTime) }
       .map(exportDataToRow)
     val endMs = System.currentTimeMillis()
     exportPrepBatchLatency.record(endMs - startMs)
@@ -187,21 +188,36 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
         })}
   }
 
-  def shouldExport(partKeyMap: Map[String, String]): Boolean = {
-    rules.find { rule =>
-      // find the rule with a key that matches these label-values
+  def getRuleIfShouldExport(partKeyMap: Map[String, String]): Option[ExportRule] = {
+    keyToRules.find { case (key, rules) =>
+      // find the group with a key that matches these label-values
       downsamplerSettings.exportRuleKey.zipWithIndex.forall { case (label, i) =>
-        partKeyMap.get(label).contains(rule.key(i))
+        partKeyMap.get(label).contains(key(i))
       }
-    }.exists { rule =>
-      // decide whether-or-not to export this partition
-      lazy val matchAnyIncludeGroup = rule.allowFilterGroups.exists { group =>
-        matchAllFilters(group, partKeyMap)
+    }.flatMap { case (key, rules) =>
+      var nRulesEvaluated = 0
+      val exportRule = rules.takeWhile{ rule =>
+        // step through rules while we still haven't matched a "block" filter
+        rule.blockFilterGroups.exists { filterGroup =>
+          matchAllFilters(filterGroup, partKeyMap)
+        }
+      }.find { rule =>
+        // stop at a rule if its "allow" filters are either emtpy or match the partKey
+        nRulesEvaluated += 1
+        rule.allowFilterGroups.isEmpty || rule.allowFilterGroups.exists { filterGroup =>
+          matchAllFilters(filterGroup, partKeyMap)
+        }
       }
-      val matchAnyExcludeGroup = rule.blockFilterGroups.exists { group =>
-        matchAllFilters(group, partKeyMap)
+      if (exportRule.isDefined) {
+        // "allow" filters were matched before "block" filters
+        exportRule
+      } else if (nRulesEvaluated == rules.size) {
+        // neither "allow" nor "block" filters were matched
+        Some(DEFAULT_RULE)
+      } else {
+        // "block" filters were matched before "allow" filters
+        None
       }
-      !matchAnyExcludeGroup && (rule.allowFilterGroups.isEmpty || matchAnyIncludeGroup)
     }
   }
 
@@ -211,9 +227,15 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
    */
   private def getExportDatas(readablePartition: ReadablePartition,
                              partKeyMap: Map[String, String],
+                             rule: ExportRule,
                              userStartTime: Long,
                              userEndTime: Long): Iterator[ExportRowData] = {
-    val partKeyString = partKeyMap.map(pair => s"${pair._1}=${pair._2}").toSeq.sorted.mkString(",")
+    // Drop unwanted labels from the exported "labels" column.
+    val partKeyString = partKeyMap.filterKeys { label =>
+      !downsamplerSettings.exportDropLabels.contains(label) &&
+      !rule.dropLabels.contains(label)
+    }.map(pair => s"${pair._1}=${pair._2}")
+     .toSeq.sorted.mkString(",")
     getChunkRangeIter(readablePartition, userStartTime, userEndTime).flatMap{ chunkRow =>
       getTimeValuePairs(partKeyMap, readablePartition,
         chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)

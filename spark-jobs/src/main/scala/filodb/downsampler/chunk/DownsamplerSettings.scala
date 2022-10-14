@@ -80,19 +80,28 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val exportBucket = downsamplerConfig.as[String]("data-export.bucket")
 
-  @transient lazy val exportRules = {
-    downsamplerConfig.as[Seq[Config]]("data-export.rules").map{ config =>
-      val key = config.as[Seq[String]]("key")
-      val allowFilterGroups = config.as[Seq[Seq[String]]]("allow-filters").map{ group =>
-        Parser.parseQuery(s"{${group.mkString(",")}}")
-          .asInstanceOf[InstantExpression].getUnvalidatedColumnFilters()
+  @transient lazy val exportDropLabels = downsamplerConfig.as[Seq[String]]("data-export.drop-labels")
+
+  @transient lazy val exportKeyToRules = {
+    val keyRulesPairs = downsamplerConfig.as[Seq[Config]]("data-export.groups").map { group =>
+      val key = group.as[Seq[String]]("key")
+      val rules = group.as[Seq[Config]]("rules").map { rule =>
+        val allowFilterGroups = rule.as[Seq[Seq[String]]]("allow-filters").map{ group =>
+          Parser.parseQuery(s"{${group.mkString(",")}}")
+            .asInstanceOf[InstantExpression].getUnvalidatedColumnFilters()
+        }
+        val blockFilterGroups = rule.as[Seq[Seq[String]]]("block-filters").map{ group =>
+          Parser.parseQuery(s"{${group.mkString(",")}}")
+            .asInstanceOf[InstantExpression].getUnvalidatedColumnFilters()
+        }
+        val dropLabels = rule.as[Seq[String]]("drop-labels")
+        ExportRule(allowFilterGroups, blockFilterGroups, dropLabels)
       }
-      val blockFilterGroups = config.as[Seq[Seq[String]]]("block-filters").map{ group =>
-        Parser.parseQuery(s"{${group.mkString(",")}}")
-          .asInstanceOf[InstantExpression].getUnvalidatedColumnFilters()
-      }
-      ExportRule(key, allowFilterGroups, blockFilterGroups)
+      (key -> rules)
     }
+    assert(keyRulesPairs.map(_._1).distinct.size == keyRulesPairs.size,
+      "export rule group keys must be unique")
+    keyRulesPairs.toMap
   }
 
   @transient lazy val exportPathSpecPairs =
