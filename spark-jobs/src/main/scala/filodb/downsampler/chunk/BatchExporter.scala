@@ -15,7 +15,7 @@ import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.Utils._
-import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, DEFAULT_RULE, LABEL_REGEX_MATCHER}
+import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
 
 case class ExportRule(allowFilterGroups: Seq[Seq[ColumnFilter]],
@@ -34,8 +34,6 @@ case class ExportRowData(partKeyMap: Map[String, String],
 object BatchExporter {
   val LABEL_REGEX_MATCHER = """\{\{(.*)\}\}""".r
   val DATE_REGEX_MATCHER = """<<(.*)>>""".r
-  // Applied when a group key is matched, but none of its rules are matched.
-  val DEFAULT_RULE = ExportRule(Nil, Nil, Nil)
 }
 
 /**
@@ -195,28 +193,16 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
         partKeyMap.get(label).contains(key(i))
       }
     }.flatMap { case (key, rules) =>
-      var nRulesEvaluated = 0
-      val exportRule = rules.takeWhile{ rule =>
+      rules.takeWhile{ rule =>
         // step through rules while we still haven't matched a "block" filter
-        rule.blockFilterGroups.exists { filterGroup =>
+        !rule.blockFilterGroups.exists { filterGroup =>
           matchAllFilters(filterGroup, partKeyMap)
         }
       }.find { rule =>
-        // stop at a rule if its "allow" filters are either emtpy or match the partKey
-        nRulesEvaluated += 1
+        // stop at a rule if its "allow" filters are either empty or match the partKey
         rule.allowFilterGroups.isEmpty || rule.allowFilterGroups.exists { filterGroup =>
           matchAllFilters(filterGroup, partKeyMap)
         }
-      }
-      if (exportRule.isDefined) {
-        // "allow" filters were matched before "block" filters
-        exportRule
-      } else if (nRulesEvaluated == rules.size) {
-        // neither "allow" nor "block" filters were matched
-        Some(DEFAULT_RULE)
-      } else {
-        // "block" filters were matched before "allow" filters
-        None
       }
     }
   }

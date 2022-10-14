@@ -109,15 +109,26 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   it ("should export partitions according to the config") {
 
     val baseConf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf"))
+      .withFallback(ConfigFactory.parseString(
+        """
+          |    filodb.downsampler.data-export {
+          |      enabled = true
+          |      bucket = "file:///dummy-bucket"
+          |      path-spec = ["unused"]
+          |      save-mode = "error"
+          |      options = {
+          |        "header": "true"
+          |      }
+          |    }
+          |""".stripMargin
+      ))
 
     val emptyConf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
-        |      enabled = true
         |      key-labels = ["l1"]
-        |      bucket = "file:///dummy-bucket"
-        |      rules = []
-        |      path-spec = ["unused"]
+        |      groups = []
+        |      drop-labels = []
         |    }
         |""".stripMargin
     )
@@ -125,17 +136,19 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val onlyKeyConf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
-        |      enabled = true
         |      key-labels = ["l1"]
-        |      bucket = "file:///dummy-bucket"
-        |      rules = [
+        |      groups = [
         |        {
         |          key = ["l1a"]
-        |          allow-filters = []
-        |          block-filters = []
+        |          rules = [
+        |            {
+        |              allow-filters = []
+        |              block-filters = []
+        |              drop-labels = []
+        |            }
+        |          ]
         |        }
         |      ]
-        |      path-spec = ["unused"]
         |    }
         |""".stripMargin
     )
@@ -143,28 +156,24 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val includeExcludeConf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
-        |      enabled = true
         |      key-labels = ["l1"]
-        |      bucket = "file:///dummy-bucket"
-        |      rules = [
+        |      groups = [
         |        {
         |          key = ["l1a"]
-        |          allow-filters = [
-        |            [
-        |              "l2=\"l2a\""
-        |            ],
-        |            [
-        |              "l2=~\".*b\""
-        |            ]
-        |          ]
-        |          block-filters = [
-        |            [
-        |              "l2=\"l2c\""
-        |            ],
+        |          rules = [
+        |            {
+        |              allow-filters = [
+        |                ["l2=\"l2a\""],
+        |                ["l2=~\".*b\""]
+        |              ]
+        |              block-filters = [
+        |                ["l2=\"l2c\""]
+        |              ]
+        |              drop-labels = []
+        |            }
         |          ]
         |        }
         |      ]
-        |      path-spec = ["unused"]
         |    }
         |""".stripMargin
     )
@@ -172,26 +181,28 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val multiFilterConf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
-        |      enabled = true
         |      key-labels = ["l1"]
-        |      bucket = "file:///dummy-bucket"
-        |      rules = [
+        |      groups = [
         |        {
         |          key = ["l1a"]
-        |          allow-filters = [
-        |            [
-        |              "l2=\"l2a\"",
-        |              "l3=~\".*a\""
-        |            ],
-        |            [
-        |              "l2=\"l2a\"",
-        |              "l3=~\".*b\""
-        |            ]
+        |          rules = [
+        |            {
+        |              allow-filters = [
+        |                [
+        |                  "l2=\"l2a\"",
+        |                  "l3=~\".*a\""
+        |                ],
+        |                [
+        |                  "l2=\"l2a\"",
+        |                  "l3=~\".*b\""
+        |                ]
+        |              ]
+        |              block-filters = []
+        |              drop-labels = []
+        |            }
         |          ]
-        |          block-filters = []
         |        }
         |      ]
-        |      path-spec = ["unused"]
         |    }
         |""".stripMargin
     )
@@ -199,22 +210,24 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val contradictFilterConf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
-        |      enabled = true
         |      key-labels = ["l1"]
-        |      bucket = "file:///dummy-bucket"
-        |      rules = [
+        |      groups = [
         |        {
         |          key = ["l1a"]
-        |          allow-filters = [
-        |            [
-        |              "l2=\"l2a\"",
-        |              "l2=~\".*b\""
-        |            ]
+        |          rules = [
+        |            {
+        |              allow-filters = [
+        |                [
+        |                  "l2=\"l2a\"",
+        |                  "l2=~\".*b\""
+        |                ]
+        |              ]
+        |              block-filters = []
+        |              drop-labels = []
+        |            }
         |          ]
-        |          block-filters = []
         |        }
         |      ]
-        |      path-spec = ["unused"]
         |    }
         |""".stripMargin
     )
@@ -222,17 +235,19 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val multiKeyConf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
-        |      enabled = true
         |      key-labels = ["l1", "l2"]
-        |      bucket = "file:///dummy-bucket"
-        |      rules = [
+        |      groups = [
         |        {
         |          key = ["l1a", "l2a"]
-        |          allow-filters = []
-        |          block-filters = []
+        |          rules = [
+        |            {
+        |              allow-filters = []
+        |              block-filters = []
+        |              drop-labels = []
+        |            }
+        |          ]
         |        }
         |      ]
-        |      path-spec = ["unused"]
         |    }
         |""".stripMargin
     )
@@ -240,22 +255,29 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val multiRuleConf = ConfigFactory.parseString(
       """
         |    filodb.downsampler.data-export {
-        |      enabled = true
         |      key-labels = ["l1"]
-        |      bucket = "file:///dummy-bucket"
-        |      rules = [
+        |      groups = [
         |        {
         |          key = ["l1a"]
-        |          allow-filters = []
-        |          block-filters = []
+        |          rules = [
+        |            {
+        |              allow-filters = []
+        |              block-filters = []
+        |              drop-labels = []
+        |            }
+        |          ]
         |        },
         |        {
         |          key = ["l1b"]
-        |          allow-filters = []
-        |          block-filters = []
+        |          rules = [
+        |            {
+        |              allow-filters = []
+        |              block-filters = []
+        |              drop-labels = []
+        |            }
+        |          ]
         |        }
         |      ]
-        |      path-spec = ["unused"]
         |    }
         |""".stripMargin
     )
@@ -286,7 +308,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       val batchExporter = new BatchExporter(dsSettings)
       // make sure batchExporter correctly decides when to export
       labelConfPairs.foreach { case (partKeyMap, includedConf) =>
-        batchExporter.getRuleIfShouldExport(partKeyMap) shouldEqual includedConf.contains(conf)
+        batchExporter.getRuleIfShouldExport(partKeyMap).isDefined shouldEqual includedConf.contains(conf)
       }
     }
   }
