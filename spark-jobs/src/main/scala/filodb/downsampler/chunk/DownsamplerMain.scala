@@ -27,18 +27,6 @@ class IdempotentCommitProtocol(jobId: String, path: String,
   extends HadoopMapReduceCommitProtocol(jobId = "data", path, dynamicPartitionOverwrite)
 
 /**
- * Implement this trait and provide its fully-qualified name as the downsampler config:
- *     data-export.spark-session-setup-class = "org.fully.qualified.SetupClass"
- * Any additional code in "setup" will run before the job is created.
- */
-trait SparkSessionSetup {
-  /**
-   * Additional setup code can be implemented here (to be run before the Spark job is created).
-   */
-  def setup(sparkSession: SparkSession, settings: DownsamplerSettings): Unit
-}
-
-/**
   *
   * Goal: Downsample all real-time data.
   * Goal: Align chunks when this job is run in multiple DCs so that cross-dc repairs can be done.
@@ -100,15 +88,6 @@ class Downsampler(settings: DownsamplerSettings,
               "filodb.downsampler.chunk.IdempotentCommitProtocol")
       .config(sparkConf)
       .getOrCreate()
-
-    // Perform additional session setup if a class is defined in the config.
-    if (settings.sparkSessionSetupClass.isDefined) {
-      Class.forName(settings.sparkSessionSetupClass.get)
-        .getDeclaredConstructor()
-        .newInstance()
-        .asInstanceOf[SparkSessionSetup]
-        .setup(spark, settings)
-    }
 
     DownsamplerContext.dsLogger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
 
