@@ -3,11 +3,14 @@ package filodb.downsampler.chunk
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
+
 import scala.collection.mutable
+
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types.{DoubleType, LongType, StringType, StructField, StructType}
+
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType.DoubleColumn
 import filodb.core.metadata.Schemas
