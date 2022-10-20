@@ -47,8 +47,9 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   val settings = new DownsamplerSettings(conf)
   val queryConfig = QueryConfig(settings.filodbConfig.getConfig("query"))
   val dsIndexJobSettings = new DSIndexJobSettings(settings)
-  val batchDownsampler = new BatchDownsampler(settings)
-  val batchExporter = new BatchExporter(settings)
+  val (dummyUserTimeStart, dummyUserTimeStop) = (123, 456)
+  val batchDownsampler = new BatchDownsampler(settings, dummyUserTimeStart, dummyUserTimeStop)
+  val batchExporter = new BatchExporter(settings, 123, 456)
 
   val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8)
   val seriesTagsNaN = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8, "nan_support".utf8 -> "yes".utf8)
@@ -336,7 +337,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     allConfs.foreach { conf =>
       val dsSettings = new DownsamplerSettings(conf.withFallback(baseConf))
-      val batchExporter = new BatchExporter(dsSettings)
+      val batchExporter = new BatchExporter(dsSettings, dummyUserTimeStart, dummyUserTimeStop)
       // make sure batchExporter correctly decides when to export
       labelConfPairs.foreach { case (partKeyMap, includedConf) =>
         batchExporter.getRuleIfShouldExport(partKeyMap).isDefined shouldEqual includedConf.contains(conf)
@@ -366,13 +367,14 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         |""".stripMargin
     )
 
-    val time = 1663804760913L
+    val userTimeStart = 1663804760913L
     val labels = Map("l1" -> "l1val", "l2" -> "l2val", "l3" -> "l3val")
     val expected =
       Seq("v1", "l1val-foo", "bar-2022-baz", "hello-09", "day-21", "l2val-goodbye")
 
-    val batchExporter = new BatchExporter(new DownsamplerSettings(conf.withFallback(baseConf)))
-    batchExporter.getPartitionByValues(labels, time).toSeq shouldEqual expected
+    val batchExporter = new BatchExporter(new DownsamplerSettings(conf.withFallback(baseConf)),
+                                          userTimeStart, userTimeStart + 123456)
+    batchExporter.getPartitionByValues(labels).toSeq shouldEqual expected
   }
 
   it ("should write untyped data to cassandra") {
@@ -689,7 +691,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
     sparkConf.set("spark.filodb.downsampler.userTimeOverride", Instant.ofEpochMilli(lastSampleTime).toString)
-    val downsampler = new Downsampler(settings, batchDownsampler, batchExporter)
+    val downsampler = new Downsampler(settings)
     downsampler.run(sparkConf).close()
   }
 

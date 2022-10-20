@@ -18,7 +18,7 @@ import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.Utils._
-import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER}
+import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER, MAP_TO_JSON_SER}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
 
 case class ExportRule(allowFilterGroups: Seq[Seq[ColumnFilter]],
@@ -37,12 +37,17 @@ case class ExportRowData(partKeyMap: Map[String, String],
 object BatchExporter {
   val LABEL_REGEX_MATCHER = """\{\{(.*)\}\}""".r
   val DATE_REGEX_MATCHER = """<<(.*)>>""".r
+  val MAP_TO_JSON_SER = {
+    val mapper = new ObjectMapper()
+    mapper.registerModule(DefaultScalaModule)
+    mapper
+  }
 }
 
 /**
  * Exports a window of data to a bucket.
  */
-case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
+case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime: Long, userEndTime: Long) {
 
   @transient lazy private[downsampler] val schemas = Schemas.fromConfig(downsamplerSettings.filodbConfig).get
 
@@ -63,10 +68,30 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
     fields.appendAll(downsamplerSettings.exportPathSpecPairs.map(f => StructField(f._1, StringType)))
     StructType(fields)
   }
-  val partitionByCols = {
+  val partitionByNames = {
     val cols = new mutable.ArrayBuffer[String](downsamplerSettings.exportPathSpecPairs.size)
     cols.appendAll(downsamplerSettings.exportPathSpecPairs.map(_._1))
     cols
+  }
+
+  // One for each name; "template" because these still contain the {{}} notation to be replaced.
+  var partitionByValuesTemplate: Seq[String] = Nil
+  // The indices of partitionByValuesTemplate that contain {{}} notation to be replaced.
+  var partitionByValuesIndicesWithTemplate: Set[Int] = Set.empty
+
+  // Replace <<>> template notation with formatted dates.
+  {
+    val date = new Date(userStartTime)
+    partitionByValuesTemplate = downsamplerSettings.exportPathSpecPairs.map(_._2)
+      // replace the <<>> strings with dates
+      .map{ pathSpecString =>
+        DATE_REGEX_MATCHER.replaceAllIn(pathSpecString, matcher => {
+          val dateFormatter = new SimpleDateFormat(matcher.group(1))
+          dateFormatter.format(date)
+        })}
+    partitionByValuesIndicesWithTemplate = partitionByValuesTemplate.zipWithIndex.filter { case (label, i) =>
+      LABEL_REGEX_MATCHER.findFirstIn(label).isDefined
+    }.map(_._2).toSet
   }
 
   // Unused, but keeping here for convenience if needed later.
@@ -132,9 +157,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
   /**
    * Returns the Spark Rows to be exported.
    */
-  def getExportRows(readablePartitions: Seq[ReadablePartition],
-                    userStartTime: Long,
-                    userEndTime: Long): Iterator[Row] = {
+  def getExportRows(readablePartitions: Seq[ReadablePartition]): Iterator[Row] = {
     val startMs = System.currentTimeMillis()
     val rowIter = readablePartitions
       .iterator
@@ -149,8 +172,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
         (part, partKeyMap, rule)
       }
       .filter { case (part, partKeyMap, rule) => rule.isDefined }
-      .flatMap { case (part, partKeyMap, rule) =>
-        getExportDatas(part, partKeyMap, rule.get, userStartTime, userEndTime) }
+      .flatMap { case (part, partKeyMap, rule) => getExportDatas(part, partKeyMap, rule.get) }
       .map(exportDataToRow)
     val endMs = System.currentTimeMillis()
     exportPrepBatchLatency.record(endMs - startMs)
@@ -162,8 +184,6 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
    * The result Row *must* match this.exportSchema.
    */
   private def exportDataToRow(exportData: ExportRowData): Row = {
-    val mapper = new ObjectMapper()
-    mapper.registerModule(DefaultScalaModule)
     val dataSeq = new mutable.ArrayBuffer[Any](3 + downsamplerSettings.exportPathSpecPairs.size)
     val filteredPartKeyMap = exportData.partKeyMap.filterKeys { label =>
       // Drop unwanted labels from the exported "labels" column.
@@ -172,7 +192,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
     }
     dataSeq.append(
       // Assuming Scala can be at least as clever as a StringBuilder...
-      "\"\"" + mapper.writeValueAsString(filteredPartKeyMap) + "\"\"",
+      "\"\"" + MAP_TO_JSON_SER.writeValueAsString(filteredPartKeyMap) + "\"\"",
       exportData.timestamp,
       exportData.value
     )
@@ -184,17 +204,14 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
    * Returns the column values used to partition the data.
    * Value order should match the order of this.partitionByCols.
    */
-  def getPartitionByValues(partKeyMap: Map[String, String], userStartTime: Long): Iterator[String] = {
-    val date = new Date(userStartTime)
-    downsamplerSettings.exportPathSpecPairs.iterator.map(_._2)
-      // replace the {{}} strings with labels
-      .map{LABEL_REGEX_MATCHER.replaceAllIn(_, matcher => partKeyMap(matcher.group(1)))}
-      // replace the <<>> strings with dates
-      .map{ pathSpecString =>
-        DATE_REGEX_MATCHER.replaceAllIn(pathSpecString, matcher => {
-          val dateFormatter = new SimpleDateFormat(matcher.group(1))
-          dateFormatter.format(date)
-        })}
+  def getPartitionByValues(partKeyMap: Map[String, String]): Iterator[String] = {
+    partitionByValuesTemplate.iterator.zipWithIndex.map{ case (value, i) =>
+      if (partitionByValuesIndicesWithTemplate.contains(i)) {
+        LABEL_REGEX_MATCHER.replaceAllIn(partitionByValuesTemplate(i), matcher => partKeyMap(matcher.group(1)))
+      } else {
+        value
+      }
+    }
   }
 
   def getRuleIfShouldExport(partKeyMap: Map[String, String]): Option[ExportRule] = {
@@ -224,14 +241,12 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
    */
   private def getExportDatas(readablePartition: ReadablePartition,
                              partKeyMap: Map[String, String],
-                             rule: ExportRule,
-                             userStartTime: Long,
-                             userEndTime: Long): Iterator[ExportRowData] = {
+                             rule: ExportRule): Iterator[ExportRowData] = {
     getChunkRangeIter(readablePartition, userStartTime, userEndTime).flatMap{ chunkRow =>
       getTimeValuePairs(partKeyMap, readablePartition,
         chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
     }.map{ case (timestamp, value) =>
-      val partitionByValues = getPartitionByValues(partKeyMap, userStartTime)
+      val partitionByValues = getPartitionByValues(partKeyMap)
       ExportRowData(partKeyMap, timestamp, value, partitionByValues, rule.dropLabels.toSet)
     }
   }

@@ -60,17 +60,12 @@ object DownsamplerMain extends App {
 
   Kamon.init()  // kamon init should be first thing in driver jvm
   val settings = new DownsamplerSettings()
-  val batchDownsampler = new BatchDownsampler(settings)
-  val batchExporter = new BatchExporter(settings)
-
-  val d = new Downsampler(settings, batchDownsampler, batchExporter)
+  val d = new Downsampler(settings)
   val sparkConf = new SparkConf(loadDefaults = true)
   d.run(sparkConf)
 }
 
-class Downsampler(settings: DownsamplerSettings,
-                  batchDownsampler: BatchDownsampler,
-                  batchExporter: BatchExporter) extends Serializable {
+class Downsampler(settings: DownsamplerSettings) extends Serializable {
 
   lazy val exportLatency =
     Kamon.histogram("export-latency", MeasurementUnit.time.milliseconds).withoutTags()
@@ -109,6 +104,9 @@ class Downsampler(settings: DownsamplerSettings,
     val ingestionTimeEnd: Long = userTimeEndExclusive + settings.widenIngestionTimeRangeBy.toMillis
 
     val downsamplePeriodStr = java.time.Instant.ofEpochMilli(userTimeStart).toString
+
+    val batchDownsampler = new BatchDownsampler(settings, userTimeStart, userTimeEndExclusive)
+    val batchExporter = new BatchExporter(settings, userTimeStart, userTimeEndExclusive)
 
     DownsamplerContext.dsLogger.info(s"This is the Downsampling driver. Starting downsampling job " +
       s"rawDataset=${settings.rawDatasetName} for " +
@@ -152,11 +150,11 @@ class Downsampler(settings: DownsamplerSettings,
         }
         // Downsample the data (this step does not contribute the the RDD).
         if (settings.chunkDownsamplerIsEnabled) {
-          batchDownsampler.downsampleBatch(readablePartsBatch, userTimeStart, userTimeEndExclusive)
+          batchDownsampler.downsampleBatch(readablePartsBatch)
         }
         // Generate the data for the RDD.
         if (settings.exportIsEnabled) {
-          batchExporter.getExportRows(readablePartsBatch, userTimeStart, userTimeEndExclusive)
+          batchExporter.getExportRows(readablePartsBatch)
         } else Iterator.empty
       }
 
@@ -168,7 +166,7 @@ class Downsampler(settings: DownsamplerSettings,
         .write
         .mode(settings.exportSaveMode)
         .options(settings.exportOptions)
-        .partitionBy(batchExporter.partitionByCols: _*)
+        .partitionBy(batchExporter.partitionByNames: _*)
         .csv(settings.exportBucket)
       val exportEndMs = System.currentTimeMillis()
       exportLatency.record(exportEndMs - exportStartMs)
