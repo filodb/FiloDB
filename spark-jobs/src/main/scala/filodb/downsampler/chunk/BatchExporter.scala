@@ -1,16 +1,16 @@
 package filodb.downsampler.chunk
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.scala.DefaultScalaModule
+
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
-
 import scala.collection.mutable
-
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types.{DoubleType, LongType, StringType, StructField, StructType}
-
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType.DoubleColumn
 import filodb.core.metadata.Schemas
@@ -29,10 +29,10 @@ case class ExportRule(allowFilterGroups: Seq[Seq[ColumnFilter]],
  * All info needed to output a result Spark Row.
  */
 case class ExportRowData(partKeyMap: Map[String, String],
-                         partKeyString: String,
                          timestamp: Long,
                          value: Double,
-                         partitionStrings: Iterator[String])
+                         partitionStrings: Iterator[String],
+                         dropLabels: Set[String])
 
 object BatchExporter {
   val LABEL_REGEX_MATCHER = """\{\{(.*)\}\}""".r
@@ -162,9 +162,17 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
    * The result Row *must* match this.exportSchema.
    */
   private def exportDataToRow(exportData: ExportRowData): Row = {
+    val mapper = new ObjectMapper()
+    mapper.registerModule(DefaultScalaModule)
     val dataSeq = new mutable.ArrayBuffer[Any](3 + downsamplerSettings.exportPathSpecPairs.size)
+    val filteredPartKeyMap = exportData.partKeyMap.filterKeys { label =>
+      // Drop unwanted labels from the exported "labels" column.
+      !downsamplerSettings.exportDropLabels.contains(label) &&
+      !exportData.dropLabels.contains(label)
+    }
     dataSeq.append(
-      exportData.partKeyString,
+      // Assuming Scala can be at least as clever as a StringBuilder...
+      "\"\"" + mapper.writeValueAsString(filteredPartKeyMap) + "\"\"",
       exportData.timestamp,
       exportData.value
     )
@@ -219,18 +227,12 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
                              rule: ExportRule,
                              userStartTime: Long,
                              userEndTime: Long): Iterator[ExportRowData] = {
-    // Drop unwanted labels from the exported "labels" column.
-    val partKeyString = partKeyMap.filterKeys { label =>
-      !downsamplerSettings.exportDropLabels.contains(label) &&
-      !rule.dropLabels.contains(label)
-    }.map(pair => s"${pair._1}=${pair._2}")
-     .toSeq.sorted.mkString(",")
     getChunkRangeIter(readablePartition, userStartTime, userEndTime).flatMap{ chunkRow =>
       getTimeValuePairs(partKeyMap, readablePartition,
         chunkRow.chunkSetInfoReader, chunkRow.istartRow, chunkRow.iendRow)
     }.map{ case (timestamp, value) =>
       val partitionByValues = getPartitionByValues(partKeyMap, userStartTime)
-      ExportRowData(partKeyMap, partKeyString, timestamp, value, partitionByValues)
+      ExportRowData(partKeyMap, timestamp, value, partitionByValues, rule.dropLabels.toSet)
     }
   }
 }
