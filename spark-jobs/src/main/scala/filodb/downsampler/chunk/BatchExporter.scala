@@ -55,9 +55,9 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings) {
     //   ArrayIndexOutOfBoundsExceptions occur when Spark exports a batch.
     val fields = new mutable.ArrayBuffer[StructField](3 + downsamplerSettings.exportPathSpecPairs.size)
     fields.append(
-      StructField("labels", StringType),
-      StructField("timestamp", LongType),
-      StructField("value", DoubleType)
+      StructField("Labels", StringType),
+      StructField("Timestamp", LongType),
+      StructField("Value", DoubleType)
     )
     // append all partitioning columns as strings
     fields.appendAll(downsamplerSettings.exportPathSpecPairs.map(f => StructField(f._1, StringType)))
