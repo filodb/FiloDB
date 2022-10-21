@@ -164,10 +164,11 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
       // NOTE: toDF(partitionCols: _*) seems buggy
       spark.createDataFrame(rdd, batchExporter.exportSchema)
         .write
+        .format(settings.exportFormat)
         .mode(settings.exportSaveMode)
         .options(settings.exportOptions)
         .partitionBy(batchExporter.partitionByNames: _*)
-        .csv(settings.exportBucket)
+        .save(settings.exportBucket)
       val exportEndMs = System.currentTimeMillis()
       exportLatency.record(exportEndMs - exportStartMs)
     }

@@ -112,6 +112,8 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val exportSaveMode = downsamplerConfig.getString("data-export.save-mode")
 
+  @transient lazy val exportFormat = downsamplerConfig.getString("data-export.format")
+
   /**
    * Two conditions should satisfy for eligibility:
    * (a) If allow list is nonEmpty partKey should match a filter in the allow list.
