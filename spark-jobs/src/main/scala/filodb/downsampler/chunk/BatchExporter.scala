@@ -1,8 +1,5 @@
 package filodb.downsampler.chunk
 
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.scala.DefaultScalaModule
-
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -18,7 +15,7 @@ import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.Utils._
-import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER, MAP_TO_JSON_SER}
+import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
 
 case class ExportRule(allowFilterGroups: Seq[Seq[ColumnFilter]],
@@ -37,11 +34,6 @@ case class ExportRowData(partKeyMap: Map[String, String],
 object BatchExporter {
   val LABEL_REGEX_MATCHER = """\{\{(.*)\}\}""".r
   val DATE_REGEX_MATCHER = """<<(.*)>>""".r
-  val MAP_TO_JSON_SER = {
-    val mapper = new ObjectMapper()
-    mapper.registerModule(DefaultScalaModule)
-    mapper
-  }
 }
 
 /**
@@ -60,9 +52,9 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     //   ArrayIndexOutOfBoundsExceptions occur when Spark exports a batch.
     val fields = new mutable.ArrayBuffer[StructField](3 + downsamplerSettings.exportPathSpecPairs.size)
     fields.append(
-      StructField("Labels", StringType),
-      StructField("Timestamp", LongType),
-      StructField("Value", DoubleType)
+      StructField("LABELS", StringType),
+      StructField("TIMESTAMP", LongType),
+      StructField("VALUE", DoubleType)
     )
     // append all partitioning columns as strings
     fields.appendAll(downsamplerSettings.exportPathSpecPairs.map(f => StructField(f._1, StringType)))
@@ -191,8 +183,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       !exportData.dropLabels.contains(label)
     }
     dataSeq.append(
-      // Assuming Scala can be at least as clever as a StringBuilder...
-      "\"\"" + MAP_TO_JSON_SER.writeValueAsString(filteredPartKeyMap) + "\"\"",
+      "{" + filteredPartKeyMap.map { case (k, v) => s"'$k':'$v'"}.mkString(",") + "}",
       exportData.timestamp,
       exportData.value
     )
