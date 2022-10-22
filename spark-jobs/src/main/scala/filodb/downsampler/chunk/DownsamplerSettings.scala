@@ -76,9 +76,7 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val exportIsEnabled = downsamplerConfig.getBoolean("data-export.enabled")
 
-  @transient lazy val sparkSessionFactoryClass =
-    Some(downsamplerConfig.getOrElse("data-export.spark-session-factory", ""))
-      .filter(_.nonEmpty)
+  @transient lazy val sparkSessionFactoryClass = downsamplerConfig.getString("spark-session-factory")
 
   @transient lazy val exportRuleKey = downsamplerConfig.as[Seq[String]]("data-export.key-labels")
 

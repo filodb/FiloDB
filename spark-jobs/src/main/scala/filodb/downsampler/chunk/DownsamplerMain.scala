@@ -16,7 +16,7 @@ import filodb.memory.format.UnsafeUtils
 
 /**
  * Implement this trait and provide its fully-qualified name as the downsampler config:
- *     data-export.spark-session-factory = "org.fully.qualified.FactoryClass"
+ *     spark-session-factory = "org.fully.qualified.FactoryClass"
  */
 trait SparkSessionFactory {
   def make(sparkConf: SparkConf): SparkSession
@@ -82,8 +82,7 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
   // scalastyle:off method.length
   def run(sparkConf: SparkConf): SparkSession = {
 
-    val spark = Class.forName(settings.sparkSessionFactoryClass.getOrElse(
-                              "filodb.downsampler.chunk.DefaultSparkSessionFactory"))
+    val spark = Class.forName(settings.sparkSessionFactoryClass)
         .getDeclaredConstructor()
         .newInstance()
         .asInstanceOf[SparkSessionFactory]
