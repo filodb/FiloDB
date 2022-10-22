@@ -6,7 +6,6 @@ import java.time.format.DateTimeFormatter
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import org.apache.spark.SparkConf
-import org.apache.spark.internal.io.HadoopMapReduceCommitProtocol
 import org.apache.spark.sql.SparkSession
 
 import filodb.coordinator.KamonShutdownHook
@@ -15,16 +14,22 @@ import filodb.core.memstore.PagedReadablePartition
 import filodb.downsampler.DownsamplerContext
 import filodb.memory.format.UnsafeUtils
 
-
 /**
- * When provided as Spark's spark.sql.sources.commitProtocolClass config, file names
- *   will be written as "part-######-data-c###". This artificially fixes the JobID
- *   and enables idempotent runs, since the same files will be generated.
- * Credit: https://www.waitingforcode.com/apache-spark-sql/idempotent-file-generation-apache-spark-sql/read
+ * Implement this trait and provide its fully-qualified name as the downsampler config:
+ *     data-export.spark-session-factory = "org.fully.qualified.FactoryClass"
  */
-class IdempotentCommitProtocol(jobId: String, path: String,
-                               dynamicPartitionOverwrite: Boolean = false)
-  extends HadoopMapReduceCommitProtocol(jobId = "data", path, dynamicPartitionOverwrite)
+trait SparkSessionFactory {
+  def make(sparkConf: SparkConf): SparkSession
+}
+
+class DefaultSparkSessionFactory extends SparkSessionFactory {
+  override def make(sparkConf: SparkConf): SparkSession = {
+    SparkSession.builder()
+      .appName("FiloDBDownsampler")
+      .config(sparkConf)
+      .getOrCreate()
+  }
+}
 
 /**
   *
@@ -77,12 +82,12 @@ class Downsampler(settings: DownsamplerSettings) extends Serializable {
   // scalastyle:off method.length
   def run(sparkConf: SparkConf): SparkSession = {
 
-    val spark = SparkSession.builder()
-      .appName("FiloDBDownsampler")
-      .config("spark.sql.sources.commitProtocolClass",  // see IdempotentCommitProtocol for details.
-              "filodb.downsampler.chunk.IdempotentCommitProtocol")
-      .config(sparkConf)
-      .getOrCreate()
+    val spark = Class.forName(settings.sparkSessionFactoryClass.getOrElse(
+                              "filodb.downsampler.chunk.DefaultSparkSessionFactory"))
+        .getDeclaredConstructor()
+        .newInstance()
+        .asInstanceOf[SparkSessionFactory]
+        .make(sparkConf)
 
     DownsamplerContext.dsLogger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
 
