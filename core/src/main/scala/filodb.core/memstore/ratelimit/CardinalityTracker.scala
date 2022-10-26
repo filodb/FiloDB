@@ -55,7 +55,11 @@ class CardinalityTracker(ref: DatasetRef,
    * @return current cardinality for each shard key prefix. There
    *         will be shardKeyLen + 1 items in the return value
    */
-  def modifyCount(shardKey: Seq[String], totalDelta: Int, activeDelta: Int): Seq[CardinalityRecord] = {
+  def modifyCount(shardKey: Seq[String], totalDelta: Int, activeDelta: Int): Seq[CardinalityRecord] = synchronized {
+
+    // note this method is synchronized since the read-modify-write pattern that happens here is not thread-safe
+    // modifyCount and decrementCount methods are protected this way
+
     require(shardKey.length == shardKeyLen, "full shard key is needed")
     require(totalDelta == 1 && activeDelta == 0 ||   // new ts but inactive
             totalDelta == 1 && activeDelta == 1 ||   // new ts and active
@@ -138,7 +142,10 @@ class CardinalityTracker(ref: DatasetRef,
    * @return current cardinality for each shard key prefix. There
    *         will be shardKeyLen + 1 items in the return value
    */
-  def decrementCount(shardKey: Seq[String]): Seq[CardinalityRecord] = {
+  def decrementCount(shardKey: Seq[String]): Seq[CardinalityRecord] = synchronized {
+    // note this method is synchronized since the read-modify-write pattern that happens here is not thread-safe
+    // modifyCount and decrementCount methods are protected this way
+
     try {
       require(shardKey.length == shardKeyLen, "full shard key is needed")
       val toStore = (0 to shardKey.length).map { i =>

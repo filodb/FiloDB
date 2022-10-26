@@ -301,6 +301,14 @@ case class InstantExpression(metricName: Option[String],
   }
 
   /**
+   * Returns pre-validation ColumnFilters (i.e. that may not include a __name__ filter).
+   */
+  def getUnvalidatedColumnFilters(): Seq[ColumnFilter] = {
+    val labels = makeMergeNameToLabels(requireName = false)
+    labelMatchesToFilters(labels)._1
+  }
+
+  /**
    * Returns a mapping from selector labels (including an explicit/implicit __name__) to values.
    * Throws an IllegalArgumentException if any of the values are not matched by equality without a regex.
    *
@@ -308,14 +316,16 @@ case class InstantExpression(metricName: Option[String],
    *   for this method to run to completion.
    */
   def toEqualLabelMap() : Map[String, String] = {
-    // See Vector::mergeNameToLabels for details about why we're ignoring the member variable.
-    val mergeNameToLabelsLocal = makeMergeNameToLabels(requireName = false)
-    mergeNameToLabelsLocal.map{ labelMatch =>
-      if (labelMatch.labelMatchOp != EqualMatch) {
-        throw new IllegalArgumentException(
-          "cannot convert to label map if any values aren't matched by equality")
+    // See Vector::mergeNameToLabels for details about why we're not using the member variable.
+    val mergeNameToLabelsLocal = getUnvalidatedColumnFilters()
+    mergeNameToLabelsLocal.map{ columnFilter =>
+      columnFilter.filter match {
+        case eqFilt: query.Filter.Equals =>
+          columnFilter.column -> eqFilt.value.toString
+        case _ =>
+          throw new IllegalArgumentException(
+            "cannot convert to label map if any values aren't matched by equality")
       }
-      labelMatch.label -> labelMatch.value
     }.toMap
   }
 }

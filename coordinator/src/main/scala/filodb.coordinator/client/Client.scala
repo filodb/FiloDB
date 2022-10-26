@@ -8,9 +8,8 @@ import scala.reflect.ClassTag
 import akka.actor.{ActorRef, ActorSystem, Address}
 import akka.pattern.ask
 import akka.util.Timeout
-import com.typesafe.scalalogging.StrictLogging
 
-import filodb.coordinator.{ActorName, NodeClusterActor}
+import filodb.coordinator.ActorName
 import filodb.core._
 
 object Client {
@@ -59,13 +58,15 @@ object Client {
    * @param system the ActorSystem to connect to
    */
   def standaloneClient(system: ActorSystem,
+                       v2ClusterEnabled: Boolean,
                        host: String,
                        port: Int = 2552,
                        askTimeout: FiniteDuration = 30 seconds): LocalClient = {
     val addr = Address("akka.tcp", "filo-standalone", host, port)
-    val refFuture = system.actorSelection(ActorName.nodeCoordinatorPath(addr))
+    val refFuture = system.actorSelection(ActorName.nodeCoordinatorPath(addr, v2ClusterEnabled))
                           .resolveOne(askTimeout)
-    new LocalClient(Await.result(refFuture, askTimeout))
+    val ref = Await.result(refFuture, askTimeout)
+    new LocalClient(ref)
   }
 }
 
@@ -83,21 +84,9 @@ trait ClientBase {
    */
   def askCoordinator[B](msg: Any, askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]): B
 
-  /**
-   * Sends a message to ALL the coordinators, parsing the responses and returning a sequence
-   */
-  def askAllCoordinators[B](msg: Any, askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]):
-    Seq[B]
-
-  /**
-   * Sends a message to ALL coordinators without waiting for a response
-   */
-  def sendAllIngestors(msg: Any): Unit
-
-  def clusterActor: Option[ActorRef]
 }
 
-trait AllClientOps extends IngestionOps with QueryOps with ClusterOps
+trait AllClientOps extends QueryOps with ClusterOps
 
 /**
  * Standard client for a local FiloDB coordinator actor, which takes reference to a single NodeCoordinator
@@ -107,43 +96,7 @@ class LocalClient(val nodeCoordinator: ActorRef) extends AllClientOps {
   def askCoordinator[B](msg: Any, askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]): B =
     Client.actorAsk(nodeCoordinator, msg, askTimeout)(Client.standardResponse(f))
 
-  def askAllCoordinators[B](msg: Any, askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]):
-    Seq[B] = Seq(askCoordinator(msg, askTimeout)(f))
-
-  def sendAllIngestors(msg: Any): Unit = { nodeCoordinator ! msg }
-
   // Always get the cluster actor ref anew.  Cluster actor may move around the cluster!
   def clusterActor: Option[ActorRef] =
     askCoordinator(MiscCommands.GetClusterActor) { case x: Option[ActorRef] @unchecked => x }
-}
-
-/**
- * A client for connecting to a cluster of NodeCoordinators.
- * @param nodeClusterActor ActorRef to an instance of NodeClusterActor
- * @param ingestionRole the role of the cluster members doing the ingestion
- * @param metadataRole the role of the cluster member handling metadata updates
- */
-class ClusterClient(nodeClusterActor: ActorRef,
-                    ingestionRole: String,
-                    metadataRole: String) extends AllClientOps with StrictLogging {
-  import NodeClusterActor._
-
-  def askCoordinator[B](msg: Any, askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]): B =
-    Client.actorAsk(nodeClusterActor, ForwardToOne(metadataRole, msg), askTimeout)(
-                    Client.standardResponse(f))
-
-  def askAllCoordinators[B](msg: Any, askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]):
-    Seq[B] = {
-    implicit val timeout = Timeout(askTimeout)
-    val coords: Set[ActorRef] = Await.result(nodeClusterActor ? GetRefs(ingestionRole), askTimeout) match {
-      case refs: Set[ActorRef] @unchecked => refs
-      case NoSuchRole          => throw ClientException(NoSuchRole)
-    }
-    logger.debug(s"Sending message $msg to coords $coords, addresses ${coords.map(_.path.address)}...")
-    Client.actorsAsk(coords.toSeq, msg, askTimeout)(Client.standardResponse(f))
-  }
-
-  def sendAllIngestors(msg: Any): Unit = nodeClusterActor ! Broadcast(ingestionRole, msg)
-
-  val clusterActor = Some(nodeClusterActor)
 }

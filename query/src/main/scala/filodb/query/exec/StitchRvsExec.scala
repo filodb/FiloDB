@@ -103,14 +103,15 @@ final case class StitchRvsExec(queryContext: QueryContext,
   }
   protected def args: String = ""
 
-  protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],
+  protected def composeStreaming(childResponses: Observable[(Observable[RangeVector], Int)],
+                                 schemas: Observable[(ResultSchema, Int)],
+                                 querySession: QuerySession): Observable[RangeVector] = ???
+
+  protected[exec] def compose(childResponses: Observable[(QueryResult, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"StitchRvsExec: Stitching results:")
-    val stitched = childResponses.map {
-      case (QueryResult(_, _, result, _, _, _), _) => result
-      case (QueryError(_, _, ex), _)         => throw ex
-    }.toListL.map(_.flatten).map { srvs =>
+    val stitched = childResponses.map(_._1.result).toListL.map(_.flatten).map { srvs =>
       val groups = srvs.groupBy(_.key.labelValues)
       groups.mapValues { toMerge =>
         val rows = StitchRvsExec.merge(toMerge.map(_.rows()), outputRvRange)
@@ -121,9 +122,6 @@ final case class StitchRvsExec(queryContext: QueryContext,
     Observable.fromTask(stitched).flatten
   }
 
-  // overriden since stitch can reduce schemas with different vector lengths as long as the columns are same
-  override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema =
-    IgnoreFixedVectorLenAndColumnNamesSchemaReducer.reduceSchema(rs, resp)
 }
 
 /**

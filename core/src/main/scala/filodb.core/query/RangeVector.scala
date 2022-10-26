@@ -485,8 +485,10 @@ object SerializedRangeVector extends StrictLogging {
   def toSchema(colSchema: Seq[ColumnInfo], brSchemas: Map[Int, RecordSchema] = Map.empty): RecordSchema =
     schemaCache.getOrElseUpdate(colSchema, { cols => new RecordSchema(cols, brSchema = brSchemas) })
 
-  def newBuilder(): RecordBuilder =
-    new RecordBuilder(MemFactory.onHeapFactory, MaxContainerSize)
+  def newBuilder(): RecordBuilder = newBuilder(MaxContainerSize)
+
+  def newBuilder(maxContainerSize: Int): RecordBuilder =
+    new RecordBuilder(MemFactory.onHeapFactory, maxContainerSize)
 }
 
 final case class IteratorBackedRangeVector(key: RangeVectorKey,

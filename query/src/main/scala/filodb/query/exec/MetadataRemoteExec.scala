@@ -31,7 +31,9 @@ case class MetadataRemoteExec(queryEndpoint: String,
   private val lcLabelNameField  = "label"
   private val lcLabelCountField = "count"
 
-  private val builder = SerializedRangeVector.newBuilder()
+  override val maxRecordContainerSize: Int = 64 * 1024
+
+  private val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize)
 
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                               (implicit sched: Scheduler): Future[QueryResponse] = {
@@ -108,7 +110,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
     // FIXME
     // Single label value query, older version returns Map type where as newer version works with List type
     // so this explicit handling is added for backward compatibility.
-    if(data.nonEmpty && data(0).value.size == 1) {
+    if(data.nonEmpty && urlParams.get("labels").map(_.split(",").size).getOrElse(0) == 1) {
       val iteratorMap = data.flatMap{ r => r.value.map { v => v._2 }}
       import NoCloseCursor._
       val rangeVector = IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),

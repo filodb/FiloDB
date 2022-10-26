@@ -3,12 +3,15 @@ package filodb.cli
 import java.io.OutputStream
 import java.math.BigInteger
 import java.sql.Timestamp
-import java.util
 
 import scala.concurrent.duration._
 import scala.util.Try
 
+import akka.actor.ActorSystem
 import com.opencsv.CSVWriter
+import com.typesafe.scalalogging.StrictLogging
+import java.util
+import monix.execution.{Scheduler, UncaughtExceptionReporter}
 import monix.reactive.Observable
 import org.rogach.scallop.ScallopConf
 import org.rogach.scallop.exceptions.ScallopException
@@ -20,11 +23,12 @@ import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
+import filodb.core.memstore.FiloSchedulers
 import filodb.core.metadata.{Column, Dataset, Schemas}
 import filodb.core.query._
 import filodb.core.store.ChunkSetInfoOnHeap
 import filodb.memory.MemFactory
-import filodb.memory.format.{BinaryVector, Classes, MemoryReader, PrimitiveVectorReader, RowReader}
+import filodb.memory.format._
 import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
 import filodb.query._
@@ -80,17 +84,20 @@ class Arguments(args: Seq[String]) extends ScallopConf(args) {
     case ScallopException(message) => throw e
     case other => throw other
   }
-
 }
 
-object CliMain extends FilodbClusterNode {
+object CliMain extends StrictLogging {
   var exitCode = 0
-
-  override val role = ClusterRole.Cli
-
-  lazy val client = new LocalClient(coordinatorActor)
-
-  val config = systemConfig.getConfig("filodb")
+  val allConfig = GlobalConfig.configToDisableAkkaCluster.withFallback(GlobalConfig.systemConfig)
+  val config = allConfig.getConfig("filodb")
+  val v2ClusterEnabled =  allConfig.getBoolean("filodb.v2-cluster-enabled")
+  lazy val system = ActorSystem("FiloCli", allConfig)
+  lazy implicit val ioPool = Scheduler.io(name = FiloSchedulers.IOSchedName,
+    reporter = UncaughtExceptionReporter(
+      logger.error("Uncaught Exception in FilodbCluster.ioPool", _)))
+  lazy val settings = FilodbSettings.initialize(allConfig)
+  lazy val factory = StoreFactory(settings, ioPool)
+  lazy val metaStore = factory.metaStore
 
   import Client.parse
 
@@ -129,7 +136,7 @@ object CliMain extends FilodbClusterNode {
 
   def getClientAndRef(args: Arguments): (LocalClient, DatasetRef) = {
     require(args.host.isDefined && args.dataset.isDefined, "--host and --dataset must be defined")
-    val remote = Client.standaloneClient(system, args.host(), args.port())
+    val remote = Client.standaloneClient(system, v2ClusterEnabled, args.host(), args.port())
     (remote, DatasetRef(args.dataset()))
   }
 
@@ -163,8 +170,8 @@ object CliMain extends FilodbClusterNode {
           }
 
         case Some("list") =>
-          args.host.map { server =>
-            listRegisteredDatasets(Client.standaloneClient(system, server, args.port()))
+          args.host.toOption.foreach { server =>
+            listRegisteredDatasets(Client.standaloneClient(system, v2ClusterEnabled, server, args.port()))
           }
 
         case Some("indexnames") =>
@@ -226,7 +233,7 @@ object CliMain extends FilodbClusterNode {
 
         case Some("timeseriesMetadata") =>
           require(args.host.isDefined && args.dataset.isDefined && args.matcher.isDefined, "--host, --dataset and --matcher must be defined")
-          val remote = Client.standaloneClient(system, args.host(), args.port())
+          val remote = Client.standaloneClient(system, v2ClusterEnabled, args.host(), args.port())
           val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
             timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
           parseTimeSeriesMetadataQuery(remote, args.matcher(), args.dataset(),
@@ -234,7 +241,7 @@ object CliMain extends FilodbClusterNode {
 
         case Some("labelvalues") =>
           require(args.host.isDefined && args.dataset.isDefined && args.labelnames.isDefined, "--host, --dataset and --labelName must be defined")
-          val remote = Client.standaloneClient(system, args.host(), args.port())
+          val remote = Client.standaloneClient(system, v2ClusterEnabled, args.host(), args.port())
           val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
             timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
           parseLabelValuesQuery(remote, args.labelnames(), args.labelfilter(), args.dataset(),
@@ -242,7 +249,7 @@ object CliMain extends FilodbClusterNode {
 
         case Some("labels") =>
           require(args.host.isDefined && args.dataset.isDefined && args.labelfilter.isDefined, "--host, --dataset and --labelfilter must be defined")
-          val remote = Client.standaloneClient(system, args.host(), args.port())
+          val remote = Client.standaloneClient(system, v2ClusterEnabled, args.host(), args.port())
           val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
             timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
           parseLabelsQuery(remote, args.labelfilter(), args.dataset(),
@@ -251,7 +258,7 @@ object CliMain extends FilodbClusterNode {
         case Some("labelcardinality") =>
           // TODO: labelfilter expects _ns_, _ws_ and _metric_, we need to ensure these three are present
           require(args.host.isDefined && args.dataset.isDefined && args.labelfilter.isDefined, "--host, --dataset and --labelfilter must be defined")
-          val remote = Client.standaloneClient(system, args.host(), args.port())
+          val remote = Client.standaloneClient(system, v2ClusterEnabled, args.host(), args.port())
           val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
             timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
           parseLabelCardinalityQuery(remote, args.labelfilter(), args.dataset(),
@@ -259,7 +266,7 @@ object CliMain extends FilodbClusterNode {
 
         case Some("tscard") =>
           require(args.host.isDefined && args.dataset.isDefined && args.labelfilter.isDefined, "--host, --dataset and --labelfilter must be defined")
-          val remote = Client.standaloneClient(system, args.host(), args.port())
+          val remote = Client.standaloneClient(system, v2ClusterEnabled, args.host(), args.port())
           val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.map(_.toInt).toOption,
             timeout, args.shards.map(_.map(_.toInt)).toOption, args.spread.toOption.map(Integer.valueOf))
           parseTsCardQuery(remote, args.shardkeyprefix(), args.numgroupbyfields(), args.dataset(), options)
@@ -268,7 +275,7 @@ object CliMain extends FilodbClusterNode {
           // This will soon be deprecated
           args.promql.map { query =>
             require(args.host.isDefined && args.dataset.isDefined, "--host and --dataset must be defined")
-            val remote = Client.standaloneClient(system, args.host(), args.port())
+            val remote = Client.standaloneClient(system, v2ClusterEnabled, args.host(), args.port())
             val options = QOptions(args.limit(), args.samplelimit(), args.everynseconds.toOption.map(_.toInt),
               timeout, args.shards.toOption.map(_.map(_.toInt)), args.spread.toOption.map(Integer.valueOf))
             parsePromQuery2(remote, query, args.dataset(), getQueryRange(args), options)
@@ -290,7 +297,7 @@ object CliMain extends FilodbClusterNode {
   private def findQueryShards(args: Arguments) = {
     val (client, dsRef) = getClientAndRef(args)
     val FindShardFormatStr = "%5s\t\t%s"
-    client.getShardMapper(dsRef) match {
+    client.getShardMapper(dsRef, v2ClusterEnabled) match {
       case Some(mapper) =>
         def mapperRef = mapper
         val queryConfig = QueryConfig (config.getConfig ("query") )
@@ -311,13 +318,13 @@ object CliMain extends FilodbClusterNode {
   }
 
   def listRegisteredDatasets(client: LocalClient): Unit = {
-    client.getDatasets().foreach(println)
+    client.getDatasets(v2ClusterEnabled).foreach(println)
   }
 
   val ShardFormatStr = "%5s\t%20s\t\t%s"
 
   def dumpShardStatus(client: LocalClient, ref: DatasetRef): Unit = {
-    client.getShardMapper(ref) match {
+    client.getShardMapper(ref, v2ClusterEnabled) match {
       case Some(map) =>
         println(ShardFormatStr.format("Shard", "Status", "Address"))
         map.shardValues.zipWithIndex.foreach { case ((ref, status), idx) =>

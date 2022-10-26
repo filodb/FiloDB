@@ -15,7 +15,7 @@ import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.Schemas
 import filodb.core.query.{QueryConfig, QuerySession, QueryStats, ResultSchema}
 import filodb.core.store._
-import filodb.query.{QueryResponse, QueryResult}
+import filodb.query.{QueryResponse, QueryResult, StreamQueryResponse}
 import filodb.query.Query.qLogger
 
 /**
@@ -36,8 +36,13 @@ import filodb.query.Query.qLogger
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(Kamon.currentSpan(), false) {
       // translate implicit ExecutionContext to monix.Scheduler
-      val querySession = QuerySession(plan.execPlan.queryContext, queryConfig, catchMultipleLockSetErrors = true)
-      plan.execPlan.execute(source, querySession).timeout(plan.clientParams.deadline.milliseconds).onErrorRecover {
+      val querySession = QuerySession(plan.execPlan.queryContext, queryConfig,
+                              streamingDispatch = PlanDispatcher.streamingResultsEnabled,
+                              catchMultipleLockSetErrors = true)
+      plan.execPlan.execute(source, querySession)
+        .timeout(plan.clientParams.deadline.milliseconds)
+        .guarantee(Task.eval(querySession.close()))
+        .onErrorRecover {
         case e: TimeoutException if (plan.execPlan.queryContext.plannerParams.allowPartialResults)
         =>
           qLogger.warn(s"Swallowed TimeoutException for query id: ${plan.execPlan.queryContext.queryId} " +
@@ -48,6 +53,10 @@ import filodb.query.Query.qLogger
   }
 
   override def isLocalCall: Boolean = true
+
+  override def dispatchStreaming(plan: ExecPlanWithClientParams,
+                                 source: ChunkSource)
+                                (implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
 }
 
 /**
