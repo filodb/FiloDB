@@ -46,6 +46,8 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
 
   @transient lazy private[downsampler] val schemas = Schemas.fromConfig(downsamplerSettings.filodbConfig).get
 
+  @transient lazy val numPartitionsExportPrepped = Kamon.counter("num-partitions-export-prepped").withoutTags()
+
   @transient lazy val exportPrepBatchLatency =
     Kamon.histogram("export-prep-batch-latency", MeasurementUnit.time.milliseconds).withoutTags()
 
@@ -191,6 +193,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       exportData.value
     )
     dataSeq.appendAll(exportData.partitionStrings)
+    numPartitionsExportPrepped.increment()
     Row.fromSeq(dataSeq)
   }
 
