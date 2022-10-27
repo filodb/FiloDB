@@ -48,8 +48,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
 
   @transient lazy val numPartitionsExportPrepped = Kamon.counter("num-partitions-export-prepped").withoutTags()
 
-  @transient lazy val exportPrepBatchLatency =
-    Kamon.histogram("export-prep-batch-latency", MeasurementUnit.time.milliseconds).withoutTags()
+  @transient lazy val numRowsExportPrepped = Kamon.counter("num-rows-export-prepped").withoutTags()
 
   val keyToRules = downsamplerSettings.exportKeyToRules
   val exportSchema = {
@@ -155,8 +154,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
    * Returns the Spark Rows to be exported.
    */
   def getExportRows(readablePartitions: Seq[ReadablePartition]): Iterator[Row] = {
-    val startMs = System.currentTimeMillis()
-    val rowIter = readablePartitions
+    readablePartitions
       .iterator
       .map { part =>
         // package each partition with a map of its label-value pairs and a matching export rule (if it exists)
@@ -169,11 +167,14 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
         (part, partKeyMap, rule)
       }
       .filter { case (part, partKeyMap, rule) => rule.isDefined }
-      .flatMap { case (part, partKeyMap, rule) => getExportDatas(part, partKeyMap, rule.get) }
-      .map(exportDataToRow)
-    val endMs = System.currentTimeMillis()
-    exportPrepBatchLatency.record(endMs - startMs)
-    rowIter
+      .flatMap { case (part, partKeyMap, rule) =>
+        numPartitionsExportPrepped.increment()
+        getExportDatas(part, partKeyMap, rule.get)
+      }
+      .map { exportData =>
+        numRowsExportPrepped.increment()
+        exportDataToRow(exportData)
+      }
   }
 
   /**
@@ -193,7 +194,6 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       exportData.value
     )
     dataSeq.appendAll(exportData.partitionStrings)
-    numPartitionsExportPrepped.increment()
     Row.fromSeq(dataSeq)
   }
 
