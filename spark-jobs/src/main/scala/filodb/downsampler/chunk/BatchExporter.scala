@@ -7,7 +7,6 @@ import java.util.Date
 import scala.collection.mutable
 
 import kamon.Kamon
-import kamon.metric.MeasurementUnit
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types.{DoubleType, LongType, StringType, StructField, StructType}
 
