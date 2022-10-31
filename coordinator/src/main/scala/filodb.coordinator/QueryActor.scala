@@ -2,12 +2,10 @@ package filodb.coordinator
 
 import java.lang.Thread.UncaughtExceptionHandler
 import java.util.concurrent.{ForkJoinPool, ForkJoinWorkerThread}
-
 import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
 import scala.util.{Failure, Success}
 import scala.util.control.NonFatal
-
 import akka.actor.{ActorRef, Props}
 import akka.pattern.AskTimeoutException
 import kamon.Kamon
@@ -19,7 +17,6 @@ import monix.execution.schedulers.SchedulerService
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
-
 import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, TermInfo, TimeSeriesStore}
@@ -29,7 +26,7 @@ import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryStats}
 import filodb.core.store.CorruptVectorException
 import filodb.memory.data.Shutdown
 import filodb.query._
-import filodb.query.exec.{ExecPlan, PlanDispatcher}
+import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PlanDispatcher}
 
 object QueryActor {
   final case class ThrowException(dataset: DatasetRef)
@@ -170,7 +167,11 @@ final class QueryActor(memStore: TimeSeriesStore,
           q.execute(memStore, querySession)(queryScheduler)
             .map { res =>
               // below prevents from calling FiloDB directly (without Query Service)
-              FiloSchedulers.assertThreadName(QuerySchedName)
+              // UPDATE: 31/10/2022. Avoiding the assert when the InProcessPlanDispatcher is used. As it runs
+              // the query (for example scalar query) on the current/Actor thread instead of the scheduler
+              if (!q.dispatcher.isInstanceOf[InProcessPlanDispatcher]) {
+                FiloSchedulers.assertThreadName(QuerySchedName)
+              }
               replyTo ! res
               res match {
                 case QueryResult(_, _, vectors, _, _, _) => resultVectors.record(vectors.length)
