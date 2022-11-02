@@ -102,12 +102,16 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     part = makePart(0, dataset1)
     val data = singleSeriesReaders().take(5)
     var i = 0
+    val dataBytesScannedCtr = new AtomicLong
+
+    // populating ReadablePartition `part`
     for (i <- 0 until 5) {
       part.ingest(i, data(i), ingestBlockHolder, timeAlignedChunksEnabled,
         flushIntervalMillis = flushIntervalMillis, acceptDuplicateSamples)
     }
-    val iter1 = part.timeRangeRows(WriteBufferChunkScan, Array(1))
+    val iter = part.timeRangeRows(WriteBufferChunkScan, Array(1))
 
+    // populating ReadablePartition `part2` with same data as feeded in part
     val part2 = makePart(1, dataset1)
     i = 0
     for (i <- 0 until 5) {
@@ -115,17 +119,17 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
         flushIntervalMillis = flushIntervalMillis, acceptDuplicateSamples)
     }
 
-    val dataBytesScannedCtr = new AtomicLong
-
-    val iter2 = part2.timeRangeRows(
+    val iterWithCountingChunkInfo = part2.timeRangeRows(
       WriteBufferChunkScan,
       Array(1),
       new CountingChunkInfoIterator(part2.infos(WriteBufferChunkScan), Array(1), dataBytesScannedCtr))
 
-    // now comparing iter1 and iter2
-    val data1Sum = iter1.map(_.getDouble(0)).sum
-    val data2Sum = iter2.map(_.getDouble(0)).sum
-    data1Sum shouldEqual data2Sum
+    // collect the sum of all data in both the iterators of readablePartition
+    val iterSum = iter.map(_.getDouble(0)).sum
+    val iterWithCountingChunkInfoSum = iterWithCountingChunkInfo.map(_.getDouble(0)).sum
+
+    // UT assertions
+    iterSum shouldEqual iterWithCountingChunkInfoSum
     dataBytesScannedCtr.get() shouldEqual 48
   }
 
