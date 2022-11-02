@@ -29,7 +29,7 @@ import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryStats}
 import filodb.core.store.CorruptVectorException
 import filodb.memory.data.Shutdown
 import filodb.query._
-import filodb.query.exec.{ExecPlan, PlanDispatcher}
+import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PlanDispatcher}
 
 object QueryActor {
   final case class ThrowException(dataset: DatasetRef)
@@ -170,7 +170,11 @@ final class QueryActor(memStore: TimeSeriesStore,
           q.execute(memStore, querySession)(queryScheduler)
             .map { res =>
               // below prevents from calling FiloDB directly (without Query Service)
-              FiloSchedulers.assertThreadName(QuerySchedName)
+              // UPDATE: 31/10/2022. Avoiding the assert when the InProcessPlanDispatcher is used. As it runs
+              // the query on the current/Actor thread instead of the scheduler
+              if (!q.dispatcher.isInstanceOf[InProcessPlanDispatcher]) {
+                FiloSchedulers.assertThreadName(QuerySchedName)
+              }
               replyTo ! res
               res match {
                 case QueryResult(_, _, vectors, _, _, _) => resultVectors.record(vectors.length)
