@@ -140,7 +140,6 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       }
       .filter { case (part, partKeyMap, rule) => rule.isDefined }
       .flatMap { case (part, partKeyMap, rule) =>
-        numPartitionsExportPrepped.increment()
         getExportDatas(part, partKeyMap, rule.get)
       }
       .map { exportData =>
@@ -222,6 +221,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       val valueIter = getChunkColIter(partition, chunkReader, valueCol, irowStart)
       columns(valueCol).columnType match {
         case DoubleColumn =>
+          numPartitionsExportPrepped.increment()
           val doubleIter = valueIter.asDoubleIt
           (irowStart until irowEnd).iterator.map{ _ =>
             (partKeyMap, timestampIter.next, doubleIter.next)
@@ -234,8 +234,9 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
           // then the exported time-series will look like:
           //    my_histo_bucket{l1=v1, l2=v2, le=10} 4
           //    my_histo_bucket{l1=v1, l2=v2, le=20} 15
-          val histIter = valueIter.asHistIt
+          val histIter = valueIter.asHistIt.buffered
           val bucketMetric = partKeyMap("_metric_") + "_bucket"
+          numPartitionsExportPrepped.increment(histIter.head.numBuckets)
           (irowStart until irowEnd).iterator.flatMap{ _ =>
             val hist = histIter.next()
             (0 until hist.numBuckets).iterator.map{ i =>
