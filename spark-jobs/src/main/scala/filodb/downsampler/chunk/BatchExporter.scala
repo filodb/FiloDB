@@ -13,12 +13,13 @@ import org.apache.spark.sql.types.{DoubleType, LongType, StringType, StructField
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter}
+import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.Utils._
 import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
+import filodb.memory.format.vectors.{Histogram, LongIterator}
 
 case class ExportRule(allowFilterGroups: Seq[Seq[ColumnFilter]],
                       blockFilterGroups: Seq[Seq[ColumnFilter]],
@@ -211,35 +212,69 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   private def getExportDatas(partition: ReadablePartition,
                              partKeyMap: Map[String, String],
                              rule: ExportRule): Iterator[ExportRowData] = {
+    // Pseudo-struct for convenience.
+    case class RangeInfo(irowStart: Int,
+                         irowEnd: Int,
+                         timestampIter: LongIterator,
+                         valueIter: TypedIterator)
+
     val timestampCol = 0  // FIXME: need a more dynamic (but efficient) solution
     val columns = partition.schema.data.columns
     val valueCol = columns.indexWhere(_.name == partition.schema.data.valueColName)
-    getChunkRangeIter(partition, userStartTime, userEndTime).flatMap{ chunkRow =>
-      val chunkReader = chunkRow.chunkSetInfoReader
-      val irowStart = chunkRow.istartRow
-      val irowEnd = chunkRow.iendRow
-      val timestampIter = getChunkColIter(partition, chunkReader, timestampCol, irowStart).asLongIt
-      val valueIter = getChunkColIter(partition, chunkReader, valueCol, irowStart)
-      columns(valueCol).columnType match {
-        case DoubleColumn =>
-          numPartitionsExportPrepped.increment()
-          val doubleIter = valueIter.asDoubleIt
-          (irowStart until irowEnd).iterator.map{ _ =>
-            (partKeyMap, timestampIter.next, doubleIter.next)
+    val rangeInfoIter = getChunkRangeIter(partition, userStartTime, userEndTime).map{ chunkRange =>
+      val infoReader = chunkRange.chunkSetInfoReader
+      val irowStart = chunkRange.istartRow
+      val irowEnd = chunkRange.iendRow
+      val timestampIter = getChunkColIter(partition, infoReader, timestampCol, irowStart).asLongIt
+      val valueIter = getChunkColIter(partition, infoReader, valueCol, irowStart)
+      RangeInfo(irowStart, irowEnd, timestampIter, valueIter)
+    }
+    if (!rangeInfoIter.hasNext) {
+      return Iterator.empty
+    }
+    val f = columns(valueCol).columnType match {
+      case DoubleColumn =>
+        val it = rangeInfoIter.flatMap{ info =>
+          val doubleIter = info.valueIter.asDoubleIt
+          (info.irowStart until info.irowEnd).iterator.map{ _ =>
+            (partKeyMap, info.timestampIter.next, doubleIter.next)
           }
-        case HistogramColumn =>
-          // If the histogram to export looks like:
-          //     my_histo{l1=v1, l2=v2}
-          // with bucket values:
-          //     [<=10 = 4, <=20 = 15, <=Inf = 26]
-          // then the exported time-series will look like:
-          //    my_histo_bucket{l1=v1, l2=v2, le=10} 4
-          //    my_histo_bucket{l1=v1, l2=v2, le=20} 15
-          //    my_histo_bucket{l1=v1, l2=v2, le=+Inf} 26
-          val histIter = valueIter.asHistIt.buffered
+        }
+        if (it.hasNext) {
+          numPartitionsExportPrepped.increment()
+        }
+        it
+      case HistogramColumn =>
+        // If the histogram to export looks like:
+        //     my_histo{l1=v1, l2=v2}
+        // with bucket values:
+        //     [<=10 = 4, <=20 = 15, <=Inf = 26]
+        // then the exported time-series will look like:
+        //    my_histo_bucket{l1=v1, l2=v2, le=10} 4
+        //    my_histo_bucket{l1=v1, l2=v2, le=20} 15
+        //    my_histo_bucket{l1=v1, l2=v2, le=+Inf} 26
+        val info = rangeInfoIter.next
+        val value = info.valueIter.asHistIt.next
+        val ts = info.timestampIter.asLongIt.next
+        val lit = new LongIterator {
+          override def next: Long = ts
+        }
+        val hit = new Iterator[Histogram] with TypedIterator {
+          var isDone = false
+          override def next: Histogram = {
+            isDone = true
+            value
+          }
+          override def hasNext: Boolean = !isDone
+        }
+
+        val newThing = RangeInfo(info.irowStart, info.irowStart + 1, lit, hit)
+        val it =
+          (Iterator.single(newThing) ++ Iterator.single(info.copy(irowStart = info.irowStart + 1)) ++ rangeInfoIter)
+          .flatMap{ info =>
+          val histIter = info.valueIter.asHistIt.buffered
           val bucketMetric = partKeyMap("_metric_") + "_bucket"
-          numPartitionsExportPrepped.increment(histIter.head.numBuckets)
-          (irowStart until irowEnd).iterator.flatMap{ _ =>
+          (info.irowStart until info.irowEnd).iterator.flatMap{ _ =>
             val hist = histIter.next()
             (0 until hist.numBuckets).iterator.map{ i =>
               val bucketTopString = {
@@ -247,15 +282,24 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
                 if (raw.isPosInfinity) "+Inf" else raw.toString
               }
               val bucketLabels = partKeyMap ++ Map("le" -> bucketTopString, "_metric_" -> bucketMetric)
-              (bucketLabels, timestampIter.next, hist.bucketValue(i))
+              (bucketLabels, info.timestampIter.next, hist.bucketValue(i))
             }
           }
-        case colType =>
-          DownsamplerContext.dsLogger.warn(
-            s"BatchExporter encountered unhandled ColumnType=$colType; partKeyMap=$partKeyMap")
-          Iterator.empty
-      }
-    }.map{ case (pkeyMapWithBucket, timestamp, value) =>
+        }
+
+        if (it.hasNext) {
+          numPartitionsExportPrepped.increment(value.numBuckets)
+        }
+
+        it
+
+      case colType =>
+        DownsamplerContext.dsLogger.warn(
+          s"BatchExporter encountered unhandled ColumnType=$colType; partKeyMap=$partKeyMap")
+        Iterator.empty
+    }
+
+    f.map{ case (pkeyMapWithBucket, timestamp, value) =>
       // NOTE: partition without histogram-adjusted labels, since we want the original metric name.
       val partitionByValues = getPartitionByValues(partKeyMap)
       ExportRowData(pkeyMapWithBucket, timestamp, value, partitionByValues, rule.dropLabels.toSet)
