@@ -203,6 +203,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     }
   }
 
+  // scalastyle:off method.length
   /**
    * Returns data about a single row to export.
    * exportDataToRow will convert these into Spark Rows that conform to this.exportSchema.
@@ -230,18 +231,22 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
           // If the histogram to export looks like:
           //     my_histo{l1=v1, l2=v2}
           // with bucket values:
-          //     [<=10 = 4, <=20 = 15]
+          //     [<=10 = 4, <=20 = 15, <=Inf = 26]
           // then the exported time-series will look like:
           //    my_histo_bucket{l1=v1, l2=v2, le=10} 4
           //    my_histo_bucket{l1=v1, l2=v2, le=20} 15
+          //    my_histo_bucket{l1=v1, l2=v2, le=+Inf} 26
           val histIter = valueIter.asHistIt.buffered
           val bucketMetric = partKeyMap("_metric_") + "_bucket"
           numPartitionsExportPrepped.increment(histIter.head.numBuckets)
           (irowStart until irowEnd).iterator.flatMap{ _ =>
             val hist = histIter.next()
             (0 until hist.numBuckets).iterator.map{ i =>
-              val bucketTop = hist.bucketTop(i)
-              val bucketLabels = partKeyMap ++ Map("le" -> bucketTop.toString, "_metric_" -> bucketMetric)
+              val bucketTopString = {
+                val raw = hist.bucketTop(i)
+                if (raw.isPosInfinity) "+Inf" else raw.toString
+              }
+              val bucketLabels = partKeyMap ++ Map("le" -> bucketTopString, "_metric_" -> bucketMetric)
               (bucketLabels, timestampIter.next, hist.bucketValue(i))
             }
           }
@@ -256,4 +261,5 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       ExportRowData(pkeyMapWithBucket, timestamp, value, partitionByValues, rule.dropLabels.toSet)
     }
   }
+  // scalastyle:on method.length
 }
