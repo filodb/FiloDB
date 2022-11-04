@@ -2,6 +2,7 @@ package filodb.standalone
 
 import scala.concurrent.duration.FiniteDuration
 
+import akka.actor.ActorSystem
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.execution.{Scheduler, UncaughtExceptionReporter}
@@ -23,7 +24,7 @@ object NewFiloServerMain extends StrictLogging {
 
       Kamon.init()
 
-      val system = ActorSystemHolder.createActorSystem("filo-standalone", allConfig)
+      val system = ActorSystem("filo-standalone", allConfig)
 
       lazy val ioPool = Scheduler.io(name = FiloSchedulers.IOSchedName,
         reporter = UncaughtExceptionReporter(

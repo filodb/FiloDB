@@ -3,12 +3,10 @@ package filodb.coordinator.queryplanner
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
+import filodb.coordinator.ShardMapper
 
-import filodb.coordinator.{ActorPlanDispatcher, ShardMapper}
 import scala.concurrent.duration._
-
 import monix.execution.Scheduler
-
 import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
@@ -29,8 +27,7 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
     override def submitTime: Long = ???
     override def dataset: DatasetRef = ???
     override def dispatcher: PlanDispatcher = ???
-    override def doExecute(source: ChunkSource,
-                           querySession: QuerySession)
+    override def doExecute(source: ChunkSource, querySession: QuerySession)
                           (implicit sched: Scheduler): ExecResult = ???
     override protected def args: String = ???
   }
