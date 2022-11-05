@@ -11,6 +11,7 @@ import akka.pattern.AskTimeoutException
 import kamon.Kamon
 import kamon.instrumentation.executor.ExecutorInstrumentation
 import kamon.tag.TagSet
+import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.schedulers.SchedulerService
 import net.ceedubs.ficus.Ficus._
@@ -145,7 +146,6 @@ final class QueryActor(memStore: TimeSeriesStore,
           .map { res =>
             // below prevents from calling FiloDB directly (without Query Service)
             FiloSchedulers.assertThreadName(QuerySchedName)
-            querySession.close()
             replyTo ! res
             res match {
               case QueryResult(_, _, vectors, _, _, _) => resultVectors.record(vectors.length)
@@ -171,9 +171,10 @@ final class QueryActor(memStore: TimeSeriesStore,
             }
             queryExecuteSpan.finish()
           }
+          .guarantee(Task.eval(querySession.close()))
+
           logger.debug(s"Will now run query execution pipeline for $q")
           execTask.runToFuture(queryScheduler).recover { case ex =>
-            querySession.close()
             // Unhandled exception in query, should be rare
             logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error," +
               s" query was ${q.queryContext.origQueryParams}", ex)

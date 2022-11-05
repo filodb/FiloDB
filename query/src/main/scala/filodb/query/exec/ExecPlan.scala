@@ -53,6 +53,14 @@ trait ExecPlan extends QueryCommand {
   def enforceSampleLimit: Boolean = true
 
   /**
+   * Default max size of the record containers created for the ExecPlan. Specific ExecPlans may choose to override and
+   * use different values
+   *
+   * @return
+   */
+  def maxRecordContainerSize: Int = SerializedRangeVector.MaxContainerSize
+
+  /**
     * Child execution plans representing sub-queries
     */
   def children: Seq[ExecPlan]
@@ -91,6 +99,10 @@ trait ExecPlan extends QueryCommand {
     *
     * The returned task can be used to perform post-execution steps
     * such as sending off an asynchronous response message etc.
+    *
+    * Typically the caller creates the QuerySession parameter object. Remember
+    * that the creator is also responsible for closing it with
+    * `returnTask.guarantee(Task.eval(querySession.close()))`
     *
     */
   // scalastyle:off method.length
@@ -183,7 +195,7 @@ trait ExecPlan extends QueryCommand {
     ): Task[QueryResult] = {
         @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
         @volatile var resultSize = 0L
-        val builder = SerializedRangeVector.newBuilder()
+        val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize)
         rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
           .map {
             case srvable: SerializableRangeVector => srvable
@@ -476,7 +488,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
             querySession.partialResultsReason = partialResultReason
           }
           querySession.queryStats.add(qStats)
-          if (res.resultSchema != ResultSchema.empty) sch = reduceSchemas(sch, res)
+          if (res.resultSchema != ResultSchema.empty) sch = reduceSchemas(sch, res.resultSchema)
           (res, i)
         case (e: QueryError, _) =>
           querySession.queryStats.add(e.queryStats)
@@ -498,19 +510,15 @@ abstract class NonLeafExecPlan extends ExecPlan {
       }
   }
 
-  /**
-   * Reduces the different ResultSchemas coming from each child to a single one.
-   * The default one here takes the first schema response, and checks that subsequent ones match the first one.
-   * Can be overridden if needed.
-   * @param rs the ResultSchema from previous calls to reduceSchemas / previous child nodes.  May be empty for first.
-   */
-  def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema = {
-    resp match {
-      case QueryResult(_, schema, _, _, _, _) if rs == ResultSchema.empty =>
-        schema     /// First schema, take as is
-      case QueryResult(_, schema, _, _, _, _) =>
-        if (rs != schema) throw SchemaMismatch(rs.toString, schema.toString)
-        else rs
+  def reduceSchemas(r1: ResultSchema, r2: ResultSchema): ResultSchema = {
+    if (r1.isEmpty) r2
+    else if (r2.isEmpty) r1
+    else if (!r1.hasSameColumnsAs(r2))  {
+      throw SchemaMismatch(r1.toString, r2.toString)
+    } else {
+      val fixedVecLen = if (r1.fixedVectorLen.isEmpty && r2.fixedVectorLen.isEmpty) None
+      else Some(r1.fixedVectorLen.getOrElse(0) + r2.fixedVectorLen.getOrElse(0))
+      r1.copy(fixedVectorLen = fixedVecLen)
     }
   }
 
@@ -523,27 +531,12 @@ abstract class NonLeafExecPlan extends ExecPlan {
     *                       There is one response per child plan.
     * @param firstSchema Task for the first schema coming in from the first child
     */
-  protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  protected def compose(childResponses: Observable[(QueryResult, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector]
 
 }
 
-object IgnoreFixedVectorLenAndColumnNamesSchemaReducer {
-  def reduceSchema(rs: ResultSchema, resp: QueryResult): ResultSchema = {
-    resp match {
-      case QueryResult(_, schema, _, _, _, _) if rs == ResultSchema.empty =>
-        schema /// First schema, take as is
-      case QueryResult(_, schema, _, _, _, _) =>
-        if (!rs.hasSameColumnsAs(schema) && !rs.hasSameColumnTypes(schema))  {
-          throw SchemaMismatch(rs.toString, schema.toString)
-        }
-        val fixedVecLen = if (rs.fixedVectorLen.isEmpty && schema.fixedVectorLen.isEmpty) None
-        else Some(rs.fixedVectorLen.getOrElse(0) + schema.fixedVectorLen.getOrElse(0))
-        rs.copy(fixedVectorLen = fixedVecLen)
-    }
-  }
-}
 // deadline is set to QueryContext.plannerParams.queryTimeoutMillis which is 30000 millisecond by default
 case class ClientParams(deadline: Long)
 case class ExecPlanWithClientParams(execPlan: ExecPlan, clientParams: ClientParams)

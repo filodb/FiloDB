@@ -7,6 +7,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.NodeClusterActor.DatasetResourceSpec
 import filodb.core.DatasetRef
+import filodb.memory.data.Shutdown
 
 trait ShardAssignmentStrategy {
 
@@ -42,7 +43,8 @@ trait ShardAssignmentStrategy {
  * The implementation assumes the number of shards is a multiple of number of nodes and there are no
  * uneven assignments of shards to nodes
  */
-class K8sStatefulSetShardAssignmentStrategy extends ShardAssignmentStrategy with StrictLogging {
+class K8sStatefulSetShardAssignmentStrategy(val maxAssignmentAttempts: Int = 8)
+      extends ShardAssignmentStrategy with StrictLogging {
 
   private val pat = "-\\d+$".r
 
@@ -53,16 +55,26 @@ class K8sStatefulSetShardAssignmentStrategy extends ShardAssignmentStrategy with
       .map(host => InetAddress.getByName(host).getHostName)
       .orElse(Some(InetAddress.getLocalHost.getHostName))
       .map(name => if (name.contains(".")) name.substring(0, name.indexOf('.')) else name)
-      .flatMap(hostName => pat.findFirstIn(hostName).map(ordinal => (hostName, -Integer.parseInt(ordinal))))
-
+      .flatMap(hostName =>
+        Some((hostName, pat.findFirstIn(hostName).map(ordinal => -Integer.parseInt(ordinal)).getOrElse(-1))))
 
 
   override def shardAssignments(coord: ActorRef,
-                                dataset: DatasetRef,
-                                resources: DatasetResourceSpec,
-                                mapper: ShardMapper): Seq[Int] =
-     getOrdinalFromActorRef(coord) match {
-        case Some((hostName, ordinal)) =>
+                       dataset: DatasetRef,
+                       resources: DatasetResourceSpec,
+                       mapper: ShardMapper): Seq[Int] =
+    shardAssignmentsWithRetry(coord, dataset, resources, mapper, currentAttempt = 1, maxAssignmentAttempts)
+
+
+  // scalastyle:off method.length
+  private def shardAssignmentsWithRetry( coord: ActorRef,
+                                         dataset: DatasetRef,
+                                         resources: DatasetResourceSpec,
+                                         mapper: ShardMapper,
+                                         currentAttempt: Int,
+                                         maxAssignmentAttempts: Int): Seq[Int] =
+    getOrdinalFromActorRef(coord) match {
+        case Some((hostName, ordinal)) if ordinal > -1 =>
           val numShardsPerHost = resources.numShards / resources.minNumNodes
           // Suppose we have a total of 8 shards and 2 hosts, assuming the hostnames are host-0 and host-1, we will map
           // host-0 to shard [0,1,2,3] and host-1 to shard [4,5,6,7]
@@ -88,31 +100,55 @@ class K8sStatefulSetShardAssignmentStrategy extends ShardAssignmentStrategy with
           val unassignedShardSet = mapper.unassignedShards.toSet
           val potentialShardsMappedToThisCoordinator =
             (firstShardThisNode until firstShardThisNode + numShardsThisHost).toList.
-              filter(unassignedShardSet.contains(_))
+              filter(unassignedShardSet.contains)
 
           if(potentialShardsMappedToThisCoordinator.nonEmpty) {
             logger.info("Using hostname resolution for shard mapping, mapping host={} to shards={}",
               hostName, potentialShardsMappedToThisCoordinator)
           }
           potentialShardsMappedToThisCoordinator
-        case None                      =>
-          // Host name does not have the ordinal at the end like a stateful set needs to have, delegate to default
-          //strategy
-          logger.info(
-            "Falling back to DefaultShardAssignmentStrategy as hostname does not match k8s StatefulSet convention" +
-              " for coordinator {}", coord.path.address.host.getOrElse(InetAddress.getLocalHost.getHostName))
-          DefaultShardAssignmentStrategy.shardAssignments(coord, dataset, resources, mapper)
-      }
+        case Some((hostName, _))       => retryWithBackoff(coord, dataset, resources, mapper,
+                                            hostName, currentAttempt, maxAssignmentAttempts)(shardAssignmentsWithRetry)
+        case None                      => retryWithBackoff(coord, dataset, resources, mapper, hostName = "",
+                                            currentAttempt, maxAssignmentAttempts)(shardAssignmentsWithRetry)
+  }
+  // scalastyle:on method.length
 
+  private def retryWithBackoff[T](coord: ActorRef, dataset: DatasetRef, resources: DatasetResourceSpec,
+                               mapper: ShardMapper, hostName: String,
+                               currentAttempt: Int, maxAssignmentAttempts: Int)
+                              (f: (ActorRef, DatasetRef, DatasetResourceSpec, ShardMapper, Int, Int) => T): T= {
+    // Host name does not have the ordinal at the end like a stateful set needs to have, retry we we have
+    // retries left
+    if (currentAttempt > maxAssignmentAttempts) {
+      logger.error(s"Unable to resolve host names after $currentAttempt attempts, terminating now")
+      Shutdown.haltAndCatchFire(
+        new Error(s"Unable to resolve host names after $currentAttempt attempts, terminating now"))
+      ???
+    } else {
+      val retryAfter = (1 << currentAttempt).min(60)
+      logger.warn("Hostname resolution did not work after attempt={}, resolved hostName='{}', will retry after {} sec",
+                  currentAttempt, hostName, retryAfter)
+      Thread.sleep(retryAfter * 1000L)
+      f(coord, dataset, resources, mapper, currentAttempt + 1, maxAssignmentAttempts)
+    }
+}
 
   override def remainingCapacity(coord: ActorRef,
                                  dataset: DatasetRef,
                                  resources: DatasetResourceSpec,
                                  mapper: ShardMapper): Int =
+    remainingCapacityWithRetry(coord, dataset, resources, mapper, currentAttempt = 1, maxAssignmentAttempts = 8)
+
+  private def remainingCapacityWithRetry(coord: ActorRef,
+                                 dataset: DatasetRef,
+                                 resources: DatasetResourceSpec,
+                                 mapper: ShardMapper,
+                                 currentAttempt: Int, maxAssignmentAttempts: Int): Int =
     getOrdinalFromActorRef(coord) match {
         // Host name has the ordinal at the end, we can thus use the logic we use for stateful sets
         // Difference between fixed number of shards the coordinator can take and those currently assigned
-        case Some((_, ordinal))  =>
+        case Some((_, ordinal)) if ordinal > -1 =>
           val numShardsPerHost = resources.numShards / resources.minNumNodes
           val numExtraShardsToAssign = resources.numShards % resources.minNumNodes
           val numShardsThisNode = if (numExtraShardsToAssign != 0) {
@@ -123,10 +159,14 @@ class K8sStatefulSetShardAssignmentStrategy extends ShardAssignmentStrategy with
             numShardsPerHost
           (numShardsThisNode - mapper.shardsForCoord(coord).size).max(0)
         // Flag to resolve shards using hostname set but hostname does not follow stateful set hostname pattern
-        case None     => DefaultShardAssignmentStrategy.remainingCapacity(coord, dataset, resources, mapper)
+        case Some((hostName, _))               =>
+                        retryWithBackoff(coord, dataset, resources, mapper, hostName,
+                          currentAttempt, maxAssignmentAttempts)(remainingCapacityWithRetry)
+        case None                              =>
+                        retryWithBackoff(coord, dataset, resources, mapper, hostName = "", currentAttempt,
+                          maxAssignmentAttempts)(remainingCapacityWithRetry)
       }
 }
-
 
 object DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with StrictLogging {
 

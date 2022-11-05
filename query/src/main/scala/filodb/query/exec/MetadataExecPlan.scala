@@ -28,6 +28,8 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
 
   override def enforceSampleLimit: Boolean = false
 
+  override val maxRecordContainerSize: Int = 64 * 1024
+
   /**
    * Args to use for the ExecPlan for printTree purposes only.
    * DO NOT change to a val. Increases heap usage.
@@ -37,17 +39,14 @@ trait MetadataDistConcatExec extends NonLeafExecPlan {
   /**
     * Compose the sub-query/leaf results here.
     */
-  protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  protected def compose(childResponses: Observable[(QueryResult, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
-    val taskOfResults = childResponses.map {
-      case (QueryResult(_, _, result, _, _, _), _) => result
-      case (QueryError(_, _, ex), _)         => throw ex
-    }.toListL.map { resp =>
+    val taskOfResults = childResponses.map(_._1.result).toListL.map { resp =>
       val metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
-      resp.filter(!_.isEmpty).foreach { rv =>
-        metadataResult ++= rv.head.rows.map { rowReader =>
+      resp.filter(_.nonEmpty).foreach { rv =>
+        metadataResult ++= rv.head.rows().map { rowReader =>
           val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
           rv.head match {
             case srv: SerializedRangeVector =>
@@ -98,13 +97,10 @@ final case class TsCardReduceExec(queryContext: QueryContext,
     acc
   }
 
-  override protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  override protected def compose(childResponses: Observable[(QueryResult, Int)],
                                  firstSchema: Task[ResultSchema],
                                  querySession: QuerySession): Observable[RangeVector] = {
-    val taskOfResults = childResponses.map {
-      case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
-      case (QueryError(_, _, ex), _)         => throw ex
-    }.flatten
+    val taskOfResults = childResponses.flatMap(res => Observable.fromIterable(res._1.result))
       .foldLeftL(new mutable.HashMap[ZeroCopyUTF8String, CardCounts])(mapFold)
       .map{ aggMap =>
         val it = aggMap.toSeq.sortBy(-_._2.total).map{ case (group, counts) =>
@@ -122,13 +118,12 @@ final case class LabelValuesDistConcatExec(queryContext: QueryContext,
   /**
    * Compose the sub-query/leaf results here.
    */
-  override final def compose(childResponses: Observable[(QueryResponse, Int)],
+  override final def compose(childResponses: Observable[(QueryResult, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
       case (QueryResult(_, schema, result, _, _, _), _) => (schema, result)
-      case (QueryError(_, _, ex), _)         => throw ex
     }.toListL.map { resp =>
       val colType = resp.head._1.columns.head.colType
       if (colType == MapColumn) {
@@ -200,14 +195,13 @@ final case class LabelNamesDistConcatExec(queryContext: QueryContext,
   /**
    * Pick first non empty result from child.
    */
-  override final def compose(childResponses: Observable[(QueryResponse, Int)],
+  override final def compose(childResponses: Observable[(QueryResult, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
-    childResponses.map {
-      case (QueryResult(_, _, result, _, _, _), _) => result
-      case (QueryError(_, _, ex), _)         => throw ex
-    }.filter(s => s.nonEmpty && s.head.numRows.getOrElse(1) > 0).head.map(_.head)
+    childResponses.map(_._1.result)
+                  .filter(s => s.nonEmpty && s.head.numRows.getOrElse(1) > 0)
+                  .head.map(_.head)
   }
 }
 
@@ -244,14 +238,12 @@ final case class LabelCardinalityReduceExec(queryContext: QueryContext,
     }
   }
 
-  override protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  override protected def compose(childResponses: Observable[(QueryResult, Int)],
                                  firstSchema: Task[ResultSchema],
                                  querySession: QuerySession): Observable[RangeVector] = {
       qLogger.debug(s"LabelCardinalityDistConcatExec: Concatenating results")
-      val taskOfResults: Task[Observable[RangeVector]] = childResponses.map {
-        case (QueryResult(_, _, result, _, _, _), _) => result
-        case (QueryError(_, _, ex), _)         => throw ex
-      }.filter(!_.isEmpty)
+      val taskOfResults: Task[Observable[RangeVector]] = childResponses.map(_._1.result)
+        .filter(_.nonEmpty)
         .foldLeftL(MutableMap.empty[RangeVectorKey, MutableMap[ZeroCopyUTF8String, CpcSketch]])
       { case (metadataResult, rv) =>
           val rangeVector = rv.head
@@ -300,9 +292,11 @@ final case class PartKeysExec(queryContext: QueryContext,
                               filters: Seq[ColumnFilter],
                               fetchFirstLastSampleTimes: Boolean,
                               start: Long,
-                              end: Long) extends LeafExecPlan {
+                              end: Long,
+                              override val maxRecordContainerSize: Int = 64 * 1024) extends LeafExecPlan {
 
   override def enforceSampleLimit: Boolean = false
+
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
@@ -334,6 +328,8 @@ final case class LabelValuesExec(queryContext: QueryContext,
                                  endMs: Long) extends LeafExecPlan {
 
   override def enforceSampleLimit: Boolean = false
+
+  override val maxRecordContainerSize: Int = 64 * 1024
 
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)

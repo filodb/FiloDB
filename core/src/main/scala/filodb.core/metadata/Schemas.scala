@@ -460,7 +460,9 @@ object Schemas extends StrictLogging {
   val global = fromConfig(GlobalConfig.defaultFiloConfig).get
   val gauge = global.schemas("gauge")
   val promCounter = global.schemas("prom-counter")
+  val deltaCounter = global.schemas("delta-counter")
   val untyped = global.schemas("untyped")
   val promHistogram = global.schemas("prom-histogram")
+  val deltaHistogram = global.schemas("delta-histogram")
   val dsGauge = global.schemas("ds-gauge")
 }

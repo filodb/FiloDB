@@ -166,9 +166,9 @@ First type `cqlsh` to start the cassandra cli. Then check the keyspaces by enter
 The script below brings up the FiloDB Dev Standalone server, and then sets up the prometheus dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra. This script targets directly towards the `develop` branch.)
 
 ```
-./filodb-dev-start.sh
+./filodb-dev-start.sh -o 0
 ```
-
+The `o` argument is the ordinal of the filodb server. This is used to determine which shards are assigned.
 Note that the above script starts the server with configuration at `conf/timeseries-filodb-server.conf`. This config
 file refers to the following datasets that will be loaded on bootstrap:
 * `conf/timeseries-dev-source.conf`
@@ -176,7 +176,7 @@ file refers to the following datasets that will be loaded on bootstrap:
 For queries to work properly you'll want to start a second server to serve all the shards:
 
 ```
-./filodb-dev-start.sh -l 2 -p
+./filodb-dev-start.sh -o 1
 ```
 
 To quickly verify that both servers are up and set up for ingestion, do this (the output below was formatted using `| jq '.'`, ports may vary):
@@ -226,7 +226,7 @@ At this point, you should be able to confirm such a message in the server logs: 
 Now you are ready to query FiloDB for the ingested data. The following command should return matching subset of the data that was ingested by the producer.
 
 ```
-./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --promql 'heap_usage{_ws_="demo", _ns_="App-2"}'
+./filo-cli -Dfilodb.v2-cluster-enabled=true --host 127.0.0.1 --dataset prometheus --promql 'heap_usage{_ws_="demo", _ns_="App-2"}'
 ```
 
 You can also look at Cassandra to check for persisted data. Look at the tables in `filodb` and `filodb-admin` keyspaces.
@@ -280,58 +280,26 @@ Now, metrics from the application having a Prom endpoint at port 9095 will be st
 
 Querying the total number of ingesting time series for the last 5 minutes, every 10 seconds:
 
-    ./filo-cli  --host 127.0.0.1 --dataset prometheus --promql 'sum(num_ingesting_partitions{_ws_="local_test",_ns_="filodb"})' --minutes 5
+    ./filo-cli -Dfilodb.v2-cluster-enabled=true  --host 127.0.0.1 --dataset prometheus --promql 'sum(num_ingesting_partitions{_ws_="local_test",_ns_="filodb"})' --minutes 5
 
 Note that histograms are ingested using FiloDB's optimized histogram format, which leads to very large savings in space.  For example, querying the 90%-tile for the size of chunks written to Cassandra, last 5 minutes:
 
-    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --promql 'histogram_quantile(0.9, sum(rate(chunk_bytes_per_call{_ws_="local_test",_ns_="filodb"}[3m])))' --minutes 5
+    ./filo-cli -Dfilodb.v2-cluster-enabled=true  --host 127.0.0.1 --dataset prometheus --promql 'histogram_quantile(0.9, sum(rate(chunk_bytes_per_call{_ws_="local_test",_ns_="filodb"}[3m])))' --minutes 5
 
 Here is how you display the raw histogram data for the same:
 
-    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --promql 'chunk_bytes_per_call{_ws_="local_test",_ns_="filodb"}' --minutes 5
-
-#### Multiple Servers using Consul
-
-The original example used a static IP to form a cluster, but a more realistic example is to use a registration service like Consul.
-To try using Consul for startup, first set up Consul dev agent:
-
-```
-> brew install consul 
-> cat /usr/local/etc/consul/config/basic_config.json 
-{
-"data_dir": "/usr/local/var/consul",
-"ui" : true,
-"dns_config" : {
-    "enable_truncate" : true
-}
- 	
-```
-
-Then run consul consul agent in dev mode:
-```
-consul agent -dev -config-dir=/usr/local/etc/consul/config/
-```
-Perform the filo-cli `init` and `create` steps as before.
-
-Start first FiloDB server 
-```
-./filodb-dev-start.sh -c conf/timeseries-filodb-server-consul.conf -l 1
-```
-And subsequent FiloDB servers. Change log file suffix with the `-l` option for each server. 
-```
-./filodb-dev-start.sh -c conf/timeseries-filodb-server-consul.conf -l 2 -p
-```
+    ./filo-cli -Dfilodb.v2-cluster-enabled=true --host 127.0.0.1 --dataset prometheus --promql 'chunk_bytes_per_call{_ws_="local_test",_ns_="filodb"}' --minutes 5
 
 ### Downsample Filo Cluster
 
 To bring up local cluster for serving downsampled data
 
 ```
-./filodb-dev-start.sh -c conf/timeseries-filodb-server-ds.conf -l 1
+./filodb-dev-start.sh -o 0 -d
 ```
 Subsequent servers. Change log file suffix with the `-l` option for each server.
 ```
-./filodb-dev-start.sh -c conf/timeseries-filodb-server-ds.conf -l 2 -p
+./filodb-dev-start.sh -o 1 -d
 ```
 
 If you had run the unit test `DownsamplerMainSpec` which populates data into the downsample
@@ -355,17 +323,13 @@ Then follow the steps to create the dataset etc.  Create a different Kafka topic
 bin/kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 1 --partitions 128 --topic timeseries-perf
 ```
 
+Modify server config to load the `conf/timeseries-128shards-source.conf` dataset instead of the default one.
+
 Start two servers as follows. This will not start ingestion yet:
 
 ```bash
-./filodb-dev-start.sh -l 1
-./filodb-dev-start.sh -l 2 -p
-```
-
-Set up ingestion:
-
-```bash
-./filo-cli --host 127.0.0.1 --dataset prometheus --command setup --filename conf/timeseries-128shards-source.conf
+./filodb-dev-start.sh -o 0
+./filodb-dev-start.sh -o 1
 ```
 
 Now if you curl the cluster status you should see 128 shards which are slowly turning active: `curl http://127.0.0.1:8080/api/v1/cluster/timeseries/status | jq '.'`
