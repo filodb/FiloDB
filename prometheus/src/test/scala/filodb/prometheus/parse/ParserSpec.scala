@@ -194,11 +194,11 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("test[5h] OFFSET 5m")
     parseSuccessfully("test[5d] OFFSET 10s")
     parseSuccessfully("test[5w] offset 2w")
+    parseSuccessfully("foo[5m30s]")
+    parseSuccessfully("foo[5m] OFFSET 1h30m")
 
     parseError("foo[5mm]")
     parseError("foo[0m]")
-    parseError("foo[5m30s]")
-    parseError("foo[5m] OFFSET 1h30m")
     parseError("foo[5m] LIMIT 1m")
     parseError("foo[\"5m\"]")
     parseError("foo[]")
@@ -765,8 +765,6 @@ class ParserSpec extends AnyFunSpec with Matchers {
   }
 
   private def parseSuccessfully(query: String) = {
-    val result = LegacyParser.parseQuery(query)
-    info(String.valueOf(result))
     antlrParseSuccessfully(query)
   }
 
@@ -810,9 +808,6 @@ class ParserSpec extends AnyFunSpec with Matchers {
   }
 
   private def parseError(query: String) = {
-    intercept[IllegalArgumentException] {
-      LegacyParser.parseQuery(query)
-    }
     antlrParseError(query)
   }
 
