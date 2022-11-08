@@ -1,6 +1,6 @@
 package filodb.prometheus.parse
 
-import filodb.prometheus.ast.{PeriodicSeries, SimpleSeries, TimeStepParams}
+import filodb.prometheus.ast.{PeriodicSeries, RangeExpression, SimpleSeries, TimeStepParams}
 import filodb.prometheus.parse.Parser.{Antlr, Shadow}
 import filodb.query.{BinaryJoin, LogicalPlan}
 import org.scalatest.funspec.AnyFunSpec
@@ -196,15 +196,22 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("test[5w] offset 2w")
     parseSuccessfully("foo[5m30s]")
     parseSuccessfully("foo[5m] OFFSET 1h30m")
+    parseSuccessfully("foo[5m25s] OFFSET 1h30m")
+    parseSuccessfully("foo[1h5m25s] OFFSET 1h30m20s")
 
     parseError("foo[5mm]")
     parseError("foo[0m]")
+    parseError("foo[1i5m]")
+    parseError("foo[2i5i]")
+    parseError("foo[3m4i]")
     parseError("foo[5m] LIMIT 1m")
     parseError("foo[\"5m\"]")
     parseError("foo[]")
     parseError("foo[1]")
     parseError("some_metric[5m] OFFSET 1")
     parseError("some_metric[5m] OFFSET 1mm")
+    parseError("some_metric[5m] OFFSET 1m5i")
+    parseError("some_metric[5m] OFFSET 5m2i")
     parseError("some_metric[5m] OFFSET")
     parseError("some_metric[5m] LIMIT")
     parseError("some_metric OFFSET 1m[5m]")
@@ -743,6 +750,29 @@ class ParserSpec extends AnyFunSpec with Matchers {
 
     queriesShouldFail.foreach{query =>
       assertThrows[IllegalArgumentException](Parser.queryToEqualLabelMap(query))
+    }
+  }
+
+  it("should correctly parse durations with multiple units") {
+    {
+      val query = """foo{label="bar"}[1m30s] offset 2h15m"""
+      val windowSec = 60 + 30
+      val offsetSec = (2 * 60 * 60) + (15 * 60)
+      Parser.parseQuery(query) match {
+        case RangeExpression(_, _, window, offset) =>
+          window.millis(0) shouldEqual 1000 * windowSec
+          offset.get.millis(0) shouldEqual 1000 * offsetSec
+      }
+    }
+    {
+      val query = """foo{label="bar"}[3d2h25m10s] offset 2d12h15m30s"""
+      val windowSec = (3 * 24 * 60 * 60) + (2 * 60 * 60) + (25 * 60) + 10
+      val offsetSec = (2 * 24 * 60 * 60) + (12 * 60 * 60) + (15 * 60) + 30
+      Parser.parseQuery(query) match {
+        case RangeExpression(_, _, window, offset) =>
+          window.millis(0) shouldEqual 1000 * windowSec
+          offset.get.millis(0) shouldEqual 1000 * offsetSec
+      }
     }
   }
 
