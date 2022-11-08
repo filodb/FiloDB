@@ -378,32 +378,42 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
     */
   private def dequote(str: TerminalNode): String = ParserUtil.dequote(str.getSymbol().getText())
 
-  private def parseDuration(node: TerminalNode): Duration = {
-    parseDuration(node.getSymbol().getText())
+  private def parseDurationRaw(str: String, istart: Int): (Double, TimeUnit, Int)  = {
+    var istop = istart + 1
+    while (istop < str.length && !str(istop).isLetter) {
+      istop += 1
+    }
+    val value = java.lang.Double.parseDouble(str.substring(istart, istop))
+    val unit = str(istop) match {
+      case 's' => Second
+      case 'm' => Minute
+      case 'h' => Hour
+      case 'd' => Day
+      case 'w' => Week
+      case 'y' => Year
+      case 'i' => IntervalMultiple
+    }
+    val nextIstart = istop + 1
+    (value, unit, nextIstart)
   }
 
-  private def parseDuration(str: String): Duration = {
+  private def parseDuration(node: TerminalNode): Duration = {
+    val str = node.getSymbol.getText
+    if (str.last == 'i') {
+      val (value, unit, _) = parseDurationRaw(str, 0)
+      Duration(value, unit)
+    } else {
+      parseDurationNoInterval(str)
+    }
+  }
+
+  private def parseDurationNoInterval(str: String): Duration = {
     var i = 0
     var totalMillis = 0d
     while (i < str.length) {
-      // Parse out the next value/unit pair, starting with the value.
-      // Then we'll add the pair's duration to `totalMillis`.
-      var j = i + 1
-      while (j < str.length && !str(j).isLetter) {
-        j += 1
-      }
-      val value = java.lang.Double.parseDouble(str.substring(i, j))
-      val unit = str(j) match {
-        case 's' => Second
-        case 'm' => Minute
-        case 'h' => Hour
-        case 'd' => Day
-        case 'w' => Week
-        case 'y' => Year
-        case 'i' => IntervalMultiple
-      }
+      val (value, unit, inext) = parseDurationRaw(str, i)
       totalMillis += Duration(value, unit).millis(0)
-      i = j + 1
+      i = inext
     }
     // Feels wrong to add a Milliseconds Duration type, so just using seconds.
     Duration(totalMillis / 1000, Second)
