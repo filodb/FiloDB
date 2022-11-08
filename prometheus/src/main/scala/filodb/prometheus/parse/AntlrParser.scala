@@ -383,18 +383,29 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
   }
 
   private def parseDuration(str: String): Duration = {
-    val timeUnit = str.charAt(str.length - 1) match {
-      case 's' => Second
-      case 'm' => Minute
-      case 'h' => Hour
-      case 'd' => Day
-      case 'w' => Week
-      case 'y' => Year
-      case 'i' => IntervalMultiple
+    var i = 0
+    var totalMillis = 0d
+    while (i < str.length) {
+      // Parse out the next value/unit pair, starting with the value.
+      // Then we'll add the pair's duration to `totalMillis`.
+      var j = i + 1
+      while (j < str.length && !str(j).isLetter) {
+        j += 1
+      }
+      val value = java.lang.Double.parseDouble(str.substring(i, j))
+      val unit = str(j) match {
+        case 's' => Second
+        case 'm' => Minute
+        case 'h' => Hour
+        case 'd' => Day
+        case 'w' => Week
+        case 'y' => Year
+        case 'i' => IntervalMultiple
+      }
+      totalMillis += Duration(value, unit).millis(0)
+      i = j + 1
     }
-
-    val scale = java.lang.Double.parseDouble(str.substring(0, str.length - 1))
-
-    Duration(scale, timeUnit)
+    // Feels wrong to add a Milliseconds Duration type, so just using seconds.
+    Duration(totalMillis / 1000, Second)
   }
 }
