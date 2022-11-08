@@ -411,8 +411,8 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
     var i = 0
     var totalMillis = 0d
     while (i < str.length) {
-      val (value, unit, inext) = parseSingleDurationFromString(str, i)
-      totalMillis += Duration(value, unit).millis(0)
+      val (dur, inext) = parseSingleDurationFromString(str, i)
+      totalMillis += dur.millis(0)
       i = inext
     }
     // Feels wrong to add a Milliseconds Duration type, so just using seconds.
