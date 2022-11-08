@@ -51,7 +51,7 @@ instantSelector
     | '{' labelMatcherList '}'
     ;
 
-window: '[' DURATION ']';
+window: '[' DURATION+ ']';
 
 offset: OFFSET DURATION;
 
