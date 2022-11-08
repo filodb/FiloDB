@@ -378,7 +378,11 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
     */
   private def dequote(str: TerminalNode): String = ParserUtil.dequote(str.getSymbol().getText())
 
-  private def parseDurationRaw(str: String, istart: Int): (Double, TimeUnit, Int)  = {
+  /**
+   * Given a string and an index to begin parsing, returns the first Duration parsed.
+   * Additionally returns the index to begin parsing for the next Duration.
+   */
+  private def parseSingleDurationFromString(str: String, istart: Int): (Duration, Int)  = {
     var istop = istart + 1
     while (istop < str.length && !str(istop).isLetter) {
       istop += 1
@@ -394,28 +398,34 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
       case 'i' => IntervalMultiple
     }
     val nextIstart = istop + 1
-    (value, unit, nextIstart)
+    (Duration(value, unit), nextIstart)
   }
 
-  private def parseDuration(node: TerminalNode): Duration = {
-    val str = node.getSymbol.getText
-    if (str.last == 'i') {
-      val (value, unit, _) = parseDurationRaw(str, 0)
-      Duration(value, unit)
-    } else {
-      parseDurationNoInterval(str)
-    }
-  }
-
+  /**
+   * Returns the total Duration of all duration time/unit pairs in the string.
+   * Example:
+   *     "1m30s" -> Duration(90.0, Second)
+   * Cannot be used with IntervalMultiple "i" notation.
+   */
   private def parseDurationNoInterval(str: String): Duration = {
     var i = 0
     var totalMillis = 0d
     while (i < str.length) {
-      val (value, unit, inext) = parseDurationRaw(str, i)
+      val (value, unit, inext) = parseSingleDurationFromString(str, i)
       totalMillis += Duration(value, unit).millis(0)
       i = inext
     }
     // Feels wrong to add a Milliseconds Duration type, so just using seconds.
     Duration(totalMillis / 1000, Second)
+  }
+
+  private def parseDuration(node: TerminalNode): Duration = {
+    val str = node.getSymbol.getText
+    if (str.last == 'i') {
+      val (dur, _) = parseSingleDurationFromString(str, 0)
+      dur
+    } else {
+      parseDurationNoInterval(str)
+    }
   }
 }
