@@ -51,7 +51,7 @@ instantSelector
     | '{' labelMatcherList '}'
     ;
 
-window: '[' DURATION+ ']';
+window: '[' DURATION ']';
 
 offset: OFFSET DURATION;
 
@@ -181,7 +181,7 @@ AGGREGATION_OP
     ;
 
 // The special 'i' form is for "Step Multiple Notation for PromQL Lookback (#821)"
-DURATION: NUMBER ('s' | 'm' | 'h' | 'd' | 'w' | 'y' | 'i');
+DURATION: (NUMBER ('s' | 'm' | 'h' | 'd' | 'w' | 'y' | 'i'))+;
 
 // Used for functions, labels, and metric names.
 IDENTIFIER: [a-zA-Z_] [a-zA-Z0-9_]*;
