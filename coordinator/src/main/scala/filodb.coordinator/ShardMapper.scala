@@ -222,6 +222,11 @@ class ShardMapper(val numShards: Int) extends Serializable {
       statusMap(shard).minimalEvents(ref, shard, shardMap(shard))
     }
 
+  def mergeFrom(from: ShardMapper, ref: DatasetRef): ShardMapper = {
+    from.minimalEvents(ref).foreach(updateFromEvent)
+    this
+  }
+
   /**
    * Registers a new node to the given shards.  Modifies state in place.
    * Idempotent.
@@ -233,8 +238,6 @@ class ShardMapper(val numShards: Int) extends Serializable {
         //changing the mapping unless it was explicitly unassigned first.
         //But functional tests uncovered that sometimes the member down event is not
         //received and hence assignments were not removed first.
-        val oldCoord = shardMap(shard)
-        log.debug(s"Unassigned coordinator $oldCoord  for shard=$shard - Reassigning to $coordinator")
         shardMap(shard) = coordinator
     }
     Success(())

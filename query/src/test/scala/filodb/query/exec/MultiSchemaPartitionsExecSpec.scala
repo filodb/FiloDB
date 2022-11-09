@@ -1,6 +1,7 @@
 package filodb.query.exec
 
 import com.typesafe.config.ConfigFactory
+
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SchemaMismatch, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn, LongColumn, TimestampColumn}
@@ -19,8 +20,9 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import scala.concurrent.duration._
+
+import monix.reactive.Observable
 
 object MultiSchemaPartitionsExecSpec {
   val dummyDispatcher = new PlanDispatcher {
@@ -30,6 +32,9 @@ object MultiSchemaPartitionsExecSpec {
     override def clusterName: String = ???
 
     override def isLocalCall: Boolean = ???
+
+    override def dispatchStreaming(plan: ExecPlanWithClientParams,
+                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
   }
 
   val dsRef = DatasetRef("raw-metrics")

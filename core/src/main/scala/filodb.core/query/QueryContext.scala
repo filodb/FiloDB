@@ -155,9 +155,14 @@ object QueryContext {
   *
   * IMPORTANT: The param catchMultipleLockSetErrors should be false
   * only in unit test code for ease of use.
+  *
+  * IMPORTANT: QuerySession object should be closed after use as such
+  * `monixTask.guarantee(Task.eval(querySession.close()))`
+  *
   */
 case class QuerySession(qContext: QueryContext,
                         queryConfig: QueryConfig,
+                        streamingDispatch: Boolean = false, // TODO needs to be removed after streaming becomes stable
                         catchMultipleLockSetErrors: Boolean = false) {
 
   val queryStats: QueryStats = QueryStats()
@@ -240,5 +245,6 @@ case class QueryStats() {
 }
 
 object QuerySession {
-  def makeForTestingOnly(): QuerySession = QuerySession(QueryContext(), QueryConfig.unitTestingQueryConfig)
+  def makeForTestingOnly(): QuerySession = QuerySession(QueryContext(),
+    QueryConfig.unitTestingQueryConfig, streamingDispatch = false)
 }

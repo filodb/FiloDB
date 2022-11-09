@@ -9,7 +9,7 @@ import kamon.Kamon
   * in the log message.
   */
 object Query extends StrictLogging {
-  protected[query] val qLogger: Logger = logger
+  val qLogger: Logger = logger
   // TODO refine with dataset tag
   protected[query] val droppedSamples = Kamon.counter("query-dropped-samples").withoutTags
 }

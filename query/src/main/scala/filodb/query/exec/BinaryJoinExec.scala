@@ -7,7 +7,6 @@ import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.reactive.Observable
 
-import filodb.core.memstore.SchemaMismatch
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -62,8 +61,12 @@ final case class BinaryJoinExec(queryContext: QueryContext,
 
   protected def args: String = s"binaryOp=$binaryOp, on=$on, ignoring=$ignoring"
 
+  protected def composeStreaming(childResponses: Observable[(Observable[RangeVector], Int)],
+                                 schemas: Observable[(ResultSchema, Int)],
+                                 querySession: QuerySession): Observable[RangeVector] = ???
+
   //scalastyle:off method.length
-  protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],
+  protected[exec] def compose(childResponses: Observable[(QueryResult, Int)],
                               firstSchema: Task[ResultSchema],
                               querySession: QuerySession): Observable[RangeVector] = {
     val span = Kamon.currentSpan()
@@ -74,7 +77,6 @@ final case class BinaryJoinExec(queryContext: QueryContext,
           s" is more than limit of ${queryContext.plannerParams.joinQueryCardLimit}." +
           s" Try applying more filters or reduce time range.")
       case (QueryResult(_, _, result, _, _, _), i) => (result, i)
-      case (QueryError(_, _, ex), _)         => throw ex
     }.toListL.map { resp =>
       span.mark("binary-join-child-results-available")
       Kamon.histogram("query-execute-time-elapsed-step1-child-results-available",
@@ -196,18 +198,5 @@ final case class BinaryJoinExec(queryContext: QueryContext,
     }
   }
 
-  /**
-    * overridden to allow schemas with different vector lengths, colids as long as the columns are same - to handle
-    * binary joins between scalar/rangevectors
-    */
-  override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema = {
-    resp match {
-      case QueryResult(_, schema, _, _, _, _) if rs == ResultSchema.empty =>
-        schema     /// First schema, take as is
-      case QueryResult(_, schema, _, _, _, _) =>
-        if (!rs.hasSameColumnsAs(schema)) throw SchemaMismatch(rs.toString, schema.toString)
-        else rs
-    }
-  }
 }
 

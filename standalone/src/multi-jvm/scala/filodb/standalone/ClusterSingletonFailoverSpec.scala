@@ -239,7 +239,7 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
     within(removedDuration * 10) {
       runOn(third) {
 
-        client1.getShardMapper(dataset, longDuration) forall { mapper =>
+        client1.getShardMapper(dataset, false, longDuration) forall { mapper =>
           mapper.shardValues.count { case (ref, status) =>
             ref == ActorRef.noSender && status == ShardStatusDown } == 2 &&
           // proves the fix for recovery, with a shard-assigned node that was the singleton node, downed:

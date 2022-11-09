@@ -4,11 +4,39 @@ import java.time.Instant
 import java.time.format.DateTimeFormatter
 
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import org.apache.spark.SparkConf
+import org.apache.spark.internal.io.HadoopMapReduceCommitProtocol
 import org.apache.spark.sql.SparkSession
 
 import filodb.coordinator.KamonShutdownHook
+import filodb.core.binaryrecord2.RecordSchema
+import filodb.core.memstore.PagedReadablePartition
 import filodb.downsampler.DownsamplerContext
+import filodb.memory.format.UnsafeUtils
+
+
+/**
+ * When provided as Spark's spark.sql.sources.commitProtocolClass config, file names
+ *   will be written as "part-######-data-c###". This artificially fixes the JobID
+ *   and enables idempotent runs, since the same files will be generated.
+ * Credit: https://www.waitingforcode.com/apache-spark-sql/idempotent-file-generation-apache-spark-sql/read
+ */
+class IdempotentCommitProtocol(jobId: String, path: String,
+                               dynamicPartitionOverwrite: Boolean = false)
+  extends HadoopMapReduceCommitProtocol(jobId = "data", path, dynamicPartitionOverwrite)
+
+/**
+ * Implement this trait and provide its fully-qualified name as the downsampler config:
+ *     data-export.spark-session-setup-class = "org.fully.qualified.SetupClass"
+ * Any additional code in "setup" will run before the job is created.
+ */
+trait SparkSessionSetup {
+  /**
+   * Additional setup code can be implemented here (to be run before the Spark job is created).
+   */
+  def setup(sparkSession: SparkSession, settings: DownsamplerSettings): Unit
+}
 
 /**
   *
@@ -45,13 +73,19 @@ object DownsamplerMain extends App {
   Kamon.init()  // kamon init should be first thing in driver jvm
   val settings = new DownsamplerSettings()
   val batchDownsampler = new BatchDownsampler(settings)
+  val batchExporter = new BatchExporter(settings)
 
-  val d = new Downsampler(settings, batchDownsampler)
+  val d = new Downsampler(settings, batchDownsampler, batchExporter)
   val sparkConf = new SparkConf(loadDefaults = true)
   d.run(sparkConf)
 }
 
-class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsampler) extends Serializable {
+class Downsampler(settings: DownsamplerSettings,
+                  batchDownsampler: BatchDownsampler,
+                  batchExporter: BatchExporter) extends Serializable {
+
+  lazy val exportLatency =
+    Kamon.histogram("export-latency", MeasurementUnit.time.milliseconds).withoutTags()
 
   // Gotcha!! Need separate function (Cannot be within body of a class)
   // to create a closure for spark to serialize and move to executors.
@@ -62,8 +96,19 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
 
     val spark = SparkSession.builder()
       .appName("FiloDBDownsampler")
+      .config("spark.sql.sources.commitProtocolClass",  // see IdempotentCommitProtocol for details.
+              "filodb.downsampler.chunk.IdempotentCommitProtocol")
       .config(sparkConf)
       .getOrCreate()
+
+    // Perform additional session setup if a class is defined in the config.
+    if (settings.sparkSessionSetupClass.isDefined) {
+      Class.forName(settings.sparkSessionSetupClass.get)
+        .getDeclaredConstructor()
+        .newInstance()
+        .asInstanceOf[SparkSessionSetup]
+        .setup(spark, settings)
+    }
 
     DownsamplerContext.dsLogger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
 
@@ -101,8 +146,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
       s"partitions. Tune num-token-range-splits-for-scans if parallelism is low or latency is high")
 
     KamonShutdownHook.registerShutdownHook()
-
-    spark.sparkContext
+    val rdd = spark.sparkContext
       .makeRDD(splits)
       .mapPartitions { splitIter =>
         Kamon.init()
@@ -118,11 +162,38 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
           cassFetchSize = settings.cassFetchSize)
         batchIter
       }
-      .foreach { rawPartsBatch =>
+      .flatMap { rawPartsBatch =>
         Kamon.init()
         KamonShutdownHook.registerShutdownHook()
-        batchDownsampler.downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
+        // convert each RawPartData to a ReadablePartition
+        val readablePartsBatch = rawPartsBatch.map{ rawPart =>
+          val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
+          val rawPartSchema = batchDownsampler.schemas(rawSchemaId)
+          new PagedReadablePartition(rawPartSchema, shard = 0, partID = 0, partData = rawPart, minResolutionMs = 1)
+        }
+        // Downsample the data (this step does not contribute the the RDD).
+        if (settings.chunkDownsamplerIsEnabled) {
+          batchDownsampler.downsampleBatch(readablePartsBatch, userTimeStart, userTimeEndExclusive)
+        }
+        // Generate the data for the RDD.
+        if (settings.exportIsEnabled) {
+          batchExporter.getExportRows(readablePartsBatch, userTimeStart, userTimeEndExclusive)
+        } else Iterator.empty
       }
+
+    // Export the data produced by "getExportRows" above.
+    if (!rdd.isEmpty()) {
+      val exportStartMs = System.currentTimeMillis()
+      // NOTE: toDF(partitionCols: _*) seems buggy
+      spark.createDataFrame(rdd, batchExporter.exportSchema)
+        .write
+        .mode(settings.exportSaveMode)
+        .options(settings.exportOptions)
+        .partitionBy(batchExporter.partitionByCols: _*)
+        .csv(settings.exportBucket)
+      val exportEndMs = System.currentTimeMillis()
+      exportLatency.record(exportEndMs - exportStartMs)
+    }
 
     DownsamplerContext.dsLogger.info(s"Chunk Downsampling Driver completed successfully for downsample period " +
       s"$downsamplePeriodStr")

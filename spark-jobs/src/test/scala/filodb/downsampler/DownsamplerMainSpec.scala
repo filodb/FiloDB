@@ -5,7 +5,7 @@ import java.time.Instant
 import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import com.typesafe.config.{ConfigException, ConfigFactory}
+import com.typesafe.config.{Config, ConfigException, ConfigFactory}
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.spark.{SparkConf, SparkException}
@@ -25,7 +25,7 @@ import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig, TimeRangeChunkScan}
-import filodb.downsampler.chunk.{BatchDownsampler, Downsampler, DownsamplerSettings}
+import filodb.downsampler.chunk.{BatchDownsampler, BatchExporter, Downsampler, DownsamplerSettings}
 import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
 import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -48,6 +48,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   val queryConfig = QueryConfig(settings.filodbConfig.getConfig("query"))
   val dsIndexJobSettings = new DSIndexJobSettings(settings)
   val batchDownsampler = new BatchDownsampler(settings)
+  val batchExporter = new BatchExporter(settings)
 
   val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8)
   val seriesTagsNaN = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8, "nan_support".utf8 -> "yes".utf8)
@@ -103,6 +104,222 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
   override def afterAll(): Unit = {
     offheapMem.free()
+  }
+
+  it ("should export partitions according to the config") {
+
+    val baseConf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf"))
+
+    val emptyConf = ConfigFactory.parseString(
+      """
+        |    filodb.downsampler.data-export {
+        |      enabled = true
+        |      key-labels = ["l1"]
+        |      bucket = "file:///dummy-bucket"
+        |      rules = []
+        |      path-spec = ["unused"]
+        |    }
+        |""".stripMargin
+    )
+
+    val onlyKeyConf = ConfigFactory.parseString(
+      """
+        |    filodb.downsampler.data-export {
+        |      enabled = true
+        |      key-labels = ["l1"]
+        |      bucket = "file:///dummy-bucket"
+        |      rules = [
+        |        {
+        |          key = ["l1a"]
+        |          allow-filters = []
+        |          block-filters = []
+        |        }
+        |      ]
+        |      path-spec = ["unused"]
+        |    }
+        |""".stripMargin
+    )
+
+    val includeExcludeConf = ConfigFactory.parseString(
+      """
+        |    filodb.downsampler.data-export {
+        |      enabled = true
+        |      key-labels = ["l1"]
+        |      bucket = "file:///dummy-bucket"
+        |      rules = [
+        |        {
+        |          key = ["l1a"]
+        |          allow-filters = [
+        |            [
+        |              "l2=\"l2a\""
+        |            ],
+        |            [
+        |              "l2=~\".*b\""
+        |            ]
+        |          ]
+        |          block-filters = [
+        |            [
+        |              "l2=\"l2c\""
+        |            ],
+        |          ]
+        |        }
+        |      ]
+        |      path-spec = ["unused"]
+        |    }
+        |""".stripMargin
+    )
+
+    val multiFilterConf = ConfigFactory.parseString(
+      """
+        |    filodb.downsampler.data-export {
+        |      enabled = true
+        |      key-labels = ["l1"]
+        |      bucket = "file:///dummy-bucket"
+        |      rules = [
+        |        {
+        |          key = ["l1a"]
+        |          allow-filters = [
+        |            [
+        |              "l2=\"l2a\"",
+        |              "l3=~\".*a\""
+        |            ],
+        |            [
+        |              "l2=\"l2a\"",
+        |              "l3=~\".*b\""
+        |            ]
+        |          ]
+        |          block-filters = []
+        |        }
+        |      ]
+        |      path-spec = ["unused"]
+        |    }
+        |""".stripMargin
+    )
+
+    val contradictFilterConf = ConfigFactory.parseString(
+      """
+        |    filodb.downsampler.data-export {
+        |      enabled = true
+        |      key-labels = ["l1"]
+        |      bucket = "file:///dummy-bucket"
+        |      rules = [
+        |        {
+        |          key = ["l1a"]
+        |          allow-filters = [
+        |            [
+        |              "l2=\"l2a\"",
+        |              "l2=~\".*b\""
+        |            ]
+        |          ]
+        |          block-filters = []
+        |        }
+        |      ]
+        |      path-spec = ["unused"]
+        |    }
+        |""".stripMargin
+    )
+
+    val multiKeyConf = ConfigFactory.parseString(
+      """
+        |    filodb.downsampler.data-export {
+        |      enabled = true
+        |      key-labels = ["l1", "l2"]
+        |      bucket = "file:///dummy-bucket"
+        |      rules = [
+        |        {
+        |          key = ["l1a", "l2a"]
+        |          allow-filters = []
+        |          block-filters = []
+        |        }
+        |      ]
+        |      path-spec = ["unused"]
+        |    }
+        |""".stripMargin
+    )
+
+    val multiRuleConf = ConfigFactory.parseString(
+      """
+        |    filodb.downsampler.data-export {
+        |      enabled = true
+        |      key-labels = ["l1"]
+        |      bucket = "file:///dummy-bucket"
+        |      rules = [
+        |        {
+        |          key = ["l1a"]
+        |          allow-filters = []
+        |          block-filters = []
+        |        },
+        |        {
+        |          key = ["l1b"]
+        |          allow-filters = []
+        |          block-filters = []
+        |        }
+        |      ]
+        |      path-spec = ["unused"]
+        |    }
+        |""".stripMargin
+    )
+
+    val allConfs = Seq(
+      emptyConf,
+      onlyKeyConf,
+      includeExcludeConf,
+      multiFilterConf,
+      contradictFilterConf,
+      multiKeyConf,
+      multiRuleConf
+    )
+
+    val labelConfPairs = Seq(
+      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3a"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,   multiFilterConf)),
+      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3b"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf,   multiFilterConf)),
+      (Map("l1" -> "l1a", "l2" -> "l2a", "l3" -> "l3c"), Set[Config](onlyKeyConf,                  includeExcludeConf, multiKeyConf, multiRuleConf)),
+      (Map("l1" -> "l1a", "l2" -> "l2b", "l3" -> "l3a"), Set[Config](onlyKeyConf,                  includeExcludeConf,               multiRuleConf)),
+      (Map("l1" -> "l1a", "l2" -> "l2c", "l3" -> "l3a"), Set[Config](onlyKeyConf, multiRuleConf)),
+      (Map("l1" -> "l1a", "l2" -> "l2d", "l3" -> "l3a"), Set[Config](onlyKeyConf, multiRuleConf)),
+      (Map("l1" -> "l1b", "l2" -> "l2a", "l3" -> "l3a"), Set[Config](             multiRuleConf)),
+      (Map("l1" -> "l1c", "l2" -> "l2a", "l3" -> "l3a"), Set[Config]()),
+    )
+
+    allConfs.foreach { conf =>
+      val dsSettings = new DownsamplerSettings(conf.withFallback(baseConf))
+      val batchExporter = new BatchExporter(dsSettings)
+      // make sure batchExporter correctly decides when to export
+      labelConfPairs.foreach { case (partKeyMap, includedConf) =>
+        batchExporter.shouldExport(partKeyMap) shouldEqual includedConf.contains(conf)
+      }
+    }
+  }
+
+  it ("should correctly generate export path names") {
+    val baseConf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf"))
+
+    val conf = ConfigFactory.parseString(
+      """
+        |    filodb.downsampler.data-export {
+        |      enabled = true
+        |      key-labels = ["unused"]
+        |      bucket = "file:///dummy-bucket"
+        |      rules = []
+        |      path-spec = [
+        |        "api",     "v1",
+        |        "l1",      "{{l1}}-foo",
+        |        "year",    "bar-<<YYYY>>-baz",
+        |        "month",   "hello-<<MM>>"
+        |        "day",     "day-<<dd>>"
+        |        "l2-woah", "{{l2}}-goodbye"
+        |      ]
+        |    }
+        |""".stripMargin
+    )
+
+    val time = 1663804760913L
+    val labels = Map("l1" -> "l1val", "l2" -> "l2val", "l3" -> "l3val")
+    val expected =
+      Seq("v1", "l1val-foo", "bar-2022-baz", "hello-09", "day-21", "l2val-goodbye")
+
+    val batchExporter = new BatchExporter(new DownsamplerSettings(conf.withFallback(baseConf)))
+    batchExporter.getPartitionByValues(labels, time).toSeq shouldEqual expected
   }
 
   it ("should write untyped data to cassandra") {
@@ -419,7 +636,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
     sparkConf.set("spark.filodb.downsampler.userTimeOverride", Instant.ofEpochMilli(lastSampleTime).toString)
-    val downsampler = new Downsampler(settings, batchDownsampler)
+    val downsampler = new Downsampler(settings, batchDownsampler, batchExporter)
     downsampler.run(sparkConf).close()
   }
 

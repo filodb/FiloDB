@@ -3,37 +3,47 @@ set -e
 #set -x
 
 function showHelp {
-        echo "`basename $0` [-h] [-c arg] [-l arg] [-p]"
+        echo "`basename $0` [-h] [-d] [-o arg]"
         echo "   -h help"
-        echo "   -c takes server config path as argument"
-        echo "   -l takes log file suffix as argument"
-        echo "   -p selects a randomly available akka tcp and http port"
+        echo "   -d start downsample server"
+        echo "   -o ordinal number of this dev server"
+        echo "configuration used is hard-coded to conf/timeseries-filodb-server.conf"
 }
 
-CONFIG=conf/timeseries-filodb-server.conf
-LOG_SUFFIX=1
-AKKA_PORT_ARG=""
-
-while getopts "hc:l:p" opt; do
+ORDINAL="0"
+DOWNSAMPLE=""
+while getopts "ho:d" opt; do
     case "$opt" in
     h|\?) showHelp
         exit 1
         ;;
-    c)  CONFIG=$OPTARG
+    o)  ORDINAL=$OPTARG
         ;;
-    l)  LOG_SUFFIX=$OPTARG
-        ;;
-    p)  PORTS_ARG="-Dakka.remote.netty.tcp.port=0 -Dfilodb.http.bind-port=0 -Dkamon.prometheus.embedded-server.port=9096"
-        ;;
+    d)  DOWNSAMPLE="-ds"
     esac
 done
 
 cd "$(dirname "$0")"
+
+# if downsample arg is present choose the downsample config. Otherwise regular server config
+CONFIG=conf/timeseries-filodb-server$DOWNSAMPLE.conf
+
+if [ $ORDINAL -eq "0" ]; then
+  ADDL_JAVA_OPTS=" -Dfilodb.cluster-discovery.localhost-ordinal=0"
+elif [ $ORDINAL -eq "1" ]; then
+  ADDL_JAVA_OPTS=" -Dfilodb.cluster-discovery.localhost-ordinal=1 -Dakka.remote.netty.tcp.port=3552 -Dfilodb.http.bind-port=0 -Dkamon.environment.service=filodb-local2"
+else
+  echo "Only ordinals 0 and 1 are supported"
+  exit
+fi
 
 if [ ! -f standalone/target/scala-2.12/standalone-assembly-*-SNAPSHOT.jar ]; then
     echo "Standalone assembly not found. Building..."
     sbt standalone/assembly
 fi
 
-echo "Starting FiloDB standalone server..."
-java -Xmx4G $PORTS_ARG -Dconfig.file=$CONFIG -DlogSuffix=$LOG_SUFFIX -cp standalone/target/scala-2.12/standalone-assembly-*-SNAPSHOT.jar filodb.standalone.FiloServer &
+FIXED_JAVA_OPTS="-Xmx2G -Dconfig.file=conf/timeseries-filodb-server.conf -Dlogback.configurationFile=conf/logback-dev.xml "
+
+echo "Starting FiloDB standalone server ..."
+echo "Java Opts Used: $FIXED_JAVA_OPTS $ADDL_JAVA_OPTS"
+java $FIXED_JAVA_OPTS $ADDL_JAVA_OPTS -cp standalone/target/scala-2.12/standalone-assembly-*-SNAPSHOT.jar filodb.standalone.FiloServer
