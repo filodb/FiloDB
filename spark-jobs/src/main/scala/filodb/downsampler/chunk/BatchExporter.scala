@@ -236,7 +236,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
       case DoubleColumn =>
         val it = rangeInfoIter.flatMap{ info =>
           val doubleIter = info.valueIter.asDoubleIt
-          (info.irowStart until info.irowEnd).iterator.map{ _ =>
+          (info.irowStart to info.irowEnd).iterator.map{ _ =>
             (partKeyMap, info.timestampIter.next, doubleIter.next)
           }
         }
@@ -274,15 +274,16 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
           .flatMap{ info =>
           val histIter = info.valueIter.asHistIt.buffered
           val bucketMetric = partKeyMap("_metric_") + "_bucket"
-          (info.irowStart until info.irowEnd).iterator.flatMap{ _ =>
+          (info.irowStart to info.irowEnd).iterator.flatMap{ _ =>
             val hist = histIter.next()
+            val timestamp = info.timestampIter.next
             (0 until hist.numBuckets).iterator.map{ i =>
               val bucketTopString = {
                 val raw = hist.bucketTop(i)
                 if (raw.isPosInfinity) "+Inf" else raw.toString
               }
               val bucketLabels = partKeyMap ++ Map("le" -> bucketTopString, "_metric_" -> bucketMetric)
-              (bucketLabels, info.timestampIter.next, hist.bucketValue(i))
+              (bucketLabels, timestamp, hist.bucketValue(i))
             }
           }
         }
