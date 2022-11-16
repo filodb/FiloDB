@@ -163,7 +163,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     val dataSeq = new mutable.ArrayBuffer[Any](3 + downsamplerSettings.exportPathSpecPairs.size)
     dataSeq.append(
       exportData.labelString,
-      exportData.timestamp,
+      exportData.timestamp / 1000,
       exportData.value
     )
     dataSeq.appendAll(exportData.partitionStrings)
