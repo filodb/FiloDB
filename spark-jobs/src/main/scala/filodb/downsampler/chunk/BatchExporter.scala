@@ -170,8 +170,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     val labelString = {
       val inner = updatedPartKeyMap.map { case (k, v) =>
         if (v.contains(",")) {
-//          String.format("'%s\':\"\"%s\"\"", k, v)  // TODO(a_theimer)
-          s"'$k':'$v'"
+          String.format("'%s\':\"%s\"", k, v)
         } else {
           s"'$k':'$v'"
         }
