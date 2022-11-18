@@ -3,13 +3,10 @@ package filodb.downsampler.chunk
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
-
 import scala.collection.mutable
-
 import kamon.Kamon
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types.{DoubleType, LongType, StringType, StructField, StructType}
-
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn}
 import filodb.core.metadata.Schemas
@@ -20,6 +17,9 @@ import filodb.downsampler.Utils._
 import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
 import filodb.memory.format.vectors.{Histogram, LongIterator}
+
+
+import scala.util.matching.Regex
 
 case class ExportRule(allowFilterGroups: Seq[Seq[ColumnFilter]],
                       blockFilterGroups: Seq[Seq[ColumnFilter]],
@@ -36,8 +36,8 @@ case class ExportRowData(partKeyMap: collection.Map[String, String],
                          dropLabels: Set[String])
 
 object BatchExporter {
-  val LABEL_REGEX_MATCHER = """\{\{(.*)\}\}""".r
-  val DATE_REGEX_MATCHER = """<<(.*)>>""".r
+  val LABEL_REGEX_MATCHER: Regex = """\{\{(.*)\}\}""".r
+  val DATE_REGEX_MATCHER: Regex = """<<(.*)>>""".r
 }
 
 /**
@@ -136,11 +136,12 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
         val partKeyMap: mutable.Map[String, String] = {
           val rawSchemaId = RecordSchema.schemaID(part.partKeyBytes, UnsafeUtils.arayOffset)
           val pairs = schemas(rawSchemaId).partKeySchema.toStringPairs(part.partKeyBytes, UnsafeUtils.arayOffset)
-          val res = new mutable.HashMap[String, String]()
-          res ++= pairs
-          res("__name__") = res("_metric_")
-          res.remove("_metric_")
-          res
+          val pairMap = new mutable.HashMap[String, String]()
+          pairMap ++= pairs
+          // replace _metric_ label name with __name__
+          pairMap("__name__") = pairMap("_metric_")
+          pairMap.remove("_metric_")
+          pairMap
         }
         val rule = getRuleIfShouldExport(partKeyMap)
         (part, partKeyMap, rule)
@@ -252,19 +253,15 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
     if (!rangeInfoIter.hasNext) {
       return Iterator.empty
     }
-    val f = columns(valueCol).columnType match {
+    val tupleIter = columns(valueCol).columnType match {
       case DoubleColumn =>
         val labelString = makeLabelString(partKeyMap)
-        val it = rangeInfoIter.flatMap{ info =>
+        rangeInfoIter.flatMap{ info =>
           val doubleIter = info.valueIter.asDoubleIt
           (info.irowStart to info.irowEnd).iterator.map{ _ =>
             (partKeyMap, labelString, info.timestampIter.next, doubleIter.next)
           }
         }
-        if (it.hasNext) {
-          numPartitionsExportPrepped.increment()
-        }
-        it
       case HistogramColumn =>
         // If the histogram to export looks like:
         //     my_histo{l1=v1, l2=v2}
@@ -274,34 +271,17 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
         //    my_histo_bucket{l1=v1, l2=v2, le=10} 4
         //    my_histo_bucket{l1=v1, l2=v2, le=20} 15
         //    my_histo_bucket{l1=v1, l2=v2, le=+Inf} 26
-        val info = rangeInfoIter.next
-        val value = info.valueIter.asHistIt.next
-        val ts = info.timestampIter.asLongIt.next
-        val lit = new LongIterator {
-          override def next: Long = ts
-        }
-        val hit = new Iterator[Histogram] with TypedIterator {
-          var isDone = false
-          override def next: Histogram = {
-            isDone = true
-            value
-          }
-          override def hasNext: Boolean = !isDone
-        }
 
-        val name = partKeyMap("__name__")
-        val bucketName = name + "_bucket"
+        val nameWithoutBucket = partKeyMap("__name__")
+        val nameWithBucket = nameWithoutBucket + "_bucket"
 
         // make labelString without __name__; will be replaced with _bucket-suffixed name
         partKeyMap.remove("__name__")
         val baseLabelString = makeLabelString(partKeyMap)
-        partKeyMap.put("__name__", name)
+        partKeyMap.put("__name__", nameWithoutBucket)
 
-        val newThing = RangeInfo(info.irowStart, info.irowStart + 1, lit, hit)
-        val it =
-          (Iterator.single(newThing) ++ Iterator.single(info.copy(irowStart = info.irowStart + 1)) ++ rangeInfoIter)
-          .flatMap{ info =>
-          val histIter = info.valueIter.asHistIt.buffered
+        rangeInfoIter.flatMap{ info =>
+          val histIter = info.valueIter.asHistIt
           (info.irowStart to info.irowEnd).iterator.flatMap{ _ =>
             val hist = histIter.next()
             val timestamp = info.timestampIter.next
@@ -310,28 +290,26 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
                 val raw = hist.bucketTop(i)
                 if (raw.isPosInfinity) "+Inf" else raw.toString
               }
-              val bucketMapping = Map("__name__" -> bucketName, "le" -> bucketTopString)
+              val bucketMapping = Map("__name__" -> nameWithBucket, "le" -> bucketTopString)
               val bucketLabels = partKeyMap ++ bucketMapping
               val labelString = mergeLabelStrings(baseLabelString, makeLabelString(bucketMapping))
               (bucketLabels, labelString, timestamp, hist.bucketValue(i))
             }
           }
         }
-
-        if (it.hasNext) {
-          numPartitionsExportPrepped.increment(value.numBuckets)
-        }
-
-        it
-
       case colType =>
         DownsamplerContext.dsLogger.warn(
           s"BatchExporter encountered unhandled ColumnType=$colType; partKeyMap=$partKeyMap")
         Iterator.empty
     }
 
+    if (tupleIter.hasNext) {
+      // NOTE: this will not count each histogram bucket; the logic to do that is messy.
+      numPartitionsExportPrepped.increment()
+    }
+
     val dropLabelSet = rule.dropLabels.toSet
-    f.map{ case (pkeyMapWithBucket, labelString, timestamp, value) =>
+    tupleIter.map{ case (pkeyMapWithBucket, labelString, timestamp, value) =>
       // NOTE: partition without histogram-adjusted labels, since we want the original metric name.
       val partitionByValues = getPartitionByValues(partKeyMap)
       ExportRowData(pkeyMapWithBucket, labelString, timestamp, value, partitionByValues, dropLabelSet)
