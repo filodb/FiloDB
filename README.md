@@ -127,8 +127,7 @@ brew services start kafka
 
 Create a new Kafka topic with 4 partitions. This is where time series data will be ingested for FiloDB to consume
 ```
-kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 4 --topic timeseries-dev
-kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 4 --topic timeseries-dev-ds-1m
+kafka-topics --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 4 --topic timeseries-dev
 ```
 
 Download and start Cassandra 2.1 or more recent versions (Cassandra 3 and above recommended).
@@ -142,6 +141,14 @@ You should install Cassandra using a tool which you're the most familiar with.
 For instance, one easy way to install it is via `brew`
 ```
 brew install cassandra
+```
+
+If you are working on an Apple M1 laptop, you may need to apply workaround mentioned
+in [here](https://stackoverflow.com/questions/68315912/how-to-start-cassandra-on-a-m1-macbook)
+to move past the JNA issue.
+
+```
+cp lib/cassandra/jna-5.10.0.jar /opt/homebrew/Cellar/cassandra/4.0.7/libexec/jna-5.6.0.jar
 ```
 
 Start Cassandra
@@ -239,20 +246,8 @@ If the above does not work, try the following:
 `delete.topic.enable=true`
 - Run below kafka-topics.sh command with “–delete” option to remove “timeseries-dev” and "timeseries-dev-ds-1m":
 ```sh
- /usr/local/Cellar/kafka/2.3.0/libexec/bin/kafka-topics.sh --zookeeper localhost:2181 \
-                --topic timeseries-dev \
-                --delete  
+ kafka-topics.sh --bootstrap-server localhost:9092 --topic timeseries-dev --delete  
 
-```
-```
-/usr/local/Cellar/kafka/2.3.0/libexec/bin/kafka-topics.sh --zookeeper localhost:2181 \
-                --topic timeseries-dev-ds-1m \
-                --delete
-```
-- You should see: 
-```
-Topic timeseries-dev is marked for deletion.
-Note: This will have no impact if delete.topic.enable is not set to true.
 ```
 
 2) `./filodb-dev-stop.sh` and restart filodb instances like above
@@ -320,7 +315,7 @@ Follow the same steps as in original setup, but do this first to clear out exist
 Then follow the steps to create the dataset etc.  Create a different Kafka topic with 128 partitions:
 
 ```bash
-bin/kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 1 --partitions 128 --topic timeseries-perf
+kafka-topics --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 128 --topic timeseries-perf
 ```
 
 Modify server config to load the `conf/timeseries-128shards-source.conf` dataset instead of the default one.
