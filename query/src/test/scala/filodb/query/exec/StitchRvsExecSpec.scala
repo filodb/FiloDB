@@ -263,7 +263,7 @@ class StitchRvsExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val rs2 = ResultSchema(List(ColumnInfo("timestamp",
       TimestampColumn), ColumnInfo("value", DoubleColumn)), 1, Map(), Some(147), List(0, 1))
 
-    val reduced = exec.reduceSchemas(rs1, QueryResult("someId", rs2, Seq.empty))
+    val reduced = exec.reduceSchemas(rs1, rs2)
     reduced.columns shouldEqual rs1.columns
     reduced.numRowKeyColumns shouldEqual rs1.numRowKeyColumns
     reduced.brSchemas shouldEqual rs1.brSchemas

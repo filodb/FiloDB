@@ -15,6 +15,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.{RowReader, TupleRowReader, UnsafeUtils}
+import java.util.concurrent.atomic.AtomicLong
 
 object TimeSeriesPartitionSpec {
   import BinaryRegion.NativePointer
@@ -95,6 +96,41 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     val minData = data.map(_.getDouble(1)).take(1)
     val iterator = part.timeRangeRows(WriteBufferChunkScan, Array(1))
     iterator.map(_.getDouble(0)).toSeq shouldEqual minData
+  }
+
+  it("timeRangeRows with CountChunkInfoIterator must return same data and update the referenced dataBytesScannedCtr") {
+    part = makePart(0, dataset1)
+    val data = singleSeriesReaders().take(5)
+    var i = 0
+    val dataBytesScannedCtr = new AtomicLong
+
+    // populating ReadablePartition `part`
+    for (i <- 0 until 5) {
+      part.ingest(i, data(i), ingestBlockHolder, timeAlignedChunksEnabled,
+        flushIntervalMillis = flushIntervalMillis, acceptDuplicateSamples)
+    }
+    val iter = part.timeRangeRows(WriteBufferChunkScan, Array(1))
+
+    // populating ReadablePartition `part2` with same data as feeded in part
+    val part2 = makePart(1, dataset1)
+    i = 0
+    for (i <- 0 until 5) {
+      part2.ingest(i, data(i), ingestBlockHolder, timeAlignedChunksEnabled,
+        flushIntervalMillis = flushIntervalMillis, acceptDuplicateSamples)
+    }
+
+    val iterWithCountingChunkInfo = part2.timeRangeRows(
+      WriteBufferChunkScan,
+      Array(1),
+      new CountingChunkInfoIterator(part2.infos(WriteBufferChunkScan), Array(1), dataBytesScannedCtr))
+
+    // collect the sum of all data in both the iterators of readablePartition
+    val iterSum = iter.map(_.getDouble(0)).sum
+    val iterWithCountingChunkInfoSum = iterWithCountingChunkInfo.map(_.getDouble(0)).sum
+
+    // UT assertions
+    iterSum shouldEqual iterWithCountingChunkInfoSum
+    dataBytesScannedCtr.get() shouldEqual 48
   }
 
   it("should be able to ingest new rows while flush() executing concurrently") {

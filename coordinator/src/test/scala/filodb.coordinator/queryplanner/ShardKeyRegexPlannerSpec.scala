@@ -6,7 +6,8 @@ import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-import filodb.coordinator.ShardMapper
+
+import filodb.coordinator.{ActorPlanDispatcher, ShardMapper}
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
 import filodb.prometheus.ast.TimeStepParams
@@ -17,8 +18,6 @@ import filodb.prometheus.parse.Parser
 import filodb.query.InstantFunctionId.{Exp, HistogramQuantile, Ln}
 import filodb.query.exec._
 import filodb.query.AggregationOperator._
-
-
 import scala.language.postfixOps
 
 class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures with PlanValidationSpec {

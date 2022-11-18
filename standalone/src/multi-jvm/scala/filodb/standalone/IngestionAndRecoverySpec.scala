@@ -56,11 +56,11 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
 
   // Used when servers are started first time
   lazy val server1 = new FiloServer(Some(watcher.ref))
-  lazy val client1 = Client.standaloneClient(system, "127.0.0.1", 2552)
+  lazy val client1 = Client.standaloneClient(system, false, "127.0.0.1", 2552)
 
   // Used when servers are restarted after shutdown
   lazy val server2 = new FiloServer(Some(watcher.ref))
-  lazy val client2 = Client.standaloneClient(system, "127.0.0.1", 2552)
+  lazy val client2 = Client.standaloneClient(system, false, "127.0.0.1", 2552)
 
   // Initializing a FilodbCluster to get a handle to the metastore and colstore so we can clear and validate data
   // It is not used beyond that. We never start this cluster.

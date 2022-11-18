@@ -444,7 +444,7 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
                                        scalarArg: ScalarPlan,
                                        vector: PeriodicSeriesPlan,
                                        scalarIsLhs: Boolean) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
-  override def children: Seq[LogicalPlan] = Seq(vector)
+  override def children: Seq[LogicalPlan] = Seq(vector, scalarArg)
   override def startMs: Long = vector.startMs
   override def stepMs: Long = vector.stepMs
   override def endMs: Long = vector.endMs

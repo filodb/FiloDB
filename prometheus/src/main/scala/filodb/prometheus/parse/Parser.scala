@@ -160,14 +160,14 @@ object Parser extends StrictLogging {
     }
   }
 
-  def queryToLogicalPlan(query: String, queryTimestamp: Long, step: Long, mode: Mode = Shadow): LogicalPlan = {
+  def queryToLogicalPlan(query: String, queryTimestamp: Long, step: Long, mode: Mode = mode): LogicalPlan = {
     // Remember step matters here in instant query, when lookback is provided in step factor
     // notation as in [5i]
     val defaultQueryParams = TimeStepParams(queryTimestamp, step, queryTimestamp)
     queryRangeToLogicalPlan(query, defaultQueryParams, mode)
   }
 
-  def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams, mode: Mode = Shadow): LogicalPlan = {
+  def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams, mode: Mode = mode): LogicalPlan = {
     val ex = parseQueryWithPrecedence(query, mode)
     ex match {
       case p: PeriodicSeries => p.toSeriesPlan(timeParams)

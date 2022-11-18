@@ -59,6 +59,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
                                ref: DatasetRef,
                                ttlMs: Long): Task[Long] = {
 
+    val startCheckpoint = System.currentTimeMillis()
     val recoverIndexLatency = Kamon.gauge("shard-recover-index-latency", MeasurementUnit.time.milliseconds)
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum)
@@ -80,7 +81,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
         // Note that we do not set an end time for the Synced here, instead
         // we will do it from DownsampleTimeSeriesShard
         index.refreshReadersBlocking()
-        recoverIndexLatency.update(System.currentTimeMillis() - start)
+        recoverIndexLatency.update(System.currentTimeMillis() - startCheckpoint)
         count
       }
   }

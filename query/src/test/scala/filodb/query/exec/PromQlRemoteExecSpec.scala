@@ -3,15 +3,17 @@ package filodb.query.exec
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
+import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.query.{PromQlQueryParams, QueryContext}
 import filodb.core.store.ChunkSource
 import filodb.memory.format.vectors.MutableHistogram
 import filodb.query
-import filodb.query.{Data, HistSampl, MetadataMapSampl, MetadataSuccessResponse, QueryResponse, QueryResult, Sampl, SuccessResponse}
+import filodb.query.{Data, HistSampl, MetadataMapSampl, MetadataSuccessResponse, QueryResponse, QueryResult, Sampl, StreamQueryResponse, SuccessResponse}
 
 
 class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
@@ -27,6 +29,9 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
     override def clusterName: String = ???
 
     override def isLocalCall: Boolean = ???
+
+    override def dispatchStreaming(plan: ExecPlanWithClientParams,
+                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
   }
 
   val params = PromQlQueryParams("", 0, 0 , 0)

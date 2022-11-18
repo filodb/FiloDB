@@ -5,7 +5,7 @@ import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import monix.execution.Scheduler
 
-import filodb.coordinator.ShardMapper
+import filodb.coordinator.{ActorPlanDispatcher, ShardMapper}
 import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
@@ -61,7 +61,8 @@ class SinglePartitionPlannerSpec extends AnyFunSpec with Matchers {
     override def submitTime: Long = 1000
     override def dataset: DatasetRef = ???
     override def dispatcher: PlanDispatcher = InProcessPlanDispatcher(queryConfig)
-    override def doExecute(source: ChunkSource, querySession: QuerySession)
+    override def doExecute(source: ChunkSource,
+                           querySession: QuerySession)
                           (implicit sched: Scheduler): ExecResult = ???
     override protected def args: String = "mock-args"
   }
