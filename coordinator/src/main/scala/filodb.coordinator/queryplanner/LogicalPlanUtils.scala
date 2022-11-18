@@ -217,14 +217,13 @@ object LogicalPlanUtils extends StrictLogging {
   }
 
   def getOffsetMillis(logicalPlan: LogicalPlan): Seq[Long] = {
-    val leaf = LogicalPlan.findLeafLogicalPlans(logicalPlan)
-    if (leaf.isEmpty) Seq(0L) else {
-      leaf.map { l =>
-        l match {
-          case lp: RawSeries => lp.offsetMs.getOrElse(0L)
-          case _             => 0L
-        }
-      }
+    logicalPlan match {
+      // Offset/Lookback aren't propagated to nested subquery plans;
+      //   the subquery's offset needs to be added to child offsets.
+      case sww: SubqueryWithWindowing => getOffsetMillis(sww.innerPeriodicSeries).map(_ + sww.offsetMs.getOrElse(0L))
+      case nl: NonLeafLogicalPlan => nl.children.flatMap(getOffsetMillis)
+      case rs: RawSeries => Seq(rs.offsetMs.getOrElse(0))
+      case _             => Seq(0)
     }
   }
 
@@ -235,23 +234,10 @@ object LogicalPlanUtils extends StrictLogging {
     // SubqueryWithWindowing has such a lookback while TopLevelSubquery does not.
     logicalPlan match {
       case sww: SubqueryWithWindowing => getLookBackMillis(sww.innerPeriodicSeries).map(lb => lb + sww.subqueryWindowMs)
-      case _ => {
-        val staleDataLookbackMillis = WindowConstants.staleDataLookbackMillis
-        val leaf = LogicalPlan.findLeafLogicalPlans(logicalPlan)
-        val valToReturn = {
-          if (leaf.isEmpty) Seq(0L) else {
-            leaf.map { l =>
-              l match {
-                case lp: RawSeries => lp.lookbackMs.getOrElse(staleDataLookbackMillis)
-                case _             => 0
-              }
-            }
-          }
-        }
-        valToReturn
-      }
+      case nl: NonLeafLogicalPlan => nl.children.flatMap(getLookBackMillis)
+      case rs: RawSeries => Seq(rs.lookbackMs.getOrElse(WindowConstants.staleDataLookbackMillis))
+      case _             => Seq(0)
     }
-
   }
 
   def getMetricName(logicalPlan: LogicalPlan, datasetMetricColumn: String): Set[String] = {
@@ -359,4 +345,16 @@ object LogicalPlanUtils extends StrictLogging {
    }
   }
 
+  /**
+   * Snap a timestamp to the next periodic step.
+   * @param timestamp the timestamp to snap.
+   * @param step the size of each periodic step.
+   * @param origin where steps began.
+   */
+  def snapToStep(timestamp: Long, step: Long, origin: Long): Long = {
+    val totalDiff = timestamp - origin
+    val partialStep = totalDiff % step
+    val diffToNextStep = if (partialStep > 0) step - partialStep else 0
+    timestamp + diffToNextStep
+  }
 }

@@ -2,13 +2,16 @@ package filodb.query.exec
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
+
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
+import monix.reactive.Observable
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
+
 import filodb.core.MetricsTestData._
 import filodb.core.TestData
 import filodb.core.binaryrecord2.BinaryRecordRowReader
@@ -21,6 +24,8 @@ import filodb.query._
 import filodb.query.exec.TsCardExec.CardCounts
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+
+import scala.collection.Seq
 
 class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
 
@@ -70,6 +75,11 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
   implicit val execTimeout = 5.seconds
 
+  // Create one container greater than 8K map, we will create one metric with 50 labels, each label of 200 chars
+  val commonLabels = Map("_ws_" -> "testws", "_ns_" -> "testns", "job" ->  "myUniqueService")
+  val longLabels = ((0 to 50).map(i => (s"label$i", s"$i" * 200)).toMap ++ commonLabels)
+    .map{ case (k, v) => (k.utf8, v.utf8)}
+
   def initShard(memStore: TimeSeriesMemStore,
                 partKeyLabelValues: Seq[Tuple2[String, Map[String, String]]],
                 ishard: Int): Unit = {
@@ -83,6 +93,15 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     }
     memStore.setup(timeseriesDatasetMultipleShardKeys.ref, Schemas(Schemas.promCounter), ishard, TestData.storeConf)
     memStore.ingest(timeseriesDatasetMultipleShardKeys.ref, ishard, SomeData(builder.allContainers.head, 0))
+
+    builder.reset()
+    tuples.take(10).foreach {
+      case (timeStamp: Long, value: Double) =>
+        builder.addFromReader(SeqRowReader(Seq(timeStamp, value, "long_labels_metric", longLabels)),
+          Schemas.promCounter)
+    }
+    memStore.ingest(timeseriesDatasetMultipleShardKeys.ref, ishard, SomeData(builder.allContainers.head, 0))
+
   }
 
   override def beforeAll(): Unit = {
@@ -104,6 +123,9 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     override def clusterName: String = ???
 
     override def isLocalCall: Boolean = ???
+
+    override def dispatchStreaming(plan: ExecPlanWithClientParams,
+                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
   }
 
   val executeDispatcher = new PlanDispatcher {
@@ -113,6 +135,9 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
                          (implicit sched: Scheduler): Task[QueryResponse] = {
       plan.execPlan.execute(memStore, querySession)(sched)
     }
+
+    override def dispatchStreaming(plan: ExecPlanWithClientParams,
+                                   source: ChunkSource)(implicit sched: Scheduler): Observable[StreamQueryResponse] = ???
   }
 
   it ("should read the job names from timeseriesindex matching the columnfilters") {
@@ -201,6 +226,44 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
       }
     }
     result shouldEqual List(expectedLabelValues(0))
+  }
+
+  it("should fail to deserialize a long map that doesn't fit the max container size") {
+    import ZeroCopyUTF8String._
+    val filters = Seq(ColumnFilter("job", Filter.Equals("myUniqueService".utf8)))
+
+    // Reducing limit results in truncated metadata response
+    val execPlan = PartKeysExec(QueryContext(plannerParams = PlannerParams(sampleLimit = limit - 1)), executeDispatcher,
+      timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now, maxRecordContainerSize = 8 * 1024)
+
+    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
+    resp match {
+      case QueryError(_, _, ex: IllegalArgumentException)  =>
+                                          ex.getMessage shouldEqual "requirement failed: Record too big for container"
+      case _                                                   =>
+                                            fail(s"Expected to see an exception for exceeding the default " +
+                                              s"container limit of ${execPlan.maxRecordContainerSize}")
+    }
+
+
+    // Default one with 64K Record container
+    val execPlan1 = PartKeysExec(QueryContext(plannerParams = PlannerParams(sampleLimit = limit - 1)), executeDispatcher,
+      timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now)
+
+    val resp1 = execPlan1.execute(memStore, querySession).runToFuture.futureValue
+    val result = resp1 match {
+      case QueryResult(id, _, response, _, _, _) => {
+        val rv = response(0)
+        rv.rows.size shouldEqual 1
+        val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
+        rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset).map {
+          case (k, v) => (k.utf8, v.utf8)
+        }
+      }
+      case _                                     => fail("Expected to see a QueryResult")
+    }
+    result.toMap shouldEqual (longLabels
+      ++ Map("_metric_".utf8 -> "long_labels_metric".utf8, "_type_".utf8 -> "prom-counter".utf8))
   }
 
   it ("should be able to query labels with filter") {
@@ -297,13 +360,16 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     Seq(
       TestSpec(Seq(), 1, Seq(
         Seq("demo") -> CardCounts(4,4),
-        Seq("demo-A") -> CardCounts(1,1)
+        Seq("demo-A") -> CardCounts(1,1),
+        Seq("testws") -> CardCounts(1,1)
         )),
       TestSpec(Seq(), 2, Seq(
         Seq("demo", "App-0") -> CardCounts(4,4),
-        Seq("demo-A", "App-A") -> CardCounts(1,1))),
+        Seq("demo-A", "App-A") -> CardCounts(1,1),
+        Seq("testws", "testns") -> CardCounts(1,1))),
       TestSpec(Seq(), 3, Seq(
         Seq("demo", "App-0", "http_req_total") -> CardCounts(2,2),
+        Seq("testws", "testns", "long_labels_metric") -> CardCounts(1,1),
         Seq("demo", "App-0", "http_foo_total") -> CardCounts(1,1),
         Seq("demo-A", "App-A", "http_req_total-A") -> CardCounts(1,1),
         Seq("demo", "App-0", "http_bar_total") -> CardCounts(1,1))),

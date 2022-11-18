@@ -297,7 +297,12 @@ final case class RawDataRangeVector(key: RangeVectorKey,
                                     columnIDs: Array[Int],
                                     dataBytesScannedCtr: AtomicLong) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
-  def rows(): RangeVectorCursor = partition.timeRangeRows(chunkMethod, columnIDs)
+  // UPDATE: 10/31/2022: Using CountingChunkInfoIterator instead of default `ReadablePartition.infos` iterator.
+  // This is done to count and track the dataBytesScanned info for raw queries
+  def rows(): RangeVectorCursor = partition.timeRangeRows(
+    chunkMethod,
+    columnIDs,
+    new CountingChunkInfoIterator(partition.infos(chunkMethod), columnIDs, dataBytesScannedCtr))
 
   // Obtain ChunkSetInfos from specific window of time from partition
   def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = {
@@ -485,8 +490,10 @@ object SerializedRangeVector extends StrictLogging {
   def toSchema(colSchema: Seq[ColumnInfo], brSchemas: Map[Int, RecordSchema] = Map.empty): RecordSchema =
     schemaCache.getOrElseUpdate(colSchema, { cols => new RecordSchema(cols, brSchema = brSchemas) })
 
-  def newBuilder(): RecordBuilder =
-    new RecordBuilder(MemFactory.onHeapFactory, MaxContainerSize)
+  def newBuilder(): RecordBuilder = newBuilder(MaxContainerSize)
+
+  def newBuilder(maxContainerSize: Int): RecordBuilder =
+    new RecordBuilder(MemFactory.onHeapFactory, maxContainerSize)
 }
 
 final case class IteratorBackedRangeVector(key: RangeVectorKey,

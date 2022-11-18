@@ -5,6 +5,7 @@ import monix.eval.Task
 import monix.reactive.Observable
 import spire.syntax.cfor._
 
+import filodb.core.memstore.SchemaMismatch
 import filodb.core.query._
 import filodb.memory.format.ZeroCopyUTF8String
 import filodb.query._
@@ -23,24 +24,45 @@ trait ReduceAggregateExec extends NonLeafExecPlan {
 
   protected def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
-  protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  /**
+   * Requiring strict result schema match for Aggregation
+   */
+  override def reduceSchemas(r1: ResultSchema, r2: ResultSchema): ResultSchema = {
+    if (r1.isEmpty) r2
+    else if (r2.isEmpty) r1
+    else if (r1 != r2)  {
+      throw SchemaMismatch(r1.toString, r2.toString)
+    } else r1
+  }
+
+  protected def composeStreaming(childResponses: Observable[(Observable[RangeVector], Int)],
+                                 schemas: Observable[(ResultSchema, Int)],
+                                 querySession: QuerySession): Observable[RangeVector] = {
+    val firstSchema = schemas.map(_._1).firstOptionL.map(_.getOrElse(ResultSchema.empty))
+    val results = childResponses.flatMap(_._1)
+    reduce(results, firstSchema, querySession)
+  }
+
+  protected def compose(childResponses: Observable[(QueryResult, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
-    val results = childResponses.flatMap {
-        case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
-        case (QueryError(_, _, ex), _)         => throw ex
-    }
+    val results = childResponses.flatMap(res => Observable.fromIterable(res._1.result))
+    reduce(results, firstSchema, querySession)
+  }
 
+  private def reduce(results: Observable[RangeVector],
+                     firstSchema: Task[ResultSchema],
+                     querySession: QuerySession) = {
     val task = for { schema <- firstSchema}
-               yield {
-                 // For absent function schema can be empty
-                 if (schema == ResultSchema.empty) Observable.empty
-                 else {
-                   val aggregator = RowAggregator(aggrOp, aggrParams, schema)
-                   RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key,
-                     querySession.qContext.plannerParams.groupByCardLimit, queryContext)
-                 }
-               }
+      yield {
+        // For absent function schema can be empty
+        if (schema == ResultSchema.empty) Observable.empty
+        else {
+          val aggregator = RowAggregator(aggrOp, aggrParams, schema)
+          RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key,
+            querySession.qContext.plannerParams.groupByCardLimit, queryContext)
+        }
+      }
     Observable.fromTask(task).flatten
   }
 }
@@ -61,12 +83,7 @@ final case class MultiPartitionReduceAggregateExec(queryContext: QueryContext,
                                                    dispatcher: PlanDispatcher,
                                                    childAggregates: Seq[ExecPlan],
                                                    aggrOp: AggregationOperator,
-                                                   aggrParams: Seq[Any]) extends ReduceAggregateExec {
-  // overriden since it can reduce schemas with different vector lengths as long as the columns are same
-  override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema =
-    IgnoreFixedVectorLenAndColumnNamesSchemaReducer.reduceSchema(rs, resp)
-}
-
+                                                   aggrParams: Seq[Any]) extends ReduceAggregateExec
 
 
 

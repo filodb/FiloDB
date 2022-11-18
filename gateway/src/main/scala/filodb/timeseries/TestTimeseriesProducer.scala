@@ -13,7 +13,7 @@ import monix.reactive.Observable
 
 import filodb.coordinator.ShardMapper
 import filodb.core.GlobalConfig
-import filodb.core.metadata.{Dataset, Schemas}
+import filodb.core.metadata.{Dataset, Schema, Schemas}
 import filodb.gateway.GatewayServer
 import filodb.gateway.conversion.{InputRecord, MetricTagInputRecord, PrometheusInputRecord}
 import filodb.memory.format.{vectors => bv, ZeroCopyUTF8String => ZCUTF8}
@@ -60,27 +60,35 @@ object TestTimeseriesProducer extends StrictLogging {
   }
 
 
-  def logQueryHelp(numSamples: Int, numTimeSeries: Int, startTime: Long): Unit = {
+  def logQueryHelp(numSamples: Int, numTimeSeries: Int,
+                   startTime: Long, isHisto: Boolean = false, promQL: Option[String] = None): Unit = {
     val samplesDuration = (numSamples.toDouble / numTimeSeries / 6).ceil.toInt * 60L * 1000L
 
     logger.info(s"Finished producing $numSamples records for ${samplesDuration / 1000} seconds")
     val startQuery = startTime / 1000
     val endQuery = startQuery + (numSamples / numTimeSeries) * 10
-    val periodicPromQL = """heap_usage{_ns_="App-0",_ws_="demo"}"""
+    val periodicPromQL = if (promQL.isEmpty) """heap_usage{_ns_="App-0",_ws_="demo"}"""
+                         else promQL.get
     val query =
       s"""./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus """ +
       s"""--promql '$periodicPromQL' --start $startQuery --end $endQuery --limit 15"""
     logger.info(s"Periodic Samples CLI Query : \n$query")
 
     val periodicSamplesQ = URLEncoder.encode(periodicPromQL, StandardCharsets.UTF_8.toString)
-    val periodicSamplesUrl = s"http://localhost:8080/promql/prometheus/api/v1/query_range?" +
-      s"query=$periodicSamplesQ&start=$startQuery&end=$endQuery&step=15"
-    logger.info(s"Periodic Samples query URL: \n$periodicSamplesUrl")
-
-    val rawSamplesQ = URLEncoder.encode("""heap_usage{_ws_="demo",_ns_="App-0"}[2m]""",
-      StandardCharsets.UTF_8.toString)
-    val rawSamplesUrl = s"http://localhost:8080/promql/prometheus/api/v1/query?query=$rawSamplesQ&time=$endQuery"
-    logger.info(s"Raw Samples query URL: \n$rawSamplesUrl")
+    val periodicSamplesUrl = if (!isHisto) {
+                              s"http://localhost:8080/promql/prometheus/api/v1/query_range?" +
+                                s"query=$periodicSamplesQ&start=$startQuery&end=$endQuery&step=15"
+                            } else {
+                              s"http://localhost:8080/promql/prometheus/api/v1/query?" +
+                                s"query=$periodicSamplesQ&time=$endQuery&step=15"
+                            }
+    logger.info(s"Samples query URL: \n$periodicSamplesUrl")
+    if (!isHisto) {
+      val rawSamplesQ = URLEncoder.encode("""heap_usage{_ws_="demo",_ns_="App-0"}[2m]""",
+        StandardCharsets.UTF_8.toString)
+      val rawSamplesUrl = s"http://localhost:8080/promql/prometheus/api/v1/query?query=$rawSamplesQ&time=$endQuery"
+      logger.info(s"Raw Samples query URL: \n$rawSamplesUrl")
+    }
   }
 
   def metricsToContainerStream(startTime: Long,
@@ -152,10 +160,16 @@ object TestTimeseriesProducer extends StrictLogging {
    * Note: the set of "instance" tags is unique for each invocation of genHistogramData.  This helps increase
    * the cardinality of time series for testing purposes.
    */
-  def genHistogramData(startTime: Long, numTimeSeries: Int = 16): Stream[InputRecord] = {
+  def genHistogramData(startTime: Long, numTimeSeries: Int = 16, histSchema: Schema): Stream[InputRecord] = {
     val numBuckets = 10
     val histBucketScheme = bv.GeometricBuckets(2.0, 3.0, numBuckets)
-    val buckets = new Array[Long](numBuckets)
+    var buckets = new Array[Long](numBuckets)
+    val metric = if (Schemas.deltaHistogram == histSchema) {
+                  "http_request_latency_delta"
+                 } else {
+                  "http_request_latency"
+                 }
+
     def updateBuckets(bucketNo: Int): Unit = {
       for { b <- bucketNo until numBuckets } {
         buckets(b) += 1
@@ -163,7 +177,7 @@ object TestTimeseriesProducer extends StrictLogging {
     }
 
     val instanceBase = System.currentTimeMillis
-
+    var prevTimestamp = startTime
     Stream.from(0).map { n =>
       val instance = n % numTimeSeries + instanceBase
       val dc = instance & oneBitMask
@@ -184,7 +198,14 @@ object TestTimeseriesProducer extends StrictLogging {
                      hostUTF8 -> s"H$host".utf8,
                      instUTF8 -> s"Instance-$instance".utf8)
 
-      new MetricTagInputRecord(Seq(timestamp, sum, count, hist), "http_request_latency", tags, Schemas.promHistogram)
+      // reset buckets for delta histograms
+      if (Schemas.deltaHistogram == histSchema && prevTimestamp != timestamp) {
+        prevTimestamp = timestamp
+        buckets = new Array[Long](numBuckets)
+        updateBuckets(0)
+      }
+
+      new MetricTagInputRecord(Seq(timestamp, sum, count, hist), metric, tags, histSchema)
     }
   }
 }

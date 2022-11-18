@@ -95,7 +95,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
                           coordinator: Option[ActorRef] = None,
                           shards: Seq[Int] = Seq.empty)
                          (statusValidator: ShardStatus => Boolean): Unit = {
-    client.getShardMapper(dataset) match {
+    client.getShardMapper(dataset, false) match {
       case Some(map) =>
         info(s"Shard map:  $map")
         info(s"Shard map nodes: ${map.allNodes}")
@@ -118,7 +118,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
                                nodeCount: Int,
                                assignments: Seq[Int],
                                coordinator: akka.actor.ActorRef): Unit =
-    client.getShardMapper(dataset) match {
+    client.getShardMapper(dataset, false) match {
       case Some(mapper) =>
         mapper.allNodes.size shouldEqual nodeCount
         mapper.assignedShards shouldEqual Seq(0, 1, 2, 3)

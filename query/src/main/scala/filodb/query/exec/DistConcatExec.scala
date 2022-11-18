@@ -14,13 +14,16 @@ trait DistConcatExec extends NonLeafExecPlan {
 
   protected def args: String = ""
 
-  protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  protected def compose(childResponses: Observable[(QueryResult, Int)],
                         firstSchema: Task[ResultSchema],
                         querySession: QuerySession): Observable[RangeVector] = {
-    childResponses.flatMap {
-      case (QueryResult(_, _, result, _, _, _), _) => Observable.fromIterable(result)
-      case (QueryError(_, _, ex), _)         => throw ex
-    }
+    childResponses.flatMap(res => Observable.fromIterable(res._1.result))
+  }
+
+  protected def composeStreaming(childResponses: Observable[(Observable[RangeVector], Int)],
+                                 schemas: Observable[(ResultSchema, Int)],
+                                 querySession: QuerySession): Observable[RangeVector] = {
+    childResponses.flatMap(_._1)
   }
 }
 
@@ -29,28 +32,7 @@ trait DistConcatExec extends NonLeafExecPlan {
   */
 final case class LocalPartitionDistConcatExec(queryContext: QueryContext,
                                               dispatcher: PlanDispatcher,
-                                              children: Seq[ExecPlan]) extends DistConcatExec {
-  override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema = {
-    // Given a pushdown-optimized BinaryJoinExec:
-    //
-    // LocalPartitionDistConcatExec
-    // |________
-    // |       |
-    // BJ      BJ
-    // |____   |____
-    // |   |   |   |
-    // L   R   L   R
-    //
-    // It's possible each BJ's reduceSchemas returns a slightly-different ResultSchema
-    //   (i.e. the left BJ reduceSchemas might process its left child first,
-    //   and the right BJ might process its right first. As of this writing, the result is
-    //   order-dependent, and the order is non-deterministic). The default reduceSchemas
-    //   implementation is too strict (essentially requires equality), and it does not work
-    //   for this use-case.
-    IgnoreFixedVectorLenAndColumnNamesSchemaReducer.reduceSchema(rs, resp)
-  }
-}
-
+                                              children: Seq[ExecPlan]) extends DistConcatExec
 
 /**
   * Wrapper/Nonleaf execplan to split long range PeriodicPlan to multiple smaller execs.
@@ -60,12 +42,7 @@ final case class SplitLocalPartitionDistConcatExec(queryContext: QueryContext,
                                      dispatcher: PlanDispatcher,
                                      children: Seq[ExecPlan], outputRvRange: Option[RvRange],
                                     override val parallelChildTasks: Boolean = false) extends DistConcatExec {
-
   addRangeVectorTransformer(StitchRvsMapper(outputRvRange))
-
-  // overriden since it can reduce schemas with different vector lengths as long as the columns are same
-  override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema =
-    IgnoreFixedVectorLenAndColumnNamesSchemaReducer.reduceSchema(rs, resp)
 }
 
 /**
@@ -73,8 +50,4 @@ final case class SplitLocalPartitionDistConcatExec(queryContext: QueryContext,
   */
 final case class MultiPartitionDistConcatExec(queryContext: QueryContext,
                                               dispatcher: PlanDispatcher,
-                                              children: Seq[ExecPlan]) extends DistConcatExec {
-  // overriden since it can reduce schemas with different vector lengths as long as the columns are same
-  override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema =
-    IgnoreFixedVectorLenAndColumnNamesSchemaReducer.reduceSchema(rs, resp)
-}
+                                              children: Seq[ExecPlan]) extends DistConcatExec

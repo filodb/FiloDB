@@ -1,10 +1,15 @@
 package filodb.core.memstore
 
-import java.io.File
-
+import com.typesafe.scalalogging.StrictLogging
+import java.io.{File, FileInputStream, FileOutputStream}
+import java.nio.ByteBuffer
 import scala.collection.mutable.Map
+import scala.util.{Failure, Success, Try, Using}
 
 import filodb.core.DatasetRef
+import filodb.core.memstore.FileSystemBasedIndexMetadataStore.{genFileV1Magic, snapFileV1Magic}
+
+
 
 
 
@@ -31,7 +36,7 @@ import filodb.core.DatasetRef
  *
  */
 object IndexState extends Enumeration {
-  val Empty, Rebuilding, Refreshing, Synced, TriggerRebuild = Value
+  val Empty, Refreshing, Synced, TriggerRebuild = Value
 }
 
 
@@ -84,6 +89,261 @@ trait IndexMetadataStore {
    */
   def updateInitState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit
 
+}
+
+object FileSystemBasedIndexMetadataStore extends StrictLogging {
+  val genFileV1Magic = 0x5b
+  val snapFileV1Magic = 0x5c
+  val expectedGenerationEnv = "INDEX_GENERATION"
+
+  def expectedVersion(expectedVersion: String): Option[Int] = {
+    if (expectedVersion != null) {
+      logger.info("Expected version for the index from env is {}", expectedVersion)
+      Try(Integer.parseInt(expectedVersion)) match {
+        case Success(parsedVersion)   => Some(parsedVersion)
+        case Failure(e)               => logger.warn("Failed while parsing index generation", e)
+          None
+      }
+    } else None
+  }
+}
+/**
+ * File system based metadata store that uses filesystem for storing the metadata. For rebuilds, current implementation
+ * supports a rebuild of entire DS cluster and not just targeted shards for simplicity.
+ *
+ * @param rootDirectory
+ * @param expectedGeneration: The expected generation of the metadata. If None is found, no rebuild will be triggered
+ *                            The checks for generation will run only when a valid integer generation is passed
+ * @param maxRefreshHours:    Refreshing for a large duration is not efficient and it will be faster to rebuild the
+ *                            index from scratch, if a snapFile and the elapsed time between now and and lastSync
+ *                            time is greater than maxRefreshHours, initState will respond with TriggerRebuild
+ */
+class FileSystemBasedIndexMetadataStore(rootDirectory: String, expectedGeneration: Option[Int],
+                                        maxRefreshHours: Long = Long.MaxValue)
+  extends IndexMetadataStore with StrictLogging {
+
+  val genFilePathFormat = rootDirectory + File.separator + "_%s_%d_rebuild.gen"
+  val snapFilePathFormat = rootDirectory + File.separator + "_%s_%d_snap"
+
+  private def hour(millis: Long = System.currentTimeMillis()): Long = millis / 1000 / 60 / 60
+
+  /**
+   * Init state is only queried when index is instantiated, the filesystem based implementation uses the file
+   * /<rootDirectory>/_<dataset>_<shard>_rebuild.gen file for triggering the rebuild, following cases will decide
+   * if a rebuild is triggered
+   *       a. If no expectedVersion is provided, then simply call currentState
+   *       b. If the file is absent, the state is assumed to be rebuild and the index will be rebuilt.
+   *       c. If the file is present and the contents are garbled, its assumed to be a rebuild of index.
+   *       d. If the file is present and the content returns the current generation (a numeric version),
+   *          the value is compared to an expected environment value and if the environment variable has a generation,
+   *          greater than the one in the file, a rebuild is triggered.
+   *       e. If sync file is present and the time in sync file is more than maxRefreshHours in the past than now,
+   *          a rebuild will be triggered
+   *       f. If none of the above cases trigger a rebuild, the currentState method is used to determine the state
+   * @param datasetRef The dataset ref
+   * @param shard the shard id of index
+   * @return a tuple of state and the option of time at which the state was recorded
+   */
+  override def initState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) = {
+    val snapFile = new File(snapFilePathFormat.format(datasetRef.dataset, shard))
+    expectedGeneration.map(expectedGen => {
+      // TODO: Simplify this code too many if else conditions.
+      val genFile = new File(genFilePathFormat.format(datasetRef.dataset, shard))
+      if (!genFile.exists()) {
+        logger.info("Gen file {} does not exist and expectedGen is {}, triggering rebuild",
+          genFile.toString, expectedGen)
+        (IndexState.TriggerRebuild, None)
+      } else {
+        Using(new FileInputStream(genFile)) { fin =>
+          val magicByte = fin.read()
+          if (magicByte != FileSystemBasedIndexMetadataStore.genFileV1Magic) {
+            // if first byte is not the expected magicByte then the file is not as expected and possibly garbled
+            logger.warn("Gen file {} exist and possibly corrupt, triggering rebuild", genFile.toString)
+            (IndexState.TriggerRebuild, None)
+          } else {
+            // If the first byte is magicByte read just the next 4 bytes. This ensures we just read what we need
+            val bytes = Array[Byte](0, 0, 0, 0)
+            if (fin.read(bytes) != 4) {
+              // Not able to read 4 bytes, the file is truncated and we will trigger a rebuild
+              logger.warn("Gen file {} with right magic bytes but less than 4 bytes for generation," +
+                " triggering rebuild", genFile.toString)
+              (IndexState.TriggerRebuild, None)
+            } else {
+              val generation = ByteBuffer.wrap(bytes).getInt()
+              if (expectedGen > generation) {
+                logger.info("Gen file {} has generation {} and expected generation is {}, triggering rebuild",
+                  genFile.toString, generation, expectedGen)
+                (IndexState.TriggerRebuild, None)
+              } else if (shouldRebuildIndexForOldSnap(datasetRef, shard, snapFile)) {
+                logger.info("lastSnapTime is more than {} hours from now, " +
+                  "for dataset={} and shard={}. Triggering index rebuild instead of syncing the delta",
+                  maxRefreshHours, datasetRef.toString, shard)
+                (IndexState.TriggerRebuild, None)
+              } else
+                currentState(datasetRef, shard)
+            }
+          }
+        }.get
+      }
+    }).getOrElse(
+      if (shouldRebuildIndexForOldSnap(datasetRef, shard, snapFile))
+        (IndexState.TriggerRebuild, None)
+      else
+        currentState(datasetRef, shard)
+    )
+  }
+
+  /**
+   * Determines if the rebuild of index should be triggered based on how old the snap is in snap file
+   * @param datasetRef
+   * @param shard
+   * @param snapFile
+   * @return
+   */
+  private def shouldRebuildIndexForOldSnap(datasetRef: DatasetRef, shard: Int, snapFile: File): Boolean=
+    if (snapFile.exists()) {
+      Using(new FileInputStream(snapFile)) { fin =>
+        getSnapTime(snapFile.toString, fin) match {
+          case Success(snapTime)    =>  hour() - hour(snapTime) > maxRefreshHours
+          case Failure(_)           =>  true
+        }
+      }.get
+    } else
+      false
+
+/**
+   * The /<rootDirectory>/_<dataset>_<shard>_snap file contains the last time the index for the given dataset and shard
+   * was synched. Current implementation only supports storing Synced state and no state related information is stored
+   * in the snap file. The file contains the magic byte followed by 8 bytes for the long value for the timestamp
+   * starting with most to least significant bytes
+   *
+   * In case the snap file does not exists, magic is not as expected or the file is corrupt, RebuildIndex will be
+   * triggered
+   *
+   * @param datasetRef The dataset ref
+   * @param shard the shard id of index
+   * @return a tuple of state and the option of time at which the state was recorded
+   */
+
+  override def currentState(datasetRef: DatasetRef, shard: Int): (IndexState.Value, Option[Long]) = {
+    val snapFile = new File(snapFilePathFormat.format(datasetRef.dataset, shard))
+    if (!snapFile.exists()) {
+      logger.info("Snap file {} does not exist , triggering rebuild", snapFile.toString)
+      (IndexState.Empty, None)
+    } else {
+      Using(new FileInputStream(snapFile)) { fin =>
+        getSnapTime(snapFile.toString, fin) match {
+          case Success(snapTime)    =>
+                                        logger.info("Found lastSyncTime={} for dataset={} and shard={}",
+                                          snapTime, datasetRef.toString, shard)
+                                        (IndexState.Synced, Some(snapTime))
+          case Failure(e)           =>  throw e           // Failure to read the snap file in currentState is fatal
+        }
+      }.get
+    }
+  }
+
+  /**
+   *  Gets the snapTime from the snap file
+   *
+   * @param snapFile   the snapFile
+   * @param fin        The input stream object for the file
+   * @return           Long snap time if file is valid
+   */
+  private def getSnapTime(snapFile: String, fin: FileInputStream): Try[Long] = {
+        val magicByte = fin.read()
+        if (magicByte != FileSystemBasedIndexMetadataStore.snapFileV1Magic) {
+          // if first byte is not the expected magicByte then the file is not as expected and possibly garbled
+          logger.warn(" Snap {} exist and possibly corrupt, this will trigger a rebuild", snapFile.toString)
+          Failure(new IllegalStateException("Invalid magic bytes in snap file"))
+        } else {
+          // If the first byte is magicByte read just the next 8 bytes
+          val bytes = Array[Byte](0, 0, 0, 0, 0, 0, 0, 0)
+          if (fin.read(bytes) != 8) {
+            // Not able to read 8 bytes, the file is truncated and we will trigger a rebuild
+            logger.warn("Snap file {} with right magic bytes but less than 8 for time," +
+              " this will trigger a rebuild of index", snapFile.toString)
+            Failure(new IllegalStateException("Snap file truncated"))
+          } else {
+            val lastSyncTime = ByteBuffer.wrap(bytes).getLong()
+            Success(lastSyncTime)
+          }
+        }
+   }
+  /**
+   *  Updates the state of the index, the snap file will be updated with the correct timestamp in case the state
+   *  is Synced, on TriggerRebuild and Empty state the gen and/or snap file will be deleted. Also when the index is
+   *  updated and synced, it is important to ensure the gen file is updated with the current generation. This guarantees
+   *  that next time on the bootstrap, the initState should return Synced and not TriggerRebuild
+   *
+   * @param datasetRef The dataset ref
+   * @param shard the shard id of index
+   * @param state One of the IndexState.Values for the index
+   * @param time a time in millis since epoch for when the state was updated
+   */
+  // scalastyle:off method.length
+  override def updateState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit = {
+    state match {
+      case IndexState.Synced           =>  // Only handle cases where state is Synced
+                                    val snapFile = new File(snapFilePathFormat.format(datasetRef.dataset, shard))
+                                    val genFile = new File(genFilePathFormat.format(datasetRef.dataset, shard))
+                                    Using(new FileOutputStream(snapFile)){
+                                      // First write the last synced time to the snap file
+                                      snapFos =>
+                                        logger.info("Updating state of dataset={}, shard={} with syncTime={}",
+                                          datasetRef.toString, shard, time)
+                                        snapFos.write(snapFileV1Magic)
+                                        val buff = ByteBuffer.allocate(8)
+                                        buff.putLong(time)
+                                        snapFos.write(buff.array())
+                                    }.flatMap { _ =>
+                                      // If writing the snap file is successful, update the generation file so
+                                      // next call to initState does not trigger the rebuild. Note that these
+                                      // two operations are not atomic, we may still have the snap file updated but
+                                      // generation file not, in which case next call to initState will trigger
+                                      // the rebuild.
+                                      expectedGeneration.map{
+                                        generation =>
+                                          Using(new FileOutputStream(genFile)) { genFos =>
+                                            logger.info("Updating genFile " +
+                                              "of dataset={}, shard={} with generation={}",
+                                              datasetRef.toString, shard, generation)
+                                            genFos.write(genFileV1Magic)
+                                            val buff = ByteBuffer.allocate(4)
+                                            buff.putInt(generation)
+                                            genFos.write(buff.array())
+                                          }
+                                      }.getOrElse(Success(()))
+                                    }.get
+      case IndexState.TriggerRebuild   => // Delete gen file so next restart triggers the rebuild
+                                    val genFile = new File(genFilePathFormat.format(datasetRef.toString, shard))
+                                    val deleted = genFile.delete()
+                                    logger.info("genFile={} delete returned {} on TriggerRebuild, " +
+                                      "index will be rebuild on next restart of dataset={} and shard={}",
+                                      genFile, deleted, datasetRef.toString, shard)
+      case IndexState.Empty            => // Empty is invoked denoting the index directory is empty. This also signals
+                                          // metastore to delete the corresponding gen and snap file
+                                          val genFile = new File(genFilePathFormat.format(datasetRef.toString, shard))
+                                          val snapFile = new File(snapFilePathFormat.format(datasetRef.toString, shard))
+                                          val genDeleted = genFile.delete()
+                                          val snapDeleted = snapFile.delete()
+                                          logger.info("genFile={} delete returned {} and " +
+                                            "snapFile={} delete returned {} when empty state was triggered " +
+                                            "for dataset={} and shard={}",
+                                            genFile, genDeleted, snapFile, snapDeleted, datasetRef.toString, shard)
+      case _                           =>  //NOP
+    }
+  }
+  // scalastyle:on method.length
+
+  /**
+   * Updates the state of the index
+   * @param datasetRef The dataset ref
+   * @param shard the shard id of index
+   * @param state One of the IndexState.Values for the index
+   * @param time a time in millis since epoch for when the state was updated
+   */
+  override def updateInitState(datasetRef: DatasetRef, shard: Int, state: IndexState.Value, time: Long): Unit = ???
 }
 
 /**
