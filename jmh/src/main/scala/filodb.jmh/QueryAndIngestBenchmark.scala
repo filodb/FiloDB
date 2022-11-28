@@ -103,7 +103,7 @@ class QueryAndIngestBenchmark extends StrictLogging {
   val shards = (0 until numShards).map { s => memstore.getShardE(dataset.ref, s) }
 
   private def ingestSamples(noSamples: Int): Future[Unit] = Future {
-    TestTimeseriesProducer.timeSeriesData(startTime, numSeries)
+    TestTimeseriesProducer.timeSeriesData(startTime, numSeries, numMetricNames = 1, publishIntervalSec = 10)
       .take(noSamples * numSeries)
       .foreach { rec =>
         // we shouldn't ingest samples for same timestamps repeatedly. This will also result in out-of-order samples.
@@ -127,10 +127,10 @@ class QueryAndIngestBenchmark extends StrictLogging {
    * ## ========  Queries ===========
    * They are designed to match all the time series (common case) under a particular metric and job
    */
-  val queries = Seq("heap_usage{_ws_=\"demo\",_ns_=\"App-2\"}",  // raw time series
-                    """sum(rate(heap_usage{_ws_="demo",_ns_="App-2"}[1m]))""",
-                    """quantile(0.75, heap_usage{_ws_="demo",_ns_="App-2"})""",
-                    """sum_over_time(heap_usage{_ws_="demo",_ns_="App-2"}[1m])""")
+  val queries = Seq("heap_usage0{_ws_=\"demo\",_ns_=\"App-2\"}",  // raw time series
+                    """sum(rate(heap_usage0{_ws_="demo",_ns_="App-2"}[1m]))""",
+                    """quantile(0.75, heap_usage0{_ws_="demo",_ns_="App-2"})""",
+                    """sum_over_time(heap_usage0{_ws_="demo",_ns_="App-2"}[1m])""")
   val queryTime = startTime + (5 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
