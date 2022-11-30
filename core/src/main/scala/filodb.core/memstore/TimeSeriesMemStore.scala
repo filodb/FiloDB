@@ -47,7 +47,7 @@ extends TimeSeriesStore with StrictLogging {
   private lazy val ingestionMemory = filodbConfig.getMemorySize("memstore.ingestion-buffer-mem-size").toBytes
 
   private[this] lazy val ingestionMemFactory: NativeMemoryManager = {
-    logger.info(s"Allocating $datasetMemFactories bytes for WriteBufferPool/PartitionKeys")
+    logger.info(s"Allocating $ingestionMemory bytes for WriteBufferPool/PartitionKeys")
     val tags = Map.empty[String, String]
     new NativeMemoryManager(ingestionMemory, tags)
   }

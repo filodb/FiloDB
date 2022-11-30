@@ -10,4 +10,6 @@ addSbtPlugin("net.virtual-void" % "sbt-dependency-graph" % "0.10.0-RC1")
 
 addSbtPlugin("io.kamon" % "sbt-kanela-runner" % "2.0.6")
 
+addSbtPlugin("io.gatling" % "gatling-sbt" % "3.2.2")
+
 resolvers += "sonatype-releases" at "https://oss.sonatype.org/content/repositories/releases/"
