@@ -182,7 +182,7 @@ class Downsampler(settings: DownsamplerSettings,
       }
 
     // Export the data produced by "getExportRows" above.
-    if (!rdd.isEmpty()) {
+    if (settings.exportIsEnabled) {
       val exportStartMs = System.currentTimeMillis()
       // NOTE: toDF(partitionCols: _*) seems buggy
       spark.createDataFrame(rdd, batchExporter.exportSchema)
