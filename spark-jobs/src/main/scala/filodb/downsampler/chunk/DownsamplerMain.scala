@@ -182,7 +182,7 @@ class Downsampler(settings: DownsamplerSettings,
       }
 
     // Export the data produced by "getExportRows" above.
-    if (!rdd.isEmpty()) {
+    if (settings.exportIsEnabled) {
       val exportStartMs = System.currentTimeMillis()
       // NOTE: toDF(partitionCols: _*) seems buggy
       spark.createDataFrame(rdd, batchExporter.exportSchema)
@@ -193,6 +193,8 @@ class Downsampler(settings: DownsamplerSettings,
         .csv(settings.exportBucket)
       val exportEndMs = System.currentTimeMillis()
       exportLatency.record(exportEndMs - exportStartMs)
+    } else {
+      rdd.foreach(_ => {})
     }
 
     DownsamplerContext.dsLogger.info(s"Chunk Downsampling Driver completed successfully for downsample period " +
