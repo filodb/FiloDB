@@ -193,6 +193,8 @@ class Downsampler(settings: DownsamplerSettings,
         .csv(settings.exportBucket)
       val exportEndMs = System.currentTimeMillis()
       exportLatency.record(exportEndMs - exportStartMs)
+    } else {
+      rdd.foreach(_ => {})
     }
 
     DownsamplerContext.dsLogger.info(s"Chunk Downsampling Driver completed successfully for downsample period " +
