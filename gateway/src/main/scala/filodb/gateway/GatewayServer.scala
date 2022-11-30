@@ -75,7 +75,7 @@ object GatewayServer extends StrictLogging {
   class GatewayOptions(args: Seq[String]) extends ScallopConf(args) {
     val samplesPerSeries = opt[Int](short = 'n', default = Some(100),
                                     descr = "# of samples per time series")
-    val numSeries = opt[Int](short = 'p', default = Some(20), descr = "# of total time series")
+    val numSeriesPerMetric = opt[Int](short = 'p', default = Some(20), descr = "# of total time series per metric")
     val sourceConfigPath = trailArg[String](descr = "Path to source config, eg conf/timeseries-dev-source.conf")
     val genHistData = toggle(noshort = true, descrYes = "Generate prom-histogram-schema test data and exit")
     val genDeltaHistData = toggle(noshort = true, descrYes = "Generate delta-histogram-schema test data and exit")
@@ -88,8 +88,8 @@ object GatewayServer extends StrictLogging {
   //scalastyle:off method.length
   def main(args: Array[String]): Unit = {
     val userOpts = new GatewayOptions(args)
-    val numSamples = userOpts.samplesPerSeries() * userOpts.numSeries() * userOpts.numMetrics()
-    val numSeries = userOpts.numSeries()
+    val numSamples = userOpts.samplesPerSeries() * userOpts.numSeriesPerMetric() * userOpts.numMetrics()
+    val numSeries = userOpts.numSeriesPerMetric()
 
     val sourceConfig = ConfigFactory.parseFile(new java.io.File(userOpts.sourceConfigPath()))
     val numShards = sourceConfig.getInt("num-shards")
