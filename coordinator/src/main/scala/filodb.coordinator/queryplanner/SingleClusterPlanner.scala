@@ -293,8 +293,7 @@ class SingleClusterPlanner(val dataset: Dataset,
           dsOptions.metricColumn, metric)
         // since target-schema filter is provided in the query, ingestionShard can be used to find the single shard
         // that can answer the query.
-        val ff = Seq(shardMapperFunc.ingestionShard(shardHash, partitionHash, spreadProvToUse.spreadFunc(filters).last.spread))
-        ff
+        Seq(shardMapperFunc.ingestionShard(shardHash, partitionHash, spreadProvToUse.spreadFunc(filters).last.spread))
       } else {
         shardMapperFunc.queryShards(shardHash, spreadProvToUse.spreadFunc(filters).last.spread)
       }
@@ -803,6 +802,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     (newFilters, schemaOpt)
   }
 
+  // scalastyle:off method.length
   private def materializeRawSeries(qContext: QueryContext,
                                    lp: RawSeries,
                                    forceInProcess: Boolean): PlanResult = {
@@ -856,6 +856,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     // when target-schema changes during query window, data might be ingested in different shards after the change.
     PlanResult(execPlans, needsStitch || tsChangeExists)
   }
+  // scalastyle:on method.length
 
   private def materializeLabelValues(qContext: QueryContext,
                                      lp: LabelValues,
