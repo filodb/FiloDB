@@ -246,8 +246,11 @@ class SingleClusterPlanner(val dataset: Dataset,
     materialized
   }
 
+  // scalastyle:off method.length
   def shardsFromFilters(filters: Seq[ColumnFilter],
                         qContext: QueryContext,
+                        startMs: Long,
+                        endMs: Long,
                         useTargetSchemaForShards: Boolean = false): Seq[Int] = {
 
     val spreadProvToUse = qContext.plannerParams.spreadOverride.getOrElse(spreadProvider)
@@ -275,7 +278,11 @@ class SingleClusterPlanner(val dataset: Dataset,
       val shardValues = shardVals.filterNot(_._1 == dsOptions.metricColumn).map(_._2)
       logger.debug(s"For shardColumns $shardColumns, extracted metric $metric and shard values $shardValues")
       val targetSchemaChange = targetSchemaProvider(qContext).targetSchemaFunc(filters)
-      val targetSchema = if (targetSchemaChange.nonEmpty) targetSchemaChange.last.schema else Seq.empty
+      val targetSchema = {
+        if (targetSchemaChange.nonEmpty) {
+          findTargetSchema(targetSchemaChange, startMs, endMs).map(tsc => tsc.schema).getOrElse(Seq.empty)
+        } else Seq.empty
+      }
       val shardHash = RecordBuilder.shardKeyHash(shardValues, dsOptions.metricColumn, metric, targetSchema)
       if(useTargetSchemaForShards) {
         val nonShardKeyLabelPairs = filters.filter(f => !shardColumns.contains(f.column)
@@ -286,12 +293,14 @@ class SingleClusterPlanner(val dataset: Dataset,
           dsOptions.metricColumn, metric)
         // since target-schema filter is provided in the query, ingestionShard can be used to find the single shard
         // that can answer the query.
-        Seq(shardMapperFunc.ingestionShard(shardHash, partitionHash, spreadProvToUse.spreadFunc(filters).last.spread))
+        val ff = Seq(shardMapperFunc.ingestionShard(shardHash, partitionHash, spreadProvToUse.spreadFunc(filters).last.spread))
+        ff
       } else {
         shardMapperFunc.queryShards(shardHash, spreadProvToUse.spreadFunc(filters).last.spread)
       }
     }
   }
+  // scalastyle:off method.length
 
   private def toChunkScanMethod(rangeSelector: RangeSelector): ChunkScanMethod = {
     rangeSelector match {
@@ -357,14 +366,17 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
   // scalastyle:on cyclomatic.complexity
 
+  // scalastyle:off method.length
   /**
    * Returns the shards spanned by a LogicalPlan's data.
    * @return an occupied Option iff shards could be determined for all leaf-level plans.
    */
-  private def getShardSpanFromLp(lp: LogicalPlan,
+  def getShardSpanFromLp(lp: LogicalPlan,
                                  qContext: QueryContext): Option[Set[Int]] = {
 
     case class LeafInfo(lp: LogicalPlan,
+                        startMs: Long,
+                        endMs: Long,
                         renamedFilters: Seq[ColumnFilter],
                         targetSchemaLabels: Option[Seq[String]])
 
@@ -377,16 +389,21 @@ class SingleClusterPlanner(val dataset: Dataset,
       leafPlan match {
         case rs: RawSeries =>
           // Get time params from the RangeSelector, and use them to identify a TargetSchemaChanges.
+          val startEndMsPairOpt = rs.rangeSelector match {
+            case is: IntervalSelector => Some((is.from, is.to))
+            case _ => None
+          }
           val tsLabels: Option[Seq[String]] = {
             val tsFunc = tsp.targetSchemaFunc(filters.head)
-            rs.rangeSelector match {
-              case is: IntervalSelector => findTargetSchema(tsFunc, is.from, is.to).map(_.schema)
+            startEndMsPairOpt match {
+              case Some((startMs, endMs)) => findTargetSchema(tsFunc, startMs, endMs).map(_.schema)
               case _ => None
             }
           }
-          leafInfos.append(LeafInfo(leafPlan, renameMetricFilter(filters.head), tsLabels))
+          val (startMs, endMs): (Long, Long) = startEndMsPairOpt.getOrElse((0, Long.MaxValue))
+          leafInfos.append(LeafInfo(leafPlan, startMs, endMs, renameMetricFilter(filters.head), tsLabels))
         // Do nothing; not pulling data from any shards.
-        case sc: ScalarPlan => {}
+        case sc: ScalarPlan => { }
         // Note!! If an unrecognized plan type is encountered, this just pessimistically returns None.
         case _ => return None
       }
@@ -402,9 +419,10 @@ class SingleClusterPlanner(val dataset: Dataset,
         val equalColFilterLabels = leaf.renamedFilters.filter(_.filter.isInstanceOf[Filter.Equals]).map(_.column)
         leaf.targetSchemaLabels.get.toSet.subsetOf(equalColFilterLabels.toSet)
       }
-      shardsFromFilters(leaf.renamedFilters, qContext, useTargetSchema)
+      shardsFromFilters(leaf.renamedFilters, qContext, leaf.startMs, leaf.endMs, useTargetSchema)
     }.toSet)
   }
+  // scalastyle:on method.length
 
   // scalastyle:off method.length
   // scalastyle:off cyclomatic.complexity
@@ -824,7 +842,12 @@ class SingleClusterPlanner(val dataset: Dataset,
     // provided in query filters (Equals), then find the target shard to route to using ingestionShard helper method.
     val useTSForQueryShards = !tsChangeExists && allTSLabelsPresent
 
-    val execPlans = shardsFromFilters(renamedFilters, qContext, useTSForQueryShards).map { shard =>
+    val (startMs, endMs): (Long, Long) = rangeSelectorWithOffset match {
+      case IntervalSelector(from, to) => (from, to)
+      case _ => (0, Long.MaxValue)
+    }
+
+    val execPlans = shardsFromFilters(renamedFilters, qContext, startMs, endMs, useTSForQueryShards).map { shard =>
       val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
       MultiSchemaPartitionsExec(qContext, dispatcher, dsRef, shard, renamedFilters,
         toChunkScanMethod(rangeSelectorWithOffset), dsOptions.metricColumn, schemaOpt, colName)
@@ -845,7 +868,7 @@ class SingleClusterPlanner(val dataset: Dataset,
 
     val renamedFilters = renameMetricFilter(lp.filters)
     val shardsToHit = if (canGetShardsFromFilters(renamedFilters, qContext)) {
-      shardsFromFilters(renamedFilters, qContext)
+      shardsFromFilters(renamedFilters, qContext, lp.startMs, lp.endMs)
     } else {
       mdNoShardKeyFilterRequests.increment()
       shardMapperFunc.assignedShards
@@ -877,7 +900,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                                     forceInProcess: Boolean): PlanResult = {
     val renamedFilters = renameMetricFilter(lp.filters)
     val shardsToHit = if (canGetShardsFromFilters(renamedFilters, qContext)) {
-      shardsFromFilters(renamedFilters, qContext)
+      shardsFromFilters(renamedFilters, qContext, lp.startMs, lp.endMs)
     } else {
       mdNoShardKeyFilterRequests.increment()
       shardMapperFunc.assignedShards
@@ -894,7 +917,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                                     lp: LabelCardinality,
                                           forceInProcess: Boolean): PlanResult = {
     val renamedFilters = renameMetricFilter(lp.filters)
-    val shardsToHit = shardsFromFilters(renamedFilters, qContext)
+    val shardsToHit = shardsFromFilters(renamedFilters, qContext, lp.startMs, lp.endMs)
 
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
@@ -929,7 +952,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     // No change in TargetSchema or not all target-schema labels are provided in the query
     val useTSForQueryShards = !tsChangeExists && allTSLabelsPresent
     val shardsToHit = if (useTSForQueryShards || canGetShardsFromFilters(renamedFilters, qContext)) {
-      shardsFromFilters(renamedFilters, qContext, useTSForQueryShards)
+      shardsFromFilters(renamedFilters, qContext, lp.startMs, lp.endMs, useTSForQueryShards)
     } else {
       mdNoShardKeyFilterRequests.increment()
       shardMapperFunc.assignedShards
@@ -948,7 +971,7 @@ class SingleClusterPlanner(val dataset: Dataset,
     // Translate column name to ID and validate here
     val colName = if (lp.column.isEmpty) None else Some(lp.column)
     val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))
-    val metaExec = shardsFromFilters(renamedFilters, qContext).map { shard =>
+    val metaExec = shardsFromFilters(renamedFilters, qContext, lp.startMs, lp.endMs).map { shard =>
       val dispatcher = dispatcherForShard(shard, forceInProcess, qContext)
       SelectChunkInfosExec(qContext, dispatcher, dsRef, shard, renamedFilters, toChunkScanMethod(lp.rangeSelector),
         schemaOpt, colName)
