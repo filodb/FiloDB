@@ -19,7 +19,7 @@ import monix.reactive.Observable
 import org.asynchttpclient.{AsyncHttpClientConfig, DefaultAsyncHttpClientConfig}
 import org.asynchttpclient.proxy.ProxyServer
 
-import filodb.core.QueryTimeoutException
+import filodb.core.{GlobalConfig, QueryTimeoutException}
 import filodb.core.query.{PromQlQueryParams, QuerySession, QueryStats}
 import filodb.core.store.ChunkSource
 import filodb.query._
@@ -72,6 +72,36 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     // FIXME: remote plans probably need their own dispatcher so they've got access
     //  to ExecPlanWithClientParams (and can therefore return partial results).
     Await.result(fut, FiniteDuration(remainingMillis, MILLISECONDS))
+  }
+
+  /**
+   * Legacy execute() logic; does not invoke super.execute().
+   * FIXME: this method should eventually be removed.
+   */
+  def executeLegacy(source: ChunkSource,
+                    querySession: QuerySession)(implicit sched: Scheduler): Task[QueryResponse] = {
+    if (queryEndpoint == null) {
+      throw new BadQueryException("Remote Query endpoint can not be null in RemoteExec.")
+    }
+
+    // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
+    // across threads. Note that task/observable will not run on the thread where span is present since
+    // kamon uses thread-locals.
+    val span = Kamon.currentSpan()
+    // Dont finish span since this code didnt create it
+    Kamon.runWithSpan(span, false) {
+      Task.fromFuture(sendHttpRequest(span, requestTimeoutMs))
+    }
+  }
+
+  override def execute(source: ChunkSource,
+                       querySession: QuerySession)(implicit sched: Scheduler): Task[QueryResponse] = {
+    // NOTE: this should no longer be overridden once executeLegacy is removed.
+    if (GlobalConfig.systemConfig.getBoolean("filodb.query.enable-legacy-remote-execute")) {
+      executeLegacy(source, querySession)
+    } else {
+      super.execute(source, querySession)
+    }
   }
 
   def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
