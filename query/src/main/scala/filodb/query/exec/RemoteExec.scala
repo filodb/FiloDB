@@ -2,8 +2,8 @@ package filodb.query.exec
 
 import java.util.concurrent.TimeUnit
 
-import scala.concurrent.Future
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.{Await, Future}
+import scala.concurrent.duration.{FiniteDuration, MILLISECONDS}
 import scala.sys.ShutdownHookThread
 
 import com.softwaremill.sttp.{DeserializationError, Response, SttpBackend, SttpBackendOptions}
@@ -15,9 +15,11 @@ import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
 import monix.execution.Scheduler
+import monix.reactive.Observable
 import org.asynchttpclient.{AsyncHttpClientConfig, DefaultAsyncHttpClientConfig}
 import org.asynchttpclient.proxy.ProxyServer
 
+import filodb.core.QueryTimeoutException
 import filodb.core.query.{PromQlQueryParams, QuerySession, QueryStats}
 import filodb.core.store.ChunkSource
 import filodb.query._
@@ -42,13 +44,9 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
   /**
    * Since execute is already overrided here, doExecute() can be empty.
    */
-  def doExecute(source: ChunkSource,
+  override def doExecute(source: ChunkSource,
                 querySession: QuerySession)
-               (implicit sched: Scheduler): ExecResult = ???
-
-  override def execute(source: ChunkSource,
-                       querySession: QuerySession)
-                      (implicit sched: Scheduler): Task[QueryResponse] = {
+               (implicit sched: Scheduler): ExecResult = {
     if (queryEndpoint == null) {
       throw new BadQueryException("Remote Query endpoint can not be null in RemoteExec.")
     }
@@ -57,10 +55,23 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     // across threads. Note that task/observable will not run on the thread where span is present since
     // kamon uses thread-locals.
     val span = Kamon.currentSpan()
-    // Dont finish span since this code didnt create it
-    Kamon.runWithSpan(span, false) {
-      Task.fromFuture(sendHttpRequest(span, requestTimeoutMs))
+    val elapsedMillis = System.currentTimeMillis() - queryContext.submitTime
+    val remainingMillis = queryContext.plannerParams.queryTimeoutMillis - elapsedMillis
+    if (remainingMillis <= 0) {
+      throw QueryTimeoutException(elapsedMillis, "RemoteExec::doExecute (before remote request)")
     }
+    // Dont finish span since this code didnt create it
+    val fut = Kamon.runWithSpan(span, false) {
+      sendHttpRequest(span, requestTimeoutMs)
+        .map {
+          case QueryResult(_, resultSchema, result, _, _, _) =>
+            ExecResult(Observable.fromIterable(result), Task.now(resultSchema))
+          case QueryError(_, _, t) => throw t
+        }
+    }
+    // FIXME: remote plans probably need their own dispatcher so they've got access
+    //  to ExecPlanWithClientParams (and can therefore return partial results).
+    Await.result(fut, FiniteDuration(remainingMillis, MILLISECONDS))
   }
 
   def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
