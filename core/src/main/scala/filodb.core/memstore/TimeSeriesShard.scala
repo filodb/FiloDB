@@ -276,6 +276,8 @@ class TimeSeriesShard(val ref: DatasetRef,
                            filodbConfig.getBoolean("memstore.index-faceting-enabled-shard-key-labels")
   private val indexFacetingEnabledAllLabels = filodbConfig.getBoolean("memstore.index-faceting-enabled-for-all-labels")
   private val numParallelFlushes = filodbConfig.getInt("memstore.flush-task-parallelism")
+  private val requestGCAfterIndexMerge = filodbConfig.getBoolean("memstore.index-faceting-enabled-for-all-labels")
+  private val minDurationBetweenGC = filodbConfig.getLong("memstore.min-duration-between-gc")
 
   /////// END CONFIGURATION FIELDS ///////////////////
 
@@ -303,7 +305,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part,
     indexFacetingEnabledAllLabels, indexFacetingEnabledShardKeyLabels, shardNum,
-    storeConfig.diskTTLSeconds * 1000)
+    storeConfig.diskTTLSeconds * 1000,
+    requestGCAfterMerge = this.requestGCAfterIndexMerge,
+    minDurationBetweenGC = this.minDurationBetweenGC)
 
   private val cardTracker: CardinalityTracker = initCardTracker()
 

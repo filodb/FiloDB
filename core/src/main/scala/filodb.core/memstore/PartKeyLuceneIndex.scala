@@ -103,7 +103,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                          retentionMillis: Long, // only used to calculate fallback startTime
                          diskLocation: Option[File] = None,
                          val lifecycleManager: Option[IndexMetadataStore] = None,
-                         useMemoryMappedImpl: Boolean = true
+                         useMemoryMappedImpl: Boolean = true,
+                         requestGCAfterMerge: Boolean = false,
+                         minDurationBetweenGC: Long = 24 * 60 * 60 * 1000L
                         ) extends StrictLogging {
 
   import PartKeyLuceneIndex._
@@ -185,7 +187,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   private val indexWriter =
     try {
-      new IndexWriterPlus(fsDirectory, createIndexWriterConfig(), ref, shardNum)
+      new IndexWriterPlus(fsDirectory, createIndexWriterConfig(), ref, shardNum,
+          requestGCAfterMerge, minDurationBetweenGC)
     } catch {
       case e: Exception =>
         // If an exception is thrown here there is something wrong with the index or the directory
@@ -204,7 +207,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
             throw new IllegalStateException("Unable to clean up index directory", t)
         }
         // Retry again after cleaning up the index directory, if it fails again, something needs to be looked into.
-        new IndexWriterPlus(fsDirectory, createIndexWriterConfig(), ref, shardNum)
+        new IndexWriterPlus(fsDirectory, createIndexWriterConfig(), ref, shardNum,
+          requestGCAfterMerge, minDurationBetweenGC)
     }
 
   private val utf8ToStrCache = concurrentCache[UTF8Str, String](PartKeyLuceneIndex.MAX_STR_INTERN_ENTRIES)
