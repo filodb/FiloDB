@@ -378,6 +378,49 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
   }
 
+  it("should apply the target schema appropriate to the query range") {
+
+    val tschemas = Seq(
+      TargetSchemaChange(0L, Seq("foo")),
+      TargetSchemaChange(10000, Seq("bar")),
+      TargetSchemaChange(20000, Seq("foo")),
+      TargetSchemaChange(30000, Seq("bar")),
+    )
+
+    // Oscillate between "foo" and "bar" as the schema
+    val queryRanges = Seq(
+      (1000L,  9000L),
+      (11000L, 19000L),
+      (21000L, 29000L),
+      (31000L, 39000L),
+    )
+
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 5))
+    }
+
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      tschemas
+    }
+
+    val tspOverride = Some(FunctionalTargetSchemaProvider(targetSchema))
+    val spreadOverride = Some(FunctionalSpreadProvider(spread))
+    val qContext = QueryContext(
+      plannerParams = PlannerParams(
+        spreadOverride = spreadOverride,
+        targetSchemaProviderOverride = tspOverride))
+
+    queryRanges.flatMap { case (start, end) =>
+      engine.shardsFromFilters(
+        Seq(
+          ColumnFilter("job", Equals("hello")),
+          ColumnFilter("__name__", Equals("name")),
+          ColumnFilter("foo", Equals("abcdefg")),
+          ColumnFilter("bar", Equals("hijklmnop")),
+        ), qContext, start, end, useTargetSchemaForShards = true)
+    } should contain theSameElementsAs Seq(22, 15, 22, 15)
+  }
+
   it("should create a single plan and not stitch results when target-schema has not changed in query range") {
     val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {

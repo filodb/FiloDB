@@ -539,7 +539,7 @@ class RecordBuilder(memFactory: MemFactory,
       val recordNumBytes = curRecEndOffset - curRecordOffset
       val oldOffset = curRecordOffset
       if (reuseOneContainer) resetContainerPointers() else newContainer()
-      logger.debug(s"Moving $recordNumBytes bytes from end of old container to new container")
+      logger.trace(s"Moving $recordNumBytes bytes from end of old container to new container")
       require((containerSize - ContainerHeaderLen) > (recordNumBytes + numBytes), "Record too big for container")
       unsafe.copyMemory(oldBase, oldOffset, curBase, curRecordOffset, recordNumBytes)
       if (mapOffset != -1L) mapOffset = curRecordOffset + (mapOffset - oldOffset)
@@ -550,7 +550,7 @@ class RecordBuilder(memFactory: MemFactory,
     val (newBase, newOff, _) = memFactory.allocate(containerSize)
     val container = new RecordContainer(newBase, newOff, containerSize)
     containers += container
-    logger.debug(s"Creating new RecordContainer with $containerSize bytes using $memFactory")
+    logger.trace(s"Creating new RecordContainer with $containerSize bytes using $memFactory")
     curBase = newBase
     curRecordOffset = newOff + ContainerHeaderLen
     curRecEndOffset = curRecordOffset

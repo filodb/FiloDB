@@ -77,7 +77,8 @@ object Dependencies {
     "org.rocksdb"                  % "rocksdbjni"         % "6.29.5",
     "com.esotericsoftware"         % "kryo"               % "4.0.0" excludeAll(excludeMinlog),
     "com.dorkbox"                  % "MinLog-SLF4J"       % "1.12",
-    "com.github.ben-manes.caffeine" % "caffeine"          % "3.0.5"
+    "com.github.ben-manes.caffeine" % "caffeine"          % "3.0.5",
+    "com.twitter"                  %% "chill"             % "0.9.3"
   )
 
   lazy val sparkJobsDeps = commonDeps ++ Seq(
@@ -193,6 +194,11 @@ object Dependencies {
 
   lazy val jmhDeps = Seq(
     "org.apache.spark" %% "spark-sql" % sparkVersion excludeAll(excludeSlf4jLog4j, excludeZK, excludeJersey)
+  )
+
+  lazy val gatlingDeps = Seq(
+      "io.gatling.highcharts" % "gatling-charts-highcharts" % "3.2.0" % "test,it",
+      "io.gatling"            % "gatling-test-framework"    % "3.2.0" % "test,it"
   )
 
   //  lazy val stressDeps = Seq(

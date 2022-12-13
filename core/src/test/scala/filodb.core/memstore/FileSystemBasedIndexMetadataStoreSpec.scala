@@ -333,19 +333,19 @@ class FileSystemBasedIndexMetadataStoreSpec extends AnyFunSpec with Matchers wit
   }
 
   it("should parse the expectedVersion when a numeric value as String is provided") {
-    FileSystemBasedIndexMetadataStore.expectedVersion("123") shouldEqual Some(123)
+    FileSystemBasedIndexMetadataStore.expectedVersion(Some("123")) shouldEqual Some(123)
   }
 
   it("should return None if null string is provided") {
-    FileSystemBasedIndexMetadataStore.expectedVersion(null) shouldEqual None
+    FileSystemBasedIndexMetadataStore.expectedVersion(None) shouldEqual None
   }
 
   it("should return None if non numeric string is provided") {
-    FileSystemBasedIndexMetadataStore.expectedVersion("test") shouldEqual None
+    FileSystemBasedIndexMetadataStore.expectedVersion(Some("test")) shouldEqual None
   }
 
   it("should return None if overflowing numeric string is provided") {
-    FileSystemBasedIndexMetadataStore.expectedVersion("12345678686774553466 ") shouldEqual None
+    FileSystemBasedIndexMetadataStore.expectedVersion(Some("12345678686774553466 ")) shouldEqual None
   }
 }
 // scalastyle:on

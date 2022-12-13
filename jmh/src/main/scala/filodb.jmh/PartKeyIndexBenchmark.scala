@@ -31,7 +31,8 @@ class PartKeyIndexBenchmark {
   val partKeyIndex = new PartKeyLuceneIndex(ref, untyped.partition, true, true,0, 1.hour.toMillis)
   val numSeries = 1000000
   val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory, RecordBuilder.DefaultContainerSize, false)
-  val untypedData = TestTimeseriesProducer.timeSeriesData(0, numSeries) take numSeries
+  val untypedData = TestTimeseriesProducer.timeSeriesData(0, numSeries,
+           numMetricNames = 1, publishIntervalSec = 10) take numSeries
   untypedData.foreach(_.addToBuilder(ingestBuilder))
 
   val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, RecordBuilder.DefaultContainerSize, false)
@@ -74,7 +75,7 @@ class PartKeyIndexBenchmark {
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
             ColumnFilter("_ws_", Filter.Equals("demo")),
             ColumnFilter("host", Filter.EqualsRegex("H0")),
-            ColumnFilter("_metric_", Filter.Equals("heap_usage"))),
+            ColumnFilter("_metric_", Filter.Equals("heap_usage0"))),
         now,
         now + 1000)
     }
@@ -90,7 +91,7 @@ class PartKeyIndexBenchmark {
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-${i + 200}")),
           ColumnFilter("_ws_", Filter.Equals("demo")),
           ColumnFilter("host", Filter.EqualsRegex("H0")),
-          ColumnFilter("_metric_", Filter.Equals("heap_usage"))),
+          ColumnFilter("_metric_", Filter.Equals("heap_usage0"))),
         now,
         now + 1000)
     }
@@ -105,7 +106,7 @@ class PartKeyIndexBenchmark {
       partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
           ColumnFilter("_ws_", Filter.Equals("demo")),
-          ColumnFilter("_metric_", Filter.Equals("heap_usage")),
+          ColumnFilter("_metric_", Filter.Equals("heap_usage0")),
           ColumnFilter("instance", Filter.EqualsRegex("Instance-2.*"))),
         now,
         now + 1000)
@@ -121,7 +122,7 @@ class PartKeyIndexBenchmark {
       partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
           ColumnFilter("_ws_", Filter.Equals("demo")),
-          ColumnFilter("_metric_", Filter.Equals("heap_usage")),
+          ColumnFilter("_metric_", Filter.Equals("heap_usage0")),
           ColumnFilter("instance", Filter.EqualsRegex(".*2"))),
         now,
         now + 1000)

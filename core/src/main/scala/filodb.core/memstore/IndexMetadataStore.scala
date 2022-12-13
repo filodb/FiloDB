@@ -96,15 +96,15 @@ object FileSystemBasedIndexMetadataStore extends StrictLogging {
   val snapFileV1Magic = 0x5c
   val expectedGenerationEnv = "INDEX_GENERATION"
 
-  def expectedVersion(expectedVersion: String): Option[Int] = {
-    if (expectedVersion != null) {
+  def expectedVersion(expectedVersion: Option[String]): Option[Int] = {
+    expectedVersion.flatMap(value => {
       logger.info("Expected version for the index from env is {}", expectedVersion)
-      Try(Integer.parseInt(expectedVersion)) match {
-        case Success(parsedVersion)   => Some(parsedVersion)
-        case Failure(e)               => logger.warn("Failed while parsing index generation", e)
+      Try(Integer.parseInt(value)) match {
+        case Success(parsedVersion) => Some(parsedVersion)
+        case Failure(e) => logger.warn("Failed while parsing index generation", e)
           None
       }
-    } else None
+    })
   }
 }
 /**

@@ -34,7 +34,9 @@ import filodb.query.exec.UnknownSchemaQueryErr
   *
   * All of the necessary params for the behavior are loaded from DownsampleSettings.
   */
-class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Serializable {
+class BatchDownsampler(settings: DownsamplerSettings,
+                       userTimeStart: Long,
+                       userTimeEndExclusive: Long) extends Instance with Serializable {
 
   @transient lazy val numBatchesStarted = Kamon.counter("num-batches-started").withoutTags()
   @transient lazy val numBatchesCompleted = Kamon.counter("num-batches-completed").withoutTags()
@@ -114,9 +116,8 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
     * Downsample batch of raw partitions, and store downsampled chunks to cassandra
     */
   // scalastyle:off method.length
-  def downsampleBatch(readablePartsBatch: Seq[ReadablePartition],
-                      userTimeStart: Long,
-                      userTimeEndExclusive: Long): Unit = {
+  def downsampleBatch(readablePartsBatch: Seq[ReadablePartition]): Unit = {
+
     DownsamplerContext.dsLogger.info(s"Starting to downsample batchSize=${readablePartsBatch.size} partitions " +
       s"rawDataset=${settings.rawDatasetName} for " +
       s"userTimeStart=${java.time.Instant.ofEpochMilli(userTimeStart)} " +
@@ -144,7 +145,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
             try {
               val shouldTrace = settings.shouldTrace(pkPairs)
               downsamplePart(offHeapMem, part, pagedPartsToFree, downsampledPartsToFree,
-                downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder, shouldTrace)
+                             downsampledChunksToPersist, dsRecordBuilder, shouldTrace)
               numPartitionsCompleted.increment()
             } catch { case e: Exception =>
               DownsamplerContext.dsLogger.error(s"Error occurred when downsampling partition $pkPairs", e)
@@ -193,8 +194,6 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
                              pagedPartsToFree: ArrayBuffer[PagedReadablePartition],
                              downsampledPartsToFree: ArrayBuffer[TimeSeriesPartition],
                              downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]],
-                             userTimeStart: Long,
-                             userTimeEndExclusive: Long,
                              dsRecordBuilder: RecordBuilder,
                              shouldTrace: Boolean) = {
 
@@ -225,8 +224,8 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
         }.toMap
 
         val downsamplePartStart = System.currentTimeMillis()
-        downsampleChunks(offHeapMem, readablePart, downsamplers, periodMarker, downsampledParts,
-                         userTimeStart, userTimeEndExclusive, dsRecordBuilder, shouldTrace)
+        downsampleChunks(offHeapMem, readablePart, downsamplers, periodMarker,
+                         downsampledParts, dsRecordBuilder, shouldTrace)
 
         downsampledPartsToFree ++= downsampledParts.values
 
@@ -256,8 +255,6 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
                                downsamplers: Seq[ChunkDownsampler],
                                periodMarker: DownsamplePeriodMarker,
                                downsampleResToPart: Map[FiniteDuration, TimeSeriesPartition],
-                               userTimeStart: Long,
-                               userTimeEndExclusive: Long,
                                dsRecordBuilder: RecordBuilder,
                                shouldTrace: Boolean) = {
 
