@@ -80,7 +80,8 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   // Manually pump in data ourselves so we know when it's done.
   Thread sleep 2000    // Give setup command some time to set up dataset shards etc.
   val (producingFut, containerStream) = TestTimeseriesProducer.metricsToContainerStream(ingestionStartTime,
-    numShards, numSeries, numSamples * numSeries, dataset, shardMapper, spread)
+    numShards, numSeries, numMetricNames = 1, numSamples * numSeries, dataset,
+    shardMapper, spread, publishIntervalSec = 10)
   val ingestTask = containerStream.groupBy(_._1)
                     // Asynchronously subcribe and ingest each shard
                     .mapParallelUnordered(numShards) { groupedStream =>
@@ -124,7 +125,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
     cluster.shutdown()
   }
 
-  val scanSumOfRate = toExecPlan("""sum(rate(heap_usage{_ws_="demo",_ns_="App-2"}[5m]))""")
+  val scanSumOfRate = toExecPlan("""sum(rate(heap_usage0{_ws_="demo",_ns_="App-2"}[5m]))""")
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
@@ -136,7 +137,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
     }
   }
 
-  val scanSumSumOverTime = toExecPlan("""sum(sum_over_time(heap_usage{_ws_="demo",_ns_="App-2"}[5m]))""")
+  val scanSumSumOverTime = toExecPlan("""sum(sum_over_time(heap_usage0{_ws_="demo",_ns_="App-2"}[5m]))""")
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)

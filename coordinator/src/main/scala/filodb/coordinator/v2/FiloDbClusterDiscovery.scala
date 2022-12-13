@@ -126,7 +126,8 @@ class FiloDbClusterDiscovery(settings: FilodbSettings,
   }
 
   def shardMapper(ref: DatasetRef): ShardMapper = {
-    datasetToMapper.get(ref)
+    val mapper = datasetToMapper.get(ref)
+    if (mapper == null) new ShardMapper(0) else mapper
   }
 
   def shutdown(): Unit = {

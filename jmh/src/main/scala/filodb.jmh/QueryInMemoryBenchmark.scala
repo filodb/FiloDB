@@ -96,7 +96,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   // TODO: ingest into multiple shards
   Thread sleep 2000    // Give setup command some time to set up dataset shards etc.
   val (producingFut, containerStream) = TestTimeseriesProducer.metricsToContainerStream(startTime, numShards, numSeries,
-                                          numSamples * numSeries, dataset, shardMapper, spread)
+               numMetricNames = 1, numSamples * numSeries, dataset, shardMapper, spread, publishIntervalSec = 10)
   val ingestTask = containerStream.groupBy(_._1)
                     // Asynchronously subcribe and ingest each shard
                     .mapParallelUnordered(numShards) { groupedStream =>
@@ -123,12 +123,12 @@ class QueryInMemoryBenchmark extends StrictLogging {
    * ## ========  Queries ===========
    * They are designed to match all the time series (common case) under a particular metric and job
    */
-  val rawQuery = "heap_usage{_ws_=\"demo\",_ns_=\"App-2\"}"
-  val sumQuery = """sum_over_time(heap_usage{_ws_="demo",_ns_="App-2"}[5m])"""
-  val sumRateQuery = """sum(rate(heap_usage{_ws_="demo",_ns_="App-2"}[5m]))"""
+  val rawQuery = "heap_usage0{_ws_=\"demo\",_ns_=\"App-2\"}"
+  val sumQuery = """sum_over_time(heap_usage0{_ws_="demo",_ns_="App-2"}[5m])"""
+  val sumRateQuery = """sum(rate(heap_usage0{_ws_="demo",_ns_="App-2"}[5m]))"""
   val queries = Seq(rawQuery,  // raw time series
                     sumRateQuery,
-                    """quantile(0.75, heap_usage{_ws_="demo",_ns_="App-2"})""",
+                    """quantile(0.75, heap_usage0{_ws_="demo",_ns_="App-2"})""",
                     sumQuery)
   val queryTime = startTime + (7 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
@@ -217,7 +217,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
     Await.result(f, 60.seconds)
   }
 
-  val minQuery = """min_over_time(heap_usage{_ws_="demo",_ns_="App-2"}[5m])"""
+  val minQuery = """min_over_time(heap_usage0{_ws_="demo",_ns_="App-2"}[5m])"""
   val minLP = Parser.queryRangeToLogicalPlan(minQuery, qParams)
   val minEP = engine.materialize(minLP, qContext).children.head
 
