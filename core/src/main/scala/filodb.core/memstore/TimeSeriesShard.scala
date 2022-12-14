@@ -276,7 +276,7 @@ class TimeSeriesShard(val ref: DatasetRef,
                            filodbConfig.getBoolean("memstore.index-faceting-enabled-shard-key-labels")
   private val indexFacetingEnabledAllLabels = filodbConfig.getBoolean("memstore.index-faceting-enabled-for-all-labels")
   private val numParallelFlushes = filodbConfig.getInt("memstore.flush-task-parallelism")
-  private val requestGCAfterIndexMerge = filodbConfig.getBoolean("memstore.index-faceting-enabled-for-all-labels")
+  private val requestGCAfterIndexMerge = filodbConfig.getBoolean("memstore.request-gc-after-index-merge")
   private val minDurationBetweenGC = filodbConfig.getLong("memstore.min-duration-between-gc")
 
   /////// END CONFIGURATION FIELDS ///////////////////
