@@ -32,6 +32,8 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
                                             |filodb.memstore.ensure-block-memory-headroom-percent = 10
                                             |filodb.memstore.ensure-tsp-count-headroom-percent = 10
                                             |filodb.memstore.ensure-native-memory-headroom-percent = 10
+                                            |filodb.memstore.request-gc-after-index-merge = false
+                                            |filodb.memstore.min-duration-between-gc = 86400000
                                             |  """.stripMargin)
                             .withFallback(ConfigFactory.load("application_test.conf"))
                             .getConfig("filodb")
