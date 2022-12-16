@@ -124,6 +124,17 @@ brew install kafka
 brew services start zookeeper
 brew services start kafka
 ```
+You may see this error from kafka log if you use an M1 chip Mac.
+
+``
+/opt/homebrew/Cellar/kafka/3.3.1_1/libexec/bin/kafka-run-class.sh: line 342: /opt/homebrew/@@HOMEBREW_JAVA@@/bin/java: No such file or directory
+``
+
+To resolve the issue, you may run brew bottle to get the installation file and reinstall kafka through it.
+```
+brew bottle --skip-relocation kafka
+brew reinstall `ls kafka*bottle*`
+```
 
 Create a new Kafka topic with 4 partitions. This is where time series data will be ingested for FiloDB to consume
 ```
