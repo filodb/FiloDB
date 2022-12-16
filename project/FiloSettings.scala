@@ -205,6 +205,7 @@ object FiloSettings {
 
   lazy val assemblySettings = Seq(
     assemblyMergeStrategy in assembly := {
+      case PathList("com", "esotericsoftware", xs @ _*) => MergeStrategy.first
       case PathList("scala", "collection", "compat", xs @ _*) => MergeStrategy.first
       case PathList("scala", "annotation", "nowarn.class") => MergeStrategy.first
       case m if m.toLowerCase.matches("scala-collection-compat.properties") => MergeStrategy.first
