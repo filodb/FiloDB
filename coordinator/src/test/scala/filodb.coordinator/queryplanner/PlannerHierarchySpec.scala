@@ -65,9 +65,9 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
   val singlePartitionPlanner = new SinglePartitionPlanner(planners, "longTerm", plannerSelector,
     dataset, queryConfig)
 
-  private val partitionLocationProvider = new PartitionLocationProvider {
+  private val oneRemotePartitionLocationProvider = new PartitionLocationProvider {
     override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
-      if(routingKey.contains("_ns_")) {
+      if (routingKey.contains("_ns_")) {
         if (routingKey("_ns_") == "localNs") {
           List(PartitionAssignment("localPartition", "localPartition-url", TimeRange(timeRange.startMs, timeRange.endMs)))
         } else {
@@ -84,7 +84,30 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       List(PartitionAssignment("localPartition", "localPartition-url", TimeRange(timeRange.startMs, timeRange.endMs)),
         PartitionAssignment("remotePartition", "remotePartition-url", TimeRange(timeRange.startMs, timeRange.endMs)))
   }
-  val multiPartitionPlanner = new MultiPartitionPlanner(partitionLocationProvider, singlePartitionPlanner,
+
+
+  private val twoRemotePartitionLocationProvider = new PartitionLocationProvider {
+    override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+      routingKey("_ns_") match {
+        case "localNs" =>
+          List(PartitionAssignment("localPartition", "localPartition-url",
+            TimeRange(timeRange.startMs, timeRange.endMs)))
+        case "remoteNs0" =>
+          List(PartitionAssignment("remotePartition0", "remotePartition-url0",
+            TimeRange(timeRange.startMs, timeRange.endMs)))
+        case "remoteNs1" =>
+          List(PartitionAssignment("remotePartition1", "remote1Partition-url1",
+            TimeRange(timeRange.startMs, timeRange.endMs)))
+        case _ => throw new IllegalArgumentException("nope")
+      }
+    }
+    override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                       timeRange: TimeRange): List[PartitionAssignment] = ???
+  }
+
+  val oneRemoteMultiPartitionPlanner = new MultiPartitionPlanner(oneRemotePartitionLocationProvider, singlePartitionPlanner,
+    "localPartition", dataset, queryConfig)
+  val twoRemoteMultiPartitionPlanner = new MultiPartitionPlanner(twoRemotePartitionLocationProvider, singlePartitionPlanner,
     "localPartition", dataset, queryConfig)
 
   private val shardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
@@ -99,7 +122,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     } else Nil  // i.e. filters for a scalar
   }
 
-  private val remoteShardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
+  private val oneRemoteShardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
     if (shardColumnFilters.nonEmpty) {
       // to ensure that tests dont call something else that is not configured
       require(shardColumnFilters.exists(f => f.column == "_ns_" && f.filter.isInstanceOf[EqualsRegex]
@@ -109,9 +132,21 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       )
     } else Nil  // i.e. filters for a scalar
   }
+  private val twoRemoteShardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
+    if (shardColumnFilters.nonEmpty) {
+      // to ensure that tests dont call something else that is not configured
+      require(shardColumnFilters.exists(f => f.column == "_ns_" && f.filter.isInstanceOf[EqualsRegex]
+        && f.filter.asInstanceOf[EqualsRegex].pattern.toString == "remoteNs.*"))
+      Seq(
+        Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("remoteNs0"))),
+        Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("remoteNs1"))),
+      )
+    } else Nil  // i.e. filters for a scalar
+  }
 
-  val rootPlanner = new ShardKeyRegexPlanner(dataset, multiPartitionPlanner, shardKeyMatcherFn, queryConfig)
-  val oneRemoteRootPlanner = new ShardKeyRegexPlanner(dataset, multiPartitionPlanner, remoteShardKeyMatcherFn, queryConfig)
+  val rootPlanner = new ShardKeyRegexPlanner(dataset, oneRemoteMultiPartitionPlanner, shardKeyMatcherFn, queryConfig)
+  val oneRemoteRootPlanner = new ShardKeyRegexPlanner(dataset, oneRemoteMultiPartitionPlanner, oneRemoteShardKeyMatcherFn, queryConfig)
+  val twoRemoteRootPlanner = new ShardKeyRegexPlanner(dataset, twoRemoteMultiPartitionPlanner, twoRemoteShardKeyMatcherFn, queryConfig)
 
 
   private val startSeconds = now / 1000 - 10.days.toSeconds
