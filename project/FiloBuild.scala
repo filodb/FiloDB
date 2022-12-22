@@ -4,7 +4,8 @@ import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.MultiJvm
 import io.gatling.sbt.GatlingPlugin
 import pl.project13.scala.sbt.JmhPlugin
 import sbt._
-import sbt.Keys._
+import sbt.Keys.{libraryDependencies, _}
+import sbtprotoc.ProtocPlugin.autoImport.{AsProtocPlugin, PB}
 
 // All of the submodules are defined here.
 // This works around an issue where things in multiple build.sbt files cannot reference one another.
@@ -19,6 +20,26 @@ object Submodules {
       scalacOptions += "-language:postfixOps",
       libraryDependencies ++= memoryDeps
     )
+
+  lazy val grpc = (project in file("grpc"))
+    .settings(
+      commonSettings,
+      name := "filodb-grpc",
+      scalacOptions += "-language:postfixOps",
+      libraryDependencies ++=
+        Seq(
+             "javax.annotation" % "javax.annotation-api" % "1.3.2",
+             "io.grpc" % "grpc-protobuf" % "1.50.0",
+             "io.grpc" % "grpc-stub" % "1.50.0",
+             "io.grpc" % "grpc-netty-shaded" % "1.50.0",
+             "io.grpc" % "protoc-gen-grpc-java" % "1.51.1" asProtocPlugin()
+        ),
+      PB.protocVersion := "3.21.7",
+      PB.targets in Compile := Seq(
+        PB.gens.java  -> (sourceManaged in Compile).value,
+        PB.gens.plugin("grpc-java")      -> (sourceManaged in Compile).value,
+      )
+  )
 
   lazy val core = (project in file("core"))
     .dependsOn(memory % "compile->compile; test->test")
@@ -53,12 +74,13 @@ object Submodules {
       name := "filodb-prometheus",
       publishArtifact in (Compile, packageDoc) := false,
       publishArtifact in packageDoc := false,
-      sources in (Compile,doc) := Seq.empty,
+      sources in (Compile, doc) := Seq.empty,
       libraryDependencies ++= promDeps
     )
 
   lazy val query = (project in file("query"))
     .dependsOn(core % "compile->compile; test->test")
+    .dependsOn(grpc % "compile->compile")
     .settings(
       libraryDependencies ++= queryDeps,
       commonSettings,
@@ -122,7 +144,7 @@ object Submodules {
     )
 
   lazy val http = (project in file("http"))
-    .dependsOn(core, coordinator % "compile->compile; test->test")
+    .dependsOn(core, grpc, coordinator % "compile->compile; test->test")
     .settings(
       commonSettings,
       name := "http",

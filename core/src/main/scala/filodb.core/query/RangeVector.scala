@@ -394,6 +394,8 @@ final class SerializedRangeVector(val key: RangeVectorKey,
 
   override def estimateSerializedRowBytes: Long = containers.map(_.numBytes).sum
 
+  def containersIterator : Iterator[RecordContainer] = containers.toIterator
+
   /**
     * Pretty prints all the elements into strings using record schema
     */

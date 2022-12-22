@@ -1,16 +1,18 @@
 package filodb.standalone
 
-import scala.concurrent.duration._
-
 import akka.actor.ActorRef
 import akka.cluster.Cluster
 import com.typesafe.scalalogging.StrictLogging
+import scala.concurrent.duration._
 
 import filodb.akkabootstrapper.AkkaBootstrapper
 import filodb.coordinator._
 import filodb.coordinator.client.LocalClient
-import filodb.core.GlobalConfig
-import filodb.http.FiloHttpServer
+import filodb.coordinator.queryplanner.SingleClusterPlanner
+import filodb.core.{DatasetRef, GlobalConfig, GlobalScheduler}
+import filodb.core.metadata.{Dataset, Schemas}
+import filodb.core.query.QueryConfig
+import filodb.http.{FiloGrpcServer, FiloHttpServer}
 
 /**
  * FiloServer starts a "standalone" FiloDB server which can ingest and support queries through the Akka
@@ -46,6 +48,7 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
   lazy val config = cluster.settings.config
 
   var filoHttpServer: FiloHttpServer = _
+  var filoGrpcServer: FiloGrpcServer = _
 
   // Now, initialize any datasets using in memory MetaStore.
   // This is a hack until we are able to use CassandraMetaStore for standalone.  It is also a
@@ -65,6 +68,26 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
     val singleton = cluster.clusterSingleton(role, watcher)
     filoHttpServer = new FiloHttpServer(cluster.system, cluster.settings)
     filoHttpServer.start(coordinatorActor, singleton, false, bootstrapper.getAkkaHttpRoute())
+    Thread.sleep(100)
+    if (config.getBoolean("http.start-grpc-service")) {
+      // TODO: Remove hardcoding
+      val dsRef = DatasetRef("prometheus")
+      val v2Enabled = config.getBoolean("v2-cluster-enabled")
+      val queryConfig = QueryConfig(config.getConfig("query"))
+      def shardMapper = client.getShardMapper(dsRef, v2Enabled).get
+      client.getShardMapper(dsRef, v2Enabled) match {
+        case Some(_) =>
+          val dataset = new Dataset(dsRef.dataset, Schemas.promCounter)
+          val planner = new SingleClusterPlanner(dataset, Schemas.global,
+            shardMapper,
+            earliestRetainedTimestampFn = 0, queryConfig, "raw")
+          filoGrpcServer = new FiloGrpcServer(planner, cluster.settings, GlobalScheduler.globalImplicitScheduler)
+          filoGrpcServer.start()
+        case None              =>
+          logger.warn("Unable to get shardMapper, not starting gRPC service")
+      }
+    }
+
     // Launch the profiler after startup, if configured.
     SimpleProfiler.launch(systemConfig.getConfig("filodb.profiler"))
     KamonShutdownHook.registerShutdownHook()
