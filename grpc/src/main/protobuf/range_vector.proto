@@ -1,0 +1,58 @@
+syntax="proto3";
+
+package filodb.grpc;
+
+//import "google/protobuf/timestamp.proto";
+option java_outer_classname = "ProtoRangeVector";
+option java_generate_equals_and_hash = true;
+
+message RangeVector {
+  RangeVectorKey key                = 1;
+  uint32 numRowsSerialized          = 2;
+  repeated bytes recordContainers   = 3;
+  RecordSchema recordSchema         = 4;
+  optional RvRange rvRange          = 5;
+}
+
+message RangeVectorKey {
+  map<string, string> labels = 1;
+}
+
+message RecordSchema {
+  repeated ColumnInfo  columns        = 1;
+  optional uint32 partitionFieldStart = 2;
+  repeated string predefinedKeys      = 3;
+  map<uint32, RecordSchema> brSchema  = 4;
+  optional uint32 schemaVersion       = 5;
+}
+
+
+message ColumnInfo {
+  string  name                       = 1;
+  ColumnType columnType              = 2;
+}
+
+enum ColumnType {
+    IntColumn                        = 0;
+    LongColumn                       = 1;
+    DoubleColumn                     = 2;
+    StringColumn                     = 3;
+    TimestampColumn                  = 4;
+    MapColumn                        = 5;
+    BinaryRecordColumn               = 6;
+    HistogramColumn                  = 7;
+}
+
+message ResultSchema {
+  uint32  numRowKeys                      = 1;
+  map<uint32, RecordSchema> brSchemas     = 2;
+  repeated ColumnInfo columns             = 3;
+  repeated int32 colIds                   = 4;
+  optional uint32 fixedVectorLen          = 5;
+}
+
+message RvRange {
+  int64 startMs = 1;
+  int64 endMs = 2;
+  int64 step = 3;
+}

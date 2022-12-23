@@ -1,0 +1,126 @@
+syntax="proto3";
+
+package filodb.grpc;
+
+import "range_vector.proto";
+
+option java_outer_classname = "GrpcMultiPartitionQueryService";
+option java_generate_equals_and_hash = true;
+
+
+
+message QueryParams {
+      uint64 start                = 1;
+      uint64 end                  = 2;
+      uint64 step                 = 3;
+      uint64 time                 = 4;
+      string promQL               = 5;
+      bool verbose                = 6;
+      bool isUnavailable          = 7;
+}
+
+message PlannerParams {
+    optional string applicationId          = 1;
+    optional uint32 queryTimeoutMillis     = 2;
+    optional uint32 sampleLimit            = 3;
+    optional uint32 groupByCardLimit       = 4;
+    optional uint32 joinQueryCardLimit     = 5;
+    optional uint64 resultByteLimit        = 6;
+    optional bool timeSplitEnabled         = 7;
+    optional uint64 minTimeRangeForSplitMs = 8;
+    optional uint64 splitSizeMs            = 9;
+    optional bool skipAggregatePresent     = 10;
+    optional bool processFailure           = 11;
+    optional bool processMultiPartition    = 12;
+    optional bool allowPartialResults      = 13;
+    optional bool histogramMap             = 14;
+}
+
+message Request {
+      QueryParams queryParams       = 1;
+      PlannerParams plannerParams   = 2;
+      string dataset                = 3;
+}
+
+message StreamingErrorResponse {
+  string id                                      = 1;
+  QueryResultStats stats                         = 2;
+  Throwable throwable                            = 3;
+}
+
+message StreamingBodyResponse {
+  string id                                      = 1;
+  RangeVector result                             = 2;
+}
+
+message StreamingFooterResponse {
+  string id                                      = 1;
+  QueryResultStats stats                         = 2;
+  bool mayBePartial                              = 3;
+  optional string partialResultReason            = 4;
+}
+
+
+message StreamingHeaderResponse {
+  string id                                      = 1;
+  ResultSchema resultSchema                      = 2;
+}
+
+message StreamingResponse {
+    oneof streamingMessage {
+        StreamingHeaderResponse header             = 1;
+        StreamingBodyResponse body                 = 2;
+        StreamingFooterResponse footer             = 3;
+        StreamingErrorResponse error               = 4;
+    }
+}
+
+// Serialize Throwables
+
+message StackTraceElement {
+  string declaringClass              = 1;
+  string methodName                  = 2;
+  string fileName                    = 3;
+  uint32 lineNumber                  = 4;
+}
+
+message Throwable {
+  optional string message            = 1;
+  optional Throwable cause           = 2;
+  repeated StackTraceElement stack   = 3;
+  string exceptionClass              = 4;
+}
+
+message Response {
+
+  string id                                      = 1;
+  QueryResultStats stats                         = 2;
+  optional Throwable throwable                   = 3;
+  optional ResultSchema resultSchema             = 4;
+  repeated RangeVector result                    = 5;
+  optional bool mayBePartial                     = 6;
+  optional string partialResultReason            = 7;
+}
+
+// Objects for Query stats
+message Stat {
+  uint64 timeSeriesScanned    = 1;
+  uint64 dataBytesScanned     = 2;
+  uint64 resultBytes          = 3;
+}
+
+message QueryResultStats {
+  // Note that the key in QueryStats is a Seq[String], we will use "\@" as a separator string to
+  // encode the Seq to string and back to Seq since we dont expect "\@" to be a character in the grouping
+  // sequence of string
+  map<string, Stat> stats     = 1;
+}
+
+
+
+service RemoteExec {
+
+  rpc exec(Request) returns (Response);
+
+  rpc execStreaming(Request) returns (stream StreamingResponse);
+}
