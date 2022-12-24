@@ -1973,4 +1973,20 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       }
     }
   }
+
+  it("should handle multi partition topk correctly") {
+    // Cases to handle
+    // Case 1: Simple top k operation to local partition, no regex present, should be supported
+    // Case 2: Simple top k operation to remote partition, no regex present, should be supported
+    // Case 3: top k with regex, the resolved regex should all be in local in local and remote partitions and use PromQLRemoteExec, should fail
+    // Case 4: top k with regex, the resolved regex should all be in local and remote partitions and use PromQLGrpcRemoteExec, should be supported
+    // Case 5: top k with regex, the resolved regex should all be in local partition, should be supported
+    // Case 6: top k with regex, the resolved regex should all be two remote partition, both  PromQLRemoteExec should fail
+    // Case 7: top k with regex, the resolved regex should all be two remote partition, one using PromQLRemoteExec and other PromQLGrpcRemoteExec, should fail
+    // Case 8: top k with regex, the resolved regex should all be two remote partition, both use PromQLGrpcRemoteExec, should be supported
+
+
+
+
+  }
 }

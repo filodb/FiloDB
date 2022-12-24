@@ -160,6 +160,12 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     PlanResult(Seq(execPlan))
   }
 
+  private def canSupportMultiPartitionCalls(execPlans: Seq[ExecPlan]): Boolean =
+    execPlans.forall{
+      case _: PromQlRemoteExec  => false
+      case _                    => true
+    }
+
   /***
    * For aggregate queries like sum(test{_ws_ = "demo", _ns_ =~ "App.*"})
    * It will be broken down to sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
@@ -185,9 +191,10 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
         LogicalPlan.getNonMetricShardKeyFilters(aggregate, dataset.options.nonMetricShardColumns).head, queryContext)
       val exec = if (execPlans.size == 1) execPlans.head
       else {
-        if (aggregate.operator.equals(AggregationOperator.TopK)
+        if ((aggregate.operator.equals(AggregationOperator.TopK)
           || aggregate.operator.equals(AggregationOperator.BottomK)
-          || aggregate.operator.equals(AggregationOperator.CountValues))
+          || aggregate.operator.equals(AggregationOperator.CountValues)
+          ) && !canSupportMultiPartitionCalls(execPlans))
           throw new UnsupportedOperationException(s"Shard Key regex not supported for ${aggregate.operator}")
         else {
           val reducer = MultiPartitionReduceAggregateExec(queryContext, inProcessPlanDispatcher,

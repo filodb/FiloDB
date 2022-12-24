@@ -9,7 +9,8 @@ import filodb.query._
 import filodb.query.LogicalPlan._
 import filodb.query.exec._
 
-case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange)
+case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange,
+                               supportGrpc: Boolean = false)
 
 trait PartitionLocationProvider {
 
