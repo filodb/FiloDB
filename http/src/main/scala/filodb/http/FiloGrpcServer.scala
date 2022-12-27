@@ -25,7 +25,7 @@ import filodb.query.{QueryResponse, StreamQueryResponse, StreamQueryResultFooter
 class FiloGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings, scheduler: Scheduler)
   extends StrictLogging{
 
-  val port  = filoSettings.allConfig.getInt("filodb.http.bind-grpc-port")
+  val port  = filoSettings.allConfig.getInt("filodb.grpc.bind-grpc-port")
   val server = ServerBuilder.forPort(this.port)
     .addService(new PromQLGrpcService()).asInstanceOf[ServerBuilder[NettyServerBuilder]].build()
 

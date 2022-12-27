@@ -11,6 +11,8 @@ import com.softwaremill.sttp.SttpBackendOptions.ProxyType.{Http, Socks}
 import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
 import com.softwaremill.sttp.circe.asJson
 import com.typesafe.scalalogging.StrictLogging
+import io.grpc.ManagedChannel
+import io.grpc.netty.{NegotiationType, NettyChannelBuilder}
 import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
@@ -18,9 +20,11 @@ import monix.execution.Scheduler
 import org.asynchttpclient.{AsyncHttpClientConfig, DefaultAsyncHttpClientConfig}
 import org.asynchttpclient.proxy.ProxyServer
 
+import filodb.core.GlobalConfig
 import filodb.core.query.{PromQlQueryParams, QuerySession, QueryStats}
 import filodb.core.store.ChunkSource
 import filodb.query._
+
 
 trait RemoteExec extends LeafExecPlan with StrictLogging {
 
@@ -93,6 +97,54 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     }
     queryStats
   }
+}
+
+trait GrpcChannelManager {
+
+  /**
+   * Based on the endpointURL borrow the Grpc channel to use
+   *
+   * @param endpointUrl
+   * @return io.grpc.Channel
+   */
+  def borrowChannel(endpointUrl: String): ManagedChannel
+
+  /**
+   * Returns the channel to the manager, the implementation may choose to close the channel of retain for later reuse
+   * @param channel
+   */
+  def returnChannel(channel: ManagedChannel): Unit
+
+}
+
+abstract class BaseChannelManager extends GrpcChannelManager {
+
+  def buildChannelFromEndpoint(endpointUrl: String): ManagedChannel = {
+
+    val grpcConfig = GlobalConfig.defaultFiloConfig.getConfig("grpc")
+    val idleTimeout = grpcConfig.getInt("idle-timeout-seconds")
+    val keepAliveTime = grpcConfig.getInt("keep-alive-time-seconds")
+    val keepAliveTimeOut = grpcConfig.getInt("keep-alive-timeout-seconds")
+    NettyChannelBuilder
+      .forTarget(endpointUrl)
+      // TODO: Configure this to SSL/Plain text later based on config, currently only Plaintext supported
+      .negotiationType(NegotiationType.PLAINTEXT)
+      .idleTimeout(idleTimeout, TimeUnit.SECONDS)
+      .keepAliveTime(keepAliveTime, TimeUnit.SECONDS)
+      .keepAliveTimeout(keepAliveTimeOut, TimeUnit.SECONDS)
+      .keepAliveWithoutCalls(true)
+      .build()
+  }
+}
+
+/**
+ * Simple but inefficient implementation that does not reuse channels.
+ */
+class SimpleGrpcChannelManager extends BaseChannelManager {
+
+  override def borrowChannel(endpointUrl: String): ManagedChannel = buildChannelFromEndpoint(endpointUrl)
+
+  override def returnChannel(channel: ManagedChannel): Unit = channel.shutdown()
 }
 
 /**

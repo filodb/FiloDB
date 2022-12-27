@@ -12,7 +12,7 @@ import filodb.query.ProtoConverters._
 import filodb.query.{StreamQueryResponse, StreamQueryResult, StreamQueryResultFooter, StreamQueryResultHeader}
 import filodb.memory.format.ZeroCopyUTF8String._
 import io.grpc.netty.NettyServerBuilder
-import io.grpc.{ManagedChannelBuilder, ServerBuilder}
+import io.grpc.{Server, ManagedChannelBuilder, ManagedChannel, ServerBuilder}
 import io.grpc.stub.StreamObserver
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
@@ -54,19 +54,26 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     options = DatasetOptions(Seq("__name__", "job"), "__name__")).get
 
 
-  val freePort = Using(new ServerSocket(0)) (_.getLocalPort).toOption
-  val channel = freePort match {
-    case Some(port)    => ManagedChannelBuilder.forAddress("127.0.0.1", port)
-                              .usePlaintext().asInstanceOf[ManagedChannelBuilder[_]].build()
-    case None          =>
-                          logger.warn("No free port found to run PromQLGrpcRemoteExecSpec, cancelling this test")
-                          cancel()
+
+  var channel: ManagedChannel = _
+  var service: Server = _
+  var freePort: Option[Int] = _
+
+  before  {
+    freePort = Using(new ServerSocket(0)) (_.getLocalPort).toOption
+    channel = freePort match {
+      case Some(port)    => ManagedChannelBuilder.forAddress("127.0.0.1", port)
+        .usePlaintext().asInstanceOf[ManagedChannelBuilder[_]].build()
+      case None          =>
+        logger.warn("No free port found to run PromQLGrpcRemoteExecSpec, cancelling this test")
+        cancel()
+    }
+    service = ServerBuilder.forPort(freePort.get)
+      .addService(new TestGrpcServer()).asInstanceOf[ServerBuilder[NettyServerBuilder]].build()
+    service.start()
   }
 
-  val service = ServerBuilder.forPort(this.freePort.get)
-    .addService(new TestGrpcServer()).asInstanceOf[ServerBuilder[NettyServerBuilder]].build()
 
-  service.start()
   val dispatcher = InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig)
 
 
@@ -131,11 +138,13 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
   it ("should convert the streaming records from gRPC service to a QueryResponse with data") {
 
 
-    val params = PromQlQueryParams("""foo{app="app1"}""", 0, 0 , 0)
+    val params = PromQlQueryParams("""foo{app="app1"}""", 0, 0, 0)
     val queryContext = QueryContext(origQueryParams = params)
     val session = QuerySession(queryContext, QueryConfig.unitTestingQueryConfig)
 
-    val exec = PromQLGrpcRemoteExec(channel, 60000, queryContext, dispatcher, timeseriesDataset.ref)
+    val exec = PromQLGrpcRemoteExec(channel, 60000, queryContext, dispatcher, timeseriesDataset.ref) {
+      () => channel.shutdown()
+    }
 
 
     val qr = exec.execute(UnsupportedChunkSource(), session).runToFuture.futureValue.asInstanceOf[QueryResult]
@@ -160,7 +169,9 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     val queryContext = QueryContext(origQueryParams = params)
     val session = QuerySession(queryContext, QueryConfig.unitTestingQueryConfig)
 
-    val exec = PromQLGrpcRemoteExec(channel, 60000, queryContext, dispatcher, timeseriesDataset.ref)
+    val exec = PromQLGrpcRemoteExec(channel, 60000, queryContext, dispatcher, timeseriesDataset.ref) {
+      () => channel.shutdown()
+    }
     val qr = exec.execute(UnsupportedChunkSource(), session).runToFuture.futureValue.asInstanceOf[QueryResult]
     qr.resultSchema shouldEqual ResultSchema.empty
     qr.result shouldEqual Nil
@@ -172,7 +183,9 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     val queryContext = QueryContext(origQueryParams = params)
     val session = QuerySession(queryContext, QueryConfig.unitTestingQueryConfig)
 
-    val exec = PromQLGrpcRemoteExec(channel, 60000, queryContext, dispatcher, timeseriesDataset.ref)
+    val exec = PromQLGrpcRemoteExec(channel, 60000, queryContext, dispatcher, timeseriesDataset.ref) {
+      () => channel.shutdown()
+    }
     val er = exec.execute(UnsupportedChunkSource(), session).runToFuture.futureValue.asInstanceOf[QueryError]
     er.id shouldEqual "errorId"
     er.queryStats shouldEqual QueryStats()

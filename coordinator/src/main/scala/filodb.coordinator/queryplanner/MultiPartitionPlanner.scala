@@ -9,8 +9,9 @@ import filodb.query._
 import filodb.query.LogicalPlan._
 import filodb.query.exec._
 
+
 case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange,
-                               supportGrpc: Boolean = false)
+                               grpcEndPoint: Option[String] = None)
 
 trait PartitionLocationProvider {
 
@@ -41,7 +42,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                             localPartitionName: String,
                             val dataset: Dataset,
                             val queryConfig: QueryConfig,
-                            remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient)
+                            remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient,
+                            grpcChannelManager: Option[GrpcChannelManager] = None)
   extends QueryPlanner with StrictLogging with DefaultPlanner {
 
   override val schemas: Schemas = Schemas(dataset.schema)
@@ -87,6 +89,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     }
   }
 
+  // scalastyle:off method.length
   override def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                    qContext: QueryContext,
                                    forceInProcess: Boolean = false): PlanResult = {
@@ -100,10 +103,13 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val partitions = getPartitions(logicalPlan, paramToCheckPartitions)
 
     if (isSinglePartition(partitions)) {
-        val (partitionName, startMs, endMs) =
-          ( partitions.headOption.map(_.partitionName).getOrElse(localPartitionName),
-            params.startSecs * 1000L,
-            params.endSecs * 1000L)
+
+      val (partitionName, startMs, endMs, grpcEndpoint) = partitions.headOption match {
+          case Some(pa: PartitionAssignment)
+                                         => (pa.partitionName, params.startSecs * 1000L,
+                                                params.endSecs * 1000L, pa.grpcEndPoint)
+          case None                      => (localPartitionName, params.startSecs * 1000L, params.endSecs * 1000L, None)
+        }
 
         // If the plan is on a single partition, then depending on partition name we either delegate to local or
         // remote planner
@@ -113,22 +119,33 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
           // Single partition but remote, send the entire plan remotely
           val remotePartitionEndpoint = partitions.head.endPoint
           val httpEndpoint = remotePartitionEndpoint + params.remoteQueryPath.getOrElse("")
-          val remoteContext = if (logicalPlan.isInstanceOf[PeriodicSeriesPlan]) {
-            val psp : PeriodicSeriesPlan = logicalPlan.asInstanceOf[PeriodicSeriesPlan]
-            val startSecs = psp.startMs / 1000
-            val stepSecs = psp.stepMs / 1000
-            val endSecs = psp.endMs / 1000
-            generateRemoteExecParamsWithStep(qContext, startSecs, stepSecs, endSecs)
-          } else {
-            generateRemoteExecParams(qContext, startMs, endMs)
+          val remoteContext = logicalPlan match {
+            case psp: PeriodicSeriesPlan =>
+              val startSecs = psp.startMs / 1000
+              val stepSecs = psp.stepMs / 1000
+              val endSecs = psp.endMs / 1000
+              generateRemoteExecParamsWithStep(qContext, startSecs, stepSecs, endSecs)
+            case _ =>
+              generateRemoteExecParams(qContext, startMs, endMs)
           }
-          PromQlRemoteExec(
-            httpEndpoint, remoteHttpTimeoutMs, remoteContext, inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient
-          )
+          (grpcEndpoint, grpcChannelManager) match {
+            case (Some(endpoint), Some(channelManager))   =>
+              val channel = channelManager.borrowChannel(endpoint)
+              PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, qContext, inProcessPlanDispatcher,
+                dataset.ref) { () => channelManager.returnChannel(channel) }
+
+              // TODO: Can handle all remaining 3 cases and log a warn in case endpoint if provided but channel manager
+              // is not configured
+            case _                                        =>
+              PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, remoteContext, inProcessPlanDispatcher,
+                dataset.ref, remoteExecHttpClient)
+          }
+
         }
         PlanResult(Seq(execPlan))
     } else walkMultiPartitionPlan(logicalPlan, qContext)
   }
+  // scalastyle:on method.length
 
   // scalastyle:off cyclomatic.complexity
   /**
