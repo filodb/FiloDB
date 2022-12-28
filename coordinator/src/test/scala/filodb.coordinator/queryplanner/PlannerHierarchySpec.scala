@@ -2140,21 +2140,6 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
           origQueryParams = PromQlQueryParams(query6, startSeconds, step, endSeconds),
           plannerParams = PlannerParams(processMultiPartition = true)))
     }
-    // Case 7: top k with regex, the resolved regex should all be two remote partition, one using PromQLRemoteExec and other PromQLGrpcRemoteExec, should fail
-    // Case 8: top k with regex, the resolved regex should all be two remote partition, both use PromQLGrpcRemoteExec, should be supported
-    // Case 9: top k with regex, the resolved regex should all be one remote partition, using PromQLRemoteExec, should be supported BUT fails
-
-    val singleRemotePartitionLocationProvider = new PartitionLocationProvider {
-      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
-        routingKey("_ns_") match {
-          case _ =>
-            List(PartitionAssignment("remotePartition", "remotePartition-url0",
-              TimeRange(timeRange.startMs, timeRange.endMs)))
-        }
-      }
-      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
-                                         timeRange: TimeRange): List[PartitionAssignment] = ???
-    }
 
     val twoRemoteShardKeyMatcherFn = (shardColumnFilters: Seq[ColumnFilter]) => {
       if (shardColumnFilters.nonEmpty) {
@@ -2170,6 +2155,61 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       }  // i.e. filters for a scalar
     }
 
+    // Case 7: top k with regex, the resolved regex should all be two remote partition, one using PromQLRemoteExec and other PromQLGrpcRemoteExec, should fail
+    // Case 8: top k with regex, the resolved regex should all be two remote partition, both use PromQLGrpcRemoteExec, should be supported
+    val rwoRemoteGrpcPartitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        routingKey("_ns_") match {
+          case "remoteNs0" =>
+            List(
+              PartitionAssignment("remotePartition1", "remotePartition-url1",
+              TimeRange(timeRange.startMs, timeRange.endMs), Some("remotePartition-grpc-url1"))
+            )
+          case _          =>
+            List(PartitionAssignment("remotePartition2", "remotePartition-url2",
+              TimeRange(timeRange.startMs, timeRange.endMs), Some("remotePartition-grpc-url2")))
+        }
+      }
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                         timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+
+    val twoGrpcRemoteMpPlanner = new MultiPartitionPlanner(rwoRemoteGrpcPartitionLocationProvider, singlePartitionPlanner,
+      "localPartition", dataset, queryConfig, grpcChannelManager = Some(new SimpleGrpcChannelManager()))
+    val twoGrpcRemoteShardKeyRegexPlanner = new ShardKeyRegexPlanner(dataset, twoGrpcRemoteMpPlanner, twoRemoteShardKeyMatcherFn, queryConfig)
+
+    val query8 = """topk(2, test{_ws_ = "demo", _ns_ =~ "remoteNs.*", instance = "Inst-1"})"""
+    val lp8 =
+      Parser.queryRangeToLogicalPlan(query8, TimeStepParams(startSeconds, step, endSeconds), Antlr)
+
+    val execPlan8 = twoGrpcRemoteShardKeyRegexPlanner.materialize(lp8,
+      QueryContext(
+        origQueryParams = PromQlQueryParams(query8, startSeconds, step, endSeconds),
+        plannerParams = PlannerParams(processMultiPartition = true)))
+
+    val expectedPlan8 =
+      """T~AggregatePresenter(aggrOp=TopK, aggrParams=List(2.0), rangeParams=RangeParams(1633913330,300,1634777330))
+        |-E~MultiPartitionReduceAggregateExec(aggrOp=TopK, aggrParams=List(2.0)) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+        |--E~PromQLGrpcRemoteExec(PromQlQueryParams(topk(2.0,test{instance="Inst-1",_ws_="demo",_ns_="remoteNs1"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,true,true,true,false), queryEndpoint=ManagedChannelOrphanWrapper{delegate=ManagedChannelImpl{logId=5, target=remotePartition-grpc-url2}}.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+        |--E~PromQLGrpcRemoteExec(PromQlQueryParams(topk(2.0,test{instance="Inst-1",_ws_="demo",_ns_="remoteNs0"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,true,true,true,false), queryEndpoint=ManagedChannelOrphanWrapper{delegate=ManagedChannelImpl{logId=3, target=remotePartition-grpc-url1}}.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin
+
+    validatePlan(execPlan8, expectedPlan8)
+    // Case 9: top k with regex, the resolved regex should all be one remote partition, using PromQLRemoteExec, should be supported BUT fails
+
+    val singleRemotePartitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
+        routingKey("_ns_") match {
+          case _ =>
+            List(PartitionAssignment("remotePartition", "remotePartition-url0",
+              TimeRange(timeRange.startMs, timeRange.endMs)))
+        }
+      }
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                         timeRange: TimeRange): List[PartitionAssignment] = ???
+    }
+
+
+
     val oneRemoteMpPlanner = new MultiPartitionPlanner(singleRemotePartitionLocationProvider, singlePartitionPlanner,
       "localPartition", dataset, queryConfig)
     val oneRemoteShardKeyRegexPlanner = new ShardKeyRegexPlanner(dataset, oneRemoteMpPlanner, twoRemoteShardKeyMatcherFn, queryConfig)
@@ -2184,9 +2224,9 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     //   partition to that partition completely.
     //
     intercept[UnsupportedOperationException] {
-      oneRemoteMpPlanner.materialize(lp9,
+      oneRemoteShardKeyRegexPlanner.materialize(lp9,
         QueryContext(
-          origQueryParams = PromQlQueryParams(query6, startSeconds, step, endSeconds),
+          origQueryParams = PromQlQueryParams(query9, startSeconds, step, endSeconds),
           plannerParams = PlannerParams(processMultiPartition = true)))
     }
 
