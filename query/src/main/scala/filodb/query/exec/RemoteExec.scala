@@ -1,5 +1,6 @@
 package filodb.query.exec
 
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 import scala.concurrent.Future
@@ -115,6 +116,8 @@ trait GrpcChannelManager {
    */
   def returnChannel(channel: ManagedChannel): Unit
 
+  def shutdown(): Unit
+
 }
 
 abstract class BaseChannelManager extends GrpcChannelManager {
@@ -138,13 +141,40 @@ abstract class BaseChannelManager extends GrpcChannelManager {
 }
 
 /**
- * Simple but inefficient implementation that does not reuse channels.
+ * Simple but inefficient implementation that does not reuse channels. Simply builds the channel, possibly multiple
+ * to same endpoint and shut it down when not needed
  */
 class SimpleGrpcChannelManager extends BaseChannelManager {
 
   override def borrowChannel(endpointUrl: String): ManagedChannel = buildChannelFromEndpoint(endpointUrl)
 
   override def returnChannel(channel: ManagedChannel): Unit = channel.shutdown()
+
+  override def shutdown(): Unit = {}
+}
+
+// TODO: Test for concurrency and performance. The handling for retrying after connection loss needs to be worked on
+class ReusableGRPCChannelManager extends BaseChannelManager {
+
+  import scala.jdk.CollectionConverters._
+
+  val map = new ConcurrentHashMap[String, ManagedChannel]().asScala
+
+  override def borrowChannel(endpointUrl: String): ManagedChannel =
+    map.getOrElseUpdate(endpointUrl, buildChannelFromEndpoint(endpointUrl))
+
+
+
+  override def returnChannel(channel: ManagedChannel): Unit = {
+    // NOP
+  }
+
+  override def shutdown(): Unit = {
+    map.foreach {
+      case (_, channel) => channel.shutdown()
+    }
+    map.clear()
+  }
 }
 
 /**

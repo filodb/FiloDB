@@ -30,7 +30,9 @@ object Submodules {
         Seq(
              "javax.annotation" % "javax.annotation-api" % "1.3.2",
              "io.grpc" % "grpc-protobuf" % "1.50.0",
+             "io.grpc" % "grpc-core" % "1.50.0",
              "io.grpc" % "grpc-stub" % "1.50.0",
+             "io.grpc" % "grpc-netty" % "1.50.0",
              "io.grpc" % "grpc-netty-shaded" % "1.50.0",
              "io.grpc" % "protoc-gen-grpc-java" % "1.51.1" asProtocPlugin()
         ),

@@ -12,6 +12,7 @@ object Dependencies {
   val excludeOldLz4 = ExclusionRule(organization = "net.jpountz.lz4", name = "lz4")
   val excludeNetty  = ExclusionRule(organization = "io.netty", name = "netty-handler")
   val excludeXBean = ExclusionRule(organization = "org.apache.xbean", name = "xbean-asm6-shaded")
+  val excludegrpc = ExclusionRule(organization = "io.grpc")
 
 
   /* Versions in various modules versus one area of build */
@@ -61,7 +62,7 @@ object Dependencies {
   lazy val coreDeps = commonDeps ++ Seq(
     scalaLoggingDep,
     "io.kamon"                     %% "kamon-zipkin"      % kamonBundleVersion,
-    "io.kamon"                     %% "kamon-opentelemetry" % kamonBundleVersion,
+    "io.kamon"                     %% "kamon-opentelemetry" % kamonBundleVersion excludeAll(excludegrpc),
     "org.slf4j"                    % "slf4j-api"          % "1.7.10",
     "com.beachape"                 %% "enumeratum"        % "1.5.10",
     "io.monix"                     %% "monix"             % "3.4.0",

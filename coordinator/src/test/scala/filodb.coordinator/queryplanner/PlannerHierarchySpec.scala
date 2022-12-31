@@ -2031,7 +2031,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     validatePlan(execPlan2, expectedPlan2)
 
     // Case 3: top k with regex, the resolved regex should be in local and remote partitions and use PromQLRemoteExec, should fail
-
+    // TODO
 
 
     // Case 4: top k with regex, the resolved regex should be in local and remote partitions and use PromQLGrpcRemoteExec, should be supported
@@ -2156,6 +2156,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
 
     // Case 7: top k with regex, the resolved regex should all be two remote partition, one using PromQLRemoteExec and other PromQLGrpcRemoteExec, should fail
+    // TODO
     // Case 8: top k with regex, the resolved regex should all be two remote partition, both use PromQLGrpcRemoteExec, should be supported
     val rwoRemoteGrpcPartitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] = {
@@ -2217,12 +2218,12 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val lp9 =
       Parser.queryRangeToLogicalPlan(query9, TimeStepParams(startSeconds, step, endSeconds), Antlr)
 
-    // TODO: Shardkey regex planner simply rejects based on multiple namespaces seen in the query. The partition location
-    //  Provider should be available with ShardKeyRegexPlanner as well to let it push down the entire plan to remote
-    //  partition. This might be more involved as MultiPartitionPlanner will not be able to resolve the regex to
+    // TODO: Shardkey regex planner simply rejects based on multiple namespaces seen in the query and target partition does not
+    //  support gRPC endpoint. The partition location Provider should be available with ShardKeyRegexPlanner as well to let it push
+    //  down the entire plan to remote partition. This might be more involved as MultiPartitionPlanner will not be able to resolve the regex to
     //   individual namespaces. Even in general, there is a scope to push the query with regex resolving to a single
-    //   partition to that partition completely.
-    //
+    //   partition to that partition completely. One solution is for the proxy to simply route to remote shard key regex planner and
+    //   return the response as is to caller
     intercept[UnsupportedOperationException] {
       oneRemoteShardKeyRegexPlanner.materialize(lp9,
         QueryContext(
