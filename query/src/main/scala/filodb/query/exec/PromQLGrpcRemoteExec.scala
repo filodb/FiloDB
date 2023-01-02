@@ -1,12 +1,14 @@
 package filodb.query.exec
 
+import java.util.concurrent.TimeUnit
+
 import io.grpc.Channel
 import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
 import monix.execution.Scheduler
-
 import scala.concurrent.Future
+
 import filodb.core.DatasetRef
 import filodb.core.query.{PromQlQueryParams, QueryContext, QuerySession}
 import filodb.core.store.ChunkSource
@@ -15,7 +17,7 @@ import filodb.grpc.RemoteExecGrpc
 import filodb.query.ProtoConverters._
 import filodb.query.QueryResponse
 
-import java.util.concurrent.TimeUnit
+
 
 trait GrpcRemoteExec extends LeafExecPlan {
 
