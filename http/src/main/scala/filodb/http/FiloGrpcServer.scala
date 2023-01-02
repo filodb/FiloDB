@@ -27,6 +27,7 @@ class FiloGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings, s
 
   val port  = filoSettings.allConfig.getInt("filodb.grpc.bind-grpc-port")
   val server = ServerBuilder.forPort(this.port)
+    .executor(scheduler).asInstanceOf[ServerBuilder[NettyServerBuilder]]
     .addService(new PromQLGrpcService()).asInstanceOf[ServerBuilder[NettyServerBuilder]].build()
 
   val queryAskTimeout = filoSettings.allConfig.as[FiniteDuration]("filodb.query.ask-timeout")

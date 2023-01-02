@@ -50,7 +50,7 @@ trait GrpcRemoteExec extends LeafExecPlan {
     def getGrpcRequest: Request = {
         val builder = Request.newBuilder()
         builder.setQueryParams(promQlQueryParams.toProto)
-        builder.setPlannerParams(queryContext.plannerParams.toProto)
+        builder.setPlannerParams(queryContext.plannerParams.copy(processMultiPartition = false).toProto)
         builder.build()
     }
 
