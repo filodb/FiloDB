@@ -74,7 +74,7 @@ case class PromQLGrpcRemoteExec(channel: Channel,
 
     override def cleanup(): Unit = f()
 
-    override def queryEndpoint: String = channel.toString + ".execStreaming"
+    override def queryEndpoint: String = channel.authority() + ".execStreaming"
 }
 
 
