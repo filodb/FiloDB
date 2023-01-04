@@ -245,7 +245,7 @@ object ProtoConverters {
       val builder = GrpcMultiPartitionQueryService.QueryResultStats.newBuilder()
       stats.stat.foreach {
         case (key, stat)  =>
-          builder.putStats( key.mkString("\\@"), stat.toProto)
+          builder.putStats( key.mkString("##@##"), stat.toProto)
       }
       builder.build()
     }
@@ -255,7 +255,7 @@ object ProtoConverters {
     def fromProto: QueryStats = {
       val qs = QueryStats()
       statGrpc.getStatsMap.forEach {
-        case (key, stat)  =>  qs.stat.put(key.split("\\@").toList, stat.fromProto)
+        case (key, stat)  =>  qs.stat.put(key.split("##@##").toList, stat.fromProto)
       }
       qs
     }

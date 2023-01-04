@@ -110,8 +110,8 @@ message Stat {
 }
 
 message QueryResultStats {
-  // Note that the key in QueryStats is a Seq[String], we will use "\@" as a separator string to
-  // encode the Seq to string and back to Seq since we dont expect "\@" to be a character in the grouping
+  // Note that the key in QueryStats is a Seq[String], we will use "##@##" as a separator string to
+  // encode the Seq to string and back to Seq since we dont expect "##@##" to be a character in the grouping
   // sequence of string
   map<string, Stat> stats     = 1;
 }

@@ -128,15 +128,24 @@ abstract class BaseChannelManager extends GrpcChannelManager {
     val idleTimeout = grpcConfig.getInt("idle-timeout-seconds")
     val keepAliveTime = grpcConfig.getInt("keep-alive-time-seconds")
     val keepAliveTimeOut = grpcConfig.getInt("keep-alive-timeout-seconds")
-    NettyChannelBuilder
+    val lbPolicy = grpcConfig.getString("load-balancing-policy")
+    val builder = NettyChannelBuilder
       .forTarget(endpointUrl)
+      .defaultLoadBalancingPolicy(lbPolicy)
       // TODO: Configure this to SSL/Plain text later based on config, currently only Plaintext supported
       .negotiationType(NegotiationType.PLAINTEXT)
-      .idleTimeout(idleTimeout, TimeUnit.SECONDS)
-      .keepAliveTime(keepAliveTime, TimeUnit.SECONDS)
-      .keepAliveTimeout(keepAliveTimeOut, TimeUnit.SECONDS)
-      .keepAliveWithoutCalls(true)
-      .build()
+
+      if (idleTimeout > 0) {
+        builder.idleTimeout(idleTimeout, TimeUnit.SECONDS)
+      }
+      if (keepAliveTime > 0) {
+        builder.keepAliveTime(keepAliveTime, TimeUnit.SECONDS).keepAliveWithoutCalls(true)
+      }
+      if(keepAliveTimeOut > 0) {
+        builder.keepAliveTimeout(keepAliveTimeOut, TimeUnit.SECONDS)
+      }
+
+      builder.build()
   }
 }
 
@@ -153,7 +162,6 @@ class SimpleGrpcChannelManager extends BaseChannelManager {
   override def shutdown(): Unit = {}
 }
 
-// TODO: Test for concurrency and performance. The handling for retrying after connection loss needs to be worked on
 class ReusableGRPCChannelManager extends BaseChannelManager {
 
   import scala.jdk.CollectionConverters._
@@ -167,6 +175,9 @@ class ReusableGRPCChannelManager extends BaseChannelManager {
 
   override def returnChannel(channel: ManagedChannel): Unit = {
     // NOP
+    // No need to return a channel, the ManagedChannel in the map abstracts the connections and automatically
+    //reconnects from an idle state if there is a RPC that needs to connect. ManagedChannel also manages disconnects
+    // from remote server
   }
 
   override def shutdown(): Unit = {
