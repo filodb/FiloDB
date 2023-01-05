@@ -1,17 +1,14 @@
 package filodb.http
 
 import java.util.concurrent.TimeUnit
-
 import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Try}
-
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ServerBuilder
 import io.grpc.netty.NettyServerBuilder
 import io.grpc.stub.StreamObserver
 import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
-
 import filodb.coordinator.FilodbSettings
 import filodb.coordinator.queryplanner.QueryPlanner
 import filodb.core.query.{QueryContext, QueryStats}
@@ -19,7 +16,7 @@ import filodb.grpc.GrpcMultiPartitionQueryService
 import filodb.grpc.RemoteExecGrpc.RemoteExecImplBase
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryError, QueryResponse, StreamQueryResponse, StreamQueryResultFooter}
+import filodb.query.{QueryError, QueryResponse, StreamQueryError, StreamQueryResponse, StreamQueryResultFooter}
 
 
 class FiloGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings, scheduler: Scheduler)
@@ -68,8 +65,13 @@ class FiloGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings, s
                 case footer: StreamQueryResultFooter =>
                   responseObserver.onNext(footer.toProto)
                   responseObserver.onCompleted()
+                case error: StreamQueryError =>
+                  responseObserver.onNext(error.toProto)
+                  responseObserver.onCompleted()
                 case others: StreamQueryResponse   =>
                   responseObserver.onNext(others.toProto)
+
+
               }
           }
         }
