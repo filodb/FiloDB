@@ -1,14 +1,17 @@
 package filodb.http
 
 import java.util.concurrent.TimeUnit
+
 import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Try}
+
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ServerBuilder
 import io.grpc.netty.NettyServerBuilder
 import io.grpc.stub.StreamObserver
 import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
+
 import filodb.coordinator.FilodbSettings
 import filodb.coordinator.queryplanner.QueryPlanner
 import filodb.core.query.{QueryContext, QueryStats}
@@ -70,8 +73,6 @@ class FiloGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings, s
                   responseObserver.onCompleted()
                 case others: StreamQueryResponse   =>
                   responseObserver.onNext(others.toProto)
-
-
               }
           }
         }
