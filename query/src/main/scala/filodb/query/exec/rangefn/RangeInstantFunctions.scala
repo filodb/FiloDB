@@ -67,6 +67,27 @@ object RangeInstantFunctions {
       resultValue
     }
   }
+
+  // instant value for a period-counter is the last value in a window.
+  def instantValuePeriodic(startTimestamp: Long,
+                   endTimestamp: Long,
+                   window: Window,
+                   isRate: Boolean): Double = {
+
+    require(window.head.timestamp >= startTimestamp, "Possible internal error, found samples < startTimestamp")
+    require(window.last.timestamp <= endTimestamp, "Possible internal error, found samples > endTimestamp")
+    var resultValue = window.last.value // instant value for a period-counter is the last value in a window.
+    val prevSampleRow = window(window.size - 2)
+    if (isRate) {
+      val sampledInterval = (window.last.timestamp - prevSampleRow.timestamp).toDouble
+      if (sampledInterval == 0) {
+        None // Avoid dividing by 0
+      }
+      // Convert to per-second.
+      resultValue = resultValue / sampledInterval * 1000
+    }
+    resultValue
+  }
 }
 
 object IRateFunction extends RangeFunction {
@@ -89,6 +110,7 @@ object IRateFunction extends RangeFunction {
 object IDeltaFunction extends RangeFunction {
 
   def addedToWindow(row: TransientRow, window: Window): Unit = {}
+
   def removedFromWindow(row: TransientRow, window: Window): Unit = {}
 
   def apply(startTimestamp: Long,
@@ -97,6 +119,39 @@ object IDeltaFunction extends RangeFunction {
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     val result = RangeInstantFunctions.instantValue(startTimestamp,
+      endTimestamp, window, false)
+    sampleToEmit.setValues(endTimestamp, result)
+  }
+}
+
+object IRatePeriodicFunction extends RangeFunction {
+
+  override def needsCounterCorrection: Boolean = false
+  def addedToWindow(row: TransientRow, window: Window): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
+
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window,
+            sampleToEmit: TransientRow,
+            queryConfig: QueryConfig): Unit = {
+    val result = RangeInstantFunctions.instantValuePeriodic(startTimestamp,
+      endTimestamp, window, true)
+    sampleToEmit.setValues(endTimestamp, result) // TODO need to use a NA instead of NaN
+  }
+}
+
+object IDeltaPeriodicFunction extends RangeFunction {
+
+  def addedToWindow(row: TransientRow, window: Window): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
+
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window,
+            sampleToEmit: TransientRow,
+            queryConfig: QueryConfig): Unit = {
+    val result = RangeInstantFunctions.instantValuePeriodic(startTimestamp,
       endTimestamp, window, false)
     sampleToEmit.setValues(endTimestamp, result)
   }
