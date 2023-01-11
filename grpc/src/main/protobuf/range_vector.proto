@@ -6,12 +6,82 @@ package filodb.grpc;
 option java_outer_classname = "ProtoRangeVector";
 option java_generate_equals_and_hash = true;
 
-message RangeVector {
+message SerializedRangeVector {
   RangeVectorKey key                = 1;
   uint32 numRowsSerialized          = 2;
   repeated bytes recordContainers   = 3;
   RecordSchema recordSchema         = 4;
   optional RvRange rvRange          = 5;
+}
+
+// Similar to RvRange
+message RangeParams {
+  int64 startSecs = 1;
+  int64 endSecs   = 2;
+  int64 step      = 3;
+}
+
+
+
+// These are all ScalarSingleValue and duplicate, alternate option is to create one Message and an enum
+// to differentiate. Having 1-1 mapping between the classes and message is simpler and easy to understand
+
+message ScalarFixedDouble {
+  RangeParams rangeParams = 1;
+  double value           = 2;
+}
+
+message TimeScalar {
+  RangeParams rangeParams = 1;
+}
+
+message HourScalar {
+  RangeParams rangeParams = 1;
+}
+
+message MinuteScalar {
+  RangeParams rangeParams = 1;
+}
+
+message MonthScalar {
+  RangeParams rangeParams = 1;
+}
+
+message YearScalar {
+  RangeParams rangeParams = 1;
+}
+
+message DayOfMonthScalar {
+  RangeParams rangeParams = 1;
+}
+
+message DayOfWeekScalar {
+  RangeParams rangeParams = 1;
+}
+
+message DaysInMonthScalar {
+  RangeParams rangeParams = 1;
+}
+
+message ScalarVaryingDouble {
+  map<int64, double> timeValueMap   = 1;
+  optional RvRange rvRange          = 2;
+}
+
+message SerializableRangeVector {
+  oneof rangeVector {
+    SerializedRangeVector serializedRangeVector = 1;
+    ScalarFixedDouble  scalarFixedDouble        = 2;
+    TimeScalar  timeScalar                      = 3;
+    HourScalar  hourScalar                      = 4;
+    MinuteScalar minuteScalar                   = 5;
+    MonthScalar monthScalar                     = 6;
+    YearScalar yearScalar                       = 7;
+    DayOfMonthScalar dayOfMonthScalar           = 8;
+    DayOfWeekScalar  dayOfWeekScalar            = 9;
+    DaysInMonthScalar daysInMonthScalar         = 10;
+    ScalarVaryingDouble scalarVaryingDouble     = 11;
+  }
 }
 
 message RangeVectorKey {
@@ -50,6 +120,7 @@ message ResultSchema {
   repeated int32 colIds                   = 4;
   optional uint32 fixedVectorLen          = 5;
 }
+
 
 message RvRange {
   int64 startMs = 1;

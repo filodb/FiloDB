@@ -50,7 +50,7 @@ message StreamingErrorResponse {
 
 message StreamingBodyResponse {
   string id                                      = 1;
-  RangeVector result                             = 2;
+  SerializableRangeVector result                 = 2;
 }
 
 message StreamingFooterResponse {
@@ -97,7 +97,7 @@ message Response {
   QueryResultStats stats                         = 2;
   optional Throwable throwable                   = 3;
   optional ResultSchema resultSchema             = 4;
-  repeated RangeVector result                    = 5;
+  repeated SerializableRangeVector result        = 5;
   optional bool mayBePartial                     = 6;
   optional string partialResultReason            = 7;
 }

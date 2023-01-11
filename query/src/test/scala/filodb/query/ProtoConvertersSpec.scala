@@ -7,7 +7,7 @@ import ProtoConverters._
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType
-import filodb.grpc.GrpcMultiPartitionQueryService
+import filodb.grpc.{GrpcMultiPartitionQueryService, ProtoRangeVector}
 import filodb.memory.format.ZeroCopyUTF8String._
 
 
@@ -193,7 +193,6 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
 
     val origQueryResult = QueryResult("someId", resultSchema, List(srv), qStats, true, Some("Some shards timed out"))
     val successResp = origQueryResult.toProto.fromProto.asInstanceOf[QueryResult]
-
     successResp.id shouldEqual origQueryResult.id
     successResp.resultSchema shouldEqual origQueryResult.resultSchema
     successResp.result.size shouldEqual 1
@@ -398,7 +397,145 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
 
   }
 
+  it ("should convert RangeParams to proto and back") {
+    val rp = RangeParams(10, 50, 100)
+    rp.toProto.fromProto shouldEqual rp
+  }
 
+  it ("It should convert ScalarFixedDouble to proto and back") {
+    val sfd = ScalarFixedDouble(RangeParams(10, 50, 100), 10)
+    sfd.toProto.fromProto shouldEqual sfd
+  }
+
+  it ("It should convert TimeScalar to proto and back") {
+    val ts = TimeScalar(RangeParams(10, 50, 100))
+    ts.toProto.fromProto shouldEqual ts
+  }
+
+  it ("It should convert HourScalar to proto and back") {
+    val hs = HourScalar(RangeParams(10, 50, 100))
+    hs.toProto.fromProto shouldEqual hs
+  }
+
+  it ("It should convert MinuteScalar to proto and back") {
+    val ms = MinuteScalar(RangeParams(10, 50, 100))
+    ms.toProto.fromProto shouldEqual ms
+  }
+
+  it ("It should convert MonthScalar to proto and back") {
+    val ms = MonthScalar(RangeParams(10, 50, 100))
+    ms.toProto.fromProto shouldEqual ms
+  }
+
+  it ("It should convert YearScalar to proto and back") {
+    val ys = YearScalar(RangeParams(10, 50, 100))
+    ys.toProto.fromProto shouldEqual ys
+  }
+
+  it ("It should convert DayOfMonthScalar to proto and back") {
+    val doms = DayOfMonthScalar(RangeParams(10, 50, 100))
+    doms.toProto.fromProto shouldEqual doms
+  }
+
+  it ("It should convert DayOfWeekScalar to proto and back") {
+    val dows = DayOfWeekScalar(RangeParams(10, 50, 100))
+    dows.toProto.fromProto shouldEqual dows
+  }
+
+  it ("It should convert DaysInMonthScalar to proto and back") {
+    val doms = DaysInMonthScalar(RangeParams(10, 50, 100))
+    doms.toProto.fromProto shouldEqual doms
+  }
+
+  it ("It should convert ScalarVaryingDouble to proto and back") {
+    val svd1 = ScalarVaryingDouble(Map( 1L -> 1.0, 2L -> 2.0), None)
+    svd1.toProto.fromProto shouldEqual svd1
+
+    val svd2 = ScalarVaryingDouble(Map( 1L -> 1.0, 2L -> 2.0), Some(RvRange(10, 50, 1000)))
+    svd2.toProto.fromProto shouldEqual svd2
+  }
+
+  it("should be able to convert all SerializableRangeVector to proto and back") {
+
+    val builder = ProtoRangeVector.SerializableRangeVector.newBuilder()
+    val svd = ScalarVaryingDouble(Map(1L -> 1.0, 2L -> 2.0), Some(RvRange(10, 20, 100)))
+    builder.setScalarVaryingDouble(svd.toProto)
+    builder.build().fromProto shouldEqual svd
+
+    val rp = RangeParams(10, 20, 100)
+    val ts = TimeScalar(rp)
+    builder.clear()
+    builder.setTimeScalar(ts.toProto)
+    builder.build().fromProto shouldEqual ts
+
+    val hs = HourScalar(rp)
+    builder.clear()
+    builder.setHourScalar(hs.toProto)
+    builder.build().fromProto shouldEqual hs
+
+    val ms = MinuteScalar(rp)
+    builder.clear()
+    builder.setMinuteScalar(ms.toProto)
+    builder.build().fromProto shouldEqual ms
+
+    val mos = MonthScalar(rp)
+    builder.clear()
+    builder.setMonthScalar(mos.toProto)
+    builder.build().fromProto shouldEqual mos
+
+    val ys = YearScalar(rp)
+    builder.clear()
+    builder.setYearScalar(ys.toProto)
+    builder.build().fromProto shouldEqual ys
+
+    val doms = DayOfMonthScalar(rp)
+    builder.clear()
+    builder.setDayOfMonthScalar(doms.toProto)
+    builder.build().fromProto shouldEqual doms
+
+    val dows = DayOfWeekScalar(rp)
+    builder.clear()
+    builder.setDayOfWeekScalar(dows.toProto)
+    builder.build().fromProto shouldEqual dows
+
+    val dims = DaysInMonthScalar(rp)
+    builder.clear()
+    builder.setDaysInMonthScalar(dims.toProto)
+    builder.build().fromProto shouldEqual dims
+
+    val sfd = ScalarFixedDouble(rp, 1.0)
+    builder.clear()
+    builder.setScalarFixedDouble(sfd.toProto)
+    builder.build().fromProto shouldEqual sfd
+
+    val resultSchema = ResultSchema(List(ColumnInfo("ts", ColumnType.DoubleColumn),
+      ColumnInfo("val", ColumnType.DoubleColumn)), 1, Map.empty)
+
+    val recBuilder = SerializedRangeVector.newBuilder()
+    val recSchema = new RecordSchema(Seq(ColumnInfo("time", ColumnType.TimestampColumn),
+      ColumnInfo("value", ColumnType.DoubleColumn)))
+    val keysMap = Map("key1".utf8 -> "val1".utf8,
+      "key2".utf8 -> "val2".utf8)
+    val key = CustomRangeVectorKey(keysMap)
+
+    val rv = toRv(Seq((0, Double.NaN), (100, 1.0), (200, Double.NaN),
+      (300, 3.0), (400, Double.NaN),
+      (500, 5.0), (600, 6.0),
+      (700, Double.NaN), (800, Double.NaN),
+      (900, Double.NaN), (1000, Double.NaN)), key,
+      RvRange(0, 100, 1000))
+    val srv = SerializedRangeVector.apply(rv, recBuilder, recSchema, "someExecPlan")
+
+    builder.clear()
+    builder.setSerializedRangeVector(srv.toProto)
+    val deserializedSrv = builder.build().fromProto.asInstanceOf[SerializedRangeVector]
+    deserializedSrv.numRows shouldEqual Some(11)
+    deserializedSrv.numRowsSerialized shouldEqual 4
+    val res = deserializedSrv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    res.length shouldEqual 11
+    res.map(_._1) shouldEqual (0 to 1000 by 100)
+    res.map(_._2).filterNot(_.isNaN) shouldEqual Seq(1.0, 3.0, 5.0, 6.0)
+  }
 
 
     // This currently converts exception to Throwable and tests fail.

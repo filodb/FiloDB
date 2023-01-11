@@ -143,7 +143,7 @@ trait RangeVector {
   *  A marker trait to identify range vector that can be serialized for write into wire. If Range Vector does not
   *  implement this marker trait, then query engine will convert it to one that does.
   */
-trait SerializableRangeVector extends RangeVector {
+sealed trait SerializableRangeVector extends RangeVector {
   /**
    * Used to calculate number of samples sent over the wire for limiting resources used by query
    */
@@ -169,7 +169,7 @@ object SerializableRangeVector {
 /**
   * Range Vector that represents a scalar result. Scalar results result in only one range vector.
   */
-trait ScalarRangeVector extends SerializableRangeVector {
+sealed trait ScalarRangeVector extends SerializableRangeVector {
   def key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
   def getValue(time: Long): Double
 }
@@ -177,7 +177,7 @@ trait ScalarRangeVector extends SerializableRangeVector {
 /**
   * ScalarRangeVector which has time specific value
   */
-final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double],
+final case class ScalarVaryingDouble(val timeValueMap: Map[Long, Double],
                                      override val outputRange: Option[RvRange]) extends ScalarRangeVector {
   import NoCloseCursor._
   override def rows: RangeVectorCursor = timeValueMap.toList.sortWith(_._1 < _._1).
@@ -194,7 +194,7 @@ final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]
 
 final case class RangeParams(startSecs: Long, stepSecs: Long, endSecs: Long)
 
-trait ScalarSingleValue extends ScalarRangeVector {
+sealed trait ScalarSingleValue extends ScalarRangeVector {
   def rangeParams: RangeParams
   override def outputRange: Option[RvRange] = Some(RvRange(rangeParams.startSecs * 1000,
                                              rangeParams.stepSecs * 1000, rangeParams.endSecs * 1000))

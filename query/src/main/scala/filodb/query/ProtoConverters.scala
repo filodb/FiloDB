@@ -5,19 +5,18 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.binaryrecord2.{RecordContainer, RecordSchema}
 import filodb.core.metadata.Column.ColumnType._
-import filodb.core.query.{ColumnInfo, CustomRangeVectorKey, PlannerParams, PromQlQueryParams, QueryStats,
-  RangeVectorKey, ResultSchema, RvRange, SerializedRangeVector, Stat, TsdbQueryParams, UnavailablePromQlQueryParams}
+import filodb.core.query._
 import filodb.grpc.{GrpcMultiPartitionQueryService, ProtoRangeVector}
 import filodb.grpc.GrpcMultiPartitionQueryService.QueryParams
 
-
+// scalastyle:off number.of.methods
 object ProtoConverters {
 
   implicit class RangeVectorToProtoConversion(rv: SerializedRangeVector) {
 
-    def toProto: ProtoRangeVector.RangeVector = {
+    def toProto: ProtoRangeVector.SerializedRangeVector = {
       import collection.JavaConverters._
-      val builder = ProtoRangeVector.RangeVector.newBuilder()
+      val builder = ProtoRangeVector.SerializedRangeVector.newBuilder()
       builder.setKey(rv.key.toProto)
       builder.setNumRowsSerialized(rv.numRowsSerialized)
       builder.addAllRecordContainers(rv.containersIterator.map(container => ByteString.copyFrom(
@@ -31,7 +30,7 @@ object ProtoConverters {
     }
   }
 
-  implicit class RangeVectorFromProtoConversion(rvProto: ProtoRangeVector.RangeVector) {
+  implicit class RangeVectorFromProtoConversion(rvProto: ProtoRangeVector.SerializedRangeVector) {
 
     def fromProto: SerializedRangeVector = {
       import collection.JavaConverters._
@@ -353,11 +352,8 @@ object ProtoConverters {
                                           builder.setResultSchema(resultSchema.toProto)
                                           builder.setStats(queryStats.toProto)
                                           builder.setMayBePartial(mayBePartial)
-                                          builder.addAllResult(result.map {
-                                            case srv: SerializedRangeVector   => srv.toProto
-                                            case _                            =>
-                                              throw new IllegalStateException("Expected a SerializedRangeVector")
-                                          }.asJava)
+                                          builder.addAllResult(
+                                            result.map(_.asInstanceOf[SerializableRangeVector].toProto).asJava)
                                           if (partialResultReason.isDefined)
                                             builder.setPartialResultReason(partialResultReason.get)
       }
@@ -393,9 +389,9 @@ object ProtoConverters {
         case StreamQueryResult(id, result) =>
                                     builder.setBody(builder.getBodyBuilder.setId(id)
                                       .setResult(result match {
-                                        case srv: SerializedRangeVector   => srv.toProto
-                                        case _                            =>
-                                          throw new IllegalStateException("Expected a SerializedRangeVector")
+                                        case srv: SerializableRangeVector   => srv.toProto
+                                        case _                              =>
+                                          throw new IllegalStateException("Expected a SerializableRangeVector")
                                       }))
         case StreamQueryResultFooter(id, queryStats, mayBePartial, partialResultReason) =>
                                   val footerBuilder = builder.getFooterBuilder.setId(id)
@@ -442,7 +438,7 @@ object ProtoConverters {
         // Reduce streaming response to a
         // Tuple of (id, result schema, list of rvs, query stats, partial result flag, partial result reason, exception)
 
-      ("", ResultSchema.empty, List.empty[SerializedRangeVector],
+      ("", ResultSchema.empty, List.empty[SerializableRangeVector],
                   QueryStats(), false, Option.empty[String], Option.empty[Throwable])) {
         case ((id, schema, rvs, stats, isPartial, partialReason, t), response) =>
           if (response.hasBody) {
@@ -469,4 +465,195 @@ object ProtoConverters {
       }
   }
 
+  implicit class RangeParamFromProtoConverter(rp: RangeParams) {
+    def toProto: ProtoRangeVector.RangeParams = {
+      val builder = ProtoRangeVector.RangeParams.newBuilder()
+      builder.setStep(rp.stepSecs)
+      builder.setEndSecs(rp.endSecs)
+      builder.setStartSecs(rp.startSecs)
+      builder.build()
+    }
+  }
+
+  implicit class RangeParamToProtoConverter(rp: ProtoRangeVector.RangeParams) {
+    def fromProto: RangeParams = RangeParams(rp.getStartSecs, rp.getStep, rp.getEndSecs)
+  }
+
+  implicit class ScalarFixedDoubleToProtoConverter(sfd: ScalarFixedDouble) {
+    def toProto: ProtoRangeVector.ScalarFixedDouble = {
+      val builder = ProtoRangeVector.ScalarFixedDouble.newBuilder()
+      builder.setValue(sfd.value)
+      builder.setRangeParams(sfd.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class TimeScalarFromProtoConverter(ts: ProtoRangeVector.TimeScalar) {
+    def fromProto: TimeScalar = TimeScalar(ts.getRangeParams.fromProto)
+  }
+
+  implicit class TimeScalarToProtoConverter(ts: TimeScalar) {
+    def toProto: ProtoRangeVector.TimeScalar = {
+      val builder = ProtoRangeVector.TimeScalar.newBuilder()
+      builder.setRangeParams(ts.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class HourScalarFromProtoConverter(hs: ProtoRangeVector.HourScalar) {
+    def fromProto: HourScalar = HourScalar(hs.getRangeParams.fromProto)
+  }
+
+  implicit class HourScalarToProtoConverter(hs: HourScalar) {
+    def toProto: ProtoRangeVector.HourScalar = {
+      val builder = ProtoRangeVector.HourScalar.newBuilder()
+      builder.setRangeParams(hs.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class MinuteScalarFromProtoConverter(ms: ProtoRangeVector.MinuteScalar) {
+    def fromProto: MinuteScalar = MinuteScalar(ms.getRangeParams.fromProto)
+  }
+
+  implicit class MinuteScalarToProtoConverter(ms: MinuteScalar) {
+    def toProto: ProtoRangeVector.MinuteScalar = {
+      val builder = ProtoRangeVector.MinuteScalar.newBuilder()
+      builder.setRangeParams(ms.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class MonthScalarFromProtoConverter(ms: ProtoRangeVector.MonthScalar) {
+    def fromProto: MonthScalar = MonthScalar(ms.getRangeParams.fromProto)
+  }
+
+  implicit class MonthScalarToProtoConverter(ms: MonthScalar) {
+    def toProto: ProtoRangeVector.MonthScalar = {
+      val builder = ProtoRangeVector.MonthScalar.newBuilder()
+      builder.setRangeParams(ms.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class YearScalarFromProtoConverter(ys: ProtoRangeVector.YearScalar) {
+    def fromProto: YearScalar = YearScalar(ys.getRangeParams.fromProto)
+  }
+
+  implicit class YearScalarToProtoConverter(ys: YearScalar) {
+    def toProto: ProtoRangeVector.YearScalar = {
+      val builder = ProtoRangeVector.YearScalar.newBuilder()
+      builder.setRangeParams(ys.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class DayOfMonthScalarFromProtoConverter(dom: ProtoRangeVector.DayOfMonthScalar) {
+    def fromProto: DayOfMonthScalar = DayOfMonthScalar(dom.getRangeParams.fromProto)
+  }
+
+  implicit class DayOfMonthScalarToProtoConverter(dom: DayOfMonthScalar) {
+    def toProto: ProtoRangeVector.DayOfMonthScalar = {
+      val builder = ProtoRangeVector.DayOfMonthScalar.newBuilder()
+      builder.setRangeParams(dom.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class DayOfWeekScalarFromProtoConverter(dow: ProtoRangeVector.DayOfWeekScalar) {
+    def fromProto: DayOfWeekScalar = DayOfWeekScalar(dow.getRangeParams.fromProto)
+  }
+
+  implicit class DayOfWeekScalarToProtoConverter(dom: DayOfWeekScalar) {
+    def toProto: ProtoRangeVector.DayOfWeekScalar = {
+      val builder = ProtoRangeVector.DayOfWeekScalar.newBuilder()
+      builder.setRangeParams(dom.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class DaysInMonthScalarFromProtoConverter(dow: ProtoRangeVector.DaysInMonthScalar) {
+    def fromProto: DaysInMonthScalar = DaysInMonthScalar(dow.getRangeParams.fromProto)
+  }
+
+  implicit class DaysInMonthScalarToProtoConverter(dom: DaysInMonthScalar) {
+    def toProto: ProtoRangeVector.DaysInMonthScalar = {
+      val builder = ProtoRangeVector.DaysInMonthScalar.newBuilder()
+      builder.setRangeParams(dom.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class ScalarVaryingDoubleFromProtoConverter(svd: ProtoRangeVector.ScalarVaryingDouble) {
+    import collection.JavaConverters._
+    def fromProto: ScalarVaryingDouble = ScalarVaryingDouble(
+      svd.getTimeValueMapMap.asScala.map{ case (k, v) => (k.toLong, v.toDouble)}.toMap,
+      if (svd.hasRvRange) Some(svd.getRvRange.fromProto) else None)
+  }
+
+  implicit class ScalarVaryingDoubleToProtoConverter(dom: ScalarVaryingDouble) {
+    import collection.JavaConverters._
+    def toProto: ProtoRangeVector.ScalarVaryingDouble = {
+      val builder = ProtoRangeVector.ScalarVaryingDouble.newBuilder()
+      dom.outputRange match {
+        case Some(rvRange)  =>  builder.setRvRange(rvRange.toProto)
+        case None           =>
+      }
+      builder.putAllTimeValueMap(dom.timeValueMap.map{
+        case (k, v) => (java.lang.Long.valueOf(k), java.lang.Double.valueOf(v))}.asJava)
+      builder.build()
+    }
+  }
+
+  implicit class ScalarFixedDoubleFromProtoConverter(sfd: ProtoRangeVector.ScalarFixedDouble) {
+    def fromProto: ScalarFixedDouble = ScalarFixedDouble(sfd.getRangeParams.fromProto, sfd.getValue)
+  }
+
+  implicit class SerializableRangeVectorFromProtoConverter(rv: ProtoRangeVector.SerializableRangeVector) {
+    def fromProto: SerializableRangeVector =
+      if (rv.hasScalarFixedDouble) {
+        rv.getScalarFixedDouble.fromProto
+      } else if (rv.hasTimeScalar) {
+        rv.getTimeScalar.fromProto
+      } else if (rv.hasHourScalar) {
+        rv.getHourScalar.fromProto
+      } else if (rv.hasMinuteScalar) {
+        rv.getMinuteScalar.fromProto
+      } else if (rv.hasMonthScalar) {
+        rv.getMonthScalar.fromProto
+      } else if (rv.hasYearScalar) {
+        rv.getYearScalar.fromProto
+      } else if (rv.hasDayOfMonthScalar) {
+        rv.getDayOfMonthScalar.fromProto
+      } else if (rv.hasDayOfWeekScalar) {
+        rv.getDayOfWeekScalar.fromProto
+      } else if (rv.hasDaysInMonthScalar) {
+        rv.getDaysInMonthScalar.fromProto
+      } else if (rv.hasSerializedRangeVector) {
+        rv.getSerializedRangeVector.fromProto
+      } else {
+        rv.getScalarVaryingDouble.fromProto
+      }
+  }
+
+  implicit class SerializableRangeVectorToProtoConverter(rv: SerializableRangeVector) {
+    def toProto: ProtoRangeVector.SerializableRangeVector = {
+      val builder = ProtoRangeVector.SerializableRangeVector.newBuilder()
+      rv match {
+        case sfd: ScalarFixedDouble            => builder.setScalarFixedDouble(sfd.toProto).build()
+        case ts: TimeScalar                    => builder.setTimeScalar(ts.toProto).build()
+        case hs: HourScalar                    => builder.setHourScalar(hs.toProto).build()
+        case ms: MinuteScalar                  => builder.setMinuteScalar(ms.toProto).build()
+        case mos: MonthScalar                  => builder.setMonthScalar(mos.toProto).build()
+        case ys: YearScalar                    => builder.setYearScalar(ys.toProto).build()
+        case dm: DayOfMonthScalar              => builder.setDayOfMonthScalar(dm.toProto).build()
+        case dw: DayOfWeekScalar               => builder.setDayOfWeekScalar(dw.toProto).build()
+        case dims: DaysInMonthScalar           => builder.setDaysInMonthScalar(dims.toProto).build()
+        case srv: SerializedRangeVector        => builder.setSerializedRangeVector(srv.toProto).build()
+        case svd: ScalarVaryingDouble          => builder.setScalarVaryingDouble(svd.toProto).build()
+      }
+    }
+  }
+
 }
+// scalastyle:on number.of.methods
