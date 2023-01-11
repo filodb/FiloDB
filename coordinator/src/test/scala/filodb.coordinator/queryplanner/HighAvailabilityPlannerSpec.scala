@@ -50,7 +50,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     ColumnFilter("job", Filter.Equals("myService")),
     ColumnFilter("le", Filter.Equals("0.3")))
 
-  private val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000)
+  private val promQlQueryParams = PromQlQueryParams("sum(heap_usage0)", 100, 1, 1000)
 
   val localPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig,
     "raw")

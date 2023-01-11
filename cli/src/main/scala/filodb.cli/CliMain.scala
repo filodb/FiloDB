@@ -32,7 +32,6 @@ import filodb.memory.format._
 import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
 import filodb.query._
-import filodb.query.LogicalPlan.getRawSeriesFilters
 
 // scalastyle:off
 class Arguments(args: Seq[String]) extends ScallopConf(args) {
@@ -309,7 +308,7 @@ object CliMain extends StrictLogging {
         println(FindShardFormatStr.format("Shards", "Query"))
         args.queries().foreach(query => {
           val lp = Parser.queryToLogicalPlan(query, 100, 1)
-          val shardRange = planner.shardsFromFilters(planner.renameMetricFilter(getRawSeriesFilters(lp).head), QueryContext())
+          val shardRange = planner.getShardSpanFromLp(lp, QueryContext())
           println(FindShardFormatStr.format(shardRange.mkString(","), query))
         })
       case _ =>

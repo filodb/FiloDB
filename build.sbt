@@ -27,5 +27,6 @@ lazy val standalone = Submodules.standalone
 lazy val bootstrapper = Submodules.bootstrapper
 lazy val sparkJobs = Submodules.sparkJobs
 lazy val jmh = Submodules.jmh
+lazy val gatling = Submodules.gatling
 
 

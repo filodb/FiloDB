@@ -76,7 +76,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       case IndexMetastoreImplementation.NoImp       => None
       case IndexMetastoreImplementation.File        =>
         Some(new FileSystemBasedIndexMetadataStore(downsampleConfig.indexLocation.get,
-          FileSystemBasedIndexMetadataStore.expectedVersion(FileSystemBasedIndexMetadataStore.expectedGenerationEnv),
+          FileSystemBasedIndexMetadataStore.expectedVersion(
+            sys.env.get(FileSystemBasedIndexMetadataStore.expectedGenerationEnv)
+          ),
           downsampleConfig.maxRefreshHours))
       case IndexMetastoreImplementation.Ephemeral   => Some(new EphemeralIndexMetadataStore())
     }

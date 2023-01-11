@@ -75,19 +75,21 @@ object GatewayServer extends StrictLogging {
   class GatewayOptions(args: Seq[String]) extends ScallopConf(args) {
     val samplesPerSeries = opt[Int](short = 'n', default = Some(100),
                                     descr = "# of samples per time series")
-    val numSeries = opt[Int](short = 'p', default = Some(20), descr = "# of total time series")
+    val numSeriesPerMetric = opt[Int](short = 'p', default = Some(20), descr = "# of total time series per metric")
     val sourceConfigPath = trailArg[String](descr = "Path to source config, eg conf/timeseries-dev-source.conf")
     val genHistData = toggle(noshort = true, descrYes = "Generate prom-histogram-schema test data and exit")
     val genDeltaHistData = toggle(noshort = true, descrYes = "Generate delta-histogram-schema test data and exit")
-    val genPromData = toggle(noshort = true, descrYes = "Generate Prometheus-schema test data and exit")
+    val genGaugeData = toggle(noshort = true, descrYes = "Generate Prometheus gauge-schema test data and exit")
+    val numMetrics = opt[Int](short = 'm', default = Some(1), descr = "# of metrics - use 2 to test binary joins")
+    val publishIntervalSecs = opt[Int](short = 'i', default = Some(10), descr = "Publish interval between samples")
     verify()
   }
 
   //scalastyle:off method.length
   def main(args: Array[String]): Unit = {
     val userOpts = new GatewayOptions(args)
-    val numSamples = userOpts.samplesPerSeries() * userOpts.numSeries()
-    val numSeries = userOpts.numSeries()
+    val numSamples = userOpts.samplesPerSeries() * userOpts.numSeriesPerMetric() * userOpts.numMetrics()
+    val numSeries = userOpts.numSeriesPerMetric()
 
     val sourceConfig = ConfigFactory.parseFile(new java.io.File(userOpts.sourceConfigPath()))
     val numShards = sourceConfig.getInt("num-shards")
@@ -125,16 +127,16 @@ object GatewayServer extends StrictLogging {
     setupKafkaProducer(sourceConfig, containerStream)
 
     val genHist = userOpts.genHistData.getOrElse(false)
-    val genProm = userOpts.genPromData.getOrElse(false)
+    val genGaugeData = userOpts.genGaugeData.getOrElse(false)
     val genDeltaHist = userOpts.genDeltaHistData.getOrElse(false)
-    var promQL = """heap_usage{_ns_="App-0",_ws_="demo"}"""
-    if (genHist || genProm || genDeltaHist) {
+    if (genHist || genGaugeData || genDeltaHist) {
       val startTime = System.currentTimeMillis
       logger.info(s"Generating $numSamples samples starting at $startTime....")
 
       val stream = if (genHist) TestTimeseriesProducer.genHistogramData(startTime, numSeries, promHistogram)
                    else if (genDeltaHist) TestTimeseriesProducer.genHistogramData(startTime, numSeries, deltaHistogram)
-                   else TestTimeseriesProducer.timeSeriesData(startTime, numSeries)
+                   else TestTimeseriesProducer.timeSeriesData(startTime, numSeries,
+                                         userOpts.numMetrics(), userOpts.publishIntervalSecs())
 
       stream.take(numSamples).foreach { rec =>
         val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
@@ -145,12 +147,8 @@ object GatewayServer extends StrictLogging {
         }
       }
       Thread sleep 10000
-      if (genHist) {
-        promQL = """http_request_latency{_ns_="App-0",_ws_="demo"}[5m]"""
-      } else if (genDeltaHist) {
-        promQL = """http_request_latency_delta{_ns_="App-0",_ws_="demo"}[5m]"""
-      }
-      TestTimeseriesProducer.logQueryHelp(numSamples, numSeries, startTime, genHist || genDeltaHist, Some(promQL))
+      TestTimeseriesProducer.logQueryHelp(dataset.name, userOpts.numMetrics(), numSamples, numSeries,
+        startTime, genHist, genDeltaHist, genGaugeData, userOpts.publishIntervalSecs())
       logger.info(s"Waited for containers to be sent, exiting...")
       sys.exit(0)
     } else {
