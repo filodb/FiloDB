@@ -11,7 +11,6 @@ import filodb.core.{MetricsTestData, SpreadChange}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{QueryConfig, QueryContext}
 import filodb.prometheus.parse.Parser
-import filodb.query.LogicalPlan.getRawSeriesFilters
 
 object FindMyShards extends StrictLogging {
 
@@ -27,7 +26,7 @@ object FindMyShards extends StrictLogging {
     val engine = initEngine(numShard, spread)
     queries.foreach(query => {
       val lp = Parser.queryToLogicalPlan(query, 100, 1)
-      val shardRange = engine.shardsFromFilters(engine.renameMetricFilter(getRawSeriesFilters(lp).head), QueryContext())
+      val shardRange = engine.getShardSpanFromLp(lp, QueryContext())
       logger.info(s">>> Shard$shardRange >>> $query")
     })
 
