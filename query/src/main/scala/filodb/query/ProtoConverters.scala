@@ -10,6 +10,7 @@ import filodb.grpc.{GrpcMultiPartitionQueryService, ProtoRangeVector}
 import filodb.grpc.GrpcMultiPartitionQueryService.QueryParams
 
 // scalastyle:off number.of.methods
+// scalastyle:off number.of.types
 object ProtoConverters {
 
   implicit class RangeVectorToProtoConversion(rv: SerializedRangeVector) {
@@ -657,3 +658,4 @@ object ProtoConverters {
 
 }
 // scalastyle:on number.of.methods
+// scalastyle:on number.of.types
