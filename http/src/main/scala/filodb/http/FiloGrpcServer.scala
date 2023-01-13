@@ -63,41 +63,46 @@ class FiloGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings, s
           import filodb.query.ProtoConverters._
           import filodb.query.QueryResponseConverter._
           executeQuery(request) {
+                // Catch all error
             qr: QueryResponse =>
-              // IMPORTANT: This will not work when we use streaming for executeQuery instead of a fat response
-              // and we need to retain the schemas
-              val (schema, stats) = qr match {
-                case err: QueryError                          => (None, err.queryStats)
-                case QueryResult(_, resultSchema, _, queryStats, _, _) =>
-                  (Some(SerializedRangeVector.toSchema(resultSchema.columns, resultSchema.brSchemas)), queryStats)
-              }
-              lazy val rb = SerializedRangeVector.newBuilder()
-              qr.toStreamingResponse.foreach {
-                case footer: StreamQueryResultFooter   =>
-                  responseObserver.onNext(footer.toProto)
-                  responseObserver.onCompleted()
-                case error: StreamQueryError           =>
-                  responseObserver.onNext(error.toProto)
-                  responseObserver.onCompleted()
-                case header: StreamQueryResultHeader   =>
-                  responseObserver.onNext(header.toProto)
-                case result: StreamQueryResult   =>
-                  // Not the cleanest way, but we need to convert these IteratorBackedRangeVectors to a serializable one
-                  val strQueryResult = (result.result, schema) match {
-                    case (irv: IteratorBackedRangeVector, Some(recordSchema))   =>
-                      result.copy(result = SerializedRangeVector.apply(irv, rb, recordSchema, "GrpcServer"))
-                    case _                                => result
-                  }
-                  Try(strQueryResult.toProto) match {
-                    case Failure(exception) =>
-                      //TODO: Need to rework when executeQuery is streaming as stats arrive in footer
-                      // This also means, that we may see StreamQueryError after some body messages are sent
-                      val error = StreamQueryError(strQueryResult.id, stats, exception)
-                      responseObserver.onNext(error.toProto)
-                      responseObserver.onCompleted()
-                    case Success(value) => responseObserver.onNext(value)
-                  }
-
+              Try {
+                lazy val rb = SerializedRangeVector.newBuilder()
+                qr.toStreamingResponse.foreach {
+                  case footer: StreamQueryResultFooter =>
+                    responseObserver.onNext(footer.toProto)
+                    responseObserver.onCompleted()
+                  case error: StreamQueryError =>
+                    responseObserver.onNext(error.toProto)
+                    responseObserver.onCompleted()
+                  case header: StreamQueryResultHeader =>
+                    responseObserver.onNext(header.toProto)
+                  case result: StreamQueryResult =>
+                    // Not the cleanest way, but we need to convert these IteratorBackedRangeVectors to a
+                    // serializable one If we have a result, its definitely is a QueryResult
+                    val strQueryResult = (result.result, qr) match {
+                      case (irv: IteratorBackedRangeVector, QueryResult(_, resultSchema, _, _, _, _)) =>
+                        result.copy(result = SerializedRangeVector.apply(irv, rb,
+                          SerializedRangeVector.toSchema(resultSchema.columns, resultSchema.brSchemas), "GrpcServer"))
+                      case _ => result
+                    }
+                    Try(strQueryResult.toProto) match {
+                      case Failure(exception) =>
+                        //TODO: Need to rework when executeQuery is streaming as stats arrive in footer
+                        // This also means, that we may see StreamQueryError after some body messages are sent
+                        val stats = qr match {
+                          case err: QueryError => err.queryStats
+                          case QueryResult(_, _, _, queryStats, _, _) => queryStats
+                        }
+                        val error = StreamQueryError(strQueryResult.id, stats, exception)
+                        responseObserver.onNext(error.toProto)
+                        responseObserver.onCompleted()
+                      case Success(value) => responseObserver.onNext(value)
+                    }
+                }
+              } match {
+                // Catch all to ensure connection is closed
+                case Failure(t)            => responseObserver.onError(t)
+                case Success(_)            =>
               }
           }
         }
