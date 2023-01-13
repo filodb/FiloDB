@@ -23,6 +23,7 @@ object ProtoConverters {
       builder.addAllRecordContainers(rv.containersIterator.map(container => ByteString.copyFrom(
         if (container.hasArray) container.array else container.trimmedArray)).toIterable.asJava)
       builder.setRecordSchema(rv.schema.toProto)
+      builder.setStartRecordNo(rv.startRecordNo)
       rv.outputRange match {
         case Some(rvr: RvRange) => builder.setRvRange(rvr.toProto)
         case _ =>
@@ -40,7 +41,7 @@ object ProtoConverters {
         rvProto.getNumRowsSerialized,
         rvProto.getRecordContainersList.asScala.map(byteString => RecordContainer(byteString.toByteArray)),
         rvProto.getRecordSchema.fromProto,
-        0,
+        rvProto.getStartRecordNo,
         if (rvProto.hasRvRange) Some(rvProto.getRvRange.fromProto) else None)
     }
   }
@@ -391,8 +392,9 @@ object ProtoConverters {
                                     builder.setBody(builder.getBodyBuilder.setId(id)
                                       .setResult(result match {
                                         case srv: SerializableRangeVector   => srv.toProto
-                                        case _                              =>
-                                          throw new IllegalStateException("Expected a SerializableRangeVector")
+                                        case other: RangeVector             =>
+                                          throw new IllegalStateException(s"Expected a SerializableRangeVector," +
+                                            s"got ${other.getClass}")
                                       }))
         case StreamQueryResultFooter(id, queryStats, mayBePartial, partialResultReason) =>
                                   val footerBuilder = builder.getFooterBuilder.setId(id)
