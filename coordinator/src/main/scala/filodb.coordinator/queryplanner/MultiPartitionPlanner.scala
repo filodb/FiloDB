@@ -17,7 +17,7 @@ import filodb.query._
 import filodb.query.LogicalPlan._
 import filodb.query.exec._
 
-case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange,
+case class PartitionAssignment(partitionName: String, httpEndPoint: String, timeRange: TimeRange,
                                grpcEndPoint: Option[String] = None)
 
 trait PartitionLocationProvider {
@@ -125,7 +125,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             localPartitionPlanner.materialize(logicalPlan, qContext)
         } else {
           // Single partition but remote, send the entire plan remotely
-          val remotePartitionEndpoint = partitions.head.endPoint
+          val remotePartitionEndpoint = partitions.head.httpEndPoint
           val httpEndpoint = remotePartitionEndpoint + params.remoteQueryPath.getOrElse("")
           val remoteContext = logicalPlan match {
             case psp: PeriodicSeriesPlan =>
@@ -361,7 +361,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       val lpWithUpdatedTime = copyLogicalPlanWithUpdatedTimeRange(logicalPlan, timeRange)
       localPartitionPlanner.materialize(lpWithUpdatedTime, queryContext)
     } else {
-      val httpEndpoint = partition.endPoint + queryParams.remoteQueryPath.getOrElse("")
+      val httpEndpoint = partition.httpEndPoint + queryParams.remoteQueryPath.getOrElse("")
       PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
         generateRemoteExecParams(queryContext, timeRange.startMs, timeRange.endMs),
         inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
@@ -630,7 +630,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                                        urlParams: Map[String, String]) = {
     val finalQueryContext = generateRemoteExecParams(
       qContext, partitionAssignment.timeRange.startMs, partitionAssignment.timeRange.endMs)
-    val httpEndpoint = partitionAssignment.endPoint + finalQueryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+    val httpEndpoint = partitionAssignment.httpEndPoint + finalQueryContext.origQueryParams.asInstanceOf[PromQlQueryParams].
       remoteQueryPath.getOrElse("")
     MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
       urlParams, finalQueryContext, inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
