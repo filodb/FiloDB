@@ -22,6 +22,7 @@ object Submodules {
     )
 
   lazy val grpc = (project in file("grpc"))
+    .dependsOn(core % "compile->compile; test->test")
     .settings(
       commonSettings,
       name := "filodb-grpc",

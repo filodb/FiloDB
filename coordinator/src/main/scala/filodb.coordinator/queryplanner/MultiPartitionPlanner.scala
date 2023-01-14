@@ -1,14 +1,21 @@
 package filodb.coordinator.queryplanner
 
+
+import java.util.concurrent.ConcurrentHashMap
+
+import scala.collection.concurrent.{Map => ConcurrentMap}
+import scala.jdk.CollectionConverters._
+
 import com.typesafe.scalalogging.StrictLogging
+import io.grpc.ManagedChannel
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RvRange}
+import filodb.grpc.GrpcCommonUtils
 import filodb.query._
 import filodb.query.LogicalPlan._
 import filodb.query.exec._
-
 
 case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange,
                                grpcEndPoint: Option[String] = None)
@@ -43,7 +50,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                             val dataset: Dataset,
                             val queryConfig: QueryConfig,
                             remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient,
-                            grpcChannelManager: Option[GrpcChannelManager] = None)
+                            channels: ConcurrentMap[String, ManagedChannel] =
+                            new ConcurrentHashMap[String, ManagedChannel]().asScala)
   extends QueryPlanner with StrictLogging with DefaultPlanner {
 
   override val schemas: Schemas = Schemas(dataset.schema)
@@ -128,19 +136,15 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             case _ =>
               generateRemoteExecParams(qContext, startMs, endMs)
           }
-          (grpcEndpoint, grpcChannelManager) match {
-            case (Some(endpoint), Some(channelManager))   =>
-              val channel = channelManager.borrowChannel(endpoint)
-              PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, qContext, inProcessPlanDispatcher,
-                dataset.ref) { () => channelManager.returnChannel(channel) }
-
-              // TODO: Can handle all remaining 3 cases and log a warn in case endpoint if provided but channel manager
-              // is not configured
-            case _                                        =>
-              PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, remoteContext, inProcessPlanDispatcher,
-                dataset.ref, remoteExecHttpClient)
+          if(!queryConfig.grpcPartitionsDenyList.contains(partitionName.toLowerCase) && grpcEndpoint.isDefined) {
+            val endpoint = grpcEndpoint.get
+            val channel = channels.getOrElseUpdate(endpoint, GrpcCommonUtils.buildChannelFromEndpoint(endpoint))
+            PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, qContext, inProcessPlanDispatcher,
+              dataset.ref)
+          } else {
+            PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, remoteContext, inProcessPlanDispatcher,
+              dataset.ref, remoteExecHttpClient)
           }
-
         }
         PlanResult(Seq(execPlan))
     } else walkMultiPartitionPlan(logicalPlan, qContext)

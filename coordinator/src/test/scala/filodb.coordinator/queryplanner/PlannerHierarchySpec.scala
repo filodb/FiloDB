@@ -2054,7 +2054,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
       override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange:  TimeRange): List[PartitionAssignment] = ???
 }
     val grpcRemoteMultiPartitionPlanner = new MultiPartitionPlanner(gRpcRemotePartitionLocationProvider, singlePartitionPlanner,
-      "localPartition", dataset, queryConfig, grpcChannelManager = Some(new SimpleGrpcChannelManager()))
+      "localPartition", dataset, queryConfig)
     val gRpcRemoteRootPlanner = new ShardKeyRegexPlanner(dataset, grpcRemoteMultiPartitionPlanner, shardKeyMatcherFn, queryConfig)
 
     val query4 = """topk(2, test{_ws_ = "demo", _ns_ =~ ".*Ns", instance = "Inst-1"})"""
@@ -2176,7 +2176,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
 
     val twoGrpcRemoteMpPlanner = new MultiPartitionPlanner(rwoRemoteGrpcPartitionLocationProvider, singlePartitionPlanner,
-      "localPartition", dataset, queryConfig, grpcChannelManager = Some(new SimpleGrpcChannelManager()))
+      "localPartition", dataset, queryConfig)
     val twoGrpcRemoteShardKeyRegexPlanner = new ShardKeyRegexPlanner(dataset, twoGrpcRemoteMpPlanner, twoRemoteShardKeyMatcherFn, queryConfig)
 
     val query8 = """topk(2, test{_ws_ = "demo", _ns_ =~ "remoteNs.*", instance = "Inst-1"})"""
@@ -2231,8 +2231,33 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
           plannerParams = PlannerParams(processMultiPartition = true)))
     }
 
+    // Case 10: MPP configured not to use grpc but partition assignment has grpc endpoint configured
 
+    val twoGrpcRemoteMpPlannerNoGrpc = new MultiPartitionPlanner(rwoRemoteGrpcPartitionLocationProvider, singlePartitionPlanner,
+      "localPartition", dataset,
+      queryConfig.copy(grpcPartitionsDenyList = Set("remotepartition1")))
+    val twoGrpcRemoteShardKeyRegexPlannerNoGrpc =
+      new ShardKeyRegexPlanner(dataset, twoGrpcRemoteMpPlannerNoGrpc, twoRemoteShardKeyMatcherFn, queryConfig)
 
+    val query10 = """sum(test{_ws_ = "demo", _ns_ =~ "remoteNs.*", instance = "Inst-1"})"""
+    val lp10 =
+      Parser.queryRangeToLogicalPlan(query10, TimeStepParams(startSeconds, step, endSeconds), Antlr)
+
+    val execPlan10 = twoGrpcRemoteShardKeyRegexPlannerNoGrpc.materialize(lp10,
+      QueryContext(
+        origQueryParams = PromQlQueryParams(query8, startSeconds, step, endSeconds),
+        plannerParams = PlannerParams(processMultiPartition = true)))
+
+    // remoteNs0 is configured to use gRPC in PartitionAssignment but explicitly denied to use gRPC Remote exec from
+    // config. Thus we see it falls back to using PromQlRemoteExec
+
+    val expectedPlan10 =
+      """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1633913330,300,1634777330))
+        |-E~MultiPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+        |--E~PromQLGrpcRemoteExec(PromQlQueryParams(sum(test{instance="Inst-1",_ws_="demo",_ns_="remoteNs1"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,true,true,true,false), queryEndpoint=remotePartition-grpc-url2.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set(remotepartition1)))
+        |--E~PromQlRemoteExec(PromQlQueryParams(sum(test{instance="Inst-1",_ws_="demo",_ns_="remoteNs0"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,true,true,false,false), queryEndpoint=remotePartition-url1, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set(remotepartition1)))""".stripMargin
+
+    validatePlan(execPlan10, expectedPlan10)
 
 
 

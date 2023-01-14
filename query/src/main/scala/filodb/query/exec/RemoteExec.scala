@@ -1,6 +1,5 @@
 package filodb.query.exec
 
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 import scala.concurrent.Future
@@ -12,8 +11,6 @@ import com.softwaremill.sttp.SttpBackendOptions.ProxyType.{Http, Socks}
 import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
 import com.softwaremill.sttp.circe.asJson
 import com.typesafe.scalalogging.StrictLogging
-import io.grpc.ManagedChannel
-import io.grpc.netty.{NegotiationType, NettyChannelBuilder}
 import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
@@ -21,7 +18,6 @@ import monix.execution.Scheduler
 import org.asynchttpclient.{AsyncHttpClientConfig, DefaultAsyncHttpClientConfig}
 import org.asynchttpclient.proxy.ProxyServer
 
-import filodb.core.GlobalConfig
 import filodb.core.query.{PromQlQueryParams, QuerySession, QueryStats}
 import filodb.core.store.ChunkSource
 import filodb.query._
@@ -97,94 +93,6 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
       queryStats.getResultBytesCounter(stat.group).addAndGet(stat.resultBytes)
     }
     queryStats
-  }
-}
-
-trait GrpcChannelManager {
-
-  /**
-   * Based on the endpointURL borrow the Grpc channel to use
-   *
-   * @param endpointUrl
-   * @return io.grpc.Channel
-   */
-  def borrowChannel(endpointUrl: String): ManagedChannel
-
-  /**
-   * Returns the channel to the manager, the implementation may choose to close the channel of retain for later reuse
-   * @param channel
-   */
-  def returnChannel(channel: ManagedChannel): Unit
-
-  def shutdown(): Unit
-
-}
-
-abstract class BaseChannelManager extends GrpcChannelManager {
-
-  def buildChannelFromEndpoint(endpointUrl: String): ManagedChannel = {
-
-    val grpcConfig = GlobalConfig.defaultFiloConfig.getConfig("grpc")
-    val idleTimeout = grpcConfig.getInt("idle-timeout-seconds")
-    val keepAliveTime = grpcConfig.getInt("keep-alive-time-seconds")
-    val keepAliveTimeOut = grpcConfig.getInt("keep-alive-timeout-seconds")
-    val lbPolicy = grpcConfig.getString("load-balancing-policy")
-    val builder = NettyChannelBuilder
-      .forTarget(endpointUrl)
-      .defaultLoadBalancingPolicy(lbPolicy)
-      // TODO: Configure this to SSL/Plain text later based on config, currently only Plaintext supported
-      .negotiationType(NegotiationType.PLAINTEXT)
-
-      if (idleTimeout > 0) {
-        builder.idleTimeout(idleTimeout, TimeUnit.SECONDS)
-      }
-      if (keepAliveTime > 0) {
-        builder.keepAliveTime(keepAliveTime, TimeUnit.SECONDS).keepAliveWithoutCalls(true)
-      }
-      if(keepAliveTimeOut > 0) {
-        builder.keepAliveTimeout(keepAliveTimeOut, TimeUnit.SECONDS)
-      }
-
-      builder.build()
-  }
-}
-
-/**
- * Simple but inefficient implementation that does not reuse channels. Simply builds the channel, possibly multiple
- * to same endpoint and shut it down when not needed
- */
-class SimpleGrpcChannelManager extends BaseChannelManager {
-
-  override def borrowChannel(endpointUrl: String): ManagedChannel = buildChannelFromEndpoint(endpointUrl)
-
-  override def returnChannel(channel: ManagedChannel): Unit = channel.shutdown()
-
-  override def shutdown(): Unit = {}
-}
-
-class ReusableGRPCChannelManager extends BaseChannelManager {
-
-  import scala.jdk.CollectionConverters._
-
-  val map = new ConcurrentHashMap[String, ManagedChannel]().asScala
-
-  override def borrowChannel(endpointUrl: String): ManagedChannel =
-    map.getOrElseUpdate(endpointUrl, buildChannelFromEndpoint(endpointUrl))
-
-
-
-  override def returnChannel(channel: ManagedChannel): Unit = {
-    // NOP
-    // No need to return a channel, the ManagedChannel in the map abstracts the connections and automatically
-    //reconnects from an idle state if there is a RPC that needs to connect. ManagedChannel also manages disconnects
-    // from remote server
-  }
-
-  override def shutdown(): Unit = {
-    map.foreach {
-      case (_, channel) => channel.shutdown()
-    }
-    map.clear()
   }
 }
 

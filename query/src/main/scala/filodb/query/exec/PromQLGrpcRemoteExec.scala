@@ -34,10 +34,9 @@ trait GrpcRemoteExec extends LeafExecPlan {
         // Dont finish span since this code didnt create it
         Kamon.runWithSpan(span, false) {
             Task.fromFuture(sendGrpcRequest(span, requestTimeoutMs))
-        }.guarantee(Task{cleanup()})
+        }
     }
 
-    def cleanup(): Unit = {}
 
     def args: String = s"${promQlQueryParams.toString}, ${queryContext.plannerParams}, queryEndpoint=$queryEndpoint, " +
       s"requestTimeoutMs=$requestTimeoutMs"
@@ -62,7 +61,7 @@ case class PromQLGrpcRemoteExec(channel: Channel,
                            requestTimeoutMs: Long,
                            queryContext: QueryContext,
                            dispatcher: PlanDispatcher,
-                           dataset: DatasetRef)(f: () => Unit) extends GrpcRemoteExec {
+                           dataset: DatasetRef) extends GrpcRemoteExec {
     override def sendGrpcRequest(span: Span, requestTimeoutMs: Long)(implicit sched: Scheduler): Future[QueryResponse]
     = Future {
         val blockingStub = RemoteExecGrpc.newBlockingStub(channel)
@@ -71,8 +70,6 @@ case class PromQLGrpcRemoteExec(channel: Channel,
         blockingStub.withDeadlineAfter(requestTimeoutMs, TimeUnit.MILLISECONDS)
           .execStreaming(getGrpcRequest).asScala.toQueryResponse
     }
-
-    override def cleanup(): Unit = f()
 
     override def queryEndpoint: String = channel.authority() + ".execStreaming"
 }
