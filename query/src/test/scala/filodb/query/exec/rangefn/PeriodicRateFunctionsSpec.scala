@@ -38,24 +38,21 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec {
   it("rate over period-counter should work when start and end are outside window") {
     val startTs = 8071950L
     val endTs =   8163070L
-    val expectedDelta = deltaCounterSamples.map(_._2).sum / (qDelta.last.timestamp - qDelta.head.timestamp) * 1000
-    val toEmitDelta = new TransientRow
-    PeriodicRateFunction.apply(startTs,endTs, deltaDCounterWindow, toEmitDelta, queryConfig)
-    toEmitDelta.value shouldEqual expectedDelta +- errorOk
+    val expectedDelta = deltaCounterSamples.map(_._2).sum / (endTs - startTs) * 1000
 
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(deltaCounterRV, endTs, 10000, endTs, endTs - startTs,
-                                        new ChunkedPeriodicRateFunction, querySession)
+                                        new RateOverDeltaChunkedFunctionD, querySession)
     it.next.getDouble(1) shouldEqual expectedDelta +- errorOk
   }
 
-  it("should return NaN for rate over period-counter when window only contains one sample") {
+  it("should not return NaN for rate over period-counter when window only contains one sample") {
     val startTs = 8101215L
     val endTs =   8103215L
 
     val it = new ChunkedWindowIteratorD(deltaCounterRV, endTs, 10000, endTs, endTs - startTs,
-                                        new ChunkedPeriodicRateFunction, querySession)
-    it.next.getDouble(1).isNaN shouldEqual true
+                                        new RateOverDeltaChunkedFunctionD, querySession)
+    it.next.getDouble(1).isNaN shouldEqual false
   }
 
   it("should not return rate of 0 when delta-counter samples do not increase") {
@@ -66,7 +63,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec {
 
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(flatRV, endTs, 10000, endTs, endTs - startTs,
-                                        new ChunkedPeriodicRateFunction, querySession)
+                                        new RateOverDeltaChunkedFunctionD, querySession)
     it.next.getDouble(1) should not equal 0.0
   }
 
@@ -81,11 +78,11 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec {
       val step = rand.nextInt(50) + 5
       info(s"  iteration $x  windowSize=$windowSize step=$step")
 
-      val slidingRate = slidingWindowIt(data, rv, PeriodicRateFunction, windowSize, step)
-      val slidingResults = slidingRate.map(_.getDouble(1)).toBuffer
+      val slidingRate = slidingWindowIt(data, rv, new RateOverDeltaFunction, windowSize, step)
+      val slidingResults = slidingRate.map{ r => (r.getLong(0), r.getDouble(1)) }.toBuffer
       slidingRate.close()
 
-      val rateChunked = chunkedWindowIt(data, rv, new ChunkedPeriodicRateFunction, windowSize, step)
+      val rateChunked = chunkedWindowIt(data, rv, new RateOverDeltaChunkedFunctionD, windowSize, step)
       val resultRows = rateChunked.map { r => (r.getLong(0), r.getDouble(1)) }.toBuffer
       val rates = resultRows.map(_._2)
 
@@ -100,7 +97,7 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec {
       //   (w.sum_of_sample_values) / (windowTime) * 1000
       //   // (w.sum_of_sample_values) / (w.last._1 - w.head._1) * 1000
       // }
-      rates shouldEqual slidingResults
+      rates.zipWithIndex.foreach{case(rate, i) => rate shouldEqual slidingResults(i)._2 +- errorOk}
     }
   }
 
@@ -112,19 +109,17 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec {
     val (data, rv) = MachineMetricsData.histogramRV(100000L, numSamples=10, pool=histBufferPool, ds=promHistDS)
     val startTs = 99500L
     val endTs =   161000L // just past 7th sample
-    val lastTime = 160000L
-    val headTime = 100000L
     val expectedRates = data
       .slice(0, 7)
       .map(_(3).asInstanceOf[LongHistogram].values) // buckets
       .reduce((b1, b2) => b1.zip(b2).map { case (x, y) => x + y }) // sum of respective buckets
-      .map(_.toDouble / (lastTime - headTime) * 1000) // rate
+      .map(_.toDouble / (endTs - startTs) * 1000) // rate
 
     val expected = MutableHistogram(MachineMetricsData.histBucketScheme, expectedRates.toArray)
 
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorH(rv, endTs, 100000, endTs, endTs - startTs,
-                                        new HistPeriodicRateFunction, querySession)
+                                        new RateOverDeltaChunkedFunctionH, querySession)
     // Scheme should have remained the same
     val answer = it.next.getHistogram(1)
     answer.numBuckets shouldEqual expected.numBuckets
@@ -149,16 +144,12 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec {
   it ("increase over period-counters should work when start and end are outside window") {
     val startTs = 8071950L
     val endTs = 8163070L
-    val expectedDelta =
-      deltaCounterSamples.map(_._2).sum / (qDelta.last.timestamp - qDelta.head.timestamp) * (endTs - startTs)
-    val toEmitDelta = new TransientRow
-    PeriodicIncreaseFunction.apply(startTs, endTs, deltaDCounterWindow, toEmitDelta, queryConfig)
-    toEmitDelta.value shouldEqual expectedDelta +- errorOk
+    val expectedDelta = deltaCounterSamples.map(_._2).sum
 
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(deltaCounterRV, endTs, 10000, endTs, endTs - startTs,
-      new ChunkedPeriodicIncreaseFunction, querySession)
-    it.next.getDouble(1) shouldEqual toEmitDelta.value
+      new SumOverTimeChunkedFunctionD, querySession)
+    it.next.getDouble(1) shouldEqual expectedDelta
   }
 
   it("idelta over period-counters should work when start and end are outside window") {

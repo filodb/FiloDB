@@ -59,7 +59,7 @@ object RangeInstantFunctions {
       if (isRate) {
         val sampledInterval = (window.last.timestamp - prevSampleRow.timestamp).toDouble
         if (sampledInterval == 0) {
-          None // Avoid dividing by 0
+          return Double.NaN // Avoid dividing by 0
         }
         // Convert to per-second.
         resultValue = resultValue/sampledInterval*1000
@@ -81,7 +81,7 @@ object RangeInstantFunctions {
     if (isRate) {
       val sampledInterval = (window.last.timestamp - prevSampleRow.timestamp).toDouble
       if (sampledInterval == 0) {
-        None // Avoid dividing by 0
+        return Double.NaN // Avoid dividing by 0
       }
       // Convert to per-second.
       resultValue = resultValue / sampledInterval * 1000
@@ -126,7 +126,7 @@ object IDeltaFunction extends RangeFunction {
 
 object IRatePeriodicFunction extends RangeFunction {
 
-  override def needsCounterCorrection: Boolean = false
+  var lastFunc = LastSampleFunction
   def addedToWindow(row: TransientRow, window: Window): Unit = {}
   def removedFromWindow(row: TransientRow, window: Window): Unit = {}
 
@@ -135,8 +135,13 @@ object IRatePeriodicFunction extends RangeFunction {
             window: Window,
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
-    val result = RangeInstantFunctions.instantValuePeriodic(startTimestamp,
-      endTimestamp, window, true)
+    lastFunc.apply(startTimestamp, endTimestamp, window, sampleToEmit, queryConfig)
+    val prevSampleRow = window(window.size - 2)
+    val sampledInterval = (window.last.timestamp - prevSampleRow.timestamp).toDouble
+    if (sampledInterval == 0) {
+      return Double.NaN // Avoid dividing by 0
+    }
+    val result = sampleToEmit.value / sampledInterval * 1000
     sampleToEmit.setValues(endTimestamp, result) // TODO need to use a NA instead of NaN
   }
 }

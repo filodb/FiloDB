@@ -162,44 +162,6 @@ trait CounterChunkedRangeFunction[R <: MutableRowReader] extends ChunkedRangeFun
 }
 
 /**
- * A ChunkedRangeFunction for period-counters/histograms. This does not handle resets/corrections.
- * Data is assumed to be ordered.
- */
-trait PeriodCounterChunkedRangeFunction[R <: MutableRowReader] extends ChunkedRangeFunction[R] {
-
-  // reset is called before first chunk.
-  override def reset(): Unit = {}
-
-  // scalastyle:off parameter.number
-  def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
-                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
-    val ccReader = valueReader
-    val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
-    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
-
-    // At least one sample is present
-    if (startRowNum <= endRowNum) {
-      try {
-        addTimeChunks(valueVectorAcc, valueVector, ccReader, startRowNum, endRowNum,
-          tsReader(tsVectorAcc, tsVector, startRowNum), tsReader(tsVectorAcc, tsVector, endRowNum))
-      } catch { case e: ArrayIndexOutOfBoundsException =>
-        Query.qLogger.error(s"ArrayIndexOutOfBoundsException startRowNum=$startRowNum endRowNum=$endRowNum")
-        throw e
-      }
-    }
-  }
-
-  /**
-   * Implements the logic for processing chunked data given row numbers and times for the
-   * start and end.
-   */
-  def addTimeChunks(acc: MemoryReader, vector: BinaryVectorPtr, reader: VectorDataReader,
-                    startRowNum: Int, endRowNum: Int,
-                    startTime: Long, endTime: Long): Unit
-}
-
-/**
  * A trait for RangeFunctions that operate on both a start time and an end time.  Will find the start and end
  * row numbers for the chunk.
  */
@@ -377,9 +339,9 @@ object RangeFunction {
       case Some(Rate) if config.fasterRateEnabled && schema.columns(1).isCumulative
                                   => () => new ChunkedRateFunction
       case Some(Increase) if config.fasterRateEnabled
-                                  => () => new ChunkedPeriodicIncreaseFunction
+                                  => () => new SumOverTimeChunkedFunctionD
       case Some(Rate)     if config.fasterRateEnabled
-                                  => () => new ChunkedPeriodicRateFunction
+                                  => () => new RateOverDeltaChunkedFunctionD
 
       case Some(CountOverTime)    => () => new CountOverTimeChunkedFunctionD()
       case Some(SumOverTime)      => () => new SumOverTimeChunkedFunctionD
@@ -424,8 +386,8 @@ object RangeFunction {
                               => () => new HistRateFunction
     case Some(Increase) if schema.columns(1).isCumulative
                               => () => new HistIncreaseFunction
-    case Some(Rate)           => () => new HistPeriodicRateFunction
-    case Some(Increase)       => () => new HistPeriodicIncreaseFunction
+    case Some(Rate)           => () => new RateOverDeltaChunkedFunctionH
+    case Some(Increase)       => () => new SumOverTimeChunkedFunctionH
     case _                    => ??? //TODO enumerate all possible cases
   }
 
@@ -444,8 +406,8 @@ object RangeFunction {
                                       => () => RateFunction
     case Some(Increase) if schema.columns(1).isCumulative
                                       => () => IncreaseFunction
-    case Some(Rate)                   => () => PeriodicRateFunction
-    case Some(Increase)               => () => PeriodicIncreaseFunction
+    case Some(Rate)                   => () => new RateOverDeltaFunction()
+    case Some(Increase)               => () => new SumOverTimeFunction() // Sum of deltas over time
     case Some(Delta)                  => () => DeltaFunction
     case Some(Resets)                 => () => new ResetsFunction()
     case Some(Irate) if schema.columns(1).isCumulative
@@ -453,7 +415,7 @@ object RangeFunction {
     case Some(Idelta) if schema.columns(1).isCumulative
                                       => () => IDeltaFunction
     case Some(Irate)                  => () => IRatePeriodicFunction
-    case Some(Idelta)                 => () => IDeltaPeriodicFunction
+    case Some(Idelta)                 => () => LastSampleFunction // Last Delta value
     case Some(Deriv)                  => () => DerivFunction
     case Some(MaxOverTime)            => () => new MinMaxOverTimeFunction(Ordering[Double])
     case Some(MinOverTime)            => () => new MinMaxOverTimeFunction(Ordering[Double].reverse)
