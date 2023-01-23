@@ -338,9 +338,9 @@ object RangeFunction {
                                   => () => new ChunkedIncreaseFunction
       case Some(Rate) if config.fasterRateEnabled && schema.columns(1).isCumulative
                                   => () => new ChunkedRateFunction
-      case Some(Increase) if config.fasterRateEnabled
+      case Some(Increase) if !schema.columns(1).isCumulative
                                   => () => new SumOverTimeChunkedFunctionD
-      case Some(Rate)     if config.fasterRateEnabled
+      case Some(Rate)     if !schema.columns(1).isCumulative
                                   => () => new RateOverDeltaChunkedFunctionD
 
       case Some(CountOverTime)    => () => new CountOverTimeChunkedFunctionD()
