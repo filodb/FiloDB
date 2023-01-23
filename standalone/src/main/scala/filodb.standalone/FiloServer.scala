@@ -12,7 +12,7 @@ import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core.{DatasetRef, GlobalConfig, GlobalScheduler}
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.QueryConfig
-import filodb.http.{FiloGrpcServer, FiloHttpServer}
+import filodb.http.{FiloHttpServer, PromQLGrpcServer}
 
 /**
  * FiloServer starts a "standalone" FiloDB server which can ingest and support queries through the Akka
@@ -48,7 +48,7 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
   lazy val config = cluster.settings.config
 
   var filoHttpServer: FiloHttpServer = _
-  var filoGrpcServer: FiloGrpcServer = _
+  var promQLGrpcServer: PromQLGrpcServer = _
 
   // Now, initialize any datasets using in memory MetaStore.
   // This is a hack until we are able to use CassandraMetaStore for standalone.  It is also a
@@ -81,8 +81,8 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
           val planner = new SingleClusterPlanner(dataset, Schemas.global,
             shardMapper,
             earliestRetainedTimestampFn = 0, queryConfig, "raw")
-          filoGrpcServer = new FiloGrpcServer(planner, cluster.settings, GlobalScheduler.globalImplicitScheduler)
-          filoGrpcServer.start()
+          promQLGrpcServer = new PromQLGrpcServer(planner, cluster.settings, GlobalScheduler.globalImplicitScheduler)
+          promQLGrpcServer.start()
         case None              =>
           logger.warn("Unable to get shardMapper, not starting gRPC service")
       }

@@ -22,12 +22,12 @@ import filodb.prometheus.parse.Parser
 import filodb.query._
 
 
-class FiloGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings, scheduler: Scheduler)
-  extends StrictLogging{
+class PromQLGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings, scheduler: Scheduler)
+  extends StrictLogging {
 
   val port  = filoSettings.allConfig.getInt("filodb.grpc.bind-grpc-port")
   val server = ServerBuilder.forPort(this.port)
-    .executor(scheduler).asInstanceOf[ServerBuilder[NettyServerBuilder]]
+    //.executor(scheduler).asInstanceOf[ServerBuilder[NettyServerBuilder]]
     .addService(new PromQLGrpcService()).asInstanceOf[ServerBuilder[NettyServerBuilder]].build()
 
   val queryAskTimeout = filoSettings.allConfig.as[FiniteDuration]("filodb.query.ask-timeout")
@@ -36,8 +36,8 @@ class FiloGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings, s
 
         private def executeQuery(request: GrpcMultiPartitionQueryService.Request)(f: QueryResponse => Unit): Unit = {
           import filodb.query.ProtoConverters._
-          implicit val timeout = queryAskTimeout
-          implicit val monixScheduler  = scheduler
+          implicit val timeout: FiniteDuration = queryAskTimeout
+          implicit val dispatcherScheduler: Scheduler = scheduler
           val queryParams = request.getQueryParams()
           val config = QueryContext(origQueryParams = request.getQueryParams.fromProto,
             plannerParams = request.getPlannerParams.fromProto)
@@ -48,8 +48,6 @@ class FiloGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings, s
               TimeStepParams(queryParams.getStart(), queryParams.getStep(), queryParams.getEnd()))
 
             val exec = queryPlanner.materialize(logicalPlan, config)
-            // TODO: make sure trace is propagated from remote call
-            //TODO: is queryAskTimeout the right timeout?
             queryPlanner.dispatchExecPlan(exec, kamon.Kamon.currentSpan()).foreach(f)
           }
           eval match {
@@ -85,23 +83,13 @@ class FiloGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings, s
                           SerializedRangeVector.toSchema(resultSchema.columns, resultSchema.brSchemas), "GrpcServer"))
                       case _ => result
                     }
-                    Try(strQueryResult.toProto) match {
-                      case Failure(exception) =>
-                        //TODO: Need to rework when executeQuery is streaming as stats arrive in footer
-                        // This also means, that we may see StreamQueryError after some body messages are sent
-                        val stats = qr match {
-                          case err: QueryError => err.queryStats
-                          case QueryResult(_, _, _, queryStats, _, _) => queryStats
-                        }
-                        val error = StreamQueryError(strQueryResult.id, stats, exception)
-                        responseObserver.onNext(error.toProto)
-                        responseObserver.onCompleted()
-                      case Success(value) => responseObserver.onNext(value)
-                    }
+                    responseObserver.onNext(strQueryResult.toProto)
                 }
               } match {
-                // Catch all to ensure connection is closed
-                case Failure(t)            => responseObserver.onError(t)
+                // Catch all to ensure onError is invoked
+                case Failure(t)            =>
+                            logger.error("Caught failure while executing query", t)
+                            responseObserver.onError(t)
                 case Success(_)            =>
               }
           }
@@ -111,11 +99,30 @@ class FiloGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings, s
                          responseObserver: StreamObserver[GrpcMultiPartitionQueryService.Response]): Unit = {
            import filodb.query.ProtoConverters._
            executeQuery(request) {
-             qr: QueryResponse => responseObserver.onNext(qr.toProto)
+               qr: QueryResponse =>
+                 Try {
+                   val queryResponse = qr match {
+                     case err: QueryError     => err
+                     case res: QueryResult    =>
+                       lazy val rb = SerializedRangeVector.newBuilder()
+                       val rvs = res.result.map {
+                         case irv: IteratorBackedRangeVector =>
+                           val resultSchema = res.resultSchema
+                           SerializedRangeVector.apply(irv, rb,
+                             SerializedRangeVector.toSchema(resultSchema.columns, resultSchema.brSchemas), "GrpcServer")
+                         case rv => rv
+                       }
+                    res.copy(result = rvs)
+                   }
+                  responseObserver.onNext(queryResponse.toProto)
+                 } match {
+                   case Failure(t)            =>
+                     logger.error("Caught failure while executing query", t)
+                     responseObserver.onError(t)
+                   case Success(_)            => responseObserver.onCompleted()
+                 }
            }
-           responseObserver.onCompleted()
         }
-
   }
 
 
@@ -129,7 +136,7 @@ class FiloGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings, s
     server.start();
     logger.info("Server started, listening on " + this.port);
     Runtime.getRuntime().addShutdownHook(new Thread() {
-      () => FiloGrpcServer.this.stop()
+      () => PromQLGrpcServer.this.stop()
     })
   }
 
