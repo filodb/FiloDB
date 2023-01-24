@@ -124,9 +124,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         val execPlan = if (partitionName.equals(localPartitionName)) {
             localPartitionPlanner.materialize(logicalPlan, qContext)
         } else {
-          // Single partition but remote, send the entire plan remotely
-          val remotePartitionEndpoint = partitions.head.httpEndPoint
-          val httpEndpoint = remotePartitionEndpoint + params.remoteQueryPath.getOrElse("")
           val remoteContext = logicalPlan match {
             case psp: PeriodicSeriesPlan =>
               val startSecs = psp.startMs / 1000
@@ -136,12 +133,15 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             case _ =>
               generateRemoteExecParams(qContext, startMs, endMs)
           }
-          if(!queryConfig.grpcPartitionsDenyList.contains(partitionName.toLowerCase) && grpcEndpoint.isDefined) {
+          // Single partition but remote, send the entire plan remotely
+          if (!queryConfig.grpcPartitionsDenyList.contains(partitionName.toLowerCase) && grpcEndpoint.isDefined) {
             val endpoint = grpcEndpoint.get
             val channel = channels.getOrElseUpdate(endpoint, GrpcCommonUtils.buildChannelFromEndpoint(endpoint))
-            PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, qContext, inProcessPlanDispatcher,
+            PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, remoteContext, inProcessPlanDispatcher,
               dataset.ref)
           } else {
+            val remotePartitionEndpoint = partitions.head.httpEndPoint
+            val httpEndpoint = remotePartitionEndpoint + params.remoteQueryPath.getOrElse("")
             PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs, remoteContext, inProcessPlanDispatcher,
               dataset.ref, remoteExecHttpClient)
           }
@@ -357,14 +357,22 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                                       timeRangeOverride: Option[TimeRange] = None): ExecPlan = {
     val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val timeRange = timeRangeOverride.getOrElse(TimeRange(1000 * queryParams.startSecs, 1000 * queryParams.endSecs))
-    if (partition.partitionName.equals(localPartitionName)) {
+    val (partitionName, grpcEndpoint) = (partition.partitionName, partition.grpcEndPoint)
+    if (partitionName.equals(localPartitionName)) {
       val lpWithUpdatedTime = copyLogicalPlanWithUpdatedTimeRange(logicalPlan, timeRange)
       localPartitionPlanner.materialize(lpWithUpdatedTime, queryContext)
     } else {
-      val httpEndpoint = partition.httpEndPoint + queryParams.remoteQueryPath.getOrElse("")
-      PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-        generateRemoteExecParams(queryContext, timeRange.startMs, timeRange.endMs),
-        inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
+      val ctx = generateRemoteExecParams(queryContext, timeRange.startMs, timeRange.endMs)
+      if (!queryConfig.grpcPartitionsDenyList.contains(partitionName.toLowerCase) && grpcEndpoint.isDefined) {
+        val channel = channels.getOrElseUpdate(grpcEndpoint.get,
+          GrpcCommonUtils.buildChannelFromEndpoint(grpcEndpoint.get))
+        PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, ctx, inProcessPlanDispatcher,
+          dataset.ref)
+      } else {
+        val httpEndpoint = partition.httpEndPoint + queryParams.remoteQueryPath.getOrElse("")
+        PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
+          ctx, inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
+      }
     }
   }
 

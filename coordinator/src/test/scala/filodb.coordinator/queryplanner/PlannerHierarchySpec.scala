@@ -1928,6 +1928,233 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     }
   }
 
+
+  it ("should pushdown when leaf plans are split across partitions when one partition has gRPC QS") {
+    val startSec = 0
+    val stepSec = 3
+    val endSec = 9999
+    val splitSec = 5000
+    val staleLookbackSec = WindowConstants.staleDataLookbackMillis / 1000
+    val expectedUrls = Seq("remote0-url", "grpc-remote1-url.execStreaming")
+
+    case class Test(query: String, lookbackSec: Long = staleLookbackSec, offsetSec: Long = 0, expected: String = "") {
+      def getExpectedRangesSec(): Seq[(Long, Long)] = {
+        val snappedSecondStart = LogicalPlanUtils.snapToStep(timestamp = splitSec + offsetSec + lookbackSec,
+          step = stepSec,
+          origin = startSec)
+        Seq((startSec, splitSec + offsetSec),
+          (snappedSecondStart, endSec))
+      }
+    }
+
+    val tests = Seq(
+      // aggregate
+      Test("""sum(test{job="app"} offset 10m)""",
+        offsetSec = 600,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(sum(test{job="app"} offset 10m),0,3,5600,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(sum(test{job="app"} offset 10m),5901,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""count(rate(test{job="app"}[20m] offset 10m))""",
+        lookbackSec = 1200,
+        offsetSec = 600,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(count(rate(test{job="app"}[20m] offset 10m)),0,3,5600,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(count(rate(test{job="app"}[20m] offset 10m)),6801,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""group(rate(test{job="app"}[20m:30s] offset 10m))""",
+        lookbackSec = 1200 + staleLookbackSec,
+        offsetSec = 600,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(group(rate(test{job="app"}[20m:30s] offset 10m)),0,3,5600,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(group(rate(test{job="app"}[20m:30s] offset 10m)),7101,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""sum(rate(test{job="app"}[5m]) + rate(test{job="app"}[20m]))""",
+        lookbackSec = 1200,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(sum(rate(test{job="app"}[5m]) + rate(test{job="app"}[20m])),0,3,5000,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(sum(rate(test{job="app"}[5m]) + rate(test{job="app"}[20m])),6201,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      // instant
+      Test("""sgn(test{job="app"} offset 10m)""",
+        offsetSec = 600,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(sgn(test{job="app"} offset 10m),0,3,5600,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(sgn(test{job="app"} offset 10m),5901,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""ln(rate(test{job="app"}[20m] offset 10m))""",
+        lookbackSec = 1200,
+        offsetSec = 600,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(ln(rate(test{job="app"}[20m] offset 10m)),0,3,5600,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(ln(rate(test{job="app"}[20m] offset 10m)),6801,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""exp(rate(test{job="app"}[20m:30s] offset 10m))""",
+        lookbackSec = 1200 + staleLookbackSec,
+        offsetSec = 600,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(exp(rate(test{job="app"}[20m:30s] offset 10m)),0,3,5600,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(exp(rate(test{job="app"}[20m:30s] offset 10m)),7101,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""floor(rate(test{job="app"}[5m]) + rate(test{job="app"}[20m]))""",
+        lookbackSec = 1200,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(floor(rate(test{job="app"}[5m]) + rate(test{job="app"}[20m])),0,3,5000,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(floor(rate(test{job="app"}[5m]) + rate(test{job="app"}[20m])),6201,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      // binary join
+      Test("""test{job="app"} + test{job="app"}""",
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"} + test{job="app"},0,3,5000,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(test{job="app"} + test{job="app"},5301,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""test{job="app"} + (test{job="app"} + test{job="app"})""",
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"} + (test{job="app"} + test{job="app"}),0,3,5000,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(test{job="app"} + (test{job="app"} + test{job="app"}),5301,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""count(test{job="app"}) + sum(test{job="app"})""",
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(count(test{job="app"}) + sum(test{job="app"}),0,3,5000,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(count(test{job="app"}) + sum(test{job="app"}),5301,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""count_over_time(foo{job="app"}[15m]) unless rate(bar{job="app"}[5m])""",
+        lookbackSec = 900,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(count_over_time(foo{job="app"}[15m]) unless rate(bar{job="app"}[5m]),0,3,5000,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(count_over_time(foo{job="app"}[15m]) unless rate(bar{job="app"}[5m]),5901,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""count_over_time(foo{job="app1"}[5m]) unless rate(bar{job="app1"}[15m:30s])""",
+        lookbackSec = 900 + staleLookbackSec,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(count_over_time(foo{job="app1"}[5m]) unless rate(bar{job="app1"}[15m:30s]),0,3,5000,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(count_over_time(foo{job="app1"}[5m]) unless rate(bar{job="app1"}[15m:30s]),6201,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""rate(foo{job="app1"}[5m]) + (rate(bar{job="app1"}[20m]) + count_over_time(baz{job="app1"}[5m]))""",
+        lookbackSec = 1200,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(rate(foo{job="app1"}[5m]) + (rate(bar{job="app1"}[20m]) + count_over_time(baz{job="app1"}[5m])),0,3,5000,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(rate(foo{job="app1"}[5m]) + (rate(bar{job="app1"}[20m]) + count_over_time(baz{job="app1"}[5m])),6201,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+
+      Test("""rate(foo{job="app1"}[5m:30s]) + (rate(bar{job="app1"}[20m:30s]) + count_over_time(baz{job="app1"}[5m:30s]))""",
+        lookbackSec = 1200 + staleLookbackSec,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(rate(foo{job="app1"}[5m:30s]) + (rate(bar{job="app1"}[20m:30s]) + count_over_time(baz{job="app1"}[5m:30s])),0,3,5000,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(rate(foo{job="app1"}[5m:30s]) + (rate(bar{job="app1"}[20m:30s]) + count_over_time(baz{job="app1"}[5m:30s])),6501,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+
+      // scalar vector join
+      Test("""test{job="app"} + 123""",
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(test{job="app"} + 123,0,3,5000,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(test{job="app"} + 123,5301,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""123 + sgn(test{job="app"} offset 10m)""",
+        offsetSec = 600,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(123 + sgn(test{job="app"} offset 10m),0,3,5600,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(123 + sgn(test{job="app"} offset 10m),5901,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""123 + sum(rate(test{job="app"}[20m] offset 10m))""",
+        lookbackSec = 1200,
+        offsetSec = 600,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(123 + sum(rate(test{job="app"}[20m] offset 10m)),0,3,5600,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(123 + sum(rate(test{job="app"}[20m] offset 10m)),6801,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""123 + group(rate(test{job="app"}[20m:30s] offset 10m))""",
+        lookbackSec = 1200 + staleLookbackSec,
+        offsetSec = 600,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(123 + group(rate(test{job="app"}[20m:30s] offset 10m)),0,3,5600,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(123 + group(rate(test{job="app"}[20m:30s] offset 10m)),7101,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+
+      Test("""123 + sum(count_over_time(test{job="app"}[5m]) + rate(test{job="app"}[20m]))""",
+        lookbackSec = 1200,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(123 + sum(count_over_time(test{job="app"}[5m]) + rate(test{job="app"}[20m])),0,3,5000,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(123 + sum(count_over_time(test{job="app"}[5m]) + rate(test{job="app"}[20m])),6201,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      // absent
+      Test("""absent(test{job="app"} offset 10m)""",
+        offsetSec = 600,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(absent(test{job="app"} offset 10m),0,3,5600,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(absent(test{job="app"} offset 10m),5901,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""absent(rate(test{job="app"}[20m] offset 10m))""",
+        lookbackSec = 1200,
+        offsetSec = 600,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(absent(rate(test{job="app"}[20m] offset 10m)),0,3,5600,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(absent(rate(test{job="app"}[20m] offset 10m)),6801,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""absent(count_over_time(test{job="app"}[20m:30s] offset 10m))""",
+        lookbackSec = 1200 + staleLookbackSec,
+        offsetSec = 600,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(absent(count_over_time(test{job="app"}[20m:30s] offset 10m)),0,3,5600,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(absent(count_over_time(test{job="app"}[20m:30s] offset 10m)),7101,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""absent(sum_over_time(test{job="app"}[5m]) + rate(test{job="app"}[20m]))""",
+        lookbackSec = 1200,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(absent(sum_over_time(test{job="app"}[5m]) + rate(test{job="app"}[20m])),0,3,5000,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(absent(sum_over_time(test{job="app"}[5m]) + rate(test{job="app"}[20m])),6201,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      // scalar
+      Test("""scalar(test{job="app"} offset 10m)""",
+        offsetSec = 600,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(scalar(test{job="app"} offset 10m),0,3,5600,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(scalar(test{job="app"} offset 10m),5901,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""scalar(rate(test{job="app"}[20m] offset 10m))""",
+        lookbackSec = 1200,
+        offsetSec = 600,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(scalar(rate(test{job="app"}[20m] offset 10m)),0,3,5600,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(scalar(rate(test{job="app"}[20m] offset 10m)),6801,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+
+      Test("""scalar(count_over_time(test{job="app"}[20m:30s] offset 10m))""",
+        lookbackSec = 1200 + staleLookbackSec,
+        offsetSec = 600,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(scalar(count_over_time(test{job="app"}[20m:30s] offset 10m)),0,3,5600,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(scalar(count_over_time(test{job="app"}[20m:30s] offset 10m)),7101,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+      Test("""scalar(sum_over_time(test{job="app"}[5m]) + rate(test{job="app"}[20m]))""",
+        lookbackSec = 1200,
+        expected = """E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQlRemoteExec(PromQlQueryParams(scalar(sum_over_time(test{job="app"}[5m]) + rate(test{job="app"}[20m])),0,3,5000,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remote0-url, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
+                     |-E~PromQLGrpcRemoteExec(PromQlQueryParams(scalar(sum_over_time(test{job="app"}[5m]) + rate(test{job="app"}[20m])),6201,3,9999,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=grpc-remote1-url.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))""".stripMargin),
+    )
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String],
+                                 timeRange: TimeRange): List[PartitionAssignment] = {
+        val splitMs = 1000 * splitSec
+        List(PartitionAssignment("remote0", "remote0-url", TimeRange(timeRange.startMs, splitMs)),
+          PartitionAssignment("remote1", "remote1-url", TimeRange(splitMs + 1, timeRange.endMs), Some("grpc-remote1-url")))
+      }
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter],
+                                         timeRange: TimeRange): List[PartitionAssignment] =
+        throw new RuntimeException("should not use")
+    }
+    val engine = new MultiPartitionPlanner(
+      partitionLocationProvider, singlePartitionPlanner, "local",
+      MetricsTestData.timeseriesDataset, queryConfig
+    )
+    for (test <- tests) {
+      val lp = Parser.queryRangeToLogicalPlan(test.query, TimeStepParams(startSec, stepSec, endSec))
+      val promQlQueryParams = PromQlQueryParams(test.query, startSec, stepSec, endSec)
+      val execPlan = engine.materialize(lp,
+        QueryContext(origQueryParams = promQlQueryParams,
+          plannerParams = PlannerParams(processMultiPartition = true))
+      )
+
+      val root = execPlan.asInstanceOf[StitchRvsExec]
+      // Make sure one PromQlRemoteExec for each partition.
+      root.children.size shouldEqual 2
+      // Extract the endpoint/TimeStepParams and make sure they are as-expected.
+      val expectedQueryParams = {
+        val timeStepParams = test.getExpectedRangesSec().map { case (startSecExp, endSecExp) =>
+          TimeStepParams(startSecExp, stepSec, endSecExp)
+        }
+        expectedUrls.zip(timeStepParams)
+      }.toSet
+      root.children.map{ child =>
+        val (params, url) = child match {
+          case remote: PromQlRemoteExec     => (remote.promQlQueryParams, remote.queryEndpoint)
+          case grpc: PromQLGrpcRemoteExec   => (grpc.promQlQueryParams, grpc.queryEndpoint)
+          case _                            => fail("unsupported execplan")
+        }
+        // Each plan should dispatch the same query.
+        params.promQl shouldEqual test.query
+        (url, TimeStepParams(params.startSecs, params.stepSecs, params.endSecs))
+      }.toSet shouldEqual expectedQueryParams
+      // sanity check
+      println("\n\n" + root.printTree())
+      validatePlan(root, test.expected)
+    }
+  }
+
   it ("should fail to materialize unsupported split-partition queries with binary joins") {
     val startSec = 123
     val stepSec = 456
@@ -2067,7 +2294,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val expectedPlan4 =
      """T~AggregatePresenter(aggrOp=TopK, aggrParams=List(2.0), rangeParams=RangeParams(1633913330,300,1634777330))
         |-E~MultiPartitionReduceAggregateExec(aggrOp=TopK, aggrParams=List(2.0)) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-        |--E~PromQLGrpcRemoteExec(PromQlQueryParams(topk(2.0,test{instance="Inst-1",_ws_="demo",_ns_="remoteNs"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,true,true,true,false), queryEndpoint=remotePartition-grpcUrl.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+        |--E~PromQLGrpcRemoteExec(PromQlQueryParams(topk(2.0,test{instance="Inst-1",_ws_="demo",_ns_="remoteNs"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,true,true,false,false), queryEndpoint=remotePartition-grpcUrl.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
         |--E~StitchRvsExec() on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,false,false,true))
         |---E~LocalPartitionReduceAggregateExec(aggrOp=TopK, aggrParams=List(2.0)) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1737727940],raw)
         |----T~AggregateMapReduce(aggrOp=TopK, aggrParams=List(2.0), without=List(), by=List())
@@ -2191,8 +2418,8 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val expectedPlan8 =
       """T~AggregatePresenter(aggrOp=TopK, aggrParams=List(2.0), rangeParams=RangeParams(1633913330,300,1634777330))
         |-E~MultiPartitionReduceAggregateExec(aggrOp=TopK, aggrParams=List(2.0)) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-        |--E~PromQLGrpcRemoteExec(PromQlQueryParams(topk(2.0,test{instance="Inst-1",_ws_="demo",_ns_="remoteNs1"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,true,true,true,false), queryEndpoint=remotePartition-grpc-url2.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
-        |--E~PromQLGrpcRemoteExec(PromQlQueryParams(topk(2.0,test{instance="Inst-1",_ws_="demo",_ns_="remoteNs0"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,true,true,true,false), queryEndpoint=remotePartition-grpc-url1.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin
+        |--E~PromQLGrpcRemoteExec(PromQlQueryParams(topk(2.0,test{instance="Inst-1",_ws_="demo",_ns_="remoteNs1"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,true,true,false,false), queryEndpoint=remotePartition-grpc-url2.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))
+        |--E~PromQLGrpcRemoteExec(PromQlQueryParams(topk(2.0,test{instance="Inst-1",_ws_="demo",_ns_="remoteNs0"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,true,true,false,false), queryEndpoint=remotePartition-grpc-url1.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true))""".stripMargin
 
     validatePlan(execPlan8, expectedPlan8)
     // Case 9: top k with regex, the resolved regex should all be one remote partition, using PromQLRemoteExec, should be supported BUT fails
@@ -2254,7 +2481,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
     val expectedPlan10 =
       """T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1633913330,300,1634777330))
         |-E~MultiPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set()))
-        |--E~PromQLGrpcRemoteExec(PromQlQueryParams(sum(test{instance="Inst-1",_ws_="demo",_ns_="remoteNs1"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,true,true,true,false), queryEndpoint=remotePartition-grpc-url2.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set(remotepartition1)))
+        |--E~PromQLGrpcRemoteExec(PromQlQueryParams(sum(test{instance="Inst-1",_ws_="demo",_ns_="remoteNs1"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,true,true,false,false), queryEndpoint=remotePartition-grpc-url2.execStreaming, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set(remotepartition1)))
         |--E~PromQlRemoteExec(PromQlQueryParams(sum(test{instance="Inst-1",_ws_="demo",_ns_="remoteNs0"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,true,true,false,false), queryEndpoint=remotePartition-url1, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set(remotepartition1)))""".stripMargin
 
     validatePlan(execPlan10, expectedPlan10)
