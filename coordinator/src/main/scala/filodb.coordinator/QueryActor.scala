@@ -170,9 +170,9 @@ final class QueryActor(memStore: TimeSeriesStore,
             .onErrorHandle { t =>
               StreamQueryError(q.queryContext.queryId, querySession.queryStats, t)
             }.map { resp =>
-            // Avoiding the assert when the InProcessPlanDispatcher is used. As it runs
-            // the query on the current/Actor thread instead of the scheduler
-            if (!q.dispatcher.isInstanceOf[InProcessPlanDispatcher]) {
+              // Avoiding the assert when the InProcessPlanDispatcher is used. As it runs
+              // the query on the current/Actor thread instead of the scheduler
+              if (!q.dispatcher.isInstanceOf[InProcessPlanDispatcher]) {
                 FiloSchedulers.assertThreadName(QuerySchedName)
               }
               replyTo ! resp
@@ -181,6 +181,7 @@ final class QueryActor(memStore: TimeSeriesStore,
                   logQueryErrors(e.t)
                   queryErrors.increment()
                   queryExecuteSpan.fail(e.t.getMessage)
+                  // rethrow so circuit beaker can block queries when there is a surge of such exceptions
                   if (e.t.isInstanceOf[QueryTimeoutException] || e.t.isInstanceOf[AskTimeoutException]) throw e.t
                 case _ =>
               }
@@ -204,6 +205,7 @@ final class QueryActor(memStore: TimeSeriesStore,
                   logQueryErrors(e.t)
                   queryErrors.increment()
                   queryExecuteSpan.fail(e.t.getMessage)
+                  // rethrow so circuit beaker can block queries when there is a surge of such exceptions
                   if (e.t.isInstanceOf[QueryTimeoutException] || e.t.isInstanceOf[AskTimeoutException]) throw e.t
                 case _ =>
               }
