@@ -5,6 +5,7 @@ import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.util
 import java.util.{Base64, PriorityQueue}
+import java.util.regex.Pattern
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable.HashSet
@@ -88,6 +89,29 @@ object PartKeyLuceneIndex {
     md.update(bytes, offset, length)
     val strDigest = Base64.getEncoder.encodeToString(md.digest())
     strDigest
+  }
+
+   private def removeRegexTailDollarSign(regex: String): String = {
+    // avoid unnecessary calculation when $ is not present at the end of the regex.
+    if (regex.nonEmpty && regex.last == '$' && Pattern.matches("""^(|.*[^\\])(\\\\)*\$$""", regex)) {
+      // (|.*[^\\]) means either empty or a sequence end with a character not \.
+      // (\\\\)* means any number of \\.
+      // remove the last $ if it is not \$.
+      // $ at locations other than the end will not be removed.
+      regex.substring(0, regex.length - 1)
+    } else {
+      regex
+    }
+  }
+
+  /**
+   * Remove leading anchor &#94; and ending anchor $.
+   *
+   * @param regex the orignal regex string.
+   * @return the regex string without anchors.
+   */
+  def removeRegexAnchors(regex: String): String = {
+    removeRegexTailDollarSign(regex.stripPrefix("^"))
   }
 }
 
@@ -795,10 +819,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   private def leafFilter(column: String, filter: Filter): Query = {
     filter match {
       case EqualsRegex(value) =>
-        val term = new Term(column, value.toString)
+        val term = new Term(column, removeRegexAnchors(value.toString))
         new RegexpQuery(term, RegExp.NONE)
       case NotEqualsRegex(value) =>
-        val term = new Term(column, value.toString)
+        val term = new Term(column, removeRegexAnchors(value.toString))
         val allDocs = new MatchAllDocsQuery
         val booleanQuery = new BooleanQuery.Builder
         booleanQuery.add(allDocs, Occur.FILTER)
