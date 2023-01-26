@@ -167,16 +167,10 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
 
     val resp = exec.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _) => {
-        val rv = response(0)
-        rv.rows.size shouldEqual 0
-        rv.rows.map { row =>
-          val record = row.asInstanceOf[BinaryRecordRowReader]
-          rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
-        }
+      case QueryResult(_, _, response, _, _, _) => {
+        response.size shouldEqual 0
       }
     }
-    result.toArray shouldEqual Array.empty
   }
 
   it ("label values remote metadata exec") {

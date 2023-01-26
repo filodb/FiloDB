@@ -2,8 +2,8 @@ package filodb.query.exec
 
 import java.util.concurrent.TimeUnit
 
-import scala.concurrent.Future
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.{Await, Future}
+import scala.concurrent.duration.{FiniteDuration, MILLISECONDS}
 import scala.sys.ShutdownHookThread
 
 import com.softwaremill.sttp.{DeserializationError, Response, SttpBackend, SttpBackendOptions}
@@ -15,9 +15,11 @@ import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
 import monix.execution.Scheduler
+import monix.reactive.Observable
 import org.asynchttpclient.{AsyncHttpClientConfig, DefaultAsyncHttpClientConfig}
 import org.asynchttpclient.proxy.ProxyServer
 
+import filodb.core.{GlobalConfig, QueryTimeoutException}
 import filodb.core.query.{PromQlQueryParams, QuerySession, QueryStats}
 import filodb.core.store.ChunkSource
 import filodb.query._
@@ -42,13 +44,42 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
   /**
    * Since execute is already overrided here, doExecute() can be empty.
    */
-  def doExecute(source: ChunkSource,
+  override def doExecute(source: ChunkSource,
                 querySession: QuerySession)
-               (implicit sched: Scheduler): ExecResult = ???
+               (implicit sched: Scheduler): ExecResult = {
+    if (queryEndpoint == null) {
+      throw new BadQueryException("Remote Query endpoint can not be null in RemoteExec.")
+    }
 
-  override def execute(source: ChunkSource,
-                       querySession: QuerySession)
-                      (implicit sched: Scheduler): Task[QueryResponse] = {
+    // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
+    // across threads. Note that task/observable will not run on the thread where span is present since
+    // kamon uses thread-locals.
+    val span = Kamon.currentSpan()
+    val elapsedMillis = System.currentTimeMillis() - queryContext.submitTime
+    val remainingMillis = queryContext.plannerParams.queryTimeoutMillis - elapsedMillis
+    if (remainingMillis <= 0) {
+      throw QueryTimeoutException(elapsedMillis, "RemoteExec::doExecute (before remote request)")
+    }
+    // Dont finish span since this code didnt create it
+    val fut = Kamon.runWithSpan(span, false) {
+      sendHttpRequest(span, requestTimeoutMs)
+        .map {
+          case QueryResult(_, resultSchema, result, _, _, _) =>
+            ExecResult(Observable.fromIterable(result), Task.now(resultSchema))
+          case QueryError(_, _, t) => throw t
+        }
+    }
+    // FIXME: remote plans probably need their own dispatcher so they've got access
+    //  to ExecPlanWithClientParams (and can therefore return partial results).
+    Await.result(fut, FiniteDuration(remainingMillis, MILLISECONDS))
+  }
+
+  /**
+   * Legacy execute() logic; does not invoke super.execute().
+   * FIXME: this method should eventually be removed.
+   */
+  def executeLegacy(source: ChunkSource,
+                    querySession: QuerySession)(implicit sched: Scheduler): Task[QueryResponse] = {
     if (queryEndpoint == null) {
       throw new BadQueryException("Remote Query endpoint can not be null in RemoteExec.")
     }
@@ -60,6 +91,16 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
     // Dont finish span since this code didnt create it
     Kamon.runWithSpan(span, false) {
       Task.fromFuture(sendHttpRequest(span, requestTimeoutMs))
+    }
+  }
+
+  override def execute(source: ChunkSource,
+                       querySession: QuerySession)(implicit sched: Scheduler): Task[QueryResponse] = {
+    // NOTE: this should no longer be overridden once executeLegacy is removed.
+    if (GlobalConfig.systemConfig.getBoolean("filodb.query.enable-legacy-remote-execute")) {
+      executeLegacy(source, querySession)
+    } else {
+      super.execute(source, querySession)
     }
   }
 
