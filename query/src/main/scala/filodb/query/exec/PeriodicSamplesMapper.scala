@@ -180,14 +180,14 @@ final case class PeriodicSamplesMapper(startMs: Long,
     } else {
       source.copy(columns = source.columns.zipWithIndex.map {
         // Transform if its not a row key column
-        case (ColumnInfo(name, ColumnType.LongColumn), i) if i >= source.numRowKeyColumns =>
+        case (ColumnInfo(name, ColumnType.LongColumn, _), i) if i >= source.numRowKeyColumns =>
           ColumnInfo("value", ColumnType.DoubleColumn)
-        case (ColumnInfo(name, ColumnType.IntColumn), i) if i >= source.numRowKeyColumns =>
+        case (ColumnInfo(name, ColumnType.IntColumn, _), i) if i >= source.numRowKeyColumns =>
           ColumnInfo(name, ColumnType.DoubleColumn)
         // For double columns, just rename the output so that it's the same no matter source schema.
         // After all after applying a range function, source column doesn't matter anymore
         // NOTE: we only rename if i is 1 or second column.  If its 2 it might be max which cannot be renamed
-        case (ColumnInfo(name, ColumnType.DoubleColumn), i) if i == 1 =>
+        case (ColumnInfo(name, ColumnType.DoubleColumn, _), i) if i == 1 =>
           ColumnInfo("value", ColumnType.DoubleColumn)
         case (c: ColumnInfo, _) => c
       }, fixedVectorLen = if (endMs == startMs) Some(1) else Some(((endMs - startMs) / adjustedStep).toInt + 1))

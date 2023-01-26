@@ -4,6 +4,7 @@ import scala.reflect.runtime.universe._
 
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
+import net.ceedubs.ficus.Ficus._
 import org.joda.time.DateTime
 
 import filodb.core.binaryrecord2.RecordSchema
@@ -23,10 +24,13 @@ final case class PartitionInfo(schema: RecordSchema, base: Array[Byte], offset: 
 /**
  * Describes column/field name and type
  */
-final case class ColumnInfo(name: String, colType: Column.ColumnType)
+final case class ColumnInfo(name: String, colType: Column.ColumnType, isCumulative: Boolean = true)
 
 object ColumnInfo {
-  def apply(col: Column): ColumnInfo = ColumnInfo(col.name, col.columnType)
+  def apply(col: Column): ColumnInfo = ColumnInfo(col.name, col.columnType, isCumulative(col))
+  private def isCumulative(col: Column): Boolean =
+    col.params.as[Option[Boolean]]("detectDrops").getOrElse(false) ||
+      col.params.as[Option[Boolean]]("counter").getOrElse(false)
 }
 
 /**

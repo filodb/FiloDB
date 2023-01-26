@@ -117,9 +117,9 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     }
   }
 
-  val timeMinSchema = ResultSchema(Seq(ColumnInfo("timestamp", TimestampColumn), ColumnInfo("min", DoubleColumn)), 1)
-  val countSchema = ResultSchema(Seq(ColumnInfo("timestamp", TimestampColumn), ColumnInfo("count", DoubleColumn)), 1)
-  val valueSchema = ResultSchema(Seq(ColumnInfo("timestamp", TimestampColumn), ColumnInfo("value", DoubleColumn)), 1)
+  val timeMinSchema = ResultSchema(Seq(ColumnInfo("timestamp", TimestampColumn, false), ColumnInfo("min", DoubleColumn, false)), 1)
+  val countSchema = ResultSchema(Seq(ColumnInfo("timestamp", TimestampColumn, false), ColumnInfo("count", DoubleColumn)), 1)
+  val valueSchema = ResultSchema(Seq(ColumnInfo("timestamp", TimestampColumn, false), ColumnInfo("value", DoubleColumn)), 1)
   val qOpt = QueryContext(plannerParams = PlannerParams(shardOverrides = Some(Seq(0))), origQueryParams =
     PromQlQueryParams("", 1000, 1, 1000))
 
@@ -381,8 +381,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     probe.send(coordinatorActor, q2)
     probe.expectMsgPF() {
       case QueryResult(_, schema, vectors, _, _, _) =>
-        schema.columns shouldEqual Seq(ColumnInfo("GLOBALEVENTID", LongColumn),
-                                       ColumnInfo("value", DoubleColumn))
+        schema.columns shouldEqual Seq(ColumnInfo("GLOBALEVENTID", LongColumn, false),
+                                       ColumnInfo("value", DoubleColumn, true))
         vectors should have length (1)
         // vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)
         // TODO:  verify if the expected results are right.  They are something....
