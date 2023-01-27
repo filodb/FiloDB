@@ -41,7 +41,8 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
    * Example: sum(test1{_ws_ = "demo", _ns_ =~ "App-1"}) + sum(test2{_ws_ = "demo", _ns_ =~ "App-1"})
    */
   private def hasSingleShardKeyMatch(nonMetricShardKeyFilters: Seq[Seq[ColumnFilter]]) = {
-    val shardKeyMatchers = nonMetricShardKeyFilters.map(shardKeyMatcher(_))
+    // Filter out the empty Seq's (which indicate scalars).
+    val shardKeyMatchers = nonMetricShardKeyFilters.map(shardKeyMatcher(_)).filter(_.nonEmpty)
     shardKeyMatchers.forall(_.size == 1) &&
       shardKeyMatchers.forall(_.head.toSet == shardKeyMatchers.head.head.toSet)
     // ^^ For Binary join LHS and RHS should have same value

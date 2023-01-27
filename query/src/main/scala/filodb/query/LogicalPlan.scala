@@ -432,7 +432,7 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
   override def startMs: Long = lhs.startMs
   override def stepMs: Long = lhs.stepMs
   override def endMs: Long = lhs.endMs
-  override def isRoutable: Boolean = lhs.isRoutable && rhs.isRoutable
+  override def isRoutable: Boolean = lhs.isRoutable || rhs.isRoutable
   override def replacePeriodicSeriesFilters(filters: Seq[ColumnFilter]): PeriodicSeriesPlan = this.copy(lhs =
     lhs.replacePeriodicSeriesFilters(filters), rhs = rhs.replacePeriodicSeriesFilters(filters))
 }

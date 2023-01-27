@@ -3,16 +3,15 @@ package filodb.query.exec.rangefn
 import spire.syntax.cfor._
 
 import filodb.core.query.{QueryConfig, TransientHistRow, TransientRow}
-import filodb.memory.format.{CounterVectorReader, MemoryReader}
-import filodb.memory.format.{vectors => bv}
+import filodb.memory.format.{vectors => bv, BinaryVector, CounterVectorReader, MemoryReader, VectorDataReader}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 
 object RateFunctions {
 
   /**
-    * Logic is kept consistent with Prometheus' extrapolatedRate function in order to get consistent results.
-    * We can look at optimizations (if any) later.
-    */
+   * Logic is kept consistent with Prometheus' extrapolatedRate function in order to get consistent results.
+   * We can look at optimizations (if any) later.
+   */
   def extrapolatedRate(startTimestamp: Long,
                        endTimestamp: Long,
                        window: Window,
@@ -124,6 +123,19 @@ object DeltaFunction extends RangeFunction {
     val result = RateFunctions.extrapolatedRate(startTimestamp,
       endTimestamp, window, false, false)
     sampleToEmit.setValues(endTimestamp, result)
+  }
+}
+
+class RateOverDeltaFunction extends RangeFunction {
+  var sumOverTime = new SumOverTimeFunction
+  override def addedToWindow(row: TransientRow, window: Window): Unit = sumOverTime.addedToWindow(row, window)
+
+  override def removedFromWindow(row: TransientRow, window: Window): Unit = sumOverTime.removedFromWindow(row, window)
+
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+                     sampleToEmit: TransientRow,
+                     queryConfig: QueryConfig): Unit = {
+    sampleToEmit.setValues(endTimestamp, sumOverTime.sum / (endTimestamp - startTimestamp) * 1000 )
   }
 }
 
@@ -299,5 +311,70 @@ class HistRateFunction extends HistogramRateFunctionBase {
 class HistIncreaseFunction extends HistogramRateFunctionBase {
   def isCounter: Boolean = true
   def isRate: Boolean    = false
+}
+
+/**
+ * Rate over Delta aggregation temporality metrics.
+ * It essentially translates to = sum_over_time / window_length_in_seconds
+ */
+class RateOverDeltaChunkedFunctionD extends ChunkedDoubleRangeFunction {
+
+  private val sumFunc = new SumOverTimeChunkedFunctionD
+  override final def reset(): Unit = {sumFunc.reset() }
+
+  final def addTimeDoubleChunks(doubleVectAcc: MemoryReader,
+                                doubleVect: BinaryVector.BinaryVectorPtr,
+                                doubleReader: bv.DoubleVectorDataReader,
+                                startRowNum: Int,
+                                endRowNum: Int): Unit =
+    sumFunc.addTimeDoubleChunks(doubleVectAcc, doubleVect, doubleReader, startRowNum, endRowNum)
+
+  override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientRow): Unit =
+    sampleToEmit.setValues(windowEnd, sumFunc.sum / (windowEnd - (windowStart - 1)) * 1000)
+  override def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = ???
+}
+
+class RateOverDeltaChunkedFunctionL extends ChunkedLongRangeFunction {
+  private val sumFunc = new SumOverTimeChunkedFunctionL
+
+  override final def reset(): Unit = sumFunc.reset()
+
+  final def addTimeLongChunks(longVectAcc: MemoryReader,
+                              longVect: BinaryVector.BinaryVectorPtr,
+                              longReader: bv.LongVectorDataReader,
+                              startRowNum: Int,
+                              endRowNum: Int): Unit =
+    sumFunc.addTimeChunks(longVectAcc, longVect, longReader, startRowNum, endRowNum)
+
+  override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientRow): Unit =
+    sampleToEmit.setValues(windowEnd, sumFunc.sum / (windowEnd - (windowStart - 1)) * 1000)
+
+  override def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = ???
+}
+
+class RateOverDeltaChunkedFunctionH(var h: bv.MutableHistogram = bv.Histogram.empty)
+  extends TimeRangeFunction[TransientHistRow] {
+
+  private val hFunc = new SumOverTimeChunkedFunctionH
+  override final def reset(): Unit = hFunc.reset()
+
+  override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientHistRow): Unit = {
+    val rateArray = new Array[Double](hFunc.h.numBuckets)
+    cforRange {
+      0 until rateArray.size
+    } { b =>
+      rateArray(b) = hFunc.h.bucketValue(b) / (windowEnd - (windowStart - 1)) * 1000
+    }
+    sampleToEmit.setValues(windowEnd, bv.MutableHistogram(hFunc.h.buckets, rateArray))
+  }
+
+  final def addTimeChunks(vectAcc: MemoryReader,
+                          vectPtr: BinaryVector.BinaryVectorPtr,
+                          reader: VectorDataReader,
+                          startRowNum: Int,
+                          endRowNum: Int): Unit =
+    hFunc.addTimeChunks(vectAcc, vectPtr, reader, startRowNum, endRowNum)
+
+  def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = ???
 }
 
