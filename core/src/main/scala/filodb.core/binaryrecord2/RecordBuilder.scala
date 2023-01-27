@@ -246,10 +246,10 @@ class RecordBuilder(memFactory: MemFactory,
   final def addPartKeyRecordFields(base: Any, offset: Long, partKeySchema: RecordSchema): Unit = {
     var id = 0
     partKeySchema.columns.foreach {
-      case ColumnInfo(_, MapColumn) => addBlobFromBr(base, offset, id, partKeySchema); id += 1
-      case ColumnInfo(_, StringColumn) => addBlobFromBr(base, offset, id, partKeySchema); id += 1
-      case ColumnInfo(_, LongColumn) => addLongFromBr(base, offset, id, partKeySchema); id += 1
-      case ColumnInfo(_, DoubleColumn) => addDoubleFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, MapColumn, _) => addBlobFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, StringColumn, _) => addBlobFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, LongColumn, _) => addLongFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, DoubleColumn, _) => addDoubleFromBr(base, offset, id, partKeySchema); id += 1
       case _ => ???
     }
     // finally copy the partition hash over

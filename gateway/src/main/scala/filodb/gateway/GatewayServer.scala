@@ -28,7 +28,7 @@ import org.rogach.scallop._
 import filodb.coordinator.{FilodbSettings, ShardMapper, StoreFactory}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
-import filodb.core.metadata.Schemas.{deltaHistogram, promHistogram}
+import filodb.core.metadata.Schemas.{deltaCounter, deltaHistogram, gauge, promHistogram}
 import filodb.gateway.conversion._
 import filodb.memory.MemFactory
 import filodb.timeseries.TestTimeseriesProducer
@@ -80,6 +80,8 @@ object GatewayServer extends StrictLogging {
     val genHistData = toggle(noshort = true, descrYes = "Generate prom-histogram-schema test data and exit")
     val genDeltaHistData = toggle(noshort = true, descrYes = "Generate delta-histogram-schema test data and exit")
     val genGaugeData = toggle(noshort = true, descrYes = "Generate Prometheus gauge-schema test data and exit")
+    val genCounterData = toggle(noshort = true, descrYes = "Generate Prometheus counter-schema test data and exit")
+    val genDeltaCounterData = toggle(noshort = true, descrYes = "Generate delta-counter-schema test data and exit")
     val numMetrics = opt[Int](short = 'm', default = Some(1), descr = "# of metrics - use 2 to test binary joins")
     val publishIntervalSecs = opt[Int](short = 'i', default = Some(10), descr = "Publish interval between samples")
     verify()
@@ -129,14 +131,22 @@ object GatewayServer extends StrictLogging {
     val genHist = userOpts.genHistData.getOrElse(false)
     val genGaugeData = userOpts.genGaugeData.getOrElse(false)
     val genDeltaHist = userOpts.genDeltaHistData.getOrElse(false)
-    if (genHist || genGaugeData || genDeltaHist) {
+    val genCounterData = userOpts.genCounterData.getOrElse(false)
+    val genDeltaCounterData = userOpts.genDeltaCounterData.getOrElse(false)
+    if (genHist || genGaugeData || genDeltaHist
+          || genCounterData || genDeltaCounterData) {
       val startTime = System.currentTimeMillis
       logger.info(s"Generating $numSamples samples starting at $startTime....")
 
       val stream = if (genHist) TestTimeseriesProducer.genHistogramData(startTime, numSeries, promHistogram)
                    else if (genDeltaHist) TestTimeseriesProducer.genHistogramData(startTime, numSeries, deltaHistogram)
-                   else TestTimeseriesProducer.timeSeriesData(startTime, numSeries,
-                                         userOpts.numMetrics(), userOpts.publishIntervalSecs())
+                   else if (genGaugeData) TestTimeseriesProducer.timeSeriesData(startTime, numSeries,
+                                        userOpts.numMetrics(), userOpts.publishIntervalSecs(), gauge)
+                   else if (genDeltaCounterData) TestTimeseriesProducer.timeSeriesData(startTime, numSeries,
+                                        userOpts.numMetrics(), userOpts.publishIntervalSecs(), deltaCounter)
+                   else
+                        TestTimeseriesProducer.timeSeriesCounterData(startTime, numSeries,
+                                        userOpts.numMetrics(), userOpts.publishIntervalSecs())
 
       stream.take(numSamples).foreach { rec =>
         val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
@@ -148,7 +158,7 @@ object GatewayServer extends StrictLogging {
       }
       Thread sleep 10000
       TestTimeseriesProducer.logQueryHelp(dataset.name, userOpts.numMetrics(), numSamples, numSeries,
-        startTime, genHist, genDeltaHist, genGaugeData, userOpts.publishIntervalSecs())
+        startTime, genHist, genDeltaHist, genGaugeData, genCounterData, userOpts.publishIntervalSecs())
       logger.info(s"Waited for containers to be sent, exiting...")
       sys.exit(0)
     } else {

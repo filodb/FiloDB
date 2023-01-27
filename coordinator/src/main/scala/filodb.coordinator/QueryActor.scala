@@ -4,7 +4,7 @@ import java.lang.Thread.UncaughtExceptionHandler
 import java.util.concurrent.{ForkJoinPool, ForkJoinWorkerThread}
 
 import scala.collection.mutable
-import scala.concurrent.duration.DurationInt
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.{Failure, Success}
 import scala.util.control.NonFatal
 
@@ -13,8 +13,10 @@ import akka.pattern.AskTimeoutException
 import kamon.Kamon
 import kamon.instrumentation.executor.ExecutorInstrumentation
 import kamon.tag.TagSet
+import monix.catnap.CircuitBreaker
 import monix.eval.Task
 import monix.execution.Scheduler
+import monix.execution.exceptions.ExecutionRejectedException
 import monix.execution.schedulers.SchedulerService
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
@@ -87,9 +89,22 @@ final class QueryActor(memStore: TimeSeriesStore,
   private val tags = Map("dataset" -> dsRef.toString)
   private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").withTags(TagSet.from(tags))
   private val epRequests = Kamon.counter("queryactor-execplan-requests").withTags(TagSet.from(tags))
-  private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").withTags(TagSet.from(tags))
   private val queryErrors = Kamon.counter("queryactor-query-errors").withTags(TagSet.from(tags))
   private val uncaughtExceptions = Kamon.counter("queryactor-uncaught-exceptions").withTags(TagSet.from(tags))
+  private val numRejectedPlans = Kamon.counter("circuit-breaker-num-rejected-plans").withTags(TagSet.from(tags))
+
+  private val circuitBreakerEnabled = config.getBoolean("filodb.query.circuit-breaker.enabled")
+  private val circuitBreakerNumFailures = config.getInt("filodb.query.circuit-breaker.open-when-num-failures")
+  private val circuitBreakerResetTimeout = config.as[FiniteDuration]("filodb.query.circuit-breaker.reset-timeout")
+  private val circuitBreakerExpBackOffFactor = config.getDouble("filodb.query.circuit-breaker.exp-backoff-factor")
+  private val circuitBreakerMaxTimeout = config.as[FiniteDuration]("filodb.query.circuit-breaker.max-reset-timeout")
+  private val circuitBreaker = CircuitBreaker[Task].unsafe(
+    circuitBreakerNumFailures, circuitBreakerResetTimeout, circuitBreakerExpBackOffFactor, circuitBreakerMaxTimeout,
+    onRejected = Task.eval(numRejectedPlans.increment()),
+    onClosed = Task.eval(logger.info("Query CircuitBreaker closed")),
+    onHalfOpen = Task.eval(logger.info("Query CircuitBreaker is now half-open")),
+    onOpen = Task.eval(logger.info("Query CircuitBreaker is now open"))
+  )
 
   /**
     * Instrumentation adds following metrics on the Query Scheduler
@@ -155,46 +170,64 @@ final class QueryActor(memStore: TimeSeriesStore,
             .onErrorHandle { t =>
               StreamQueryError(q.queryContext.queryId, querySession.queryStats, t)
             }.map { resp =>
-              FiloSchedulers.assertThreadName(QuerySchedName)
+              // Avoiding the assert when the InProcessPlanDispatcher is used. As it runs
+              // the query on the current/Actor thread instead of the scheduler
+              if (!q.dispatcher.isInstanceOf[InProcessPlanDispatcher]) {
+                FiloSchedulers.assertThreadName(QuerySchedName)
+              }
+              replyTo ! resp
               resp match {
-                case e: StreamQueryError => logQueryErrors(e.t)
+                case e: StreamQueryError =>
+                  logQueryErrors(e.t)
+                  queryErrors.increment()
+                  queryExecuteSpan.fail(e.t.getMessage)
+                  // rethrow so circuit beaker can block queries when there is a surge of such exceptions
+                  if (e.t.isInstanceOf[QueryTimeoutException] || e.t.isInstanceOf[AskTimeoutException]) throw e.t
                 case _ =>
               }
-              logger.debug(s"Sending response $resp to $replyTo")
-              replyTo ! resp
             }.guarantee(Task.eval {
               querySession.close()
               queryExecuteSpan.finish()
             }).completedL
-        } else {
+        } else { // TODO remove this block when query streaming is enabled and working well
           q.execute(memStore, querySession)(queryScheduler)
-            .map { res =>
-              // below prevents from calling FiloDB directly (without Query Service)
-              // UPDATE: 31/10/2022. Avoiding the assert when the InProcessPlanDispatcher is used. As it runs
+            .onErrorHandle { t =>
+              QueryError(q.queryContext.queryId, querySession.queryStats, t)
+            }.map { res =>
+              // Avoiding the assert when the InProcessPlanDispatcher is used. As it runs
               // the query on the current/Actor thread instead of the scheduler
               if (!q.dispatcher.isInstanceOf[InProcessPlanDispatcher]) {
                 FiloSchedulers.assertThreadName(QuerySchedName)
               }
               replyTo ! res
               res match {
-                case QueryResult(_, _, vectors, _, _, _) => resultVectors.record(vectors.length)
                 case e: QueryError =>
                   logQueryErrors(e.t)
                   queryErrors.increment()
                   queryExecuteSpan.fail(e.t.getMessage)
+                  // rethrow so circuit beaker can block queries when there is a surge of such exceptions
+                  if (e.t.isInstanceOf[QueryTimeoutException] || e.t.isInstanceOf[AskTimeoutException]) throw e.t
+                case _ =>
               }
-            }.onErrorHandle { ex =>
-              // Unhandled exception in query, should be rare
-              logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error," +
-                s" query was ${q.queryContext.origQueryParams}", ex)
-              replyTo ! QueryError(q.queryContext.queryId, querySession.queryStats, ex)
             }.guarantee(Task.eval {
               queryExecuteSpan.finish()
               querySession.close()
             })
         }
-        logger.debug(s"Will now run query execution pipeline for $q")
-        execTask.runToFuture(queryScheduler)
+
+        val execTask2 = if (circuitBreakerEnabled) {
+          circuitBreaker.protect(execTask)
+            .onErrorRecover {
+              case t: ExecutionRejectedException =>
+                logQueryErrors(t)
+                if (querySession.streamingDispatch)
+                  replyTo ! StreamQueryError(q.queryContext.queryId, querySession.queryStats, t)
+                else
+                  replyTo ! QueryError(q.queryContext.queryId, querySession.queryStats, t)
+              case _ => // all other errors are already handled
+            }
+        } else execTask
+        execTask2.runToFuture(queryScheduler)
       }
     }
 
@@ -203,11 +236,11 @@ final class QueryActor(memStore: TimeSeriesStore,
       t match {
         case _: BadQueryException => // dont log user errors
         case _: AskTimeoutException => // dont log ask timeouts. useless - let it simply flow up
-        case e: QueryTimeoutException => // log just message, no need for stacktrace
-          logger.error(s"queryId: ${q.queryContext.queryId} QueryTimeoutException: " +
-            s"${q.queryContext.origQueryParams} ${e.getMessage}")
+        case _: QueryTimeoutException | _: ExecutionRejectedException => // log just message, no need for stacktrace
+          logger.error(s"Query Error ${t.getClass.getSimpleName} queryId=${q.queryContext.queryId} " +
+            s"${q.queryContext.origQueryParams} ${t.getMessage}")
         case e: Throwable =>
-          logger.error(s"queryId: ${q.queryContext.queryId} Query Error: " +
+          logger.error(s"Query Error queryId=${q.queryContext.queryId} " +
             s"${q.queryContext.origQueryParams}", e)
       }
       // debug logging

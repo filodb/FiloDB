@@ -17,6 +17,7 @@ import filodb.core.GlobalConfig
 import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
+import filodb.core.metadata.Schemas
 import filodb.core.query.{PlannerParams, QueryContext}
 import filodb.core.store.StoreConfig
 import filodb.gateway.GatewayServer
@@ -103,7 +104,8 @@ class QueryAndIngestBenchmark extends StrictLogging {
   val shards = (0 until numShards).map { s => memstore.getShardE(dataset.ref, s) }
 
   private def ingestSamples(noSamples: Int): Future[Unit] = Future {
-    TestTimeseriesProducer.timeSeriesData(startTime, numSeries, numMetricNames = 1, publishIntervalSec = 10)
+    TestTimeseriesProducer.timeSeriesData(startTime, numSeries, numMetricNames = 1,
+                                          publishIntervalSec = 10, Schemas.gauge)
       .take(noSamples * numSeries)
       .foreach { rec =>
         // we shouldn't ingest samples for same timestamps repeatedly. This will also result in out-of-order samples.

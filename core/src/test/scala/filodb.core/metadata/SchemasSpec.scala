@@ -188,10 +188,10 @@ class SchemasSpec extends AnyFunSpec with Matchers {
     it("should return ColumnInfos for colIDs") {
       val sch = largeDataset.schema
       val infos = sch.infosFromIDs(Seq(1, 0))
-      infos shouldEqual Seq(ColumnInfo("first", StringColumn), ColumnInfo("age", LongColumn))
+      infos shouldEqual Seq(ColumnInfo("first", StringColumn, false), ColumnInfo("age", LongColumn, false))
 
       val infos2 = sch.infosFromIDs(Seq(PartColStartIndex, 2))
-      infos2 shouldEqual Seq(ColumnInfo("league", StringColumn), ColumnInfo("last", StringColumn))
+      infos2 shouldEqual Seq(ColumnInfo("league", StringColumn, false), ColumnInfo("last", StringColumn, false))
     }
   }
 
