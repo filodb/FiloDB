@@ -84,4 +84,23 @@ class ResultTypesSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val queryResult = QueryResult("id:1", resultSchema, Seq(rv1))
     queryResult.resultType shouldEqual(QueryResultType.Scalar)
   }
+
+  it("should ignore isCumulative field when comparing ColumnInfos") {
+    val columns1: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn, true),
+      ColumnInfo("value", ColumnType.DoubleColumn))
+    val resultSchema1 = ResultSchema(columns1, 1)
+
+    val columns2: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn, false),
+      ColumnInfo("value", ColumnType.DoubleColumn))
+    val resultSchema2 = ResultSchema(columns2, 1)
+
+    resultSchema1 shouldEqual resultSchema2
+
+    val columns3: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp1", ColumnType.TimestampColumn, false),
+      ColumnInfo("value", ColumnType.DoubleColumn))
+    val resultSchema3 = ResultSchema(columns3, 1)
+
+    resultSchema2 should not be resultSchema3
+
+  }
 }
