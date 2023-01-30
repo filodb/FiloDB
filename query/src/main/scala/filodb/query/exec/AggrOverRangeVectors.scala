@@ -72,7 +72,7 @@ final case class LocalPartitionReduceAggregateExec(queryContext: QueryContext,
     if (r1.isEmpty) r2
     else if (r2.isEmpty) r1
     else if (r1 != r2) {
-      throw SchemaMismatch(r1.toString, r2.toString)
+      throw SchemaMismatch(r1.toString, r2.toString, getClass.getSimpleName)
     } else r1
   }
 }
