@@ -218,11 +218,12 @@ case class PartLookupResult(shard: Int,
                             pkRecords: Seq[PartKeyLuceneIndexRecord] = Seq.empty,
                             dataBytesScannedCtr: AtomicLong)
 
-final case class SchemaMismatch(expected: String, found: String) extends
-Exception(s"Multiple schemas found, please filter. Expected schema $expected, found schema $found")
+final case class SchemaMismatch(expected: String, found: String, clazz: String) extends
+  Exception(s"Multiple schemas found, please filter. Expected schema $expected, found schema $found in $clazz")
 
 object SchemaMismatch {
-  def apply(expected: Schema, found: Schema): SchemaMismatch = SchemaMismatch(expected.name, found.name)
+  def apply(expected: Schema, found: Schema, clazz: String): SchemaMismatch =
+    SchemaMismatch(expected.name, found.name, clazz)
 }
 
 case class TimeSeriesShardInfo(shardNum: Int,

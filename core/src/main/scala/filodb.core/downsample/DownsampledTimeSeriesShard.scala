@@ -418,7 +418,7 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
                                  colIds: Seq[Types.ColumnId]): ReadablePartition = {
     val schemaId = RecordSchema.schemaID(part.partitionKey, UnsafeUtils.arayOffset)
     if (schemaId != firstSchemaId) {
-      throw SchemaMismatch(schemas.schemaName(firstSchemaId), schemas.schemaName(schemaId))
+      throw SchemaMismatch(schemas.schemaName(firstSchemaId), schemas.schemaName(schemaId), getClass.getSimpleName)
     }
     // FIXME It'd be nice to pass in the correct partId here instead of -1
     new PagedReadablePartition(schemas(schemaId), shardNum, -1, part, minResolutionMs, colIds)
