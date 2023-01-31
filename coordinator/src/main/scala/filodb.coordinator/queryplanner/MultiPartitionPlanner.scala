@@ -111,7 +111,12 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         } else {
           // Single partition but remote, send the entire plan remotely
           val remotePartitionEndpoint = partitions.head.endPoint
-          val httpEndpoint = remotePartitionEndpoint + params.remoteQueryPath.getOrElse("")
+          val remoteQueryPath = if (params.remoteQueryPath.getOrElse("") == "/api/v1/query") {
+            "/api/v1/query_range"
+          } else {
+            params.remoteQueryPath.getOrElse("")
+          }
+          val httpEndpoint = remotePartitionEndpoint + remoteQueryPath
           val remoteContext = if (logicalPlan.isInstanceOf[PeriodicSeriesPlan]) {
             val psp : PeriodicSeriesPlan = logicalPlan.asInstanceOf[PeriodicSeriesPlan]
             val startSecs = psp.startMs / 1000
