@@ -134,7 +134,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
               generateRemoteExecParams(qContext, startMs, endMs)
           }
           // Single partition but remote, send the entire plan remotely
-          if (!queryConfig.grpcPartitionsDenyList.contains(partitionName.toLowerCase) && grpcEndpoint.isDefined) {
+          if (grpcEndpoint.isDefined && !(queryConfig.grpcPartitionsDenyList.contains("*") ||
+            queryConfig.grpcPartitionsDenyList.contains(partitionName.toLowerCase))) {
             val endpoint = grpcEndpoint.get
             val channel = channels.getOrElseUpdate(endpoint, GrpcCommonUtils.buildChannelFromEndpoint(endpoint))
             PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, remoteContext, inProcessPlanDispatcher,
@@ -363,7 +364,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       localPartitionPlanner.materialize(lpWithUpdatedTime, queryContext)
     } else {
       val ctx = generateRemoteExecParams(queryContext, timeRange.startMs, timeRange.endMs)
-      if (!queryConfig.grpcPartitionsDenyList.contains(partitionName.toLowerCase) && grpcEndpoint.isDefined) {
+      if (grpcEndpoint.isDefined &&
+        !(queryConfig.grpcPartitionsDenyList.contains("*") ||
+          queryConfig.grpcPartitionsDenyList.contains(partitionName.toLowerCase))) {
         val channel = channels.getOrElseUpdate(grpcEndpoint.get,
           GrpcCommonUtils.buildChannelFromEndpoint(grpcEndpoint.get))
         PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, ctx, inProcessPlanDispatcher,
