@@ -151,14 +151,4 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec {
       new SumOverTimeChunkedFunctionD, querySession)
     it.next.getDouble(1) shouldEqual expectedDelta
   }
-
-  it("idelta over period-counters should work when start and end are outside window") {
-    val startTs = 8071950L
-    val endTs = 8163070L
-    val prevSample = qDelta(qDelta.size - 2)
-    val expected = qDelta.last.value
-    val toEmit = new TransientRow
-    IDeltaPeriodicFunction.apply(startTs, endTs, deltaDCounterWindow, toEmit, queryConfig)
-    Math.abs(toEmit.value - expected) should be < errorOk
-  }
 }

@@ -617,16 +617,50 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       RecordBuilder.shardKeyHash(Seq(labels("job")), "__name__", labels("__name__"), targetSchemaWithMetric) shouldEqual ((7*31 + jobHash)*31 + metricHash)
     }
 
-    it("should compute partition key hash correctly when target schema is provided") {
+    it("should compute partitionKey hash correctly when target schema is provided") {
       val jobHash = BinaryRegion.hash32(labels("job").getBytes(StandardCharsets.UTF_8))
       val instanceHash = BinaryRegion.hash32(labels("instance").getBytes(StandardCharsets.UTF_8))
+      val metricHash = BinaryRegion.hash32(labels("__name__").getBytes(StandardCharsets.UTF_8))
       val nonShardKeyPairs = labels.filter(f => f._1 != "job" && f._1 != "__name__")
       val shardKeyPairs = labels.filter(f => f._1 == "job" || f._1 == "__name__")
-      val targetSchema = Seq("job","instance")
+      val targetSchema = Seq("job","instance") // job, __name__, instance
+
+      val expectedPartkeyHash = ((7 * 31 + jobHash) * 31 + metricHash) * 31 + instanceHash
 
       RecordBuilder.partitionKeyHash(
         nonShardKeyPairs, shardKeyPairs,
-        targetSchema, "__name__", labels("__name__")) shouldEqual ((7*31 + jobHash)*31 + instanceHash)
+        targetSchema, "__name__", labels("__name__")) shouldEqual expectedPartkeyHash
+    }
+
+    it("should compute partitionKey hash correctly when target schema doesn't specify shardkeys") {
+      val jobHash = BinaryRegion.hash32(labels("job").getBytes(StandardCharsets.UTF_8))
+      val instanceHash = BinaryRegion.hash32(labels("instance").getBytes(StandardCharsets.UTF_8))
+      val metricHash = BinaryRegion.hash32(labels("__name__").getBytes(StandardCharsets.UTF_8))
+      val nonShardKeyPairs = labels.filter(f => f._1 != "job" && f._1 != "__name__")
+      val shardKeyPairs = labels.filter(f => f._1 == "job" || f._1 == "__name__")
+      val targetSchema = Seq("instance") // job, __name__, instance
+
+      val expectedPartkeyHash = ((7 * 31 + jobHash) * 31 + metricHash) * 31 + instanceHash
+
+      RecordBuilder.partitionKeyHash(
+        nonShardKeyPairs, shardKeyPairs,
+        targetSchema, "__name__", labels("__name__")) shouldEqual expectedPartkeyHash
+    }
+
+    it("should compute partitionKey hash using shardkeys + SORTED targetschema labels") {
+      val jobHash = BinaryRegion.hash32(labels("job").getBytes(StandardCharsets.UTF_8))
+      val metricHash = BinaryRegion.hash32(labels("__name__").getBytes(StandardCharsets.UTF_8))
+      val instanceHash = BinaryRegion.hash32(labels("instance").getBytes(StandardCharsets.UTF_8))
+      val dcHash = BinaryRegion.hash32(labels("dc").getBytes(StandardCharsets.UTF_8))
+      val nonShardKeyPairs = labels.filter(f => f._1 != "job" && f._1 != "__name__")
+      val shardKeyPairs = labels.filter(f => f._1 == "job" || f._1 == "__name__")
+      val targetSchema = Seq("instance", "dc") // // (job, __name__, dc, instance) shardkeys, dc then instance
+
+      val expectedPartkeyHash = (((7 * 31 + jobHash) * 31 + metricHash) * 31 + dcHash) * 31 + instanceHash
+
+      RecordBuilder.partitionKeyHash(
+        nonShardKeyPairs, shardKeyPairs,
+        targetSchema,"__name__", labels("__name__")) shouldEqual expectedPartkeyHash
     }
 
     it("should combine hash excluding certain keys") {
