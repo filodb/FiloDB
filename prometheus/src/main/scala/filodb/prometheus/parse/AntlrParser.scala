@@ -103,9 +103,11 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
 
   override def visitSubquery(ctx: PromQLParser.SubqueryContext): SubqueryClause = {
     val list = ctx.DURATION
-    val window = parseDuration(list.get(0))
-    val step = if (list.size() > 1) Some(parseDuration(list.get(1))) else None
-    SubqueryClause(window, step)
+    val windowMs = parseDuration(list.get(0))
+    val stepMs = if (list.size() > 1) Some(parseDuration(list.get(1))) else None
+    SubqueryClause(
+      Duration(windowMs / 1000, Second),
+      stepMs.map(ms => Duration(ms / 1000, Second)))
   }
 
   override def visitBinaryOperation(ctx: PromQLParser.BinaryOperationContext): BinaryExpression = {
@@ -209,11 +211,11 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
   }
 
   override def visitWindow(ctx: PromQLParser.WindowContext): Duration = {
-    parseDuration(ctx.DURATION)
+    Duration(parseDuration(ctx.DURATION) / 1000, Second)
   }
 
   override def visitOffset(ctx: PromQLParser.OffsetContext): Duration = {
-    parseDuration(ctx.DURATION)
+    Duration(parseDuration(ctx.DURATION) / 1000, Second)
   }
 
   override def visitLimitOperation(ctx: PromQLParser.LimitOperationContext) = {
@@ -379,10 +381,11 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
   private def dequote(str: TerminalNode): String = ParserUtil.dequote(str.getSymbol().getText())
 
   /**
-   * Given a string and an index to begin parsing, returns the first Duration parsed.
-   * Additionally returns the index to begin parsing for the next Duration.
+   * Given a string and an index to begin parsing, returns the first duration parsed.
+   * Additionally returns the index to begin parsing for the next duration.
+   * @return a (duration, index) tuple, where the duration is in milliseconds.
    */
-  private def parseSingleDurationFromString(str: String, istart: Int): (Duration, Int)  = {
+  private def parseSingleDurationFromString(str: String, istart: Int): (Long, Int)  = {
     var istop = istart + 1
     while (istop < str.length && !str(istop).isLetter) {
       istop += 1
@@ -398,32 +401,35 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
       case 'i' => IntervalMultiple
     }
     val nextIstart = istop + 1
-    (Duration(value, unit), nextIstart)
+    val millis = if (value > 0) {
+      // Duration throws exception if value==0
+      Duration(value, unit).millis(0)
+    } else 0L
+    (millis, nextIstart)
   }
 
   /**
-   * Returns the total Duration of all duration time/unit pairs in the string.
+   * Returns the total duration (in milliseconds) of all duration time/unit pairs in the string.
    * Example:
-   *     "1m30s" -> Duration(90.0, Second)
+   *     "1m30s" -> 90000
    * Cannot be used with IntervalMultiple "i" notation.
    */
-  private def parseDurationNoInterval(str: String): Duration = {
+  private def parseDurationNoInterval(str: String): Long = {
     var i = 0
-    var totalMillis = 0d
+    var totalMillis = 0L
     while (i < str.length) {
-      val (dur, inext) = parseSingleDurationFromString(str, i)
-      totalMillis += dur.millis(0)
+      val (millis, inext) = parseSingleDurationFromString(str, i)
+      totalMillis += millis
       i = inext
     }
-    // Feels wrong to add a Milliseconds Duration type, so just using seconds.
-    Duration(totalMillis / 1000, Second)
+    totalMillis
   }
 
-  private def parseDuration(node: TerminalNode): Duration = {
+  private def parseDuration(node: TerminalNode): Long = {
     val str = node.getSymbol.getText
     if (str.last == 'i') {
-      val (dur, _) = parseSingleDurationFromString(str, 0)
-      dur
+      val (millis, _) = parseSingleDurationFromString(str, 0)
+      millis
     } else {
       parseDurationNoInterval(str)
     }
