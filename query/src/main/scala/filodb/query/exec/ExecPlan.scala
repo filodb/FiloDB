@@ -740,7 +740,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     if (r1.isEmpty) r2
     else if (r2.isEmpty) r1
     else if (!r1.hasSameColumnsAs(r2))  {
-      throw SchemaMismatch(r1.toString, r2.toString)
+      throw SchemaMismatch(r1.toString, r2.toString, getClass.getSimpleName)
     } else {
       val fixedVecLen = if (r1.fixedVectorLen.isEmpty && r2.fixedVectorLen.isEmpty) None
       else Some(r1.fixedVectorLen.getOrElse(0) + r2.fixedVectorLen.getOrElse(0))
