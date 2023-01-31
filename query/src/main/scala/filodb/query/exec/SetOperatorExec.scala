@@ -118,7 +118,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
 
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
-      // Don't add range vector if it is contains no rows
+      // Don't add range vector if it contains no rows
       if (!isEmpty(rv, rhsSchema)) {
         // When spread changes, we need to account for multiple Range Vectors with same key coming from different shards
         // Each of these range vectors would contain data for different time ranges
