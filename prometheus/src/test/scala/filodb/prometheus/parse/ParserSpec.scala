@@ -1,6 +1,6 @@
 package filodb.prometheus.parse
 
-import filodb.prometheus.ast.{PeriodicSeries, RangeExpression, SimpleSeries, TimeStepParams}
+import filodb.prometheus.ast.{PeriodicSeries, RangeExpression, SimpleSeries, SubqueryClause, SubqueryExpression, TimeStepParams}
 import filodb.prometheus.parse.Parser.{Antlr, Shadow}
 import filodb.query.{BinaryJoin, LogicalPlan}
 import org.scalatest.funspec.AnyFunSpec
@@ -754,34 +754,55 @@ class ParserSpec extends AnyFunSpec with Matchers {
   }
 
   it("should correctly parse durations with multiple units") {
-    {
-      val query = """foo{label="bar"}[1m30s] offset 2h15m"""
-      val windowSec = 60 + 30
-      val offsetSec = (2 * 60 * 60) + (15 * 60)
-      Parser.parseQuery(query) match {
+    case class Spec(query: String, windowSec: Int, offsetSec: Int)
+    val specs = Seq(
+      Spec(
+        """foo{label="bar"}[1m30s] offset 2h15m""",
+            60 + 30,
+            (2 * 60 * 60) + (15 * 60)
+      ),
+      Spec(
+        """foo{label="bar"}[3d2h25m10s] offset 2d12h15m30s""",
+            (3 * 24 * 60 * 60) + (2 * 60 * 60) + (25 * 60) + 10,
+            (2 * 24 * 60 * 60) + (12 * 60 * 60) + (15 * 60) + 30
+      ),
+      Spec(
+        """foo{label="bar"}[3d0h25m0s] offset 0d12h15m30s""",
+            (3 * 24 * 60 * 60) + (25 * 60),
+            (12 * 60 * 60) + (15 * 60) + 30
+      )
+    )
+    specs.foreach{ spec =>
+      Parser.parseQuery(spec.query) match {
         case RangeExpression(_, _, window, offset) =>
-          window.millis(0) shouldEqual 1000 * windowSec
-          offset.get.millis(0) shouldEqual 1000 * offsetSec
+          window.millis(0) shouldEqual 1000 * spec.windowSec
+          offset.get.millis(0) shouldEqual 1000 * spec.offsetSec
       }
     }
-    {
-      val query = """foo{label="bar"}[3d2h25m10s] offset 2d12h15m30s"""
-      val windowSec = (3 * 24 * 60 * 60) + (2 * 60 * 60) + (25 * 60) + 10
-      val offsetSec = (2 * 24 * 60 * 60) + (12 * 60 * 60) + (15 * 60) + 30
-      Parser.parseQuery(query) match {
-        case RangeExpression(_, _, window, offset) =>
-          window.millis(0) shouldEqual 1000 * windowSec
-          offset.get.millis(0) shouldEqual 1000 * offsetSec
-      }
-    }
-    {
-      val query = """foo{label="bar"}[3d0h25m0s] offset 0d12h15m30s"""
-      val windowSec = (3 * 24 * 60 * 60) + (25 * 60)
-      val offsetSec = (12 * 60 * 60) + (15 * 60) + 30
-      Parser.parseQuery(query) match {
-        case RangeExpression(_, _, window, offset) =>
-          window.millis(0) shouldEqual 1000 * windowSec
-          offset.get.millis(0) shouldEqual 1000 * offsetSec
+  }
+
+  it("should correctly parse subquery durations with multiple units") {
+    case class Spec(query: String, windowSec: Int, stepSec: Int, offsetSec: Int)
+    val specs = Seq(
+      Spec(
+        """foo{label="bar"}[3d2h25m10s:1d4h30m4s] offset 2d12h15m30s""",
+        (3 * 24 * 60 * 60) + (2 * 60 * 60) + (25 * 60) + 10,
+        (1 * 24 * 60 * 60) + (4 * 60 * 60) + (30 * 60) + 4,
+        (2 * 24 * 60 * 60) + (12 * 60 * 60) + (15 * 60) + 30
+      ),
+      Spec(
+        """foo{label="bar"}[3d0h25m0s:1d0h2m] offset 0d12h15m30s""",
+        (3 * 24 * 60 * 60) + (25 * 60),
+        (1 * 24 * 60 * 60) + (2 * 60),
+        (12 * 60 * 60) + (15 * 60) + 30
+      )
+    )
+    specs.foreach{ spec =>
+      Parser.parseQuery(spec.query) match {
+        case SubqueryExpression(_, SubqueryClause(window, step), offset, _) =>
+          window.millis(0) shouldEqual 1000 * spec.windowSec
+          step.map(_.millis(0)).getOrElse(0) shouldEqual 1000 * spec.stepSec
+          offset.get.millis(0) shouldEqual 1000 * spec.offsetSec
       }
     }
   }
