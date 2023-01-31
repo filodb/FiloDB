@@ -774,6 +774,16 @@ class ParserSpec extends AnyFunSpec with Matchers {
           offset.get.millis(0) shouldEqual 1000 * offsetSec
       }
     }
+    {
+      val query = """foo{label="bar"}[3d0h25m0s] offset 0d12h15m30s"""
+      val windowSec = (3 * 24 * 60 * 60) + (25 * 60)
+      val offsetSec = (12 * 60 * 60) + (15 * 60) + 30
+      Parser.parseQuery(query) match {
+        case RangeExpression(_, _, window, offset) =>
+          window.millis(0) shouldEqual 1000 * windowSec
+          offset.get.millis(0) shouldEqual 1000 * offsetSec
+      }
+    }
   }
 
   private def printBinaryJoin( lp: LogicalPlan, level: Int = 0) : scala.Unit =  {
