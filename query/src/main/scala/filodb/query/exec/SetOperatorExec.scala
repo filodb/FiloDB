@@ -93,15 +93,6 @@ final case class SetOperatorExec(queryContext: QueryContext,
     else rvk.labelValues.filterNot(lv => ignoringLabels.contains(lv._1))
   }
 
-  private def joinKeys2(rvk: RangeVectorKey): Option[Map[Utf8Str, Utf8Str]] = {
-    if (onLabels.nonEmpty) {
-      val labels = rvk.labelValues.filter(lv => onLabels.contains(lv._1))
-      Some(labels)
-    } else {
-      Some(rvk.labelValues.filterNot(lv => ignoringLabels.contains(lv._1)))
-    }
-  }
-
   /***
     * Returns true when range vector does not have any values
     */
