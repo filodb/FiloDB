@@ -412,10 +412,8 @@ object RangeFunction {
     case Some(Resets)                 => () => new ResetsFunction()
     case Some(Irate) if schema.columns(1).isCumulative
                                       => () => IRateFunction
-    case Some(Idelta) if schema.columns(1).isCumulative
-                                      => () => IDeltaFunction
+    case Some(Idelta)                 => () => IDeltaFunction
     case Some(Irate)                  => () => IRatePeriodicFunction
-    case Some(Idelta)                 => () => LastSampleFunction // Last Delta value
     case Some(Deriv)                  => () => DerivFunction
     case Some(MaxOverTime)            => () => new MinMaxOverTimeFunction(Ordering[Double])
     case Some(MinOverTime)            => () => new MinMaxOverTimeFunction(Ordering[Double].reverse)
