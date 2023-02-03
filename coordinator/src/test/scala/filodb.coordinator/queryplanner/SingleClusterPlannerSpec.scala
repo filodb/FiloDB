@@ -503,6 +503,28 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     binaryJoinNode.asInstanceOf[BinaryJoinExec].rhs.size shouldEqual 4
   }
 
+  it ("should pushdown BinaryJoins between different shard keys when shards are identical") {
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 5))
+    }
+    def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
+      Seq(TargetSchemaChange(0, Seq("job", "app")))
+    }
+    val queries = Seq(
+      """foo{job="baz"} + on(job,app) bar{job="bat"}""",
+      """foo{job="baz"} + on(app) bar{job="bat"}""",
+    )
+    queries.foreach{ query =>
+      val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(20000, 100, 30000))
+      val execPlan = engine.materialize(lp, QueryContext(promQlQueryParams, plannerParams = PlannerParams(
+              spreadOverride = Some(FunctionalSpreadProvider(spread)),
+              targetSchemaProviderOverride = Some(FunctionalTargetSchemaProvider(targetSchema)),
+              queryTimeoutMillis = 1000000)))
+      execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
+      execPlan.children.forall(c => c.isInstanceOf[BinaryJoinExec])
+    }
+  }
+
   it ("should pushdown BinaryJoins/Aggregates when valid") {
 
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
