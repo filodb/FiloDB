@@ -3,17 +3,19 @@ package filodb.query.exec
 import java.util.concurrent.TimeUnit
 
 import io.grpc.Channel
+import io.grpc.stub.StreamObserver
 import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
 import monix.execution.Scheduler
-import scala.concurrent.Future
+import monix.reactive.{MulticastStrategy, Observable}
+import monix.reactive.subjects.ConcurrentSubject
 
 import filodb.core.DatasetRef
 import filodb.core.query.{PromQlQueryParams, QueryContext, QuerySession}
 import filodb.core.store.ChunkSource
-import filodb.grpc.GrpcMultiPartitionQueryService.Request
-import filodb.grpc.RemoteExecGrpc
+import filodb.grpc._
+import filodb.grpc.GrpcMultiPartitionQueryService._
 import filodb.query.ProtoConverters._
 import filodb.query.QueryResponse
 
@@ -33,7 +35,7 @@ trait GrpcRemoteExec extends LeafExecPlan {
         val span = Kamon.currentSpan()
         // Dont finish span since this code didnt create it
         Kamon.runWithSpan(span, false) {
-            Task.fromFuture(sendGrpcRequest(span, requestTimeoutMs))
+            sendGrpcRequest(span, requestTimeoutMs).toListL.map(_.toIterator.toQueryResponse)
         }
     }
 
@@ -41,7 +43,8 @@ trait GrpcRemoteExec extends LeafExecPlan {
     def args: String = s"${promQlQueryParams.toString}, ${queryContext.plannerParams}, queryEndpoint=$queryEndpoint, " +
       s"requestTimeoutMs=$requestTimeoutMs"
 
-    def sendGrpcRequest(span: Span, requestTimeoutMs: Long)(implicit sched: Scheduler): Future[QueryResponse]
+    def sendGrpcRequest(span: Span, requestTimeoutMs: Long)(implicit sched: Scheduler):
+    Observable[GrpcMultiPartitionQueryService.StreamingResponse]
 
     def requestTimeoutMs: Long
 
@@ -62,13 +65,21 @@ case class PromQLGrpcRemoteExec(channel: Channel,
                            queryContext: QueryContext,
                            dispatcher: PlanDispatcher,
                            dataset: DatasetRef) extends GrpcRemoteExec {
-    override def sendGrpcRequest(span: Span, requestTimeoutMs: Long)(implicit sched: Scheduler): Future[QueryResponse]
-    = Future {
-        val blockingStub = RemoteExecGrpc.newBlockingStub(channel)
-        import scala.collection.JavaConverters._
-        import filodb.query.ProtoConverters._
-        blockingStub.withDeadlineAfter(requestTimeoutMs, TimeUnit.MILLISECONDS)
-          .execStreaming(getGrpcRequest).asScala.toQueryResponse
+    override def sendGrpcRequest(span: Span, requestTimeoutMs: Long)(implicit sched: Scheduler):
+        // Todo add asset for thread name
+    Observable[GrpcMultiPartitionQueryService.StreamingResponse] = {
+        val subject = ConcurrentSubject[GrpcMultiPartitionQueryService.StreamingResponse](MulticastStrategy.Publish)
+        subject
+          .doOnSubscribe(Task.eval {
+              val nonBlockingStub = RemoteExecGrpc.newStub(channel)
+              nonBlockingStub.withDeadlineAfter(requestTimeoutMs, TimeUnit.MILLISECONDS)
+                .execStreaming(getGrpcRequest,
+                    new StreamObserver[GrpcMultiPartitionQueryService.StreamingResponse] {
+                        override def onNext(value: StreamingResponse): Unit = subject.onNext(value)
+                        override def onError(t: java.lang.Throwable): Unit = subject.onError(t)
+                        override def onCompleted(): Unit = subject.onComplete()
+                    })
+          })
     }
 
     override def queryEndpoint: String = channel.authority() + ".execStreaming"
