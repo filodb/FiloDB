@@ -94,7 +94,7 @@ message RecordSchema {
   optional uint32 partitionFieldStart = 2;
   repeated string predefinedKeys      = 3;
   map<uint32, RecordSchema> brSchema  = 4;
-  optional uint32 schemaVersion       = 5;
+  uint32 schemaVersion                = 5;
 }
 
 

@@ -130,7 +130,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val binRc1 = new RecordSchema( columns = List(
       ColumnInfo("time", Column.ColumnType.LongColumn),
       ColumnInfo("value", Column.ColumnType.DoubleColumn)),
-      partitionFieldStart = None, predefinedKeys = Nil, brSchema = Map.empty, schemaVersion = None)
+      partitionFieldStart = None, predefinedKeys = Nil, brSchema = Map.empty)
 
     val rs = new RecordSchema( columns = List(
                         ColumnInfo("time", Column.ColumnType.LongColumn),
@@ -139,7 +139,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
                       partitionFieldStart = Some(1),
                       predefinedKeys = List("_ws_", "_ns_"),
                       brSchema = Map(2 -> binRc1),
-                      schemaVersion = Some(1))
+                      schemaVersion = 2)
       rs.toProto.fromProto shouldEqual rs
   }
 
@@ -151,7 +151,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
       partitionFieldStart = Some(1),
       predefinedKeys = List("_ws_", "_ns_"),
       brSchema = Map.empty,
-      schemaVersion = Some(1))
+      schemaVersion = 1)
 
     val resSchema = ResultSchema(List(ColumnInfo("ts", ColumnType.DoubleColumn),
       ColumnInfo("val", ColumnType.DoubleColumn),

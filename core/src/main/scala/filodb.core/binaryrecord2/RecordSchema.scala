@@ -49,7 +49,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
                          val partitionFieldStart: Option[Int] = None,
                          val predefinedKeys: Seq[String] = Nil,
                          val brSchema: Map[Int, RecordSchema] = Map.empty,
-                         val schemaVersion: Option[Int] = None) {
+                         val schemaVersion: Int = 1) {
   import RecordSchema._
   import BinaryRegion.NativePointer
 

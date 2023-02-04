@@ -78,7 +78,7 @@ object ProtoConverters {
       rvk.brSchema.foreach {
         case (key, schema)   => builder.putBrSchema(key, schema.toProto)
       }
-      if (rvk.schemaVersion.isDefined) builder.setSchemaVersion(rvk.schemaVersion.get)
+      builder.setSchemaVersion(rvk.schemaVersion)
       builder.build()
     }
   }
@@ -94,7 +94,7 @@ object ProtoConverters {
                    predefinedKeys = rvkProto.getPredefinedKeysList.asScala.toList,
                    brSchema = rvkProto.getBrSchemaMap.asScala.map
                      { case (key, value) => (key.toInt, value.fromProto)}.toMap,
-                   schemaVersion = if (rvkProto.hasSchemaVersion) Some(rvkProto.getSchemaVersion) else None)
+                   schemaVersion = rvkProto.getSchemaVersion)
     }
   }
 
