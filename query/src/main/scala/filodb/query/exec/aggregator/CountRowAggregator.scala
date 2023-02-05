@@ -40,7 +40,8 @@ abstract class CountRowAggregator extends RowAggregator {
       acc.count += aggRes.getDouble(1)
     acc
   }
-  def present(aggRangeVector: RangeVector, limit: Int, rangeParams: RangeParams): Seq[RangeVector] = Seq(aggRangeVector)
+  def present(aggRangeVector: RangeVector, limit: Int,
+              rangeParams: RangeParams, queryStats: QueryStats): Seq[RangeVector] = Seq(aggRangeVector)
   def reductionSchema(source: ResultSchema): ResultSchema = schema
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = reductionSchema
 }

@@ -370,7 +370,7 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
                   |            "timeSeriesScanned": 24,
                   |            "dataBytesScanned": 38784,
                   |            "resultBytes": 15492,
-                  |            "cpuNanos"": 434999
+                  |            "cpuNanos": 434999
                   |        }
                   |    ]
                   |}]""".stripMargin

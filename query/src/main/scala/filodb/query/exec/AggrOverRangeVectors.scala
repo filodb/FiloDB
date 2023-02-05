@@ -168,7 +168,7 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
-    RangeVectorAggregator.present(aggregator, source, limit, rangeParams)
+    RangeVectorAggregator.present(aggregator, source, limit, rangeParams, querySession.queryStats)
   }
 
   override def schema(source: ResultSchema): ResultSchema = {
@@ -225,8 +225,9 @@ object RangeVectorAggregator extends StrictLogging {
   def present(aggregator: RowAggregator,
               source: Observable[RangeVector],
               limit: Int,
-              rangeParams: RangeParams): Observable[RangeVector] = {
-    source.flatMap(rv => Observable.fromIterable(aggregator.present(rv, limit, rangeParams)))
+              rangeParams: RangeParams,
+              queryStats: QueryStats): Observable[RangeVector] = {
+    source.flatMap(rv => Observable.fromIterable(aggregator.present(rv, limit, rangeParams, queryStats)))
   }
 
   private def mapReduceInternal(rvs: List[RangeVector],

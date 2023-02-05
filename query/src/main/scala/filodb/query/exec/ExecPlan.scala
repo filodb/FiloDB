@@ -404,8 +404,6 @@ trait ExecPlan extends QueryCommand {
                   MeasurementUnit.time.milliseconds)
               .withTag("plan", getClass.getSimpleName)
               .record(Math.max(0, System.currentTimeMillis - startExecute))
-            SerializedRangeVector.queryResultBytes.record(resultSize)
-            querySession.queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
             span.mark(s"resultBytes=$resultSize")
             span.mark(s"resultSamples=$numResultSamples")
             span.mark(s"numSrv=${r.size}")
