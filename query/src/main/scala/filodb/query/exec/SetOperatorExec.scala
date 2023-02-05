@@ -61,29 +61,35 @@ final case class SetOperatorExec(queryContext: QueryContext,
     val taskOfResults = childResponses.map {
       case (QueryResult(_, schema, result, _, _, _), i) => (schema, result, i)
     }.toListL.map { resp =>
-      span.mark("binary-join-child-results-available")
-      Kamon.histogram("query-execute-time-elapsed-step1-child-results-available",
-        MeasurementUnit.time.milliseconds)
-        .withTag("plan", getClass.getSimpleName)
-        .record(Math.max(0, System.currentTimeMillis - queryContext.submitTime))
-      // NOTE: We can't require this any more, as multischema queries may result in not a QueryResult if the
-      //       filter returns empty results.  The reason is that the schema will be undefined.
-      // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
-      // Resp is segregated based on index of child plans
-      val lhsRvs = resp.filter(_._3 < lhs.size).flatMap(_._2)
-      val rhsResp = resp.filter(_._3 >= lhs.size)
-      val rhsRvs = rhsResp.flatMap(_._2)
+      val startNs = System.nanoTime()
+      try {
+        span.mark("binary-join-child-results-available")
+        Kamon.histogram("query-execute-time-elapsed-step1-child-results-available",
+          MeasurementUnit.time.milliseconds)
+          .withTag("plan", getClass.getSimpleName)
+          .record(Math.max(0, System.currentTimeMillis - queryContext.submitTime))
+        // NOTE: We can't require this any more, as multischema queries may result in not a QueryResult if the
+        //       filter returns empty results.  The reason is that the schema will be undefined.
+        // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
+        // Resp is segregated based on index of child plans
+        val lhsRvs = resp.filter(_._3 < lhs.size).flatMap(_._2)
+        val rhsResp = resp.filter(_._3 >= lhs.size)
+        val rhsRvs = rhsResp.flatMap(_._2)
 
-      val results: Iterator[RangeVector] = binaryOp match {
-        case LAND    => val rhsSchema = if (rhsResp.nonEmpty) rhsResp.head._1 else ResultSchema.empty
-                        setOpAnd(lhsRvs, rhsRvs, rhsSchema)
-        case LOR     => setOpOr(lhsRvs, rhsRvs)
-        case LUnless => setOpUnless(lhsRvs, rhsRvs)
-        case _       => throw new IllegalArgumentException("requirement failed: Only and, or and unless are supported ")
+        val results: Iterator[RangeVector] = binaryOp match {
+          case LAND => val rhsSchema = if (rhsResp.nonEmpty) rhsResp.head._1 else ResultSchema.empty
+            setOpAnd(lhsRvs, rhsRvs, rhsSchema)
+          case LOR => setOpOr(lhsRvs, rhsRvs)
+          case LUnless => setOpUnless(lhsRvs, rhsRvs)
+          case _ => throw new IllegalArgumentException("requirement failed: Only and, or and unless are supported ")
+        }
+        // check for timeout after dealing with metadata, before dealing with numbers
+        querySession.qContext.checkQueryTimeout(this.getClass.getName)
+        Observable.fromIteratorUnsafe(results)
+      } finally {
+        // Adding CPU time here since dealing with metadata join is not insignificant
+        querySession.queryStats.getCpuNanosCounter(Nil).addAndGet(System.nanoTime() - startNs)
       }
-      // check for timeout after dealing with metadata, before dealing with numbers
-      querySession.qContext.checkQueryTimeout(this.getClass.getName)
-      Observable.fromIteratorUnsafe(results)
     }
     Observable.fromTask(taskOfResults).flatten
   }

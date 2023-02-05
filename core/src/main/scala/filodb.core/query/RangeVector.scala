@@ -153,6 +153,8 @@ trait SerializableRangeVector extends RangeVector {
    * Estimates the total size (in bytes) of all rows after serialization.
    */
   def estimateSerializedRowBytes: Long
+
+  def estimatedSerializedBytes: Long = estimateSerializedRowBytes + key.keySize
 }
 
 object SerializableRangeVector {
@@ -438,36 +440,46 @@ object SerializedRangeVector extends StrictLogging {
   def apply(rv: RangeVector,
             builder: RecordBuilder,
             schema: RecordSchema,
-            execPlan: String): SerializedRangeVector = {
+            execPlan: String,
+            queryStats: QueryStats): SerializedRangeVector = {
+    val startNs = System.nanoTime()
     var numRows = 0
-    val oldContainerOpt = builder.currentContainer
-    val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
     try {
-      ChunkMap.validateNoSharedLocks(execPlan)
-      val rows = rv.rows
-      while (rows.hasNext) {
-        val nextRow = rows.next()
-        // Don't encode empty / NaN data over the wire
-        if (!canRemoveEmptyRows(rv.outputRange, schema) ||
+      val oldContainerOpt = builder.currentContainer
+      val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
+      try {
+        ChunkMap.validateNoSharedLocks(execPlan)
+        val rows = rv.rows
+        while (rows.hasNext) {
+          val nextRow = rows.next()
+          // Don't encode empty / NaN data over the wire
+          if (!canRemoveEmptyRows(rv.outputRange, schema) ||
             schema.columns(1).colType == DoubleColumn && !nextRow.getDouble(1).isNaN ||
             schema.columns(1).colType == HistogramColumn && !nextRow.getHistogram(1).isEmpty) {
-          numRows += 1
-          builder.addFromReader(nextRow, schema, 0)
+            numRows += 1
+            builder.addFromReader(nextRow, schema, 0)
+          }
         }
+      } finally {
+        rv.rows().close()
+        // clear exec plan
+        // When the query is done, clean up lingering shared locks caused by iterator limit.
+        ChunkMap.releaseAllSharedLocks()
       }
+      // If there weren't containers before, then take all of them.  If there were, discard earlier ones, just
+      // start with the most recent one we started adding to
+      val containers = oldContainerOpt match {
+        case None => builder.allContainers
+        case Some(firstContainer) => builder.allContainers.dropWhile(_ != firstContainer)
+      }
+      val srv = new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo, rv.outputRange)
+      val resultSize = srv.estimatedSerializedBytes
+      SerializedRangeVector.queryResultBytes.record(resultSize)
+      queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
+      srv
     } finally {
-      rv.rows().close()
-      // clear exec plan
-      // When the query is done, clean up lingering shared locks caused by iterator limit.
-      ChunkMap.releaseAllSharedLocks()
+      queryStats.getCpuNanosCounter(Nil).addAndGet(System.nanoTime() - startNs)
     }
-    // If there weren't containers before, then take all of them.  If there were, discard earlier ones, just
-    // start with the most recent one we started adding to
-    val containers = oldContainerOpt match {
-      case None                 => builder.allContainers
-      case Some(firstContainer) => builder.allContainers.dropWhile(_ != firstContainer)
-    }
-    new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo, rv.outputRange)
   }
   // scalastyle:on null
 
@@ -475,9 +487,9 @@ object SerializedRangeVector extends StrictLogging {
     * Creates a SerializedRangeVector out of another RV and ColumnInfo schema.  Convenient but no sharing.
     * Since it wastes space when working with multiple RVs, should be used mostly for testing.
     */
-  def apply(rv: RangeVector, cols: Seq[ColumnInfo]): SerializedRangeVector = {
+  def apply(rv: RangeVector, cols: Seq[ColumnInfo], queryStats: QueryStats): SerializedRangeVector = {
     val schema = toSchema(cols)
-    apply(rv, newBuilder(), schema, "Test-Only-Plan")
+    apply(rv, newBuilder(), schema, "Test-Only-Plan", queryStats)
   }
 
   // TODO: make this configurable....

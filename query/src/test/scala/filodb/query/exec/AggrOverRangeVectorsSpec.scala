@@ -24,7 +24,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   val histMaxSchema = ResultSchema(MMD.histMaxDS.schema.infosFromIDs(Seq(0, 4, 3)), 1, colIDs = Seq(0, 4, 3))
 
   val qc = QueryContext()
-  
+  val queryStats = QueryStats()
+
   it ("should work without grouping") {
     val ignoreKey = CustomRangeVectorKey(
       Map(("ignore").utf8 -> ("ignore").utf8))
@@ -323,7 +324,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val recSchema = SerializedRangeVector.toSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
                                                          ColumnInfo("tdig", ColumnType.StringColumn)))
     val builder = SerializedRangeVector.newBuilder()
-    val srv = SerializedRangeVector(result7(0), builder, recSchema, "AggrOverRangeVectorsSpec")
+    val srv = SerializedRangeVector(result7(0), builder, recSchema, "AggrOverRangeVectorsSpec", queryStats)
 
     val resultObs7b = RangeVectorAggregator.present(agg7, Observable.now(srv), 1000, RangeParams(0,1,0))
     val finalResult = resultObs7b.toListL.runToFuture.futureValue

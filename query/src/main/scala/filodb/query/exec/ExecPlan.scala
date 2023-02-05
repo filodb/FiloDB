@@ -128,7 +128,12 @@ trait ExecPlan extends QueryCommand {
       // kamon uses thread-locals.
       // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {
-        val doEx = doExecute(source, querySession)
+        val startNs = System.nanoTime()
+        val doEx = try {
+          doExecute(source, querySession)
+        } finally {
+          querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(System.nanoTime() - startNs)
+        }
         Kamon.histogram("query-execute-time-elapsed-step1-done",
           MeasurementUnit.time.milliseconds)
           .withTag("plan", getClass.getSimpleName)
@@ -193,7 +198,7 @@ trait ExecPlan extends QueryCommand {
             // materialize, and limit rows per RV
             val execPlanString = queryWithPlanName(queryContext)
             val builder = SerializedRangeVector.newBuilder()
-            val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString)
+            val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString, querySession.queryStats)
             if (rv.outputRange.isEmpty)
               qLogger.debug(s"Empty rangevector found. Rv class is:  ${rv.getClass.getSimpleName}, " +
                 s"execPlan is: $execPlanString, execPlan children ${this.children}")
@@ -206,7 +211,7 @@ trait ExecPlan extends QueryCommand {
             throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
               sampleLimit} samples. Try applying more filters or reduce time range.")
 
-          resultSize += srv.estimateSerializedRowBytes + srv.key.keySize
+          resultSize += srv.estimatedSerializedBytes
           if (resultSize > queryContext.plannerParams.resultByteLimit) {
             val size_mib = queryContext.plannerParams.resultByteLimit / math.pow(1024, 2)
             val msg = s"Reached maximum result size (final or intermediate) " +
@@ -227,8 +232,6 @@ trait ExecPlan extends QueryCommand {
             MeasurementUnit.time.milliseconds)
             .withTag("plan", getClass.getSimpleName)
             .record(Math.max(0, System.currentTimeMillis - startExecute))
-          SerializedRangeVector.queryResultBytes.record(resultSize)
-          querySession.queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
           span.mark("after-last-materialized-result-rv")
           span.mark(s"resultBytes=$resultSize")
           span.mark(s"resultSamples=$numResultSamples")
@@ -287,7 +290,12 @@ trait ExecPlan extends QueryCommand {
       // kamon uses thread-locals.
       // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {
-        val doEx = doExecute(source, querySession)
+        val startNs = System.nanoTime()
+        val doEx = try {
+          doExecute(source, querySession)
+        } finally {
+          querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(System.nanoTime() - startNs)
+        }
         Kamon.histogram("query-execute-time-elapsed-step1-done",
           MeasurementUnit.time.milliseconds)
           .withTag("plan", getClass.getSimpleName)
@@ -361,7 +369,7 @@ trait ExecPlan extends QueryCommand {
             case rv: RangeVector =>
               // materialize, and limit rows per RV
               val execPlanString = queryWithPlanName(queryContext)
-              val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString)
+              val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString, querySession.queryStats)
               if (rv.outputRange.isEmpty)
                 qLogger.debug(s"Empty rangevector found. Rv class is:  ${rv.getClass.getSimpleName}, " +
                   s"execPlan is: $execPlanString, execPlan children ${this.children}")
@@ -386,7 +394,6 @@ trait ExecPlan extends QueryCommand {
                     s"$msg Try to apply more filters, reduce the time range, and/or increase the step size.")
                 }
               }
-
               srv
           }
           .filter(_.numRowsSerialized > 0)
