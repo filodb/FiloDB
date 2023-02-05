@@ -7,6 +7,7 @@ import scala.collection.mutable.ListBuffer
 
 import com.typesafe.scalalogging.StrictLogging
 
+import filodb.core.Utils
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.FiloSchedulers
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
@@ -117,7 +118,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator wi
   // scalastyle:off method.length
   def present(aggRangeVector: RangeVector, limit: Int,
               rangeParams: RangeParams, queryStats: QueryStats): Seq[RangeVector] = {
-    val startNs = System.nanoTime()
+    val startNs = Utils.currentCpuUserTimeNanos
     try {
       val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
       try {
@@ -165,7 +166,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator wi
         srv
       }.toSeq
     } finally {
-      queryStats.getCpuNanosCounter(Nil).getAndAdd(System.nanoTime() - startNs)
+      queryStats.getCpuNanosCounter(Nil).getAndAdd(Utils.currentCpuUserTimeNanos - startNs)
     }
   }
 

@@ -7,6 +7,7 @@ import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.reactive.Observable
 
+import filodb.core.Utils
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -78,7 +79,7 @@ final case class BinaryJoinExec(queryContext: QueryContext,
           s" Try applying more filters or reduce time range.")
       case (QueryResult(_, _, result, _, _, _), i) => (result, i)
     }.toListL.map { resp =>
-      val startNs = System.nanoTime()
+      val startNs = Utils.currentCpuUserTimeNanos
       try {
         span.mark("binary-join-child-results-available")
         Kamon.histogram("query-execute-time-elapsed-step1-child-results-available",
@@ -149,7 +150,7 @@ final case class BinaryJoinExec(queryContext: QueryContext,
         Observable.fromIterable(results.values.map(_.resultRv))
       } finally {
         // Adding CPU time here since dealing with metadata join is not insignificant
-        querySession.queryStats.getCpuNanosCounter(Nil).addAndGet(System.nanoTime() - startNs)
+        querySession.queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentCpuUserTimeNanos - startNs)
       }
     }
     Observable.fromTask(taskOfResults).flatten

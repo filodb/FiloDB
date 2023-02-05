@@ -9,7 +9,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.{Observable, Pipe}
 
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, Utils}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
@@ -128,11 +128,11 @@ trait ExecPlan extends QueryCommand {
       // kamon uses thread-locals.
       // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {
-        val startNs = System.nanoTime()
+        val startNs = Utils.currentCpuUserTimeNanos
         val doEx = try {
           doExecute(source, querySession)
         } finally {
-          querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(System.nanoTime() - startNs)
+          querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(Utils.currentCpuUserTimeNanos - startNs)
         }
         Kamon.histogram("query-execute-time-elapsed-step1-done",
           MeasurementUnit.time.milliseconds)
@@ -382,7 +382,7 @@ trait ExecPlan extends QueryCommand {
                 throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
                   sampleLimit} samples. Try applying more filters or reduce time range.")
 
-              resultSize += srv.estimateSerializedRowBytes + srv.key.keySize
+              resultSize += srv.estimatedSerializedBytes
               if (resultSize > queryContext.plannerParams.resultByteLimit) {
                 val size_mib = queryContext.plannerParams.resultByteLimit / math.pow(1024, 2)
                 val msg = s"Reached maximum result size (final or intermediate) " +
