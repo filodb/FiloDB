@@ -72,10 +72,9 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
     if (config.getBoolean("grpc.start-grpc-service")) {
       // TODO: Remove hardcoding
       val dsRef = DatasetRef("prometheus")
-      val v2Enabled = config.getBoolean("v2-cluster-enabled")
       val queryConfig = QueryConfig(config.getConfig("query"))
-      def shardMapper = client.getShardMapper(dsRef, v2Enabled).get
-      client.getShardMapper(dsRef, v2Enabled) match {
+      def shardMapper = client.getShardMapper(dsRef, false).get
+      client.getShardMapper(dsRef, false) match {
         case Some(_) =>
           val dataset = new Dataset(dsRef.dataset, Schemas.promCounter)
           val planner = new SingleClusterPlanner(dataset, Schemas.global,
@@ -96,6 +95,9 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
   override def shutdown(): Unit = {
     if (filoHttpServer != null) {
       filoHttpServer.shutdown(5.seconds) // TODO configure
+    }
+    if (promQLGrpcServer != null) {
+      promQLGrpcServer.stop()
     }
     super.shutdown()
   }
