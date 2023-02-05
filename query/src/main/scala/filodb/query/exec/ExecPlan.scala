@@ -111,6 +111,7 @@ trait ExecPlan extends QueryCommand {
                        (implicit sched: Scheduler): Observable[StreamQueryResponse] = {
 
     val startExecute = querySession.qContext.submitTime
+    @volatile var step1CpuTime = 0L
 
     val span = Kamon.currentSpan()
     // NOTE: we launch the preparatory steps as a Task too.  This is important because scanPartitions,
@@ -132,7 +133,7 @@ trait ExecPlan extends QueryCommand {
         val doEx = try {
           doExecute(source, querySession)
         } finally {
-          querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(Utils.currentCpuUserTimeNanos - startNs)
+          step1CpuTime = Utils.currentCpuUserTimeNanos - startNs
         }
         Kamon.histogram("query-execute-time-elapsed-step1-done",
           MeasurementUnit.time.milliseconds)
@@ -169,6 +170,9 @@ trait ExecPlan extends QueryCommand {
           }
         }
         if (finalRes._2 == ResultSchema.empty) {
+          // recording and adding step1 to queryStats at the end of execution since the grouping
+          // for stats is not formed yet at the beginning
+          querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(step1CpuTime)
           Observable.fromIterable(Seq(StreamQueryResultHeader(queryContext.queryId, finalRes._2),
             StreamQueryResultFooter(queryContext.queryId, querySession.queryStats,
               querySession.resultCouldBePartial, querySession.partialResultsReason)))
@@ -232,15 +236,18 @@ trait ExecPlan extends QueryCommand {
             MeasurementUnit.time.milliseconds)
             .withTag("plan", getClass.getSimpleName)
             .record(Math.max(0, System.currentTimeMillis - startExecute))
+          // recording and adding step1 to queryStats at the end of execution since the grouping
+          // for stats is not formed yet at the beginning
+          querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(step1CpuTime)
           span.mark("after-last-materialized-result-rv")
           span.mark(s"resultBytes=$resultSize")
           span.mark(s"resultSamples=$numResultSamples")
           span.mark(s"execute-step2-end-${this.getClass.getSimpleName}")
         })
 
-      Observable.now(StreamQueryResultHeader(queryContext.queryId, resultSchema)) ++
+      Observable.eval(StreamQueryResultHeader(queryContext.queryId, resultSchema)) ++
         queryResults ++
-        Observable.now(StreamQueryResultFooter(queryContext.queryId, querySession.queryStats,
+        Observable.eval(StreamQueryResultFooter(queryContext.queryId, querySession.queryStats,
           querySession.resultCouldBePartial, querySession.partialResultsReason))
     }
 
@@ -272,6 +279,8 @@ trait ExecPlan extends QueryCommand {
               querySession: QuerySession)
              (implicit sched: Scheduler): Task[QueryResponse] = {
 
+    @volatile var step1CpuTime = 0L
+
     val startExecute = querySession.qContext.submitTime
 
     val span = Kamon.currentSpan()
@@ -290,11 +299,11 @@ trait ExecPlan extends QueryCommand {
       // kamon uses thread-locals.
       // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {
-        val startNs = System.nanoTime()
+        val startNs = Utils.currentCpuUserTimeNanos
         val doEx = try {
           doExecute(source, querySession)
         } finally {
-          querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(System.nanoTime() - startNs)
+          step1CpuTime = Utils.currentCpuUserTimeNanos - startNs
         }
         Kamon.histogram("query-execute-time-elapsed-step1-done",
           MeasurementUnit.time.milliseconds)
@@ -336,6 +345,9 @@ trait ExecPlan extends QueryCommand {
           span.mark(s"execute-step2-end-${getClass.getSimpleName}")
           Task.eval( {
             qLogger.debug(s"Finished query execution pipeline with empty results for $this")
+            // recording and adding step1 to queryStats at the end of execution since the grouping
+            // for stats is not formed yet at the beginning
+            querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(step1CpuTime)
             QueryResult(queryContext.queryId, resSchema, Nil, querySession.queryStats,
               querySession.resultCouldBePartial, querySession.partialResultsReason
             )
@@ -404,6 +416,9 @@ trait ExecPlan extends QueryCommand {
                   MeasurementUnit.time.milliseconds)
               .withTag("plan", getClass.getSimpleName)
               .record(Math.max(0, System.currentTimeMillis - startExecute))
+            // recording and adding step1 to queryStats at the end of execution since the grouping
+            // for stats is not formed yet at the beginning
+            querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(step1CpuTime)
             span.mark(s"resultBytes=$resultSize")
             span.mark(s"resultSamples=$numResultSamples")
             span.mark(s"numSrv=${r.size}")
