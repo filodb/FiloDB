@@ -19,6 +19,8 @@ import filodb.memory.format.RowReader
 import filodb.query._
 import filodb.query.Query.qLogger
 
+// scalastyle:off file.size.limit
+
 /**
  * The observable of vectors and the schema that is returned by ExecPlan doExecute
  */
