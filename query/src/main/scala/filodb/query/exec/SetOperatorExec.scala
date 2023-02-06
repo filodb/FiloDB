@@ -118,8 +118,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
 
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
-      // Don't add range vector if it is empty
-      if (jk.nonEmpty && !isEmpty(rv, rhsSchema)) {
+      // Don't add range vector if it contains no rows
+      if (!isEmpty(rv, rhsSchema)) {
         // When spread changes, we need to account for multiple Range Vectors with same key coming from different shards
         // Each of these range vectors would contain data for different time ranges
         if (rhsMap.contains(jk)) {
@@ -172,11 +172,6 @@ final case class SetOperatorExec(queryContext: QueryContext,
         val arrayBuffer = result.getOrElse(jk, ArrayBuffer())
         val resRv = IteratorBackedRangeVector(lhs.key, rows, period)
         if (index >= 0) arrayBuffer.update(index, resRv) else arrayBuffer.append(resRv)
-        result.put(jk, arrayBuffer)
-      } else if (jk.isEmpty) {
-        // "up AND ON (dummy) vector(1)" should be equivalent to up as there's no dummy label
-        val arrayBuffer = result.getOrElse(jk, ArrayBuffer())
-        arrayBuffer.append(lhs)
         result.put(jk, arrayBuffer)
       }
     }

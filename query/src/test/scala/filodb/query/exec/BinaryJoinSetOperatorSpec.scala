@@ -519,6 +519,21 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       sameElements(result.flatMap(_.rows.map(_.getDouble(1)).toList)) shouldEqual true
   }
 
+  it("should not return LHS when op=LAND and LHS has no labels and RHS is empty") {
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher, Array(dummyPlan),
+                       new Array[ExecPlan](1), BinaryOperator.LAND, Nil, Nil, "__name__", None)
+    val rvEmptyLabels = sampleHttpRequests
+      // remove the labels from the key
+      .map(rv => IteratorBackedRangeVector(new CustomRangeVectorKey(Map()), rv.rows(), rv.outputRange))
+      .head
+    val lhs = QueryResult("someId", tvSchema, Seq(rvEmptyLabels))
+    val rhs = QueryResult("someId", tvSchema, Nil)
+    val childrenObservable = Observable.fromIterable(Seq((rhs, 1), (lhs, 0)))
+    val result = execPlan.compose(childrenObservable, resSchemaTask, querySession)
+      .toListL.runToFuture.futureValue
+    result.size shouldEqual 0
+  }
+
   it("should return Lhs when LAND is done with vector having no labels and ignoring is used om Lhs labels") {
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleNoKey.toList)
