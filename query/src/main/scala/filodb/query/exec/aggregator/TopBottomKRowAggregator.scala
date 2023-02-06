@@ -118,7 +118,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator wi
   // scalastyle:off method.length
   def present(aggRangeVector: RangeVector, limit: Int,
               rangeParams: RangeParams, queryStats: QueryStats): Seq[RangeVector] = {
-    val startNs = Utils.currentCpuUserTimeNanos
+    val startNs = Utils.currentThreadCpuTimeNanos
     try {
       val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
       try {
@@ -166,7 +166,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator wi
         srv
       }.toSeq
     } finally {
-      queryStats.getCpuNanosCounter(Nil).getAndAdd(Utils.currentCpuUserTimeNanos - startNs)
+      queryStats.getCpuNanosCounter(Nil).getAndAdd(Utils.currentThreadCpuTimeNanos - startNs)
     }
   }
 

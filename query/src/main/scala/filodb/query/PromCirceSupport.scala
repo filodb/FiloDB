@@ -112,13 +112,13 @@ object PromCirceSupport {
   implicit val decodeQueryStatistics: Decoder[QueryStatistics] = new Decoder[QueryStatistics] {
     final def apply(c: HCursor): Decoder.Result[QueryStatistics] = {
       for {
-        group    <- c.downField("group").as[Seq[String]]
+        group             <- c.downField("group").as[Seq[String]]
         timeSeriesScanned <- c.downField("timeSeriesScanned").as[Long]
-        dataBytesScanned     <- c.downField("dataBytesScanned").as[Long]
-        resultBytes     <- c.downField("resultBytes").as[Long]
-        cpuNanos     <- c.downField("cpuNanos").as[Long]
+        dataBytesScanned  <- c.downField("dataBytesScanned").as[Long]
+        resultBytes       <- c.downField("resultBytes").as[Long]
+        cpuNanos          <- c.downField("cpuNanos").as[Option[Long]] // option to be backward compatible
       } yield {
-        QueryStatistics(group, timeSeriesScanned, dataBytesScanned, resultBytes, cpuNanos)
+        QueryStatistics(group, timeSeriesScanned, dataBytesScanned, resultBytes, cpuNanos.getOrElse(0))
       }
     }
   }

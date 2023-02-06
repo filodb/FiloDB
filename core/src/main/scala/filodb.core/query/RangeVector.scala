@@ -442,7 +442,7 @@ object SerializedRangeVector extends StrictLogging {
             schema: RecordSchema,
             execPlan: String,
             queryStats: QueryStats): SerializedRangeVector = {
-    val startNs = Utils.currentCpuUserTimeNanos
+    val startNs = Utils.currentThreadCpuTimeNanos
     var numRows = 0
     try {
       val oldContainerOpt = builder.currentContainer
@@ -478,7 +478,7 @@ object SerializedRangeVector extends StrictLogging {
       queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
       srv
     } finally {
-      queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentCpuUserTimeNanos - startNs)
+      queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
     }
   }
   // scalastyle:on null

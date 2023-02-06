@@ -79,7 +79,7 @@ final case class BinaryJoinExec(queryContext: QueryContext,
           s" Try applying more filters or reduce time range.")
       case (QueryResult(_, _, result, _, _, _), i) => (result, i)
     }.toListL.map { resp =>
-      val startNs = Utils.currentCpuUserTimeNanos
+      val startNs = Utils.currentThreadCpuTimeNanos
       try {
         span.mark("binary-join-child-results-available")
         Kamon.histogram("query-execute-time-elapsed-step1-child-results-available",
@@ -150,7 +150,7 @@ final case class BinaryJoinExec(queryContext: QueryContext,
         Observable.fromIterable(results.values.map(_.resultRv))
       } finally {
         // Adding CPU time here since dealing with metadata join is not insignificant
-        querySession.queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentCpuUserTimeNanos - startNs)
+        querySession.queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
       }
     }
     Observable.fromTask(taskOfResults).flatten

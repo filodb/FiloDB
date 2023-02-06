@@ -131,11 +131,11 @@ trait ExecPlan extends QueryCommand {
       // kamon uses thread-locals.
       // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {
-        val startNs = Utils.currentCpuUserTimeNanos
+        val startNs = Utils.currentThreadCpuTimeNanos
         val doEx = try {
           doExecute(source, querySession)
         } finally {
-          step1CpuTime = Utils.currentCpuUserTimeNanos - startNs
+          step1CpuTime = Utils.currentThreadCpuTimeNanos - startNs
         }
         Kamon.histogram("query-execute-time-elapsed-step1-done",
           MeasurementUnit.time.milliseconds)
@@ -301,11 +301,11 @@ trait ExecPlan extends QueryCommand {
       // kamon uses thread-locals.
       // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {
-        val startNs = Utils.currentCpuUserTimeNanos
+        val startNs = Utils.currentThreadCpuTimeNanos
         val doEx = try {
           doExecute(source, querySession)
         } finally {
-          step1CpuTime = Utils.currentCpuUserTimeNanos - startNs
+          step1CpuTime = Utils.currentThreadCpuTimeNanos - startNs
         }
         Kamon.histogram("query-execute-time-elapsed-step1-done",
           MeasurementUnit.time.milliseconds)
