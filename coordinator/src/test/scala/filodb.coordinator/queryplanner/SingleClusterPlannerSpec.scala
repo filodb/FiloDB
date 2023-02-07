@@ -503,8 +503,9 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     binaryJoinNode.asInstanceOf[BinaryJoinExec].rhs.size shouldEqual 4
   }
 
-  it ("should pushdown BinaryJoins between different shard keys when shards are identical") {
+  it ("should not pushdown BinaryJoins between different shard keys") {
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      // Spread across all shards.
       Seq(SpreadChange(0, 5))
     }
     def targetSchema(filter: Seq[ColumnFilter]): Seq[TargetSchemaChange] = {
@@ -520,8 +521,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
               spreadOverride = Some(FunctionalSpreadProvider(spread)),
               targetSchemaProviderOverride = Some(FunctionalTargetSchemaProvider(targetSchema)),
               queryTimeoutMillis = 1000000)))
-      execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual true
-      execPlan.children.forall(c => c.isInstanceOf[BinaryJoinExec])
+      execPlan.isInstanceOf[LocalPartitionDistConcatExec] shouldEqual false
     }
   }
 
