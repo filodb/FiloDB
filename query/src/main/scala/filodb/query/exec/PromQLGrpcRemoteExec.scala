@@ -54,7 +54,7 @@ trait GrpcRemoteExec extends RemoteExec {
     }
 
 
-    override def args: String = s"${promQlQueryParams.toString}, ${queryContext.plannerParams}," +
+    override def args: String = s"${promQlQueryParams.toString}, ${queryContext.plannerParams}, " +
       s"queryEndpoint=$queryEndpoint, " +
       s"requestTimeoutMs=$requestTimeoutMs"
 

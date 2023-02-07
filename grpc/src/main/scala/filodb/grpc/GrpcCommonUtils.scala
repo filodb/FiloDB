@@ -31,7 +31,7 @@ object GrpcCommonUtils {
     if (keepAliveTimeOut > 0) {
       builder.keepAliveTimeout(keepAliveTimeOut, TimeUnit.SECONDS)
     }
-
+    // TODO: Add metrics for tracking the actual number of connections opened by this ManagedChannel
     builder.build()
   }
 }
