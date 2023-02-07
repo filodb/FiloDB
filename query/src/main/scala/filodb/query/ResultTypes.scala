@@ -65,6 +65,20 @@ final case class QueryResult(id: String,
   }
 }
 
+object QueryResponseConverter {
+
+  implicit class QueryResponseToStreamingResponse(qr: QueryResponse) {
+      def toStreamingResponse: Seq[StreamQueryResponse] = qr match {
+        case QueryError(id, queryStats, t) => StreamQueryError(id, queryStats, t) :: Nil
+        case QueryResult(id, resultSchema, result, queryStats, mayBePartial, partialResultReason) =>
+          (StreamQueryResultHeader(id, resultSchema) :: result.map(StreamQueryResult(id, _)).toList) :::
+            List(StreamQueryResultFooter(id, queryStats, mayBePartial, partialResultReason))
+      }
+
+  }
+}
+
+
 sealed trait StreamQueryResponse extends NodeResponse with java.io.Serializable {
   def id: String
   def isLast: Boolean = false

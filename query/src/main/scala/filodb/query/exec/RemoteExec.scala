@@ -22,6 +22,7 @@ import filodb.core.query.{PromQlQueryParams, QuerySession, QueryStats}
 import filodb.core.store.ChunkSource
 import filodb.query._
 
+
 trait RemoteExec extends LeafExecPlan with StrictLogging {
 
   def queryEndpoint: String

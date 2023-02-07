@@ -39,12 +39,17 @@ import filodb.memory.format.{vectors => bv}
  * @param brSchema schema of any binary record type column
  * @param partitionFieldStart Some(n) from n to the last field are considered the partition key.  A field number.
  * @param predefinedKeys A list of predefined keys to save space for the tags/MapColumn field(s)
+ * @param schemaVersion the version can be used to interpret the data in the containers in a specific way.
+ *                      If the version is None, the default behavior(and the only current interpretation) is used.
+ *                      NOTE: This value is not serialized over the wire in Kryo currently. See toSerializableTuple
+ *                      method for what gets serialized currently
  */
 final class RecordSchema(val columns: Seq[ColumnInfo],
                          // val hash: Int,
                          val partitionFieldStart: Option[Int] = None,
                          val predefinedKeys: Seq[String] = Nil,
-                         val brSchema: Map[Int, RecordSchema] = Map.empty) {
+                         val brSchema: Map[Int, RecordSchema] = Map.empty,
+                         val schemaVersion: Int = 1) {
   import RecordSchema._
   import BinaryRegion.NativePointer
 

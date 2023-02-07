@@ -1,0 +1,665 @@
+package filodb.query
+
+import com.google.protobuf.ByteString
+import com.typesafe.scalalogging.StrictLogging
+
+import filodb.core.binaryrecord2.{RecordContainer, RecordSchema}
+import filodb.core.metadata.Column.ColumnType._
+import filodb.core.query._
+import filodb.grpc.{GrpcMultiPartitionQueryService, ProtoRangeVector}
+import filodb.grpc.GrpcMultiPartitionQueryService.QueryParams
+
+// scalastyle:off number.of.methods
+// scalastyle:off number.of.types
+object ProtoConverters {
+
+  implicit class RangeVectorToProtoConversion(rv: SerializedRangeVector) {
+
+    def toProto: ProtoRangeVector.SerializedRangeVector = {
+      import collection.JavaConverters._
+      val builder = ProtoRangeVector.SerializedRangeVector.newBuilder()
+      builder.setKey(rv.key.toProto)
+      builder.setNumRowsSerialized(rv.numRowsSerialized)
+      builder.addAllRecordContainers(rv.containersIterator.map(container => ByteString.copyFrom(
+        if (container.hasArray) container.array else container.trimmedArray)).toIterable.asJava)
+      builder.setRecordSchema(rv.schema.toProto)
+      builder.setStartRecordNo(rv.startRecordNo)
+      rv.outputRange match {
+        case Some(rvr: RvRange) => builder.setRvRange(rvr.toProto)
+        case _ =>
+      }
+      builder.build()
+    }
+  }
+
+  implicit class RangeVectorFromProtoConversion(rvProto: ProtoRangeVector.SerializedRangeVector) {
+
+    def fromProto: SerializedRangeVector = {
+      import collection.JavaConverters._
+
+      new SerializedRangeVector(rvProto.getKey.fromProto,
+        rvProto.getNumRowsSerialized,
+        rvProto.getRecordContainersList.asScala.map(byteString => RecordContainer(byteString.toByteArray)),
+        rvProto.getRecordSchema.fromProto,
+        rvProto.getStartRecordNo,
+        if (rvProto.hasRvRange) Some(rvProto.getRvRange.fromProto) else None)
+    }
+  }
+
+
+  implicit class RangeVectorKeyToProtoConversion(rvk: RangeVectorKey) {
+    def toProto: ProtoRangeVector.RangeVectorKey = {
+      import collection.JavaConverters._
+      val builder = ProtoRangeVector.RangeVectorKey.newBuilder()
+      builder.putAllLabels(rvk.labelValues.map {
+        case (key, value) => key.toString -> value.toString
+      }.asJava)
+      builder.build()
+    }
+  }
+
+  implicit class RangeVectorKeyFromProtoConversion(rvkProto: ProtoRangeVector.RangeVectorKey) {
+    def fromProto: RangeVectorKey = {
+      import collection.JavaConverters._
+      import filodb.memory.format.ZeroCopyUTF8String._
+
+      CustomRangeVectorKey(labelValues = rvkProto.getLabelsMap.asScala.map {
+        case (key, value) => key.utf8 -> value.utf8
+      }.toMap)
+    }
+  }
+
+  implicit class RecordSchemaToProtoConversion(rvk: RecordSchema) {
+    def toProto: ProtoRangeVector.RecordSchema = {
+      val builder = ProtoRangeVector.RecordSchema.newBuilder()
+      rvk.columns.foreach(ci => builder.addColumns(ci.toProto))
+      if (rvk.partitionFieldStart.isDefined) builder.setPartitionFieldStart(rvk.partitionFieldStart.get)
+      rvk.predefinedKeys.foreach(k => builder.addPredefinedKeys(k))
+      rvk.brSchema.foreach {
+        case (key, schema)   => builder.putBrSchema(key, schema.toProto)
+      }
+      builder.setSchemaVersion(rvk.schemaVersion)
+      builder.build()
+    }
+  }
+
+
+  implicit class RecordSchemaFromProtoConversion(rvkProto: ProtoRangeVector.RecordSchema) {
+    def fromProto: RecordSchema = {
+      import collection.JavaConverters._
+      new RecordSchema(
+                   columns = rvkProto.getColumnsList.asScala.toList.map(ci => ci.fromProto),
+                   partitionFieldStart = if (rvkProto.hasPartitionFieldStart)
+                                            Some(rvkProto.getPartitionFieldStart) else None,
+                   predefinedKeys = rvkProto.getPredefinedKeysList.asScala.toList,
+                   brSchema = rvkProto.getBrSchemaMap.asScala.map
+                     { case (key, value) => (key.toInt, value.fromProto)}.toMap,
+                   schemaVersion = rvkProto.getSchemaVersion)
+    }
+  }
+
+  implicit class RvRangeToProtoConversion(rvr: RvRange) {
+    def toProto: ProtoRangeVector.RvRange = {
+      val builder = ProtoRangeVector.RvRange.newBuilder()
+      builder.setStartMs(rvr.startMs)
+      builder.setEndMs(rvr.endMs)
+      builder.setStep(rvr.stepMs)
+      builder.build()
+    }
+  }
+
+  implicit class RvRangeFromProtoConversion(rvrProto: ProtoRangeVector.RvRange) {
+    def fromProto: RvRange = RvRange(rvrProto.getStartMs, rvrProto.getStep, rvrProto.getEndMs)
+  }
+
+  implicit class ColumnInfoToProtoConversion(ci: ColumnInfo) {
+    def toProto: ProtoRangeVector.ColumnInfo = {
+      val builder = ProtoRangeVector.ColumnInfo.newBuilder()
+      val grpcColType = ci.colType match {
+        case IntColumn => ProtoRangeVector.ColumnType.IntColumn
+        case LongColumn => ProtoRangeVector.ColumnType.LongColumn
+        case DoubleColumn => ProtoRangeVector.ColumnType.DoubleColumn
+        case StringColumn => ProtoRangeVector.ColumnType.StringColumn
+        case TimestampColumn => ProtoRangeVector.ColumnType.TimestampColumn
+        case MapColumn => ProtoRangeVector.ColumnType.MapColumn
+        case BinaryRecordColumn => ProtoRangeVector.ColumnType.BinaryRecordColumn
+        case HistogramColumn => ProtoRangeVector.ColumnType.HistogramColumn
+      }
+      builder.setColumnType(grpcColType)
+      builder.setName(ci.name)
+      builder.build()
+    }
+  }
+
+  implicit class ColumnInfoFromProtoConversion(ci: ProtoRangeVector.ColumnInfo) {
+    def fromProto: ColumnInfo = {
+      val colType = ci.getColumnType match {
+        case ProtoRangeVector.ColumnType.IntColumn => IntColumn
+        case ProtoRangeVector.ColumnType.LongColumn => LongColumn
+        case ProtoRangeVector.ColumnType.DoubleColumn => DoubleColumn
+        case ProtoRangeVector.ColumnType.StringColumn => StringColumn
+        case ProtoRangeVector.ColumnType.TimestampColumn => TimestampColumn
+        case ProtoRangeVector.ColumnType.MapColumn => MapColumn
+        case ProtoRangeVector.ColumnType.BinaryRecordColumn => BinaryRecordColumn
+        case ProtoRangeVector.ColumnType.HistogramColumn => HistogramColumn
+        case ProtoRangeVector.ColumnType.UNRECOGNIZED =>
+          throw new IllegalStateException("Unrecognized colType found")
+      }
+      ColumnInfo(ci.getName, colType)
+    }
+  }
+
+  implicit class QueryParamsFromProtoConversion(qp: QueryParams) {
+    def fromProto: TsdbQueryParams = {
+      if (qp.getIsUnavailable)
+        UnavailablePromQlQueryParams
+      else
+        PromQlQueryParams(promQl = qp.getPromQL, startSecs = qp.getStart,
+          stepSecs = qp.getStep, endSecs = qp.getEnd, verbose = qp.getVerbose)
+    }
+  }
+
+
+  implicit class QueryParamsToProtoConversion(qp: TsdbQueryParams) {
+    def toProto: QueryParams = {
+      val builder = QueryParams.newBuilder()
+      qp match {
+        case UnavailablePromQlQueryParams => builder.setIsUnavailable(true)
+        case PromQlQueryParams(promQl, startSecs, stepSecs, endSecs, _, verbose) =>
+          builder.setIsUnavailable(false)
+          builder.setPromQL(promQl)
+          builder.setStart(startSecs)
+          builder.setStep(stepSecs)
+          builder.setEnd(endSecs)
+          builder.setVerbose(verbose)
+          builder.setTime(endSecs)
+      }
+      builder.build()
+    }
+  }
+
+  implicit class PlannerParamsToProtoConverter(pp: PlannerParams) {
+    def toProto: GrpcMultiPartitionQueryService.PlannerParams = {
+      val builder = GrpcMultiPartitionQueryService.PlannerParams.newBuilder()
+      builder.setApplicationId(pp.applicationId)
+      builder.setQueryTimeoutMillis(pp.queryTimeoutMillis)
+      builder.setSampleLimit(pp.sampleLimit)
+      builder.setGroupByCardLimit(pp.groupByCardLimit)
+      builder.setJoinQueryCardLimit(pp.joinQueryCardLimit)
+      builder.setResultByteLimit(pp.resultByteLimit)
+      builder.setTimeSplitEnabled(pp.timeSplitEnabled)
+      builder.setMinTimeRangeForSplitMs(pp.minTimeRangeForSplitMs)
+      builder.setSplitSizeMs(pp.splitSizeMs)
+      builder.setSkipAggregatePresent(pp.skipAggregatePresent)
+      builder.setProcessFailure(pp.processFailure)
+      builder.setProcessMultiPartition(pp.processMultiPartition)
+      builder.setAllowPartialResults(pp.allowPartialResults)
+      builder.build()
+    }
+  }
+
+  implicit class PlannerParamsFromProtoConverter(gpp: GrpcMultiPartitionQueryService.PlannerParams) {
+    def fromProto: PlannerParams = {
+      val pp = PlannerParams()
+      pp.copy(
+        applicationId = if (gpp.hasApplicationId) gpp.getApplicationId else pp.applicationId,
+        queryTimeoutMillis = if (gpp.hasQueryTimeoutMillis) gpp.getQueryTimeoutMillis else pp.queryTimeoutMillis,
+        sampleLimit = if (gpp.hasSampleLimit) gpp.getSampleLimit else pp.sampleLimit,
+        groupByCardLimit = if (gpp.hasGroupByCardLimit) gpp.getGroupByCardLimit else pp.groupByCardLimit,
+        joinQueryCardLimit = if (gpp.hasJoinQueryCardLimit) gpp.getJoinQueryCardLimit else pp.joinQueryCardLimit,
+        resultByteLimit = if (gpp.hasResultByteLimit) gpp.getResultByteLimit else pp.resultByteLimit,
+        timeSplitEnabled = if (gpp.hasTimeSplitEnabled) gpp.getTimeSplitEnabled else pp.timeSplitEnabled,
+        minTimeRangeForSplitMs = if (gpp.hasMinTimeRangeForSplitMs) gpp.getMinTimeRangeForSplitMs
+        else pp.minTimeRangeForSplitMs,
+        splitSizeMs = if (gpp.hasSplitSizeMs) gpp.getSplitSizeMs else pp.splitSizeMs,
+        skipAggregatePresent = if (gpp.hasSkipAggregatePresent) gpp.getSkipAggregatePresent
+        else pp.skipAggregatePresent,
+        processFailure = if (gpp.hasProcessFailure) gpp.getProcessFailure else pp.processFailure,
+        processMultiPartition = if (gpp.hasProcessMultiPartition) gpp.getProcessMultiPartition
+        else pp.processMultiPartition,
+        allowPartialResults = if (gpp.hasAllowPartialResults) gpp.getAllowPartialResults else pp.allowPartialResults
+      )
+    }
+  }
+
+  implicit class StatToProtoConverter(stat: Stat) {
+    def toProto: GrpcMultiPartitionQueryService.Stat = {
+      val builder = GrpcMultiPartitionQueryService.Stat.newBuilder()
+      builder.setResultBytes(stat.resultBytes.get())
+      builder.setDataBytesScanned(stat.dataBytesScanned.get())
+      builder.setTimeSeriesScanned(stat.timeSeriesScanned.get())
+      builder.setCpuNanos(stat.cpuNanos.get())
+      builder.build()
+    }
+  }
+
+  implicit class StatFromProtoConverter(statGrpc: GrpcMultiPartitionQueryService.Stat) {
+    def fromProto: Stat = {
+      val stat = Stat()
+      stat.timeSeriesScanned.addAndGet(statGrpc.getTimeSeriesScanned)
+      stat.dataBytesScanned.addAndGet(statGrpc.getDataBytesScanned)
+      stat.resultBytes.addAndGet(statGrpc.getResultBytes)
+      stat.cpuNanos.addAndGet(statGrpc.getCpuNanos)
+      stat
+    }
+  }
+  implicit class QueryStatsToProtoConverter(stats: QueryStats) {
+    def toProto: GrpcMultiPartitionQueryService.QueryResultStats = {
+      val builder = GrpcMultiPartitionQueryService.QueryResultStats.newBuilder()
+      stats.stat.foreach {
+        case (key, stat)  =>
+          builder.putStats( key.mkString("##@##"), stat.toProto)
+      }
+      builder.build()
+    }
+  }
+
+  implicit class QueryStatsFromProtoConverter(statGrpc: GrpcMultiPartitionQueryService.QueryResultStats) {
+    def fromProto: QueryStats = {
+      val qs = QueryStats()
+      statGrpc.getStatsMap.forEach {
+        case (key, stat)  =>  qs.stat.put(key.split("##@##").toList, stat.fromProto)
+      }
+      qs
+    }
+  }
+
+  implicit class StackTraceElementToProtoConverter(stackTraceElement: StackTraceElement) {
+    def toProto: GrpcMultiPartitionQueryService.StackTraceElement = {
+      val builder = GrpcMultiPartitionQueryService.StackTraceElement.newBuilder()
+      builder.setDeclaringClass(stackTraceElement.getClassName)
+      builder.setFileName(stackTraceElement.getFileName)
+      builder.setLineNumber(stackTraceElement.getLineNumber)
+      builder.setMethodName(stackTraceElement.getMethodName)
+      builder.build()
+    }
+  }
+
+
+  implicit class StackTraceElementFromProtoConverter
+    (stackTraceElement: GrpcMultiPartitionQueryService.StackTraceElement) {
+    def fromProto: StackTraceElement = {
+      new StackTraceElement(stackTraceElement.getDeclaringClass, stackTraceElement.getMethodName,
+        stackTraceElement.getFileName, stackTraceElement.getLineNumber)
+    }
+  }
+
+  implicit class ThrowableToProtoConverter(t: Throwable) {
+    def toProto: GrpcMultiPartitionQueryService.Throwable = {
+      val builder = GrpcMultiPartitionQueryService.Throwable.newBuilder()
+      builder.setMessage(t.getMessage)
+      if (t.getCause != null)
+        builder.setCause(t.getCause.toProto)
+      t.getStackTrace.iterator.foreach(elem => builder.addStack(elem.toProto))
+      builder.build()
+    }
+  }
+
+
+  implicit class ThrowableFromProtoConverter(throwableProto: GrpcMultiPartitionQueryService.Throwable) {
+    def fromProto: Throwable = {
+      import scala.collection.JavaConverters._
+      val t = if (throwableProto.hasCause)
+                new Throwable(throwableProto.getMessage, throwableProto.getCause.fromProto)
+              else
+                new Throwable(throwableProto.getMessage)
+      t.setStackTrace(
+        throwableProto.getStackList.asScala.iterator
+        .map(e => new StackTraceElement(e.getDeclaringClass, e.getMethodName, e.getFileName, e.getLineNumber)).toArray)
+      t
+    }
+  }
+
+  implicit class ResultSchemaToProtoConverter(resultSchema: ResultSchema) {
+    def toProto: ProtoRangeVector.ResultSchema = {
+      import scala.collection.JavaConverters._
+      val builder = ProtoRangeVector.ResultSchema.newBuilder()
+      builder.setNumRowKeys(resultSchema.numRowKeyColumns)
+      if (resultSchema.fixedVectorLen.isDefined) {
+        builder.setFixedVectorLen(resultSchema.fixedVectorLen.get)
+      }
+      builder.addAllColIds(resultSchema.colIDs.map(Integer.valueOf).asJava)
+      builder.addAllColumns(resultSchema.columns.map(_.toProto).asJava)
+      resultSchema.brSchemas.map {
+        case (key, value) => builder.putBrSchemas(key, value.toProto)
+      }
+      builder.build()
+    }
+  }
+
+
+  implicit class ResultSchemaFromProtoConverter(resultSchemaProto: ProtoRangeVector.ResultSchema) {
+    def fromProto: ResultSchema = {
+      import scala.collection.JavaConverters._
+      ResultSchema(
+        resultSchemaProto.getColumnsList.asScala.map(_.fromProto).toList,
+        resultSchemaProto.getNumRowKeys,
+        resultSchemaProto.getBrSchemasMap.asScala.map {
+          case (key, value) => (key.toInt, value.fromProto)
+        }.toMap,
+        if (resultSchemaProto.hasFixedVectorLen) Some(resultSchemaProto.getFixedVectorLen) else None,
+        resultSchemaProto.getColIdsList.asScala.map(_.toInt).toList)
+    }
+  }
+
+  implicit class ResponseToProtoConverter(response: QueryResponse) {
+    def toProto: GrpcMultiPartitionQueryService.Response = {
+      import scala.collection.JavaConverters._
+      val builder = GrpcMultiPartitionQueryService.Response.newBuilder()
+      response match {
+        case QueryError(id, stats, throwable)                                                       =>
+                                          builder.setId(id)
+                                          builder.setStats(stats.toProto)
+                                          builder.setThrowable(throwable.toProto)
+        case QueryResult(id, resultSchema, result, queryStats, mayBePartial, partialResultReason)   =>
+                                          builder.setId(id)
+                                          builder.setResultSchema(resultSchema.toProto)
+                                          builder.setStats(queryStats.toProto)
+                                          builder.setMayBePartial(mayBePartial)
+                                          builder.addAllResult(
+                                            result.map(_.asInstanceOf[SerializableRangeVector].toProto).asJava)
+                                          if (partialResultReason.isDefined)
+                                            builder.setPartialResultReason(partialResultReason.get)
+      }
+      builder.build()
+    }
+  }
+
+
+  implicit class ResponseFromProtoConverter(responseProto: GrpcMultiPartitionQueryService.Response) {
+    def fromProto: QueryResponse = {
+      import scala.collection.JavaConverters._
+      if (responseProto.hasThrowable) {
+        QueryError(responseProto.getId, responseProto.getStats.fromProto, responseProto.getThrowable.fromProto)
+      } else {
+        QueryResult(responseProto.getId, responseProto.getResultSchema.fromProto,
+          responseProto.getResultList.asScala.map(_.fromProto).toList, responseProto.getStats.fromProto,
+          responseProto.getMayBePartial,
+          if (responseProto.hasPartialResultReason) Some(responseProto.getPartialResultReason) else None)
+      }
+    }
+  }
+
+  implicit class StreamingResponseToProtoConverter(response: StreamQueryResponse) {
+    def toProto: GrpcMultiPartitionQueryService.StreamingResponse = {
+      val builder = GrpcMultiPartitionQueryService.StreamingResponse.newBuilder()
+      response match {
+        case StreamQueryResultHeader(id, resultSchema) =>
+                                    builder.setHeader(
+                                    builder
+                                      .getHeaderBuilder
+                                      .setId(id)
+                                      .setResultSchema(resultSchema.toProto))
+        case StreamQueryResult(id, result) =>
+                                    builder.setBody(builder.getBodyBuilder.setId(id)
+                                      .setResult(result match {
+                                        case srv: SerializableRangeVector   => srv.toProto
+                                        case other: RangeVector             =>
+                                          throw new IllegalStateException(s"Expected a SerializableRangeVector," +
+                                            s"got ${other.getClass}")
+                                      }))
+        case StreamQueryResultFooter(id, queryStats, mayBePartial, partialResultReason) =>
+                                  val footerBuilder = builder.getFooterBuilder.setId(id)
+                                    .setStats(queryStats.toProto)
+                                    .setMayBePartial(mayBePartial)
+                                  partialResultReason.foreach(footerBuilder.setPartialResultReason)
+                                  builder.setFooter(footerBuilder)
+        case StreamQueryError(id, queryStats, t) =>
+                                  builder.setError(
+                                    builder.getErrorBuilder.setId(id)
+                                      .setStats(queryStats.toProto).setThrowable(t.toProto)
+                                  )
+      }
+      builder.build()
+    }
+  }
+
+
+  implicit class StreamingResponseFromProtoConverter(responseProto: GrpcMultiPartitionQueryService.StreamingResponse) {
+    def fromProto: StreamQueryResponse = {
+      // Not checking optional type's existence
+      if (responseProto.hasBody) {
+        val body = responseProto.getBody
+        StreamQueryResult(body.getId, body.getResult.fromProto)
+      } else if (responseProto.hasFooter) {
+        val footer = responseProto.getFooter
+        StreamQueryResultFooter(footer.getId, footer.getStats.fromProto,
+          footer.getMayBePartial,
+          if (footer.hasPartialResultReason) Some(footer.getPartialResultReason) else None)
+      } else if (responseProto.hasHeader) {
+        val header = responseProto.getHeader
+        StreamQueryResultHeader(header.getId, header.getResultSchema.fromProto)
+      } else {
+        val error = responseProto.getError
+        StreamQueryError(error.getId, error.getStats.fromProto, error.getThrowable.fromProto)
+      }
+    }
+  }
+
+  implicit class StreamingResponseIteratorToQueryResponseProtoConverter(
+                    responseProto: Iterator[GrpcMultiPartitionQueryService.StreamingResponse]) extends StrictLogging {
+    def toQueryResponse: QueryResponse =
+      responseProto.foldLeft(
+        // Reduce streaming response to a
+        // Tuple of (id, result schema, list of rvs, query stats, partial result flag, partial result reason, exception)
+
+      ("", ResultSchema.empty, List.empty[SerializableRangeVector],
+                  QueryStats(), false, Option.empty[String], Option.empty[Throwable])) {
+        case ((id, schema, rvs, stats, isPartial, partialReason, t), response) =>
+          if (response.hasBody) {
+              val body = response.getBody
+              (id, schema, body.getResult.fromProto :: rvs, stats, isPartial, partialReason, t)
+          } else if (response.hasFooter) {
+            val footer = response.getFooter
+            (id, schema, rvs, footer.getStats.fromProto, footer.getMayBePartial,
+              if (footer.hasPartialResultReason) Some(footer.getPartialResultReason) else None, t)
+          } else if (response.hasHeader) {
+            val header = response.getHeader
+            (header.getId, header.getResultSchema.fromProto, rvs, stats, isPartial, partialReason, t)
+          } else {
+            val error = response.getError
+            (error.getId, schema, rvs, error.getStats.fromProto, isPartial,
+              partialReason, Some(error.getThrowable.fromProto))
+          }
+      } match {
+        case (id, schema, rvs, stats, isPartial, partialReason, None) =>
+                                                          QueryResult(id, schema, rvs, stats, isPartial, partialReason)
+        case (id, _, _, stats, _, _, Some(t))                        =>
+                                                          QueryError(id, stats, t)
+
+      }
+  }
+
+  implicit class RangeParamFromProtoConverter(rp: RangeParams) {
+    def toProto: ProtoRangeVector.RangeParams = {
+      val builder = ProtoRangeVector.RangeParams.newBuilder()
+      builder.setStep(rp.stepSecs)
+      builder.setEndSecs(rp.endSecs)
+      builder.setStartSecs(rp.startSecs)
+      builder.build()
+    }
+  }
+
+  implicit class RangeParamToProtoConverter(rp: ProtoRangeVector.RangeParams) {
+    def fromProto: RangeParams = RangeParams(rp.getStartSecs, rp.getStep, rp.getEndSecs)
+  }
+
+  implicit class ScalarFixedDoubleToProtoConverter(sfd: ScalarFixedDouble) {
+    def toProto: ProtoRangeVector.ScalarFixedDouble = {
+      val builder = ProtoRangeVector.ScalarFixedDouble.newBuilder()
+      builder.setValue(sfd.value)
+      builder.setRangeParams(sfd.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class TimeScalarFromProtoConverter(ts: ProtoRangeVector.TimeScalar) {
+    def fromProto: TimeScalar = TimeScalar(ts.getRangeParams.fromProto)
+  }
+
+  implicit class TimeScalarToProtoConverter(ts: TimeScalar) {
+    def toProto: ProtoRangeVector.TimeScalar = {
+      val builder = ProtoRangeVector.TimeScalar.newBuilder()
+      builder.setRangeParams(ts.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class HourScalarFromProtoConverter(hs: ProtoRangeVector.HourScalar) {
+    def fromProto: HourScalar = HourScalar(hs.getRangeParams.fromProto)
+  }
+
+  implicit class HourScalarToProtoConverter(hs: HourScalar) {
+    def toProto: ProtoRangeVector.HourScalar = {
+      val builder = ProtoRangeVector.HourScalar.newBuilder()
+      builder.setRangeParams(hs.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class MinuteScalarFromProtoConverter(ms: ProtoRangeVector.MinuteScalar) {
+    def fromProto: MinuteScalar = MinuteScalar(ms.getRangeParams.fromProto)
+  }
+
+  implicit class MinuteScalarToProtoConverter(ms: MinuteScalar) {
+    def toProto: ProtoRangeVector.MinuteScalar = {
+      val builder = ProtoRangeVector.MinuteScalar.newBuilder()
+      builder.setRangeParams(ms.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class MonthScalarFromProtoConverter(ms: ProtoRangeVector.MonthScalar) {
+    def fromProto: MonthScalar = MonthScalar(ms.getRangeParams.fromProto)
+  }
+
+  implicit class MonthScalarToProtoConverter(ms: MonthScalar) {
+    def toProto: ProtoRangeVector.MonthScalar = {
+      val builder = ProtoRangeVector.MonthScalar.newBuilder()
+      builder.setRangeParams(ms.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class YearScalarFromProtoConverter(ys: ProtoRangeVector.YearScalar) {
+    def fromProto: YearScalar = YearScalar(ys.getRangeParams.fromProto)
+  }
+
+  implicit class YearScalarToProtoConverter(ys: YearScalar) {
+    def toProto: ProtoRangeVector.YearScalar = {
+      val builder = ProtoRangeVector.YearScalar.newBuilder()
+      builder.setRangeParams(ys.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class DayOfMonthScalarFromProtoConverter(dom: ProtoRangeVector.DayOfMonthScalar) {
+    def fromProto: DayOfMonthScalar = DayOfMonthScalar(dom.getRangeParams.fromProto)
+  }
+
+  implicit class DayOfMonthScalarToProtoConverter(dom: DayOfMonthScalar) {
+    def toProto: ProtoRangeVector.DayOfMonthScalar = {
+      val builder = ProtoRangeVector.DayOfMonthScalar.newBuilder()
+      builder.setRangeParams(dom.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class DayOfWeekScalarFromProtoConverter(dow: ProtoRangeVector.DayOfWeekScalar) {
+    def fromProto: DayOfWeekScalar = DayOfWeekScalar(dow.getRangeParams.fromProto)
+  }
+
+  implicit class DayOfWeekScalarToProtoConverter(dom: DayOfWeekScalar) {
+    def toProto: ProtoRangeVector.DayOfWeekScalar = {
+      val builder = ProtoRangeVector.DayOfWeekScalar.newBuilder()
+      builder.setRangeParams(dom.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class DaysInMonthScalarFromProtoConverter(dow: ProtoRangeVector.DaysInMonthScalar) {
+    def fromProto: DaysInMonthScalar = DaysInMonthScalar(dow.getRangeParams.fromProto)
+  }
+
+  implicit class DaysInMonthScalarToProtoConverter(dom: DaysInMonthScalar) {
+    def toProto: ProtoRangeVector.DaysInMonthScalar = {
+      val builder = ProtoRangeVector.DaysInMonthScalar.newBuilder()
+      builder.setRangeParams(dom.rangeParams.toProto)
+      builder.build()
+    }
+  }
+
+  implicit class ScalarVaryingDoubleFromProtoConverter(svd: ProtoRangeVector.ScalarVaryingDouble) {
+    import collection.JavaConverters._
+    def fromProto: ScalarVaryingDouble = ScalarVaryingDouble(
+      svd.getTimeValueMapMap.asScala.map{ case (k, v) => (k.toLong, v.toDouble)}.toMap,
+      if (svd.hasRvRange) Some(svd.getRvRange.fromProto) else None)
+  }
+
+  implicit class ScalarVaryingDoubleToProtoConverter(dom: ScalarVaryingDouble) {
+    import collection.JavaConverters._
+    def toProto: ProtoRangeVector.ScalarVaryingDouble = {
+      val builder = ProtoRangeVector.ScalarVaryingDouble.newBuilder()
+      dom.outputRange match {
+        case Some(rvRange)  =>  builder.setRvRange(rvRange.toProto)
+        case None           =>
+      }
+      builder.putAllTimeValueMap(dom.timeValueMap.map{
+        case (k, v) => (java.lang.Long.valueOf(k), java.lang.Double.valueOf(v))}.asJava)
+      builder.build()
+    }
+  }
+
+  implicit class ScalarFixedDoubleFromProtoConverter(sfd: ProtoRangeVector.ScalarFixedDouble) {
+    def fromProto: ScalarFixedDouble = ScalarFixedDouble(sfd.getRangeParams.fromProto, sfd.getValue)
+  }
+
+  implicit class SerializableRangeVectorFromProtoConverter(rv: ProtoRangeVector.SerializableRangeVector) {
+    def fromProto: SerializableRangeVector =
+      if (rv.hasScalarFixedDouble) {
+        rv.getScalarFixedDouble.fromProto
+      } else if (rv.hasTimeScalar) {
+        rv.getTimeScalar.fromProto
+      } else if (rv.hasHourScalar) {
+        rv.getHourScalar.fromProto
+      } else if (rv.hasMinuteScalar) {
+        rv.getMinuteScalar.fromProto
+      } else if (rv.hasMonthScalar) {
+        rv.getMonthScalar.fromProto
+      } else if (rv.hasYearScalar) {
+        rv.getYearScalar.fromProto
+      } else if (rv.hasDayOfMonthScalar) {
+        rv.getDayOfMonthScalar.fromProto
+      } else if (rv.hasDayOfWeekScalar) {
+        rv.getDayOfWeekScalar.fromProto
+      } else if (rv.hasDaysInMonthScalar) {
+        rv.getDaysInMonthScalar.fromProto
+      } else if (rv.hasSerializedRangeVector) {
+        rv.getSerializedRangeVector.fromProto
+      } else {
+        rv.getScalarVaryingDouble.fromProto
+      }
+  }
+
+  implicit class SerializableRangeVectorToProtoConverter(rv: SerializableRangeVector) {
+    def toProto: ProtoRangeVector.SerializableRangeVector = {
+      val builder = ProtoRangeVector.SerializableRangeVector.newBuilder()
+      rv match {
+        case sfd: ScalarFixedDouble            => builder.setScalarFixedDouble(sfd.toProto).build()
+        case ts: TimeScalar                    => builder.setTimeScalar(ts.toProto).build()
+        case hs: HourScalar                    => builder.setHourScalar(hs.toProto).build()
+        case ms: MinuteScalar                  => builder.setMinuteScalar(ms.toProto).build()
+        case mos: MonthScalar                  => builder.setMonthScalar(mos.toProto).build()
+        case ys: YearScalar                    => builder.setYearScalar(ys.toProto).build()
+        case dm: DayOfMonthScalar              => builder.setDayOfMonthScalar(dm.toProto).build()
+        case dw: DayOfWeekScalar               => builder.setDayOfWeekScalar(dw.toProto).build()
+        case dims: DaysInMonthScalar           => builder.setDaysInMonthScalar(dims.toProto).build()
+        case srv: SerializedRangeVector        => builder.setSerializedRangeVector(srv.toProto).build()
+        case svd: ScalarVaryingDouble          => builder.setScalarVaryingDouble(svd.toProto).build()
+      }
+    }
+  }
+
+}
+// scalastyle:on number.of.methods
+// scalastyle:on number.of.types
