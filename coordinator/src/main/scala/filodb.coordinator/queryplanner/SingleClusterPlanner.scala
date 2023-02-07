@@ -365,6 +365,9 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
   // scalastyle:on cyclomatic.complexity
 
+  /**
+   * Return the target-schema labels (if any) that will be used to materialize a RawSeries.
+   */
   private def getTargetSchemaLabelsFromRawSeries(rs: RawSeries, qContext: QueryContext): Option[Seq[String]] = {
     val tsp = targetSchemaProvider(qContext)
     val filters = getColumnFilterGroup(rs).map(_.toSeq)
@@ -443,7 +446,9 @@ class SingleClusterPlanner(val dataset: Dataset,
    */
   private def getPushdownShards(qContext: QueryContext,
                                 lp: LogicalPlan): Option[Set[Int]] = {
-    case class PushdownData(shards: Set[Int], shardKeys: Map[String, String], tschemaLabels: Set[String])
+    case class PushdownData(shards: Set[Int],
+                            shardKeys: Map[String, String],
+                            tschemaLabels: Set[String])
     def helper(lp: LogicalPlan): Option[PushdownData] = lp match {
       // VectorPlans can't currently be pushed down. Consider:
       //     foo{...} or vector(0)
@@ -470,7 +475,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       case aif: ApplyInstantFunction => helper(aif.vectors)
       case bj: BinaryJoin =>
         // lhs/rhs must reside on the same set of shards, and target schema labels for all leaves must be
-        //   discoverable, equal, and preserved by join keys
+        //   discoverable, equal, and preserved by join keys.
         val lhsData = helper(bj.lhs)
         val rhsData = helper(bj.rhs)
         val canPushdown = lhsData.isDefined && rhsData.isDefined && {
