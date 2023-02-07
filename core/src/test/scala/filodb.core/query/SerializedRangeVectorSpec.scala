@@ -48,7 +48,10 @@ class SerializedRangeVectorSpec  extends AnyFunSpec with Matchers {
                       (700, Double.NaN), (800, Double.NaN),
                       (900, Double.NaN), (1000, Double.NaN)), key,
       RvRange(0, 100, 1000))
-    val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan")
+    val queryStats = QueryStats()
+    val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", queryStats)
+    queryStats.getCpuNanosCounter(Nil).get() > 0 shouldEqual true
+    queryStats.getResultBytesCounter(Nil).get() shouldEqual 108
     srv.numRows shouldEqual Some(11)
     srv.numRowsSerialized shouldEqual 4
     val res = srv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
@@ -71,7 +74,10 @@ class SerializedRangeVectorSpec  extends AnyFunSpec with Matchers {
       (700, Double.NaN), (800, Double.NaN),
       (900, Double.NaN), (1000, Double.NaN)), key,
       RvRange(1000, 100, 1000))
-    val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan")
+    val queryStats = QueryStats()
+    val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", queryStats)
+    queryStats.getCpuNanosCounter(Nil).get() > 0 shouldEqual true
+    queryStats.getResultBytesCounter(Nil).get() shouldEqual 248
     srv.numRows shouldEqual Some(11)
     srv.numRowsSerialized shouldEqual 11
     val res = srv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
@@ -96,7 +102,10 @@ class SerializedRangeVectorSpec  extends AnyFunSpec with Matchers {
                           (900, Histogram.empty), (1000, Histogram.empty)), key,
                       RvRange(0, 100, 1000))
 
-    val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan")
+    val queryStats = QueryStats()
+    val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", queryStats)
+    queryStats.getCpuNanosCounter(Nil).get() > 0 shouldEqual true
+    queryStats.getResultBytesCounter(Nil).get() shouldEqual 188
     srv.numRows shouldEqual Some(11)
     srv.numRowsSerialized shouldEqual 4
     val res = srv.rows.map(r => (r.getLong(0), r.getHistogram(1))).toList

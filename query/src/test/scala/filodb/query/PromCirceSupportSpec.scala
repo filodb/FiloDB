@@ -369,11 +369,12 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
                   |            ],
                   |            "timeSeriesScanned": 24,
                   |            "dataBytesScanned": 38784,
-                  |            "resultBytes": 15492
+                  |            "resultBytes": 15492,
+                  |            "cpuNanos": 434999
                   |        }
                   |    ]
                   |}]""".stripMargin
-    val qs = QueryStatistics(Seq("local", "raw", "ws1", "ns1", "metric1"), 24, 38784, 15492)
+    val qs = QueryStatistics(Seq("local", "raw", "ws1", "ns1", "metric1"), 24, 38784, 15492, 434999)
     parser.decode[List[ErrorResponse]](input) match {
       case Right(errorResponse) =>
         errorResponse.head.errorType shouldEqual "query_materialization_failed"

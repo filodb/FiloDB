@@ -42,6 +42,7 @@ case class PromQlRemoteExec(queryEndpoint: String,
   private val builder = SerializedRangeVector.newBuilder()
 
   override val urlParams = Map("query" -> promQlQueryParams.promQl)
+  private val dummyQueryStats = QueryStats()
 
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                               (implicit sched: Scheduler): Future[QueryResponse] = {
@@ -136,8 +137,9 @@ case class PromQlRemoteExec(queryEndpoint: String,
                                                             promQlQueryParams.stepSecs * 1000,
                                                             promQlQueryParams.endSecs * 1000))
       }
+      // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
       SerializedRangeVector(rv, builder, recordSchema.get("default").get,
-        queryWithPlanName(queryContext))
+        queryWithPlanName(queryContext), dummyQueryStats)
       // TODO: Handle stitching with verbose flag
     }
     QueryResult(id, resultSchema.get("default").get, rangeVectors, readQueryStats(response.queryStats),
@@ -176,7 +178,9 @@ case class PromQlRemoteExec(queryEndpoint: String,
           promQlQueryParams.endSecs * 1000))
 
       }
-      SerializedRangeVector(rv, builder, recordSchema.get("histogram").get, queryContext.origQueryParams.toString)
+      // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
+      SerializedRangeVector(rv, builder, recordSchema.get("histogram").get, queryContext.origQueryParams.toString,
+        dummyQueryStats)
       // TODO: Handle stitching with verbose flag
     }
     QueryResult(id, resultSchema.get("histogram").get, rangeVectors, readQueryStats(response.queryStats),
@@ -205,8 +209,9 @@ case class PromQlRemoteExec(queryEndpoint: String,
             promQlQueryParams.stepSecs * 1000,
             promQlQueryParams.endSecs * 1000))
       }
+      // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
       SerializedRangeVector(rv, builder, recordSchema.get(Avg.entryName).get,
-        queryWithPlanName(queryContext))
+        queryWithPlanName(queryContext), dummyQueryStats)
     }
 
     // TODO: Handle stitching with verbose flag
@@ -237,8 +242,9 @@ case class PromQlRemoteExec(queryEndpoint: String,
           promQlQueryParams.stepSecs * 1000,
           promQlQueryParams.endSecs * 1000))
       }
+      // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
       SerializedRangeVector(rv, builder, recordSchema.get(QueryFunctionConstants.stdVal).get,
-        queryWithPlanName(queryContext))
+        queryWithPlanName(queryContext), dummyQueryStats)
     }
 
     // TODO: Handle stitching with verbose flag

@@ -301,7 +301,8 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
 
       // Create SerializedRangeVector so that sorting does not consume rows iterator
       val resultRv = source.toListL.map { rvs =>
-         rvs.map(SerializedRangeVector(_, builder, recSchema, s"SortRangeVectorTransformer: $args")).
+         rvs.map(SerializedRangeVector(_, builder, recSchema,
+           s"SortRangeVectorTransformer: $args", querySession.queryStats)).
            sortBy { rv => if (rv.rows.hasNext) rv.rows.next().getDouble(1) else Double.NaN
         }(ordering)
 
