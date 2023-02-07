@@ -2,6 +2,8 @@ package filodb.query.exec
 
 import java.util.concurrent.TimeUnit
 
+import scala.concurrent.Future
+
 import io.grpc.Channel
 import io.grpc.stub.StreamObserver
 import kamon.Kamon
@@ -20,13 +22,25 @@ import filodb.query.ProtoConverters._
 import filodb.query.QueryResponse
 
 
+trait GrpcRemoteExec extends RemoteExec {
 
-trait GrpcRemoteExec extends LeafExecPlan {
 
+    override def promQlQueryParams: PromQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
 
-    def promQlQueryParams: PromQlQueryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    // TODO: RemoteExec is not truly remote exec makes assumption of using Http for remoting, for now we will mark these
+    //  as unimplemented but the intent os extending from RemoteExec to to group all Execs that arent serialized.
+    //  RemoteExec should not be making any assumptions on transport and HttpRemoteExec is the implementation that
+    //  uses Http for remoting. No refactoring will be done as part of this PR and can be done in future
+    def urlParams: Map[String, String] = ???
+
+    def remoteExecHttpClient: RemoteExecHttpClient = ???
+
+    override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)(implicit sched: Scheduler):
+    Future[QueryResponse] = ???
 
     // Since execute of overridden no one will invoke this
+    // TODO: note PromQLRemoteExec and this implementation should be using doExecute and not override execute.
+    //  execute in ExecPlan needs to be final
     override def doExecute(source: ChunkSource, querySession: QuerySession)
                           (implicit sched: Scheduler): ExecResult = ???
 
@@ -34,13 +48,14 @@ trait GrpcRemoteExec extends LeafExecPlan {
                          querySession: QuerySession)(implicit sched: Scheduler): Task[QueryResponse] = {
         val span = Kamon.currentSpan()
         // Dont finish span since this code didnt create it
-        Kamon.runWithSpan(span, false) {
+        Kamon.runWithSpan(span, finishSpan = false) {
             sendGrpcRequest(span, requestTimeoutMs).toListL.map(_.toIterator.toQueryResponse)
         }
     }
 
 
-    def args: String = s"${promQlQueryParams.toString}, ${queryContext.plannerParams}, queryEndpoint=$queryEndpoint, " +
+    override def args: String = s"${promQlQueryParams.toString}, ${queryContext.plannerParams}," +
+      s"queryEndpoint=$queryEndpoint, " +
       s"requestTimeoutMs=$requestTimeoutMs"
 
     def sendGrpcRequest(span: Span, requestTimeoutMs: Long)(implicit sched: Scheduler):
