@@ -83,13 +83,13 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
 
   val rvKey = CustomRangeVectorKey(keysMap)
 
-  val stat = Stat()
-  stat.resultBytes.addAndGet(100)
-  stat.dataBytesScanned.addAndGet(1000)
-  stat.timeSeriesScanned.addAndGet(5)
-
-  val qStats = QueryStats()
-  qStats.stat.put(List(), stat)
+//  val stat = Stat()
+//  stat.resultBytes.addAndGet(100)
+//  stat.dataBytesScanned.addAndGet(1000)
+//  stat.timeSeriesScanned.addAndGet(5)
+//
+//  val qStats = QueryStats()
+//  qStats.stat.put(List(), stat)
 
   class TestGrpcServer extends RemoteExecImplBase {
     override def execStreaming(request: GrpcMultiPartitionQueryService.Request,
@@ -120,10 +120,11 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
       (700, Double.NaN), (800, Double.NaN),
       (900, Double.NaN), (1000, Double.NaN)), rvKey,
       RvRange(0, 100, 1000))
-    val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan")
+    val stats = QueryStats()
+    val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", stats)
     val streamingQueryBody = StreamQueryResult("someId", srv)
 
-    val footer = StreamQueryResultFooter("someId", qStats, true, Some("Reason"))
+    val footer = StreamQueryResultFooter("someId", stats, true, Some("Reason"))
     Seq(header, streamingQueryBody, footer)
   }
 
@@ -156,7 +157,8 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     deserializedSrv.numRowsSerialized shouldEqual 4
     val res = deserializedSrv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
     deserializedSrv.key shouldEqual rvKey
-    qr.queryStats shouldEqual qStats
+    qr.queryStats.getResultBytesCounter(List()).get()shouldEqual 108
+    (qr.queryStats.getCpuNanosCounter(List()).get() > 0) shouldEqual true
     res.length shouldEqual 11
     res.map(_._1) shouldEqual (0 to 1000 by 100)
     res.map(_._2).filterNot(_.isNaN) shouldEqual Seq(1.0, 3.0, 5.0, 6.0)

@@ -98,6 +98,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     stat.resultBytes.addAndGet(100)
     stat.dataBytesScanned.addAndGet(1000)
     stat.timeSeriesScanned.addAndGet(5)
+    stat.cpuNanos.addAndGet(100)
     stat.toProto.fromProto shouldEqual stat
   }
 
@@ -181,7 +182,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
       (700, Double.NaN), (800, Double.NaN),
       (900, Double.NaN), (1000, Double.NaN)), key,
       RvRange(0, 100, 1000))
-    val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan")
+
 
     val stat = Stat()
     stat.resultBytes.addAndGet(100)
@@ -190,6 +191,8 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
 
     val qStats = QueryStats()
     qStats.stat.put(List(), stat)
+
+    val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", qStats)
 
     val origQueryResult = QueryResult("someId", resultSchema, List(srv), qStats, true, Some("Some shards timed out"))
     val successResp = origQueryResult.toProto.fromProto.asInstanceOf[QueryResult]
@@ -252,7 +255,11 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
       (700, Double.NaN), (800, Double.NaN),
       (900, Double.NaN), (1000, Double.NaN)), key,
       RvRange(0, 100, 1000))
-    val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan")
+
+
+    val qStats = QueryStats()
+
+    val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", qStats)
     val origQueryResult = StreamQueryResult("id", srv)
 
     val successResp = origQueryResult.toProto.fromProto.asInstanceOf[StreamQueryResult]
@@ -305,7 +312,8 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
       (700, Double.NaN), (800, Double.NaN),
       (900, Double.NaN), (1000, Double.NaN)), key,
       RvRange(0, 100, 1000))
-    val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan")
+    val stats = QueryStats()
+    val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", stats)
     val streamingQueryBody = StreamQueryResult("someId", srv)
 
 
@@ -524,7 +532,8 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
       (700, Double.NaN), (800, Double.NaN),
       (900, Double.NaN), (1000, Double.NaN)), key,
       RvRange(0, 100, 1000))
-    val srv = SerializedRangeVector.apply(rv, recBuilder, recSchema, "someExecPlan")
+    val stats = QueryStats()
+    val srv = SerializedRangeVector.apply(rv, recBuilder, recSchema, "someExecPlan", stats)
 
     builder.clear()
     builder.setSerializedRangeVector(srv.toProto)

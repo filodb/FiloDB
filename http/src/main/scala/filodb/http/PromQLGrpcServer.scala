@@ -78,9 +78,10 @@ class PromQLGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings,
                     // Not the cleanest way, but we need to convert these IteratorBackedRangeVectors to a
                     // serializable one If we have a result, its definitely is a QueryResult
                     val strQueryResult = (result.result, qr) match {
-                      case (irv: IteratorBackedRangeVector, QueryResult(_, resultSchema, _, _, _, _)) =>
+                      case (irv: IteratorBackedRangeVector, QueryResult(_, resultSchema, _, queryStats, _, _)) =>
                         result.copy(result = SerializedRangeVector.apply(irv, rb,
-                          SerializedRangeVector.toSchema(resultSchema.columns, resultSchema.brSchemas), "GrpcServer"))
+                          SerializedRangeVector.toSchema(resultSchema.columns, resultSchema.brSchemas),
+                          "GrpcServer", queryStats))
                       case _ => result
                     }
                     responseObserver.onNext(strQueryResult.toProto)
@@ -109,7 +110,8 @@ class PromQLGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings,
                          case irv: IteratorBackedRangeVector =>
                            val resultSchema = res.resultSchema
                            SerializedRangeVector.apply(irv, rb,
-                             SerializedRangeVector.toSchema(resultSchema.columns, resultSchema.brSchemas), "GrpcServer")
+                             SerializedRangeVector.toSchema(resultSchema.columns, resultSchema.brSchemas),
+                             "GrpcServer", res.queryStats)
                          case rv => rv
                        }
                     res.copy(result = rvs)

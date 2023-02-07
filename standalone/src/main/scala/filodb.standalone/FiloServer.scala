@@ -68,7 +68,6 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
     val singleton = cluster.clusterSingleton(role, watcher)
     filoHttpServer = new FiloHttpServer(cluster.system, cluster.settings)
     filoHttpServer.start(coordinatorActor, singleton, false, bootstrapper.getAkkaHttpRoute())
-    Thread.sleep(100)
     if (config.getBoolean("grpc.start-grpc-service")) {
       // TODO: Remove hardcoding
       val dsRef = DatasetRef("prometheus")

@@ -228,6 +228,7 @@ object ProtoConverters {
       builder.setResultBytes(stat.resultBytes.get())
       builder.setDataBytesScanned(stat.dataBytesScanned.get())
       builder.setTimeSeriesScanned(stat.timeSeriesScanned.get())
+      builder.setCpuNanos(stat.cpuNanos.get())
       builder.build()
     }
   }
@@ -238,6 +239,7 @@ object ProtoConverters {
       stat.timeSeriesScanned.addAndGet(statGrpc.getTimeSeriesScanned)
       stat.dataBytesScanned.addAndGet(statGrpc.getDataBytesScanned)
       stat.resultBytes.addAndGet(statGrpc.getResultBytes)
+      stat.cpuNanos.addAndGet(statGrpc.getCpuNanos)
       stat
     }
   }
