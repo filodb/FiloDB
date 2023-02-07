@@ -3,6 +3,7 @@ package filodb.core.query
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
+import scala.collection.Seq
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration._
 
@@ -186,12 +187,15 @@ case class Stat() {
   val timeSeriesScanned = new AtomicLong
   val dataBytesScanned = new AtomicLong
   val resultBytes = new AtomicLong
+  val cpuNanos = new AtomicLong
+
   override def toString: String = s"(timeSeriesScanned=$timeSeriesScanned, " +
-    s"dataBytesScanned=$dataBytesScanned, resultBytes=$resultBytes)"
+    s"dataBytesScanned=$dataBytesScanned, resultBytes=$resultBytes, cpuNanos=$cpuNanos)"
   def add(s: Stat): Unit = {
     timeSeriesScanned.addAndGet(s.timeSeriesScanned.get())
     dataBytesScanned.addAndGet(s.dataBytesScanned.get())
     resultBytes.addAndGet(s.resultBytes.get())
+    cpuNanos.addAndGet(s.cpuNanos.get())
   }
 }
 
@@ -242,6 +246,17 @@ case class QueryStats() {
     stat.getOrElseUpdate(theNs, Stat()).resultBytes
   }
 
+  /**
+   * Counter for CPU Nano seconds consumed by query
+   *
+   * @param group typically a tuple of (clusterType, dataset, WS, NS, metricName),
+   *              and if tuple is not available, pass Nil. If Nil is passed,
+   *              then head group is used if it exists.
+   */
+  def getCpuNanosCounter(group: Seq[String] = Nil): AtomicLong = {
+    val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
+    stat.getOrElseUpdate(theNs, Stat()).cpuNanos
+  }
 }
 
 object QuerySession {

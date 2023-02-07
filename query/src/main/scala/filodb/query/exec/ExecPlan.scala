@@ -9,7 +9,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.{Observable, Pipe}
 
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, Utils}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
@@ -18,6 +18,8 @@ import filodb.core.store.ChunkSource
 import filodb.memory.format.RowReader
 import filodb.query._
 import filodb.query.Query.qLogger
+
+// scalastyle:off file.size.limit
 
 /**
  * The observable of vectors and the schema that is returned by ExecPlan doExecute
@@ -111,6 +113,7 @@ trait ExecPlan extends QueryCommand {
                        (implicit sched: Scheduler): Observable[StreamQueryResponse] = {
 
     val startExecute = querySession.qContext.submitTime
+    @volatile var step1CpuTime = 0L
 
     val span = Kamon.currentSpan()
     // NOTE: we launch the preparatory steps as a Task too.  This is important because scanPartitions,
@@ -128,7 +131,12 @@ trait ExecPlan extends QueryCommand {
       // kamon uses thread-locals.
       // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {
-        val doEx = doExecute(source, querySession)
+        val startNs = Utils.currentThreadCpuTimeNanos
+        val doEx = try {
+          doExecute(source, querySession)
+        } finally {
+          step1CpuTime = Utils.currentThreadCpuTimeNanos - startNs
+        }
         Kamon.histogram("query-execute-time-elapsed-step1-done",
           MeasurementUnit.time.milliseconds)
           .withTag("plan", getClass.getSimpleName)
@@ -164,6 +172,9 @@ trait ExecPlan extends QueryCommand {
           }
         }
         if (finalRes._2 == ResultSchema.empty) {
+          // recording and adding step1 to queryStats at the end of execution since the grouping
+          // for stats is not formed yet at the beginning
+          querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(step1CpuTime)
           Observable.fromIterable(Seq(StreamQueryResultHeader(queryContext.queryId, finalRes._2),
             StreamQueryResultFooter(queryContext.queryId, querySession.queryStats,
               querySession.resultCouldBePartial, querySession.partialResultsReason)))
@@ -193,7 +204,7 @@ trait ExecPlan extends QueryCommand {
             // materialize, and limit rows per RV
             val execPlanString = queryWithPlanName(queryContext)
             val builder = SerializedRangeVector.newBuilder()
-            val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString)
+            val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString, querySession.queryStats)
             if (rv.outputRange.isEmpty)
               qLogger.debug(s"Empty rangevector found. Rv class is:  ${rv.getClass.getSimpleName}, " +
                 s"execPlan is: $execPlanString, execPlan children ${this.children}")
@@ -206,7 +217,7 @@ trait ExecPlan extends QueryCommand {
             throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
               sampleLimit} samples. Try applying more filters or reduce time range.")
 
-          resultSize += srv.estimateSerializedRowBytes + srv.key.keySize
+          resultSize += srv.estimatedSerializedBytes
           if (resultSize > queryContext.plannerParams.resultByteLimit) {
             val size_mib = queryContext.plannerParams.resultByteLimit / math.pow(1024, 2)
             val msg = s"Reached maximum result size (final or intermediate) " +
@@ -227,17 +238,18 @@ trait ExecPlan extends QueryCommand {
             MeasurementUnit.time.milliseconds)
             .withTag("plan", getClass.getSimpleName)
             .record(Math.max(0, System.currentTimeMillis - startExecute))
-          SerializedRangeVector.queryResultBytes.record(resultSize)
-          querySession.queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
+          // recording and adding step1 to queryStats at the end of execution since the grouping
+          // for stats is not formed yet at the beginning
+          querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(step1CpuTime)
           span.mark("after-last-materialized-result-rv")
           span.mark(s"resultBytes=$resultSize")
           span.mark(s"resultSamples=$numResultSamples")
           span.mark(s"execute-step2-end-${this.getClass.getSimpleName}")
         })
 
-      Observable.now(StreamQueryResultHeader(queryContext.queryId, resultSchema)) ++
+      Observable.eval(StreamQueryResultHeader(queryContext.queryId, resultSchema)) ++
         queryResults ++
-        Observable.now(StreamQueryResultFooter(queryContext.queryId, querySession.queryStats,
+        Observable.eval(StreamQueryResultFooter(queryContext.queryId, querySession.queryStats,
           querySession.resultCouldBePartial, querySession.partialResultsReason))
     }
 
@@ -269,6 +281,8 @@ trait ExecPlan extends QueryCommand {
               querySession: QuerySession)
              (implicit sched: Scheduler): Task[QueryResponse] = {
 
+    @volatile var step1CpuTime = 0L
+
     val startExecute = querySession.qContext.submitTime
 
     val span = Kamon.currentSpan()
@@ -287,7 +301,12 @@ trait ExecPlan extends QueryCommand {
       // kamon uses thread-locals.
       // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {
-        val doEx = doExecute(source, querySession)
+        val startNs = Utils.currentThreadCpuTimeNanos
+        val doEx = try {
+          doExecute(source, querySession)
+        } finally {
+          step1CpuTime = Utils.currentThreadCpuTimeNanos - startNs
+        }
         Kamon.histogram("query-execute-time-elapsed-step1-done",
           MeasurementUnit.time.milliseconds)
           .withTag("plan", getClass.getSimpleName)
@@ -328,6 +347,9 @@ trait ExecPlan extends QueryCommand {
           span.mark(s"execute-step2-end-${getClass.getSimpleName}")
           Task.eval( {
             qLogger.debug(s"Finished query execution pipeline with empty results for $this")
+            // recording and adding step1 to queryStats at the end of execution since the grouping
+            // for stats is not formed yet at the beginning
+            querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(step1CpuTime)
             QueryResult(queryContext.queryId, resSchema, Nil, querySession.queryStats,
               querySession.resultCouldBePartial, querySession.partialResultsReason
             )
@@ -361,7 +383,7 @@ trait ExecPlan extends QueryCommand {
             case rv: RangeVector =>
               // materialize, and limit rows per RV
               val execPlanString = queryWithPlanName(queryContext)
-              val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString)
+              val srv = SerializedRangeVector(rv, builder, recordSchema, execPlanString, querySession.queryStats)
               if (rv.outputRange.isEmpty)
                 qLogger.debug(s"Empty rangevector found. Rv class is:  ${rv.getClass.getSimpleName}, " +
                   s"execPlan is: $execPlanString, execPlan children ${this.children}")
@@ -374,7 +396,7 @@ trait ExecPlan extends QueryCommand {
                 throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
                   sampleLimit} samples. Try applying more filters or reduce time range.")
 
-              resultSize += srv.estimateSerializedRowBytes + srv.key.keySize
+              resultSize += srv.estimatedSerializedBytes
               if (resultSize > queryContext.plannerParams.resultByteLimit) {
                 val size_mib = queryContext.plannerParams.resultByteLimit / math.pow(1024, 2)
                 val msg = s"Reached maximum result size (final or intermediate) " +
@@ -386,7 +408,6 @@ trait ExecPlan extends QueryCommand {
                     s"$msg Try to apply more filters, reduce the time range, and/or increase the step size.")
                 }
               }
-
               srv
           }
           .filter(_.numRowsSerialized > 0)
@@ -397,8 +418,9 @@ trait ExecPlan extends QueryCommand {
                   MeasurementUnit.time.milliseconds)
               .withTag("plan", getClass.getSimpleName)
               .record(Math.max(0, System.currentTimeMillis - startExecute))
-            SerializedRangeVector.queryResultBytes.record(resultSize)
-            querySession.queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
+            // recording and adding step1 to queryStats at the end of execution since the grouping
+            // for stats is not formed yet at the beginning
+            querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(step1CpuTime)
             span.mark(s"resultBytes=$resultSize")
             span.mark(s"resultSamples=$numResultSamples")
             span.mark(s"numSrv=${r.size}")
@@ -740,7 +762,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     if (r1.isEmpty) r2
     else if (r2.isEmpty) r1
     else if (!r1.hasSameColumnsAs(r2))  {
-      throw SchemaMismatch(r1.toString, r2.toString)
+      throw SchemaMismatch(r1.toString, r2.toString, getClass.getSimpleName)
     } else {
       val fixedVecLen = if (r1.fixedVectorLen.isEmpty && r2.fixedVectorLen.isEmpty) None
       else Some(r1.fixedVectorLen.getOrElse(0) + r2.fixedVectorLen.getOrElse(0))

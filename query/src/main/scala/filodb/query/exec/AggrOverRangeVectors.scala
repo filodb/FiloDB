@@ -24,17 +24,6 @@ trait ReduceAggregateExec extends NonLeafExecPlan {
 
   protected def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
-  /**
-   * Requiring strict result schema match for Aggregation
-   */
-  override def reduceSchemas(r1: ResultSchema, r2: ResultSchema): ResultSchema = {
-    if (r1.isEmpty) r2
-    else if (r2.isEmpty) r1
-    else if (r1 != r2)  {
-      throw SchemaMismatch(r1.toString, r2.toString)
-    } else r1
-  }
-
   protected def composeStreaming(childResponses: Observable[(Observable[RangeVector], Int)],
                                  schemas: Observable[(ResultSchema, Int)],
                                  querySession: QuerySession): Observable[RangeVector] = {
@@ -74,7 +63,19 @@ final case class LocalPartitionReduceAggregateExec(queryContext: QueryContext,
                                                    dispatcher: PlanDispatcher,
                                                    childAggregates: Seq[ExecPlan],
                                                    aggrOp: AggregationOperator,
-                                                   aggrParams: Seq[Any]) extends ReduceAggregateExec
+                                                   aggrParams: Seq[Any]) extends ReduceAggregateExec {
+  /**
+   * Requiring strict result schema match for Aggregation within filodb cluster
+   * since fixedVectorLen presence will enable fast-reduce when possible
+   */
+  override def reduceSchemas(r1: ResultSchema, r2: ResultSchema): ResultSchema = {
+    if (r1.isEmpty) r2
+    else if (r2.isEmpty) r1
+    else if (r1 != r2) {
+      throw SchemaMismatch(r1.toString, r2.toString, getClass.getSimpleName)
+    } else r1
+  }
+}
 
 /**
   * Use when child ExecPlan's span multiple partitions
@@ -83,9 +84,10 @@ final case class MultiPartitionReduceAggregateExec(queryContext: QueryContext,
                                                    dispatcher: PlanDispatcher,
                                                    childAggregates: Seq[ExecPlan],
                                                    aggrOp: AggregationOperator,
-                                                   aggrParams: Seq[Any]) extends ReduceAggregateExec
-
-
+                                                   aggrParams: Seq[Any]) extends ReduceAggregateExec {
+  // retain non-strict reduceSchemas method in super (ExecPlan trait) since
+  // colIds, fixedVectorLen etc are not transmitted in cross-partition json response
+}
 
 /**
   * Performs aggregation operation across RangeVectors within a shard
@@ -166,7 +168,7 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
-    RangeVectorAggregator.present(aggregator, source, limit, rangeParams)
+    RangeVectorAggregator.present(aggregator, source, limit, rangeParams, querySession.queryStats)
   }
 
   override def schema(source: ResultSchema): ResultSchema = {
@@ -223,8 +225,9 @@ object RangeVectorAggregator extends StrictLogging {
   def present(aggregator: RowAggregator,
               source: Observable[RangeVector],
               limit: Int,
-              rangeParams: RangeParams): Observable[RangeVector] = {
-    source.flatMap(rv => Observable.fromIterable(aggregator.present(rv, limit, rangeParams)))
+              rangeParams: RangeParams,
+              queryStats: QueryStats): Observable[RangeVector] = {
+    source.flatMap(rv => Observable.fromIterable(aggregator.present(rv, limit, rangeParams, queryStats)))
   }
 
   private def mapReduceInternal(rvs: List[RangeVector],

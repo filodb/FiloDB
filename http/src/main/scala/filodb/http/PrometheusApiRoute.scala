@@ -183,9 +183,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
         else if (qr.resultSchema.columns.length == 1 && qr.resultSchema.columns(0).colType == MapColumn)
           complete(toMetadataMapResponse(qr, verbose, qr.resultType, Option(qr.mayBePartial)))
         else complete(toPromSuccessResponse(qr, verbose)) // not defined
-      case qr: QueryResult => val translated = if (histMap)
-                                                qr
-                                               else convertHistToPromResult(qr, schemas.part)
+      case qr: QueryResult => val translated = if (histMap) qr else convertHistToPromResult(qr, schemas.part)
                               complete(toPromSuccessResponse(translated, verbose))
       case qr: QueryError => complete(toPromErrorResponse(qr))
       case qr: ExecPlan => complete(toPromExplainPlanResponse(qr))

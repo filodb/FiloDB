@@ -471,7 +471,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                             val targetSchemaLabels =
                               getUniversalTargetSchemaLabels(bj, targetSchemaProvider(qContext))
                             targetSchemaLabels.isDefined &&
-                              targetSchemaLabels.get.toSet.subsetOf(bj.on.toSet)
+                              targetSchemaLabels.get.toSet.diff(shardColumns.toSet).subsetOf(bj.on.toSet)
                           }
         // union lhs/rhs shards, since one might be empty (if it's a scalar)
         if (canPushdown) Some(lhsShards.get.union(rhsShards.get)) else None
@@ -487,7 +487,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                             targetSchemaLabels.isDefined &&
                             {
                               val byLabels = agg.clauseOpt.get.labels
-                              targetSchemaLabels.get.toSet.subsetOf(byLabels.toSet)
+                              targetSchemaLabels.get.toSet.diff(shardColumns.toSet).subsetOf(byLabels.toSet)
                             }
                           }
         if (canPushdown) shards else None

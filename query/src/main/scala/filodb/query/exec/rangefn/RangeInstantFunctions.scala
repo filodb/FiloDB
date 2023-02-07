@@ -59,10 +59,35 @@ object RangeInstantFunctions {
       if (isRate) {
         val sampledInterval = (window.last.timestamp - prevSampleRow.timestamp).toDouble
         if (sampledInterval == 0) {
-          None // Avoid dividing by 0
+          return Double.NaN // Avoid dividing by 0
         }
         // Convert to per-second.
         resultValue = resultValue/sampledInterval*1000
+      }
+      resultValue
+    }
+  }
+
+  // instant value for a period-counter is the last value in a window.
+  def instantValueDeltaCounter(startTimestamp: Long,
+                               endTimestamp: Long,
+                               window: Window,
+                               isRate: Boolean): Double = {
+    if (window.size < 2) {
+      Double.NaN // cannot calculate result without 2 samples
+    } else {
+      require(window.head.timestamp >= startTimestamp, "Possible internal error, found samples < startTimestamp")
+      require(window.last.timestamp <= endTimestamp, "Possible internal error, found samples > endTimestamp")
+      var resultValue = window.last.value // instant value for a period-counter is the last value in a window.
+      val prevSampleRow = window(window.size - 2)
+      if (isRate) {
+        val sampledInterval = (window.last.timestamp - prevSampleRow.timestamp).toDouble
+        resultValue = if (sampledInterval == 0) {
+                        Double.NaN // Avoid dividing by 0
+                      } else {
+                        // Convert to per-second.
+                        resultValue / sampledInterval * 1000
+                      }
       }
       resultValue
     }
@@ -89,6 +114,7 @@ object IRateFunction extends RangeFunction {
 object IDeltaFunction extends RangeFunction {
 
   def addedToWindow(row: TransientRow, window: Window): Unit = {}
+
   def removedFromWindow(row: TransientRow, window: Window): Unit = {}
 
   def apply(startTimestamp: Long,
@@ -97,6 +123,47 @@ object IDeltaFunction extends RangeFunction {
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     val result = RangeInstantFunctions.instantValue(startTimestamp,
+      endTimestamp, window, false)
+    sampleToEmit.setValues(endTimestamp, result)
+  }
+}
+
+object IRatePeriodicFunction extends RangeFunction {
+
+  var lastFunc = LastSampleFunction
+  def addedToWindow(row: TransientRow, window: Window): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
+
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window,
+            sampleToEmit: TransientRow,
+            queryConfig: QueryConfig): Unit = {
+    if (window.size < 2) {
+      sampleToEmit.setValues(endTimestamp, Double.NaN) // cannot calculate result without 2 samples
+    } else {
+      lastFunc.apply(startTimestamp, endTimestamp, window, sampleToEmit, queryConfig)
+      val prevSampleRow = window(window.size - 2)
+      val sampledInterval = (window.last.timestamp - prevSampleRow.timestamp).toDouble
+      val result = if (sampledInterval == 0) {
+                    Double.NaN // Avoid dividing by 0
+                   } else sampleToEmit.value / sampledInterval * 1000
+      sampleToEmit.setValues(endTimestamp, result)
+    }
+  }
+}
+
+object IDeltaPeriodicFunction extends RangeFunction {
+
+  def addedToWindow(row: TransientRow, window: Window): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
+
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window,
+            sampleToEmit: TransientRow,
+            queryConfig: QueryConfig): Unit = {
+    val result = RangeInstantFunctions.instantValueDeltaCounter(startTimestamp,
       endTimestamp, window, false)
     sampleToEmit.setValues(endTimestamp, result)
   }

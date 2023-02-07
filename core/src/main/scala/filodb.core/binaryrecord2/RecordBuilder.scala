@@ -246,10 +246,10 @@ class RecordBuilder(memFactory: MemFactory,
   final def addPartKeyRecordFields(base: Any, offset: Long, partKeySchema: RecordSchema): Unit = {
     var id = 0
     partKeySchema.columns.foreach {
-      case ColumnInfo(_, MapColumn) => addBlobFromBr(base, offset, id, partKeySchema); id += 1
-      case ColumnInfo(_, StringColumn) => addBlobFromBr(base, offset, id, partKeySchema); id += 1
-      case ColumnInfo(_, LongColumn) => addLongFromBr(base, offset, id, partKeySchema); id += 1
-      case ColumnInfo(_, DoubleColumn) => addDoubleFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, MapColumn, _) => addBlobFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, StringColumn, _) => addBlobFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, LongColumn, _) => addLongFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, DoubleColumn, _) => addDoubleFromBr(base, offset, id, partKeySchema); id += 1
       case _ => ???
     }
     // finally copy the partition hash over
@@ -685,7 +685,7 @@ object RecordBuilder {
 
   /**
    * Calculate partition key hash from non-shard-key columns. This is used for calculating the ingestionShard.
-   * If a target-schema is provided, use the labels configured in target-schema.
+   * If a target-schema is provided, use shardKey labels plus the labels configured in target-schema.
    * @param nonShardKeyLabelPair non-shard-key label pair
    * @param targetSchema target-schema list of sorted labels that uniquely identify the source of data and used
    *                     exclusively for determining target ingestion shard.
@@ -700,9 +700,10 @@ object RecordBuilder {
                              metric: String): Int = {
     var hash = 7
     val labelPairs = nonShardKeyLabelPair ++ shardKeyLabelPair + (metricShardkey -> metric)
-    val tags = labelPairs.keys
-    val labelValues = if (targetSchema.nonEmpty && targetSchema.diff(tags.toSeq).isEmpty) {
-      targetSchema.map(labelPairs(_))
+    val tags: Set[String] = labelPairs.keySet
+    val targetSchemaWithShardKeys = shardKeyLabelPair.keySet ++ targetSchema.sorted
+    val labelValues = if (targetSchemaWithShardKeys.nonEmpty && targetSchemaWithShardKeys.diff(tags).isEmpty) {
+      targetSchemaWithShardKeys.map(labelPairs(_))
     } else nonShardKeyLabelPair.values
     labelValues.foreach { v => {
         hash = RecordBuilder

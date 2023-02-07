@@ -7,6 +7,7 @@ import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.reactive.Observable
 
+import filodb.core.Utils
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -78,71 +79,79 @@ final case class BinaryJoinExec(queryContext: QueryContext,
           s" Try applying more filters or reduce time range.")
       case (QueryResult(_, _, result, _, _, _), i) => (result, i)
     }.toListL.map { resp =>
-      span.mark("binary-join-child-results-available")
-      Kamon.histogram("query-execute-time-elapsed-step1-child-results-available",
-        MeasurementUnit.time.milliseconds)
-        .withTag("plan", getClass.getSimpleName)
-        .record(Math.max(0, System.currentTimeMillis - queryContext.submitTime))
-      // NOTE: We can't require this any more, as multischema queries may result in not a QueryResult if the
-      //       filter returns empty results.  The reason is that the schema will be undefined.
-      // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
-      val lhsRvs = resp.filter(_._2 < lhs.size).flatMap(_._1)
-      val rhsRvs = resp.filter(_._2 >= lhs.size).flatMap(_._1)
-      // figure out which side is the "one" side
-      val (oneSide, otherSide, lhsIsOneSide) =
-        if (cardinality == Cardinality.OneToMany) (lhsRvs, rhsRvs, true)
-        else (rhsRvs, lhsRvs, false)
-      val period = oneSide.headOption.flatMap(_.outputRange)
-      // load "one" side keys in a hashmap
-      val oneSideMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
-      oneSide.foreach { rv =>
-        val jk = joinKeys(rv.key)
-        // When spread changes, we need to account for multiple Range Vectors with same key coming from different shards
-        // Each of these range vectors would contain data for different time ranges
-        if (oneSideMap.contains(jk)) {
-          val rvDupe = oneSideMap(jk)
-          if (rv.key.labelValues == rvDupe.key.labelValues) {
-            oneSideMap.put(jk, StitchRvsExec.stitch(rv, rvDupe, outputRvRange))
-          } else {
-            throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk. " +
-              s"${rvDupe.key.labelValues} and ${rv.key.labelValues} were the violating keys on many side")
-          }
-        } else {
-          oneSideMap.put(jk, rv)
-        }
-      }
-      // keep a hashset of result range vector keys to help ensure uniqueness of result range vectors
-      val results = new mutable.HashMap[RangeVectorKey, ResultVal]()
-      case class ResultVal(resultRv: RangeVector, stitchedOtherSide: RangeVector)
-      // iterate across the the "other" side which could be one or many and perform the binary operation
-      otherSide.foreach { rvOther =>
-        val jk = joinKeys(rvOther.key)
-        oneSideMap.get(jk).foreach { rvOne =>
-          val resKey = resultKeys(rvOne.key, rvOther.key)
-          val rvOtherCorrect = if (results.contains(resKey)) {
-            val resVal = results(resKey)
-            if (resVal.stitchedOtherSide.key.labelValues == rvOther.key.labelValues) {
-              StitchRvsExec.stitch(rvOther, resVal.stitchedOtherSide, outputRvRange)
+      val startNs = Utils.currentThreadCpuTimeNanos
+      try {
+        span.mark("binary-join-child-results-available")
+        Kamon.histogram("query-execute-time-elapsed-step1-child-results-available",
+          MeasurementUnit.time.milliseconds)
+          .withTag("plan", getClass.getSimpleName)
+          .record(Math.max(0, System.currentTimeMillis - queryContext.submitTime))
+        // NOTE: We can't require this any more, as multischema queries may result in not a QueryResult if the
+        //       filter returns empty results.  The reason is that the schema will be undefined.
+        // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
+        val lhsRvs = resp.filter(_._2 < lhs.size).flatMap(_._1)
+        val rhsRvs = resp.filter(_._2 >= lhs.size).flatMap(_._1)
+        // figure out which side is the "one" side
+        val (oneSide, otherSide, lhsIsOneSide) =
+          if (cardinality == Cardinality.OneToMany) (lhsRvs, rhsRvs, true)
+          else (rhsRvs, lhsRvs, false)
+        val period = oneSide.headOption.flatMap(_.outputRange)
+        // load "one" side keys in a hashmap
+        val oneSideMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
+        oneSide.foreach { rv =>
+          val jk = joinKeys(rv.key)
+          // When spread changes, we need to account for multiple Range Vectors
+          // with same key coming from different shards
+          // Each of these range vectors would contain data for different time ranges
+          if (oneSideMap.contains(jk)) {
+            val rvDupe = oneSideMap(jk)
+            if (rv.key.labelValues == rvDupe.key.labelValues) {
+              oneSideMap.put(jk, StitchRvsExec.stitch(rv, rvDupe, outputRvRange))
             } else {
-              throw new BadQueryException(s"Non-unique result vectors ${resVal.stitchedOtherSide.key.labelValues} " +
-                s"and ${rvOther.key.labelValues} found for $resKey . Use grouping to create unique matching")
+              throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one " +
+                s"for $jk. ${rvDupe.key.labelValues} and ${rv.key.labelValues} were the violating keys on many side")
             }
           } else {
-            rvOther
+            oneSideMap.put(jk, rv)
           }
-
-          // OneToOne cardinality case is already handled. this condition handles OneToMany case
-          if (results.size >= queryContext.plannerParams.joinQueryCardLimit)
-            throw new BadQueryException(s"The result of this join query has cardinality ${results.size} and " +
-              s"has reached the limit of ${queryContext.plannerParams.joinQueryCardLimit}. Try applying more filters.")
-
-          val res = if (lhsIsOneSide) binOp(rvOne.rows, rvOtherCorrect.rows) else binOp(rvOtherCorrect.rows, rvOne.rows)
-          results.put(resKey, ResultVal(IteratorBackedRangeVector(resKey, res, period), rvOtherCorrect))
         }
+        // keep a hashset of result range vector keys to help ensure uniqueness of result range vectors
+        val results = new mutable.HashMap[RangeVectorKey, ResultVal]()
+        case class ResultVal(resultRv: RangeVector, stitchedOtherSide: RangeVector)
+        // iterate across the the "other" side which could be one or many and perform the binary operation
+        otherSide.foreach { rvOther =>
+          val jk = joinKeys(rvOther.key)
+          oneSideMap.get(jk).foreach { rvOne =>
+            val resKey = resultKeys(rvOne.key, rvOther.key)
+            val rvOtherCorrect = if (results.contains(resKey)) {
+              val resVal = results(resKey)
+              if (resVal.stitchedOtherSide.key.labelValues == rvOther.key.labelValues) {
+                StitchRvsExec.stitch(rvOther, resVal.stitchedOtherSide, outputRvRange)
+              } else {
+                throw new BadQueryException(s"Non-unique result vectors ${resVal.stitchedOtherSide.key.labelValues} " +
+                  s"and ${rvOther.key.labelValues} found for $resKey . Use grouping to create unique matching")
+              }
+            } else {
+              rvOther
+            }
+
+            // OneToOne cardinality case is already handled. this condition handles OneToMany case
+            if (results.size >= queryContext.plannerParams.joinQueryCardLimit)
+              throw new BadQueryException(s"The result of this join query has cardinality ${results.size} and has " +
+                s"reached the limit of ${queryContext.plannerParams.joinQueryCardLimit}. Try applying more filters.")
+
+            val res = if (lhsIsOneSide) binOp(rvOne.rows, rvOtherCorrect.rows)
+            else binOp(rvOtherCorrect.rows, rvOne.rows)
+            results.put(resKey, ResultVal(IteratorBackedRangeVector(resKey, res, period), rvOtherCorrect))
+          }
+        }
+        // check for timeout after dealing with metadata, before dealing with numbers
+        querySession.qContext.checkQueryTimeout(this.getClass.getName)
+        Observable.fromIterable(results.values.map(_.resultRv))
+      } finally {
+        // Adding CPU time here since dealing with metadata join is not insignificant
+        querySession.queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
       }
-      // check for timeout after dealing with metadata, before dealing with numbers
-      querySession.qContext.checkQueryTimeout(this.getClass.getName)
-      Observable.fromIterable(results.values.map(_.resultRv))
     }
     Observable.fromTask(taskOfResults).flatten
   }

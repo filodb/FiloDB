@@ -71,7 +71,8 @@ object StdvarRowAggregator extends RowAggregator {
     acc
   }
   // ignore last two column. we rely on schema change
-  def present(aggRangeVector: RangeVector, limit: Int, rangeParams: RangeParams): Seq[RangeVector] = Seq(aggRangeVector)
+  def present(aggRangeVector: RangeVector, limit: Int,
+              rangeParams: RangeParams, queryStats: QueryStats): Seq[RangeVector] = Seq(aggRangeVector)
   def reductionSchema(source: ResultSchema): ResultSchema = {
     source.copy(source.columns :+ ColumnInfo("mean", ColumnType.DoubleColumn)
       :+ ColumnInfo("count", ColumnType.LongColumn))

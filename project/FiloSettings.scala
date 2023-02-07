@@ -208,6 +208,7 @@ object FiloSettings {
       case PathList("com", "esotericsoftware", xs @ _*) => MergeStrategy.first
       case PathList("scala", "collection", "compat", xs @ _*) => MergeStrategy.first
       case PathList("scala", "annotation", "nowarn.class") => MergeStrategy.first
+      case PathList("com", "esotericsoftware", xs @ _*) => MergeStrategy.first
       case m if m.toLowerCase.matches("scala-collection-compat.properties") => MergeStrategy.first
       case m if m.toLowerCase.endsWith("manifest.mf") => MergeStrategy.discard
       case m if m.toLowerCase.matches("meta-inf.*\\.sf$") => MergeStrategy.discard

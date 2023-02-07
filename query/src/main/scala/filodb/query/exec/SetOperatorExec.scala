@@ -8,6 +8,7 @@ import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.reactive.Observable
 
+import filodb.core.Utils
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -61,29 +62,35 @@ final case class SetOperatorExec(queryContext: QueryContext,
     val taskOfResults = childResponses.map {
       case (QueryResult(_, schema, result, _, _, _), i) => (schema, result, i)
     }.toListL.map { resp =>
-      span.mark("binary-join-child-results-available")
-      Kamon.histogram("query-execute-time-elapsed-step1-child-results-available",
-        MeasurementUnit.time.milliseconds)
-        .withTag("plan", getClass.getSimpleName)
-        .record(Math.max(0, System.currentTimeMillis - queryContext.submitTime))
-      // NOTE: We can't require this any more, as multischema queries may result in not a QueryResult if the
-      //       filter returns empty results.  The reason is that the schema will be undefined.
-      // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
-      // Resp is segregated based on index of child plans
-      val lhsRvs = resp.filter(_._3 < lhs.size).flatMap(_._2)
-      val rhsResp = resp.filter(_._3 >= lhs.size)
-      val rhsRvs = rhsResp.flatMap(_._2)
+      val startNs = Utils.currentThreadCpuTimeNanos
+      try {
+        span.mark("binary-join-child-results-available")
+        Kamon.histogram("query-execute-time-elapsed-step1-child-results-available",
+          MeasurementUnit.time.milliseconds)
+          .withTag("plan", getClass.getSimpleName)
+          .record(Math.max(0, System.currentTimeMillis - queryContext.submitTime))
+        // NOTE: We can't require this any more, as multischema queries may result in not a QueryResult if the
+        //       filter returns empty results.  The reason is that the schema will be undefined.
+        // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
+        // Resp is segregated based on index of child plans
+        val lhsRvs = resp.filter(_._3 < lhs.size).flatMap(_._2)
+        val rhsResp = resp.filter(_._3 >= lhs.size)
+        val rhsRvs = rhsResp.flatMap(_._2)
 
-      val results: Iterator[RangeVector] = binaryOp match {
-        case LAND    => val rhsSchema = if (rhsResp.nonEmpty) rhsResp.head._1 else ResultSchema.empty
-                        setOpAnd(lhsRvs, rhsRvs, rhsSchema)
-        case LOR     => setOpOr(lhsRvs, rhsRvs)
-        case LUnless => setOpUnless(lhsRvs, rhsRvs)
-        case _       => throw new IllegalArgumentException("requirement failed: Only and, or and unless are supported ")
+        val results: Iterator[RangeVector] = binaryOp match {
+          case LAND => val rhsSchema = if (rhsResp.nonEmpty) rhsResp.head._1 else ResultSchema.empty
+            setOpAnd(lhsRvs, rhsRvs, rhsSchema)
+          case LOR => setOpOr(lhsRvs, rhsRvs)
+          case LUnless => setOpUnless(lhsRvs, rhsRvs)
+          case _ => throw new IllegalArgumentException("requirement failed: Only and, or and unless are supported ")
+        }
+        // check for timeout after dealing with metadata, before dealing with numbers
+        querySession.qContext.checkQueryTimeout(this.getClass.getName)
+        Observable.fromIteratorUnsafe(results)
+      } finally {
+        // Adding CPU time here since dealing with metadata join is not insignificant
+        querySession.queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
       }
-      // check for timeout after dealing with metadata, before dealing with numbers
-      querySession.qContext.checkQueryTimeout(this.getClass.getName)
-      Observable.fromIteratorUnsafe(results)
     }
     Observable.fromTask(taskOfResults).flatten
   }
@@ -118,8 +125,8 @@ final case class SetOperatorExec(queryContext: QueryContext,
 
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
-      // Don't add range vector if it is empty
-      if (jk.nonEmpty && !isEmpty(rv, rhsSchema)) {
+      // Don't add range vector if it contains no rows
+      if (!isEmpty(rv, rhsSchema)) {
         // When spread changes, we need to account for multiple Range Vectors with same key coming from different shards
         // Each of these range vectors would contain data for different time ranges
         if (rhsMap.contains(jk)) {
@@ -172,11 +179,6 @@ final case class SetOperatorExec(queryContext: QueryContext,
         val arrayBuffer = result.getOrElse(jk, ArrayBuffer())
         val resRv = IteratorBackedRangeVector(lhs.key, rows, period)
         if (index >= 0) arrayBuffer.update(index, resRv) else arrayBuffer.append(resRv)
-        result.put(jk, arrayBuffer)
-      } else if (jk.isEmpty) {
-        // "up AND ON (dummy) vector(1)" should be equivalent to up as there's no dummy label
-        val arrayBuffer = result.getOrElse(jk, ArrayBuffer())
-        arrayBuffer.append(lhs)
         result.put(jk, arrayBuffer)
       }
     }
