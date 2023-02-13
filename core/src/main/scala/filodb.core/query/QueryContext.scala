@@ -257,6 +257,9 @@ case class QueryStats() {
     val theNs = if (group.isEmpty && stat.size == 1) stat.head._1 else group
     stat.getOrElseUpdate(theNs, Stat()).cpuNanos
   }
+
+  def totalCpuNanos: Long = stat.valuesIterator.map(_.cpuNanos.get()).sum
+
 }
 
 object QuerySession {

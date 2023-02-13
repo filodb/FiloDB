@@ -27,7 +27,7 @@ import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, TermInfo, TimeSeriesStore}
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Dataset, Schemas}
-import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryStats}
+import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryStats, SerializedRangeVector}
 import filodb.core.store.CorruptVectorException
 import filodb.memory.data.Shutdown
 import filodb.query._
@@ -186,6 +186,7 @@ final class QueryActor(memStore: TimeSeriesStore,
                 case _ =>
               }
             }.guarantee(Task.eval {
+              SerializedRangeVector.queryCpuTime.increment(querySession.queryStats.totalCpuNanos)
               querySession.close()
               queryExecuteSpan.finish()
             }).completedL
@@ -210,6 +211,7 @@ final class QueryActor(memStore: TimeSeriesStore,
                 case _ =>
               }
             }.guarantee(Task.eval {
+              SerializedRangeVector.queryCpuTime.increment(querySession.queryStats.totalCpuNanos)
               queryExecuteSpan.finish()
               querySession.close()
             })

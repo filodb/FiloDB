@@ -3,11 +3,10 @@ package filodb.core.query
 import java.time.{LocalDateTime, YearMonth, ZoneOffset}
 import java.util.concurrent.atomic.AtomicLong
 
-import scala.collection.Iterator
-
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import org.joda.time.DateTime
 
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
@@ -423,6 +422,7 @@ object SerializedRangeVector extends StrictLogging {
   import filodb.core._
 
   val queryResultBytes = Kamon.histogram("query-engine-result-bytes").withoutTags
+  val queryCpuTime = Kamon.counter("query-engine-cpu-time", MeasurementUnit.time.nanoseconds).withoutTags
 
   def canRemoveEmptyRows(outputRange: Option[RvRange], sch: RecordSchema) : Boolean = {
     outputRange.isDefined && // metadata queries
