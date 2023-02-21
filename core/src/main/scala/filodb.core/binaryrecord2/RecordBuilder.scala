@@ -701,11 +701,14 @@ object RecordBuilder {
     var hash = 7
     val labelPairs = nonShardKeyLabelPair ++ shardKeyLabelPair + (metricShardkey -> metric)
     val tags: Set[String] = labelPairs.keySet
-    val targetSchemaWithShardKeys = shardKeyLabelPair.keySet ++ targetSchema.sorted
-    val labelValues = if (targetSchemaWithShardKeys.nonEmpty && targetSchemaWithShardKeys.diff(tags).isEmpty) {
-      targetSchemaWithShardKeys.map(labelPairs(_))
-    } else nonShardKeyLabelPair.values
-    labelValues.foreach { v => {
+    val nonMetricShardKeys = shardKeyLabelPair - metricShardkey
+    val implicitTargetSchema = nonMetricShardKeys.keySet ++ targetSchema
+    val useTargetSchema = implicitTargetSchema.nonEmpty && implicitTargetSchema.diff(tags).isEmpty
+    val shardingLabels = if (useTargetSchema) {
+      labelPairs.filterKeys(implicitTargetSchema.contains)
+    } else nonShardKeyLabelPair
+    // sort by key, then hash each value
+    shardingLabels.toStream.sortBy(pair => pair._1).map(_._2).foreach { v => {
         hash = RecordBuilder
           .combineHash(hash, BinaryRegion.hash32(v.getBytes(StandardCharsets.UTF_8)))
       }
