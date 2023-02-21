@@ -703,12 +703,11 @@ object RecordBuilder {
     val tags: Set[String] = labelPairs.keySet
     val nonMetricShardKeys = shardKeyLabelPair - metricShardkey
     val implicitTargetSchema = nonMetricShardKeys.keySet ++ targetSchema
-    val useTargetSchema = implicitTargetSchema.nonEmpty && implicitTargetSchema.diff(tags).isEmpty
+    val useTargetSchema = targetSchema.nonEmpty && implicitTargetSchema.diff(tags).isEmpty
     val shardingLabels = if (useTargetSchema) {
-      labelPairs.filterKeys(implicitTargetSchema.contains)
-    } else nonShardKeyLabelPair
-    // sort by key, then hash each value
-    shardingLabels.toStream.sortBy(pair => pair._1).map(_._2).foreach { v => {
+      implicitTargetSchema.toStream.sorted.map(labelPairs(_))
+    } else nonShardKeyLabelPair.values  // NOTE: avoiding a sort here to preserve legacy logic
+    shardingLabels.foreach { v => {
         hash = RecordBuilder
           .combineHash(hash, BinaryRegion.hash32(v.getBytes(StandardCharsets.UTF_8)))
       }
