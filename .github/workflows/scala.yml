@@ -21,3 +21,8 @@ jobs:
         distribution: 'adopt'
     - name: Run tests
       run: .github/workflows/runtests.sh
+    - name: Coverage Reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: scoverage-report
+        path: target/scala-*/scoverage-report/**

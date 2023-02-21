@@ -15,3 +15,5 @@ addSbtPlugin("io.gatling" % "gatling-sbt" % "3.2.2")
 addSbtPlugin("com.github.sbt" % "sbt-protobuf" % "0.7.1")
 
 resolvers += "sonatype-releases" at "https://oss.sonatype.org/content/repositories/releases/"
+
+addSbtPlugin("org.scoverage" % "sbt-scoverage" % "2.0.7")
