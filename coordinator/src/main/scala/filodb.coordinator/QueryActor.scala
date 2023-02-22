@@ -18,7 +18,6 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.exceptions.ExecutionRejectedException
 import monix.execution.schedulers.SchedulerService
-import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
 
