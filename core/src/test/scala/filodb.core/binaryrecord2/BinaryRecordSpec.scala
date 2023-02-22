@@ -620,12 +620,11 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
     it("should compute partitionKey hash correctly when target schema is provided") {
       val jobHash = BinaryRegion.hash32(labels("job").getBytes(StandardCharsets.UTF_8))
       val instanceHash = BinaryRegion.hash32(labels("instance").getBytes(StandardCharsets.UTF_8))
-      val metricHash = BinaryRegion.hash32(labels("__name__").getBytes(StandardCharsets.UTF_8))
       val nonShardKeyPairs = labels.filter(f => f._1 != "job" && f._1 != "__name__")
       val shardKeyPairs = labels.filter(f => f._1 == "job" || f._1 == "__name__")
       val targetSchema = Seq("job","instance") // job, __name__, instance
 
-      val expectedPartkeyHash = ((7 * 31 + jobHash) * 31 + metricHash) * 31 + instanceHash
+      val expectedPartkeyHash = (7 * 31 + instanceHash) * 31 + jobHash
 
       RecordBuilder.partitionKeyHash(
         nonShardKeyPairs, shardKeyPairs,
@@ -640,7 +639,7 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
       val shardKeyPairs = labels.filter(f => f._1 == "job" || f._1 == "__name__")
       val targetSchema = Seq("instance") // job, __name__, instance
 
-      val expectedPartkeyHash = ((7 * 31 + jobHash) * 31 + metricHash) * 31 + instanceHash
+      val expectedPartkeyHash = (7 * 31 + instanceHash) * 31 + jobHash
 
       RecordBuilder.partitionKeyHash(
         nonShardKeyPairs, shardKeyPairs,
@@ -649,14 +648,13 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
 
     it("should compute partitionKey hash using shardkeys + SORTED targetschema labels") {
       val jobHash = BinaryRegion.hash32(labels("job").getBytes(StandardCharsets.UTF_8))
-      val metricHash = BinaryRegion.hash32(labels("__name__").getBytes(StandardCharsets.UTF_8))
       val instanceHash = BinaryRegion.hash32(labels("instance").getBytes(StandardCharsets.UTF_8))
       val dcHash = BinaryRegion.hash32(labels("dc").getBytes(StandardCharsets.UTF_8))
       val nonShardKeyPairs = labels.filter(f => f._1 != "job" && f._1 != "__name__")
       val shardKeyPairs = labels.filter(f => f._1 == "job" || f._1 == "__name__")
       val targetSchema = Seq("instance", "dc") // // (job, __name__, dc, instance) shardkeys, dc then instance
 
-      val expectedPartkeyHash = (((7 * 31 + jobHash) * 31 + metricHash) * 31 + dcHash) * 31 + instanceHash
+      val expectedPartkeyHash = ((7 * 31 + dcHash) * 31 + instanceHash) * 31 + jobHash
 
       RecordBuilder.partitionKeyHash(
         nonShardKeyPairs, shardKeyPairs,
@@ -704,4 +702,38 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
     metricName5 shouldEqual "heap_usage_sum"
   }
 
+  it("should correctly ignore metric labels when calculating a target-schema shard hash") {
+    val metricName = "metric"
+    val metricValue = "my-metric"
+    val nonShardKeys = Map("nonShard1" -> "ns1", "nonShard2" -> "ns2")
+    val shardKeys = Map("shard1" -> "s1", "shard2" -> "s2")
+    val targetSchema = Seq("shard1", "shard2", "nonShard1")
+
+    val hashNoMetricShardKey = RecordBuilder.partitionKeyHash(
+      nonShardKeys,
+      shardKeys,
+      targetSchema,
+      metricName,
+      metricValue
+    )
+    val hashWithMetricShardKey = RecordBuilder.partitionKeyHash(
+      nonShardKeys ++ Map(metricName -> metricValue),
+      shardKeys,
+      targetSchema,
+      metricName,
+      metricValue
+    )
+    val otherHash = RecordBuilder.partitionKeyHash(
+      nonShardKeys ++ Map(metricName -> metricValue),
+      shardKeys ++ Map("rando" -> "value"),
+      targetSchema,
+      metricName,
+      metricValue
+    )
+
+    // equal, since the hash should ignore the metric label
+    hashNoMetricShardKey shouldEqual hashWithMetricShardKey
+    // not equal, since some other shard key is different
+    hashNoMetricShardKey should not equal otherHash
+  }
 }
