@@ -261,7 +261,7 @@ final class QueryActor(memStore: TimeSeriesStore,
         val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
         if (PlanDispatcher.streamingResultsEnabled) {
           val res = queryPlanner.dispatchStreamingExecPlan(execPlan, Kamon.currentSpan())(queryScheduler, 30.seconds)
-          streamToFatQueryResponse(q.qContext, res).runToFuture(queryScheduler).onComplete {
+          queryengine.Utils.streamToFatQueryResponse(q.qContext, res).runToFuture(queryScheduler).onComplete {
             case Success(resp) => replyTo ! resp
             case Failure(e) => replyTo ! QueryError(q.qContext.queryId, QueryStats(), e)
           }(queryScheduler)
@@ -277,27 +277,7 @@ final class QueryActor(memStore: TimeSeriesStore,
     }
   }
 
-  def streamToFatQueryResponse(queryContext: QueryContext,
-                               resp: Observable[StreamQueryResponse]): Task[QueryResponse] = {
-    resp.takeWhileInclusive(!_.isLast).toListL.map { r =>
-      r.collectFirst {
-        case StreamQueryError(id, stats, t) => QueryError(id, stats, t)
-      }
-      .getOrElse {
-        val header = r.collectFirst {
-          case h: StreamQueryResultHeader => h
-        }.getOrElse(throw new IllegalStateException(s"Did not get a header for query id ${queryContext.queryId}"))
-        val rvs = r.collect {
-          case StreamQueryResult(id, rv) => rv
-        }
-        val footer = r.lastOption.collect {
-          case f: StreamQueryResultFooter => f
-        }.getOrElse(StreamQueryResultFooter(queryContext.queryId))
-        QueryResult(queryContext.queryId, header.resultSchema, rvs,
-                  footer.queryStats, footer.mayBePartial, footer.partialResultReason)
-      }
-    }
-  }
+
 
   private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef): Unit = {
     if (checkTimeoutBeforeQueryExec(q.qContext, replyTo)) {

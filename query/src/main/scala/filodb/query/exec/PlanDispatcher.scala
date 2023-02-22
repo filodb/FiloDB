@@ -4,11 +4,12 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
+import filodb.core.GlobalConfig
 import filodb.core.store.ChunkSource
 import filodb.query.{QueryResponse, StreamQueryResponse}
 
 object PlanDispatcher {
-  val streamingResultsEnabled = false // TODO enable when streaming support is complete in all non-leaf plans
+  val streamingResultsEnabled = GlobalConfig.systemConfig.getBoolean("filodb.query.streaming-query-results-enabled")
 }
 
 /**
