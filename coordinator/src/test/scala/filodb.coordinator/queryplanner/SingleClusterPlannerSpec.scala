@@ -381,10 +381,10 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
   it("should apply the target schema appropriate to the query range") {
 
     val tschemas = Seq(
-      TargetSchemaChange(0L, Seq("foo")),      // + shardKeys (job, __name__)
-      TargetSchemaChange(10000, Seq("bar")),   // + shardKeys (job, __name__)
-      TargetSchemaChange(20000, Seq("foo")),   // + shardKeys (job, __name__)
-      TargetSchemaChange(30000, Seq("bar")),   // + shardKeys (job, __name__)
+      TargetSchemaChange(0L, Seq("foo")),      // + shardKeys (job)
+      TargetSchemaChange(10000, Seq("bar")),   // + shardKeys (job)
+      TargetSchemaChange(20000, Seq("foo")),   // + shardKeys (job)
+      TargetSchemaChange(30000, Seq("bar")),   // + shardKeys (job)
     )
 
     // Oscillate between "foo" and "bar" as the schema
@@ -418,7 +418,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
           ColumnFilter("foo", Equals("abcdefg")),
           ColumnFilter("bar", Equals("hijklmnop")),
         ), qContext, start, end, useTargetSchemaForShards = true)
-    } should contain theSameElementsAs Seq(1, 26, 1, 26)
+    } should contain theSameElementsAs Seq(13, 20, 13, 20)
   }
 
   it("should create a single plan and not stitch results when target-schema has not changed in query range") {
