@@ -1125,9 +1125,9 @@ class TimeSeriesShard(val ref: DatasetRef,
       .foreach(_.switchBuffers(blockFactoryPool.checkoutForOverflow(groupNum)))
 
     val dirtyPartKeys = if (groupNum == dirtyPartKeysFlushGroup) {
-      logger.debug(s"Switching dirty part keys in dataset=$ref shard=$shardNum out for flush. ")
       purgeExpiredPartitions()
       ensureCapOnEvictablePartIds()
+      logger.debug(s"Switching dirty part keys in dataset=$ref shard=$shardNum out for flush. ")
       val old = dirtyPartitionsForIndexFlush
       dirtyPartitionsForIndexFlush = debox.Buffer.empty[Int]
       old

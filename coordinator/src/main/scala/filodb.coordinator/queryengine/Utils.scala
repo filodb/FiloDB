@@ -17,6 +17,8 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter, QueryContext}
 import filodb.core.store._
+import filodb.query.{QueryError, QueryResponse, QueryResult, StreamQueryError,
+  StreamQueryResponse, StreamQueryResult, StreamQueryResultFooter, StreamQueryResultHeader}
 
 final case class ChildErrorResponse(source: ActorRef, resp: ErrorResponse) extends
     Exception(s"From [$source] - $resp")
@@ -132,5 +134,27 @@ object Utils extends StrictLogging {
       (shardMap.coordForShard(method.shard), msgFunc(method))
     }
     scatterGather[A](coordsAndMsgs, parallelism)
+  }
+
+  def streamToFatQueryResponse(queryContext: QueryContext,
+                               resp: Observable[StreamQueryResponse]): Task[QueryResponse] = {
+    resp.takeWhileInclusive(!_.isLast).toListL.map { r =>
+      r.collectFirst {
+        case StreamQueryError(id, stats, t) => QueryError(id, stats, t)
+      }
+        .getOrElse {
+          val header = r.collectFirst {
+            case h: StreamQueryResultHeader => h
+          }.getOrElse(throw new IllegalStateException(s"Did not get a header for query id ${queryContext.queryId}"))
+          val rvs = r.collect {
+            case StreamQueryResult(id, rv) => rv
+          }
+          val footer = r.lastOption.collect {
+            case f: StreamQueryResultFooter => f
+          }.getOrElse(StreamQueryResultFooter(queryContext.queryId))
+          QueryResult(queryContext.queryId, header.resultSchema, rvs,
+            footer.queryStats, footer.mayBePartial, footer.partialResultReason)
+        }
+    }
   }
 }
