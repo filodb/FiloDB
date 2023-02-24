@@ -819,7 +819,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   private def leafFilter(column: String, filter: Filter): Query = {
     filter match {
       case EqualsRegex(value) =>
-        if (value.toString.nonEmpty) new RegexpQuery(new Term(column, removeRegexAnchors(value.toString)), RegExp.NONE)
+        val regex = removeRegexAnchors(value.toString)
+        if (regex.nonEmpty) new RegexpQuery(new Term(column, regex), RegExp.NONE)
         else leafFilter(column, NotEqualsRegex(".+"))
       case NotEqualsRegex(value) =>
         val term = new Term(column, removeRegexAnchors(value.toString))

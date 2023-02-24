@@ -826,6 +826,11 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val partKeyOpt2 = keyIndex.singlePartKeyFromFilters(Seq(filter2_found), 4, 10)
     partKeyOpt2.isDefined shouldBe true
     partKeyOpt2.get shouldEqual pkrs.head.partKey
+
+    val filter3_found = ColumnFilter("Actor2Code", EqualsRegex("^$"))
+    val partKeyOpt3 = keyIndex.singlePartKeyFromFilters(Seq(filter3_found), 4, 10)
+    partKeyOpt3.isDefined shouldBe true
+    partKeyOpt3.get shouldEqual pkrs.head.partKey
   }
 
   it("should get a single match for part keys through a non-existing field") {
@@ -847,6 +852,11 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val partKeyOpt2 = keyIndex.singlePartKeyFromFilters(Seq(filter2_found), 4, 10)
     partKeyOpt2.isDefined shouldBe true
     partKeyOpt2.get shouldEqual pkrs.head.partKey
+
+    val filter3_found = ColumnFilter("NonExistingField", EqualsRegex("^$"))
+    val partKeyOpt3 = keyIndex.singlePartKeyFromFilters(Seq(filter3_found), 4, 10)
+    partKeyOpt3.isDefined shouldBe true
+    partKeyOpt3.get shouldEqual pkrs.head.partKey
   }
 
   it("should get a single match for part keys by a regex filter") {
