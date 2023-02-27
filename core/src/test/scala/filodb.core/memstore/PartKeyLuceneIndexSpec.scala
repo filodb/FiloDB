@@ -807,6 +807,58 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     }
   }
 
+  it("should get a single match for part keys through a field with empty value") {
+    val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.slice(95, 96)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val pk = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
+      keyIndex.addPartKey(pk, -1, i, i + 10)(
+        pk.length, PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pk, 0, pk.length))
+      PartKeyLuceneIndexRecord(pk, i, i + 10)
+    }
+    keyIndex.refreshReadersBlocking()
+
+    val filter1_found = ColumnFilter("Actor2Code", Equals(""))
+    val partKeyOpt = keyIndex.singlePartKeyFromFilters(Seq(filter1_found), 4, 10)
+    partKeyOpt.isDefined shouldBe true
+    partKeyOpt.get shouldEqual pkrs.head.partKey
+
+    val filter2_found = ColumnFilter("Actor2Code", EqualsRegex(""))
+    val partKeyOpt2 = keyIndex.singlePartKeyFromFilters(Seq(filter2_found), 4, 10)
+    partKeyOpt2.isDefined shouldBe true
+    partKeyOpt2.get shouldEqual pkrs.head.partKey
+
+    val filter3_found = ColumnFilter("Actor2Code", EqualsRegex("^$"))
+    val partKeyOpt3 = keyIndex.singlePartKeyFromFilters(Seq(filter3_found), 4, 10)
+    partKeyOpt3.isDefined shouldBe true
+    partKeyOpt3.get shouldEqual pkrs.head.partKey
+  }
+
+  it("should get a single match for part keys through a non-existing field") {
+    val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val pk = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
+      keyIndex.addPartKey(pk, -1, i, i + 10)(
+        pk.length, PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pk, 0, pk.length))
+      PartKeyLuceneIndexRecord(pk, i, i + 10)
+    }
+    keyIndex.refreshReadersBlocking()
+
+    val filter1_found = ColumnFilter("NonExistingField", Equals(""))
+    val partKeyOpt = keyIndex.singlePartKeyFromFilters(Seq(filter1_found), 4, 10)
+    partKeyOpt.isDefined shouldBe true
+    partKeyOpt.get shouldEqual pkrs.head.partKey
+
+    val filter2_found = ColumnFilter("NonExistingField", EqualsRegex(""))
+    val partKeyOpt2 = keyIndex.singlePartKeyFromFilters(Seq(filter2_found), 4, 10)
+    partKeyOpt2.isDefined shouldBe true
+    partKeyOpt2.get shouldEqual pkrs.head.partKey
+
+    val filter3_found = ColumnFilter("NonExistingField", EqualsRegex("^$"))
+    val partKeyOpt3 = keyIndex.singlePartKeyFromFilters(Seq(filter3_found), 4, 10)
+    partKeyOpt3.isDefined shouldBe true
+    partKeyOpt3.get shouldEqual pkrs.head.partKey
+  }
+
   it("should get a single match for part keys by a regex filter") {
     val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
       .zipWithIndex.map { case (addr, i) =>
