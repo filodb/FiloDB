@@ -821,7 +821,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       case EqualsRegex(value) =>
         val regex = removeRegexAnchors(value.toString)
         if (regex.nonEmpty) new RegexpQuery(new Term(column, regex), RegExp.NONE)
-        else leafFilter(column, NotEqualsRegex(".+"))
+        else leafFilter(column, NotEqualsRegex(".+"))  // value="" means the label is absent or has an empty value.
       case NotEqualsRegex(value) =>
         val term = new Term(column, removeRegexAnchors(value.toString))
         val allDocs = new MatchAllDocsQuery
@@ -831,7 +831,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         booleanQuery.build()
       case Equals(value) =>
         if (value.toString.nonEmpty) new TermQuery(new Term(column, value.toString))
-        else leafFilter(column, NotEqualsRegex(".+"))
+        else leafFilter(column, NotEqualsRegex(".+"))  // value="" means the label is absent or has an empty value.
       case NotEquals(value) =>
         val str = value.toString
         val term = new Term(column, str)
