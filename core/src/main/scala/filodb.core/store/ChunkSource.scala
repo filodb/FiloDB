@@ -176,7 +176,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
         case Some(reqSchemaId) =>
           scanPartitions(ref, lookupRes, columnIDs, querySession).filter { p =>
             if (p.schema.schemaHash != reqSchemaId)
-              throw SchemaMismatch(Schemas.global.schemaName(reqSchemaId), p.schema.name)
+              throw SchemaMismatch(Schemas.global.schemaName(reqSchemaId), p.schema.name, getClass.getSimpleName)
             p.hasChunks(lookupRes.chunkMethod)
           }
         case None =>

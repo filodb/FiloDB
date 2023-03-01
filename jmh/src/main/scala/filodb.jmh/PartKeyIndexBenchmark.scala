@@ -32,7 +32,7 @@ class PartKeyIndexBenchmark {
   val numSeries = 1000000
   val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory, RecordBuilder.DefaultContainerSize, false)
   val untypedData = TestTimeseriesProducer.timeSeriesData(0, numSeries,
-           numMetricNames = 1, publishIntervalSec = 10) take numSeries
+           numMetricNames = 1, publishIntervalSec = 10, Schemas.untyped) take numSeries
   untypedData.foreach(_.addToBuilder(ingestBuilder))
 
   val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, RecordBuilder.DefaultContainerSize, false)

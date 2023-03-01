@@ -63,4 +63,4 @@ do
     truncate_chunk_tables ${FILO_DOWNSAMPLE_KEYSPACE} "${DATASET}_ds_${RES}"
 done
 
-truncate_partkey_tables ${FILO_DOWNSAMPLE_KEYSPACE} "${DATASET}_ds_${RESOLUTIONS[-1]}"
+truncate_partkey_tables ${FILO_DOWNSAMPLE_KEYSPACE} "${DATASET}_ds_${RESOLUTIONS[@]: -1}"
