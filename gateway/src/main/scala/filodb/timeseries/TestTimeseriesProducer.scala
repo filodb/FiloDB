@@ -3,6 +3,7 @@ package filodb.timeseries
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
+import scala.collection.mutable
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.Random
@@ -14,8 +15,10 @@ import monix.reactive.Observable
 import filodb.coordinator.ShardMapper
 import filodb.core.GlobalConfig
 import filodb.core.metadata.{Dataset, Schema, Schemas}
+import filodb.core.metadata.Schemas.gauge
 import filodb.gateway.GatewayServer
-import filodb.gateway.conversion.{InputRecord, MetricTagInputRecord, PrometheusInputRecord}
+import filodb.gateway.conversion.{DeltaCounterRecord, InputRecord, MetricTagInputRecord, PrometheusCounterRecord,
+                                  PrometheusInputRecord}
 import filodb.memory.format.{vectors => bv, ZeroCopyUTF8String => ZCUTF8}
 
 /**
@@ -60,7 +63,8 @@ object TestTimeseriesProducer extends StrictLogging {
 
   //scalastyle:off method.length parameter.number
   def logQueryHelp(dataset: String, numMetrics: Int, numSamples: Int, numTimeSeries: Int, startTimeMs: Long,
-                   genHist: Boolean, genDeltaHist: Boolean, genGauge: Boolean, publishIntervalSec: Int): Unit = {
+                   genHist: Boolean, genDeltaHist: Boolean, genGauge: Boolean,
+                   genPromCounter: Boolean, publishIntervalSec: Int): Unit = {
     val startQuery = startTimeMs / 1000
     val endQuery = startQuery + (numSamples / numMetrics / numTimeSeries) * publishIntervalSec
     logger.info(s"Finished producing $numSamples records for ${(endQuery-startQuery).toDouble/60} minutes")
@@ -68,6 +72,8 @@ object TestTimeseriesProducer extends StrictLogging {
     val metricName = if (genGauge) "heap_usage0"
                       else if (genHist) "http_request_latency"
                       else if (genDeltaHist) "http_request_latency_delta"
+                      else if (genPromCounter) "heap_usage_counter0"
+                      else "heap_usage_delta0"
 
     val promQL = s"""$metricName{_ns_="App-0",_ws_="demo"}"""
 
@@ -95,7 +101,7 @@ object TestTimeseriesProducer extends StrictLogging {
     val (shardQueues, containerStream) = GatewayServer.shardingPipeline(GlobalConfig.systemConfig, numShards, dataset)
 
     val producingFut = Future {
-      timeSeriesData(startTimeMs, numTimeSeries, numMetricNames, publishIntervalSec)
+      timeSeriesData(startTimeMs, numTimeSeries, numMetricNames, publishIntervalSec, gauge)
         .take(numSamples)
         .foreach { rec =>
           val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
@@ -115,7 +121,8 @@ object TestTimeseriesProducer extends StrictLogging {
   def timeSeriesData(startTime: Long,
                      numTimeSeries: Int,
                      numMetricNames: Int,
-                     publishIntervalSec: Int): Stream[InputRecord] = {
+                     publishIntervalSec: Int,
+                     schema: Schema): Stream[InputRecord] = {
     // TODO For now, generating a (sinusoidal + gaussian) time series. Other generators more
     // closer to real world data can be added later.
     Stream.from(0).flatMap { n =>
@@ -138,7 +145,43 @@ object TestTimeseriesProducer extends StrictLogging {
                      "instance"   -> s"Instance-$instance")
 
       (0 until numMetricNames).map { i =>
-        PrometheusInputRecord(tags, "heap_usage" + i, timestamp, value)
+        if (schema == Schemas.deltaCounter)
+          DeltaCounterRecord(tags, "heap_usage_delta" + i, timestamp, value)
+        else
+          PrometheusInputRecord(tags, "heap_usage" + i, timestamp, value)
+      }
+    }
+  }
+
+  def timeSeriesCounterData(startTime: Long,
+                     numTimeSeries: Int,
+                     numMetricNames: Int,
+                     publishIntervalSec: Int): Stream[InputRecord] = {
+    // TODO For now, generating a (sinusoidal + gaussian) time series. Other generators more
+    // closer to real world data can be added later.
+    val valMap: mutable.HashMap[Map[String, String], Double] = mutable.HashMap.empty[Map[String, String], Double]
+    Stream.from(0).flatMap { n =>
+      val instance = n % numTimeSeries
+      val dc = instance & oneBitMask
+      val partition = (instance >> 1) & twoBitMask
+      val app = 0 // (instance >> 3) & twoBitMask // commented to get high-cardinality in one app
+      val host = (instance >> 4) & twoBitMask
+      val timestamp = startTime + (n.toLong / numTimeSeries) * publishIntervalSec * 1000
+
+      val tags = Map("dc" -> s"DC$dc",
+        "_ws_" -> "demo",
+        "_ns_" -> s"App-$app",
+        "partition" -> s"partition-$partition",
+        "partitionAl" -> s"partition-$partition",
+        "longTag" -> "AlonglonglonglonglonglonglonglonglonglonglonglonglonglongTag",
+        "host" -> s"H$host",
+        "hostAlias" -> s"H$host",
+        "instance" -> s"Instance-$instance")
+      var value: Double = valMap.getOrElse(tags, 0)
+      value += (15 + Math.sin(n + 1) + rand.nextGaussian())
+      valMap(tags) = value
+      (0 until numMetricNames).map { i =>
+        PrometheusCounterRecord(tags, "heap_usage_counter" + i, timestamp, value)
       }
     }
   }
@@ -184,7 +227,11 @@ object TestTimeseriesProducer extends StrictLogging {
       val app = 0 // (instance >> 3) & twoBitMask // commented to get high-cardinality in one app
       val host = (instance >> 4) & twoBitMask
       val timestamp = startTime + (n.toLong / numTimeSeries) * 10000 // generate 1 sample every 10s for each instance
-
+      // reset buckets for delta histograms
+      if (Schemas.deltaHistogram == histSchema && prevTimestamp != timestamp) {
+        prevTimestamp = timestamp
+        buckets = new Array[Long](numBuckets)
+      }
       updateBuckets(n % numBuckets)
       val hist = bv.LongHistogram(histBucketScheme, buckets.map(x => x))
       val count = util.Random.nextInt(100).toDouble
@@ -196,13 +243,6 @@ object TestTimeseriesProducer extends StrictLogging {
                      partUTF8 -> s"partition-$partition".utf8,
                      hostUTF8 -> s"H$host".utf8,
                      instUTF8 -> s"Instance-$instance".utf8)
-
-      // reset buckets for delta histograms
-      if (Schemas.deltaHistogram == histSchema && prevTimestamp != timestamp) {
-        prevTimestamp = timestamp
-        buckets = new Array[Long](numBuckets)
-        updateBuckets(0)
-      }
 
       new MetricTagInputRecord(Seq(timestamp, sum, count, hist), metric, tags, histSchema)
     }

@@ -1,9 +1,12 @@
 package filodb.core.query
 
+import java.util.Objects
+
 import scala.reflect.runtime.universe._
 
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
+import net.ceedubs.ficus.Ficus._
 import org.joda.time.DateTime
 
 import filodb.core.binaryrecord2.RecordSchema
@@ -21,12 +24,22 @@ final case class PartitionInfo(schema: RecordSchema, base: Array[Byte], offset: 
 }
 
 /**
- * Describes column/field name and type
+ * Describes column/field name and type.
+ * isCumulative is not considered for equality/Hashcode.
  */
-final case class ColumnInfo(name: String, colType: Column.ColumnType)
+final case class ColumnInfo(name: String, colType: Column.ColumnType, isCumulative: Boolean = true) {
+  override def equals(obj: Any): Boolean = obj match {
+    case ColumnInfo(n: String, ct: Column.ColumnType, _) => n == name && ct == colType
+    case _ => false
+  }
+  override def hashCode(): Int = Objects.hash(name, colType)
+}
 
 object ColumnInfo {
-  def apply(col: Column): ColumnInfo = ColumnInfo(col.name, col.columnType)
+  def apply(col: Column): ColumnInfo = ColumnInfo(col.name, col.columnType, isCumulative(col))
+  private def isCumulative(col: Column): Boolean =
+    col.params.as[Option[Boolean]]("detectDrops").getOrElse(false) ||
+      col.params.as[Option[Boolean]]("counter").getOrElse(false)
 }
 
 /**

@@ -2,12 +2,10 @@
 package filodb.prometheus.parse
 
 import scala.collection.JavaConverters._
-
 import com.typesafe.scalalogging.StrictLogging
 import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.misc.ParseCancellationException
 import org.antlr.v4.runtime.tree.{ParseTree, TerminalNode}
-
 import filodb.prometheus.antlr.{PromQLBaseVisitor, PromQLLexer, PromQLParser}
 import filodb.prometheus.ast._
 
@@ -17,6 +15,7 @@ import filodb.prometheus.ast._
   * auto-generated classes need to be rebuilt, and then additional changes are required here.
   */
 object AntlrParser extends StrictLogging {
+
   /**
     * Main entry point.
     */
@@ -103,9 +102,9 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
 
   override def visitSubquery(ctx: PromQLParser.SubqueryContext): SubqueryClause = {
     val list = ctx.DURATION
-    val window = parseDuration(list.get(0))
-    val step = if (list.size() > 1) Some(parseDuration(list.get(1))) else None
-    SubqueryClause(window, step)
+    val windowDuration = parseDuration(list.get(0))
+    val stepDuration = if (list.size() > 1) Some(parseDuration(list.get(1))) else None
+    SubqueryClause(windowDuration, stepDuration)
   }
 
   override def visitBinaryOperation(ctx: PromQLParser.BinaryOperationContext): BinaryExpression = {
@@ -381,8 +380,11 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
   /**
    * Given a string and an index to begin parsing, returns the first Duration parsed.
    * Additionally returns the index to begin parsing for the next Duration.
+   * Intended as a helper method to [[getTotalSecondsFromAntlrDurationString]].
+   * Example: str="1d2h30m10s",istart=2 -> (2h, 4)
+   * @return an occupied Option iff the duration's value is > 0
    */
-  private def parseSingleDurationFromString(str: String, istart: Int): (Duration, Int)  = {
+  private def parseSingleDurationFromString(str: String, istart: Int): (Option[Duration], Int)  = {
     var istop = istart + 1
     while (istop < str.length && !str(istop).isLetter) {
       istop += 1
@@ -398,34 +400,49 @@ class AntlrParser extends PromQLBaseVisitor[Object] {
       case 'i' => IntervalMultiple
     }
     val nextIstart = istop + 1
-    (Duration(value, unit), nextIstart)
+    val duration = if (value > 0) {
+      // Duration throws exception if value==0
+      Some(Duration(value, unit))
+    } else None
+    (duration, nextIstart)
   }
 
   /**
-   * Returns the total Duration of all duration time/unit pairs in the string.
-   * Example:
-   *     "1m30s" -> Duration(90.0, Second)
+   * Returns the sum of all duration time/unit pairs in the [[PromQLParser.DURATION]] string.
+   * Example: "1m30s" -> 90000
    * Cannot be used with IntervalMultiple "i" notation.
+   * This is intended to be a helper method to [[parseDuration]].
+   * @return the sum of durations (in seconds)
    */
-  private def parseDurationNoInterval(str: String): Duration = {
+  private def getTotalSecondsFromAntlrDurationString(str: String): Long = {
     var i = 0
-    var totalMillis = 0d
+    var totalSeconds = 0L
     while (i < str.length) {
-      val (dur, inext) = parseSingleDurationFromString(str, i)
-      totalMillis += dur.millis(0)
+      val (duration, inext) = parseSingleDurationFromString(str, i)
+      if (duration.isDefined) {
+        assert(duration.get.timeUnit != IntervalMultiple,
+          "'i' notation should not be parsed as part of a multi-unit duration")
+        totalSeconds += duration.get.millis(0) / 1000
+      }
       i = inext
     }
-    // Feels wrong to add a Milliseconds Duration type, so just using seconds.
-    Duration(totalMillis / 1000, Second)
+    totalSeconds
   }
 
+  /**
+   * Returns the sum Duration of all duration time/unit pairs in the string.
+   * Example: "1m30s" -> 90000
+   */
   private def parseDuration(node: TerminalNode): Duration = {
     val str = node.getSymbol.getText
     if (str.last == 'i') {
-      val (dur, _) = parseSingleDurationFromString(str, 0)
-      dur
+      val (duration, _) = parseSingleDurationFromString(str, 0)
+      assert(duration.isDefined, "interval notation cannot have value 0")
+      duration.get
     } else {
-      parseDurationNoInterval(str)
+      val seconds = getTotalSecondsFromAntlrDurationString(str)
+      assert(seconds > 0, "bracket-notation duration cannot be zero")
+      Duration(seconds, Second)
     }
   }
 }
