@@ -18,19 +18,19 @@ class QueryRangeSimulation extends Simulation {
   object Configuration {
     val baseUrl = "http://localhost:8080"
     val numApps = 1
-    val numUsers = 20
+    val numUsers = 10
     val testDuration = 3.minutes
-    val startSecs = 1670818224L // Before each run, change this to the right timestamp relevant to data stored in server
+    val startSecs = 1678298250L // Before each run, change this to the right timestamp relevant to data stored in server
 
     // Uncomment one query from here:
-    val queryName = "BinaryJoin"
-    val query = """count(heap_usage0{_ns_="App-$appNum",_ws_="demo"} + heap_usage1{_ns_="App-$appNum",_ws_="demo"})"""
+//    val queryName = "BinaryJoin"
+//    val query = """count(heap_usage0{_ns_="App-$appNum",_ws_="demo"} + heap_usage1{_ns_="App-$appNum",_ws_="demo"})"""
 
 //    val queryName = "SumOfSumOverTime"
 //    val query = """sum(sum_over_time(heap_usage0{_ns_="App-$appNum",_ws_="demo"}[5m]))"""
 
-//    val queryName = "GetAllTimeseriesQuery"
-//    val query = """heap_usage0{_ns_="App-$appNum",_ws_="demo"}"""
+    val queryName = "GetAllTimeseriesQuery"
+    val query = """heap_usage0{_ns_="App-$appNum",_ws_="demo", host="H1"} or vector(0)"""
 
   }
 

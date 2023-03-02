@@ -30,6 +30,7 @@ object InstantFunctionId extends Enum[InstantFunctionId] {
   case object Minute extends InstantFunctionId("minute")
   case object Month extends InstantFunctionId("month")
   case object Year extends InstantFunctionId("year")
+  case object OrVectorDouble extends InstantFunctionId("or_vector")
 }
 
 

@@ -658,12 +658,16 @@ class SingleClusterPlanner(val dataset: Dataset,
   override def materializeBinaryJoin(qContext: QueryContext,
                                      lp: BinaryJoin,
                                      forceInProcess: Boolean): PlanResult = {
-    // see materializeWithPushdown for details about the pushdown optimization.
-    val pushdownShards = getPushdownShards(qContext, lp)
-    if (pushdownShards.isDefined) {
-      materializeWithPushdown(qContext, lp, pushdownShards.get, forceInProcess)
-    } else {
-      materializeBinaryJoinNoPushdown(qContext, lp, forceInProcess, None)
+
+    optimizeOrVectorZero(qContext, lp).getOrElse {
+
+      // see materializeWithPushdown for details about the pushdown optimization.
+      val pushdownShards = getPushdownShards(qContext, lp)
+      if (pushdownShards.isDefined) {
+        materializeWithPushdown(qContext, lp, pushdownShards.get, forceInProcess)
+      } else {
+        materializeBinaryJoinNoPushdown(qContext, lp, forceInProcess, None)
+      }
     }
   }
 

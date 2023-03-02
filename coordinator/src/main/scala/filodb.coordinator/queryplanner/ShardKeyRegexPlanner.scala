@@ -135,29 +135,32 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
    * LHS and RHS could be across multiple partitions
    */
   private def materializeBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): PlanResult = {
-    val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
-      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
-    val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
-      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
 
-    // FIXME, Optimize and push the lhs and rhs to wrapped planner if they belong to same partition
+    optimizeOrVectorZero(qContext, logicalPlan).getOrElse {
+      val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+        copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
+      val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+        copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
 
-    val lhsExec = materialize(logicalPlan.lhs, lhsQueryContext)
-    val rhsExec = materialize(logicalPlan.rhs, rhsQueryContext)
+      // FIXME, Optimize and push the lhs and rhs to wrapped planner if they belong to same partition
 
-    val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
-      SetOperatorExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-        LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
-        LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn,
-        rvRangeFromPlan(logicalPlan))
-    else
-      BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-        logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
-        LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
-        LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn,
-        rvRangeFromPlan(logicalPlan))
+      val lhsExec = materialize(logicalPlan.lhs, lhsQueryContext)
+      val rhsExec = materialize(logicalPlan.rhs, rhsQueryContext)
 
-    PlanResult(Seq(execPlan))
+      val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
+        SetOperatorExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+          LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn,
+          rvRangeFromPlan(logicalPlan))
+      else
+        BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+          logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn,
+          rvRangeFromPlan(logicalPlan))
+
+      PlanResult(Seq(execPlan))
+    }
   }
 
   private def canSupportMultiPartitionCalls(execPlans: Seq[ExecPlan]): Boolean =
