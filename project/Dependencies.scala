@@ -13,6 +13,7 @@ object Dependencies {
   val excludeNetty  = ExclusionRule(organization = "io.netty", name = "netty-handler")
   val excludeXBean = ExclusionRule(organization = "org.apache.xbean", name = "xbean-asm6-shaded")
   val excludegrpc = ExclusionRule(organization = "io.grpc")
+  val excludeAkka = ExclusionRule(organization = "com.typesafe.akka")
 
 
   /* Versions in various modules versus one area of build */
@@ -109,13 +110,13 @@ object Dependencies {
   lazy val coordDeps = commonDeps ++ Seq(
     "com.typesafe.akka"      %% "akka-slf4j"                  % akkaVersion,
     "com.typesafe.akka"      %% "akka-cluster"                % akkaVersion withJavadoc(),
-    "io.altoo"               %% "akka-kryo-serialization"     % "1.0.0" excludeAll(excludeMinlog, excludeOldLz4),
-    "de.javakaffee"          % "kryo-serializers"             % "0.42" excludeAll(excludeMinlog),
+    "io.altoo"               %% "akka-kryo-serialization"     % "1.0.0" excludeAll(excludeMinlog, excludeOldLz4,excludeAkka),
+    "de.javakaffee"          % "kryo-serializers"             % "0.42" excludeAll(excludeMinlog,excludeAkka),
     "io.kamon"               %% "kamon-prometheus"            % kamonBundleVersion,
     // Redirect minlog logs to SLF4J
     "com.dorkbox"            % "MinLog-SLF4J"                 % "1.12",
     "com.opencsv"            % "opencsv"                      % "3.3",
-    "org.sisioh"             %% "akka-cluster-custom-downing" % "0.0.21",
+    "org.sisioh"             %% "akka-cluster-custom-downing" % "0.0.21" excludeAll(excludeAkka),
     "com.typesafe.akka"      %% "akka-testkit"                % akkaVersion % Test,
     "com.typesafe.akka"      %% "akka-multi-node-testkit"     % akkaVersion % Test,
     "org.apache.commons" % "commons-text" % "1.9"
