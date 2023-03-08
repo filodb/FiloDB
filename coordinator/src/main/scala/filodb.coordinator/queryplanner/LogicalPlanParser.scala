@@ -51,12 +51,6 @@ object LogicalPlanParser {
       map(f => f._1 + f._2 + f._3).mkString(Comma)}$ClosingCurlyBraces" + window + offsetString
   }
 
-  private def filtersToMetadataQuery(filters: Seq[(String, String, String)]): String = {
-    s"$OpeningCurlyBraces${
-      filters.map(f => f._1 + f._2 + f._3).mkString(Comma)
-    }$ClosingCurlyBraces"
-  }
-
   private def rawSeriesLikeToQuery(lp: RawSeriesLikePlan, addWindow: Boolean): String = {
     lp match {
       case r: RawSeries               => filtersToQuery(getFiltersFromRawSeries(r), r.columns, r.lookbackMs,
