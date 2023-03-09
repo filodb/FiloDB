@@ -1211,7 +1211,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
     val (startSeconds: Int, endSeconds: Int, engine: MultiPartitionPlanner) = getPlannerForMetadataQueryTests
     val lv = SeriesKeysByFilters(ColumnFilter("job", Equals("app"))::ColumnFilter("__name__", Equals("test"))::Nil,
       true, startSeconds * 1000 , endSeconds * 1000)
-    val promQl = """test{job="app"}"""
+    val promQl = """{job="app",__name__="test"}"""
     val promQlQueryParams = PromQlQueryParams(promQl, startSeconds, step, endSeconds)
     val execPlan = engine.materialize(lv, QueryContext(origQueryParams = promQlQueryParams, plannerParams =
       PlannerParams(processMultiPartition = true)))
@@ -1231,7 +1231,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
   it("should materialize LabelNames query correctly") {
     val (startSeconds: Int, endSeconds: Int, engine: MultiPartitionPlanner) = getPlannerForMetadataQueryTests
 
-    val promQl = """test{job="app"}"""
+    val promQl = """{job="app",__name__="test"}"""
     val lv = Parser.labelNamesQueryToLogicalPlan(promQl, TimeStepParams(startSeconds, step, endSeconds))
 
     val promQlQueryParams = PromQlQueryParams(promQl, startSeconds, step, endSeconds, Some("/api/v2/labels/name"))
