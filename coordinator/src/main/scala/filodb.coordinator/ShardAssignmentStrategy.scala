@@ -46,12 +46,28 @@ trait ShardAssignmentStrategy {
  * The implementation assumes the number of shards is a multiple of number of nodes and there are no
  * uneven assignments of shards to nodes
  */
-class K8sStatefulSetShardAssignmentStrategy(val maxAssignmentAttempts: Int = 8)
+class K8sStatefulSetShardAssignmentStrategy(val maxAssignmentAttempts: Int = 8,
+                                            val headlessServiceName: Option[String] = None)
       extends ShardAssignmentStrategy with StrictLogging {
 
   private val pat = "-\\d+$".r
 
-  private[coordinator] def getOrdinalFromActorRef(coord: ActorRef): Option[(String, Int)] =
+  private[coordinator] def getOrdinalFromActorRef(coord: ActorRef): Option[(String, Int)] = {
+    // If a headless service is available that lists all the pod's hostnames and addresses, we use that to lookup
+    // hostname from ip address, this approach avoids reverse lookup using ip address. If headless service is not
+    // defined, the approach falls back to lookup hostname from ipaddress using reverse lookup.
+    headlessServiceName.map(headlessServiceName => {
+      coord.path.address.host
+        .flatMap(host => InetAddress.getAllByName(headlessServiceName)
+          .filter(_.getHostAddress == host).headOption.map(_.getCanonicalHostName))
+        .orElse(Some(InetAddress.getLocalHost.getHostName))
+        .map(name => if (name.contains(".")) name.substring(0, name.indexOf('.')) else name)
+        .flatMap(hostName =>
+          Some((hostName, pat.findFirstIn(hostName).map(ordinal => -Integer.parseInt(ordinal)).getOrElse(-1))))
+    }).getOrElse(getOrdinalFromActorRefUsingReverseLookup(coord))
+  }
+
+  private[coordinator] def getOrdinalFromActorRefUsingReverseLookup(coord: ActorRef): Option[(String, Int)] =
     // if hostname is None from coordinator actor path, then its a local actor
     // If the host name does not contain an ordinal at the end (e.g filodb-host-0, filodb-host-10), it will match None
     coord.path.address.host
