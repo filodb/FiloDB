@@ -412,6 +412,10 @@ trait  DefaultPlanner {
    * Function to optimize and convert `foo or vector(0)` like queries which would normally
    * result in an expensive SetOperatorExec plan into a simple InstantFunctionMapper
    * which is far more efficient.
+   *
+   * Note that vector(0) on left side of operator, example `vector(0) or foo` is not
+   * optimized yet since it is uncommon and almost unseen, and not worth the additional
+   * complexity at the moment.
    */
   def optimizeOrVectorDouble(qContext: QueryContext, logicalPlan: BinaryJoin): Option[PlanResult] = {
     if (logicalPlan.operator == BinaryOperator.LOR) {
