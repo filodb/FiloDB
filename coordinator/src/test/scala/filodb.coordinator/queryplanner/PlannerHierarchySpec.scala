@@ -129,7 +129,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
           Seq(ColumnFilter("_ws_", Equals("demo")), ColumnFilter("_ns_", Equals("remoteNs")))
         )
       }
-    } else{
+    } else {
       Nil
     }  // i.e. filters for a scalar
   }
@@ -231,6 +231,87 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
 
     validatePlan(execPlan, expected)
   }
+
+  it("should optimize plan for shard key regex query that has vector(0)") {
+    val query = """sum(foo{_ws_ = "demo", _ns_ =~ ".*Ns", instance = "Inst-1" }) or vector(0)"""
+    val queryParams = PromQlQueryParams(query, startSeconds, step, endSeconds)
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(startSeconds, step, endSeconds), Antlr)
+    val execPlan = rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams,
+      plannerParams = PlannerParams(processMultiPartition = true)))
+
+    val expected =
+      """T~InstantVectorFunctionMapper(function=OrVectorDouble)
+        |-FA1~StaticFuncArgs(0.0,RangeParams(1633913330,300,1634777330))
+        |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1633913330,300,1634777330))
+        |--E~MultiPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on InProcessPlanDispatcher
+        |---E~StitchRvsExec() on InProcessPlanDispatcher
+        |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |------T~PeriodicSamplesMapper(start=1634173130000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1634172830000,1634777330000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |------T~PeriodicSamplesMapper(start=1634173130000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634172830000,1634777330000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
+        |----E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testActor],downsample)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |------T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634172830000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1633913030000,1634172830000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],downsample)
+        |-----T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+        |------T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634172830000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633913030000,1634172830000), filters=List(ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],downsample)
+        |---E~PromQlRemoteExec(PromQlQueryParams(sum(foo{instance="Inst-1",_ws_="demo",_ns_="remoteNs"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,true,true,false,false), queryEndpoint=remotePartition-url, requestTimeoutMs=10000) on InProcessPlanDispatcher""".stripMargin
+
+    validatePlan(execPlan, expected)
+  }
+
+  it("should optimize plan for remote partition query that has vector(0)") {
+    val query = """sum(foo{_ws_ = "demo", _ns_ = "RemoteNs", instance = "Inst-1" }) or vector(0)"""
+    val queryParams = PromQlQueryParams(query, startSeconds, step, endSeconds)
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(startSeconds, step, endSeconds), Antlr)
+    val execPlan = rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams,
+      plannerParams = PlannerParams(processMultiPartition = true)))
+
+    val expected =
+      """E~PromQlRemoteExec(PromQlQueryParams(sum(foo{_ws_ = "demo", _ns_ = "RemoteNs", instance = "Inst-1" }) or vector(0),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remotePartition-url, requestTimeoutMs=10000) on InProcessPlanDispatcher""".stripMargin
+
+    validatePlan(execPlan, expected)
+  }
+
+  it("should optimize plan for local+remote partition query that has vector(0)") {
+    val query =
+      """(foo{_ws_ = "demo", _ns_ = "localNs", instance = "Inst-1" } or vector(0)) +
+         (bar{_ws_ = "demo", _ns_ = "remoteNs0", instance = "Inst-1" } or vector(0))"""
+    val queryParams = PromQlQueryParams(query, startSeconds, step, endSeconds)
+    val lp = Parser.queryRangeToLogicalPlan(query, TimeStepParams(startSeconds, step, endSeconds), Antlr)
+    val execPlan = rootPlanner.materialize(lp, QueryContext(origQueryParams = queryParams,
+      plannerParams = PlannerParams(processMultiPartition = true)))
+
+    val expected =
+      """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher
+        |-E~StitchRvsExec() on InProcessPlanDispatcher
+        |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
+        |---T~InstantVectorFunctionMapper(function=OrVectorDouble)
+        |----FA1~StaticFuncArgs(0.0,RangeParams(1634173130,300,1634777330))
+        |----T~PeriodicSamplesMapper(start=1634173130000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1634172830000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
+        |---T~InstantVectorFunctionMapper(function=OrVectorDouble)
+        |----FA1~StaticFuncArgs(0.0,RangeParams(1634173130,300,1634777330))
+        |----T~PeriodicSamplesMapper(start=1634173130000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634172830000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],raw)
+        |--E~LocalPartitionDistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testActor],downsample)
+        |---T~InstantVectorFunctionMapper(function=OrVectorDouble)
+        |----FA1~StaticFuncArgs(0.0,RangeParams(1633913330,300,1634172830))
+        |----T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634172830000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1633913030000,1634172830000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],downsample)
+        |---T~InstantVectorFunctionMapper(function=OrVectorDouble)
+        |----FA1~StaticFuncArgs(0.0,RangeParams(1633913330,300,1634172830))
+        |----T~PeriodicSamplesMapper(start=1633913330000, step=300000, end=1634172830000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1633913030000,1634172830000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(instance,Equals(Inst-1)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testActor],downsample)
+        |-E~PromQlRemoteExec(PromQlQueryParams((bar{_ws_="demo",_ns_="remoteNs0",instance="Inst-1"} or vector(0.0)),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,false,true,false,false), queryEndpoint=remotePartition-url, requestTimeoutMs=10000) on InProcessPlanDispatcher""".stripMargin
+
+    validatePlan(execPlan, expected)
+  }
+
 
   it("should not pushdown root scalar operation into a RemoteExec's promql when query spans multiple partitions") {
     val queryExpectedPairs = Seq(
@@ -1340,31 +1421,31 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
         QueryContext(origQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(lp))))
     val expectedPlan =
         """T~AggregatePresenter(aggrOp=Min, aggrParams=List(), rangeParams=RangeParams(1634777330,300,1634777330))
-           |-E~LocalPartitionReduceAggregateExec(aggrOp=Min, aggrParams=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@66e21568)
-           |--T~AggregateMapReduce(aggrOp=Min, aggrParams=List(), without=List(), by=List())
-           |---E~BinaryJoinExec(binaryOp=DIV, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@66e21568)
-           |----T~ScalarOperationMapper(operator=SUB, scalarOnLhs=true)
-           |-----FA1~StaticFuncArgs(1000.0,RangeParams(1634777330,300,1634777330))
-           |-----T~PeriodicSamplesMapper(start=1634777330000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
-           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1634777030000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1012526996],raw)
-           |----T~ScalarOperationMapper(operator=SUB, scalarOnLhs=true)
-           |-----FA1~StaticFuncArgs(1000.0,RangeParams(1634777330,300,1634777330))
-           |-----T~PeriodicSamplesMapper(start=1634777330000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
-           |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634777030000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1012526996],raw)
-           |----E~SetOperatorExec(binaryOp=LOR, on=List(), ignoring=List()) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@66e21568)
-           |-----T~ScalarOperationMapper(operator=GTR, scalarOnLhs=false)
-           |------FA1~StaticFuncArgs(0.0,RangeParams(1634777330,300,1634777330))
-           |------T~PeriodicSamplesMapper(start=1634777330000, step=300000, end=1634777330000, window=Some(3600000), functionId=Some(Delta), rawSource=true, offsetMs=None)
-           |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1634773730000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1012526996],raw)
-           |-----T~ScalarOperationMapper(operator=GTR, scalarOnLhs=false)
-           |------FA1~StaticFuncArgs(0.0,RangeParams(1634777330,300,1634777330))
-           |------T~PeriodicSamplesMapper(start=1634777330000, step=300000, end=1634777330000, window=Some(3600000), functionId=Some(Delta), rawSource=true, offsetMs=None)
-           |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634773730000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1012526996],raw)
-           |-----T~VectorFunctionMapper(funcParams=List())
-           |------E~ScalarFixedDoubleExec(params = RangeParams(1634777330,300,1634777330), value = 1.0) on InProcessPlanDispatcher(filodb.core.query.QueryConfig@66e21568)""".stripMargin
+          |-E~LocalPartitionReduceAggregateExec(aggrOp=Min, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1563309325],raw)
+          |--T~AggregateMapReduce(aggrOp=Min, aggrParams=List(), without=List(), by=List())
+          |---E~BinaryJoinExec(binaryOp=DIV, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1563309325],raw)
+          |----T~ScalarOperationMapper(operator=SUB, scalarOnLhs=true)
+          |-----FA1~StaticFuncArgs(1000.0,RangeParams(1634777330,300,1634777330))
+          |-----T~PeriodicSamplesMapper(start=1634777330000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1634777030000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1563309325],raw)
+          |----T~ScalarOperationMapper(operator=SUB, scalarOnLhs=true)
+          |-----FA1~StaticFuncArgs(1000.0,RangeParams(1634777330,300,1634777330))
+          |-----T~PeriodicSamplesMapper(start=1634777330000, step=300000, end=1634777330000, window=None, functionId=None, rawSource=true, offsetMs=None)
+          |------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634777030000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1563309325],raw)
+          |----T~InstantVectorFunctionMapper(function=OrVectorDouble)
+          |-----FA1~StaticFuncArgs(1.0,RangeParams(1634777330,300,1634777330))
+          |-----T~ScalarOperationMapper(operator=GTR, scalarOnLhs=false)
+          |------FA1~StaticFuncArgs(0.0,RangeParams(1634777330,300,1634777330))
+          |------T~PeriodicSamplesMapper(start=1634777330000, step=300000, end=1634777330000, window=Some(3600000), functionId=Some(Delta), rawSource=true, offsetMs=None)
+          |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=0, chunkMethod=TimeRangeChunkScan(1634773730000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1563309325],raw)
+          |----T~InstantVectorFunctionMapper(function=OrVectorDouble)
+          |-----FA1~StaticFuncArgs(1.0,RangeParams(1634777330,300,1634777330))
+          |-----T~ScalarOperationMapper(operator=GTR, scalarOnLhs=false)
+          |------FA1~StaticFuncArgs(0.0,RangeParams(1634777330,300,1634777330))
+          |------T~PeriodicSamplesMapper(start=1634777330000, step=300000, end=1634777330000, window=Some(3600000), functionId=Some(Delta), rawSource=true, offsetMs=None)
+          |-------E~MultiSchemaPartitionsExec(dataset=timeseries, shard=1, chunkMethod=TimeRangeChunkScan(1634773730000,1634777330000), filters=List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(localNs)), ColumnFilter(_metric_,Equals(foo))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1563309325],raw)""".stripMargin
     validatePlan(execPlan, expectedPlan)
   }
-
 
   // SinglePartitionPlanner tests
 
@@ -2436,8 +2517,6 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
                                          timeRange: TimeRange): List[PartitionAssignment] = ???
     }
 
-
-
     val oneRemoteMpPlanner = new MultiPartitionPlanner(singleRemotePartitionLocationProvider, singlePartitionPlanner,
       "localPartition", dataset, queryConfig)
     val oneRemoteShardKeyRegexPlanner = new ShardKeyRegexPlanner(dataset, oneRemoteMpPlanner, twoRemoteShardKeyMatcherFn, queryConfig)
@@ -2485,9 +2564,5 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
         |--E~PromQlRemoteExec(PromQlQueryParams(sum(test{instance="Inst-1",_ws_="demo",_ns_="remoteNs0"}),1633913330,300,1634777330,None,false), PlannerParams(filodb,None,None,None,None,60000,1000000,100000,100000,18000000,false,86400000,86400000,true,true,false,false), queryEndpoint=remotePartition-url1, requestTimeoutMs=10000) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,Some(10000),None,true,false,true,Set(remotepartition1)))""".stripMargin
 
     validatePlan(execPlan10, expectedPlan10)
-
-
-
-
   }
 }
