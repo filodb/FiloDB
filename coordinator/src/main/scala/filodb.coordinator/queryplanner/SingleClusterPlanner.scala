@@ -659,7 +659,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                                      lp: BinaryJoin,
                                      forceInProcess: Boolean): PlanResult = {
 
-    optimizeOrVectorZero(qContext, lp).getOrElse {
+    optimizeOrVectorDouble(qContext, lp).getOrElse {
 
       // see materializeWithPushdown for details about the pushdown optimization.
       val pushdownShards = getPushdownShards(qContext, lp)

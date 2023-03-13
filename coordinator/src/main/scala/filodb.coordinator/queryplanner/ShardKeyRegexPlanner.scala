@@ -136,7 +136,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
    */
   private def materializeBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): PlanResult = {
 
-    optimizeOrVectorZero(qContext, logicalPlan).getOrElse {
+    optimizeOrVectorDouble(qContext, logicalPlan).getOrElse {
       val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
         copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
       val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].

@@ -413,7 +413,7 @@ trait  DefaultPlanner {
    * result in an expensive SetOperatorExec plan into a simple InstantFunctionMapper
    * which is far more efficient.
    */
-  def optimizeOrVectorZero(qContext: QueryContext, logicalPlan: BinaryJoin): Option[PlanResult] = {
+  def optimizeOrVectorDouble(qContext: QueryContext, logicalPlan: BinaryJoin): Option[PlanResult] = {
     if (logicalPlan.operator == BinaryOperator.LOR) {
       logicalPlan.rhs match {
         case VectorPlan(ScalarFixedDoublePlan(value, rangeParams)) =>
@@ -431,7 +431,7 @@ trait  DefaultPlanner {
                             logicalPlan: BinaryJoin,
                             forceInProcess: Boolean = false): PlanResult = {
 
-    optimizeOrVectorZero(qContext, logicalPlan).getOrElse {
+    optimizeOrVectorDouble(qContext, logicalPlan).getOrElse {
       val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
         copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
       val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
