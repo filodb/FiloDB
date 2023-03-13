@@ -34,6 +34,8 @@ object MiscCommands {
    * Asks for the NodeClusterActor ActorRef.  Sends back Option[ActorRef].
    */
   case object GetClusterActor extends NodeCommand
+
+  case object GetHostName extends NodeCommand
 }
 
 object IngestionCommands {
