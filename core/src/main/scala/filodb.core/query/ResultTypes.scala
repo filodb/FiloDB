@@ -37,9 +37,11 @@ final case class ColumnInfo(name: String, colType: Column.ColumnType, isCumulati
 
 object ColumnInfo {
   def apply(col: Column): ColumnInfo = ColumnInfo(col.name, col.columnType, isCumulative(col))
-  private def isCumulative(col: Column): Boolean =
-    col.params.as[Option[Boolean]]("detectDrops").getOrElse(false) ||
+  private def isCumulative(col: Column): Boolean = {
+    // FIXME: hack for supporting rate/increase functions for untyped metrics
+    col.params.as[Option[Boolean]]("detectDrops").getOrElse(true) ||
       col.params.as[Option[Boolean]]("counter").getOrElse(false)
+  }
 }
 
 /**
