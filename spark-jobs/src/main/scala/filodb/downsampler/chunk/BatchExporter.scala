@@ -42,7 +42,9 @@ object BatchExporter {
    * Converts a label's value to a value of an exported row's LABELS column.
    */
   def getExportLabelValueString(value: String): String = {
-    value.replaceAll("""\\(\")|(\")""", """\\$1$2""")
+    value
+      // escape all single- and double-quotes if they aren't already escaped
+      .replaceAll("""\\(\"|\')|(\"|\')""", """\\$1$2""")
   }
 }
 

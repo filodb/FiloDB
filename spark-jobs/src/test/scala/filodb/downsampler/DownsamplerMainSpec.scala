@@ -377,16 +377,17 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     batchExporter.getPartitionByValues(labels).toSeq shouldEqual expected
   }
 
-  it ("should correctly escape double-quotes in a label's value") {
+  it ("should correctly escape quotes in a label's value prior to export") {
     val inputOutputPairs = Map(
       // empty string
       "" -> "",
+      // no quotes
+      """ abc """ -> """ abc """,
+      // ======= DOUBLE QUOTES =======
       // single double-quote
       """"""" -> """\"""",
       // double-quote pair
       """ "" """ -> """ \"\" """,
-      // no quotes
-      """ abc """ -> """ abc """,
       // escaped quote
       """ \" """ -> """ \" """,
       // double-escaped quote
@@ -398,7 +399,26 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       // escaped quote at beginning of string; unescaped at end
       """\"foo"""" -> """\"foo\"""",
       // complex string
-      """ "foo\" " ""\""\ bar "baz" """ -> """ \"foo\" \" \"\"\"\"\ bar \"baz\" """
+      """ "foo\" " ""\""\ bar "baz" """ -> """ \"foo\" \" \"\"\"\"\ bar \"baz\" """,
+      // ======= SINGLE QUOTES =======
+      // single single-quote
+      """'""" -> """\'""",
+      // single-quote pair
+      """ '' """ -> """ \'\' """,
+      // escaped quote
+      """ \' """ -> """ \' """,
+      // double-escaped quote
+      """ \\' """ -> """ \\' """,
+      // double-escaped quote pair
+      """ \\'' """ -> """ \\'\' """,
+      // unescaped quote at beginning of string; escaped at end
+      """'foo\'""" -> """\'foo\'""",
+      // escaped quote at beginning of string; unescaped at end
+      """\'foo'""" -> """\'foo\'""",
+      // complex string
+      """ 'foo\' ' ''\''\ bar 'baz' """ -> """ \'foo\' \' \'\'\'\'\ bar \'baz\' """,
+      // ======= SINGLE AND DOUBLE QUOTES =======
+      """ 'foo\" ' "'\'"\ bar 'baz" """ -> """ \'foo\" \' \"\'\'\"\ bar \'baz\" """
     )
     for ((value, expected) <- inputOutputPairs) {
       BatchExporter.getExportLabelValueString(value) shouldEqual expected
