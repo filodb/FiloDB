@@ -46,8 +46,8 @@ object BatchExporter {
    */
   def getExportLabelValueString(value: String): String = {
     value
-      // escape all single- and double-quotes if they aren't already escaped
-      .replaceAll("""\\(\"|\')|(\"|\')""", """\\$1$2""")
+      // escape all single-quotes and commas if they aren't already escaped
+      .replaceAll("""\\(\,|\')|(\,|\')""", """\\$1$2""")
   }
 }
 
