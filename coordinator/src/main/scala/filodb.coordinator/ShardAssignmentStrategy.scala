@@ -2,15 +2,19 @@ package filodb.coordinator
 
 import java.net.InetAddress
 
+import scala.concurrent.Await
+import scala.concurrent.duration._
+import scala.util.{Failure, Success, Try}
+
 import akka.actor.ActorRef
+import akka.pattern.ask
+import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator.NodeClusterActor.DatasetResourceSpec
+import filodb.coordinator.client.MiscCommands
 import filodb.core.DatasetRef
 import filodb.memory.data.Shutdown
-
-
-
 
 trait ShardAssignmentStrategy {
 
@@ -52,15 +56,25 @@ class K8sStatefulSetShardAssignmentStrategy(val maxAssignmentAttempts: Int = 8)
   private val pat = "-\\d+$".r
 
   private[coordinator] def getOrdinalFromActorRef(coord: ActorRef): Option[(String, Int)] =
-    // if hostname is None from coordinator actor path, then its a local actor
-    // If the host name does not contain an ordinal at the end (e.g filodb-host-0, filodb-host-10), it will match None
-    coord.path.address.host
-      .map(host => InetAddress.getByName(host).getHostName)
-      .orElse(Some(InetAddress.getLocalHost.getHostName))
-      .map(name => if (name.contains(".")) name.substring(0, name.indexOf('.')) else name)
-      .flatMap(hostName =>
-        Some((hostName, pat.findFirstIn(hostName).map(ordinal => -Integer.parseInt(ordinal)).getOrElse(-1))))
+    Try {
+      // IMP: This is not an ideal solution as this blocks on actor dispatcher thread. Clustering V2 is the preferred
+      // approch but this is acceptable as an interim solution.
+      implicit val timeout = Timeout(5.seconds)
+      val coordinatorHostName = coord.path.address.host
+        .map(_ => Await.result((coord ? MiscCommands.GetHostName).mapTo[String],
+          FilodbSettings.globalOrDefault.DefaultTaskTimeout)).getOrElse(InetAddress.getLocalHost.getHostName)
 
+      val hostName = if (coordinatorHostName.contains("."))
+        coordinatorHostName.substring(0, coordinatorHostName.indexOf('.'))
+      else coordinatorHostName
+
+      (hostName, pat.findFirstIn(hostName).map(ordinal => -Integer.parseInt(ordinal)).getOrElse(-1))
+    } match {
+      case Failure(exception) =>
+        logger.error("Failure in getting ordinal from ActorRef", exception)
+        None
+      case Success(value) => Some(value)
+    }
 
   override def shardAssignments(coord: ActorRef,
                        dataset: DatasetRef,
