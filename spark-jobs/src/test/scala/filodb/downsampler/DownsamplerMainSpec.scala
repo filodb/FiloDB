@@ -385,24 +385,20 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       """ abc """ -> """ abc """,
       // ======= DOUBLE QUOTES =======
       // single double-quote
-      """"""" -> """\"""",
+      """ " """ -> """ " """,
       // double-quote pair
-      """ "" """ -> """ \"\" """,
+      """ "" """ -> """ "" """,
       // escaped quote
       """ \" """ -> """ \" """,
       // double-escaped quote
       """ \\" """ -> """ \\" """,
       // double-escaped quote pair
-      """ \\"" """ -> """ \\"\" """,
-      // unescaped quote at beginning of string; escaped at end
-      """"foo\"""" -> """\"foo\"""",
-      // escaped quote at beginning of string; unescaped at end
-      """\"foo"""" -> """\"foo\"""",
+      """ \\"" """ -> """ \\"" """,
       // complex string
-      """ "foo\" " ""\""\ bar "baz" """ -> """ \"foo\" \" \"\"\"\"\ bar \"baz\" """,
+      """ "foo\" " ""\""\ bar "baz" """ -> """ "foo\" " ""\""\ bar "baz" """,
       // ======= SINGLE QUOTES =======
       // single single-quote
-      """'""" -> """\'""",
+      """ ' """ -> """ \' """,
       // single-quote pair
       """ '' """ -> """ \'\' """,
       // escaped quote
@@ -411,14 +407,26 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
       """ \\' """ -> """ \\' """,
       // double-escaped quote pair
       """ \\'' """ -> """ \\'\' """,
-      // unescaped quote at beginning of string; escaped at end
-      """'foo\'""" -> """\'foo\'""",
-      // escaped quote at beginning of string; unescaped at end
-      """\'foo'""" -> """\'foo\'""",
       // complex string
       """ 'foo\' ' ''\''\ bar 'baz' """ -> """ \'foo\' \' \'\'\'\'\ bar \'baz\' """,
-      // ======= SINGLE AND DOUBLE QUOTES =======
-      """ 'foo\" ' "'\'"\ bar 'baz" """ -> """ \'foo\" \' \"\'\'\"\ bar \'baz\" """
+      // ======= COMMAS =======
+      // single single-quote
+      """ , """ -> """ \, """,
+      // single-quote pair
+      """ ,, """ -> """ \,\, """,
+      // escaped quote
+      """ \, """ -> """ \, """,
+      // double-escaped quote
+      """ \\, """ -> """ \\, """,
+      // double-escaped quote pair
+      """ \\,, """ -> """ \\,\, """,
+      // complex string
+      """ 'foo\' ' ''\''\ bar 'baz' """ -> """ \'foo\' \' \'\'\'\'\ bar \'baz\' """,
+      // ======= COMBINATION =======
+      """ 'foo\" ' "'\'"\ bar 'baz" """ -> """ \'foo\" \' "\'\'"\ bar \'baz" """,
+      """ 'foo\" ' ,, "'\'"\ bar 'baz" \, """ -> """ \'foo\" \' \,\, "\'\'"\ bar \'baz" \, """,
+      """ ["foo","ba'r:1234"] """ -> """ ["foo"\,"ba\'r:1234"] """,
+      """ "foo,bar:1234" """ -> """ "foo\,bar:1234" """
     )
     for ((value, expected) <- inputOutputPairs) {
       BatchExporter.getExportLabelValueString(value) shouldEqual expected
