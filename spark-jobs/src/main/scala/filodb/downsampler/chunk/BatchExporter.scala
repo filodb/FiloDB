@@ -3,14 +3,11 @@ package filodb.downsampler.chunk
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
-
 import scala.collection.mutable
 import scala.util.matching.Regex
-
 import kamon.Kamon
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types.{DoubleType, LongType, StringType, StructField, StructType}
-
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn}
 import filodb.core.metadata.Schemas
@@ -18,7 +15,7 @@ import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.Utils._
-import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER}
+import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER, getExportLabelValueString}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
 import filodb.memory.format.vectors.LongIterator
 
@@ -40,6 +37,13 @@ case class ExportRowData(partKeyMap: collection.Map[String, String],
 object BatchExporter {
   val LABEL_REGEX_MATCHER: Regex = """\{\{(.*)\}\}""".r
   val DATE_REGEX_MATCHER: Regex = """<<(.*)>>""".r
+
+  /**
+   * Converts a label's value to a value of an exported row's LABELS column.
+   */
+  def getExportLabelValueString(value: String): String = {
+    value.replaceAll("""\\(\")|(\")""", """\\$1$2""")
+  }
 }
 
 /**
@@ -209,7 +213,7 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   }
 
   private def makeLabelString(labels: collection.Map[String, String]): String = {
-    val inner = labels.map {case (k, v) =>
+    val inner = labels.map {case (k, v) => (k, getExportLabelValueString(v))}.map {case (k, v) =>
       if (v.contains (",") ) {
         String.format ("'%s\':\"%s\"", k, v)
       } else {

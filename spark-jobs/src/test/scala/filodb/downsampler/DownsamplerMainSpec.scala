@@ -377,6 +377,34 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     batchExporter.getPartitionByValues(labels).toSeq shouldEqual expected
   }
 
+  it ("should correctly escape double-quotes in a label's value") {
+    val inputOutputPairs = Map(
+      // empty string
+      "" -> "",
+      // single double-quote
+      """"""" -> """\"""",
+      // double-quote pair
+      """ "" """ -> """ \"\" """,
+      // no quotes
+      """ abc """ -> """ abc """,
+      // escaped quote
+      """ \" """ -> """ \" """,
+      // double-escaped quote
+      """ \\" """ -> """ \\" """,
+      // double-escaped quote pair
+      """ \\"" """ -> """ \\"\" """,
+      // unescaped quote at beginning of string; escaped at end
+      """"foo\"""" -> """\"foo\"""",
+      // escaped quote at beginning of string; unescaped at end
+      """\"foo"""" -> """\"foo\"""",
+      // complex string
+      """ "foo\" " ""\""\ bar "baz" """ -> """ \"foo\" \" \"\"\"\"\ bar \"baz\" """
+    )
+    for ((value, expected) <- inputOutputPairs) {
+      BatchExporter.getExportLabelValueString(value) shouldEqual expected
+    }
+  }
+
   it ("should write untyped data to cassandra") {
 
     val rawDataset = Dataset("prometheus", Schemas.untyped)
