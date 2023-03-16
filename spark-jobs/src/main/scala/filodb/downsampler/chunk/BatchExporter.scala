@@ -218,13 +218,10 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   }
 
   private def makeLabelString(labels: collection.Map[String, String]): String = {
-    val inner = labels.map {case (k, v) => (k, getExportLabelValueString(v))}.map {case (k, v) =>
-      if (v.contains (",") ) {
-        String.format ("'%s\':\"%s\"", k, v)
-      } else {
-        s"'$k':'$v'"
-      }
-    }.mkString (",")
+    val inner = labels
+      .map {case (k, v) => (k, getExportLabelValueString(v))}
+      .map {case (k, v) => s"'$k':'$v'"}
+      .mkString (",")
     s"{$inner}"
   }
 
