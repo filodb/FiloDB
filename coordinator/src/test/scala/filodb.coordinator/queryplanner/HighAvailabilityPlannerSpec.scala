@@ -2,8 +2,7 @@ package filodb.coordinator.queryplanner
 
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
-import com.typesafe.config.ConfigFactory
-
+import com.typesafe.config.{ConfigFactory, ConfigValueFactory}
 import filodb.coordinator.ShardMapper
 import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
@@ -13,7 +12,6 @@ import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query._
 import filodb.query.exec._
-
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -31,7 +29,7 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
   private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
 
-  private val routingConfigString = "routing {\n  remote {\n    http {\n" +
+  private val routingConfigString = "routing {partition_name = p1 \n  remote {\n    http {\n" +
       "      endpoint = localhost\n      timeout = 10000\n    }\n  }\n}"
 
   private val routingConfig = ConfigFactory.parseString(routingConfigString)
@@ -117,6 +115,68 @@ class HighAvailabilityPlannerSpec extends AnyFunSpec with Matchers {
     val queryParams = execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     queryParams.startSecs shouldEqual(from/1000)
     queryParams.endSecs shouldEqual(to/1000)
+  }
+
+
+  it("should generate PromQLGrpcExec when failure is present only in local and remote gRPC is configured") {
+    val to = 10000
+    val from = 100
+    val intervalSelector = IntervalSelector(from, to)
+    val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
+    val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, AggregateClause.byOpt(Seq("job")))
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef,
+          TimeRange(1000, 6000), false))
+      }
+    }
+
+    val queryConfigWithGrpcEndpoint = QueryConfig(
+      config.withValue("routing.remote.grpc.endpoint", ConfigValueFactory.fromAnyRef("grpcEndpoint")))
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfigWithGrpcEndpoint)
+
+    val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
+
+    execPlan.isInstanceOf[PromQLGrpcRemoteExec] shouldEqual (true)
+    val queryParams = execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    queryParams.startSecs shouldEqual(from/1000)
+    queryParams.endSecs shouldEqual(to/1000)
+    execPlan.queryContext.plannerParams.processFailure shouldEqual false
+    execPlan.asInstanceOf[PromQLGrpcRemoteExec].channel.authority() shouldEqual "grpcEndpoint"
+  }
+
+  it("should generate PromQLRemoteExec when failure is present in local, remote gRPC is configured " +
+    "but partition is denied") {
+    val to = 10000
+    val from = 100
+    val intervalSelector = IntervalSelector(from, to)
+    val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
+    val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, AggregateClause.byOpt(Seq("job")))
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef,
+          TimeRange(1000, 6000), false))
+      }
+    }
+
+    val queryConfigWithGrpcEndpoint = QueryConfig(
+      config.withValue("routing.remote.grpc.endpoint", ConfigValueFactory.fromAnyRef("grpcEndpoint")))
+      .copy(grpcPartitionsDenyList = Set("*"))
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfigWithGrpcEndpoint)
+
+    val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
+
+    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+    val queryParams = execPlan.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    queryParams.startSecs shouldEqual(from/1000)
+    queryParams.endSecs shouldEqual(to/1000)
+    execPlan.queryContext.plannerParams.processFailure shouldEqual false
   }
 
   it("should generate RemoteExecPlan with RawSeries time according to lookBack") {

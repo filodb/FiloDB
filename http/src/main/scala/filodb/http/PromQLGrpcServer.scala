@@ -1,19 +1,19 @@
 package filodb.http
 
-import java.util.concurrent.TimeUnit
+import akka.pattern.AskTimeoutException
 
+import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Success, Try}
-
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ServerBuilder
 import io.grpc.netty.NettyServerBuilder
 import io.grpc.stub.StreamObserver
 import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
-
 import filodb.coordinator.FilodbSettings
 import filodb.coordinator.queryplanner.QueryPlanner
+import filodb.core.QueryTimeoutException
 import filodb.core.query.{IteratorBackedRangeVector, QueryContext, QueryStats, SerializedRangeVector}
 import filodb.grpc.GrpcMultiPartitionQueryService
 import filodb.grpc.RemoteExecGrpc.RemoteExecImplBase
@@ -51,7 +51,10 @@ class PromQLGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings,
             queryPlanner.dispatchExecPlan(exec, kamon.Kamon.currentSpan()).foreach(f)
           }
           eval match {
-            case Failure(t)   => f(QueryError(config.queryId, QueryStats(), t))
+            case Failure(t)   =>
+              if (t.isInstanceOf[QueryTimeoutException] || t.isInstanceOf[AskTimeoutException])
+                // TODO: Handle Ask Timeouts
+              f(QueryError(config.queryId, QueryStats(), t))
             case _            => //Nop, for success we dont care as the response is already notified
           }
         }
