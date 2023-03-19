@@ -65,4 +65,5 @@ case class QueryConfig(askTimeout: FiniteDuration,
                        enforceResultByteLimit: Boolean = false,
                        allowPartialResultsRangeQuery: Boolean = false,
                        allowPartialResultsMetadataQuery: Boolean = true,
-                       grpcPartitionsDenyList: Set[String] = Set.empty)
+                       grpcPartitionsDenyList: Set[String] = Set.empty,
+                       plannerSelector: Option[String] = None)

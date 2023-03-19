@@ -1,16 +1,19 @@
 package filodb.http
 
-import akka.pattern.AskTimeoutException
 
 import java.util.concurrent.TimeUnit
+
 import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Success, Try}
+
+import akka.pattern.AskTimeoutException
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ServerBuilder
 import io.grpc.netty.NettyServerBuilder
 import io.grpc.stub.StreamObserver
 import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
+
 import filodb.coordinator.FilodbSettings
 import filodb.coordinator.queryplanner.QueryPlanner
 import filodb.core.QueryTimeoutException
@@ -22,7 +25,8 @@ import filodb.prometheus.parse.Parser
 import filodb.query._
 
 
-class PromQLGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings, scheduler: Scheduler)
+class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
+                       filoSettings: FilodbSettings, scheduler: Scheduler)
   extends StrictLogging {
 
   val port  = filoSettings.allConfig.getInt("filodb.grpc.bind-grpc-port")
@@ -42,6 +46,7 @@ class PromQLGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings,
           val config = QueryContext(origQueryParams = request.getQueryParams.fromProto,
             plannerParams = request.getPlannerParams.fromProto)
           val eval = Try {
+            val queryPlanner = queryPlannerSelector(request.getPlannerSelector)
             // Catch parsing errors, query materialization and errors in dispatch
             val logicalPlan = Parser.queryRangeToLogicalPlan(
               queryParams.getPromQL(),

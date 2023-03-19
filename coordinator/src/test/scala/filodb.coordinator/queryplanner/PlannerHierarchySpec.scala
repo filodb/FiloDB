@@ -34,7 +34,7 @@ class PlannerHierarchySpec extends AnyFunSpec with Matchers with PlanValidationS
   private val routingConfig = ConfigFactory.parseString(routingConfigString)
 
   private val config = ConfigFactory.load("application_test.conf").getConfig("filodb.query").withFallback(routingConfig)
-  private val queryConfig = QueryConfig(config)
+  private val queryConfig = QueryConfig(config).copy(plannerSelector = Some("plannerSelector"))
 
   private val now = 1634777330000L
 

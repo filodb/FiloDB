@@ -79,7 +79,8 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
           val planner = new SingleClusterPlanner(dataset, Schemas.global,
             shardMapper,
             earliestRetainedTimestampFn = 0, queryConfig, "raw")
-          promQLGrpcServer = new PromQLGrpcServer(planner, cluster.settings, GlobalScheduler.globalImplicitScheduler)
+          promQLGrpcServer = new PromQLGrpcServer(_ => planner,
+            cluster.settings, GlobalScheduler.globalImplicitScheduler)
           promQLGrpcServer.start()
         case None              =>
           logger.warn("Unable to get shardMapper, not starting gRPC service")

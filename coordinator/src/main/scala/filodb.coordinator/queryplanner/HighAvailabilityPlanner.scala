@@ -48,6 +48,9 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   val partitionName = queryConfig.partitionName
     .getOrElse(throw new IllegalArgumentException("partitionName config needed"))
 
+  val plannerSelector: String = queryConfig.plannerSelector
+    .getOrElse(throw new IllegalArgumentException("plannerSelector is mandatory"))
+
   val remoteGrpcEndpoint: Option[String] = queryConfig.remoteGrpcEndpoint
 
   if(remoteGrpcEndpoint.isDefined)
@@ -124,7 +127,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
                 val endpoint = remoteGrpcEndpoint.get
                 val channel = channels.getOrElseUpdate(endpoint, GrpcCommonUtils.buildChannelFromEndpoint(endpoint))
                 PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, newQueryContext, inProcessPlanDispatcher,
-                  dsRef)
+                  dsRef, plannerSelector)
               } else
                 PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                             newQueryContext, inProcessPlanDispatcher, dsRef, remoteExecHttpClient)

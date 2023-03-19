@@ -40,6 +40,7 @@ message Request {
       QueryParams queryParams       = 1;
       PlannerParams plannerParams   = 2;
       string dataset                = 3;
+      string plannerSelector        = 4;
 }
 
 message StreamingErrorResponse {
