@@ -18,7 +18,7 @@ import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.Utils._
-import filodb.downsampler.chunk.BatchExporter.{getExportLabelValueString, DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER}
+import filodb.downsampler.chunk.BatchExporter.{DATE_REGEX_MATCHER, LABEL_REGEX_MATCHER}
 import filodb.memory.format.{TypedIterator, UnsafeUtils}
 import filodb.memory.format.vectors.LongIterator
 
@@ -40,15 +40,6 @@ case class ExportRowData(partKeyMap: collection.Map[String, String],
 object BatchExporter {
   val LABEL_REGEX_MATCHER: Regex = """\{\{(.*)\}\}""".r
   val DATE_REGEX_MATCHER: Regex = """<<(.*)>>""".r
-
-  /**
-   * Converts a label's value to a value of an exported row's LABELS column.
-   */
-  def getExportLabelValueString(value: String): String = {
-    value
-      // escape all single-quotes and commas if they aren't already escaped
-      .replaceAll("""\\(\,|\')|(\,|\')""", """\\$1$2""")
-  }
 }
 
 /**
@@ -218,10 +209,13 @@ case class BatchExporter(downsamplerSettings: DownsamplerSettings, userStartTime
   }
 
   private def makeLabelString(labels: collection.Map[String, String]): String = {
-    val inner = labels
-      .map {case (k, v) => (k, getExportLabelValueString(v))}
-      .map {case (k, v) => s"'$k':'$v'"}
-      .mkString (",")
+    val inner = labels.map {case (k, v) =>
+      if (v.contains (",") ) {
+        String.format ("'%s\':\"%s\"", k, v)
+      } else {
+        s"'$k':'$v'"
+      }
+    }.mkString (",")
     s"{$inner}"
   }
 
