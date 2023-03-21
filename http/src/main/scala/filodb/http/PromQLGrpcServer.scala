@@ -6,7 +6,6 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Success, Try}
 
-import akka.pattern.AskTimeoutException
 import com.typesafe.scalalogging.StrictLogging
 import io.grpc.ServerBuilder
 import io.grpc.netty.NettyServerBuilder
@@ -16,14 +15,12 @@ import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.FilodbSettings
 import filodb.coordinator.queryplanner.QueryPlanner
-import filodb.core.QueryTimeoutException
 import filodb.core.query.{IteratorBackedRangeVector, QueryContext, QueryStats, SerializedRangeVector}
 import filodb.grpc.GrpcMultiPartitionQueryService
 import filodb.grpc.RemoteExecGrpc.RemoteExecImplBase
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query._
-
 
 class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
                        filoSettings: FilodbSettings, scheduler: Scheduler)
@@ -57,8 +54,7 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
           }
           eval match {
             case Failure(t)   =>
-              if (t.isInstanceOf[QueryTimeoutException] || t.isInstanceOf[AskTimeoutException])
-                // TODO: Handle Ask Timeouts
+              logger.error("Caught failure while executing query", t)
               f(QueryError(config.queryId, QueryStats(), t))
             case _            => //Nop, for success we dont care as the response is already notified
           }

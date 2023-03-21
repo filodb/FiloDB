@@ -155,7 +155,9 @@ object ProtoConverters {
         UnavailablePromQlQueryParams
       else
         PromQlQueryParams(promQl = qp.getPromQL, startSecs = qp.getStart,
-          stepSecs = qp.getStep, endSecs = qp.getEnd, verbose = qp.getVerbose)
+          stepSecs = qp.getStep, endSecs = qp.getEnd,
+          remoteQueryPath = if (qp.hasRemoteQueryPath) Some(qp.getRemoteQueryPath) else None,
+          verbose = qp.getVerbose)
     }
   }
 
@@ -165,7 +167,7 @@ object ProtoConverters {
       val builder = QueryParams.newBuilder()
       qp match {
         case UnavailablePromQlQueryParams => builder.setIsUnavailable(true)
-        case PromQlQueryParams(promQl, startSecs, stepSecs, endSecs, _, verbose) =>
+        case PromQlQueryParams(promQl, startSecs, stepSecs, endSecs, remoteQueryPath, verbose) =>
           builder.setIsUnavailable(false)
           builder.setPromQL(promQl)
           builder.setStart(startSecs)
@@ -173,6 +175,8 @@ object ProtoConverters {
           builder.setEnd(endSecs)
           builder.setVerbose(verbose)
           builder.setTime(endSecs)
+          if (remoteQueryPath.isDefined)
+            builder.setRemoteQueryPath(remoteQueryPath.get)
       }
       builder.build()
     }
@@ -288,8 +292,10 @@ object ProtoConverters {
     def toProto: GrpcMultiPartitionQueryService.Throwable = {
       val builder = GrpcMultiPartitionQueryService.Throwable.newBuilder()
       builder.setMessage(t.getMessage)
-      if (t.getCause != null)
+      if (t.getCause != null) {
         builder.setCause(t.getCause.toProto)
+        builder.setExceptionClass(t.getClass.getName)
+      }
       t.getStackTrace.iterator.foreach(elem => builder.addStack(elem.toProto))
       builder.build()
     }

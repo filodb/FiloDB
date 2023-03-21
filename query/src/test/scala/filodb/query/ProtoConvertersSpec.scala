@@ -72,6 +72,10 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val params = PromQlQueryParams(promQl = "cpu_utilization{host=\"foo\"}", startSecs = 0, stepSecs = 10,
       endSecs = 100 , verbose = true)
     params.toProto.fromProto shouldEqual params
+
+    val params1 = PromQlQueryParams(promQl = "cpu_utilization{host=\"foo\"}", startSecs = 0, stepSecs = 10,
+      endSecs = 100 , verbose = true, remoteQueryPath = Some("/api/v1/query_range"))
+    params1.toProto.fromProto shouldEqual params1
   }
 
   it("should convert PlannerParams to proto and back") {

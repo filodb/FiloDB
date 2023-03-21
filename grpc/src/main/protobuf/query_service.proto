@@ -10,13 +10,14 @@ option java_generate_equals_and_hash = true;
 
 
 message QueryParams {
-      uint64 start                = 1;
-      uint64 end                  = 2;
-      uint64 step                 = 3;
-      uint64 time                 = 4;
-      string promQL               = 5;
-      bool verbose                = 6;
-      bool isUnavailable          = 7;
+      uint64 start                         = 1;
+      uint64 end                           = 2;
+      uint64 step                          = 3;
+      uint64 time                          = 4;
+      string promQL                        = 5;
+      bool verbose                         = 6;
+      bool isUnavailable                   = 7;
+      optional string remoteQueryPath      = 8;
 }
 
 message PlannerParams {
