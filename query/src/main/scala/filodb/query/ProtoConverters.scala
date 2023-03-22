@@ -1,13 +1,18 @@
 package filodb.query
 
+import java.util.concurrent.TimeoutException
+
 import com.google.protobuf.ByteString
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.binaryrecord2.{RecordContainer, RecordSchema}
+import filodb.core.memstore.SchemaMismatch
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.query._
 import filodb.grpc.{GrpcMultiPartitionQueryService, ProtoRangeVector}
 import filodb.grpc.GrpcMultiPartitionQueryService.QueryParams
+
+
 
 // scalastyle:off number.of.methods
 // scalastyle:off number.of.types
@@ -291,7 +296,25 @@ object ProtoConverters {
   implicit class ThrowableToProtoConverter(t: Throwable) {
     def toProto: GrpcMultiPartitionQueryService.Throwable = {
       val builder = GrpcMultiPartitionQueryService.Throwable.newBuilder()
-      builder.setMessage(t.getMessage)
+      t match {
+        case filodb.core.QueryTimeoutException(elapsedQueryTime, timedOutAt)                  =>
+                                                      builder.putMetadata("timedOutAt", timedOutAt)
+                                                      builder.putMetadata("elapsedQueryTime", s"$elapsedQueryTime")
+        case SchemaMismatch(expected, found, clazz)                                           =>
+                                                      builder.putMetadata("expected", expected)
+                                                      builder.putMetadata("found", found)
+                                                      builder.putMetadata("clazz", clazz)
+        case RemoteQueryFailureException(statusCode, requestStatus, errorType, errorMessage)  =>
+                                                      builder.putMetadata("statusCode", s"$statusCode")
+                                                      builder.putMetadata("requestStatus", requestStatus)
+                                                      builder.putMetadata("errorType", errorType)
+                                                      builder.putMetadata("errorMessage", errorMessage)
+
+        case _                                                                                =>
+                                                      if (t.getMessage != null) builder.setMessage(t.getMessage)
+
+      }
+      builder.setExceptionClass(t.getClass.getName)
       if (t.getCause != null) {
         builder.setCause(t.getCause.toProto)
         builder.setExceptionClass(t.getClass.getName)
@@ -305,10 +328,46 @@ object ProtoConverters {
   implicit class ThrowableFromProtoConverter(throwableProto: GrpcMultiPartitionQueryService.Throwable) {
     def fromProto: Throwable = {
       import scala.collection.JavaConverters._
-      val t = if (throwableProto.hasCause)
-                new Throwable(throwableProto.getMessage, throwableProto.getCause.fromProto)
-              else
-                new Throwable(throwableProto.getMessage)
+      val cause = if (throwableProto.hasCause) Some(throwableProto.getCause.fromProto) else None
+      // to avoid multiple combinations, we will treat null message as an empty string
+      val message  = if (throwableProto.hasMessage) throwableProto.getMessage else ""
+      val t = throwableProto.getExceptionClass match {
+        case "filodb.core.QueryTimeoutException"     =>
+                  val metaMap = throwableProto.getMetadataMap
+                  val eqt = metaMap.getOrDefault("elapsedQueryTime", "0").toLong
+                  val timedOutAt = metaMap.getOrDefault("timedOutAt", "")
+                  filodb.core.QueryTimeoutException(eqt, timedOutAt)
+        case "java.lang.IllegalArgumentException"    =>
+            cause.map(new IllegalArgumentException(throwableProto.getMessage, _))
+              .getOrElse(new IllegalArgumentException(throwableProto.getMessage))
+        case "java.lang.UnsupportedOperationException"    =>
+          cause.map(new UnsupportedOperationException(throwableProto.getMessage, _))
+            .getOrElse(new UnsupportedOperationException(throwableProto.getMessage))
+        case "filodb.query.BadQueryException"        =>
+            new BadQueryException(if (throwableProto.hasMessage) throwableProto.getMessage else "")
+        case "java.util.concurrent.TimeoutException" =>
+          if (throwableProto.hasMessage) new TimeoutException(throwableProto.getMessage)
+          else new TimeoutException()
+        case "scala.NotImplementedError" =>
+          new NotImplementedError(message)
+        case "filodb.core.memstore.SchemaMismatch" =>
+                val metaMap = throwableProto.getMetadataMap
+                val expected = metaMap.getOrDefault("expected", "")
+                val found = metaMap.getOrDefault("found", "")
+                val clazz = metaMap.getOrDefault("clazz", "")
+                SchemaMismatch(expected, found, clazz)
+        case "filodb.core.query.ServiceUnavailableException"  =>
+          new ServiceUnavailableException(message)
+        case "filodb.query.RemoteQueryFailureException"       =>
+          val metaMap = throwableProto.getMetadataMap
+          val statusCode = metaMap.getOrDefault("statusCode", "0").toInt
+          val requestStatus = metaMap.getOrDefault("requestStatus", "")
+          val errorType = metaMap.getOrDefault("errorType", "")
+          val errorMessage = metaMap.getOrDefault("errorMessage", "")
+          RemoteQueryFailureException(statusCode, requestStatus, errorType, errorMessage)
+        case _          =>
+            cause.map(new Throwable(message, _)).getOrElse(new Throwable(message))
+      }
       t.setStackTrace(
         throwableProto.getStackList.asScala.iterator
         .map(e => new StackTraceElement(e.getDeclaringClass, e.getMethodName, e.getFileName, e.getLineNumber)).toArray)

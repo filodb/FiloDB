@@ -91,6 +91,7 @@ message Throwable {
   optional Throwable cause           = 2;
   repeated StackTraceElement stack   = 3;
   string exceptionClass              = 4;
+  map<string, string> metadata       = 5;
 }
 
 message Response {
