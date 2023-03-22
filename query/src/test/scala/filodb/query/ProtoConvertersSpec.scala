@@ -269,7 +269,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val origQueryResult = StreamQueryResult("id", srv)
 
     val successResp = origQueryResult.toProto.fromProto.asInstanceOf[StreamQueryResult]
-    successResp.id shouldEqual origQueryResult.id
+    successResp.queryId shouldEqual origQueryResult.queryId
     successResp.result.isInstanceOf[SerializedRangeVector] shouldEqual true
     val deserializedSrv = successResp.result.asInstanceOf[SerializedRangeVector]
     deserializedSrv.numRows shouldEqual Some(11)
@@ -291,7 +291,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
 
     val err = StreamQueryError("id", qStats, new IllegalArgumentException("Args"))
     val deser = err.toProto.fromProto.asInstanceOf[StreamQueryError]
-    deser.id shouldEqual err.id
+    deser.queryId shouldEqual err.queryId
     deser.queryStats shouldEqual err.queryStats
     // Throwable is not constructed to the same type as original
     deser.t.getMessage shouldEqual err.t.getMessage

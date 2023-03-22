@@ -45,27 +45,31 @@ message Request {
 }
 
 message StreamingErrorResponse {
-  string id                                      = 1;
+  string queryId                                 = 1;
   QueryResultStats stats                         = 2;
   Throwable throwable                            = 3;
+  string planId                                  = 4;
 }
 
 message StreamingBodyResponse {
-  string id                                      = 1;
+  string queryId                                 = 1;
   SerializableRangeVector result                 = 2;
+  string planId                                  = 3;
 }
 
 message StreamingFooterResponse {
-  string id                                      = 1;
+  string queryId                                 = 1;
   QueryResultStats stats                         = 2;
   bool mayBePartial                              = 3;
   optional string partialResultReason            = 4;
+  string planId                                  = 5;
 }
 
 
 message StreamingHeaderResponse {
-  string id                                      = 1;
+  string queryId                                 = 1;
   ResultSchema resultSchema                      = 2;
+  string planId                                  = 3;
 }
 
 message StreamingResponse {

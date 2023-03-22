@@ -449,29 +449,29 @@ object ProtoConverters {
     def toProto: GrpcMultiPartitionQueryService.StreamingResponse = {
       val builder = GrpcMultiPartitionQueryService.StreamingResponse.newBuilder()
       response match {
-        case StreamQueryResultHeader(id, resultSchema) =>
+        case StreamQueryResultHeader(queryId, resultSchema) =>
                                     builder.setHeader(
                                     builder
                                       .getHeaderBuilder
-                                      .setId(id)
+                                      .setQueryId(queryId)
                                       .setResultSchema(resultSchema.toProto))
-        case StreamQueryResult(id, result) =>
-                                    builder.setBody(builder.getBodyBuilder.setId(id)
+        case StreamQueryResult(queryId, result) =>
+                                    builder.setBody(builder.getBodyBuilder.setQueryId(queryId)
                                       .setResult(result match {
                                         case srv: SerializableRangeVector   => srv.toProto
                                         case other: RangeVector             =>
                                           throw new IllegalStateException(s"Expected a SerializableRangeVector," +
                                             s"got ${other.getClass}")
                                       }))
-        case StreamQueryResultFooter(id, queryStats, mayBePartial, partialResultReason) =>
-                                  val footerBuilder = builder.getFooterBuilder.setId(id)
+        case StreamQueryResultFooter(queryId, queryStats, mayBePartial, partialResultReason) =>
+                                  val footerBuilder = builder.getFooterBuilder.setQueryId(queryId)
                                     .setStats(queryStats.toProto)
                                     .setMayBePartial(mayBePartial)
                                   partialResultReason.foreach(footerBuilder.setPartialResultReason)
                                   builder.setFooter(footerBuilder)
-        case StreamQueryError(id, queryStats, t) =>
+        case StreamQueryError(queryId, queryStats, t) =>
                                   builder.setError(
-                                    builder.getErrorBuilder.setId(id)
+                                    builder.getErrorBuilder.setQueryId(queryId)
                                       .setStats(queryStats.toProto).setThrowable(t.toProto)
                                   )
       }
@@ -485,18 +485,18 @@ object ProtoConverters {
       // Not checking optional type's existence
       if (responseProto.hasBody) {
         val body = responseProto.getBody
-        StreamQueryResult(body.getId, body.getResult.fromProto)
+        StreamQueryResult(body.getQueryId, body.getResult.fromProto)
       } else if (responseProto.hasFooter) {
         val footer = responseProto.getFooter
-        StreamQueryResultFooter(footer.getId, footer.getStats.fromProto,
+        StreamQueryResultFooter(footer.getQueryId, footer.getStats.fromProto,
           footer.getMayBePartial,
           if (footer.hasPartialResultReason) Some(footer.getPartialResultReason) else None)
       } else if (responseProto.hasHeader) {
         val header = responseProto.getHeader
-        StreamQueryResultHeader(header.getId, header.getResultSchema.fromProto)
+        StreamQueryResultHeader(header.getQueryId, header.getResultSchema.fromProto)
       } else {
         val error = responseProto.getError
-        StreamQueryError(error.getId, error.getStats.fromProto, error.getThrowable.fromProto)
+        StreamQueryError(error.getQueryId, error.getStats.fromProto, error.getThrowable.fromProto)
       }
     }
   }
@@ -520,10 +520,10 @@ object ProtoConverters {
               if (footer.hasPartialResultReason) Some(footer.getPartialResultReason) else None, t)
           } else if (response.hasHeader) {
             val header = response.getHeader
-            (header.getId, header.getResultSchema.fromProto, rvs, stats, isPartial, partialReason, t)
+            (header.getQueryId, header.getResultSchema.fromProto, rvs, stats, isPartial, partialReason, t)
           } else {
             val error = response.getError
-            (error.getId, schema, rvs, error.getStats.fromProto, isPartial,
+            (error.getQueryId, schema, rvs, error.getStats.fromProto, isPartial,
               partialReason, Some(error.getThrowable.fromProto))
           }
       } match {
