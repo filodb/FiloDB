@@ -121,22 +121,26 @@ object RowAggregator {
   def apply(aggrOp: AggregationOperator, params: Seq[Any], schema: ResultSchema): RowAggregator = {
     val valColType = ResultSchema.valueColumnType(schema)
     aggrOp match {
-      case Min      => MinRowAggregator
-      case Max      => MaxRowAggregator
+      case Min if valColType == ColumnType.DoubleColumn => MinRowAggregator
+      case Max if valColType == ColumnType.DoubleColumn => MaxRowAggregator
       case Sum if valColType == ColumnType.DoubleColumn => SumRowAggregator
       case Sum if isHistMax(valColType, schema)            => HistMaxSumAggregator
       case Sum if valColType == ColumnType.HistogramColumn => HistSumRowAggregator
       case Count if valColType == ColumnType.DoubleColumn    => CountRowAggregator.double
       case Count if valColType == ColumnType.HistogramColumn => CountRowAggregator.hist
-      case Group    => GroupRowAggregator
-      case Avg      => AvgRowAggregator
-      case TopK     => new TopBottomKRowAggregator(params(0).asInstanceOf[Double].toInt, false)
-      case BottomK  => new TopBottomKRowAggregator(params(0).asInstanceOf[Double].toInt, true)
-      case Quantile => new QuantileRowAggregator(params(0).asInstanceOf[Double])
-      case Stdvar   => StdvarRowAggregator
-      case Stddev   => StddevRowAggregator
+      case Group if valColType == ColumnType.DoubleColumn   => GroupRowAggregator
+      case Avg if valColType == ColumnType.DoubleColumn  => AvgRowAggregator
+      case TopK if valColType == ColumnType.DoubleColumn
+                  => new TopBottomKRowAggregator(params(0).asInstanceOf[Double].toInt, false)
+      case BottomK if valColType == ColumnType.DoubleColumn
+                  => new TopBottomKRowAggregator(params(0).asInstanceOf[Double].toInt, true)
+      case Quantile if valColType == ColumnType.DoubleColumn
+          => new QuantileRowAggregator(params(0).asInstanceOf[Double])
+      case Stdvar if valColType == ColumnType.DoubleColumn  => StdvarRowAggregator
+      case Stddev if valColType == ColumnType.DoubleColumn  => StddevRowAggregator
       case CountValues => new CountValuesRowAggregator(params(0).asInstanceOf[String])
-      case _     => ???
+      case _ => throw new IllegalArgumentException(s"This operation ${aggrOp} is not supported for ${valColType}." +
+      s" Because it does not result in a meaningful query. Please contact us if you have a use case.")
     }
   }
 }
