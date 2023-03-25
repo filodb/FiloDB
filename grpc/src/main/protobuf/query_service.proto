@@ -53,7 +53,7 @@ message StreamingErrorResponse {
 
 message StreamingBodyResponse {
   string queryId                                 = 1;
-  SerializableRangeVector result                 = 2;
+  repeated SerializableRangeVector result        = 2;
   string planId                                  = 3;
 }
 

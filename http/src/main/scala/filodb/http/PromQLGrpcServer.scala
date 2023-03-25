@@ -22,6 +22,16 @@ import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query._
 
+/**
+ *
+ * @param queryPlannerSelector a function that will map the datasetId (usually cluster-dataset but not always true) to
+ *                             a planner. Different planners will use different selectors. For example, HA planner will
+ *                             use raw-<dataset> for raw HA planner but multi partition planner uses
+ *                             singlepartition-<dataset> as the plannerSelector input to resolve the appropriate planner
+ *                             to use for materializing the query.
+ * @param filoSettings         FiloDB settings.
+ * @param scheduler            Scheduler used to dispatch the exec plan
+ */
 class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
                        filoSettings: FilodbSettings, scheduler: Scheduler)
   extends StrictLogging {

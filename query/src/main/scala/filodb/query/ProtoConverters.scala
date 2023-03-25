@@ -2,6 +2,8 @@ package filodb.query
 
 import java.util.concurrent.TimeoutException
 
+import scala.collection.JavaConverters._
+
 import com.google.protobuf.ByteString
 import com.typesafe.scalalogging.StrictLogging
 
@@ -457,7 +459,7 @@ object ProtoConverters {
                                       .setResultSchema(resultSchema.toProto))
         case StreamQueryResult(queryId, result) =>
                                     builder.setBody(builder.getBodyBuilder.setQueryId(queryId)
-                                      .setResult(result match {
+                                      .addResult(result match {
                                         case srv: SerializableRangeVector   => srv.toProto
                                         case other: RangeVector             =>
                                           throw new IllegalStateException(s"Expected a SerializableRangeVector," +
@@ -485,7 +487,7 @@ object ProtoConverters {
       // Not checking optional type's existence
       if (responseProto.hasBody) {
         val body = responseProto.getBody
-        StreamQueryResult(body.getQueryId, body.getResult.fromProto)
+        StreamQueryResult(body.getQueryId, body.getResult(0).fromProto)
       } else if (responseProto.hasFooter) {
         val footer = responseProto.getFooter
         StreamQueryResultFooter(footer.getQueryId, footer.getStats.fromProto,
@@ -513,7 +515,8 @@ object ProtoConverters {
         case ((id, schema, rvs, stats, isPartial, partialReason, t), response) =>
           if (response.hasBody) {
               val body = response.getBody
-              (id, schema, body.getResult.fromProto :: rvs, stats, isPartial, partialReason, t)
+              (id, schema,
+                body.getResultList.asScala.map(_.fromProto).toList::: rvs, stats, isPartial, partialReason, t)
           } else if (response.hasFooter) {
             val footer = response.getFooter
             (id, schema, rvs, footer.getStats.fromProto, footer.getMayBePartial,
