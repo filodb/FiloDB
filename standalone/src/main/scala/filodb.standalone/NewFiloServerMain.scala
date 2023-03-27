@@ -72,7 +72,8 @@ object NewFiloServerMain extends StrictLogging {
             val planner = new SingleClusterPlanner(new Dataset(dsRef.dataset, Schemas.promCounter), Schemas.global,
               shardMapper,
               earliestRetainedTimestampFn = 0, queryConfig, "raw")
-            val promQLGrpcServer = new PromQLGrpcServer(planner, settings, GlobalScheduler.globalImplicitScheduler)
+            val promQLGrpcServer = new PromQLGrpcServer(_ => planner, settings,
+              GlobalScheduler.globalImplicitScheduler)
             Runtime.getRuntime.addShutdownHook(new Thread() {
               override def run(): Unit = {
                 promQLGrpcServer.stop()

@@ -10,13 +10,14 @@ option java_generate_equals_and_hash = true;
 
 
 message QueryParams {
-      uint64 start                = 1;
-      uint64 end                  = 2;
-      uint64 step                 = 3;
-      uint64 time                 = 4;
-      string promQL               = 5;
-      bool verbose                = 6;
-      bool isUnavailable          = 7;
+      uint64 start                         = 1;
+      uint64 end                           = 2;
+      uint64 step                          = 3;
+      uint64 time                          = 4;
+      string promQL                        = 5;
+      bool verbose                         = 6;
+      bool isUnavailable                   = 7;
+      optional string remoteQueryPath      = 8;
 }
 
 message PlannerParams {
@@ -40,30 +41,35 @@ message Request {
       QueryParams queryParams       = 1;
       PlannerParams plannerParams   = 2;
       string dataset                = 3;
+      string plannerSelector        = 4;
 }
 
 message StreamingErrorResponse {
-  string id                                      = 1;
+  string queryId                                 = 1;
   QueryResultStats stats                         = 2;
   Throwable throwable                            = 3;
+  string planId                                  = 4;
 }
 
 message StreamingBodyResponse {
-  string id                                      = 1;
-  SerializableRangeVector result                 = 2;
+  string queryId                                 = 1;
+  repeated SerializableRangeVector result        = 2;
+  string planId                                  = 3;
 }
 
 message StreamingFooterResponse {
-  string id                                      = 1;
+  string queryId                                 = 1;
   QueryResultStats stats                         = 2;
   bool mayBePartial                              = 3;
   optional string partialResultReason            = 4;
+  string planId                                  = 5;
 }
 
 
 message StreamingHeaderResponse {
-  string id                                      = 1;
+  string queryId                                 = 1;
   ResultSchema resultSchema                      = 2;
+  string planId                                  = 3;
 }
 
 message StreamingResponse {
@@ -89,6 +95,7 @@ message Throwable {
   optional Throwable cause           = 2;
   repeated StackTraceElement stack   = 3;
   string exceptionClass              = 4;
+  map<string, string> metadata       = 5;
 }
 
 message Response {

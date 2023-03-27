@@ -1,5 +1,6 @@
 package filodb.http
 
+
 import java.util.concurrent.TimeUnit
 
 import scala.concurrent.duration.FiniteDuration
@@ -21,8 +22,18 @@ import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query._
 
-
-class PromQLGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings, scheduler: Scheduler)
+/**
+ *
+ * @param queryPlannerSelector a function that will map the datasetId (usually cluster-dataset but not always true) to
+ *                             a planner. Different planners will use different selectors. For example, HA planner will
+ *                             use raw-<dataset> for raw HA planner but multi partition planner uses
+ *                             singlepartition-<dataset> as the plannerSelector input to resolve the appropriate planner
+ *                             to use for materializing the query.
+ * @param filoSettings         FiloDB settings.
+ * @param scheduler            Scheduler used to dispatch the exec plan
+ */
+class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
+                       filoSettings: FilodbSettings, scheduler: Scheduler)
   extends StrictLogging {
 
   val port  = filoSettings.allConfig.getInt("filodb.grpc.bind-grpc-port")
@@ -42,6 +53,7 @@ class PromQLGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings,
           val config = QueryContext(origQueryParams = request.getQueryParams.fromProto,
             plannerParams = request.getPlannerParams.fromProto)
           val eval = Try {
+            val queryPlanner = queryPlannerSelector(request.getPlannerSelector)
             // Catch parsing errors, query materialization and errors in dispatch
             val logicalPlan = Parser.queryRangeToLogicalPlan(
               queryParams.getPromQL(),
@@ -51,7 +63,9 @@ class PromQLGrpcServer(queryPlanner: QueryPlanner, filoSettings: FilodbSettings,
             queryPlanner.dispatchExecPlan(exec, kamon.Kamon.currentSpan()).foreach(f)
           }
           eval match {
-            case Failure(t)   => f(QueryError(config.queryId, QueryStats(), t))
+            case Failure(t)   =>
+              logger.error("Caught failure while executing query", t)
+              f(QueryError(config.queryId, QueryStats(), t))
             case _            => //Nop, for success we dont care as the response is already notified
           }
         }

@@ -4,7 +4,9 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import filodb.core.query._
 import ProtoConverters._
+import filodb.core.QueryTimeoutException
 import filodb.core.binaryrecord2.RecordSchema
+import filodb.core.memstore.SchemaMismatch
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType
 import filodb.grpc.{GrpcMultiPartitionQueryService, ProtoRangeVector}
@@ -72,6 +74,10 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val params = PromQlQueryParams(promQl = "cpu_utilization{host=\"foo\"}", startSecs = 0, stepSecs = 10,
       endSecs = 100 , verbose = true)
     params.toProto.fromProto shouldEqual params
+
+    val params1 = PromQlQueryParams(promQl = "cpu_utilization{host=\"foo\"}", startSecs = 0, stepSecs = 10,
+      endSecs = 100 , verbose = true, remoteQueryPath = Some("/api/v1/query_range"))
+    params1.toProto.fromProto shouldEqual params1
   }
 
   it("should convert PlannerParams to proto and back") {
@@ -263,7 +269,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val origQueryResult = StreamQueryResult("id", srv)
 
     val successResp = origQueryResult.toProto.fromProto.asInstanceOf[StreamQueryResult]
-    successResp.id shouldEqual origQueryResult.id
+    successResp.queryId shouldEqual origQueryResult.queryId
     successResp.result.isInstanceOf[SerializedRangeVector] shouldEqual true
     val deserializedSrv = successResp.result.asInstanceOf[SerializedRangeVector]
     deserializedSrv.numRows shouldEqual Some(11)
@@ -285,7 +291,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
 
     val err = StreamQueryError("id", qStats, new IllegalArgumentException("Args"))
     val deser = err.toProto.fromProto.asInstanceOf[StreamQueryError]
-    deser.id shouldEqual err.id
+    deser.queryId shouldEqual err.queryId
     deser.queryStats shouldEqual err.queryStats
     // Throwable is not constructed to the same type as original
     deser.t.getMessage shouldEqual err.t.getMessage
@@ -546,13 +552,108 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     res.map(_._2).filterNot(_.isNaN) shouldEqual Seq(1.0, 3.0, 5.0, 6.0)
   }
 
+  it("should convert exception to proto and back") {
+    // Limited exceptions, typically those that might be used by client application to decide the response codes are
+    // marshalled and their types retained. IllegalArgumentException for instance indicates a bad input and should be
+    // propagated as is.
+    //   IMPORTANT: Tests do not assert stacktraces yet
 
-    // This currently converts exception to Throwable and tests fail.
-//  it("should convert exception to proto and back") {
-//    val exception = new IllegalStateException("Exception message")
-//    val t: Throwable  = exception.fillInStackTrace()
-//    t.toProto.fromProto shouldEqual t
-//
-//  }
+    // Case 1. IllegalArgumentException
+    val iae = new IllegalArgumentException("Exception message").fillInStackTrace()
+    val deserialized = iae.toProto.fromProto
+    deserialized.isInstanceOf[IllegalArgumentException] shouldBe true
+    deserialized.getMessage shouldEqual iae.getMessage
+    deserialized.getCause shouldBe null
+
+
+    val iae1 = new IllegalArgumentException().fillInStackTrace()
+    val deserialized1 = iae1.toProto.fromProto
+    deserialized1.isInstanceOf[IllegalArgumentException] shouldBe true
+    deserialized1.getMessage shouldEqual ""
+    deserialized1.getCause shouldBe null
+
+    val iae2 = new IllegalArgumentException(new IllegalArgumentException("Cause")).fillInStackTrace()
+    val deserialized2 = iae2.toProto.fromProto
+    deserialized2.isInstanceOf[IllegalArgumentException] shouldBe true
+    deserialized2.getMessage shouldEqual "java.lang.IllegalArgumentException: Cause"
+    deserialized2.getCause.getMessage shouldBe iae2.getCause.getMessage
+    iae2.getCause.isInstanceOf[IllegalArgumentException] shouldBe true
+
+    // Case 2. QueryTimeoutException
+    val qte = QueryTimeoutException(10000L, "timedoutAt")
+    qte.toProto.fromProto shouldEqual qte
+
+    // Case 3: QueryTimeoutException
+    val bqe = new BadQueryException("Bad Query")
+    val deserializedbqe  = bqe.toProto.fromProto
+    deserializedbqe.isInstanceOf[BadQueryException] shouldBe true
+    deserializedbqe.getMessage shouldEqual bqe.getMessage
+
+    // Case 4: java.util.concurrent.TimeoutException
+    val te1 = new java.util.concurrent.TimeoutException("Bad Query")
+    val deserializedte1  = te1.toProto.fromProto
+    deserializedte1.isInstanceOf[java.util.concurrent.TimeoutException] shouldBe true
+    deserializedte1.getMessage shouldBe te1.getMessage
+    deserializedte1.getCause shouldBe null
+
+
+    val te2 = new java.util.concurrent.TimeoutException()
+    val deserializedte2  = te2.toProto.fromProto
+    deserializedte2.isInstanceOf[java.util.concurrent.TimeoutException] shouldBe true
+    deserializedte2.getMessage shouldBe null
+    deserializedte2.getCause shouldBe null
+
+    // Case 5: NotImplementedError
+    val nee = new NotImplementedError("not implemented")
+    val deserializednee = nee.toProto.fromProto
+    deserializednee.isInstanceOf[NotImplementedError] shouldBe true
+    deserializednee.getMessage shouldBe nee.getMessage
+    deserializednee.getCause shouldBe null
+
+    // Case 6: SchemaMismatch
+    val sme = SchemaMismatch(expected = "expectedSchema", found = "foundSchema", clazz = "SomeClass")
+    val deserializedsme = sme.toProto.fromProto
+    deserializedsme shouldEqual sme
+
+    // Case 7: UnsupportedOperationException
+    val uoe = new UnsupportedOperationException("Exception message").fillInStackTrace()
+    val deserializeduoe = uoe.toProto.fromProto
+    deserializeduoe.isInstanceOf[UnsupportedOperationException] shouldBe true
+    deserializeduoe.getMessage shouldEqual uoe.getMessage
+    deserializeduoe.getCause shouldBe null
+
+
+    val uoe1 = new UnsupportedOperationException().fillInStackTrace()
+    val deserializeduoe1 = uoe1.toProto.fromProto
+    deserializeduoe1.isInstanceOf[UnsupportedOperationException] shouldBe true
+    deserializeduoe1.getMessage shouldEqual ""
+    deserializeduoe1.getCause shouldBe null
+
+    val uoe2 = new UnsupportedOperationException(new IllegalArgumentException("Cause")).fillInStackTrace()
+    val deserializeduoe2 = uoe2.toProto.fromProto
+    deserializeduoe2.isInstanceOf[UnsupportedOperationException] shouldBe true
+    deserializeduoe2.getMessage shouldEqual "java.lang.IllegalArgumentException: Cause"
+    deserializeduoe2.getCause.getMessage shouldBe uoe2.getCause.getMessage
+    uoe2.getCause.isInstanceOf[IllegalArgumentException] shouldBe true
+
+    // Case 8: ServiceUnavailableException
+    val sue = new ServiceUnavailableException("serviceUnavailable")
+    val deseruializedsue = sue.toProto.fromProto
+    deseruializedsue.isInstanceOf[ServiceUnavailableException] shouldBe true
+    deseruializedsue.getMessage shouldBe sue.getMessage
+
+    // Case 9: RemoteQueryFailureException
+
+    val rqfe = RemoteQueryFailureException(200, "OK", "none", "no error")
+    rqfe.toProto.fromProto shouldEqual rqfe
+
+    // Case 10: Anything else should throw Throwable
+    val isecause = SchemaMismatch(expected = "expectedSchema", found = "foundSchema", clazz = "SomeClass")
+    val ise = new IllegalStateException("Illegal state", isecause)
+    val deserializedise = ise.toProto.fromProto
+    deserializedise.isInstanceOf[Throwable] shouldBe true
+    deserializedise.getMessage shouldBe ise.getMessage
+    deserializedise.getCause shouldEqual isecause
+  }
 
 }

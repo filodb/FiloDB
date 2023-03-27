@@ -35,7 +35,7 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
 
   private val config = ConfigFactory.load("application_test.conf")
     .getConfig("filodb.query").withFallback(routingConfig)
-  private val queryConfig = QueryConfig(config)
+  private val queryConfig = QueryConfig(config).copy(plannerSelector = Some("plannerSelector"))
 
   val localPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef, earliestRetainedTimestampFn = 0,
     queryConfig, "raw", StaticSpreadProvider(SpreadChange(0, 1)))
@@ -672,6 +672,35 @@ class MultiPartitionPlannerSpec extends AnyFunSpec with Matchers with PlanValida
       asInstanceOf[PromQlQueryParams]
     queryParams.startSecs shouldEqual 1000
     queryParams.endSecs shouldEqual 10000
+  }
+
+  it ("should generate PromQLGrpcRemote plan for BinaryJoin when lhs and rhs are in same remote partition and grpc is enabled") {
+    def partitions(timeRange: TimeRange): List[PartitionAssignment] = List(PartitionAssignment("remote", "remote-url",
+      TimeRange(timeRange.startMs, timeRange.endMs), grpcEndPoint = Some("grpcEndpoint")))
+
+    val partitionLocationProvider = new PartitionLocationProvider {
+      override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+
+      override def getMetadataPartitions(nonMetricShardKeyFilters: Seq[ColumnFilter], timeRange: TimeRange): List[PartitionAssignment] =
+        partitions(timeRange)
+    }
+
+    val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset, queryConfig)
+    val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
+      TimeStepParams(1000, 100, 10000))
+
+    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 100, 10000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams,  plannerParams =
+      PlannerParams(processMultiPartition = true)))
+
+    execPlan.isInstanceOf[PromQLGrpcRemoteExec] shouldEqual (true)
+    val queryParams = execPlan.asInstanceOf[PromQLGrpcRemoteExec].queryContext.origQueryParams.
+      asInstanceOf[PromQlQueryParams]
+    queryParams.startSecs shouldEqual 1000
+    queryParams.endSecs shouldEqual 10000
+    execPlan.asInstanceOf[PromQLGrpcRemoteExec].plannerSelector shouldEqual "plannerSelector"
   }
 
   it ("should generate Exec plan for Metadata query without shardkey") {

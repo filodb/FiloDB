@@ -66,10 +66,11 @@ trait GrpcRemoteExec extends RemoteExec {
     def queryEndpoint: String
 
 
-    def getGrpcRequest: Request = {
+    def getGrpcRequest(plannerSelector: String): Request = {
         val builder = Request.newBuilder()
         builder.setQueryParams(promQlQueryParams.toProto)
         builder.setPlannerParams(queryContext.plannerParams.copy(processMultiPartition = false).toProto)
+        builder.setPlannerSelector(plannerSelector)
         builder.build()
     }
 
@@ -79,7 +80,8 @@ case class PromQLGrpcRemoteExec(channel: Channel,
                            requestTimeoutMs: Long,
                            queryContext: QueryContext,
                            dispatcher: PlanDispatcher,
-                           dataset: DatasetRef) extends GrpcRemoteExec {
+                           dataset: DatasetRef,
+                           plannerSelector: String) extends GrpcRemoteExec {
     override def sendGrpcRequest(span: Span, requestTimeoutMs: Long)(implicit sched: Scheduler):
         // Todo add asset for thread name
     Observable[GrpcMultiPartitionQueryService.StreamingResponse] = {
@@ -88,7 +90,7 @@ case class PromQLGrpcRemoteExec(channel: Channel,
           .doOnSubscribe(Task.eval {
               val nonBlockingStub = RemoteExecGrpc.newStub(channel)
               nonBlockingStub.withDeadlineAfter(requestTimeoutMs, TimeUnit.MILLISECONDS)
-                .execStreaming(getGrpcRequest,
+                .execStreaming(getGrpcRequest(plannerSelector),
                     new StreamObserver[GrpcMultiPartitionQueryService.StreamingResponse] {
                         override def onNext(value: StreamingResponse): Unit = subject.onNext(value)
                         override def onError(t: java.lang.Throwable): Unit = subject.onError(t)

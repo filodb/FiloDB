@@ -57,6 +57,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options
 
+  val plannerSelector: String = queryConfig.plannerSelector
+    .getOrElse(throw new IllegalArgumentException("plannerSelector is mandatory"))
+
   val remoteHttpTimeoutMs: Long = queryConfig.remoteHttpTimeoutMs.getOrElse(60000)
 
   val datasetMetricColumn: String = dataset.options.metricColumn
@@ -139,7 +142,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             val endpoint = grpcEndpoint.get
             val channel = channels.getOrElseUpdate(endpoint, GrpcCommonUtils.buildChannelFromEndpoint(endpoint))
             PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, remoteContext, inProcessPlanDispatcher,
-              dataset.ref)
+              dataset.ref, plannerSelector)
           } else {
             val remotePartitionEndpoint = partitions.head.httpEndPoint
             val httpEndpoint = remotePartitionEndpoint + params.remoteQueryPath.getOrElse("")
@@ -370,7 +373,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         val channel = channels.getOrElseUpdate(grpcEndpoint.get,
           GrpcCommonUtils.buildChannelFromEndpoint(grpcEndpoint.get))
         PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, ctx, inProcessPlanDispatcher,
-          dataset.ref)
+          dataset.ref, plannerSelector)
       } else {
         val httpEndpoint = partition.httpEndPoint + queryParams.remoteQueryPath.getOrElse("")
         PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
