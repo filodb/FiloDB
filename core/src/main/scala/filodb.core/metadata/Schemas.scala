@@ -247,9 +247,7 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, var downsa
 
   /** Returns ColumnInfos from a set of column IDs.  Throws exception if ID is invalid */
   def infosFromIDs(ids: Seq[ColumnId]): Seq[ColumnInfo] =
-    ids.map(columnFromID).map { c => ColumnInfo(c.name, c.columnType,
-      isCumulative = c.params.as[Option[Boolean]]("detectDrops").getOrElse(true)
-                        || c.params.as[Option[Boolean]]("counter").getOrElse(false)) }
+    ids.map(columnFromID).map(ColumnInfo.apply)
 
   override final def toString: String = {
     s"Schema(partition=$partition, data=$data, downsample=${downsample.map(_.name)})"
