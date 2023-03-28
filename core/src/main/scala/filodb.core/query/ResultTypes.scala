@@ -38,11 +38,9 @@ final case class ColumnInfo(name: String, colType: Column.ColumnType, isCumulati
 object ColumnInfo {
   def apply(col: Column): ColumnInfo = ColumnInfo(col.name, col.columnType, isCumulative(col))
   private def isCumulative(col: Column): Boolean = {
-    // untyped metrics are treated as cumulative counters for the sake of rate/increase
-    // functions (backward compatibility).
-    // detectDrops is not set for untyped metrics, so isCumulative is evaluated to true if detectDrops is missing.
-    col.params.as[Option[Boolean]]("detectDrops").getOrElse(true) ||
-      col.params.as[Option[Boolean]]("counter").getOrElse(false)
+    // only columns with param delta=true are treated as delta/period counters and rate/increase functions are applied
+    // accordingly.
+    !col.params.as[Option[Boolean]]("delta").getOrElse(false)
   }
 }
 
