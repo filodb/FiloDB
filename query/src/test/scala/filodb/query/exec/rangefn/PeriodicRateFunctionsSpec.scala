@@ -1,16 +1,23 @@
 package filodb.query.exec.rangefn
 
 import filodb.core.{MachineMetricsData, TestData}
+import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.WriteBufferPool
-import filodb.core.metadata.Dataset
-import filodb.core.query.TransientRow
+import filodb.core.metadata.{Dataset, Schemas}
+import filodb.core.query.{QueryContext, ResultSchema, TransientRow}
 import filodb.memory.format.vectors.{LongHistogram, MutableHistogram}
+import filodb.memory.format.ZeroCopyUTF8String
 import filodb.query.exec.{ChunkedWindowIteratorD, ChunkedWindowIteratorH, QueueBasedWindow}
+import filodb.query.exec
+import filodb.query.exec.InternalRangeFunction.Increase
 import filodb.query.util.IndexedArrayQueue
+import monix.execution.Scheduler.Implicits.global
+import monix.reactive.Observable
+import org.scalatest.concurrent.ScalaFutures
 
 import scala.util.Random
 
-class PeriodicRateFunctionsSpec extends RawDataWindowingSpec {
+class PeriodicRateFunctionsSpec extends RawDataWindowingSpec with ScalaFutures {
   val rand = new Random()
 
   val deltaCounterSamples = Seq(8072000L->111.0,
@@ -150,5 +157,239 @@ class PeriodicRateFunctionsSpec extends RawDataWindowingSpec {
     val it = new ChunkedWindowIteratorD(deltaCounterRV, endTs, 10000, endTs, endTs - startTs,
       new SumOverTimeChunkedFunctionD, querySession)
     it.next.getDouble(1) shouldEqual expectedDelta
+  }
+
+  it("appropriate increase function is used for prom-counter type") {
+    val samples = Seq(
+      100000L -> 100d,
+      200000L -> 170d,
+      300000L -> 180d,
+      400000L -> 190d,
+      500000L -> 200d,
+      600000L -> 220d,
+      700000L -> 240d,
+      800000L -> 260d,
+      900000L -> 280d,
+      1000000L -> 300d,
+      1100000L -> 400d,
+      1200000L -> 500d,
+      1300000L -> 600d
+    )
+    import ZeroCopyUTF8String._
+    val resultSchema = ResultSchema(Schemas.promCounter.infosFromIDs(0 to 1), 1)
+
+    // step tag with 100s publish interval is important here
+    val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8, "_step_".utf8 -> "100".utf8)
+    val partBuilder = new RecordBuilder(TestData.nativeMem)
+    val partKey = partBuilder.partKeyFromObjects(Schemas.promCounter, "counterName".utf8, seriesTags)
+
+    val rv = timeValueRVPk(samples, partKey)
+
+    val expectedResults = List(
+      500000L -> 125d,
+      900000L -> 100d,
+      1300000 -> 400d
+    )
+
+    // step == lookback here
+    // stepMultipleNotationUsed = true when step factor notation is used.
+    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
+      Some(400000L), Some(Increase), QueryContext(),
+      stepMultipleNotationUsed = true, Nil, None)
+    val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
+      1000, resultSchema, Nil)
+
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
+
+    resultRows.foreach(_.toList shouldEqual expectedResults)
+  }
+
+  it("appropriate increase function is used for gauge type") {
+    val samples = Seq(
+      100000L -> 100d,
+      200000L -> 170d,
+      300000L -> 180d,
+      400000L -> 190d,
+      500000L -> 200d,
+      600000L -> 220d,
+      700000L -> 240d,
+      800000L -> 260d,
+      900000L -> 280d,
+      1000000L -> 300d,
+      1100000L -> 400d,
+      1200000L -> 500d,
+      1300000L -> 600d
+    )
+
+    import ZeroCopyUTF8String._
+    val resultSchema = ResultSchema(Schemas.gauge.infosFromIDs(0 to 1), 1)
+
+    // step tag with 100s publish interval is important here
+    val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8, "_step_".utf8 -> "100".utf8)
+    val partBuilder = new RecordBuilder(TestData.nativeMem)
+    val partKey = partBuilder.partKeyFromObjects(Schemas.gauge, "counterName".utf8, seriesTags)
+
+    val rv = timeValueRVPk(samples, partKey)
+
+    val expectedResults = List(
+      500000L -> 125d,
+      900000L -> 100d,
+      1300000 -> 400d
+    )
+
+    // step == lookback here
+    // stepMultipleNotationUsed = true when step factor notation is used.
+    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
+      Some(400000L), Some(Increase), QueryContext(),
+      stepMultipleNotationUsed = true, Nil, None)
+    val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
+      1000, resultSchema, Nil)
+
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
+
+    resultRows.foreach(_.toList shouldEqual expectedResults)
+  }
+
+  it("appropriate increase function is used for untyped") {
+    val samples = Seq(
+      100000L -> 100d,
+      200000L -> 170d,
+      300000L -> 180d,
+      400000L -> 190d,
+      500000L -> 200d,
+      600000L -> 220d,
+      700000L -> 240d,
+      800000L -> 260d,
+      900000L -> 280d,
+      1000000L -> 300d,
+      1100000L -> 400d,
+      1200000L -> 500d,
+      1300000L -> 600d
+    )
+
+    import ZeroCopyUTF8String._
+    val resultSchema = ResultSchema(Schemas.untyped.infosFromIDs(0 to 1), 1)
+
+    // step tag with 100s publish interval is important here
+    val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8, "_step_".utf8 -> "100".utf8)
+    val partBuilder = new RecordBuilder(TestData.nativeMem)
+    val partKey = partBuilder.partKeyFromObjects(Schemas.untyped, "counterName".utf8, seriesTags)
+
+    val rv = timeValueRVPk(samples, partKey)
+
+    val expectedResults = List(
+      500000L -> 125d,
+      900000L -> 100d,
+      1300000 -> 400d
+    )
+
+    // step == lookback here
+    // stepMultipleNotationUsed = true when step factor notation is used.
+    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
+      Some(400000L), Some(Increase), QueryContext(),
+      stepMultipleNotationUsed = true, Nil, None)
+    val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
+      1000, resultSchema, Nil)
+
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
+
+    resultRows.foreach(_.toList shouldEqual expectedResults)
+  }
+
+  it("appropriate increase function is used for delta-counter and doesn't match with cumulative style results") {
+    val samples = Seq(
+      100000L -> 100d,
+      200000L -> 170d,
+      300000L -> 180d,
+      400000L -> 190d,
+      500000L -> 200d,
+      600000L -> 220d,
+      700000L -> 240d,
+      800000L -> 260d,
+      900000L -> 280d,
+      1000000L -> 300d,
+      1100000L -> 400d,
+      1200000L -> 500d,
+      1300000L -> 600d
+    )
+
+    import ZeroCopyUTF8String._
+    val resultSchema = ResultSchema(Schemas.deltaCounter.infosFromIDs(0 to 1), 1)
+
+    // step tag with 100s publish interval is important here
+    val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8, "_step_".utf8 -> "100".utf8)
+    val partBuilder = new RecordBuilder(TestData.nativeMem)
+    val partKey = partBuilder.partKeyFromObjects(Schemas.deltaCounter, "counterName".utf8, seriesTags)
+
+    val rv = timeValueRVPk(samples, partKey)
+
+    val expectedResults = List(
+      500000L -> 125d,
+      900000L -> 100d,
+      1300000 -> 400d
+    )
+
+    // step == lookback here
+    // stepMultipleNotationUsed = true when step factor notation is used.
+    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
+      Some(400000L), Some(Increase), QueryContext(),
+      stepMultipleNotationUsed = true, Nil, None)
+    val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
+      1000, resultSchema, Nil)
+
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
+
+    resultRows.foreach(_.toList should not equal expectedResults) // increase functioncumulative
+  }
+
+  it("appropriate increase function is used for delta-counter and matches with expected nonCumulative results") {
+    val samples = Seq(
+      100000L -> 100d,
+      200000L -> 70d,
+      300000L -> 10d,
+      400000L -> 10d,
+      500000L -> 10d,
+      600000L -> 20d,
+      700000L -> 20d,
+      800000L -> 20d,
+      900000L -> 20d,
+      1000000L -> 20d,
+      1100000L -> 100d,
+      1200000L -> 100d,
+      1300000L -> 100d
+    )
+
+    import ZeroCopyUTF8String._
+    val resultSchema = ResultSchema(Schemas.deltaCounter.infosFromIDs(0 to 1), 1)
+
+    // step tag with 100s publish interval is important here
+    val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8, "_step_".utf8 -> "100".utf8)
+    val partBuilder = new RecordBuilder(TestData.nativeMem)
+    val partKey = partBuilder.partKeyFromObjects(Schemas.deltaCounter, "counterName".utf8, seriesTags)
+
+    val rv = timeValueRVPk(samples, partKey)
+
+    val expectedResults = List(
+      500000L -> 200d,
+      900000L -> 90d,
+      1300000 -> 340d
+    )
+
+    // step == lookback here
+    // stepMultipleNotationUsed = true when step factor notation is used.
+    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(500000L, 400000L, 1300000L,
+      Some(400000L), Some(Increase), QueryContext(),
+      stepMultipleNotationUsed = true, Nil, None)
+    val resultObs = periodicSamplesVectorFnMapper.apply(Observable.fromIterable(Seq(rv)), querySession,
+      1000, resultSchema, Nil)
+
+    val resultRows = resultObs.toListL.runToFuture.futureValue.map(_.rows.map
+    (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
+
+    resultRows.foreach(_.toList shouldEqual expectedResults) // increase functioncumulative
   }
 }
