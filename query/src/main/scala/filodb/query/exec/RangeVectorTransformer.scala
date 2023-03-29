@@ -1,6 +1,5 @@
 package filodb.query.exec
 
-import scala.collection.Iterator
 import scala.collection.mutable.ListBuffer
 
 import monix.reactive.Observable
@@ -88,9 +87,20 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
           mapper.apply(source, querySession, limit, sourceSchema, Nil)
         } else {
           val instantFunction = InstantFunction.double(function)
-          source.map { rv =>
+          val result = source.map { rv =>
             IteratorBackedRangeVector(rv.key, new DoubleInstantFuncIterator(rv.rows, instantFunction,
               scalarRangeVector), rv.outputRange)
+          }
+
+          // NOTE: In BinaryJoin queries, if rhs is vector(static value) and lhs returns an empty TS, we must return
+          // a TS of static value to be compliant with Prometheus. Else, we return the empty result
+          if (function == InstantFunctionId.OrVectorDouble){
+            // WHY only selecting head ? The caller ensures that only one function params (ScalarFixedDouble)
+            // is being sent. Hence we are selecting the head RangeVector
+            result.defaultIfEmpty(scalarRangeVector.head)
+          }
+          else {
+            result
           }
         }
       case cType: ColumnType =>
@@ -106,6 +116,8 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
       evaluate(source, Nil, querySession, limit, sourceSchema)
     } else {
       // Multiple ExecPlanFunArgs not supported yet
+      // GOTCHA: Previous author assumes that the types of all FuncArgs (represented by variable funcParams) is same
+      // However, this can be broken or invalidated by new features or query patterns
       funcParams.head match {
         case s: StaticFuncArgs   => evaluate(source, funcParams.map(x => x.asInstanceOf[StaticFuncArgs]).
                                       map(x => ScalarFixedDouble(x.timeStepParams, x.scalar)), querySession, limit,
