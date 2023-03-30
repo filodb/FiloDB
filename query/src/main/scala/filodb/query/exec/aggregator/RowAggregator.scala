@@ -130,7 +130,7 @@ object RowAggregator {
           + s"or calculate the rate and histogram_quantile before applying the aggregation. "
           + s"If you have a genuine use case for this query, please get in touch.")
       }
-    } else if (valColType == ColumnType.DoubleColumn || valColType == ColumnType.StringColumn) {
+    } else if (valColType == ColumnType.DoubleColumn) {
       aggrOp match {
         case Min => MinRowAggregator
         case Max => MaxRowAggregator
@@ -146,6 +146,9 @@ object RowAggregator {
         case CountValues => new CountValuesRowAggregator(params(0).asInstanceOf[String])
       }
     } else {
+      if (aggrOp == CountValues) {
+        return new CountValuesRowAggregator(params(0).asInstanceOf[String])
+      }
       throw new UnsupportedOperationException(s"The ${aggrOp} operation is not supported for ${valColType}");
     }
   }
