@@ -130,7 +130,7 @@ object RowAggregator {
           + s"or calculate the rate and histogram_quantile before applying the aggregation. "
           + s"If you have a genuine use case for this query, please get in touch.")
       }
-    } else if (valColType == ColumnType.DoubleColumn) {
+    } else if (valColType == ColumnType.DoubleColumn || valColType == ColumnType.StringColumn) {
       aggrOp match {
         case Min => MinRowAggregator
         case Max => MaxRowAggregator
