@@ -121,20 +121,20 @@ object RowAggregator {
   def apply(aggrOp: AggregationOperator, params: Seq[Any], schema: ResultSchema): RowAggregator = {
     val valColType = ResultSchema.valueColumnType(schema)
     aggrOp match {
-      case Min if valColType == ColumnType.DoubleColumn => MinRowAggregator
-      case Max if valColType == ColumnType.DoubleColumn => MaxRowAggregator
+      case Min if valColType != ColumnType.HistogramColumn => MinRowAggregator
+      case Max if valColType != ColumnType.HistogramColumn => MaxRowAggregator
       case Sum if valColType == ColumnType.DoubleColumn => SumRowAggregator
       case Sum if isHistMax(valColType, schema) => HistMaxSumAggregator
       case Sum if valColType == ColumnType.HistogramColumn => HistSumRowAggregator
       case Count if valColType == ColumnType.DoubleColumn => CountRowAggregator.double
       case Count if valColType == ColumnType.HistogramColumn => CountRowAggregator.hist
-      case Group if valColType == ColumnType.DoubleColumn => GroupRowAggregator
-      case Avg if valColType == ColumnType.DoubleColumn => AvgRowAggregator
+      case Group if valColType != ColumnType.HistogramColumn => GroupRowAggregator
+      case Avg if valColType != ColumnType.HistogramColumn => AvgRowAggregator
       case TopK => new TopBottomKRowAggregator(params(0).asInstanceOf[Double].toInt, false)
       case BottomK => new TopBottomKRowAggregator(params(0).asInstanceOf[Double].toInt, true)
       case Quantile => new QuantileRowAggregator(params(0).asInstanceOf[Double])
-      case Stdvar if valColType == ColumnType.DoubleColumn => StdvarRowAggregator
-      case Stddev if valColType == ColumnType.DoubleColumn => StddevRowAggregator
+      case Stdvar if valColType != ColumnType.HistogramColumn => StdvarRowAggregator
+      case Stddev if valColType != ColumnType.HistogramColumn => StddevRowAggregator
       case CountValues => new CountValuesRowAggregator(params(0).asInstanceOf[String])
       case _ =>
         if (valColType == ColumnType.HistogramColumn) {
