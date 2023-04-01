@@ -165,7 +165,7 @@ trait ExecPlan extends QueryCommand {
             (acc._1, resultSchema)
           } else {
             val rangeVector : Observable[RangeVector] = transf.apply(
-              acc._1, querySession, queryContext.plannerParams.sampleLimit, acc._2, paramRangeVector
+              acc._1, querySession, queryContext.plannerParams.enforcedQuota.execPlanSamples, acc._2, paramRangeVector
             )
             val schema = transf.schema(resultSchema)
             (rangeVector, schema)
@@ -213,13 +213,14 @@ trait ExecPlan extends QueryCommand {
         .map { srv =>
           numResultSamples += srv.numRowsSerialized
           // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-          if (enforceSampleLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
-            throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
-              sampleLimit} samples. Try applying more filters or reduce time range.")
+          if (enforceSampleLimit && numResultSamples > queryContext.plannerParams.enforcedQuota.execPlanSamples)
+            throw new BadQueryException(s"This query results in more than " +
+              s"${queryContext.plannerParams.enforcedQuota.execPlanSamples} samples. " +
+              s"Try applying more filters or reduce time range.")
 
           resultSize += srv.estimatedSerializedBytes
-          if (resultSize > queryContext.plannerParams.resultByteLimit) {
-            val size_mib = queryContext.plannerParams.resultByteLimit / math.pow(1024, 2)
+          if (resultSize > queryContext.plannerParams.enforcedQuota.execPlanResultBytes) {
+            val size_mib = queryContext.plannerParams.enforcedQuota.execPlanResultBytes / math.pow(1024, 2)
             val msg = s"Reached maximum result size (final or intermediate) " +
               s"for data serialized out of a host or shard " +
               s"(${math.round(size_mib)} MiB)."
@@ -336,7 +337,7 @@ trait ExecPlan extends QueryCommand {
             (acc._1, resultSchema)
           } else {
             val rangeVector : Observable[RangeVector] = transf.apply(
-              acc._1, querySession, queryContext.plannerParams.sampleLimit, acc._2, paramRangeVector
+              acc._1, querySession, queryContext.plannerParams.enforcedQuota.execPlanSamples, acc._2, paramRangeVector
             )
             val schema = transf.schema(resultSchema)
             (rangeVector, schema)
@@ -392,13 +393,14 @@ trait ExecPlan extends QueryCommand {
           .map { srv =>
               numResultSamples += srv.numRowsSerialized
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-              if (enforceSampleLimit && numResultSamples > queryContext.plannerParams.sampleLimit)
-                throw new BadQueryException(s"This query results in more than ${queryContext.plannerParams.
-                  sampleLimit} samples. Try applying more filters or reduce time range.")
+              if (enforceSampleLimit && numResultSamples > queryContext.plannerParams.enforcedQuota.execPlanSamples)
+                throw new BadQueryException(s"This query results in more than " +
+                  s"${queryContext.plannerParams.enforcedQuota.execPlanSamples} samples. " +
+                  s"Try applying more filters or reduce time range.")
 
               resultSize += srv.estimatedSerializedBytes
-              if (resultSize > queryContext.plannerParams.resultByteLimit) {
-                val size_mib = queryContext.plannerParams.resultByteLimit / math.pow(1024, 2)
+              if (resultSize > queryContext.plannerParams.enforcedQuota.execPlanResultBytes) {
+                val size_mib = queryContext.plannerParams.enforcedQuota.execPlanResultBytes / math.pow(1024, 2)
                 val msg = s"Reached maximum result size (final or intermediate) " +
                           s"for data serialized out of a host or shard " +
                           s"(${math.round(size_mib)} MiB)."

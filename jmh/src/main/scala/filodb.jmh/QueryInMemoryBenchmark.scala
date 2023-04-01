@@ -20,7 +20,7 @@ import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{PlannerParams, QueryConfig, QueryContext, QuerySession}
+import filodb.core.query.{IndividualQuota, PlannerParams, QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -194,7 +194,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   // Single-threaded query test
   val qContext = QueryContext(plannerParams =
     new PlannerParams(spreadOverride = Some(StaticSpreadProvider(SpreadChange(0, spread))),
-      sampleLimit = 10000,
+      enforcedQuota = IndividualQuota(execPlanSamples = 10000),
       queryTimeoutMillis = 2.hours.toMillis.toInt)) // high timeout since we are using same context for all queries
   val logicalPlan = Parser.queryRangeToLogicalPlan(rawQuery, qParams)
   // Pick the children nodes, not the LocalPartitionDistConcatExec.  Thus we can run in a single thread this way

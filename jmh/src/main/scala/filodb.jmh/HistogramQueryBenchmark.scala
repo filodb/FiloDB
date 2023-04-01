@@ -19,7 +19,7 @@ import filodb.core.{MachineMetricsData, MetricsTestData, SpreadChange, TestData}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
-import filodb.core.query.{PlannerParams, QueryConfig, QueryContext, QuerySession}
+import filodb.core.query.{IndividualQuota, PlannerParams, QueryConfig, QueryContext, QuerySession}
 import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.format.SeqRowReader
@@ -91,7 +91,7 @@ class HistogramQueryBenchmark {
 
   // Single-threaded query test
   val numQueries = 500
-  QueryContext(plannerParams= PlannerParams(sampleLimit = 1000))
+  QueryContext(plannerParams = PlannerParams(enforcedQuota = IndividualQuota(execPlanSamples = 1000)))
   QueryContext(plannerParams = PlannerParams(shardOverrides = Some(Seq(0))))
 
   val qContext = QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 100).

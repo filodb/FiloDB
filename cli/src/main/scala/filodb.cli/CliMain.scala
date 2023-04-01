@@ -476,8 +476,10 @@ object CliMain extends StrictLogging {
     val spreadProvider: Option[SpreadProvider] = options.spread.map(s => StaticSpreadProvider(SpreadChange(0, s)))
 
     val qOpts = QueryContext(origQueryParams = tsdbQueryParams,
-      plannerParams = PlannerParams(applicationId = "filodb-cli", spreadOverride = spreadProvider,
-        sampleLimit = options.sampleLimit, queryTimeoutMillis = options.timeout.toMillis.toInt,
+      plannerParams = PlannerParams(
+        applicationId = "filodb-cli", spreadOverride = spreadProvider,
+        enforcedQuota = IndividualQuota(execPlanSamples = options.sampleLimit),
+        queryTimeoutMillis = options.timeout.toMillis.toInt,
         shardOverrides = options.shardOverrides))
     println(s"Sending query command to server for $ref with options $qOpts...")
     println(s"Query Plan:\n$plan")

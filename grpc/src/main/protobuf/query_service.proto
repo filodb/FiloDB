@@ -19,21 +19,30 @@ message QueryParams {
       bool isUnavailable          = 7;
 }
 
+message IndividualQuota{
+  optional uint32 execPlanSamples            = 1; // Limit on ExecPlan results in samples
+  optional uint64 execPlanResultBytes        = 2; // Limit on ExecPlan results in bytes
+  optional uint32 groupByCardinality         = 3; // Limit on "group by" clause results
+  optional uint32 joinQueryCardinality       = 4; // Limit on binary join results
+  optional uint64 timeSeriesSamplesScanBytes = 5; // Limit on max data scanned per shard
+}
+
 message PlannerParams {
     optional string applicationId          = 1;
     optional uint32 queryTimeoutMillis     = 2;
-    optional uint32 sampleLimit            = 3;
-    optional uint32 groupByCardLimit       = 4;
-    optional uint32 joinQueryCardLimit     = 5;
-    optional uint64 resultByteLimit        = 6;
-    optional bool timeSplitEnabled         = 7;
-    optional uint64 minTimeRangeForSplitMs = 8;
-    optional uint64 splitSizeMs            = 9;
-    optional bool skipAggregatePresent     = 10;
-    optional bool processFailure           = 11;
-    optional bool processMultiPartition    = 12;
-    optional bool allowPartialResults      = 13;
-    optional bool histogramMap             = 14;
+    optional IndividualQuota enforcedQuota = 3;
+    optional IndividualQuota warnQuota     = 4;
+    optional string queryOrigin            = 5;
+    optional string queryOriginId          = 6;
+    optional string queryPrincipal         = 7;
+    optional bool timeSplitEnabled         = 8;
+    optional uint64 minTimeRangeForSplitMs = 9;
+    optional uint64 splitSizeMs            = 10;
+    optional bool skipAggregatePresent     = 11;
+    optional bool processFailure           = 12;
+    optional bool processMultiPartition    = 13;
+    optional bool allowPartialResults      = 14;
+    optional bool histogramMap             = 15;
 }
 
 message Request {
