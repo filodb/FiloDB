@@ -72,6 +72,14 @@ class CardinalityTracker(ref: DatasetRef,
     (0 to shardKey.length).foreach { i =>
       val prefix = shardKey.take(i)
       val old = store.getOrZero(prefix, CardinalityRecord(shard, prefix, 0, 0, 0, defaultChildrenQuota(i)))
+      if (old.activeTsCount + activeDelta < 0) {
+        throw new IllegalArgumentException(s"$prefix active count is already zero - cannot reduce " +
+          s"further. A double delete likely happened.")
+      }
+      if (old.tsCount + totalDelta < 0) {
+        throw new IllegalArgumentException(s"$prefix total count is already zero - cannot reduce " +
+          s"further. A double delete likely happened.")
+      }
       val neu = old.copy(tsCount = old.tsCount + totalDelta,
                          activeTsCount = old.activeTsCount + activeDelta,
                          childrenCount = if (i == shardKeyLen) old.childrenCount + totalDelta else old.childrenCount)
