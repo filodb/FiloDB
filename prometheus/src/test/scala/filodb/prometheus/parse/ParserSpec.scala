@@ -1,11 +1,10 @@
 package filodb.prometheus.parse
 
-import filodb.prometheus.ast.{PeriodicSeries, RangeExpression, SimpleSeries, SubqueryClause, SubqueryExpression, TimeStepParams}
+import filodb.prometheus.ast.{PeriodicSeries, RangeExpression, SimpleSeries, SubqueryClause, SubqueryExpression, TimeStepParams, VectorSpec}
 import filodb.prometheus.parse.Parser.{Antlr, Shadow}
 import filodb.query.{BinaryJoin, LogicalPlan}
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-
 
 import java.util.concurrent.TimeUnit.{MINUTES, SECONDS, HOURS, DAYS}
 import scala.concurrent.duration.Duration
@@ -17,6 +16,39 @@ class ParserSpec extends AnyFunSpec with Matchers {
   it("test") {
     antlrParseSuccessfully("http_requests_total{job=\"prometheus\", method=\"GET\"} limit 10")
     parseSuccessfully("http_requests_total{job=\"prometheus\", method=\"GET\"} limit 1")
+  }
+
+  it("test columnName split regex for different type of metric names") {
+
+    // Various test cases to test the regex on
+    val input = List(
+      ("http_requests_total:::aggregated_rule","http_requests_total:::aggregated_rule", None),
+      ("http_requests_total:::aggregated_rule::count","http_requests_total:::aggregated_rule", Some("count")),
+      ("http_requests_total::sum","http_requests_total", Some("sum")),
+      ("http_requests_total","http_requests_total", None),
+      ("mygauge","mygauge", None),
+      ("mygauge:sum","mygauge:sum", None),
+      ("mygauge:sum:::","mygauge:sum:::", None),
+    )
+
+    input.foreach { i => {
+      val (metricName, columnName) = VectorSpec.apply().getMetricAndColumnName(i._1)
+      metricName shouldEqual i._2
+      columnName shouldEqual i._3
+    }}
+  }
+
+  it("test columnName split regex should throw IllegalArgumentException for invalid metric name") {
+
+    val input = List(
+      ("http_requests_total:: ", "cannot use blank/whitespace column name"),
+      ("test::    ", "cannot use blank/whitespace column name"),
+    )
+
+    input.foreach { i => {
+      val thrownEx = the [IllegalArgumentException] thrownBy(VectorSpec.apply().getMetricAndColumnName(i._1))
+      thrownEx.getMessage.contains(i._2) shouldEqual true
+    }}
   }
 
   it("metadata matcher query") {
