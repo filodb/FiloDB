@@ -303,6 +303,70 @@ abstract class HistogramRateFunctionBase extends CounterChunkedRangeFunction[Tra
   def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = ???
 }
 
+abstract class HistogramIRateFunctionBase extends CounterChunkedRangeFunction[TransientHistRow]{
+  var numSamples = 0
+  var previousToLastSampleTime = Long.MaxValue
+  var previousToLastSampleValue: bv.HistogramWithBuckets = bv.HistogramWithBuckets.empty
+  var lastSampleTime = 0L
+  var lastSampleValue: bv.HistogramWithBuckets = bv.HistogramWithBuckets.empty
+
+  def isCounter: Boolean
+
+  def isRate: Boolean
+
+  override def reset(): Unit = {
+    previousToLastSampleTime = 0L
+    previousToLastSampleValue = bv.HistogramWithBuckets.empty
+    lastSampleTime = 0L
+    lastSampleValue = bv.HistogramWithBuckets.empty
+    super.reset()
+  }
+
+  def addTimeChunks(acc: MemoryReader, vector: BinaryVectorPtr, reader: CounterVectorReader,
+                    previousToEndRowNum: Int, endRowNum: Int,
+                    previousToEndTime: Long, endTime: Long): Unit = reader match {
+    case histReader: bv.CounterHistogramReader =>
+
+      // For IRate, we need the last 2 samples in the given window
+      // Hence, we are using the endtime to see if there is any newer sample
+      if (endTime > lastSampleTime) {
+
+        previousToLastSampleTime = previousToEndTime
+        previousToLastSampleValue = histReader.correctedValue(previousToEndRowNum, correctionMeta)
+
+        lastSampleTime = endTime
+        lastSampleValue = histReader.correctedValue(endRowNum, correctionMeta)
+      }
+    case other: CounterVectorReader =>
+  }
+
+  override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientHistRow): Unit = {
+    if (previousToLastSampleTime > lastSampleTime) {
+      // NOTE: It seems in order to match previous code, we have to adjust the windowStart by -1 so it's "inclusive"
+      // TODO: handle case where schemas are different and we need to interpolate schemas
+      if (previousToLastSampleValue.buckets == lastSampleValue.buckets) {
+        val rateArray = new Array[Double](previousToLastSampleValue.numBuckets)
+        cforRange {
+          0 until rateArray.size
+        } { b =>
+          rateArray(b) = RateFunctions.extrapolatedRate(
+            windowStart - 1, windowEnd, 2,
+            previousToLastSampleTime, previousToLastSampleValue.bucketValue(b),
+            lastSampleTime, lastSampleValue.bucketValue(b),
+            isCounter, isRate)
+        }
+        sampleToEmit.setValues(windowEnd, bv.MutableHistogram(previousToLastSampleValue.buckets, rateArray))
+      } else {
+        sampleToEmit.setValues(windowEnd, bv.HistogramWithBuckets.empty)
+      }
+    } else {
+      sampleToEmit.setValues(windowEnd, bv.HistogramWithBuckets.empty)
+    }
+  }
+
+  def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = ???
+}
+
 class HistRateFunction extends HistogramRateFunctionBase {
   def isCounter: Boolean = true
   def isRate: Boolean    = true
