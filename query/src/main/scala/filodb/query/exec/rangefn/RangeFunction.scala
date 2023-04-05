@@ -124,13 +124,20 @@ trait CounterChunkedRangeFunction[R <: MutableRowReader] extends ChunkedRangeFun
   // reset is called before first chunk.  Reset correction metadata
   override def reset(): Unit = { correctionMeta = NoCorrection }
 
+  def calculateStartAndEndRowNum(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr,
+                                 tsReader: bv.LongVectorDataReader, startTime: Long, endTime: Long,
+                                 info: ChunkSetInfoReader): (Int, Int) = {
+    val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
+    (startRowNum, endRowNum)
+  }
+
   // scalastyle:off parameter.number
   def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                 valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
                 startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
     val ccReader = valueReader.asInstanceOf[CounterVectorReader]
-    val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
-    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
+    val (startRowNum, endRowNum) = calculateStartAndEndRowNum(tsVectorAcc, tsVector, tsReader, startTime, endTime, info)
 
     // For each chunk:
     // Check if any dropoff from end of last chunk to beg of this chunk (unless it's the first chunk)
@@ -384,6 +391,8 @@ object RangeFunction {
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionH
     case Some(Rate) if schema.columns(1).isCumulative
                               => () => new HistRateFunction
+    case Some(Irate) if schema.columns(1).isCumulative
+                              => () => new HistIRateFunction
     case Some(Increase) if schema.columns(1).isCumulative
                               => () => new HistIncreaseFunction
     case Some(Rate)           => () => new RateOverDeltaChunkedFunctionH

@@ -1,9 +1,9 @@
 package filodb.query.exec.rangefn
 
 import spire.syntax.cfor._
-
 import filodb.core.query.{QueryConfig, TransientHistRow, TransientRow}
-import filodb.memory.format.{vectors => bv, BinaryVector, CounterVectorReader, MemoryReader, VectorDataReader}
+import filodb.core.store.ChunkSetInfoReader
+import filodb.memory.format.{BinaryVector, CounterVectorReader, MemoryReader, VectorDataReader, vectors => bv}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 
 object RateFunctions {
@@ -322,6 +322,14 @@ abstract class HistogramIRateFunctionBase extends CounterChunkedRangeFunction[Tr
     super.reset()
   }
 
+  override def calculateStartAndEndRowNum(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr,
+                                 tsReader: bv.LongVectorDataReader, startTime: Long, endTime: Long,
+                                 info: ChunkSetInfoReader): (Int, Int) = {
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
+    // In Irate, we use the last two samples
+    (endRowNum-1, endRowNum)
+  }
+
   def addTimeChunks(acc: MemoryReader, vector: BinaryVectorPtr, reader: CounterVectorReader,
                     previousToEndRowNum: Int, endRowNum: Int,
                     previousToEndTime: Long, endTime: Long): Unit = reader match {
@@ -331,8 +339,11 @@ abstract class HistogramIRateFunctionBase extends CounterChunkedRangeFunction[Tr
       // Hence, we are using the endtime to see if there is any newer sample
       if (endTime > lastSampleTime) {
 
-        previousToLastSampleTime = previousToEndTime
-        previousToLastSampleValue = histReader.correctedValue(previousToEndRowNum, correctionMeta)
+        // TODO: Check what is the lowest endRowNum possible, assuming 0 for now
+        if (previousToEndRowNum > -1){
+          previousToLastSampleTime = previousToEndTime
+          previousToLastSampleValue = histReader.correctedValue(previousToEndRowNum, correctionMeta)
+        }
 
         lastSampleTime = endTime
         lastSampleValue = histReader.correctedValue(endRowNum, correctionMeta)
@@ -341,7 +352,9 @@ abstract class HistogramIRateFunctionBase extends CounterChunkedRangeFunction[Tr
   }
 
   override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientHistRow): Unit = {
-    if (previousToLastSampleTime > lastSampleTime) {
+
+    // check if previousToLastSampleTime is init and if it is < the lastSampleTime
+    if ( (previousToLastSampleTime > 0L) && (previousToLastSampleTime < lastSampleTime) ) {
       // NOTE: It seems in order to match previous code, we have to adjust the windowStart by -1 so it's "inclusive"
       // TODO: handle case where schemas are different and we need to interpolate schemas
       if (previousToLastSampleValue.buckets == lastSampleValue.buckets) {
@@ -365,6 +378,11 @@ abstract class HistogramIRateFunctionBase extends CounterChunkedRangeFunction[Tr
   }
 
   def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = ???
+}
+
+class HistIRateFunction extends HistogramIRateFunctionBase {
+  def isCounter: Boolean = true
+  def isRate: Boolean    = true
 }
 
 class HistRateFunction extends HistogramRateFunctionBase {
