@@ -180,28 +180,16 @@ object ProtoConverters {
 
   implicit class PlannerParamsToProtoConverter(pp: PlannerParams) {
     def toProto: GrpcMultiPartitionQueryService.PlannerParams = {
-      val enforcedQuotaBuilder = GrpcMultiPartitionQueryService.IndividualQuota.newBuilder()
-      enforcedQuotaBuilder.setExecPlanSamples(pp.enforcedQuota.execPlanSamples)
-      enforcedQuotaBuilder.setExecPlanResultBytes(pp.enforcedQuota.execPlanResultBytes)
-      enforcedQuotaBuilder.setGroupByCardinality(pp.enforcedQuota.groupByCardinality)
-      enforcedQuotaBuilder.setJoinQueryCardinality(pp.enforcedQuota.joinQueryCardinality)
-      enforcedQuotaBuilder.setTimeSeriesSamplesScanBytes(pp.enforcedQuota.timeSeriesSamplesScanBytes)
-      val enforcedQuota = enforcedQuotaBuilder.build()
-      val warnQuotaBuilder = GrpcMultiPartitionQueryService.IndividualQuota.newBuilder()
-      warnQuotaBuilder.setExecPlanSamples(pp.warnQuota.execPlanSamples)
-      warnQuotaBuilder.setExecPlanResultBytes(pp.warnQuota.execPlanResultBytes)
-      warnQuotaBuilder.setGroupByCardinality(pp.warnQuota.groupByCardinality)
-      warnQuotaBuilder.setJoinQueryCardinality(pp.warnQuota.joinQueryCardinality)
-      warnQuotaBuilder.setTimeSeriesSamplesScanBytes(pp.warnQuota.timeSeriesSamplesScanBytes)
-      val warnQuota = warnQuotaBuilder.build()
+      val enforcedQuota = pp.enforcedQuota.toProto
+      val warnQuota = pp.warnQuota.toProto
       val builder = GrpcMultiPartitionQueryService.PlannerParams.newBuilder()
       builder.setApplicationId(pp.applicationId)
       builder.setQueryTimeoutMillis(pp.queryTimeoutMillis)
       builder.setEnforcedQuota(enforcedQuota)
       builder.setWarnQuota(warnQuota)
-      pp.queryOrigin.map(qo => builder.setQueryOrigin(qo))
-      pp.queryOriginId.map(qoi => builder.setQueryOriginId(qoi))
-      pp.queryPrincipal.map(qp => builder.setQueryPrincipal(qp))
+      pp.queryOrigin.foreach(qo => builder.setQueryOrigin(qo))
+      pp.queryOriginId.foreach(qoi => builder.setQueryOriginId(qoi))
+      pp.queryPrincipal.foreach(qp => builder.setQueryPrincipal(qp))
       builder.setTimeSplitEnabled(pp.timeSplitEnabled)
       builder.setMinTimeRangeForSplitMs(pp.minTimeRangeForSplitMs)
       builder.setSplitSizeMs(pp.splitSizeMs)
@@ -215,9 +203,10 @@ object ProtoConverters {
 
   implicit class PlannerParamsFromProtoConverter(gpp: GrpcMultiPartitionQueryService.PlannerParams) {
     def fromProto: PlannerParams = {
-      val enforcedQuota = gpp.getEnforcedQuota.fromProto()
-      val warnQuota = gpp.getWarnQuota.fromProto(true)
+      val enforcedQuota = gpp.getEnforcedQuota.fromProto(IndividualQuota.defaultEnforcedQuota())
+      val warnQuota = gpp.getWarnQuota.fromProto(IndividualQuota.defaultWarnQuota())
       val pp = PlannerParams()
+
       pp.copy(
         applicationId = if (gpp.hasApplicationId) gpp.getApplicationId else pp.applicationId,
         queryTimeoutMillis = if (gpp.hasQueryTimeoutMillis) gpp.getQueryTimeoutMillis else pp.queryTimeoutMillis,
@@ -240,35 +229,49 @@ object ProtoConverters {
     }
   }
 
+  implicit class IndividualQuotaToProtoConverter(sq: IndividualQuota) {
+    def toProto: GrpcMultiPartitionQueryService.IndividualQuota = {
+      val quotaBuilder = GrpcMultiPartitionQueryService.IndividualQuota.newBuilder()
+      quotaBuilder.setExecPlanSamples(sq.execPlanSamples)
+      quotaBuilder.setExecPlanResultBytes(sq.execPlanResultBytes)
+      quotaBuilder.setGroupByCardinality(sq.groupByCardinality)
+      quotaBuilder.setJoinQueryCardinality(sq.joinQueryCardinality)
+      quotaBuilder.setTimeSeriesSamplesScanBytes(sq.timeSeriesSamplesScanBytes)
+      quotaBuilder.build()
+    }
+  }
   implicit class IndividualQuotaFromProtoConverter(giq: GrpcMultiPartitionQueryService.IndividualQuota) {
-    def fromProto(warnDefaults: Boolean = false): IndividualQuota = {
-      val iq = IndividualQuota(warnDefaults)
-      val quota = iq.copy(
+    def fromProto(): IndividualQuota = {
+      val q = IndividualQuota()
+      fromProto(q)
+    }
+    def fromProto(defaultQ: IndividualQuota): IndividualQuota = {
+      val quota = defaultQ.copy(
         execPlanSamples =
           if (giq.hasExecPlanSamples)
             giq.getExecPlanSamples
           else
-            iq.execPlanSamples,
+            defaultQ.execPlanSamples,
         execPlanResultBytes =
           if (giq.hasExecPlanResultBytes)
             giq.getExecPlanResultBytes
           else
-            iq.execPlanResultBytes,
+            defaultQ.execPlanResultBytes,
         groupByCardinality =
           if (giq.hasGroupByCardinality)
             giq.getGroupByCardinality
           else
-            iq.groupByCardinality,
+            defaultQ.groupByCardinality,
         joinQueryCardinality =
           if (giq.hasJoinQueryCardinality)
             giq.getJoinQueryCardinality
           else
-            iq.joinQueryCardinality,
+            defaultQ.joinQueryCardinality,
         timeSeriesSamplesScanBytes =
           if (giq.hasJoinQueryCardinality)
             giq.getTimeSeriesSamplesScanBytes
           else
-            iq.timeSeriesSamplesScanBytes
+            defaultQ.timeSeriesSamplesScanBytes
       )
       quota
     }

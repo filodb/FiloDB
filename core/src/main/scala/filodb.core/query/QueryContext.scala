@@ -30,19 +30,21 @@ case class IndividualQuota(
         timeSeriesSamplesScanBytes: Long = 300000000)  // Limit on max data scanned per shard, default is 300 MB
 
 object IndividualQuota {
-  def apply(warnDefaults: Boolean): IndividualQuota = {
-    if (warnDefaults) {
-      IndividualQuota(
-        execPlanSamples = 50000,
-        execPlanResultBytes = 15000000,
-        groupByCardinality = 50000,
-        joinQueryCardinality = 50000,
-        timeSeriesSamplesScanBytes = 150000
-      )
-    } else {
-      IndividualQuota()
-    }
+
+  def defaultEnforcedQuota(): IndividualQuota = {
+    IndividualQuota()
   }
+
+  def defaultWarnQuota(): IndividualQuota = {
+    IndividualQuota(
+      execPlanSamples = 50000,
+      execPlanResultBytes = 15000000,
+      groupByCardinality = 50000,
+      joinQueryCardinality = 50000,
+      timeSeriesSamplesScanBytes = 150000
+    )
+  }
+
 }
 case class PlannerParams(applicationId: String = "filodb",
                          spread: Option[Int] = None,
@@ -50,8 +52,8 @@ case class PlannerParams(applicationId: String = "filodb",
                          shardOverrides: Option[Seq[Int]] = None,
                          targetSchemaProviderOverride: Option[TargetSchemaProvider] = None,
                          queryTimeoutMillis: Int = 60000, // set default to match default http-request-timeout
-                         enforcedQuota: IndividualQuota = IndividualQuota(),
-                         warnQuota: IndividualQuota = IndividualQuota.apply(warnDefaults = true),
+                         enforcedQuota: IndividualQuota = IndividualQuota.defaultEnforcedQuota(),
+                         warnQuota: IndividualQuota = IndividualQuota.defaultWarnQuota(),
                          queryOrigin: Option[String] = None, // alert/dashboard/rr/api/etc
                          queryOriginId: Option[String] = None, // an ID of rr/alert
                          queryPrincipal: Option[String] = None, // user, entity initiating query
