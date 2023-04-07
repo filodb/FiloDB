@@ -317,7 +317,7 @@ abstract class HistogramIRateFunctionBase extends CounterChunkedRangeFunction[Tr
   def isRate: Boolean
 
   override def reset(): Unit = {
-    previousToLastSampleTime = 0L
+    previousToLastSampleTime = Long.MaxValue
     previousToLastSampleValue = bv.HistogramWithBuckets.empty
     lastSampleTime = 0L
     lastSampleValue = bv.HistogramWithBuckets.empty
@@ -341,8 +341,8 @@ abstract class HistogramIRateFunctionBase extends CounterChunkedRangeFunction[Tr
       // Hence, we are using the endtime to see if there is any newer sample
       if (endTime > lastSampleTime) {
 
-        // TODO: Check what is the lowest endRowNum possible, assuming 0 for now
-        if (previousToEndRowNum > -1){
+        // lowest rowNum possible in chunk is 0
+        if (previousToEndRowNum >= 0){
           previousToLastSampleTime = previousToEndTime
           previousToLastSampleValue = histReader.correctedValue(previousToEndRowNum, correctionMeta)
         }
@@ -355,9 +355,10 @@ abstract class HistogramIRateFunctionBase extends CounterChunkedRangeFunction[Tr
 
   override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientHistRow): Unit = {
 
-    // check if previousToLastSampleTime is init and if it is < the lastSampleTime
-    if ( (previousToLastSampleTime > 0L) && (previousToLastSampleTime < lastSampleTime) ) {
-      // NOTE: It seems in order to match previous code, we have to adjust the windowStart by -1 so it's "inclusive"
+    // previousToLastSampleTime is set to Long.Max and lastSampleTime = 0, by default. Following check
+    // helps to determine if we have at least two samples to calculate Irate
+    if (lastSampleTime > previousToLastSampleTime) {
+
       // TODO: handle case where schemas are different and we need to interpolate schemas
       if (previousToLastSampleValue.buckets == lastSampleValue.buckets) {
         val rateArray = new Array[Double](previousToLastSampleValue.numBuckets)
@@ -365,7 +366,7 @@ abstract class HistogramIRateFunctionBase extends CounterChunkedRangeFunction[Tr
           0 until rateArray.size
         } { b =>
           rateArray(b) = RateFunctions.extrapolatedRate(
-            windowStart - 1, windowEnd, 2,
+            previousToLastSampleTime, lastSampleTime, 2,
             previousToLastSampleTime, previousToLastSampleValue.bucketValue(b),
             lastSampleTime, lastSampleValue.bucketValue(b),
             isCounter, isRate)
@@ -464,22 +465,33 @@ class RateOverDeltaChunkedFunctionH(var h: bv.MutableHistogram = bv.Histogram.em
 
 class IRateOverDeltaChunkedFunctionH(var lastSampleValue: bv.HistogramWithBuckets = bv.Histogram.empty,
                                      var previousToLastSampleValue: bv.HistogramWithBuckets = bv.Histogram.empty,
-                                     var latestTime: Long = 0L)
+                                     var previousToLastSampleTime: Long = Long.MaxValue,
+                                     var lastSampleTime: Long = 0L)
   extends ChunkedRangeFunction[TransientHistRow] {
 
-  // TODO: Add all the necessary checks
-  // TODO: track last sample time and previous to last sample time
+  override def reset(): Unit = {
+    previousToLastSampleTime = Long.MaxValue
+    previousToLastSampleValue = bv.HistogramWithBuckets.empty
+    lastSampleTime = 0L
+    lastSampleValue = bv.HistogramWithBuckets.empty
+    super.reset()
+  }
 
   override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientHistRow): Unit = {
-    // TODO: Add checks
-    val irateArray = new Array[Double](lastSampleValue.numBuckets)
-    cforRange {
-      0 until irateArray.size
-    } { b =>
-      val sumOfLastTwoSamples = (lastSampleValue.bucketValue(b) + previousToLastSampleValue.bucketValue(b))
-      irateArray(b) = sumOfLastTwoSamples / (windowEnd - (windowStart - 1)) * 1000
+
+    if (lastSampleTime > previousToLastSampleTime){
+      val irateArray = new Array[Double](lastSampleValue.numBuckets)
+      cforRange {
+        0 until irateArray.size
+      } { b =>
+        val sumOfLastTwoSamples = (lastSampleValue.bucketValue(b) + previousToLastSampleValue.bucketValue(b))
+        irateArray(b) = sumOfLastTwoSamples / (lastSampleTime - previousToLastSampleTime) * 1000
+      }
+      sampleToEmit.setValues(windowEnd, bv.MutableHistogram(lastSampleValue.buckets, irateArray))
     }
-    sampleToEmit.setValues(windowEnd, bv.MutableHistogram(lastSampleValue.buckets, irateArray))
+    else{
+      sampleToEmit.setValues(windowEnd, bv.HistogramWithBuckets.empty)
+    }
   }
 
   // scalastyle:off parameter.number
@@ -503,10 +515,15 @@ class IRateOverDeltaChunkedFunctionH(var lastSampleValue: bv.HistogramWithBucket
                     previousToEndTime: Long, endTime: Long): Unit = {
 
     // we are tracking the last two sample's histogram buckets for irate
-    if (endTime > latestTime){
-      latestTime = endTime
+    if (endTime > lastSampleTime){
+      // track sample's time value to calculate the irate between these two times
+      lastSampleTime = endTime
       lastSampleValue = reader.asHistReader.apply(endRowNum)
-      previousToLastSampleValue = reader.asHistReader.apply(previousToEndRowNum)
+
+      if (previousToEndRowNum >= 0){
+        previousToLastSampleTime = previousToEndTime
+        previousToLastSampleValue = reader.asHistReader.apply(previousToEndRowNum)
+      }
     }
   }
 
