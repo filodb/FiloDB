@@ -22,16 +22,43 @@ case class PromQlQueryParams(promQl: String, startSecs: Long, stepSecs: Long, en
 
 case object UnavailablePromQlQueryParams extends TsdbQueryParams
 
+case class PerQueryLimits(
+        execPlanSamples: Int = 1000000,       // Limit on ExecPlan results in samples, default is 100K
+        execPlanResultBytes: Long = 18000000, // Limit on ExecPlan results in bytes, default is 18MB
+        groupByCardinality: Int = 100000,     // Limit on "group by" clause results, default is 100K
+        joinQueryCardinality: Int = 100000,   // Limit on binary join results, default is 100K
+        timeSeriesSamplesScannedBytes: Long = 300000000, // Limit on max data scanned per shard, default is 300 MB
+        timeSeriesScanned: Int = 1000000)    // Limit on max number of time series scanned, default is 1M
+
+object PerQueryLimits {
+
+  def defaultEnforcedLimits(): PerQueryLimits = {
+    PerQueryLimits()
+  }
+
+  def defaultWarnLimits(): PerQueryLimits = {
+    PerQueryLimits(
+      execPlanSamples = 50000,
+      execPlanResultBytes = 15000000,
+      groupByCardinality = 50000,
+      joinQueryCardinality = 50000,
+      timeSeriesSamplesScannedBytes = 150000,
+      timeSeriesScanned = 500000
+    )
+  }
+
+}
 case class PlannerParams(applicationId: String = "filodb",
                          spread: Option[Int] = None,
                          spreadOverride: Option[SpreadProvider] = None,
                          shardOverrides: Option[Seq[Int]] = None,
                          targetSchemaProviderOverride: Option[TargetSchemaProvider] = None,
                          queryTimeoutMillis: Int = 60000, // set default to match default http-request-timeout
-                         sampleLimit: Int = 1000000,
-                         groupByCardLimit: Int = 100000,
-                         joinQueryCardLimit: Int = 100000,
-                         resultByteLimit: Long = 18000000,  // 18MB
+                         enforcedLimits: PerQueryLimits = PerQueryLimits.defaultEnforcedLimits(),
+                         warnLimits: PerQueryLimits = PerQueryLimits.defaultWarnLimits(),
+                         queryOrigin: Option[String] = None, // alert/dashboard/rr/api/etc
+                         queryOriginId: Option[String] = None, // an ID of rr/alert
+                         queryPrincipal: Option[String] = None, // user, entity initiating query
                          timeSplitEnabled: Boolean = false,
                          minTimeRangeForSplitMs: Long = 1.day.toMillis,
                          splitSizeMs: Long = 1.day.toMillis,
@@ -39,9 +66,10 @@ case class PlannerParams(applicationId: String = "filodb",
                          processFailure: Boolean = true,
                          processMultiPartition: Boolean = false,
                          allowPartialResults: Boolean = false)
+
 object PlannerParams {
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): PlannerParams =
-    PlannerParams(spreadOverride = constSpread, sampleLimit = sampleLimit)
+    PlannerParams(spreadOverride = constSpread, enforcedLimits = PerQueryLimits(execPlanSamples = sampleLimit))
   def apply(constSpread: Option[SpreadProvider], partialResults: Boolean): PlannerParams =
     PlannerParams(spreadOverride = constSpread, allowPartialResults = partialResults)
 }

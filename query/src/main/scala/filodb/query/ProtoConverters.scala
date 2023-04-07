@@ -191,13 +191,16 @@ object ProtoConverters {
 
   implicit class PlannerParamsToProtoConverter(pp: PlannerParams) {
     def toProto: GrpcMultiPartitionQueryService.PlannerParams = {
+      val enforcedLimits = pp.enforcedLimits.toProto
+      val warnLimits = pp.warnLimits.toProto
       val builder = GrpcMultiPartitionQueryService.PlannerParams.newBuilder()
       builder.setApplicationId(pp.applicationId)
       builder.setQueryTimeoutMillis(pp.queryTimeoutMillis)
-      builder.setSampleLimit(pp.sampleLimit)
-      builder.setGroupByCardLimit(pp.groupByCardLimit)
-      builder.setJoinQueryCardLimit(pp.joinQueryCardLimit)
-      builder.setResultByteLimit(pp.resultByteLimit)
+      builder.setEnforcedLimits(enforcedLimits)
+      builder.setWarnLimits(warnLimits)
+      pp.queryOrigin.foreach(qo => builder.setQueryOrigin(qo))
+      pp.queryOriginId.foreach(qoi => builder.setQueryOriginId(qoi))
+      pp.queryPrincipal.foreach(qp => builder.setQueryPrincipal(qp))
       builder.setTimeSplitEnabled(pp.timeSplitEnabled)
       builder.setMinTimeRangeForSplitMs(pp.minTimeRangeForSplitMs)
       builder.setSplitSizeMs(pp.splitSizeMs)
@@ -211,14 +214,18 @@ object ProtoConverters {
 
   implicit class PlannerParamsFromProtoConverter(gpp: GrpcMultiPartitionQueryService.PlannerParams) {
     def fromProto: PlannerParams = {
+      val enforcedLimits = gpp.getEnforcedLimits.fromProto(PerQueryLimits.defaultEnforcedLimits())
+      val warnLimits = gpp.getWarnLimits.fromProto(PerQueryLimits.defaultWarnLimits())
       val pp = PlannerParams()
+
       pp.copy(
         applicationId = if (gpp.hasApplicationId) gpp.getApplicationId else pp.applicationId,
         queryTimeoutMillis = if (gpp.hasQueryTimeoutMillis) gpp.getQueryTimeoutMillis else pp.queryTimeoutMillis,
-        sampleLimit = if (gpp.hasSampleLimit) gpp.getSampleLimit else pp.sampleLimit,
-        groupByCardLimit = if (gpp.hasGroupByCardLimit) gpp.getGroupByCardLimit else pp.groupByCardLimit,
-        joinQueryCardLimit = if (gpp.hasJoinQueryCardLimit) gpp.getJoinQueryCardLimit else pp.joinQueryCardLimit,
-        resultByteLimit = if (gpp.hasResultByteLimit) gpp.getResultByteLimit else pp.resultByteLimit,
+        enforcedLimits = enforcedLimits,
+        warnLimits = warnLimits,
+        queryOrigin = if (gpp.hasQueryOrigin) Option(gpp.getQueryOrigin) else None,
+        queryOriginId = if (gpp.hasQueryOriginId) Option(gpp.getQueryOriginId) else None,
+        queryPrincipal = if (gpp.hasQueryPrincipal) Option(gpp.getQueryPrincipal) else None,
         timeSplitEnabled = if (gpp.hasTimeSplitEnabled) gpp.getTimeSplitEnabled else pp.timeSplitEnabled,
         minTimeRangeForSplitMs = if (gpp.hasMinTimeRangeForSplitMs) gpp.getMinTimeRangeForSplitMs
         else pp.minTimeRangeForSplitMs,
@@ -230,6 +237,60 @@ object ProtoConverters {
         else pp.processMultiPartition,
         allowPartialResults = if (gpp.hasAllowPartialResults) gpp.getAllowPartialResults else pp.allowPartialResults
       )
+    }
+  }
+
+  implicit class PerQueryLimitsToProtoConverter(sq: PerQueryLimits) {
+    def toProto: GrpcMultiPartitionQueryService.PerQueryLimits = {
+      val quotaBuilder = GrpcMultiPartitionQueryService.PerQueryLimits.newBuilder()
+      quotaBuilder.setExecPlanSamples(sq.execPlanSamples)
+      quotaBuilder.setExecPlanResultBytes(sq.execPlanResultBytes)
+      quotaBuilder.setGroupByCardinality(sq.groupByCardinality)
+      quotaBuilder.setJoinQueryCardinality(sq.joinQueryCardinality)
+      quotaBuilder.setTimeSeriesSamplesScannedBytes(sq.timeSeriesSamplesScannedBytes)
+      quotaBuilder.setTimeSeriesScanned(sq.timeSeriesScanned)
+      quotaBuilder.build()
+    }
+  }
+  implicit class PerQueryLimitsFromProtoConverter(giq: GrpcMultiPartitionQueryService.PerQueryLimits) {
+    def fromProto(): PerQueryLimits = {
+      val q = PerQueryLimits()
+      fromProto(q)
+    }
+    def fromProto(defaultQ: PerQueryLimits): PerQueryLimits = {
+      val limits = defaultQ.copy(
+        execPlanSamples =
+          if (giq.hasExecPlanSamples)
+            giq.getExecPlanSamples
+          else
+            defaultQ.execPlanSamples,
+        execPlanResultBytes =
+          if (giq.hasExecPlanResultBytes)
+            giq.getExecPlanResultBytes
+          else
+            defaultQ.execPlanResultBytes,
+        groupByCardinality =
+          if (giq.hasGroupByCardinality)
+            giq.getGroupByCardinality
+          else
+            defaultQ.groupByCardinality,
+        joinQueryCardinality =
+          if (giq.hasJoinQueryCardinality)
+            giq.getJoinQueryCardinality
+          else
+            defaultQ.joinQueryCardinality,
+        timeSeriesSamplesScannedBytes =
+          if (giq.hasTimeSeriesSamplesScannedBytes)
+            giq.getTimeSeriesSamplesScannedBytes
+          else
+            defaultQ.timeSeriesSamplesScannedBytes,
+        timeSeriesScanned =
+          if (giq.hasTimeSeriesScanned)
+            giq.getTimeSeriesScanned
+          else
+            defaultQ.timeSeriesScanned
+      )
+      limits
     }
   }
 
