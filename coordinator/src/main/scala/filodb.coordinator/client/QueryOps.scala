@@ -7,7 +7,7 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.core._
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.query.QueryContext
-import filodb.query.{LogicalPlan => LogicalPlan2, QueryError, QueryResponse => QueryResponse2}
+import filodb.query.{LogicalPlan => LogicalPlan2, QueryError, QueryResponse => QueryResponse2, TopkCardinalityResult}
 
 trait QueryOps extends ClientBase with StrictLogging {
   import QueryCommands._
@@ -55,7 +55,7 @@ trait QueryOps extends ClientBase with StrictLogging {
       GetTopkCardinality(dataset, shards, shardKeyPrefix,
                          shardKeyPrefix.size + 1, k, addInactive),
       timeout) {
-      case s: Seq[CardinalityRecord] @unchecked => s
+      case s: TopkCardinalityResult => s.card
       case e: QueryError => throw e.t
     }
 

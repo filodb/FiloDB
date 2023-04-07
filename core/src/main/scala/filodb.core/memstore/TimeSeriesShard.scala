@@ -43,7 +43,6 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
 
   val shardTotalRecoveryTime = Kamon.gauge("memstore-total-shard-recovery-time",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
-  val tsCountBySchema = Kamon.gauge("memstore-timeseries-by-schema").withTags(TagSet.from(tags))
   val rowsIngested = Kamon.counter("memstore-rows-ingested").withTags(TagSet.from(tags))
   val partitionsCreated = Kamon.counter("memstore-partitions-created").withTags(TagSet.from(tags))
   val dataDropped = Kamon.counter("memstore-data-dropped").withTags(TagSet.from(tags))
@@ -59,7 +58,6 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val encodedHistBytes = Kamon.counter("memstore-hist-encoded-bytes", MeasurementUnit.information.bytes)
     .withTags(TagSet.from(tags))
   val flushesSuccessful = Kamon.counter("memstore-flushes-success").withTags(TagSet.from(tags))
-  val flushesFailedPartWrite = Kamon.counter("memstore-flushes-failed-partition").withTags(TagSet.from(tags))
   val flushesFailedChunkWrite = Kamon.counter("memstore-flushes-failed-chunk").withTags(TagSet.from(tags))
   val flushesFailedOther = Kamon.counter("memstore-flushes-failed-other").withTags(TagSet.from(tags))
 
@@ -912,9 +910,9 @@ class TimeSeriesShard(val ref: DatasetRef,
         dirtyParts += p.partID
         activelyIngesting -= p.partID
         markPartAsNotIngesting(p, odp = false)
-        val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
-          p.schema.options.shardKeyColumns)
         if (storeConfig.meteringEnabled) {
+          val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
+            p.schema.options.shardKeyColumns)
           cardTracker.modifyCount(shardKey, 0, -1)
         }
       }

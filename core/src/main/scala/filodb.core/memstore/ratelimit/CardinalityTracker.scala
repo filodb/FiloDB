@@ -61,36 +61,32 @@ class CardinalityTracker(ref: DatasetRef,
     // modifyCount and decrementCount methods are protected this way
 
     require(shardKey.length == shardKeyLen, "full shard key is needed")
-    require(totalDelta == 1 && activeDelta == 0 ||   // new ts but inactive
-            totalDelta == 1 && activeDelta == 1 ||   // new ts and active
-            totalDelta == 0 && activeDelta == 1 ||   // // existing inactive ts that became active
-            totalDelta == 0 && activeDelta == -1,    // existing active ts that became inactive
-            "invalid values for totalDelta / activeDelta")
+    require(totalDelta == 1 && activeDelta == 0 || // new ts but inactive
+      totalDelta == 1 && activeDelta == 1 || // new ts and active
+          totalDelta == 0 && activeDelta == 1 ||   // // existing inactive ts that became active
+      totalDelta == 0 && activeDelta == -1, // existing active ts that became inactive
+      "invalid values for totalDelta / activeDelta")
 
     val toStore = ArrayBuffer[(Seq[String], CardinalityRecord)]()
     // first make sure there is no breach for any prefix
     (0 to shardKey.length).foreach { i =>
       val prefix = shardKey.take(i)
       val old = store.getOrZero(prefix, CardinalityRecord(shard, prefix, 0, 0, 0, defaultChildrenQuota(i)))
+      val newActive = Math.max(old.activeTsCount + activeDelta, 0)
       if (old.activeTsCount + activeDelta < 0) {
-        throw new IllegalArgumentException(s"$prefix active count is already zero - cannot reduce " +
-          s"further. A double delete likely happened.")
-      }
-      if (old.tsCount + totalDelta < 0) {
-        throw new IllegalArgumentException(s"$prefix total count is already zero - cannot reduce " +
-          s"further. A double delete likely happened.")
+        logger.error(s"For some reason, activeTs count for prefix $prefix cannot be reduced below zero")
       }
       val neu = old.copy(tsCount = old.tsCount + totalDelta,
-                         activeTsCount = old.activeTsCount + activeDelta,
-                         childrenCount = if (i == shardKeyLen) old.childrenCount + totalDelta else old.childrenCount)
+        activeTsCount = newActive,
+        childrenCount = if (i == shardKeyLen) old.childrenCount + totalDelta else old.childrenCount)
       if (i == shardKeyLen && neu.tsCount > neu.childrenQuota) {
         quotaExceededProtocol.quotaExceeded(ref, shard, prefix, neu.childrenQuota)
         throw QuotaReachedException(shardKey, prefix, neu.childrenQuota)
       }
       if (i > 0 && neu.tsCount == 1 && totalDelta == 1) { // parent's new child
-        val parent = toStore(i-1)
+        val parent = toStore(i - 1)
         val neuParent = parent._2.copy(childrenCount = parent._2.childrenCount + 1)
-        toStore(i-1) = (parent._1, neuParent)
+        toStore(i - 1) = (parent._1, neuParent)
         if (neuParent.childrenCount > neuParent.childrenQuota) {
           quotaExceededProtocol.quotaExceeded(ref, shard, parent._1, neuParent.childrenQuota)
           throw QuotaReachedException(shardKey, parent._1, neuParent.childrenQuota)
