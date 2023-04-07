@@ -77,18 +77,18 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
   it("should convert PlannerParams to proto and back") {
     val pp = PlannerParams( applicationId= "fdb",
                             queryTimeoutMillis = 10,
-                            enforcedQuota = IndividualQuota(
+                            enforcedLimits = PerQueryLimits(
                               groupByCardinality = 123,
                               joinQueryCardinality = 124,
                               execPlanResultBytes = 125,
                               execPlanSamples = 126,
-                              timeSeriesSamplesScanBytes = 127),
-                            warnQuota = IndividualQuota(
+                              timeSeriesSamplesScannedBytes = 127),
+                            warnLimits = PerQueryLimits(
                               groupByCardinality = 128,
                               joinQueryCardinality = 129,
                               execPlanResultBytes = 130,
                               execPlanSamples = 131,
-                              timeSeriesSamplesScanBytes = 132),
+                              timeSeriesSamplesScannedBytes = 132),
                             queryOrigin = Option("rr"),
                             queryOriginId = Option("rr_id"),
                             timeSplitEnabled = true,

@@ -212,7 +212,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     // Reducing limit results in truncated metadata response
     val execPlan = PartKeysExec(
-      QueryContext(plannerParams = PlannerParams(enforcedQuota = IndividualQuota(execPlanSamples = limit -1))),
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanSamples = limit -1))),
       executeDispatcher,
       timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now)
 
@@ -236,7 +236,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     // Reducing limit results in truncated metadata response
     val execPlan = PartKeysExec(
-      QueryContext(plannerParams = PlannerParams(enforcedQuota = IndividualQuota(execPlanSamples = limit -1))),
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanSamples = limit -1))),
       executeDispatcher,
       timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now, maxRecordContainerSize = 8 * 1024)
 
@@ -252,7 +252,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     // Default one with 64K Record container
     val execPlan1 = PartKeysExec(
-      QueryContext(plannerParams = PlannerParams(enforcedQuota = IndividualQuota(execPlanSamples = limit -1))),
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanSamples = limit -1))),
       executeDispatcher,
       timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now)
 

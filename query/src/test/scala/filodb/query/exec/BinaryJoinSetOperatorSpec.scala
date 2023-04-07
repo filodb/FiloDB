@@ -1041,7 +1041,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
 
     val queryContext =
-      QueryContext(plannerParams = PlannerParams(enforcedQuota = IndividualQuota(joinQueryCardinality = 10)))
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(joinQueryCardinality = 10)))
 
     val execPlan = SetOperatorExec(queryContext, dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
@@ -1092,7 +1092,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
 
     val queryContext =
-      QueryContext(plannerParams = PlannerParams(enforcedQuota = IndividualQuota(joinQueryCardinality = 10)))
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(joinQueryCardinality = 10)))
     val execPlan = SetOperatorExec(queryContext, dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
@@ -1141,7 +1141,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
 
     val queryContext =
-      QueryContext(plannerParams = PlannerParams(enforcedQuota = IndividualQuota(joinQueryCardinality = 10)))
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(joinQueryCardinality = 10)))
     val execPlan = SetOperatorExec(queryContext, dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
@@ -1189,7 +1189,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
 
     val queryContext =
-      QueryContext(plannerParams = PlannerParams(enforcedQuota = IndividualQuota(joinQueryCardinality = 10)))
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(joinQueryCardinality = 10)))
     val execPlan = SetOperatorExec(queryContext, dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
@@ -1236,7 +1236,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
 
     val queryContext =
-      QueryContext(plannerParams = PlannerParams(enforcedQuota = IndividualQuota(joinQueryCardinality = 10)))
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(joinQueryCardinality = 10)))
     val execPlan = SetOperatorExec(queryContext, dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
@@ -1283,7 +1283,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
     def dataRows = Stream.from(0).map(n => new TransientRow(n.toLong, n.toDouble))
 
     val queryContext =
-      QueryContext(plannerParams = PlannerParams(enforcedQuota = IndividualQuota(joinQueryCardinality = 10)))
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(joinQueryCardinality = 10)))
     val execPlan = SetOperatorExec(queryContext, dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
@@ -1376,7 +1376,7 @@ class BinaryJoinSetOperatorSpec extends AnyFunSpec with Matchers with ScalaFutur
       })
 
     val queryContext =
-      QueryContext(plannerParams = PlannerParams(enforcedQuota = IndividualQuota(joinQueryCardinality = 10)))
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(joinQueryCardinality = 10)))
     val execPlan = SetOperatorExec(queryContext, dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute

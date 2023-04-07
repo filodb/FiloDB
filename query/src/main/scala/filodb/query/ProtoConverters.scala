@@ -180,13 +180,13 @@ object ProtoConverters {
 
   implicit class PlannerParamsToProtoConverter(pp: PlannerParams) {
     def toProto: GrpcMultiPartitionQueryService.PlannerParams = {
-      val enforcedQuota = pp.enforcedQuota.toProto
-      val warnQuota = pp.warnQuota.toProto
+      val enforcedLimits = pp.enforcedLimits.toProto
+      val warnLimits = pp.warnLimits.toProto
       val builder = GrpcMultiPartitionQueryService.PlannerParams.newBuilder()
       builder.setApplicationId(pp.applicationId)
       builder.setQueryTimeoutMillis(pp.queryTimeoutMillis)
-      builder.setEnforcedQuota(enforcedQuota)
-      builder.setWarnQuota(warnQuota)
+      builder.setEnforcedLimits(enforcedLimits)
+      builder.setWarnLimits(warnLimits)
       pp.queryOrigin.foreach(qo => builder.setQueryOrigin(qo))
       pp.queryOriginId.foreach(qoi => builder.setQueryOriginId(qoi))
       pp.queryPrincipal.foreach(qp => builder.setQueryPrincipal(qp))
@@ -203,15 +203,15 @@ object ProtoConverters {
 
   implicit class PlannerParamsFromProtoConverter(gpp: GrpcMultiPartitionQueryService.PlannerParams) {
     def fromProto: PlannerParams = {
-      val enforcedQuota = gpp.getEnforcedQuota.fromProto(IndividualQuota.defaultEnforcedQuota())
-      val warnQuota = gpp.getWarnQuota.fromProto(IndividualQuota.defaultWarnQuota())
+      val enforcedLimits = gpp.getEnforcedLimits.fromProto(PerQueryLimits.defaultEnforcedLimits())
+      val warnLimits = gpp.getWarnLimits.fromProto(PerQueryLimits.defaultWarnLimits())
       val pp = PlannerParams()
 
       pp.copy(
         applicationId = if (gpp.hasApplicationId) gpp.getApplicationId else pp.applicationId,
         queryTimeoutMillis = if (gpp.hasQueryTimeoutMillis) gpp.getQueryTimeoutMillis else pp.queryTimeoutMillis,
-        enforcedQuota = enforcedQuota,
-        warnQuota = warnQuota,
+        enforcedLimits = enforcedLimits,
+        warnLimits = warnLimits,
         queryOrigin = if (gpp.hasQueryOrigin) Option(gpp.getQueryOrigin) else None,
         queryOriginId = if (gpp.hasQueryOriginId) Option(gpp.getQueryOriginId) else None,
         queryPrincipal = if (gpp.hasQueryPrincipal) Option(gpp.getQueryPrincipal) else None,
@@ -229,24 +229,25 @@ object ProtoConverters {
     }
   }
 
-  implicit class IndividualQuotaToProtoConverter(sq: IndividualQuota) {
-    def toProto: GrpcMultiPartitionQueryService.IndividualQuota = {
-      val quotaBuilder = GrpcMultiPartitionQueryService.IndividualQuota.newBuilder()
+  implicit class PerQueryLimitsToProtoConverter(sq: PerQueryLimits) {
+    def toProto: GrpcMultiPartitionQueryService.PerQueryLimits = {
+      val quotaBuilder = GrpcMultiPartitionQueryService.PerQueryLimits.newBuilder()
       quotaBuilder.setExecPlanSamples(sq.execPlanSamples)
       quotaBuilder.setExecPlanResultBytes(sq.execPlanResultBytes)
       quotaBuilder.setGroupByCardinality(sq.groupByCardinality)
       quotaBuilder.setJoinQueryCardinality(sq.joinQueryCardinality)
-      quotaBuilder.setTimeSeriesSamplesScanBytes(sq.timeSeriesSamplesScanBytes)
+      quotaBuilder.setTimeSeriesSamplesScannedBytes(sq.timeSeriesSamplesScannedBytes)
+      quotaBuilder.setTimeSeriesScanned(sq.timeSeriesScanned)
       quotaBuilder.build()
     }
   }
-  implicit class IndividualQuotaFromProtoConverter(giq: GrpcMultiPartitionQueryService.IndividualQuota) {
-    def fromProto(): IndividualQuota = {
-      val q = IndividualQuota()
+  implicit class PerQueryLimitsFromProtoConverter(giq: GrpcMultiPartitionQueryService.PerQueryLimits) {
+    def fromProto(): PerQueryLimits = {
+      val q = PerQueryLimits()
       fromProto(q)
     }
-    def fromProto(defaultQ: IndividualQuota): IndividualQuota = {
-      val quota = defaultQ.copy(
+    def fromProto(defaultQ: PerQueryLimits): PerQueryLimits = {
+      val limits = defaultQ.copy(
         execPlanSamples =
           if (giq.hasExecPlanSamples)
             giq.getExecPlanSamples
@@ -267,13 +268,18 @@ object ProtoConverters {
             giq.getJoinQueryCardinality
           else
             defaultQ.joinQueryCardinality,
-        timeSeriesSamplesScanBytes =
-          if (giq.hasJoinQueryCardinality)
-            giq.getTimeSeriesSamplesScanBytes
+        timeSeriesSamplesScannedBytes =
+          if (giq.hasTimeSeriesSamplesScannedBytes)
+            giq.getTimeSeriesSamplesScannedBytes
           else
-            defaultQ.timeSeriesSamplesScanBytes
+            defaultQ.timeSeriesSamplesScannedBytes,
+        timeSeriesScanned =
+          if (giq.hasTimeSeriesScanned)
+            giq.getTimeSeriesScanned
+          else
+            defaultQ.timeSeriesScanned
       )
-      quota
+      limits
     }
   }
 

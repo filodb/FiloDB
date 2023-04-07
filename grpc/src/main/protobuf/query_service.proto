@@ -19,19 +19,20 @@ message QueryParams {
       bool isUnavailable          = 7;
 }
 
-message IndividualQuota{
-  optional uint32 execPlanSamples            = 1; // Limit on ExecPlan results in samples
-  optional uint64 execPlanResultBytes        = 2; // Limit on ExecPlan results in bytes
-  optional uint32 groupByCardinality         = 3; // Limit on "group by" clause results
-  optional uint32 joinQueryCardinality       = 4; // Limit on binary join results
-  optional uint64 timeSeriesSamplesScanBytes = 5; // Limit on max data scanned per shard
+message PerQueryLimits {
+  optional uint32 execPlanSamples               = 1; // Limit on ExecPlan results in samples
+  optional uint64 execPlanResultBytes           = 2; // Limit on ExecPlan results in bytes
+  optional uint32 groupByCardinality            = 3; // Limit on "group by" clause results
+  optional uint32 joinQueryCardinality          = 4; // Limit on binary join results
+  optional uint64 timeSeriesSamplesScannedBytes = 5; // Limit on max data scanned per shard
+  optional uint32 timeSeriesScanned             = 6; // Limit on max time series scanned
 }
 
 message PlannerParams {
     optional string applicationId          = 1;
     optional uint32 queryTimeoutMillis     = 2;
-    optional IndividualQuota enforcedQuota = 3;
-    optional IndividualQuota warnQuota     = 4;
+    optional PerQueryLimits enforcedLimits = 3;
+    optional PerQueryLimits warnLimits     = 4;
     optional string queryOrigin            = 5;
     optional string queryOriginId          = 6;
     optional string queryPrincipal         = 7;

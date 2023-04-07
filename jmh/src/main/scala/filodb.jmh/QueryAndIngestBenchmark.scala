@@ -18,7 +18,7 @@ import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{IndividualQuota, PlannerParams, QueryContext}
+import filodb.core.query.{PerQueryLimits, PlannerParams, QueryContext}
 import filodb.core.store.StoreConfig
 import filodb.gateway.GatewayServer
 import filodb.gateway.conversion.PrometheusInputRecord
@@ -122,7 +122,7 @@ class QueryAndIngestBenchmark extends StrictLogging {
   println(s"Initial ingestion ended, indexes set up")
   val qContext = QueryContext(plannerParams =
     new PlannerParams(spreadOverride = Some(StaticSpreadProvider(SpreadChange(0, spread))),
-      enforcedQuota = IndividualQuota(execPlanSamples = 1000000),
+      enforcedLimits = PerQueryLimits(execPlanSamples = 1000000),
       queryTimeoutMillis = 2.hours.toMillis.toInt)) // high timeout since we are using same context for all queries
 
   /**

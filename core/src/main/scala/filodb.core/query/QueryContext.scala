@@ -22,26 +22,28 @@ case class PromQlQueryParams(promQl: String, startSecs: Long, stepSecs: Long, en
 
 case object UnavailablePromQlQueryParams extends TsdbQueryParams
 
-case class IndividualQuota(
+case class PerQueryLimits(
         execPlanSamples: Int = 1000000,       // Limit on ExecPlan results in samples, default is 100K
         execPlanResultBytes: Long = 18000000, // Limit on ExecPlan results in bytes, default is 18MB
         groupByCardinality: Int = 100000,     // Limit on "group by" clause results, default is 100K
         joinQueryCardinality: Int = 100000,   // Limit on binary join results, default is 100K
-        timeSeriesSamplesScanBytes: Long = 300000000)  // Limit on max data scanned per shard, default is 300 MB
+        timeSeriesSamplesScannedBytes: Long = 300000000, // Limit on max data scanned per shard, default is 300 MB
+        timeSeriesScanned: Int = 1000000)    // Limit on max number of time series scanned, default is 1M
 
-object IndividualQuota {
+object PerQueryLimits {
 
-  def defaultEnforcedQuota(): IndividualQuota = {
-    IndividualQuota()
+  def defaultEnforcedLimits(): PerQueryLimits = {
+    PerQueryLimits()
   }
 
-  def defaultWarnQuota(): IndividualQuota = {
-    IndividualQuota(
+  def defaultWarnLimits(): PerQueryLimits = {
+    PerQueryLimits(
       execPlanSamples = 50000,
       execPlanResultBytes = 15000000,
       groupByCardinality = 50000,
       joinQueryCardinality = 50000,
-      timeSeriesSamplesScanBytes = 150000
+      timeSeriesSamplesScannedBytes = 150000,
+      timeSeriesScanned = 500000
     )
   }
 
@@ -52,8 +54,8 @@ case class PlannerParams(applicationId: String = "filodb",
                          shardOverrides: Option[Seq[Int]] = None,
                          targetSchemaProviderOverride: Option[TargetSchemaProvider] = None,
                          queryTimeoutMillis: Int = 60000, // set default to match default http-request-timeout
-                         enforcedQuota: IndividualQuota = IndividualQuota.defaultEnforcedQuota(),
-                         warnQuota: IndividualQuota = IndividualQuota.defaultWarnQuota(),
+                         enforcedLimits: PerQueryLimits = PerQueryLimits.defaultEnforcedLimits(),
+                         warnLimits: PerQueryLimits = PerQueryLimits.defaultWarnLimits(),
                          queryOrigin: Option[String] = None, // alert/dashboard/rr/api/etc
                          queryOriginId: Option[String] = None, // an ID of rr/alert
                          queryPrincipal: Option[String] = None, // user, entity initiating query
@@ -67,7 +69,7 @@ case class PlannerParams(applicationId: String = "filodb",
 
 object PlannerParams {
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): PlannerParams =
-    PlannerParams(spreadOverride = constSpread, enforcedQuota = IndividualQuota(execPlanSamples = sampleLimit))
+    PlannerParams(spreadOverride = constSpread, enforcedLimits = PerQueryLimits(execPlanSamples = sampleLimit))
   def apply(constSpread: Option[SpreadProvider], partialResults: Boolean): PlannerParams =
     PlannerParams(spreadOverride = constSpread, allowPartialResults = partialResults)
 }

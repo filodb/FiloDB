@@ -325,7 +325,7 @@ final case class PartKeysExec(queryContext: QueryContext,
     val rvs = source match {
       case memStore: TimeSeriesStore =>
         val response = memStore.partKeysWithFilters(dataset, shard, filters,
-          fetchFirstLastSampleTimes, end, start, queryContext.plannerParams.enforcedQuota.execPlanSamples)
+          fetchFirstLastSampleTimes, end, start, queryContext.plannerParams.enforcedLimits.execPlanSamples)
         Observable.now(IteratorBackedRangeVector(
           new CustomRangeVectorKey(Map.empty), UTF8MapIteratorRowReader(response), None))
       case _ => Observable.empty
@@ -335,7 +335,7 @@ final case class PartKeysExec(queryContext: QueryContext,
   }
 
   def args: String =
-    s"shard=$shard, filters=$filters, limit=${queryContext.plannerParams.enforcedQuota.execPlanSamples}"
+    s"shard=$shard, filters=$filters, limit=${queryContext.plannerParams.enforcedLimits.execPlanSamples}"
 }
 
 final case class LabelValuesExec(queryContext: QueryContext,
@@ -362,7 +362,7 @@ final case class LabelValuesExec(queryContext: QueryContext,
         // retrieves label values for a single label - no column filter
         case true if (columns.size == 1) =>
           val labels = memStore.labelValues(dataset, shard, columns.head,
-            queryContext.plannerParams.enforcedQuota.execPlanSamples).map(_.term.toString)
+            queryContext.plannerParams.enforcedLimits.execPlanSamples).map(_.term.toString)
           val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
             StringArrayRowReader(labels), None))
           val sch = if (labels.isEmpty) ResultSchema.empty
@@ -372,7 +372,7 @@ final case class LabelValuesExec(queryContext: QueryContext,
           "or there are multiple label names without filter")
         case false if (columns.size == 1) =>
           val labelsIter = memStore.singleLabelValueWithFilters(dataset, shard, filters, columns.head, endMs, startMs,
-            querySession, queryContext.plannerParams.enforcedQuota.execPlanSamples)
+            querySession, queryContext.plannerParams.enforcedLimits.execPlanSamples)
           val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
             UTF8StringRowReader(labelsIter), None))
           val sch = if (labelsIter.isEmpty) ResultSchema.empty
@@ -380,7 +380,7 @@ final case class LabelValuesExec(queryContext: QueryContext,
           ExecResult(resp, Task.eval(sch))
         case false =>
           val metadataMap = memStore.labelValuesWithFilters(dataset, shard, filters, columns, endMs, startMs,
-            querySession, queryContext.plannerParams.enforcedQuota.execPlanSamples)
+            querySession, queryContext.plannerParams.enforcedLimits.execPlanSamples)
           val resp = Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
             UTF8MapIteratorRowReader(metadataMap), None))
           val sch = if (metadataMap.isEmpty) ResultSchema.empty
@@ -396,7 +396,7 @@ final case class LabelValuesExec(queryContext: QueryContext,
   }
 
   def args: String = s"shard=$shard, filters=$filters, col=$columns, " +
-    s"limit=${queryContext.plannerParams.enforcedQuota.execPlanSamples}," +
+    s"limit=${queryContext.plannerParams.enforcedLimits.execPlanSamples}," +
     s" startMs=$startMs, endMs=$endMs"
 }
 
@@ -449,7 +449,7 @@ final case class LabelCardinalityExec(queryContext: QueryContext,
   }
 
   def args: String = s"shard=$shard, filters=$filters," +
-    s" limit=${queryContext.plannerParams.enforcedQuota.execPlanSamples}," +
+    s" limit=${queryContext.plannerParams.enforcedLimits.execPlanSamples}," +
     s" startMs=$startMs, endMs=$endMs"
 }
 
@@ -572,7 +572,7 @@ final case class TsCardExec(queryContext: QueryContext,
   // scalastyle:on method.length
 
   def args: String = s"shard=$shard, shardKeyPrefix=$shardKeyPrefix, " +
-    s"limit=${queryContext.plannerParams.enforcedQuota.execPlanSamples}"
+    s"limit=${queryContext.plannerParams.enforcedLimits.execPlanSamples}"
 }
 
 final case class LabelNamesExec(queryContext: QueryContext,

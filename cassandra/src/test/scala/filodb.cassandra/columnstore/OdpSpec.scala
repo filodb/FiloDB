@@ -186,7 +186,7 @@ class OdpSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll with Scala
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(gaugeName))
     val exec = MultiSchemaPartitionsExec(
-      QueryContext(plannerParams = PlannerParams(enforcedQuota = IndividualQuota(execPlanSamples = numSamples * 2))),
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanSamples = numSamples * 2))),
       InProcessPlanDispatcher(QueryConfig.unitTestingQueryConfig), dataset.ref, 0, queryFilters, TimeRangeChunkScan(firstSampleTime, firstSampleTime + 2 *
         numSamples), "_metric_")
     val queryConfig = QueryConfig(config.getConfig("query"))

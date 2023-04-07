@@ -5,7 +5,7 @@ import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, TimeSeriesMemStor
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.NoCloseCursor.NoCloseCursor
 import filodb.core.DatasetRef
-import filodb.core.query.{ColumnInfo, CustomRangeVectorKey, IndividualQuota, PlannerParams, QueryConfig, QueryContext, QuerySession, RangeParams, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange, TransientHistRow}
+import filodb.core.query.{ColumnInfo, CustomRangeVectorKey, PerQueryLimits, PlannerParams, QueryConfig, QueryContext, QuerySession, RangeParams, RangeVector, RangeVectorCursor, RangeVectorKey, ResultSchema, RvRange, TransientHistRow}
 import filodb.core.store.{ChunkSource, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.vectors.{GeometricBuckets, HistogramBuckets, LongHistogram}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -197,9 +197,9 @@ class ExecPlanSpec extends AnyFunSpec with Matchers with ScalaFutures {
     val confAllow = ConfigFactory.parseString("enforce-result-byte-limit = false").withFallback(rawQueryConfig)
 
     val qContextWithLowLimit =
-      QueryContext(plannerParams = PlannerParams(enforcedQuota = IndividualQuota(execPlanResultBytes = 5)))
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanResultBytes = 5)))
     val qContextWithHighLimit =
-      QueryContext(plannerParams = PlannerParams(enforcedQuota = IndividualQuota(execPlanResultBytes = Long.MaxValue)))
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanResultBytes = Long.MaxValue)))
 
     // All combos between [low, high] limit and [enforce, allow] protocol
     val querySessionEnforceLow = QuerySession(qContextWithLowLimit, QueryConfig(confEnforce))

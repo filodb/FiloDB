@@ -49,7 +49,7 @@ trait ReduceAggregateExec extends NonLeafExecPlan {
         else {
           val aggregator = RowAggregator(aggrOp, aggrParams, schema)
           RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key,
-            querySession.qContext.plannerParams.enforcedQuota.groupByCardinality, queryContext)
+            querySession.qContext.plannerParams.enforcedLimits.groupByCardinality, queryContext)
         }
       }
     Observable.fromTask(task).flatten
@@ -140,11 +140,11 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
         RangeVectorAggregator.fastReduce(aggregator, false, source, numWindows)
       }.getOrElse {
         RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping,
-          querySession.qContext.plannerParams.enforcedQuota.groupByCardinality, querySession.qContext)
+          querySession.qContext.plannerParams.enforcedLimits.groupByCardinality, querySession.qContext)
       }
     } else {
       RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping,
-        querySession.qContext.plannerParams.enforcedQuota.groupByCardinality, querySession.qContext)
+        querySession.qContext.plannerParams.enforcedLimits.groupByCardinality, querySession.qContext)
     }
   }
 
