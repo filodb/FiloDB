@@ -111,7 +111,7 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
         datasetRef,
         pk.endTime,
         SinglePartitionScan(pk.partKey, shardNum),
-        TimeRangeChunkScan(pk.endTime, pk.endTime))
+        TimeRangeChunkScan(pk.endTime, pk.endTime))  // we only want the most-recent chunk
       .headL
       .runToFuture(currentThreadScheduler)
     val readablePart = {
