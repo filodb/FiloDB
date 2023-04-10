@@ -19,6 +19,14 @@ final case class DownsampleConfig(config: Config) {
                     else Seq.empty
 
   /**
+   * If enabled, stats about downsampled data will be collected/published as the index is bootstrapped/refreshed.
+   * These stats describe the data's "shape", e.g. label/value lengths and histogram bucket counts.
+   */
+  val enableDataShapeStats = if (config.hasPath("enableDataShapeStats")) {
+                               config.as[Boolean]("enableDataShapeStats")
+                             } else false
+
+  /**
     * TTL for downsampled data for the resolutions in same order
     */
   val ttls = if (config.hasPath ("ttls")) config.as[Seq[FiniteDuration]]("ttls")

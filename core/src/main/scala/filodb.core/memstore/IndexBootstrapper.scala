@@ -1,16 +1,28 @@
 package filodb.core.memstore
 
+import java.util.concurrent.TimeUnit
+
+import scala.concurrent.{Await, ExecutionContext}
+import scala.concurrent.duration.Duration
+
+import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.eval.Task
+import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.RecordBuilder
-import filodb.core.metadata.Schemas
-import filodb.core.store.{ColumnStore, PartKeyRecord}
+import filodb.core.binaryrecord2.RecordSchema.schemaID
+import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesShardStats}
+import filodb.core.memstore.DownsampleIndexBootstrapper.currentThreadScheduler
+import filodb.core.metadata.{Schema, Schemas}
+import filodb.core.metadata.Column.ColumnType.HistogramColumn
+import filodb.core.store.{AllChunkScan, ColumnStore, PartKeyRecord, SinglePartitionScan, TimeRangeChunkScan}
+import filodb.memory.format.UnsafeUtils
 
-class IndexBootstrapper(colStore: ColumnStore) {
+class RawIndexBootstrapper(colStore: ColumnStore) {
 
   /**
    * Bootstrap the lucene index for the shard
@@ -46,6 +58,76 @@ class IndexBootstrapper(colStore: ColumnStore) {
         count
       }
   }
+}
+
+object DownsampleIndexBootstrapper {
+  val currentThreadScheduler = {
+    Scheduler.apply(ExecutionContext.fromExecutor(cmd => cmd.run()))
+  }
+}
+
+class DownsampleIndexBootstrapper(colStore: ColumnStore,
+                                  schemas: Schemas,
+                                  stats: DownsampledTimeSeriesShardStats,
+                                  datasetRef: DatasetRef,
+                                  downsampleConfig: DownsampleConfig) extends StrictLogging {
+  val schemaHashToHistCol = schemas.schemas.values
+    // Also include DS schemas
+    .flatMap(schema => schema.downsample.map(Seq(_)).getOrElse(Nil) ++ Seq(schema))
+    .map{ schema =>
+      val histIndex = schema.data.columns.indexWhere(col => col.columnType == HistogramColumn)
+      (schema.schemaHash, histIndex)
+    }
+    .filter{ case (_, histIndex) => histIndex > -1 }
+    .toMap
+
+  /**
+   * Update metrics about the series' "shape", e.g. label/value lengths/counts, bucket counts, etc.
+   */
+  private def updateDataShapeStats(pk: PartKeyRecord, shardNum: Int, schema: Schema): Unit = {
+    val pairs = schema.partKeySchema.toStringPairs(pk.partKey, UnsafeUtils.arayOffset)
+    stats.dataShapeLabelCount.record(pairs.size)
+    var totalSize = 0  // add to this as we iterate label/value pairs, then record the total
+    pairs.foreach{ case (key, value) =>
+      stats.dataShapeKeyLength.record(key.size)
+      stats.dataShapeValueLength.record(value.size)
+      if (key == schema.options.metricColumn) {
+        stats.dataShapeMetricLength.record(value.size)
+      }
+      totalSize += key.size + value.size
+    }
+    stats.dataShapeTotalLength.record(totalSize)
+    if (schemaHashToHistCol.contains(schema.schemaHash)) {
+      val bucketCount = getHistBucketCount(pk, shardNum, schema)
+      stats.dataShapeBucketCount.record(bucketCount)
+    }
+  }
+
+  /**
+   * Given a PartKeyRecord for a histogram, returns the count of buckets in its most-recent chunk.
+   */
+  private def getHistBucketCount(pk: PartKeyRecord, shardNum: Int, schema: Schema): Int = {
+    val rawPartFut = colStore.readRawPartitions(
+        datasetRef,
+        pk.endTime,
+        SinglePartitionScan(pk.partKey, shardNum),
+        TimeRangeChunkScan(pk.endTime, pk.endTime))
+      .headL
+      .runToFuture(currentThreadScheduler)
+    val readablePart = {
+      val rawPart = Await.result(rawPartFut, Duration(5, TimeUnit.SECONDS))
+      new PagedReadablePartition(
+        schema, shard = 0, partID = 0, partData = rawPart, minResolutionMs = 1)
+    }
+    val histReader = {
+      val info = readablePart.infos(AllChunkScan).nextInfoReader
+      val histCol = schemaHashToHistCol(schema.schemaHash)
+      val ptr = info.vectorAddress(colId = histCol)
+      val acc = info.vectorAccessor(colId = histCol)
+      readablePart.chunkReader(columnID = histCol, acc, ptr).asHistReader
+    }
+    histReader.buckets.numBuckets
+  }
 
   /**
    * Same as bootstrapIndexRaw, except that we parallelize lucene update for
@@ -58,7 +140,6 @@ class IndexBootstrapper(colStore: ColumnStore) {
                                shardNum: Int,
                                ref: DatasetRef,
                                ttlMs: Long): Task[Long] = {
-
     val startCheckpoint = System.currentTimeMillis()
     val recoverIndexLatency = Kamon.gauge("shard-recover-index-latency", MeasurementUnit.time.milliseconds)
       .withTag("dataset", ref.dataset)
@@ -68,6 +149,15 @@ class IndexBootstrapper(colStore: ColumnStore) {
       .filter(_.endTime > start)
       .mapParallelUnordered(Runtime.getRuntime.availableProcessors()) { pk =>
         Task.evalAsync {
+          if (downsampleConfig.enableDataShapeStats) {
+            try {
+              val schema = schemas(schemaID(pk.partKey, UnsafeUtils.arayOffset))
+              updateDataShapeStats(pk, shardNum, schema.downsample.get)
+            } catch {
+              case t: Throwable =>
+                logger.error("swallowing exception during data-shape stats update", t)
+            }
+          }
           index.addPartKey(pk.partKey, partId = -1, pk.startTime, pk.endTime)(
             pk.partKey.length,
             PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pk.partKey, 0, pk.partKey.length)
@@ -86,6 +176,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
       }
   }
 
+  // scalastyle:off method.length
   /**
    * Refresh index with real-time data rom colStore's raw dataset
    * @param fromHour fromHour inclusive
@@ -125,6 +216,15 @@ class IndexBootstrapper(colStore: ColumnStore) {
       // Same PK can be updated multiple times, but they wont be close for order to matter.
       // Hence using mapParallelUnordered
       Task.evalAsync {
+        if (downsampleConfig.enableDataShapeStats) {
+          try {
+            val schema = schemas(schemaID(pk.partKey, UnsafeUtils.arayOffset))
+            updateDataShapeStats(pk, shardNum, schema)
+          } catch {
+            case t: Throwable =>
+              logger.error("swallowing exception during data-shape stats update", t)
+          }
+        }
         val downsamplePartKey = RecordBuilder.buildDownsamplePartKey(pk.partKey, schemas)
         downsamplePartKey.foreach { dpk =>
           index.upsertPartKey(dpk, partId = -1, pk.startTime, pk.endTime)(
@@ -144,5 +244,5 @@ class IndexBootstrapper(colStore: ColumnStore) {
         count
       }
   }
+  // scalastyle:on method.length
 }
-
