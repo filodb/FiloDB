@@ -220,7 +220,7 @@ object RangeVectorAggregator extends StrictLogging {
       val groupByWarnLimit = queryContext.plannerParams.enforcedLimits.groupByCardinality
       if (groupedResult.size > groupByWarnLimit) {
         logger.info(queryContext.getQueryLogLine(
-          s"Exceeded warning group-by cardinality limit ${groupByEnforcedLimit}. "
+          s"Exceeded warning group-by cardinality limit ${groupByWarnLimit}. "
         ))
       }
       groupedResult.map { case (rvk, aggHolder) =>
