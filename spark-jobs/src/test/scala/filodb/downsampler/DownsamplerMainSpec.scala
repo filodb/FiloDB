@@ -1748,6 +1748,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
   }
 
   it ("should correctly calculate data-shape stats during bootstrap / refresh") {
+
     // The plan:
     //   (1) Write rows to the raw column store.
     //     (a) Populate a set of "expected" data-shape stats while iterating rows.
@@ -1765,6 +1766,14 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val commonLabels = Map("_ws_" -> "foo_ws", "_ns_" -> "foo_ns")
     val firstTimestampMs = 74372801000L
     val stepMs = 10000L
+
+    // ====== clear all previous state ========================================
+
+    beforeAll()  // truncate columnstores
+    val offheapMem = new OffHeapMemory(
+      Seq(Schemas.promCounter, Schemas.promHistogram), Map.empty, 100, rawDataStoreConfig)
+    val shardInfo = TimeSeriesShardInfo(
+      0, batchDownsampler.shardStats, offheapMem.bufferPools, offheapMem.nativeMemoryManager)
 
     // ====== configure the data to ingest / downsample =========================
 
