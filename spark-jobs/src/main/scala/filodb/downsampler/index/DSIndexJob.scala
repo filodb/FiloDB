@@ -22,6 +22,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
   @transient lazy private val sparkForeachTasksCompleted = Kamon.counter("spark-foreach-tasks-completed")
                                                                .withoutTags()
   @transient lazy private val sparkTasksFailed = Kamon.counter("spark-tasks-failed").withoutTags()
+  @transient lazy private val numPartKeysUnknownSchema = Kamon.counter("num-partkeys-unknown-schema").withoutTags()
   @transient lazy private val numPartKeysNoDownsampleSchema = Kamon.counter("num-partkeys-no-downsample").withoutTags()
   @transient lazy private val numPartKeysMigrated = Kamon.counter("num-partkeys-migrated").withoutTags()
   @transient lazy private val numPartKeysBlocked = Kamon.counter("num-partkeys-blocked").withoutTags()
@@ -97,17 +98,24 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
     val pkRecords = partKeys.filter { pk =>
       val rawSchemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
       val schema = schemas(rawSchemaId)
-      val pkPairs = schema.partKeySchema.toStringPairs(pk.partKey, UnsafeUtils.arayOffset)
-      val blocked = !dsSettings.isEligibleForDownsample(pkPairs)
-      val hasDownsampleSchema = schema.downsample.isDefined
-      if (blocked) numPartKeysBlocked.increment()
-      if (!hasDownsampleSchema) numPartKeysNoDownsampleSchema.increment()
-      DownsamplerContext.dsLogger.debug(s"Migrating partition partKey=$pkPairs schema=${schema.name} " +
-        s"startTime=${pk.startTime} endTime=${pk.endTime} blocked=$blocked shard=$shard " +
-        s"hasDownsampleSchema=$hasDownsampleSchema")
-      val eligible = hasDownsampleSchema && !blocked
-      if (eligible) count += 1
-      eligible
+      if (schema == Schemas.UnknownSchema) {
+        DownsamplerContext.dsLogger.warn(s"Partition with unknownSchemaId=$rawSchemaId " +
+          s"startTime=${pk.startTime} endTime=${pk.endTime} shard=$shard")
+        numPartKeysUnknownSchema.increment()
+        false
+      } else {
+        val pkPairs = schema.partKeySchema.toStringPairs(pk.partKey, UnsafeUtils.arayOffset)
+        val blocked = !dsSettings.isEligibleForDownsample(pkPairs)
+        val hasDownsampleSchema = schema.downsample.isDefined
+        if (blocked) numPartKeysBlocked.increment()
+        if (!hasDownsampleSchema) numPartKeysNoDownsampleSchema.increment()
+        DownsamplerContext.dsLogger.debug(s"Migrating partition partKey=$pkPairs schema=${schema.name} " +
+          s"startTime=${pk.startTime} endTime=${pk.endTime} blocked=$blocked shard=$shard " +
+          s"hasDownsampleSchema=$hasDownsampleSchema")
+        val eligible = hasDownsampleSchema && !blocked
+        if (eligible) count += 1
+        eligible
+      }
     }.map(pkr => rawDataSource.getPartKeyRecordOrDefault(ref = rawDatasetRef, shard = shard.toInt,
         partKeyRecord = pkr)) // Merge with persisted (if exists) partKey.
       .map(toDownsamplePkrWithHash)
