@@ -50,7 +50,6 @@ trait ReduceAggregateExec extends NonLeafExecPlan {
           val aggregator = RowAggregator(aggrOp, aggrParams, schema)
           RangeVectorAggregator.mapReduce(
             aggregator, skipMapPhase = true, results, rv => rv.key,
-            //querySession.qContext.plannerParams.enforcedLimits.groupByCardinality,
             queryContext)
         }
       }
@@ -217,7 +216,7 @@ object RangeVectorAggregator extends StrictLogging {
           "Try applying more filters or reduce query range. "
         )
       }
-      val groupByWarnLimit = queryContext.plannerParams.enforcedLimits.groupByCardinality
+      val groupByWarnLimit = queryContext.plannerParams.warnLimits.groupByCardinality
       if (groupedResult.size > groupByWarnLimit) {
         logger.info(queryContext.getQueryLogLine(
           s"Exceeded warning group-by cardinality limit ${groupByWarnLimit}. "
