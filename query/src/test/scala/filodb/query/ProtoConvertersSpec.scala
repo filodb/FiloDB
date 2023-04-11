@@ -88,7 +88,8 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
                               joinQueryCardinality = 124,
                               execPlanResultBytes = 125,
                               execPlanSamples = 126,
-                              timeSeriesSamplesScannedBytes = 127),
+                              timeSeriesSamplesScannedBytes = 127,
+                              timeSeriesScanned = 200),
                             warnLimits = PerQueryLimits(
                               groupByCardinality = 128,
                               joinQueryCardinality = 129,
