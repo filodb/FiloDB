@@ -95,8 +95,12 @@ final case class QueryContext(origQueryParams: TsdbQueryParams = UnavailableProm
   }
 
   def getQueryLogLine(msg: String): String = {
+    val promQl = origQueryParams match {
+      case PromQlQueryParams(promQl: String, _, _, _, _, _) => s" promQL = -=# ${promQl} #=-"
+      case UnavailablePromQlQueryParams => "-=# unknown query #=-"
+    }
     val logLine = msg +
-      s" promQL = -=# ${origQueryParams.asInstanceOf[PromQlQueryParams].promQl} #=-" +
+      s" promQL = -=# ${promQl} #=-" +
       s" queryOrigin = ${plannerParams.queryOrigin}" +
       s" queryPrincipal = ${plannerParams.queryPrincipal}" +
       s" queryOriginId = ${plannerParams.queryOriginId}"

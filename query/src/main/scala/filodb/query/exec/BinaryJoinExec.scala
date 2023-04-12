@@ -79,13 +79,11 @@ final case class BinaryJoinExec(queryContext: QueryContext,
         if (result.size > joinQueryEnforcedCardinalityLimit && cardinality == Cardinality.OneToOne) {
           logger.warn(queryContext.getQueryLogLine(
             s"Exceeded enforced binary join input cardinality limit ${joinQueryEnforcedCardinalityLimit}," +
-              s" encountered input cardinality ${tuple._1.result.size}"
+              s" encountered input cardinality ${result.size}"
           ))
           throw new BadQueryException(s"The join in this query has input cardinality of ${result.size} which" +
             s" is more than limit of ${queryContext.plannerParams.enforcedLimits.joinQueryCardinality}." +
-            s" Encountered input cardinality ${result.size}." +
-            s" Try applying more filters or reduce time range."
-          )
+            s" Try applying more filters or reduce time range.")
         }
         val joinQueryWarnCardinalityLimit = queryContext.plannerParams.warnLimits.joinQueryCardinality
         if (result.size > joinQueryWarnCardinalityLimit && cardinality == Cardinality.OneToOne) {
