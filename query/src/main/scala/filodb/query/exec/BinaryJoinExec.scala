@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import scala.collection.mutable
 
+import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.eval.Task
@@ -45,7 +46,7 @@ final case class BinaryJoinExec(queryContext: QueryContext,
                                 ignoring: Seq[String],
                                 include: Seq[String],
                                 metricColumn: String,
-                                outputRvRange: Option[RvRange]) extends NonLeafExecPlan {
+                                outputRvRange: Option[RvRange]) extends NonLeafExecPlan with StrictLogging {
 
   require(cardinality != Cardinality.ManyToMany,
     "Many To Many cardinality is not supported for BinaryJoinExec")
@@ -72,14 +73,27 @@ final case class BinaryJoinExec(queryContext: QueryContext,
                               querySession: QuerySession): Observable[RangeVector] = {
     val span = Kamon.currentSpan()
     val taskOfResults = childResponses.map {
-      case (QueryResult(_, _, result, _, _, _), _)
-        if (
-          result.size  > queryContext.plannerParams.enforcedLimits.joinQueryCardinality &&
-          cardinality == Cardinality.OneToOne
-        ) => throw new BadQueryException(s"The join in this query has input cardinality of ${result.size} which" +
-          s" is more than limit of ${queryContext.plannerParams.enforcedLimits.joinQueryCardinality}." +
-          s" Try applying more filters or reduce time range.")
-      case (QueryResult(_, _, result, _, _, _), i) => (result, i)
+      tuple : (QueryResult, Int) => {
+        val result : Seq[RangeVector] = tuple._1.result
+        val joinQueryEnforcedCardinalityLimit = queryContext.plannerParams.enforcedLimits.joinQueryCardinality
+        if (result.size > joinQueryEnforcedCardinalityLimit && cardinality == Cardinality.OneToOne) {
+          logger.warn(queryContext.getQueryLogLine(
+            s"Exceeded enforced binary join input cardinality limit ${joinQueryEnforcedCardinalityLimit}," +
+              s" encountered input cardinality ${result.size}"
+          ))
+          throw new BadQueryException(s"The join in this query has input cardinality of ${result.size} which" +
+            s" is more than limit of ${queryContext.plannerParams.enforcedLimits.joinQueryCardinality}." +
+            s" Try applying more filters or reduce time range.")
+        }
+        val joinQueryWarnCardinalityLimit = queryContext.plannerParams.warnLimits.joinQueryCardinality
+        if (result.size > joinQueryWarnCardinalityLimit && cardinality == Cardinality.OneToOne) {
+          logger.info(queryContext.getQueryLogLine(
+            s"Exceeded warn binary join input cardinality limit=${joinQueryWarnCardinalityLimit}, " +
+              s" encountered input cardinality ${result.size}"
+          ))
+        }
+        (result, tuple._2)
+      }
     }.toListL.map { resp =>
       val startNs = Utils.currentThreadCpuTimeNanos
       try {
