@@ -290,29 +290,26 @@ final case class Schemas(part: PartitionSchema,
   Schemas._log.info(s"bytesPerSampleSwag: $bytesPerSampleSwagString")
 
   /**
-    * Note this approach below assumes the following for quick size estimation. The sizing is more
-    * a swag than reality:
-    * (a) every matched time series ingests at all query times. Looking up start/end times and more
-    *     precise size estimation is costly
-    * (b) it also assigns bytes per sample based on schema which is much of a swag. In reality, it would depend on
-    *     number of histogram buckets, samples per chunk etc.
-    */
-  def ensureQueriedDataSizeWithinLimitApprox(schemaId: Int,
-                                             numTsPartitions: Int,
-                                             chunkDurationMillis: Long,
-                                             resolutionMs: Long,
-                                             queryDurationMs: Long,
-                                             dataSizeLimit: Long): Unit = {
+   * Note this approach below assumes the following for quick size estimation. The sizing is more
+   * a swag than reality:
+   * (a) every matched time series ingests at all query times. Looking up start/end times and more
+   * precise size estimation is costly
+   * (b) it also assigns bytes per sample based on schema which is much of a swag. In reality, it would depend on
+   * number of histogram buckets, samples per chunk etc.
+   */
+  def estimateBytesScan(
+    schemaId: Int,
+    numTsPartitions: Int,
+    chunkDurationMillis: Long,
+    resolutionMs: Long,
+    queryDurationMs: Long
+  ): Double = {
     val numSamplesPerChunk = chunkDurationMillis / resolutionMs
     // find number of chunks to be scanned. Ceil division needed here
     val numChunksPerTs = (queryDurationMs + chunkDurationMillis - 1) / chunkDurationMillis
     val bytesPerSample = bytesPerSampleSwag(schemaId)
     val estDataSize = bytesPerSample * numTsPartitions * numSamplesPerChunk * numChunksPerTs
-    require(estDataSize < dataSizeLimit,
-      s"With match of $numTsPartitions time series, estimate of $estDataSize bytes exceeds limit of " +
-        s"$dataSizeLimit bytes queried per shard for ${_schemas(schemaId).name} schema. Try one or more of these: " +
-        s"(a) narrow your query filters to reduce to fewer than the current $numTsPartitions matches " +
-        s"(b) reduce query time range, currently at ${queryDurationMs / 1000 / 60 } minutes")
+    estDataSize
   }
 
   /**
@@ -320,12 +317,13 @@ final case class Schemas(part: PartitionSchema,
     * since it accepts the start/end times of each matching part key. It is able to handle estimation with
     * time series churn much better
     */
-  def ensureQueriedDataSizeWithinLimit(schemaId: Int,
-                                       pkRecs: Seq[PartKeyLuceneIndexRecord],
-                                       chunkDurationMillis: Long,
-                                       resolutionMs: Long,
-                                       chunkMethod: ChunkScanMethod,
-                                       dataSizeLimit: Long): Unit = {
+  def estimateByteScan(
+    schemaId: Int,
+    pkRecs: Seq[PartKeyLuceneIndexRecord],
+    chunkDurationMillis: Long,
+    resolutionMs: Long,
+    chunkMethod: ChunkScanMethod
+  ): Double = {
     val numSamplesPerChunk = chunkDurationMillis / resolutionMs
     val bytesPerSample = bytesPerSampleSwag(schemaId)
     var estDataSize = 0d
@@ -335,12 +333,7 @@ final case class Schemas(part: PartitionSchema,
       val numChunks = (intersection + chunkDurationMillis - 1) / chunkDurationMillis
       estDataSize += bytesPerSample * numSamplesPerChunk * numChunks
     }
-    val quRange = chunkMethod.endTime - chunkMethod.startTime + 1
-    require(estDataSize < dataSizeLimit,
-      s"With match of ${pkRecs.length} time series, estimate of $estDataSize bytes exceeds limit of " +
-        s"$dataSizeLimit bytes queried per shard for ${_schemas(schemaId).name} schema. Try one or more of these: " +
-        s"(a) narrow your query filters to reduce to fewer than the current ${pkRecs.length} matches " +
-        s"(b) reduce query time range, currently at ${quRange / 1000 / 60 } minutes")
+    estDataSize
   }
 
   /**

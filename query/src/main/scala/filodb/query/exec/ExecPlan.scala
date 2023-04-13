@@ -211,25 +211,11 @@ trait ExecPlan extends QueryCommand {
             srv
         }
         .map { srv =>
-          numResultSamples += srv.numRowsSerialized
           // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-          if (enforceSampleLimit && numResultSamples > queryContext.plannerParams.enforcedLimits.execPlanSamples)
-            throw new BadQueryException(s"This query results in more than " +
-              s"${queryContext.plannerParams.enforcedLimits.execPlanSamples} samples. " +
-              s"Try applying more filters or reduce time range.")
-
+          numResultSamples += srv.numRowsSerialized
+          checkSamplesLimit(numResultSamples)
           resultSize += srv.estimatedSerializedBytes
-          if (resultSize > queryContext.plannerParams.enforcedLimits.execPlanResultBytes) {
-            val size_mib = queryContext.plannerParams.enforcedLimits.execPlanResultBytes / math.pow(1024, 2)
-            val msg = s"Reached maximum result size (final or intermediate) " +
-              s"for data serialized out of a host or shard " +
-              s"(${math.round(size_mib)} MiB)."
-            qLogger.warn(s"$msg QueryContext: $queryContext")
-            if (querySession.queryConfig.enforceResultByteLimit) {
-              throw new BadQueryException(
-                s"$msg Try to apply more filters, reduce the time range, and/or increase the step size.")
-            }
-          }
+          checkResultBytes(resultSize, querySession.queryConfig)
           srv
         }
         .filter(_.numRowsSerialized > 0)
@@ -259,6 +245,45 @@ trait ExecPlan extends QueryCommand {
     qLogger.debug(s"Constructed monix query execution pipeline for $this")
     ret
   }
+
+  def checkSamplesLimit(numResultSamples: Int): Unit = {
+    // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
+    if (enforceSampleLimit && numResultSamples > queryContext.plannerParams.enforcedLimits.execPlanSamples) {
+      val msg = s"Exceeded enforced limit of samples produced on a single shard or processing node. " +
+        s"Max number of samples is ${queryContext.plannerParams.enforcedLimits.execPlanSamples}"
+      qLogger.warn(queryContext.getQueryLogLine(msg))
+      throw new BadQueryException(s"This query results in more than " +
+        s"${queryContext.plannerParams.enforcedLimits.execPlanSamples} samples. " +
+        s"Try applying more filters or reduce time range.")
+    }
+    if (numResultSamples > queryContext.plannerParams.warnLimits.execPlanSamples) {
+      val msg = s"Exceeded warning limit of samples produced on a single shard or processing node. " +
+        s"Max number of samples is ${queryContext.plannerParams.warnLimits.execPlanSamples}"
+      qLogger.info(queryContext.getQueryLogLine(msg))
+    }
+  }
+
+  def checkResultBytes(resultSize: Long, queryConfig: QueryConfig): Unit = {
+    if (resultSize > queryContext.plannerParams.enforcedLimits.execPlanResultBytes) {
+      val size_mib = queryContext.plannerParams.enforcedLimits.execPlanResultBytes / math.pow(1024, 2)
+      val msg = s"Reached maximum enforced result size limit (final or intermediate) " +
+        s"for data serialized out of a host or shard " +
+        s"(${math.round(size_mib)} MiB)."
+      qLogger.warn(queryContext.getQueryLogLine(msg))
+      if (queryConfig.enforceResultByteLimit) {
+        throw new BadQueryException(
+          s"$msg Try to apply more filters, reduce the time range, and/or increase the step size.")
+      }
+    }
+    if (resultSize > queryContext.plannerParams.warnLimits.execPlanResultBytes) {
+      val size_mib = queryContext.plannerParams.warnLimits.execPlanResultBytes / math.pow(1024, 2)
+      val msg = s"Reached maximum warning result size limit (final or intermediate) " +
+        s"for data serialized out of a host or shard " +
+        s"(${math.round(size_mib)} MiB)."
+      qLogger.info(queryContext.getQueryLogLine(msg))
+    }
+  }
+
 
   /**
   * Facade for the execution orchestration of the plan sub-tree
@@ -372,6 +397,7 @@ trait ExecPlan extends QueryCommand {
       }
     }
 
+
     def makeResult(
       rv : Observable[RangeVector], recordSchema: RecordSchema, resultSchema: ResultSchema
     ): Task[QueryResult] = {
@@ -391,25 +417,11 @@ trait ExecPlan extends QueryCommand {
               srv
           }
           .map { srv =>
-              numResultSamples += srv.numRowsSerialized
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-              if (enforceSampleLimit && numResultSamples > queryContext.plannerParams.enforcedLimits.execPlanSamples)
-                throw new BadQueryException(s"This query results in more than " +
-                  s"${queryContext.plannerParams.enforcedLimits.execPlanSamples} samples. " +
-                  s"Try applying more filters or reduce time range.")
-
+              numResultSamples += srv.numRowsSerialized
+              checkSamplesLimit(numResultSamples)
               resultSize += srv.estimatedSerializedBytes
-              if (resultSize > queryContext.plannerParams.enforcedLimits.execPlanResultBytes) {
-                val size_mib = queryContext.plannerParams.enforcedLimits.execPlanResultBytes / math.pow(1024, 2)
-                val msg = s"Reached maximum result size (final or intermediate) " +
-                          s"for data serialized out of a host or shard " +
-                          s"(${math.round(size_mib)} MiB)."
-                qLogger.warn(s"$msg QueryContext: $queryContext")
-                if (querySession.queryConfig.enforceResultByteLimit) {
-                  throw new BadQueryException(
-                    s"$msg Try to apply more filters, reduce the time range, and/or increase the step size.")
-                }
-              }
+              checkResultBytes(resultSize, querySession.queryConfig)
               srv
           }
           .filter(_.numRowsSerialized > 0)
