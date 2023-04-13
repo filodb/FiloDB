@@ -118,6 +118,13 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
     */
   val ingestionClockDelay = Kamon.gauge("ingestion-clock-delay",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+
+  /**
+   *  This measures the time from Message Queue to when the data is stored.
+   */
+  val ingestionPipelineLatency = Kamon.histogram("ingestion-pipeline-latency",
+    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+
   val chunkFlushTaskLatency = Kamon.histogram("chunk-flush-task-latency-after-retries",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
 
@@ -1229,11 +1236,13 @@ class TimeSeriesShard(val ref: DatasetRef,
       }
     }
 
+    val currentTime = System.currentTimeMillis()
+    shardStats.ingestionPipelineLatency.record(currentTime - container.timestamp)
     // Only update stuff if no exception was thrown.
 
     if (ingestionTime != lastIngestionTime) {
       lastIngestionTime = ingestionTime
-      shardStats.ingestionClockDelay.update(System.currentTimeMillis() - ingestionTime)
+      shardStats.ingestionClockDelay.update(currentTime - ingestionTime)
     }
 
     tasks
