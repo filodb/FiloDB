@@ -140,7 +140,8 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
   def bootstrapIndexDownsample(index: PartKeyLuceneIndex,
                                shardNum: Int,
                                ref: DatasetRef,
-                               ttlMs: Long): Task[Long] = {
+                               ttlMs: Long,
+                               parallelism: Int = Runtime.getRuntime.availableProcessors()): Task[Long] = {
     val startCheckpoint = System.currentTimeMillis()
     val recoverIndexLatency = Kamon.gauge("shard-recover-index-latency", MeasurementUnit.time.milliseconds)
       .withTag("dataset", ref.dataset)
@@ -148,7 +149,7 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
     val start = System.currentTimeMillis() - ttlMs
     colStore.scanPartKeys(ref, shardNum)
       .filter(_.endTime > start)
-      .mapParallelUnordered(Runtime.getRuntime.availableProcessors()) { pk =>
+      .mapParallelUnordered(parallelism) { pk =>
         Task.evalAsync {
           if (downsampleConfig.enableDataShapeStats) {
             try {
