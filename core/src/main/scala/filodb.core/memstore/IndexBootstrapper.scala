@@ -2,12 +2,14 @@ package filodb.core.memstore
 
 import java.util.concurrent.TimeUnit
 
+import scala.collection.mutable
 import scala.concurrent.{Await, ExecutionContext}
 import scala.concurrent.duration.Duration
 
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
+import kamon.tag.TagSet
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -16,7 +18,7 @@ import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.binaryrecord2.RecordSchema.schemaID
 import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesShardStats}
-import filodb.core.memstore.DownsampleIndexBootstrapper.currentThreadScheduler
+import filodb.core.memstore.DownsampleIndexBootstrapper.{currentThreadScheduler, ShapeStats}
 import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.metadata.Column.ColumnType.HistogramColumn
 import filodb.core.store.{AllChunkScan, ColumnStore, PartKeyRecord, SinglePartitionScan, TimeRangeChunkScan}
@@ -62,10 +64,23 @@ class RawIndexBootstrapper(colStore: ColumnStore) {
 }
 
 object DownsampleIndexBootstrapper {
+  /**
+   * Describes the shape-stats to be published against a specific key (i.e. sequence of label-values).
+   */
+  case class ShapeStats(key: Seq[String],
+                        labelCount: Int,
+                        keyLengths: Seq[Int],
+                        valueLengths: Seq[Int],
+                        metricLength: Int,
+                        totalLength: Int,
+                        bucketCount: Option[Int])
+
   val currentThreadScheduler = {
     Scheduler.apply(ExecutionContext.fromExecutor(cmd => cmd.run()))
   }
 }
+
+
 
 class DownsampleIndexBootstrapper(colStore: ColumnStore,
                                   schemas: Schemas,
@@ -83,24 +98,123 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
     .toMap
 
   /**
-   * Update metrics about the series' "shape", e.g. label/value lengths/counts, bucket counts, etc.
+   * Build/return a ShapeStats object that contains all data to be published as shape-stats metrics.
+   * A ShapeStats is returned iff the stats should be published according to the config.
+   */
+  private def getShapeStats(pk: PartKeyRecord, shardNum: Int, schema: Schema): Option[ShapeStats] = {
+    val statsKey = new mutable.ArraySeq[String](downsampleConfig.dataShapeKeyIndex.size)
+    val labelValuePairs = schema.partKeySchema.toStringPairs(pk.partKey, UnsafeUtils.arayOffset)
+    val keyLengths = new mutable.ArrayBuffer[Int](labelValuePairs.size)
+    val valueLengths = new mutable.ArrayBuffer[Int](labelValuePairs.size)
+    var metricLength = 0
+    var totalLength = 0
+    var bucketCount: Option[Int] = None
+    labelValuePairs.foreach{ case (key, value) =>
+      // Build the statsKey in the pre-defined order (we will use this to determine
+      //   whether-or-not these stats should be published)
+      val keyIndex = downsampleConfig.dataShapeKeyIndex.getOrElse(key, -1)
+      if (keyIndex > -1) {
+        statsKey(keyIndex) = value
+      }
+      totalLength += key.length + value.length
+      keyLengths.append(key.length)
+      valueLengths.append(value.length)
+      if (key == schema.options.metricColumn) {
+        metricLength = value.length
+      }
+    }
+    if (!shouldPublishShapeStats(statsKey)) {
+      return None
+    }
+    if (downsampleConfig.enableDataShapeBucketCount && schemaHashToHistCol.contains(schema.schemaHash)) {
+      bucketCount = Some(getHistBucketCount(pk, shardNum, schema))
+    }
+    Some(ShapeStats(
+      statsKey, labelValuePairs.size, keyLengths,
+      valueLengths, metricLength, totalLength, bucketCount))
+  }
+
+  /**
+   * Returns true iff the key is "covered" by the map.
+   * The key is "covered" iff there is no nonempty map at depth depth i that does not contain key[i].
+   * @param map a Map[String ,Map[String, Map[...]]]
+   */
+  private def keyIsCovered(key: Seq[String], map: Map[String, Any]): Boolean = {
+    var i = 0
+    var ptr = map
+    while (ptr.nonEmpty) {
+      val value = key(i)
+      if (!ptr.contains(value)) {
+        return false
+      }
+      ptr = ptr(value).asInstanceOf[Map[String, Any]]
+      i += 1
+    }
+    true
+  }
+
+  /**
+   * Returns true iff shape-stats should be published for the key.
+   */
+  private def shouldPublishShapeStats(key: Seq[String]): Boolean = {
+    val allowMap: Map[String, Any] = downsampleConfig.dataShapeAllow
+    val blockMap: Map[String, Any] = downsampleConfig.dataShapeBlock
+    if (!keyIsCovered(key, allowMap)) {
+      return false
+    }
+    if (blockMap.isEmpty) {
+      return true
+    }
+    !keyIsCovered(key, blockMap)
+  }
+
+  private def updateStatsWithTags(shapeStats: ShapeStats): Unit = {
+    var builder = TagSet.builder()
+    for ((key, value) <- downsampleConfig.dataShapeKey.zip(shapeStats.key)) {
+      builder = builder.add(key, value)
+    }
+    val tags = builder.build()
+    stats.dataShapeLabelCount.withTags(tags).record(shapeStats.labelCount)
+    for (keyLength <- shapeStats.keyLengths) {
+      stats.dataShapeKeyLength.withTags(tags).record(keyLength)
+    }
+    for (valueLength <- shapeStats.valueLengths) {
+      stats.dataShapeValueLength.withTags(tags).record(valueLength)
+    }
+    stats.dataShapeMetricLength.withTags(tags).record(shapeStats.metricLength)
+    stats.dataShapeTotalLength.withTags(tags).record(shapeStats.totalLength)
+    if (shapeStats.bucketCount.isDefined) {
+      stats.dataShapeBucketCount.withTags(tags).record(shapeStats.bucketCount.get)
+    }
+  }
+
+  private def updateStatsWithoutTags(shapeStats: ShapeStats): Unit = {
+    stats.dataShapeLabelCount.record(shapeStats.labelCount)
+    for (keyLength <- shapeStats.keyLengths) {
+      stats.dataShapeKeyLength.record(keyLength)
+    }
+    for (valueLength <- shapeStats.valueLengths) {
+      stats.dataShapeValueLength.record(valueLength)
+    }
+    stats.dataShapeMetricLength.record(shapeStats.metricLength)
+    stats.dataShapeTotalLength.record(shapeStats.totalLength)
+    if (shapeStats.bucketCount.isDefined) {
+      stats.dataShapeBucketCount.record(shapeStats.bucketCount.get)
+    }
+  }
+
+  /**
+   * Publish metrics about the series' "shape", e.g. label/value lengths/counts, bucket counts, etc.
    */
   private def updateDataShapeStats(pk: PartKeyRecord, shardNum: Int, schema: Schema): Unit = {
-    val pairs = schema.partKeySchema.toStringPairs(pk.partKey, UnsafeUtils.arayOffset)
-    stats.dataShapeLabelCount.record(pairs.size)
-    var totalSize = 0  // add to this as we iterate label/value pairs, then record the total
-    pairs.foreach{ case (key, value) =>
-      stats.dataShapeKeyLength.record(key.size)
-      stats.dataShapeValueLength.record(value.size)
-      if (key == schema.options.metricColumn) {
-        stats.dataShapeMetricLength.record(value.size)
-      }
-      totalSize += key.size + value.size
+    val shapeStats = getShapeStats(pk, shardNum, schema)
+    if (!shapeStats.isDefined) {
+      return
     }
-    stats.dataShapeTotalLength.record(totalSize)
-    if (schemaHashToHistCol.contains(schema.schemaHash)) {
-      val bucketCount = getHistBucketCount(pk, shardNum, schema)
-      stats.dataShapeBucketCount.record(bucketCount)
+    if (downsampleConfig.enableDataShapeKeyLabels) {
+      updateStatsWithTags(shapeStats.get)
+    } else {
+      updateStatsWithoutTags(shapeStats.get)
     }
   }
 

@@ -1755,7 +1755,16 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     //   (2) Downsample the chunks/index.
     //   (3) Simulate an index bootstrap and refresh.
     //   (4) Compare the index/bootstrap-generated stats with the stats from (1.a).
-    val conf = ConfigFactory.parseString("enable-data-shape-stats: true").withFallback(settings.downsamplerConfig)
+    val rawConf =
+    """
+      |enable-data-shape-stats: true
+      |data-shape-key: [_ws_,_ns_]
+      |enable-data-shape-key-labels: true
+      |data-shape-allow: [[foo_ws]]
+      |data-shape-block: [[foo_ws,block_ns]]
+      |enable-data-shape-bucket-count: true
+      |""".stripMargin
+    val conf = ConfigFactory.parseString(rawConf).withFallback(settings.downsamplerConfig)
     val dsConfig = DownsampleConfig(conf)
     val dsDataset = settings.downsampledDatasetRefs.last
     val shardNum = 0
@@ -1763,7 +1772,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val index = new PartKeyLuceneIndex(
       dsDataset, schemas.part, facetEnabledAllLabels = true,
       facetEnabledShardKeyLabels = true, shardNum, ttl.toMillis)
-    val commonLabels = Map("_ws_" -> "foo_ws", "_ns_" -> "foo_ns")
+    val commonLabels = Map("_ws_" -> "foo_ws")
     val firstTimestampMs = 74372801000L
     val stepMs = 10000L
 
@@ -1779,16 +1788,19 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
 
     case class Series(metric: String,
                       labels: Map[String, String],
+                      expected: Boolean,
                       schema: Schema,
                       bucketCount: Option[Int],
                       rows: Stream[Seq[Any]])
 
     val threeBucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
+    val fourBucketScheme = CustomBuckets(Array(3d, 10d, 20, Double.PositiveInfinity))
     val fiveBucketScheme = CustomBuckets(Array(3d, 10d, 25d, 50d, Double.PositiveInfinity))
 
     val seriesSpecs = Seq(
       Series("three_buckets",
-        Map("a" -> "123", "b" -> "456", "c" -> "789"),
+        Map("_ns_" -> "foo_ns", "a" -> "123", "b" -> "456", "c" -> "789"),
+        expected = true,
         Schemas.promHistogram,
         bucketCount = Some(3),
         Stream(
@@ -1797,8 +1809,10 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
           Seq(5d, 6d, LongHistogram(threeBucketScheme, Array(2L, 5, 6))),
         )),
       Series("five_buckets_delta",
-        Map("this_is_a_really_really_really_long_key" ->
+        Map("_ns_" -> "foo_ns",
+          "this_is_a_really_really_really_long_key" ->
           "wow such value incredible who could have guessed a value could be so long"),
+        expected = true,
         Schemas.promHistogram,
         bucketCount = Some(5),
         Stream(
@@ -1807,11 +1821,22 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
           Seq(5d, 6d, LongHistogram(fiveBucketScheme, Array(2L, 5, 6, 7, 8))),
         )),
       Series("just_a_counter",
-        Map("blue" -> "red", "green" -> "yellow"),
+        Map("_ns_" -> "foo_ns", "blue" -> "red", "green" -> "yellow"),
+        expected = true,
         Schemas.promCounter,
         bucketCount = None,
         Stream(
           Seq(0d),Seq(2d),Seq(5d),
+        )),
+      Series("four_buckets_blocked",
+        Map("_ns_" -> "block_ns", "a" -> "123", "b" -> "456", "c" -> "789"),
+        expected = false,
+        Schemas.promHistogram,
+        bucketCount = Some(4),
+        Stream(
+          Seq(0d, 1d, LongHistogram(fourBucketScheme, Array(0L, 0, 1, 10))),
+          Seq(2d, 3d, LongHistogram(fourBucketScheme, Array(0L, 2, 3, 12))),
+          Seq(5d, 6d, LongHistogram(fourBucketScheme, Array(2L, 5, 6, 13))),
         )),
     )
 
@@ -1824,6 +1849,7 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
         }
         this
       }
+      override def withTags(tags: TagSet): Histogram = this
       override def record(value: Long, times: Long): Histogram = ???
       override def metric: Metric[Histogram, Settings.ForDistributionInstrument] = ???
       override def tags: TagSet = ???
@@ -1872,24 +1898,24 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     val nextPartId = new AtomicInteger(0)
     val metricKey = schemas.part.options.metricColumn
     seriesSpecs.foreach{ spec =>
-      val labels = (spec.labels ++ commonLabels).map{ case (k, v) =>
-        expectedStats.dataShapeKeyLength.record(k.length)
-        expectedStats.dataShapeValueLength.record(v.length)
-        k.utf8 -> v.utf8
-      }
-      // Also include the metric column as a label.
-      expectedStats.dataShapeKeyLength.record(metricKey.length)
-      expectedStats.dataShapeValueLength.record(spec.metric.length)
-      expectedStats.dataShapeLabelCount.record(labels.size + 1)
-      expectedStats.dataShapeMetricLength.record(spec.metric.length)
-
-      val totalLength = metricKey.length + spec.metric.length + labels.foldLeft(0){ case (length, (k, v)) =>
-        length + k.length + v.length
-      }
-      expectedStats.dataShapeTotalLength.record(totalLength)
-
-      if (spec.bucketCount.isDefined) {
-        expectedStats.dataShapeBucketCount.record(spec.bucketCount.get)
+      val labels = (spec.labels ++ commonLabels).map{ case (k, v) => k.utf8 -> v.utf8 }
+      if (spec.expected) {
+        // Also include the metric column as a label.
+        for ((k, v) <- labels) {
+          expectedStats.dataShapeKeyLength.record(k.length)
+          expectedStats.dataShapeValueLength.record(v.length)
+        }
+        expectedStats.dataShapeKeyLength.record(metricKey.length)
+        expectedStats.dataShapeValueLength.record(spec.metric.length)
+        expectedStats.dataShapeLabelCount.record(labels.size + 1)
+        expectedStats.dataShapeMetricLength.record(spec.metric.length)
+        val totalLength = metricKey.length + spec.metric.length + labels.foldLeft(0){ case (length, (k, v)) =>
+          length + k.length + v.length
+        }
+        expectedStats.dataShapeTotalLength.record(totalLength)
+        if (spec.bucketCount.isDefined) {
+          expectedStats.dataShapeBucketCount.record(spec.bucketCount.get)
+        }
       }
 
       val rows = spec.rows.map{ raw =>
