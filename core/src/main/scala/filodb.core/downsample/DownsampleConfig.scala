@@ -1,12 +1,12 @@
 package filodb.core.downsample
 
+import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
+
 import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
+
 import filodb.core.DatasetRef
-
-
-import scala.collection.mutable
 
 object IndexMetastoreImplementation extends Enumeration {
   val NoImp, File, Ephemeral = Value
@@ -80,8 +80,10 @@ final case class DownsampleConfig(config: Config) {
    *
    * Each sequence can have a length less than the length of a key.
    */
-  val dataShapeAllow: Map[String, Any] = dataShapeKeysToMap(config.getOrElse[Seq[Seq[String]]]("data-shape-allow", Seq()))
-  val dataShapeBlock: Map[String, Any] = dataShapeKeysToMap(config.getOrElse[Seq[Seq[String]]]("data-shape-block", Seq()))
+  val dataShapeAllow: Map[String, Any] = dataShapeKeysToMap(
+    config.getOrElse[Seq[Seq[String]]]("data-shape-allow", Seq()))
+  val dataShapeBlock: Map[String, Any] = dataShapeKeysToMap(
+    config.getOrElse[Seq[Seq[String]]]("data-shape-block", Seq()))
 
   /**
    * A bucket-count data-shape metric is published iff this is true.
