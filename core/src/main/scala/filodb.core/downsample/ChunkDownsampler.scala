@@ -7,6 +7,7 @@ import enumeratum.{Enum, EnumEntry}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}
 import filodb.memory.format.{vectors => bv}
+import filodb.memory.format.vectors.LongHistogram
 
 /**
   * Enum of supported downsampling function names
@@ -145,7 +146,8 @@ case class HistSumDownsampler(val inputColIds: Seq[Int]) extends HistChunkDownsa
     val vecAcc = chunkset.vectorAccessor(inputColIds(0))
     val vecPtr = chunkset.vectorAddress(inputColIds(0))
     val histReader = part.chunkReader(inputColIds(0), vecAcc, vecPtr).asHistReader
-    histReader.sum(startRow, endRow)
+    val summedHist = histReader.sum(startRow, endRow)
+    LongHistogram(summedHist.buckets, summedHist.values.map(_.toLong))
   }
 }
 
