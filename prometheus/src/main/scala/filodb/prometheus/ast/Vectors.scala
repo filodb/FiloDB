@@ -135,7 +135,11 @@ sealed trait Vector extends Expression {
 
   def metricName: Option[String]
   def labelSelection: Seq[LabelMatch]
-  val regexColumnName: String = "::(?=[^::]+$)" //regex pattern to extract ::columnName at the end
+
+  // UPDATE April 04, 2023: Updating the regex to split only on "::" and not on ":::". The metric names might have
+  // ":::" for certain cases, like the aggregated metrics from streaming aggregation. For ex -
+  // "requests:::rule_1::sum" should give -> ("requests:::rule_1", "sum") on split
+  val regexColumnName: String = "(?=.)+(?<!:)::(?=[^:]+$)" //regex pattern to extract ::columnName at the end
 
   // Convert metricName{labels} -> {labels, __name__="metricName"} so it's uniform
   // Note: see makeMergeNameToLabels before changing the laziness.
@@ -199,10 +203,11 @@ sealed trait Vector extends Expression {
   def realMetricName: String = mergeNameToLabels.find(_.label == PromMetricLabel).get.value
 
   // Returns (trimmedMetricName, column) after stripping ::columnName
-  private def extractStripColumn(metricName: String): (String, Option[String]) = {
+  protected def extractStripColumn(metricName: String): (String, Option[String]) = {
     val parts = metricName.split(regexColumnName)
     if (parts.size > 1) {
       require(parts(1).nonEmpty, "cannot use empty column name")
+      require(!parts(1).isBlank, "cannot use blank/whitespace column name")
       (parts(0), Some(parts(1)))
     } else (metricName, None)
   }
@@ -245,6 +250,21 @@ sealed trait Vector extends Expression {
     }
     (filters, column, bucketOpt)
   }
+}
+
+/**
+ * Adding a class to be able to unit test few methods
+ * of the sealed trait Vector like "extractStripColumn"
+ */
+case class VectorSpec() extends Vector{
+  override def labelSelection: Seq[LabelMatch] = Seq.empty
+  override def metricName: Option[String] = None
+
+  // helper function created to unit test "extractStripColumn" function in sealted trait Vector
+  def getMetricAndColumnName(metricName: String): (String, Option[String]) = {
+    extractStripColumn(metricName)
+  }
+  override def applyPromqlConstraints(): Unit = {}
 }
 
 /**
