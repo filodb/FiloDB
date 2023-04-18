@@ -16,7 +16,7 @@ import filodb.core.{DatasetRef, Types}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.ratelimit.QuotaSource
 import filodb.core.metadata.Schemas
-import filodb.core.query.{QuerySession, ServiceUnavailableException}
+import filodb.core.query.{QueryContext, QuerySession, ServiceUnavailableException}
 import filodb.core.store._
 import filodb.memory.NativeMemoryManager
 
@@ -51,16 +51,71 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
     .tag("shard", shardNum)
     .start()
 
-  private def capDataScannedPerShardCheck(lookup: PartLookupResult): Unit = {
+  private def capDataScannedPerShardCheck(lookup: PartLookupResult, qContext : QueryContext): Unit = {
     lookup.firstSchemaId.foreach { schId =>
       lookup.chunkMethod match {
         case TimeRangeChunkScan(st, end) =>
           val numMatches = lookup.partsInMemory.length + lookup.partIdsNotInMemory.length
-          schemas.ensureQueriedDataSizeWithinLimitApprox(schId, numMatches,
+          ensureQueriedDataSizeWithinLimitApprox(
+            schId, numMatches,
             storeConfig.flushInterval.toMillis,
-            storeConfig.estimatedIngestResolutionMillis, end - st, storeConfig.maxDataPerShardQuery)
+            storeConfig.estimatedIngestResolutionMillis,
+            end - st,
+            qContext
+          )
         case _ =>
       }
+    }
+  }
+
+  /**
+   * Note this approach below assumes the following for quick size estimation. The sizing is more
+   * a swag than reality:
+   * (a) every matched time series ingests at all query times. Looking up start/end times and more
+   * precise size estimation is costly
+   * (b) it also assigns bytes per sample based on schema which is much of a swag. In reality, it would depend on
+   * number of histogram buckets, samples per chunk etc.
+   */
+  def ensureQueriedDataSizeWithinLimitApprox(
+    schemaId: Int,
+    numTsPartitions: Int,
+    chunkDurationMillis: Long,
+    resolutionMs: Long,
+    queryDurationMs: Long,
+    qContext: QueryContext
+  ): Unit = {
+    val enforcedLimits = qContext.plannerParams.enforcedLimits
+    val warnLimits = qContext.plannerParams.warnLimits
+    val estDataSize = schemas.estimateBytesScan(
+      schemaId, numTsPartitions, chunkDurationMillis, resolutionMs, queryDurationMs
+    )
+    // TODO the below does not return a particular kind of error code. Most likely this would translate to
+    // an internal error of FiloDB which is not appropriate for the case
+    require(estDataSize < enforcedLimits.timeSeriesSamplesScannedBytes,
+      s"With match of $numTsPartitions time series, estimate of $estDataSize bytes exceeds limit of " +
+        s"${enforcedLimits.timeSeriesSamplesScannedBytes} bytes queried per shard " +
+        s"for ${schemas.apply(schemaId).name} schema. " +
+        s"Try one or more of these: " +
+        s"(a) narrow your query filters to reduce to fewer than the current $numTsPartitions matches " +
+        s"(b) reduce query time range, currently at ${queryDurationMs / 1000 / 60} minutes")
+    require(numTsPartitions < enforcedLimits.timeSeriesScanned,
+        s"Query matched $numTsPartitions time series, which exceeds a max enforced limit of " +
+          s"${enforcedLimits.timeSeriesScanned} time series allowed to be queried per shard. " +
+          s"Try one or more of these: " +
+          s"(a) narrow your query filters to reduce to fewer than the current $numTsPartitions matches " +
+          s"(b) reduce query time range, currently at ${queryDurationMs / 1000 / 60} minutes")
+    if (numTsPartitions > warnLimits.timeSeriesScanned) {
+      val msg =
+        s"Query matched $numTsPartitions time series, which exceeds a max warn limit of " +
+          s"${warnLimits.timeSeriesScanned} time series allowed to be queried per shard. "
+      logger.info(qContext.getQueryLogLine(msg))
+    }
+    if (estDataSize > warnLimits.timeSeriesSamplesScannedBytes) {
+      val msg =
+        s"With match of $numTsPartitions time series, estimate of $estDataSize bytes exceeds " +
+          s"limit of ${warnLimits.timeSeriesSamplesScannedBytes} bytes queried per shard " +
+          s"for ${schemas.apply(schemaId).name} schema. "
+      logger.info(qContext.getQueryLogLine(msg))
     }
   }
 
@@ -75,7 +130,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
                               colIds: Seq[Types.ColumnId],
                               querySession: QuerySession): Observable[ReadablePartition] = {
 
-    capDataScannedPerShardCheck(partLookupRes)
+    capDataScannedPerShardCheck(partLookupRes, querySession.qContext)
 
     // For now, always read every data column.
     // 1. We don't have a good way to update just some columns of a chunkset for ODP

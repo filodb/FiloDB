@@ -88,7 +88,7 @@ final case class BinaryJoinExec(queryContext: QueryContext,
         val joinQueryWarnCardinalityLimit = queryContext.plannerParams.warnLimits.joinQueryCardinality
         if (result.size > joinQueryWarnCardinalityLimit && cardinality == Cardinality.OneToOne) {
           logger.info(queryContext.getQueryLogLine(
-            s"Exceeded warn binary join input cardinality limit=${joinQueryWarnCardinalityLimit}, " +
+            s"Exceeded warning binary join input cardinality limit=${joinQueryWarnCardinalityLimit}, " +
               s" encountered input cardinality ${result.size}"
           ))
         }
