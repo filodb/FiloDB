@@ -136,7 +136,17 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
 
   /**
    * Returns true iff the key is "covered" by the map.
-   * The key is "covered" iff there is no nonempty map at depth depth i that does not contain key[i].
+   * The key is "covered" iff each of:
+   *   (a) there exists a path through the maps that sequentially
+   *       steps through a prefix of the strings in `key`.
+   *   (b) the path is ended by an empty Map.
+   *
+   * For example, each of the following maps cover the key:
+   *   key: [foo, bar]
+   *   map1: Map(foo -> Map(bar -> Map()))
+   *   map2: Map(foo -> Map())
+   *   map3: Map()  // The prefix can be empty!
+   *
    * @param map a Map[String ,Map[String, Map[...]]]
    */
   private def keyIsCovered(key: Seq[String], map: Map[String, Any]): Boolean = {
@@ -244,6 +254,22 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
     histReader.buckets.numBuckets
   }
 
+
+  /**
+   * If configured, update data-shape stats.
+   */
+  def updateDataShapeStatsIfEnabled(pk: PartKeyRecord, schema: Schema, shardNum: Int): Unit = {
+    if (downsampleConfig.enableDataShapeStats) {
+      try {
+        val schema = schemas(schemaID(pk.partKey, UnsafeUtils.arayOffset))
+        updateDataShapeStats(pk, shardNum, schema)
+      } catch {
+        case t: Throwable =>
+          logger.error("swallowing exception during data-shape stats update", t)
+      }
+    }
+  }
+
   /**
    * Same as bootstrapIndexRaw, except that we parallelize lucene update for
    * faster bootstrap of large number of index entries in downsample cluster.
@@ -265,15 +291,8 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
       .filter(_.endTime > start)
       .mapParallelUnordered(parallelism) { pk =>
         Task.evalAsync {
-          if (downsampleConfig.enableDataShapeStats) {
-            try {
-              val schema = schemas(schemaID(pk.partKey, UnsafeUtils.arayOffset))
-              updateDataShapeStats(pk, shardNum, schema.downsample.get)
-            } catch {
-              case t: Throwable =>
-                logger.error("swallowing exception during data-shape stats update", t)
-            }
-          }
+          val dsSchema = schemas(schemaID(pk.partKey, UnsafeUtils.arayOffset)).downsample.get
+          updateDataShapeStatsIfEnabled(pk, dsSchema, shardNum)
           index.addPartKey(pk.partKey, partId = -1, pk.startTime, pk.endTime)(
             pk.partKey.length,
             PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pk.partKey, 0, pk.partKey.length)
@@ -332,15 +351,8 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
       // Same PK can be updated multiple times, but they wont be close for order to matter.
       // Hence using mapParallelUnordered
       Task.evalAsync {
-        if (downsampleConfig.enableDataShapeStats) {
-          try {
-            val schema = schemas(schemaID(pk.partKey, UnsafeUtils.arayOffset))
-            updateDataShapeStats(pk, shardNum, schema)
-          } catch {
-            case t: Throwable =>
-              logger.error("swallowing exception during data-shape stats update", t)
-          }
-        }
+        val schema = schemas(schemaID(pk.partKey, UnsafeUtils.arayOffset))
+        updateDataShapeStatsIfEnabled(pk, schema, shardNum)
         val downsamplePartKey = RecordBuilder.buildDownsamplePartKey(pk.partKey, schemas)
         downsamplePartKey.foreach { dpk =>
           index.upsertPartKey(dpk, partId = -1, pk.startTime, pk.endTime)(
