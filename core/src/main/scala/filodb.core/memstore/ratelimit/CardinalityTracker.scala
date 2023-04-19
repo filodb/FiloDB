@@ -74,7 +74,8 @@ class CardinalityTracker(ref: DatasetRef,
       val old = store.getOrZero(prefix, CardinalityRecord(shard, prefix, 0, 0, 0, defaultChildrenQuota(i)))
       val newActive = Math.max(old.activeTsCount + activeDelta, 0)
       if (old.activeTsCount + activeDelta < 0) {
-        logger.error(s"For some reason, activeTs count for prefix $prefix cannot be reduced below zero")
+        logger.error(s"For some reason, activeTs count for prefix $prefix cannot be reduced below zero",
+          new RuntimeException())
       }
       val neu = old.copy(tsCount = old.tsCount + totalDelta,
         activeTsCount = newActive,
