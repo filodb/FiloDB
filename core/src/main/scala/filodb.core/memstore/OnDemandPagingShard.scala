@@ -51,13 +51,15 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
     .tag("shard", shardNum)
     .start()
 
-  private def capDataScannedPerShardCheck(lookup: PartLookupResult, qContext : QueryContext): Unit = {
+  private def capDataScannedPerShardCheck(lookup: PartLookupResult,
+                                          colIds: Seq[Types.ColumnId],
+                                          qContext : QueryContext): Unit = {
     lookup.firstSchemaId.foreach { schId =>
       lookup.chunkMethod match {
         case TimeRangeChunkScan(st, end) =>
           val numMatches = lookup.partsInMemory.length + lookup.partIdsNotInMemory.length
           ensureQueriedDataSizeWithinLimitApprox(
-            schId, numMatches,
+            schId, colIds, numMatches,
             storeConfig.flushInterval.toMillis,
             storeConfig.estimatedIngestResolutionMillis,
             end - st,
@@ -78,6 +80,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
    */
   def ensureQueriedDataSizeWithinLimitApprox(
     schemaId: Int,
+    colIds: Seq[Types.ColumnId],
     numTsPartitions: Int,
     chunkDurationMillis: Long,
     resolutionMs: Long,
@@ -87,7 +90,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
     val enforcedLimits = qContext.plannerParams.enforcedLimits
     val warnLimits = qContext.plannerParams.warnLimits
     val estDataSize = schemas.estimateBytesScan(
-      schemaId, numTsPartitions, chunkDurationMillis, resolutionMs, queryDurationMs
+      schemaId, colIds, numTsPartitions, chunkDurationMillis, resolutionMs, queryDurationMs
     )
     // TODO the below does not return a particular kind of error code. Most likely this would translate to
     // an internal error of FiloDB which is not appropriate for the case
@@ -130,7 +133,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
                               colIds: Seq[Types.ColumnId],
                               querySession: QuerySession): Observable[ReadablePartition] = {
 
-    capDataScannedPerShardCheck(partLookupRes, querySession.qContext)
+    capDataScannedPerShardCheck(partLookupRes, colIds, querySession.qContext)
 
     // For now, always read every data column.
     // 1. We don't have a good way to update just some columns of a chunkset for ODP

@@ -5,7 +5,7 @@ import com.typesafe.scalalogging.StrictLogging
 import net.ceedubs.ficus.Ficus._
 import org.scalactic._
 
-import filodb.core.GlobalConfig
+import filodb.core.{GlobalConfig, Types}
 import filodb.core.Types._
 import filodb.core.binaryrecord2._
 import filodb.core.downsample.{ChunkDownsampler, DownsamplePeriodMarker}
@@ -266,25 +266,25 @@ final case class Schemas(part: PartitionSchema,
 
   /**
     * This is purely a SWAG to be used for query size estimation. Do not rely for other use cases.
+    * Map format (SchemaHash, ColId) -> SizeEstimate
     */
-  private val bytesPerSampleSwag: Map[Int, Double] = {
+  private val bytesPerSampleSwag: Map[(Int, Types.ColumnId), Double] = {
 
     val allSchemas = schemas.values ++ schemas.values.flatMap(_.downsample)
-    allSchemas.map { s  =>
-      val est = s.data.columns.map(_.columnType).map {
-        case ColumnType.LongColumn => 1
-        case ColumnType.IntColumn => 1
-        case ColumnType.TimestampColumn => 0.5
-        case ColumnType.HistogramColumn => 20
-        case ColumnType.DoubleColumn => 2
-        case _ => 0 // TODO allow without sizing for now
-      }.sum
-      s.schemaHash -> est
+    allSchemas.flatMap { s  =>
+      s.data.columns.map(_.columnType).zipWithIndex.map {
+        case (ColumnType.LongColumn, i)      => (s.schemaHash, i) -> 1.0
+        case (ColumnType.IntColumn, i)       => (s.schemaHash, i) -> 1.0
+        case (ColumnType.TimestampColumn, i) => (s.schemaHash, i) -> 0.5
+        case (ColumnType.HistogramColumn, i) => (s.schemaHash, i) -> 20.0
+        case (ColumnType.DoubleColumn, i)    => (s.schemaHash, i) -> 2.0
+        case (_, i)                          => (s.schemaHash, i) -> 0.0 // TODO allow without sizing for now
+      }
     }.toMap
   }
 
-  private def bytesPerSampleSwagString = bytesPerSampleSwag.map { case e =>
-    schemaName(e._1) + ": " + e._2
+  private def bytesPerSampleSwagString = bytesPerSampleSwag.map { case (k, v) =>
+    s"${schemaName(k._1)} ColId:${k._2} : $v"
   }
 
   Schemas._log.info(s"bytesPerSampleSwag: $bytesPerSampleSwagString")
@@ -299,6 +299,7 @@ final case class Schemas(part: PartitionSchema,
    */
   def estimateBytesScan(
     schemaId: Int,
+    colIds: Seq[Types.ColumnId],
     numTsPartitions: Int,
     chunkDurationMillis: Long,
     resolutionMs: Long,
@@ -307,7 +308,7 @@ final case class Schemas(part: PartitionSchema,
     val numSamplesPerChunk = chunkDurationMillis / resolutionMs
     // find number of chunks to be scanned. Ceil division needed here
     val numChunksPerTs = (queryDurationMs + chunkDurationMillis - 1) / chunkDurationMillis
-    val bytesPerSample = bytesPerSampleSwag(schemaId)
+    val bytesPerSample = colIds.map(c => bytesPerSampleSwag((schemaId, c))).sum
     val estDataSize = bytesPerSample * numTsPartitions * numSamplesPerChunk * numChunksPerTs
     estDataSize
   }
@@ -319,13 +320,14 @@ final case class Schemas(part: PartitionSchema,
     */
   def estimateByteScan(
     schemaId: Int,
+    colIds: Seq[Types.ColumnId],
     pkRecs: Seq[PartKeyLuceneIndexRecord],
     chunkDurationMillis: Long,
     resolutionMs: Long,
     chunkMethod: ChunkScanMethod
   ): Double = {
     val numSamplesPerChunk = chunkDurationMillis / resolutionMs
-    val bytesPerSample = bytesPerSampleSwag(schemaId)
+    val bytesPerSample = colIds.map(c => bytesPerSampleSwag((schemaId, c))).sum
     var estDataSize = 0d
     pkRecs.foreach { pkRec =>
       val intersection = Math.min(chunkMethod.endTime, pkRec.endTime) - Math.max(chunkMethod.startTime, pkRec.startTime)

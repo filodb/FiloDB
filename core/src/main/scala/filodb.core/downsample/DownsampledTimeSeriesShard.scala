@@ -346,7 +346,7 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
     // Step 1: Choose the downsample level depending on the range requested
     val (resolutionMs, downsampledDataset) = chooseDownsampleResolution(lookup.chunkMethod)
     logger.debug(s"Chose resolution $downsampledDataset for chunk method ${lookup.chunkMethod}")
-    capDataScannedPerShardCheck(lookup, resolutionMs, querySession.qContext)
+    capDataScannedPerShardCheck(lookup, colIds, resolutionMs, querySession.qContext)
     // Step 2: Query Cassandra table for that downsample level using downsampleColStore
     // Create a ReadablePartition objects that contain the time series data. This can be either a
     // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
@@ -390,9 +390,12 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
       }
   }
 
-  private def capDataScannedPerShardCheck(lookup: PartLookupResult, resolution: Long, qContext: QueryContext) = {
+  private def capDataScannedPerShardCheck(lookup: PartLookupResult,
+                                          colIds: Seq[Types.ColumnId],
+                                          resolution: Long,
+                                          qContext: QueryContext) = {
     lookup.firstSchemaId.foreach { schId =>
-      ensureQueriedDataSizeWithinLimit(schId, lookup.pkRecords,
+      ensureQueriedDataSizeWithinLimit(schId, colIds, lookup.pkRecords,
         downsampleStoreConfig.flushInterval.toMillis,
         resolution, lookup.chunkMethod, qContext)
     }
@@ -404,6 +407,7 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
    * time series churn much better
    */
   def ensureQueriedDataSizeWithinLimit(schemaId: Int,
+                                       colIds: Seq[Types.ColumnId],
                                        pkRecs: Seq[PartKeyLuceneIndexRecord],
                                        chunkDurationMillis: Long,
                                        resolutionMs: Long,
@@ -411,6 +415,7 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
                                        qContext: QueryContext): Unit = {
     val estDataSize = schemas.estimateByteScan(
       schemaId,
+      colIds,
       pkRecs,
       chunkDurationMillis,
       resolutionMs,
