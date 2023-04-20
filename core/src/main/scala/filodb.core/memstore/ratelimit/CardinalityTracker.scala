@@ -72,9 +72,10 @@ class CardinalityTracker(ref: DatasetRef,
     (0 to shardKey.length).foreach { i =>
       val prefix = shardKey.take(i)
       val old = store.getOrZero(prefix, CardinalityRecord(shard, prefix, 0, 0, 0, defaultChildrenQuota(i)))
-      val newActive = Math.max(old.activeTsCount + activeDelta, 0)
-      if (old.activeTsCount + activeDelta < 0) {
-        logger.error(s"For some reason, activeTs count for prefix $prefix cannot be reduced below zero",
+      val newActive = old.activeTsCount + activeDelta
+      if (newActive < 0) {
+        logger.error(s"For some reason, activeTs count for prefix $prefix. For now, leaving count" +
+          s" negative to be able to debug. Use filo-cli to check cardinality in individual shards.",
           new RuntimeException())
       }
       val neu = old.copy(tsCount = old.tsCount + totalDelta,
