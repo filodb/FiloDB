@@ -62,10 +62,10 @@ class CardinalityTracker(ref: DatasetRef,
 
     require(shardKey.length == shardKeyLen, "full shard key is needed")
     require(totalDelta == 1 && activeDelta == 0 || // new ts but inactive
-      totalDelta == 1 && activeDelta == 1 || // new ts and active
-          totalDelta == 0 && activeDelta == 1 ||   // // existing inactive ts that became active
-      totalDelta == 0 && activeDelta == -1, // existing active ts that became inactive
-      "invalid values for totalDelta / activeDelta")
+            totalDelta == 1 && activeDelta == 1 || // new ts and active
+            totalDelta == 0 && activeDelta == 1 ||   // // existing inactive ts that became active
+            totalDelta == 0 && activeDelta == -1, // existing active ts that became inactive
+            "invalid values for totalDelta / activeDelta")
 
     val toStore = ArrayBuffer[(Seq[String], CardinalityRecord)]()
     // first make sure there is no breach for any prefix
