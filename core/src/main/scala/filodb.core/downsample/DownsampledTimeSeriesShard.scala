@@ -43,6 +43,19 @@ class DownsampledTimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
   val purgeIndexEntriesLatency = Kamon.histogram("downsample-store-purge-index-entries-latency",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+
+  val dataShapeKeyLength = Kamon.histogram("data-shape")
+    .withTags(TagSet.from(tags)).withTag("dimension", "key-length")
+  val dataShapeValueLength = Kamon.histogram("data-shape")
+    .withTags(TagSet.from(tags)).withTag("dimension", "value-length")
+  val dataShapeLabelCount = Kamon.histogram("data-shape")
+    .withTags(TagSet.from(tags)).withTag("dimension", "label-count")
+  val dataShapeMetricLength = Kamon.histogram("data-shape")
+    .withTags(TagSet.from(tags)).withTag("dimension", "metric-length")
+  val dataShapeTotalLength = Kamon.histogram("data-shape")
+    .withTags(TagSet.from(tags)).withTag("dimension", "total-length")
+  val dataShapeBucketCount = Kamon.histogram("data-shape")
+    .withTags(TagSet.from(tags)).withTag("dimension", "bucket-count")
 }
 
 class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
@@ -92,14 +105,17 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
 
   private val indexUpdatedHour = new AtomicLong(0)
 
-  private val indexBootstrapper = new IndexBootstrapper(store) // used for initial index loading
+  // used for initial index loading
+  private val indexBootstrapper =
+    new DownsampleIndexBootstrapper(store, schemas, stats, indexDataset, downsampleConfig)
 
   private val housekeepingSched = Scheduler.computation(
     name = "housekeeping",
     reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in Housekeeping Scheduler", _)))
 
   // used for periodic refresh of index, happens from raw tables
-  private val indexRefresher = new IndexBootstrapper(rawColStore)
+  private val indexRefresher =
+    new DownsampleIndexBootstrapper(rawColStore, schemas, stats, rawDatasetRef, downsampleConfig)
 
   private var houseKeepingFuture: CancelableFuture[Unit] = _
   private var gaugeUpdateFuture: CancelableFuture[Unit] = _
