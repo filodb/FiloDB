@@ -290,8 +290,8 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
       .filter(_.endTime > start)
       .mapParallelUnordered(parallelism) { pk =>
         Task.evalAsync {
-          val dsSchema = schemas(schemaID(pk.partKey, UnsafeUtils.arayOffset)).downsample.get
-          updateDataShapeStatsIfEnabled(pk, dsSchema, shardNum)
+          val schema = schemas(schemaID(pk.partKey, UnsafeUtils.arayOffset))
+          updateDataShapeStatsIfEnabled(pk, schema.downsample.getOrElse(schema), shardNum)
           index.addPartKey(pk.partKey, partId = -1, pk.startTime, pk.endTime)(
             pk.partKey.length,
             PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pk.partKey, 0, pk.partKey.length)
