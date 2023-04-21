@@ -258,9 +258,10 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
   /**
    * If configured, update data-shape stats.
    */
-  def updateDataShapeStatsIfEnabled(pk: PartKeyRecord, schema: Schema, shardNum: Int): Unit = {
+  def updateDataShapeStatsIfEnabled(pk: PartKeyRecord, shardNum: Int): Unit = {
     if (downsampleConfig.enableDataShapeStats) {
       try {
+        val schema = schemas(schemaID(pk.partKey, UnsafeUtils.arayOffset))
         updateDataShapeStats(pk, shardNum, schema)
       } catch {
         case t: Throwable =>
@@ -290,8 +291,7 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
       .filter(_.endTime > start)
       .mapParallelUnordered(parallelism) { pk =>
         Task.evalAsync {
-          val dsSchema = schemas(schemaID(pk.partKey, UnsafeUtils.arayOffset)).downsample.get
-          updateDataShapeStatsIfEnabled(pk, dsSchema, shardNum)
+          updateDataShapeStatsIfEnabled(pk, shardNum)
           index.addPartKey(pk.partKey, partId = -1, pk.startTime, pk.endTime)(
             pk.partKey.length,
             PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pk.partKey, 0, pk.partKey.length)
@@ -350,8 +350,7 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
       // Same PK can be updated multiple times, but they wont be close for order to matter.
       // Hence using mapParallelUnordered
       Task.evalAsync {
-        val schema = schemas(schemaID(pk.partKey, UnsafeUtils.arayOffset))
-        updateDataShapeStatsIfEnabled(pk, schema, shardNum)
+        updateDataShapeStatsIfEnabled(pk, shardNum)
         val downsamplePartKey = RecordBuilder.buildDownsamplePartKey(pk.partKey, schemas)
         downsamplePartKey.foreach { dpk =>
           index.upsertPartKey(dpk, partId = -1, pk.startTime, pk.endTime)(
