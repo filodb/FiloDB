@@ -135,23 +135,23 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
   }
 
   /**
-   * Returns true iff the key is "covered" by the map.
+   * Returns true iff the key is "covered" by the trie.
    * The key is "covered" iff each of:
-   *   (a) there exists a path through the maps that sequentially
+   *   (a) there exists a path through the trie that sequentially
    *       steps through a prefix of the strings in `key`.
    *   (b) the path is ended by an empty Map.
    *
-   * For example, each of the following maps cover the key:
+   * For example, each of the following tries cover the key:
    *   key: [foo, bar]
-   *   map1: Map(foo -> Map(bar -> Map()))
-   *   map2: Map(foo -> Map())
-   *   map3: Map()  // The prefix can be empty!
+   *   trie1: Map(foo -> Map(bar -> Map()))
+   *   trie2: Map(foo -> Map())
+   *   trie3: Map()  // The prefix can be empty!
    *
-   * @param map a Map[String ,Map[String, Map[...]]]
+   * @param trie a Map[String ,Map[String, Map[...]]]
    */
-  private def keyIsCovered(key: Seq[String], map: Map[String, Any]): Boolean = {
+  private def keyIsCovered(key: Seq[String], trie: Map[String, Any]): Boolean = {
     var i = 0
-    var ptr = map
+    var ptr = trie
     while (ptr.nonEmpty) {
       val value = key(i)
       if (!ptr.contains(value)) {
@@ -167,15 +167,15 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
    * Returns true iff shape-stats should be published for the key.
    */
   private def shouldPublishShapeStats(key: Seq[String]): Boolean = {
-    val allowMap: Map[String, Any] = downsampleConfig.dataShapeAllow
-    val blockMap: Map[String, Any] = downsampleConfig.dataShapeBlock
-    if (!keyIsCovered(key, allowMap)) {
+    val allowTrie: Map[String, Any] = downsampleConfig.dataShapeAllowTrie
+    val blockTrie: Map[String, Any] = downsampleConfig.dataShapeBlockTrie
+    if (!keyIsCovered(key, allowTrie)) {
       return false
     }
-    if (blockMap.isEmpty) {
+    if (blockTrie.isEmpty) {
       return true
     }
-    !keyIsCovered(key, blockMap)
+    !keyIsCovered(key, blockTrie)
   }
 
   private def updateStatsWithTags(shapeStats: ShapeStats): Unit = {

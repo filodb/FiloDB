@@ -19,6 +19,7 @@ final case class DownsampleConfig(config: Config) {
   val resolutions = if (config.hasPath ("resolutions")) config.as[Seq[FiniteDuration]]("resolutions")
                     else Seq.empty
 
+  // FIXME: just initially create a immutable trie and remove this method.
   /**
    * DFS through nested mutable Maps, and return an equivalent tree of nested immutable Maps.
    */
@@ -32,10 +33,10 @@ final case class DownsampleConfig(config: Config) {
   }
 
   /**
-   * Convert data-shape keys into a map, where exactly the set of unique keys is described
-   *   by the set of unique paths through the maps.
+   * Convert data-shape keys into a trie, where exactly the set of unique keys is described
+   *   by the set of unique paths through the trie.
    */
-  private def dataShapeKeysToMap(keys: Seq[Seq[String]]): Map[String, Any] = {
+  private def dataShapeKeysToTrie(keys: Seq[Seq[String]]): Map[String, Any] = {
     val map = new mutable.HashMap[String, Any]
     for (key <- keys) {
       var ptr = map
@@ -80,9 +81,9 @@ final case class DownsampleConfig(config: Config) {
    *
    * Each sequence can have a length less than the length of a key.
    */
-  val dataShapeAllow: Map[String, Any] = dataShapeKeysToMap(
+  val dataShapeAllowTrie: Map[String, Any] = dataShapeKeysToTrie(
     config.getOrElse[Seq[Seq[String]]]("data-shape-allow", Seq()))
-  val dataShapeBlock: Map[String, Any] = dataShapeKeysToMap(
+  val dataShapeBlockTrie: Map[String, Any] = dataShapeKeysToTrie(
     config.getOrElse[Seq[Seq[String]]]("data-shape-block", Seq()))
 
   /**
