@@ -58,6 +58,15 @@ final case class DownsampleConfig(config: Config) {
    * A sequence of label keys that constitute a "data-shape" key.
    * A series' corresponding label values are used to determine whether-or-not its data-shape stats are published.
    * Additionally, stats are published against these labels iff enable-data-shape-key-labels=true.
+   *
+   * For example:
+   *   data-shape-key=[labelA, labelB]
+   *   data-shape-allow=[[valueA1, valueB1], [valueA2]]
+   *   data-shape-block=[[valueA2, valueB2]]
+   *
+   *   --> Metrics are published for all series with labelA=valueA1,labelB=valueB1
+   *       and all with labelA=valueA2 except where labelB=valueB2. Additionally, metrics
+   *       are published with labelA=value and labelB=value tags iff enable-data-shape-key-labels=true.
    */
   val dataShapeKey = config.getOrElse[Seq[String]]("data-shape-key", Seq())
 
