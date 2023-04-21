@@ -908,12 +908,19 @@ class TimeSeriesShard(val ref: DatasetRef,
         if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
         updatePartEndTimeInIndex(p, endTime)
         dirtyParts += p.partID
+        val oldActivelyIngestingSize = activelyIngesting.size
         activelyIngesting -= p.partID
+
         markPartAsNotIngesting(p, odp = false)
         if (storeConfig.meteringEnabled) {
           val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
             p.schema.options.shardKeyColumns)
-          cardTracker.modifyCount(shardKey, 0, -1)
+          val newCard = cardTracker.modifyCount(shardKey, 0, -1)
+          // temporary debugging since we are seeing some negative counts
+          if (newCard.exists(_.activeTsCount < 0))
+            logger.error(s"For some reason, activeTs count negative when updating card for " +
+              s"partKey: ${p.stringPartition} newCard: $newCard oldActivelyIngestingSize=$oldActivelyIngestingSize " +
+              s"newActivelyIngestingSize=${activelyIngesting.size}")
         }
       }
     }

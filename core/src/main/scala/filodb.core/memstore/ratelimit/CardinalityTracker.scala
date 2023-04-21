@@ -72,14 +72,8 @@ class CardinalityTracker(ref: DatasetRef,
     (0 to shardKey.length).foreach { i =>
       val prefix = shardKey.take(i)
       val old = store.getOrZero(prefix, CardinalityRecord(shard, prefix, 0, 0, 0, defaultChildrenQuota(i)))
-      val newActive = old.activeTsCount + activeDelta
-      if (newActive < 0) {
-        logger.error(s"For some reason, activeTs count for prefix $prefix. For now, leaving count" +
-          s" negative to be able to debug. Use filo-cli to check cardinality in individual shards.",
-          new RuntimeException())
-      }
       val neu = old.copy(tsCount = old.tsCount + totalDelta,
-        activeTsCount = newActive,
+                         activeTsCount = old.activeTsCount + activeDelta,
         childrenCount = if (i == shardKeyLen) old.childrenCount + totalDelta else old.childrenCount)
       if (i == shardKeyLen && neu.tsCount > neu.childrenQuota) {
         quotaExceededProtocol.quotaExceeded(ref, shard, prefix, neu.childrenQuota)

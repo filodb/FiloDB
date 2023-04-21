@@ -127,6 +127,11 @@ class SingleClusterPlanner(val dataset: Dataset,
   override val dsOptions: DatasetOptions = schemas.part.options
   private val shardColumns = dsOptions.shardKeyColumns.sorted
   private val dsRef = dataset.ref
+
+  val numPlansMaterialized = Kamon.counter("plans-materialized")
+    .withTag("cluster", clusterName)
+    .withTag("dataset", dataset.ref.dataset)
+
   private def targetSchemaProvider(qContext: QueryContext): TargetSchemaProvider = {
    qContext.plannerParams.targetSchemaProviderOverride.getOrElse(_targetSchemaProvider)
   }
@@ -205,6 +210,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       }
       logger.debug(s"Materialized logical plan for dataset=$dsRef :" +
         s" $logicalPlan to \n${materialized.printTree()}")
+      numPlansMaterialized.increment()
       materialized
     }
   }
