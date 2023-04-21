@@ -261,7 +261,6 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
   def updateDataShapeStatsIfEnabled(pk: PartKeyRecord, schema: Schema, shardNum: Int): Unit = {
     if (downsampleConfig.enableDataShapeStats) {
       try {
-        val schema = schemas(schemaID(pk.partKey, UnsafeUtils.arayOffset))
         updateDataShapeStats(pk, shardNum, schema)
       } catch {
         case t: Throwable =>
