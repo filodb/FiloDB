@@ -128,7 +128,7 @@ class SingleClusterPlanner(val dataset: Dataset,
   private val shardColumns = dsOptions.shardKeyColumns.sorted
   private val dsRef = dataset.ref
 
-  val numPlansMaterialized = Kamon.counter("plans-materialized")
+  val numPlansMaterialized = Kamon.counter("single-cluster-plans-materialized")
     .withTag("cluster", clusterName)
     .withTag("dataset", dataset.ref.dataset)
 
