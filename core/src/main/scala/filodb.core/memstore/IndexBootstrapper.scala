@@ -21,6 +21,7 @@ import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.metadata.Column.ColumnType.HistogramColumn
 import filodb.core.store.{AllChunkScan, ColumnStore, PartKeyRecord, SinglePartitionScan, TimeRangeChunkScan}
 import filodb.memory.format.UnsafeUtils
+import filodb.memory.format.vectors.HistogramVector
 
 class RawIndexBootstrapper(colStore: ColumnStore) {
 
@@ -124,7 +125,7 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
       val histCol = schemaHashToHistCol(schema.schemaHash)
       val ptr = info.vectorAddress(colId = histCol)
       val acc = info.vectorAccessor(colId = histCol)
-      readablePart.chunkReader(columnID = histCol, acc, ptr).asHistReader
+      HistogramVector(acc, ptr)
     }
     histReader.buckets.numBuckets
   }
