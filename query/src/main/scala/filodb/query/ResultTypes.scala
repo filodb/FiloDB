@@ -3,6 +3,7 @@ package filodb.query
 import enumeratum.{Enum, EnumEntry}
 
 import filodb.core.{DatasetRef, NodeCommand, NodeResponse}
+import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.query.{QueryStats, RangeVector, ResultSchema}
 
 trait QueryCommand extends NodeCommand with java.io.Serializable {
@@ -64,6 +65,8 @@ final case class QueryResult(id: String,
     }
   }
 }
+
+final case class TopkCardinalityResult(card: Seq[CardinalityRecord])
 
 object QueryResponseConverter {
 

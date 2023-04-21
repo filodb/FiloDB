@@ -308,9 +308,9 @@ final class QueryActor(memStore: TimeSeriesStore,
     implicit val ord = new Ordering[CardinalityRecord]() {
       override def compare(x: CardinalityRecord, y: CardinalityRecord): Int = {
         if (q.addInactive) x.tsCount - y.tsCount
-          else x.activeTsCount - y.activeTsCount
-        }
-      }.reverse
+        else x.activeTsCount - y.activeTsCount
+      }
+    }.reverse
     try {
       val cards = memStore.scanTsCardinalities(q.dataset, q.shards, q.shardKeyPrefix, q.depth)
       val heap = mutable.PriorityQueue[CardinalityRecord]()
@@ -318,7 +318,7 @@ final class QueryActor(memStore: TimeSeriesStore,
           heap.enqueue(card)
           if (heap.size > q.k) heap.dequeue()
         }
-      sender ! heap.toSeq
+      sender ! TopkCardinalityResult(heap.toSeq)
     } catch { case e: Exception =>
       sender ! QueryError(s"Error Occurred", QueryStats(), e)
     }

@@ -43,7 +43,6 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
 
   val shardTotalRecoveryTime = Kamon.gauge("memstore-total-shard-recovery-time",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
-  val tsCountBySchema = Kamon.gauge("memstore-timeseries-by-schema").withTags(TagSet.from(tags))
   val rowsIngested = Kamon.counter("memstore-rows-ingested").withTags(TagSet.from(tags))
   val partitionsCreated = Kamon.counter("memstore-partitions-created").withTags(TagSet.from(tags))
   val dataDropped = Kamon.counter("memstore-data-dropped").withTags(TagSet.from(tags))
@@ -59,7 +58,6 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val encodedHistBytes = Kamon.counter("memstore-hist-encoded-bytes", MeasurementUnit.information.bytes)
     .withTags(TagSet.from(tags))
   val flushesSuccessful = Kamon.counter("memstore-flushes-success").withTags(TagSet.from(tags))
-  val flushesFailedPartWrite = Kamon.counter("memstore-flushes-failed-partition").withTags(TagSet.from(tags))
   val flushesFailedChunkWrite = Kamon.counter("memstore-flushes-failed-chunk").withTags(TagSet.from(tags))
   val flushesFailedOther = Kamon.counter("memstore-flushes-failed-other").withTags(TagSet.from(tags))
 
@@ -910,12 +908,19 @@ class TimeSeriesShard(val ref: DatasetRef,
         if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
         updatePartEndTimeInIndex(p, endTime)
         dirtyParts += p.partID
+        val oldActivelyIngestingSize = activelyIngesting.size
         activelyIngesting -= p.partID
+
         markPartAsNotIngesting(p, odp = false)
-        val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
-          p.schema.options.shardKeyColumns)
         if (storeConfig.meteringEnabled) {
-          cardTracker.modifyCount(shardKey, 0, -1)
+          val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
+            p.schema.options.shardKeyColumns)
+          val newCard = cardTracker.modifyCount(shardKey, 0, -1)
+          // temporary debugging since we are seeing some negative counts
+          if (newCard.exists(_.activeTsCount < 0))
+            logger.error(s"For some reason, activeTs count negative when updating card for " +
+              s"partKey: ${p.stringPartition} newCard: $newCard oldActivelyIngestingSize=$oldActivelyIngestingSize " +
+              s"newActivelyIngestingSize=${activelyIngesting.size}")
         }
       }
     }
