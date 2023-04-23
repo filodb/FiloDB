@@ -61,8 +61,8 @@ final case class DownsampleConfig(config: Config) {
    *
    * For example:
    *   data-shape-key=[labelA, labelB]
-   *   data-shape-allow=[[valueA1, valueB1], [valueA2]]
-   *   data-shape-block=[[valueA2, valueB2]]
+   *   data-shape-allow=[(valueA1, valueB1), (valueA2)]
+   *   data-shape-block=[(valueA2, valueB2)]
    *
    *   --> Metrics are published for all series with labelA=valueA1,labelB=valueB1
    *       and all with labelA=valueA2 except where labelB=valueB2. Additionally, metrics
