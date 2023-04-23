@@ -1757,9 +1757,8 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     //   (4) Compare the index/bootstrap-generated stats with the stats from (1.a).
     val rawConf =
     """
-      |enable-data-shape-stats: true
       |data-shape-key: [_ws_,_ns_]
-      |enable-data-shape-key-labels: true
+      |data-shape-key-publish-labels: [workspace, namespace]
       |data-shape-allow: [[foo_ws]]
       |data-shape-block: [[foo_ws,block_ns]]
       |enable-data-shape-bucket-count: true

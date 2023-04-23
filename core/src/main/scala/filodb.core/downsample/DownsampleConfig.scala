@@ -49,12 +49,6 @@ final case class DownsampleConfig(config: Config) {
   }
 
   /**
-   * If enabled, stats about downsampled data will be collected/published as the index is bootstrapped/refreshed.
-   * These stats describe the data's "shape", e.g. label/value lengths and histogram bucket counts.
-   */
-  val enableDataShapeStats = config.getOrElse[Boolean]("enable-data-shape-stats", false)
-
-  /**
    * A sequence of label keys that constitute a "data-shape" key.
    * A series' corresponding label values are used to determine whether-or-not its data-shape stats are published.
    * Additionally, stats are published against these labels iff enable-data-shape-key-labels=true.
@@ -77,9 +71,21 @@ final case class DownsampleConfig(config: Config) {
   val dataShapeKeyIndex = dataShapeKey.zipWithIndex.map{ case (key, i) => key -> i }.toMap
 
   /**
-   * Data-shape stats are published against these labels iff enable-data-shape-key-labels=true.
+   * Data-shape stats are published with data-shape-key values iff this sequence is nonempty.
+   * If populated, this sequence must have the same size as data-shape-key; each ith string will be the
+   *   published key for the ith data-shape key's value.
+   * For example:
+   *       data-shape-key = ["label1", "label2"]
+   *       data-shape-key-publish-labels = ["foo", "bar"]
+   *   Suppose we had the time-series labels:
+   *       my_metric{label1="value1", label2="value2", ...}
+   *   If this matches a configured "allow" set of labels and no "block" set, then
+   *     data-shape metrics would be updated as:
+   *       data_shape{foo="value1", bar="value2", dimension="label-count", ...}
+   *   If data-shape-key-published-labels is empty, then data-shape metrics would
+   *     not include the data-shape key values.
    */
-  val enableDataShapeKeyLabels = config.getOrElse[Boolean]("enable-data-shape-key-labels", false)
+  val dataShapeKeyPublishLabels = config.getOrElse[Seq[String]]("data-shape-key-publish-labels", Seq())
 
   /**
    * Allow/Block publish of data-shape stats for specific data-shape keys.

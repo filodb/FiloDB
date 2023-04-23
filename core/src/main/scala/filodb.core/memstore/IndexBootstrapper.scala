@@ -180,7 +180,7 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
 
   private def updateStatsWithTags(shapeStats: ShapeStats): Unit = {
     var builder = TagSet.builder()
-    for ((key, value) <- downsampleConfig.dataShapeKey.zip(shapeStats.key)) {
+    for ((key, value) <- downsampleConfig.dataShapeKeyPublishLabels.zip(shapeStats.key)) {
       builder = builder.add(key, value)
     }
     val tags = builder.build()
@@ -221,7 +221,7 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
     if (!shapeStats.isDefined) {
       return
     }
-    if (downsampleConfig.enableDataShapeKeyLabels) {
+    if (downsampleConfig.dataShapeKeyPublishLabels.nonEmpty) {
       updateStatsWithTags(shapeStats.get)
     } else {
       updateStatsWithoutTags(shapeStats.get)
@@ -259,7 +259,7 @@ class DownsampleIndexBootstrapper(colStore: ColumnStore,
    * If configured, update data-shape stats.
    */
   def updateDataShapeStatsIfEnabled(pk: PartKeyRecord, shardNum: Int): Unit = {
-    if (downsampleConfig.enableDataShapeStats) {
+    if (downsampleConfig.dataShapeKey.nonEmpty) {
       try {
         val schema = schemas(schemaID(pk.partKey, UnsafeUtils.arayOffset))
         updateDataShapeStats(pk, shardNum, schema)
