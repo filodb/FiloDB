@@ -118,6 +118,10 @@ final case class DownsampleConfig(config: Config) {
 
   val maxRefreshHours = config.getOrElse("max-refresh-hours", Long.MaxValue)
 
+  val indexRebuildParallelismMultiplier = config.getOrElse("index-rebuild-parallelism-multiplier", 1.0)
+
+  val housekeepingParallelismMultiplier = config.getOrElse("housekeeping-parallelism-multiplier", 1.0)
+
   val enablePersistentIndexing = indexLocation.isDefined
 
   val indexMetastoreImplementation = if (config.hasPath("index-metastore-implementation")) {
