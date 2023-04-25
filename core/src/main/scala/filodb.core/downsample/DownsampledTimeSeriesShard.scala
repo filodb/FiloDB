@@ -109,7 +109,10 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
   private val indexBootstrapper =
     new DownsampleIndexBootstrapper(store, schemas, stats, indexDataset, downsampleConfig)
 
+  val houseKeepingSchedParallelism = Math.round(Runtime.getRuntime.availableProcessors() *
+                                        downsampleConfig.housekeepingParallelismMultiplier).toInt
   private val housekeepingSched = Scheduler.computation(
+    parallelism = houseKeepingSchedParallelism,
     name = "housekeeping",
     reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in Housekeeping Scheduler", _)))
 
@@ -200,9 +203,12 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
                                 // do not notify listener as the map operation will be updating the state
                                 indexRefresh(endHour, startHour, periodicRefresh = false)
       case None             => // No checkpoint time found, start refresh from scratch
+                                val parallelism = Math.round(downsampleConfig.indexRebuildParallelismMultiplier *
+                                                    Runtime.getRuntime.availableProcessors()).toInt
+                                logger.info("Rebuilding index with parallelism {}", parallelism)
                                 indexBootstrapper
                                   .bootstrapIndexDownsample(
-                                    partKeyIndex, shardNum, indexDataset, indexTtlMs)
+                                    partKeyIndex, shardNum, indexDataset, indexTtlMs, parallelism)
     }).map { count =>
         logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
         indexUpdatedHour.set(endHour)
