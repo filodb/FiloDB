@@ -45,35 +45,42 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     s"INSERT INTO $tableString (partition, chunkid, info, chunks) " +
     s"VALUES (?, ?, ?, ?) USING TTL ?")
     .setConsistencyLevel(writeConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val deleteChunksCql = session.prepare(
     s"DELETE FROM $tableString WHERE partition=? AND chunkid IN ?")
     .setConsistencyLevel(writeConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val readChunkInCql = session.prepare(
     s"SELECT info, chunks FROM $tableString " +
     s"WHERE partition = ? AND chunkid IN ?")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val readChunksCql = session.prepare(
     s"SELECT chunkid, info, chunks FROM $tableString " +
     s"WHERE partition = ? AND chunkid IN ?")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val readAllChunksCql = session.prepare(
     s"SELECT chunkid, info, chunks FROM $tableString " +
     s"WHERE partition = ?")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val scanBySplit = session.prepare(
     s"SELECT partition, info, chunks FROM $tableString " +
     s"WHERE TOKEN(partition) >= ? AND TOKEN(partition) < ?")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
   private lazy val readChunkRangeCql = session.prepare(
     s"SELECT partition, info, chunks FROM $tableString " +
     s"WHERE partition IN ? AND chunkid >= ? AND chunkid < ?")
     .setConsistencyLevel(readConsistencyLevel)
+    .setIdempotent(true)
 
 
   def writeChunks(partition: Array[Byte],
