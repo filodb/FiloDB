@@ -16,7 +16,7 @@ import filodb.core.{DatasetRef, Types}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.ratelimit.QuotaSource
 import filodb.core.metadata.Schemas
-import filodb.core.query.{QueryContext, QuerySession, ServiceUnavailableException}
+import filodb.core.query.{QueryContext, QueryLimitException, QuerySession, ServiceUnavailableException}
 import filodb.core.store._
 import filodb.memory.NativeMemoryManager
 
@@ -91,13 +91,15 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
     )
     // TODO the below does not return a particular kind of error code. Most likely this would translate to
     // an internal error of FiloDB which is not appropriate for the case
-    require(estDataSize < enforcedLimits.timeSeriesSamplesScannedBytes,
-      s"With match of $numTsPartitions time series, estimate of $estDataSize bytes exceeds limit of " +
+    if (estDataSize > enforcedLimits.timeSeriesSamplesScannedBytes) {
+      val exMessage = s"With match of $numTsPartitions time series, estimate of $estDataSize bytes exceeds limit of " +
         s"${enforcedLimits.timeSeriesSamplesScannedBytes} bytes queried per shard " +
         s"for ${schemas.apply(schemaId).name} schema. " +
         s"Try one or more of these: " +
         s"(a) narrow your query filters to reduce to fewer than the current $numTsPartitions matches " +
-        s"(b) reduce query time range, currently at ${queryDurationMs / 1000 / 60} minutes")
+        s"(b) reduce query time range, currently at ${queryDurationMs / 1000 / 60} minutes"
+      throw new QueryLimitException(exMessage)
+    }
     require(numTsPartitions < enforcedLimits.timeSeriesScanned,
         s"Query matched $numTsPartitions time series, which exceeds a max enforced limit of " +
           s"${enforcedLimits.timeSeriesScanned} time series allowed to be queried per shard. " +

@@ -266,8 +266,8 @@ trait ExecPlan extends QueryCommand {
   def checkResultBytes(resultSize: Long, queryConfig: QueryConfig): Unit = {
     if (resultSize > queryContext.plannerParams.enforcedLimits.execPlanResultBytes) {
       val size_mib = queryContext.plannerParams.enforcedLimits.execPlanResultBytes / math.pow(1024, 2)
-      val msg = s"Reached maximum enforced result size limit (final or intermediate) " +
-        s"for data serialized out of a host or shard " +
+      val msg = s"Reached ${resultSize} bytes of result size (final or intermediate) " +
+        s"for data serialized out of a host or shard breaching maximum result size limit" +
         s"(${math.round(size_mib)} MiB)."
       qLogger.warn(queryContext.getQueryLogLine(msg))
       if (queryConfig.enforceResultByteLimit) {
