@@ -81,9 +81,9 @@ final case class BinaryJoinExec(queryContext: QueryContext,
             s" encountered input cardinality ${result.size}"
           val logline = queryContext.getQueryLogLine(msg)
           qLogger.warn(logline)
-          throw new BadQueryException(s"The join in this query has input cardinality of ${result.size} which" +
+          throw new QueryLimitException(s"The join in this query has input cardinality of ${result.size} which" +
             s" is more than limit of ${queryContext.plannerParams.enforcedLimits.joinQueryCardinality}." +
-            s" Try applying more filters or reduce time range.")
+            s" Try applying more filters or reduce time range.", queryContext.queryId)
         }
         val joinQueryWarnCardinalityLimit = queryContext.plannerParams.warnLimits.joinQueryCardinality
         if (result.size > joinQueryWarnCardinalityLimit && cardinality == Cardinality.OneToOne) {

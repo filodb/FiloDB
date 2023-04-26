@@ -2,12 +2,10 @@ package filodb.coordinator
 
 import java.lang.Thread.UncaughtExceptionHandler
 import java.util.concurrent.{ForkJoinPool, ForkJoinWorkerThread}
-
 import scala.collection.mutable
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.{Failure, Success}
 import scala.util.control.NonFatal
-
 import akka.actor.{ActorRef, Props}
 import akka.pattern.AskTimeoutException
 import kamon.Kamon
@@ -20,13 +18,12 @@ import monix.execution.exceptions.ExecutionRejectedException
 import monix.execution.schedulers.SchedulerService
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
-
 import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, TermInfo, TimeSeriesStore}
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Dataset, Schemas}
-import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryStats, SerializedRangeVector}
+import filodb.core.query.{QueryConfig, QueryContext, QueryLimitException, QuerySession, QueryStats, SerializedRangeVector}
 import filodb.core.store.CorruptVectorException
 import filodb.memory.data.Shutdown
 import filodb.query._
@@ -239,6 +236,9 @@ final class QueryActor(memStore: TimeSeriesStore,
         case _: AskTimeoutException => // dont log ask timeouts. useless - let it simply flow up
         case _: QueryTimeoutException | _: ExecutionRejectedException => // log just message, no need for stacktrace
           logger.error(s"Query Error ${t.getClass.getSimpleName} queryId=${q.queryContext.queryId} " +
+            s"${q.queryContext.origQueryParams} ${t.getMessage}")
+        case _: QueryLimitException =>
+          logger.warn(s"Query Limit Breached " +
             s"${q.queryContext.origQueryParams} ${t.getMessage}")
         case e: Throwable =>
           logger.error(s"Query Error queryId=${q.queryContext.queryId} " +

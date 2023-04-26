@@ -98,14 +98,17 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
         s"Try one or more of these: " +
         s"(a) narrow your query filters to reduce to fewer than the current $numTsPartitions matches " +
         s"(b) reduce query time range, currently at ${queryDurationMs / 1000 / 60} minutes"
-      throw new QueryLimitException(exMessage)
+      throw new QueryLimitException(exMessage, qContext.queryId)
     }
-    require(numTsPartitions < enforcedLimits.timeSeriesScanned,
+    if (numTsPartitions > enforcedLimits.timeSeriesScanned) {
+      val exMessage =
         s"Query matched $numTsPartitions time series, which exceeds a max enforced limit of " +
           s"${enforcedLimits.timeSeriesScanned} time series allowed to be queried per shard. " +
           s"Try one or more of these: " +
           s"(a) narrow your query filters to reduce to fewer than the current $numTsPartitions matches " +
-          s"(b) reduce query time range, currently at ${queryDurationMs / 1000 / 60} minutes")
+          s"(b) reduce query time range, currently at ${queryDurationMs / 1000 / 60} minutes"
+      throw new QueryLimitException(exMessage, qContext.queryId)
+    }
     if (numTsPartitions > warnLimits.timeSeriesScanned) {
       val msg =
         s"Query matched $numTsPartitions time series, which exceeds a max warn limit of " +
