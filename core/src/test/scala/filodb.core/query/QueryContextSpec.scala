@@ -37,7 +37,8 @@ class QueryContextSpec extends AnyFunSpec with Matchers {
     )
     val logLine = queryContext.getQueryLogLine("My log message")
     logLine should equal (
-      "My log message promQL = -=# myQuery #=- queryOrigin = Some(rr) queryPrincipal = None queryOriginId = Some(rr_id)"
+      s"My log message promQL = -=# myQuery #=- queryOrigin = Some(rr) queryPrincipal = None " +
+        s"queryOriginId = Some(rr_id) queryId = ${queryContext.queryId}"
     )
   }
 }

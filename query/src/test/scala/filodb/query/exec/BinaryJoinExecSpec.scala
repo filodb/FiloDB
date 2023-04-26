@@ -536,9 +536,9 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
         .toListL.runToFuture.futureValue
     }
-    thrown.getCause.getClass shouldEqual classOf[BadQueryException]
-    thrown.getCause.getMessage shouldEqual "The join in this query has input cardinality of 2 which is more than " +
-      "limit of 1. Try applying more filters or reduce time range."
+    thrown.getCause.getClass shouldEqual classOf[QueryLimitException]
+    thrown.getCause.getMessage shouldEqual s"The join in this query has input cardinality of 2 which is more than " +
+      s"limit of 1. Try applying more filters or reduce time range., queryId=${queryContext.queryId}"
   }
 
   it("should throw BadQueryException - one-to-one with on - cardinality limit 1") {
@@ -561,9 +561,9 @@ class BinaryJoinExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
       execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
         .toListL.runToFuture.futureValue
     }
-    thrown.getCause.getClass shouldEqual classOf[BadQueryException]
-    thrown.getCause.getMessage shouldEqual "The join in this query has input cardinality of 2 which is more than " +
-      "limit of 1. Try applying more filters or reduce time range."
+    thrown.getCause.getClass shouldEqual classOf[QueryLimitException]
+    thrown.getCause.getMessage shouldEqual s"The join in this query has input cardinality of 2 which is more than " +
+      s"limit of 1. Try applying more filters or reduce time range., queryId=${queryContext.queryId}"
   }
 
   it ("should stitch same RVs from multiple shards on LHS and RHS before joining by ignoring NaN") {

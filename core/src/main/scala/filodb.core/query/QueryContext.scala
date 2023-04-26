@@ -104,7 +104,7 @@ final case class QueryContext(origQueryParams: TsdbQueryParams = UnavailableProm
       s" queryOrigin = ${plannerParams.queryOrigin}" +
       s" queryPrincipal = ${plannerParams.queryPrincipal}" +
       s" queryOriginId = ${plannerParams.queryOriginId}" +
-      s" queryId =  ${queryId}"
+      s" queryId = ${queryId}"
     logLine
   }
 }
