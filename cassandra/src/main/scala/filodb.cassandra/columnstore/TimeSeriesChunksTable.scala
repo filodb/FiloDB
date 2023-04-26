@@ -1,13 +1,13 @@
 package filodb.cassandra.columnstore
 
-import java.nio.ByteBuffer
 
-import scala.concurrent.Future
+import java.nio.ByteBuffer
 
 import com.datastax.driver.core.{ConsistencyLevel, ResultSet, Row}
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
+import scala.concurrent.Future
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
@@ -21,7 +21,8 @@ import filodb.core.store._
  */
 sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                                    val connector: FiloCassandraConnector,
-                                   writeConsistencyLevel: ConsistencyLevel)
+                                   writeConsistencyLevel: ConsistencyLevel,
+                                   readConsistencyLevel: ConsistencyLevel)
                                   (implicit sched: Scheduler) extends BaseDatasetTable {
   import collection.JavaConverters._
   import filodb.cassandra.Util._
@@ -52,27 +53,27 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
   private lazy val readChunkInCql = session.prepare(
     s"SELECT info, chunks FROM $tableString " +
     s"WHERE partition = ? AND chunkid IN ?")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
   private lazy val readChunksCql = session.prepare(
     s"SELECT chunkid, info, chunks FROM $tableString " +
     s"WHERE partition = ? AND chunkid IN ?")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
   private lazy val readAllChunksCql = session.prepare(
     s"SELECT chunkid, info, chunks FROM $tableString " +
     s"WHERE partition = ?")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
   private lazy val scanBySplit = session.prepare(
     s"SELECT partition, info, chunks FROM $tableString " +
     s"WHERE TOKEN(partition) >= ? AND TOKEN(partition) < ?")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
   private lazy val readChunkRangeCql = session.prepare(
     s"SELECT partition, info, chunks FROM $tableString " +
     s"WHERE partition IN ? AND chunkid >= ? AND chunkid < ?")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
 
   def writeChunks(partition: Array[Byte],
