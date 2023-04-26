@@ -522,6 +522,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
 
   val cassandraConfig = config.getConfig("cassandra")
   val ingestionConsistencyLevel = ConsistencyLevel.valueOf(cassandraConfig.getString("ingestion-consistency-level"))
+  val readConsistencyLevel = ConsistencyLevel.valueOf(cassandraConfig.getString("default-read-consistency-level"))
   val tableCacheSize = config.getInt("columnstore.tablecache-size")
 
   val chunkTableCache = concurrentCache[DatasetRef, TimeSeriesChunksTable](tableCacheSize)
@@ -583,19 +584,21 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
 
   def getOrCreateChunkTable(dataset: DatasetRef): TimeSeriesChunksTable = {
     chunkTableCache.getOrElseUpdate(dataset, { dataset: DatasetRef =>
-      new TimeSeriesChunksTable(dataset, clusterConnector, ingestionConsistencyLevel)(readEc) })
+      new TimeSeriesChunksTable(dataset, clusterConnector, ingestionConsistencyLevel, readConsistencyLevel)(readEc) })
   }
 
   def getOrCreateIngestionTimeIndexTable(dataset: DatasetRef): IngestionTimeIndexTable = {
     indexTableCache.getOrElseUpdate(dataset,
                         { dataset: DatasetRef =>
-                          new IngestionTimeIndexTable(dataset, clusterConnector, ingestionConsistencyLevel)(readEc) })
+                          new IngestionTimeIndexTable(dataset, clusterConnector, ingestionConsistencyLevel,
+                            readConsistencyLevel)(readEc) })
 }
 
   def getOrCreatePartitionKeysByUpdateTimeTable(dataset: DatasetRef): PartitionKeysByUpdateTimeTable = {
     partKeysByUTTableCache.getOrElseUpdate(dataset,
       { dataset: DatasetRef =>
-        new PartitionKeysByUpdateTimeTable(dataset, clusterConnector, ingestionConsistencyLevel)(readEc) })
+        new PartitionKeysByUpdateTimeTable(dataset, clusterConnector, ingestionConsistencyLevel,
+          readConsistencyLevel)(readEc) })
   }
 
   def getOrCreatePartitionKeysTable(dataset: DatasetRef, shard: Int): PartitionKeysTable = {
@@ -603,7 +606,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
       concurrentCache[Int, PartitionKeysTable](tableCacheSize)
     })
     map.getOrElseUpdate(shard, { shard: Int =>
-      new PartitionKeysTable(dataset, shard, clusterConnector, ingestionConsistencyLevel)(readEc)
+      new PartitionKeysTable(dataset, shard, clusterConnector, ingestionConsistencyLevel, readConsistencyLevel)(readEc)
     })
   }
 

@@ -20,7 +20,8 @@ import filodb.core.store.ChunkSinkStats
  */
 sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
                                      val connector: FiloCassandraConnector,
-                                     writeConsistencyLevel: ConsistencyLevel)
+                                     writeConsistencyLevel: ConsistencyLevel,
+                                     readConsistencyLevel: ConsistencyLevel)
                                     (implicit ec: ExecutionContext) extends BaseDatasetTable {
   import scala.collection.JavaConverters._
 
@@ -49,19 +50,19 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
   private lazy val allCql = session.prepare(
     s"SELECT ingestion_time, start_time, info FROM $tableString " +
     s"WHERE partition = ?")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
   private lazy val scanCql1 = session.prepare(
     s"SELECT partition, ingestion_time, start_time, info FROM $tableString " +
     s"WHERE TOKEN(partition) >= ? AND TOKEN(partition) < ? AND ingestion_time >= ? AND ingestion_time <= ? " +
     s"ALLOW FILTERING")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
   private lazy val scanCql2 = session.prepare(
     s"SELECT partition FROM $tableString " +
     s"WHERE TOKEN(partition) >= ? AND TOKEN(partition) < ? AND ingestion_time >= ? AND ingestion_time <= ? " +
     s"ALLOW FILTERING")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
   /**
     * Test method which returns all rows for a partition. Not async-friendly.
@@ -143,7 +144,7 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
                          diskTimeToLiveSeconds: java.lang.Integer)
     }
     stats.addIndexWriteStats(infoBytes)
-    connector.execStmtWithRetries(unloggedBatch(statements).setConsistencyLevel(ConsistencyLevel.ONE))
+    connector.execStmtWithRetries(unloggedBatch(statements).setConsistencyLevel(readConsistencyLevel))
   }
 
   /**
