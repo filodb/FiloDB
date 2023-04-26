@@ -16,7 +16,8 @@ import filodb.cassandra.FiloCassandraConnector
   */
 sealed class CheckpointTable(val config: Config,
                              val session: Session,
-                             writeConsistencyLevel: ConsistencyLevel)
+                             writeConsistencyLevel: ConsistencyLevel,
+                             checkPointReadConsistencyLevel: ConsistencyLevel)
                              (implicit val ec: ExecutionContext) extends FiloCassandraConnector {
   val keyspace = config.getString("admin-keyspace")
   val tableString = s"${keyspace}.checkpoints"
@@ -36,7 +37,7 @@ sealed class CheckpointTable(val config: Config,
       s"""SELECT groupnum, offset FROM $tableString WHERE
          | databasename = ? AND
          | datasetname = ? AND
-         | shardnum = ? """.stripMargin).setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM)
+         | shardnum = ? """.stripMargin).setConsistencyLevel(checkPointReadConsistencyLevel)
     // we want consistent reads during recovery
 
   lazy val writeCheckpointCql = {
