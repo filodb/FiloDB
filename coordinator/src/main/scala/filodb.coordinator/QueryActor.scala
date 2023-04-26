@@ -2,10 +2,12 @@ package filodb.coordinator
 
 import java.lang.Thread.UncaughtExceptionHandler
 import java.util.concurrent.{ForkJoinPool, ForkJoinWorkerThread}
+
 import scala.collection.mutable
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.{Failure, Success}
 import scala.util.control.NonFatal
+
 import akka.actor.{ActorRef, Props}
 import akka.pattern.AskTimeoutException
 import kamon.Kamon
@@ -18,12 +20,18 @@ import monix.execution.exceptions.ExecutionRejectedException
 import monix.execution.schedulers.SchedulerService
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
+
 import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, TermInfo, TimeSeriesStore}
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Dataset, Schemas}
-import filodb.core.query.{QueryConfig, QueryContext, QueryLimitException, QuerySession, QueryStats, SerializedRangeVector}
+import filodb.core.query.QueryConfig
+import filodb.core.query.QueryContext
+import filodb.core.query.QueryLimitException
+import filodb.core.query.QuerySession
+import filodb.core.query.QueryStats
+import filodb.core.query.SerializedRangeVector
 import filodb.core.store.CorruptVectorException
 import filodb.memory.data.Shutdown
 import filodb.query._
