@@ -26,7 +26,12 @@ import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, TermInfo, TimeSeriesStore}
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Dataset, Schemas}
-import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryStats, SerializedRangeVector}
+import filodb.core.query.QueryConfig
+import filodb.core.query.QueryContext
+import filodb.core.query.QueryLimitException
+import filodb.core.query.QuerySession
+import filodb.core.query.QueryStats
+import filodb.core.query.SerializedRangeVector
 import filodb.core.store.CorruptVectorException
 import filodb.memory.data.Shutdown
 import filodb.query._
@@ -239,6 +244,9 @@ final class QueryActor(memStore: TimeSeriesStore,
         case _: AskTimeoutException => // dont log ask timeouts. useless - let it simply flow up
         case _: QueryTimeoutException | _: ExecutionRejectedException => // log just message, no need for stacktrace
           logger.error(s"Query Error ${t.getClass.getSimpleName} queryId=${q.queryContext.queryId} " +
+            s"${q.queryContext.origQueryParams} ${t.getMessage}")
+        case _: QueryLimitException =>
+          logger.warn(s"Query Limit Breached " +
             s"${q.queryContext.origQueryParams} ${t.getMessage}")
         case e: Throwable =>
           logger.error(s"Query Error queryId=${q.queryContext.queryId} " +

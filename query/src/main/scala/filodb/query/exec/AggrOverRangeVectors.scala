@@ -211,9 +211,9 @@ object RangeVectorAggregator extends StrictLogging {
         logger.warn(queryContext.getQueryLogLine(
           s"Exceeded enforced group-by cardinality limit ${groupByEnforcedLimit}. "
         ))
-        throw new BadQueryException(
+        throw new QueryLimitException(
           s"Query exceeded group-by cardinality limit ${groupByEnforcedLimit}. " +
-          "Try applying more filters or reduce query range. "
+          "Try applying more filters or reduce query range. ", queryContext.queryId
         )
       }
       val groupByWarnLimit = queryContext.plannerParams.warnLimits.groupByCardinality

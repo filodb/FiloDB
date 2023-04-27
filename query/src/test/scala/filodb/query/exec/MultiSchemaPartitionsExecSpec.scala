@@ -477,7 +477,7 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
       dummyDispatcher, dsRef, 0, filters, AllChunkScan, "_metric_")
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = resp.asInstanceOf[QueryError]
-    result.t.getClass shouldEqual classOf[BadQueryException]
+    result.t.getClass shouldEqual classOf[QueryLimitException]
   }
 
   it("should throw QueryTimeoutException when query processing time is greater than timeout") {

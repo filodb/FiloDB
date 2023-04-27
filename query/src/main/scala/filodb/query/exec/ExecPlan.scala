@@ -252,9 +252,9 @@ trait ExecPlan extends QueryCommand {
       val msg = s"Exceeded enforced limit of samples produced on a single shard or processing node. " +
         s"Max number of samples is ${queryContext.plannerParams.enforcedLimits.execPlanSamples}"
       qLogger.warn(queryContext.getQueryLogLine(msg))
-      throw new BadQueryException(s"This query results in more than " +
+      throw new QueryLimitException(s"This query results in more than " +
         s"${queryContext.plannerParams.enforcedLimits.execPlanSamples} samples. " +
-        s"Try applying more filters or reduce time range.")
+        s"Try applying more filters or reduce time range.", queryContext.queryId)
     }
     if (numResultSamples > queryContext.plannerParams.warnLimits.execPlanSamples) {
       val msg = s"Exceeded warning limit of samples produced on a single shard or processing node. " +
@@ -266,13 +266,15 @@ trait ExecPlan extends QueryCommand {
   def checkResultBytes(resultSize: Long, queryConfig: QueryConfig): Unit = {
     if (resultSize > queryContext.plannerParams.enforcedLimits.execPlanResultBytes) {
       val size_mib = queryContext.plannerParams.enforcedLimits.execPlanResultBytes / math.pow(1024, 2)
-      val msg = s"Reached maximum enforced result size limit (final or intermediate) " +
-        s"for data serialized out of a host or shard " +
+      val msg = s"Reached ${resultSize} bytes of result size (final or intermediate) " +
+        s"for data serialized out of a host or shard breaching maximum result size limit" +
         s"(${math.round(size_mib)} MiB)."
       qLogger.warn(queryContext.getQueryLogLine(msg))
       if (queryConfig.enforceResultByteLimit) {
-        throw new BadQueryException(
-          s"$msg Try to apply more filters, reduce the time range, and/or increase the step size.")
+        throw new QueryLimitException(
+          s"$msg Try to apply more filters, reduce the time range, and/or increase the step size.",
+          queryContext.queryId
+        )
       }
     }
     if (resultSize > queryContext.plannerParams.warnLimits.execPlanResultBytes) {
