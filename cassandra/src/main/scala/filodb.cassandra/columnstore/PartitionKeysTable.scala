@@ -16,7 +16,8 @@ import filodb.core.store.PartKeyRecord
 sealed class PartitionKeysTable(val dataset: DatasetRef,
                                 val shard: Int,
                                 val connector: FiloCassandraConnector,
-                                writeConsistencyLevel: ConsistencyLevel)
+                                writeConsistencyLevel: ConsistencyLevel,
+                                readConsistencyLevel: ConsistencyLevel)
                                (implicit ec: ExecutionContext) extends BaseDatasetTable {
 
   import filodb.cassandra.Util._
@@ -44,7 +45,7 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
   private lazy val scanCql = session.prepare(
     s"SELECT * FROM $tableString " +
     s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ?")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
   private lazy val scanCqlForStartEndTime = session.prepare(
     s"SELECT partKey, startTime, endTime FROM $tableString " +
@@ -52,24 +53,24 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
       s"startTime >= ? AND startTime <= ? AND " +
       s"endTime >= ? AND endTime <= ? " +
       s"ALLOW FILTERING")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
   private lazy val scanCqlForStartTime = session.prepare(
     s"SELECT partKey, startTime, endTime FROM $tableString " +
       s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ? AND startTime >= ? AND startTime <= ? " +
       s"ALLOW FILTERING")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
   private lazy val scanCqlForEndTime = session.prepare(
     s"SELECT partKey, startTime, endTime FROM $tableString " +
       s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ? AND endTime >= ? AND endTime <= ? " +
       s"ALLOW FILTERING")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
   private lazy val readCql = session.prepare(
     s"SELECT partKey, startTime, endTime FROM $tableString " +
       s"WHERE partKey = ? ")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
   private lazy val deleteCql = session.prepare(
     s"DELETE FROM $tableString " +

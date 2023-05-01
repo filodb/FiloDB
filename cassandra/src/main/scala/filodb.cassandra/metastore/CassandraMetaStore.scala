@@ -16,8 +16,10 @@ import filodb.core.store.MetaStore
 class CassandraMetaStore(config: Config, session: Session)
                         (implicit val ec: ExecutionContext) extends MetaStore {
   private val ingestionConsistencyLevel = ConsistencyLevel.valueOf(config.getString("ingestion-consistency-level"))
+  private val checkpointReadConsistencyLevel = ConsistencyLevel.valueOf(
+    config.getString("checkpoint-read-consistency-level"))
 
-  val checkpointTable = new CheckpointTable(config, session, ingestionConsistencyLevel)
+  val checkpointTable = new CheckpointTable(config, session, ingestionConsistencyLevel, checkpointReadConsistencyLevel)
   private val createTablesEnabled = config.getBoolean("create-tables-enabled")
 
   val defaultKeySpace = config.getString("keyspace")
