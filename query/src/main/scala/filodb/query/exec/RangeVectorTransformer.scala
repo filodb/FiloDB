@@ -61,50 +61,54 @@ trait RangeVectorTransformer extends java.io.Serializable {
 final case class InstantVectorFunctionMapper(function: InstantFunctionId,
                                              funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
   protected[exec] def args: String = s"function=$function"
-
+  // scalastyle:off null method.length
   def evaluate(source: Observable[RangeVector], scalarRangeVector: Seq[ScalarRangeVector], querySession: QuerySession,
                limit: Int, sourceSchema: ResultSchema) : Observable[RangeVector] = {
-    ResultSchema.valueColumnType(sourceSchema) match {
-      case ColumnType.HistogramColumn =>
-        val instantFunction = InstantFunction.histogram(function)
-        if (instantFunction.isHToDoubleFunc) {
-          source.map { rv =>
-            IteratorBackedRangeVector(rv.key, new H2DoubleInstantFuncIterator(rv.rows, instantFunction.asHToDouble,
-              scalarRangeVector), rv.outputRange)
+    if (sourceSchema == ResultSchema.empty && function == InstantFunctionId.OrVectorDouble) {
+      Observable.now(scalarRangeVector.head)
+    } else {
+      ResultSchema.valueColumnType(sourceSchema) match {
+        case ColumnType.HistogramColumn =>
+          val instantFunction = InstantFunction.histogram(function)
+          if (instantFunction.isHToDoubleFunc) {
+            source.map { rv =>
+              IteratorBackedRangeVector(rv.key, new H2DoubleInstantFuncIterator(rv.rows, instantFunction.asHToDouble,
+                scalarRangeVector), rv.outputRange)
+            }
+          } else if (instantFunction.isHistDoubleToDoubleFunc && sourceSchema.isHistDouble) {
+            source.map { rv =>
+              IteratorBackedRangeVector(rv.key, new HD2DoubleInstantFuncIterator(rv.rows, instantFunction.asHDToDouble,
+                scalarRangeVector), rv.outputRange)
+            }
+          } else {
+            throw new UnsupportedOperationException(s"Sorry, function $function is not supported right now")
           }
-        } else if (instantFunction.isHistDoubleToDoubleFunc && sourceSchema.isHistDouble) {
-          source.map { rv =>
-            IteratorBackedRangeVector(rv.key, new HD2DoubleInstantFuncIterator(rv.rows, instantFunction.asHDToDouble,
-              scalarRangeVector), rv.outputRange)
-          }
-        } else {
-          throw new UnsupportedOperationException(s"Sorry, function $function is not supported right now")
-        }
-      case ColumnType.DoubleColumn =>
-        if (function == HistogramQuantile) {
-          // Special mapper to pull all buckets together from different Prom-schema time series
-          val mapper = HistogramQuantileMapper(funcParams)
-          mapper.apply(source, querySession, limit, sourceSchema, Nil)
-        } else {
-          val instantFunction = InstantFunction.double(function)
-          val result = source.map { rv =>
-            IteratorBackedRangeVector(rv.key, new DoubleInstantFuncIterator(rv.rows, instantFunction,
-              scalarRangeVector), rv.outputRange)
-          }
+        case ColumnType.DoubleColumn =>
+          if (function == HistogramQuantile) {
+            // Special mapper to pull all buckets together from different Prom-schema time series
+            val mapper = HistogramQuantileMapper(funcParams)
+            mapper.apply(source, querySession, limit, sourceSchema, Nil)
+          } else {
+            val instantFunction = InstantFunction.double(function)
+            val result = source.map { rv =>
+              IteratorBackedRangeVector(rv.key, new DoubleInstantFuncIterator(rv.rows, instantFunction,
+                scalarRangeVector), rv.outputRange)
+            }
 
-          // NOTE: In BinaryJoin queries, if rhs is vector(static value) and lhs returns an empty TS, we must return
-          // a TS of static value to be compliant with Prometheus. Else, we return the empty result
-          if (function == InstantFunctionId.OrVectorDouble){
-            // WHY only selecting head ? The caller ensures that only one function params (ScalarFixedDouble)
-            // is being sent. Hence we are selecting the head RangeVector
-            result.defaultIfEmpty(scalarRangeVector.head)
+            // NOTE: In BinaryJoin queries, if rhs is vector(static value) and lhs returns an empty TS, we must return
+            // a TS of static value to be compliant with Prometheus. Else, we return the empty result
+            if (function == InstantFunctionId.OrVectorDouble) {
+              // WHY only selecting head ? The caller ensures that only one function params (ScalarFixedDouble)
+              // is being sent. Hence we are selecting the head RangeVector
+              result.defaultIfEmpty(scalarRangeVector.head)
+            }
+            else {
+              result
+            }
           }
-          else {
-            result
-          }
-        }
-      case cType: ColumnType =>
-        throw new UnsupportedOperationException(s"Column type $cType is not supported for instant functions")
+        case cType: ColumnType =>
+          throw new UnsupportedOperationException(s"Column type $cType is not supported for instant functions")
+      }
     }
   }
 
@@ -133,19 +137,25 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
   }
 
   override def schema(source: ResultSchema): ResultSchema = {
-    // if source is histogram, determine what output column type is
-    // otherwise pass along the source
-    ResultSchema.valueColumnType(source) match {
-      case ColumnType.HistogramColumn =>
-        val instantFunction = InstantFunction.histogram(function)
-        if (instantFunction.isHToDoubleFunc || instantFunction.isHistDoubleToDoubleFunc) {
-          // Hist to Double function, so output schema is double
-          source.copy(columns = Seq(source.columns.head, ColumnInfo("value", ColumnType.DoubleColumn)))
-        } else { source }
-      case cType: ColumnType          =>
-        source
+    if (source == ResultSchema.empty && function == InstantFunctionId.OrVectorDouble) {
+      ResultSchema.timeDouble
+    } else {
+      // if source is histogram, determine what output column type is
+      // otherwise pass along the source
+      ResultSchema.valueColumnType(source) match {
+        case ColumnType.HistogramColumn =>
+          val instantFunction = InstantFunction.histogram(function)
+          if (instantFunction.isHToDoubleFunc || instantFunction.isHistDoubleToDoubleFunc) {
+            // Hist to Double function, so output schema is double
+            source.copy(columns = Seq(source.columns.head, ColumnInfo("value", ColumnType.DoubleColumn)))
+          } else { source }
+        case cType: ColumnType =>
+          source
+      }
     }
   }
+
+  override def canHandleEmptySchemas: Boolean = function == InstantFunctionId.OrVectorDouble
 }
 
 private class DoubleInstantFuncIterator(rows: RangeVectorCursor,
@@ -443,8 +453,7 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
     Observable.fromTask(resultRv)
   }
   override def funcParams: Seq[FuncArgs] = Nil
-  override def schema(source: ResultSchema): ResultSchema = ResultSchema(Seq(ColumnInfo("timestamp",
-    ColumnType.TimestampColumn), ColumnInfo("value", ColumnType.DoubleColumn)), 1)
+  override def schema(source: ResultSchema): ResultSchema = ResultSchema.timeDouble
 
   override def canHandleEmptySchemas: Boolean = true
 }
@@ -515,8 +524,7 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
 
   override def schema(source: ResultSchema): ResultSchema =
     if (ResultSchema.valueColumnType(source) != ColumnType.HistogramColumn) source else
-    ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
-      ColumnInfo("value", ColumnType.DoubleColumn)), 1)
+    ResultSchema.timeDouble
 
   private def addNewBuckets(newScheme: HistogramBuckets,
                             buckets: debox.Map[Double, debox.Buffer[Double]],

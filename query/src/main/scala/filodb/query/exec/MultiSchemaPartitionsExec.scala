@@ -113,9 +113,12 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
             newPlan
           }.getOrElse {
             qLogger.debug(s"No time series found for filters $filters... employing empty plan")
-            SelectRawPartitionsExec(queryContext, dispatcher, dataset,
+            val newPlan = SelectRawPartitionsExec(queryContext, dispatcher, dataset,
                                     None, Some(lookupRes),
                                     schema.isDefined, Nil)
+            // Adding the transformers present in the MultiSchemaPartitionsExec Plan
+            this.rangeVectorTransformers.foreach (xf => newPlan.addRangeVectorTransformer(xf))
+            newPlan
           }
   }
   // scalastyle:on method.length
