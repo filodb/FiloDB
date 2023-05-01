@@ -416,8 +416,12 @@ trait  DefaultPlanner {
    * Note that vector(0) on left side of operator, example `vector(0) or foo` is not
    * optimized yet since it is uncommon and almost unseen, and not worth the additional
    * complexity at the moment.
+   *
+   * 05/01/2023: We are disabling this optimization until we handle the corner cases like:
+   * 1. when the given metrics is not present or is not actively ingesting
    */
   def optimizeOrVectorDouble(qContext: QueryContext, logicalPlan: BinaryJoin): Option[PlanResult] = {
+    return None
     if (logicalPlan.operator == BinaryOperator.LOR) {
       logicalPlan.rhs match {
         case VectorPlan(ScalarFixedDoublePlan(value, rangeParams)) =>
