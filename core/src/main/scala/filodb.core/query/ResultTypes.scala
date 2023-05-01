@@ -85,6 +85,9 @@ final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
 object ResultSchema {
   val empty = ResultSchema(Nil, 1)
 
+  val timeDouble = ResultSchema(Seq(ColumnInfo("timestamp",
+    ColumnType.TimestampColumn), ColumnInfo("value", ColumnType.DoubleColumn)), 1)
+
   def valueColumnType(schema: ResultSchema): ColumnType = {
     require(schema.isTimeSeries, s"Schema $schema is not time series based, cannot continue query")
     require(schema.columns.size >= 2, s"Schema $schema has less than 2 columns, cannot continue query")

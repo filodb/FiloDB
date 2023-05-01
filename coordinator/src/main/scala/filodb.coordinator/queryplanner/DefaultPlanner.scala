@@ -421,11 +421,15 @@ trait  DefaultPlanner {
     if (logicalPlan.operator == BinaryOperator.LOR) {
       logicalPlan.rhs match {
         case VectorPlan(ScalarFixedDoublePlan(value, rangeParams)) =>
-          val planRes = materializeApplyInstantFunction(
-                              qContext, ApplyInstantFunction(logicalPlan.lhs,
-                                                             InstantFunctionId.OrVectorDouble,
-                                                             Seq(ScalarFixedDoublePlan(value, rangeParams))))
-          Some(planRes)
+          val planRes = walkLogicalPlanTree(logicalPlan.lhs, qContext)
+
+          // TODO: Ask Vish if the dispatcher choice is correct here ???
+          // Also ask if we need to remove any other changes that we have applied
+          val rootPlan = LocalPartitionDistConcatExec(qContext,
+            PlannerUtil.pickDispatcher(planRes.plans), planRes.plans)
+          val paramsExec = materializeFunctionArgs(Seq(ScalarFixedDoublePlan(value, rangeParams)), qContext)
+          rootPlan.addRangeVectorTransformer(InstantVectorFunctionMapper(InstantFunctionId.OrVectorDouble, paramsExec))
+          Some(PlanResult(Seq(rootPlan), false))
         case _ => None // TODO add more matchers to cover cases where rhs is a fully scalar plan
       }
     } else None
