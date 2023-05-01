@@ -13,7 +13,8 @@ import filodb.core.store.PartKeyRecord
 
 sealed class PartitionKeysByUpdateTimeTable(val dataset: DatasetRef,
                                             val connector: FiloCassandraConnector,
-                                            writeConsistencyLevel: ConsistencyLevel)
+                                            writeConsistencyLevel: ConsistencyLevel,
+                                            readConsistencyLevel: ConsistencyLevel)
                                            (implicit ec: ExecutionContext) extends BaseDatasetTable {
 
   import filodb.cassandra.Util._
@@ -41,7 +42,7 @@ sealed class PartitionKeysByUpdateTimeTable(val dataset: DatasetRef,
   private lazy val readCql = session.prepare(
     s"SELECT * FROM $tableString " +
     s"WHERE shard = ? AND epochHour = ? AND split = ? ")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
 
   def writePartKey(shard: Int, updateHour: Long, split: Int,
