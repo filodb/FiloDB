@@ -33,6 +33,7 @@ class DownsampledTimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
   val partitionsQueried = Kamon.counter("downsample-partitions-queried").withTags(TagSet.from(tags))
   val queryTimeRangeMins = Kamon.histogram("query-time-range-minutes").withTags(TagSet.from(tags))
+  val queriesBySchema = Kamon.counter("leaf-queries-by-schema").withTags(TagSet.from(tags))
   val indexEntriesRefreshed = Kamon.counter("index-entries-refreshed").withTags(TagSet.from(tags))
   val indexEntriesPurged = Kamon.counter("index-entries-purged").withTags(TagSet.from(tags))
   val indexRefreshFailed = Kamon.counter("index-refresh-failed").withTags(TagSet.from(tags))
@@ -333,6 +334,9 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
           val recs = partKeyIndex.partKeyRecordsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
           val _schema = recs.headOption.map { pkRec =>
             RecordSchema.schemaID(pkRec.partKey, UnsafeUtils.arayOffset)
+          }
+          _schema.foreach { s =>
+            stats.queriesBySchema.withTag("schema", schemas(s).name).increment()
           }
           stats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
           val metricShardKeys = schemas.part.options.shardKeyColumns

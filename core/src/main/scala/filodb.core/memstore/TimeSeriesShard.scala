@@ -96,6 +96,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val chunkIdsEvicted = Kamon.counter("memstore-chunkids-evicted").withTags(TagSet.from(tags))
   val partitionsEvicted = Kamon.counter("memstore-partitions-evicted").withTags(TagSet.from(tags))
   val queryTimeRangeMins = Kamon.histogram("query-time-range-minutes").withTags(TagSet.from(tags))
+  val queriesBySchema = Kamon.counter("leaf-queries-by-schema").withTags(TagSet.from(tags))
   val memoryStats = new MemoryStats(tags)
 
   val bufferPoolSize = Kamon.gauge("memstore-writebuffer-pool-size").withTags(TagSet.from(tags))
@@ -1905,6 +1906,9 @@ class TimeSeriesShard(val ref: DatasetRef,
         // first find out which partitions are being queried for data not in memory
         val firstPartId = if (matches.isEmpty) None else Some(matches(0))
         val _schema = firstPartId.map(schemaIDFromPartID)
+        _schema.foreach { s =>
+          shardStats.queriesBySchema.withTag("schema", schemas(s).name).increment()
+        }
         val it1 = InMemPartitionIterator2(matches)
         val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
         val partIdsNotInMem = it1.skippedPartIDs
