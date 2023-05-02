@@ -1559,16 +1559,18 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
 
       val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
 
-      val expected = """T~InstantVectorFunctionMapper(function=OrVectorDouble)
-                        |-FA1~StaticFuncArgs(0.0,RangeParams(1634086130,60,1634755730))
-                        |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634086130,60,1634755730))
-                        |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1823110189],downsample)
-                        |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-                        |----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634755730000, window=Some(2592000000), functionId=Some(Rate), rawSource=true, offsetMs=None)
-                        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(1631494130000,1634755730000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1823110189],downsample)
-                        |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
-                        |----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634755730000, window=Some(2592000000), functionId=Some(Rate), rawSource=true, offsetMs=None)
-                        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(1631494130000,1634755730000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1823110189],downsample)""".stripMargin
+      val expected = """E~SetOperatorExec(binaryOp=LOR, on=List(), ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,true,false,true,Set(),None))
+                       |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634086130,60,1634755730))
+                       |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1009481049],downsample)
+                       |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                       |----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634755730000, window=Some(2592000000), functionId=Some(Rate), rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(1631494130000,1634755730000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1009481049],downsample)
+                       |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                       |----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634755730000, window=Some(2592000000), functionId=Some(Rate), rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(1631494130000,1634755730000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1009481049],downsample)
+                       |-T~VectorFunctionMapper(funcParams=List())
+                       |--E~ScalarFixedDoubleExec(params = RangeParams(1634086130,60,1634755730), value = 0.0) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,true,false,true,Set(),None))""".stripMargin
+
       validatePlan(ep, expected)
     }
   }
