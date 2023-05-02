@@ -215,6 +215,17 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
     t.close()
   }
 
+  it ("should be able to increment and decrement counters fast and correctly") {
+    val t = new CardinalityTracker(ref, 0, 3, Seq(50000, 50000, 50000, 50000), newCardStore)
+
+    (1 to 30000).foreach(_ => t.modifyCount(Seq("a", "b", "c"), 1, 1))
+    t.getCardinality(Seq("a", "b", "c")) shouldEqual CardinalityRecord(0, Seq("a", "b", "c"), 30000, 30000, 30000, 50000)
+    (1 to 30000).foreach(_ => t.modifyCount(Seq("a", "b", "c"), 0, -1))
+    t.getCardinality(Seq("a", "b", "c")) shouldEqual CardinalityRecord(0, Seq("a", "b", "c"), 30000, 0, 30000, 50000)
+    (1 to 30000).foreach(_ => t.decrementCount(Seq("a", "b", "c")))
+    t.getCardinality(Seq("a", "b", "c")) shouldEqual CardinalityRecord(0, Seq("a", "b", "c"), 0, 0, 0, 50000)
+  }
+
   it ("should be able to do scan") {
     val t = new CardinalityTracker(ref, 0, 3, Seq(100, 100, 100, 100), newCardStore)
     (1 to 10).foreach(_ => t.modifyCount(Seq("a", "ac", "aca"), 1, 0))

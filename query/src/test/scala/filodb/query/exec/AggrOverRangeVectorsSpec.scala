@@ -24,7 +24,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   val histMaxSchema = ResultSchema(MMD.histMaxDS.schema.infosFromIDs(Seq(0, 4, 3)), 1, colIDs = Seq(0, 4, 3))
 
   val qc = QueryContext()
-  
+  val queryStats = QueryStats()
+
   it ("should work without grouping") {
     val ignoreKey = CustomRangeVectorKey(
       Map(("ignore").utf8 -> ("ignore").utf8))
@@ -114,7 +115,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val agg7 = RowAggregator(AggregationOperator.Quantile, Seq(0.70), tvSchema)
     val resultObs7a = RangeVectorAggregator.mapReduce(agg7, false, Observable.fromIterable(samples), noGrouping, queryContext = qc)
     val resultObs7 = RangeVectorAggregator.mapReduce(agg7, true, resultObs7a, rv=>rv.key, queryContext = qc)
-    val resultObs7b = RangeVectorAggregator.present(agg7, resultObs7, 1000, rangeParams)
+    val resultObs7b = RangeVectorAggregator.present(agg7, resultObs7, 1000, rangeParams, queryStats)
     val result7 = resultObs7b.toListL.runToFuture.futureValue
     result7.size shouldEqual 1
     result7(0).key shouldEqual noKey
@@ -234,7 +235,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val agg5 = RowAggregator(AggregationOperator.BottomK, Seq(2.0), tvSchema)
     val resultObs5a = RangeVectorAggregator.mapReduce(agg5, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
     val resultObs5 = RangeVectorAggregator.mapReduce(agg5,true, resultObs5a, rv=>rv.key,  queryContext = qc)
-    val resultObs5b = RangeVectorAggregator.present(agg5, resultObs5, 1000, rangeParams)
+    val resultObs5b = RangeVectorAggregator.present(agg5, resultObs5, 1000, rangeParams, queryStats)
     val result5 = resultObs5.toListL.runToFuture.futureValue
     result5.size shouldEqual 1
     result5(0).key shouldEqual noKey
@@ -252,7 +253,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(2.0), tvSchema)
     val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
     val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv.key,  queryContext = qc)
-    val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000, rangeParams)
+    val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000, rangeParams, queryStats)
     val result6 = resultObs6.toListL.runToFuture.futureValue
     result6.size shouldEqual 1
     result6(0).key shouldEqual noKey
@@ -272,7 +273,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val agg7 = RowAggregator(AggregationOperator.Quantile, Seq(0.5), tvSchema)
     val resultObs7a = RangeVectorAggregator.mapReduce(agg7, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
     val resultObs7 = RangeVectorAggregator.mapReduce(agg7, true, resultObs7a, rv=>rv.key,  queryContext = qc)
-    val resultObs7b = RangeVectorAggregator.present(agg7, resultObs7, 1000, rangeParams)
+    val resultObs7b = RangeVectorAggregator.present(agg7, resultObs7, 1000, rangeParams, queryStats)
     val result7 = resultObs7b.toListL.runToFuture.futureValue
     result7.size shouldEqual 1
     result7(0).key shouldEqual noKey
@@ -323,9 +324,9 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val recSchema = SerializedRangeVector.toSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
                                                          ColumnInfo("tdig", ColumnType.StringColumn)))
     val builder = SerializedRangeVector.newBuilder()
-    val srv = SerializedRangeVector(result7(0), builder, recSchema, "AggrOverRangeVectorsSpec")
+    val srv = SerializedRangeVector(result7(0), builder, recSchema, "AggrOverRangeVectorsSpec", queryStats)
 
-    val resultObs7b = RangeVectorAggregator.present(agg7, Observable.now(srv), 1000, RangeParams(0,1,0))
+    val resultObs7b = RangeVectorAggregator.present(agg7, Observable.now(srv), 1000, RangeParams(0,1,0), queryStats)
     val finalResult = resultObs7b.toListL.runToFuture.futureValue
     compareIter(finalResult(0).rows.map(_.getDouble(1)), Seq(3.35d, 5.4d).iterator)
 
@@ -446,7 +447,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     compareIter2(result5(0).rows.map(r=> Set(r.getDouble(2), r.getDouble(4))),
       Seq(Set(1.7976931348623157E308d, 1.7976931348623157E308d), Set(4.4d, 5.4d)).iterator)
     // present
-    val resultObs5b = RangeVectorAggregator.present(agg5, resultObs5, 1000, RangeParams(1,1,2))
+    val resultObs5b = RangeVectorAggregator.present(agg5, resultObs5, 1000, RangeParams(1,1,2), queryStats)
     val result5b = resultObs5b.toListL.runToFuture.futureValue
     result5b.size shouldEqual 2
     result5b(0).key shouldEqual CustomRangeVectorKey(Map("a".utf8 -> "2".utf8))
@@ -459,7 +460,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(2.0), tvSchema)
     val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
     val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv.key,  queryContext = qc)
-    val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000, RangeParams(1,1,2))
+    val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000, RangeParams(1,1,2), queryStats)
     val result6 = resultObs6.toListL.runToFuture.futureValue
     result6.size shouldEqual 1
     result6(0).key shouldEqual noKey
@@ -511,7 +512,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(5.0), tvSchema)
     val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
     val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv.key,  queryContext = qc)
-    val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000, RangeParams(1556744,1,1556745))
+    val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000, RangeParams(1556744,1,1556745), queryStats)
     val result6 = resultObs6.toListL.runToFuture.futureValue
     result6(0).key shouldEqual noKey
     val result6b = resultObs6b.toListL.runToFuture.futureValue
@@ -584,7 +585,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultObsa = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples),
       noGrouping,  queryContext = qc)
     val resultObsb = RangeVectorAggregator.mapReduce(agg, true, resultObsa, rv=>rv.key,  queryContext = qc)
-    val resultObsc = RangeVectorAggregator.present(agg, resultObsb, 1000, rangeParams)
+    val resultObsc = RangeVectorAggregator.present(agg, resultObsb, 1000, rangeParams, queryStats)
     val result = resultObsc.toListL.runToFuture.futureValue
 
     result.size shouldEqual 2
@@ -643,7 +644,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val resultObs = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
     val resultObs1 = RangeVectorAggregator.mapReduce(agg, true, resultObs,  rv=>rv.key,  queryContext = qc)
 
-    val resultObs2 = RangeVectorAggregator.present(agg, resultObs1, 1000, RangeParams(0,1,0) )
+    val resultObs2 = RangeVectorAggregator.present(agg, resultObs1, 1000, RangeParams(0,1,0), queryStats )
     val result = resultObs2.toListL.runToFuture.futureValue
     result.size.shouldEqual(4)
     result.map(_.key.labelValues).sameElements(expectedLabels) shouldEqual true
@@ -660,7 +661,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(1.0), tvSchema)
     val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping,  queryContext = qc)
     val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv.key,  queryContext = qc)
-    val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000, RangeParams(1556744, 0, 1556744))
+    val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000, RangeParams(1556744, 0, 1556744), queryStats)
     val result6 = resultObs6.toListL.runToFuture.futureValue
     result6(0).key shouldEqual noKey
     val result6b = resultObs6b.toListL.runToFuture.futureValue
@@ -711,7 +712,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val noPresent = (agg: RowAggregator, rv: Observable[RangeVector]) => rv
 
     val withPresent = (agg: RowAggregator, rv: Observable[RangeVector]) => {
-      RangeVectorAggregator.present(agg, rv, 1000, RangeParams(0, 1, 0))
+      RangeVectorAggregator.present(agg, rv, 1000, RangeParams(0, 1, 0), queryStats)
     }
 
     // Tuples of (op, params, presenterFunc, bValExpected).

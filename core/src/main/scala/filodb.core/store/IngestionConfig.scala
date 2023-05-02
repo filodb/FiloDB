@@ -32,7 +32,6 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              evictedPkBfCapacity: Int,
                              // filters on ingested records to log in detail
                              traceFilters: Map[String, String],
-                             maxDataPerShardQuery: Long,
                              meteringEnabled: Boolean,
                              acceptDuplicateSamples: Boolean,
                              // approx data resolution, used for estimating the size of data to be scanned for
@@ -57,7 +56,6 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "multi-partition-odp" -> multiPartitionODP,
                                "demand-paging-parallelism" -> demandPagingParallelism,
                                "demand-paging-enabled" -> demandPagingEnabled,
-                               "max-data-per-shard-query" -> maxDataPerShardQuery,
                                "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity,
                                "metering-enabled" -> meteringEnabled,
                                "accept-duplicate-samples" -> acceptDuplicateSamples,
@@ -134,7 +132,6 @@ object StoreConfig {
                 config.getBoolean("demand-paging-enabled"),
                 config.getInt("evicted-pk-bloom-filter-capacity"),
                 config.as[Map[String, String]]("trace-filters"),
-                config.getMemorySize("max-data-per-shard-query").toBytes,
                 config.getBoolean("metering-enabled"),
                 config.getBoolean("accept-duplicate-samples"),
                 config.getInt("ingest-resolution-millis"))

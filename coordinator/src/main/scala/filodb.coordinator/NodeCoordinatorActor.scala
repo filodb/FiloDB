@@ -1,5 +1,6 @@
 package filodb.coordinator
 
+import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
 
 import scala.collection.mutable.HashMap
@@ -18,6 +19,8 @@ import filodb.core.memstore.TimeSeriesStore
 import filodb.core.metadata._
 import filodb.core.store.{IngestionConfig, MetaStore, StoreConfig}
 import filodb.query.QueryCommand
+
+
 
 /**
  * The NodeCoordinatorActor is the common external API entry point for all FiloDB operations.
@@ -211,6 +214,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
                                          forward(s, s.ref, sender())
     case Terminated(memstoreCoord)    => terminated(memstoreCoord)
     case MiscCommands.GetClusterActor => sender() ! clusterActor
+    case MiscCommands.GetHostName     => sender() ! InetAddress.getLocalHost.getHostName
     case StatusActor.GetCurrentEvents => statusActor.foreach(_.tell(StatusActor.GetCurrentEvents, sender()))
     case ClearState(ref)              => clearState(ref)
     case NodeProtocol.ResetState      => reset(sender())

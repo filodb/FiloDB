@@ -48,8 +48,9 @@ trait ReduceAggregateExec extends NonLeafExecPlan {
         if (schema == ResultSchema.empty) Observable.empty
         else {
           val aggregator = RowAggregator(aggrOp, aggrParams, schema)
-          RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key,
-            querySession.qContext.plannerParams.groupByCardLimit, queryContext)
+          RangeVectorAggregator.mapReduce(
+            aggregator, skipMapPhase = true, results, rv => rv.key,
+            queryContext)
         }
       }
     Observable.fromTask(task).flatten
@@ -139,12 +140,10 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
       sourceSchema.fixedVectorLen.filter(_ <= querySession.queryConfig.fastReduceMaxWindows).map { numWindows =>
         RangeVectorAggregator.fastReduce(aggregator, false, source, numWindows)
       }.getOrElse {
-        RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping,
-          querySession.qContext.plannerParams.groupByCardLimit, querySession.qContext)
+        RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping, querySession.qContext)
       }
     } else {
-      RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping,
-        querySession.qContext.plannerParams.groupByCardLimit, querySession.qContext)
+      RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping, querySession.qContext)
     }
   }
 
@@ -168,7 +167,7 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
-    RangeVectorAggregator.present(aggregator, source, limit, rangeParams)
+    RangeVectorAggregator.present(aggregator, source, limit, rangeParams, querySession.queryStats)
   }
 
   override def schema(source: ResultSchema): ResultSchema = {
@@ -199,7 +198,6 @@ object RangeVectorAggregator extends StrictLogging {
                 skipMapPhase: Boolean,
                 source: Observable[RangeVector],
                 grouping: RangeVector => RangeVectorKey,
-                cardinalityLimit: Int = Int.MaxValue,
                 queryContext: QueryContext): Observable[RangeVector] = {
     // reduce the range vectors using the foldLeft construct. This results in one aggregate per group.
     val task = source.toListL.map { rvs =>
@@ -208,9 +206,22 @@ object RangeVectorAggregator extends StrictLogging {
       val groupedResult = mapReduceInternal(rvs, rowAgg, skipMapPhase, grouping, queryContext)
 
       // if group-by cardinality breaches the limit, throw exception
-      if (groupedResult.size > cardinalityLimit)
-        throw new BadQueryException(s"This query results in more than $cardinalityLimit group-by cardinality limit. " +
-          s"Try applying more filters")
+      val groupByEnforcedLimit = queryContext.plannerParams.enforcedLimits.groupByCardinality
+      if (groupedResult.size > groupByEnforcedLimit) {
+        logger.warn(queryContext.getQueryLogLine(
+          s"Exceeded enforced group-by cardinality limit ${groupByEnforcedLimit}. "
+        ))
+        throw new QueryLimitException(
+          s"Query exceeded group-by cardinality limit ${groupByEnforcedLimit}. " +
+          "Try applying more filters or reduce query range. ", queryContext.queryId
+        )
+      }
+      val groupByWarnLimit = queryContext.plannerParams.warnLimits.groupByCardinality
+      if (groupedResult.size > groupByWarnLimit) {
+        logger.info(queryContext.getQueryLogLine(
+          s"Exceeded warning group-by cardinality limit ${groupByWarnLimit}. "
+        ))
+      }
       groupedResult.map { case (rvk, aggHolder) =>
         val rowIterator = new CustomCloseCursor(aggHolder.map(_.toRowReader))(aggHolder.close())
         IteratorBackedRangeVector(rvk, rowIterator, period)
@@ -225,8 +236,9 @@ object RangeVectorAggregator extends StrictLogging {
   def present(aggregator: RowAggregator,
               source: Observable[RangeVector],
               limit: Int,
-              rangeParams: RangeParams): Observable[RangeVector] = {
-    source.flatMap(rv => Observable.fromIterable(aggregator.present(rv, limit, rangeParams)))
+              rangeParams: RangeParams,
+              queryStats: QueryStats): Observable[RangeVector] = {
+    source.flatMap(rv => Observable.fromIterable(aggregator.present(rv, limit, rangeParams, queryStats)))
   }
 
   private def mapReduceInternal(rvs: List[RangeVector],

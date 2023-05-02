@@ -37,9 +37,11 @@ final case class ColumnInfo(name: String, colType: Column.ColumnType, isCumulati
 
 object ColumnInfo {
   def apply(col: Column): ColumnInfo = ColumnInfo(col.name, col.columnType, isCumulative(col))
-  private def isCumulative(col: Column): Boolean =
-    col.params.as[Option[Boolean]]("detectDrops").getOrElse(false) ||
-      col.params.as[Option[Boolean]]("counter").getOrElse(false)
+  private def isCumulative(col: Column): Boolean = {
+    // only columns with param delta=true are treated as delta/period counters and rate/increase functions are applied
+    // accordingly.
+    !col.params.as[Option[Boolean]]("delta").getOrElse(false)
+  }
 }
 
 /**
@@ -165,3 +167,13 @@ object ResultMaker extends StrictLogging {
 }
 
 class ServiceUnavailableException(message: String) extends RuntimeException(message)
+
+/**
+ * This error means that the user exceeded the limit on the query size (for example
+ * number of scanned bytes)
+ */
+class QueryLimitException(message: String, queryId: String) extends RuntimeException(message) {
+  override def getMessage: String = {
+    s"${super.getMessage}, queryId=${queryId}"
+  }
+}

@@ -5,7 +5,7 @@ import com.typesafe.scalalogging.StrictLogging
 import net.ceedubs.ficus.Ficus._
 import org.scalactic._
 
-import filodb.core.GlobalConfig
+import filodb.core.{GlobalConfig, Types}
 import filodb.core.Types._
 import filodb.core.binaryrecord2._
 import filodb.core.downsample.{ChunkDownsampler, DownsamplePeriodMarker}
@@ -247,9 +247,7 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, var downsa
 
   /** Returns ColumnInfos from a set of column IDs.  Throws exception if ID is invalid */
   def infosFromIDs(ids: Seq[ColumnId]): Seq[ColumnInfo] =
-    ids.map(columnFromID).map { c => ColumnInfo(c.name, c.columnType,
-      isCumulative = c.params.as[Option[Boolean]]("detectDrops").getOrElse(false)
-                        || c.params.as[Option[Boolean]]("counter").getOrElse(false)) }
+    ids.map(columnFromID).map(ColumnInfo.apply)
 
   override final def toString: String = {
     s"Schema(partition=$partition, data=$data, downsample=${downsample.map(_.name)})"
@@ -268,53 +266,51 @@ final case class Schemas(part: PartitionSchema,
 
   /**
     * This is purely a SWAG to be used for query size estimation. Do not rely for other use cases.
+    * Map format (SchemaHash, ColId) -> SizeEstimate
     */
-  private val bytesPerSampleSwag: Map[Int, Double] = {
+  private val bytesPerSampleSwag: Map[(Int, Types.ColumnId), Double] = {
 
     val allSchemas = schemas.values ++ schemas.values.flatMap(_.downsample)
-    allSchemas.map { s  =>
-      val est = s.data.columns.map(_.columnType).map {
-        case ColumnType.LongColumn => 1
-        case ColumnType.IntColumn => 1
-        case ColumnType.TimestampColumn => 0.5
-        case ColumnType.HistogramColumn => 20
-        case ColumnType.DoubleColumn => 2
-        case _ => 0 // TODO allow without sizing for now
-      }.sum
-      s.schemaHash -> est
+    allSchemas.flatMap { s  =>
+      s.data.columns.map(_.columnType).zipWithIndex.map {
+        case (ColumnType.LongColumn, i)      => (s.schemaHash, i) -> 1.0
+        case (ColumnType.IntColumn, i)       => (s.schemaHash, i) -> 1.0
+        case (ColumnType.TimestampColumn, i) => (s.schemaHash, i) -> 0.5
+        case (ColumnType.HistogramColumn, i) => (s.schemaHash, i) -> 20.0
+        case (ColumnType.DoubleColumn, i)    => (s.schemaHash, i) -> 2.0
+        case (_, i)                          => (s.schemaHash, i) -> 0.0 // TODO allow without sizing for now
+      }
     }.toMap
   }
 
-  private def bytesPerSampleSwagString = bytesPerSampleSwag.map { case e =>
-    schemaName(e._1) + ": " + e._2
+  private def bytesPerSampleSwagString = bytesPerSampleSwag.map { case (k, v) =>
+    s"${schemaName(k._1)} ColId:${k._2} : $v"
   }
 
   Schemas._log.info(s"bytesPerSampleSwag: $bytesPerSampleSwagString")
 
   /**
-    * Note this approach below assumes the following for quick size estimation. The sizing is more
-    * a swag than reality:
-    * (a) every matched time series ingests at all query times. Looking up start/end times and more
-    *     precise size estimation is costly
-    * (b) it also assigns bytes per sample based on schema which is much of a swag. In reality, it would depend on
-    *     number of histogram buckets, samples per chunk etc.
-    */
-  def ensureQueriedDataSizeWithinLimitApprox(schemaId: Int,
-                                             numTsPartitions: Int,
-                                             chunkDurationMillis: Long,
-                                             resolutionMs: Long,
-                                             queryDurationMs: Long,
-                                             dataSizeLimit: Long): Unit = {
+   * Note this approach below assumes the following for quick size estimation. The sizing is more
+   * a swag than reality:
+   * (a) every matched time series ingests at all query times. Looking up start/end times and more
+   * precise size estimation is costly
+   * (b) it also assigns bytes per sample based on schema which is much of a swag. In reality, it would depend on
+   * number of histogram buckets, samples per chunk etc.
+   */
+  def estimateBytesScan(
+    schemaId: Int,
+    colIds: Seq[Types.ColumnId],
+    numTsPartitions: Int,
+    chunkDurationMillis: Long,
+    resolutionMs: Long,
+    queryDurationMs: Long
+  ): Double = {
     val numSamplesPerChunk = chunkDurationMillis / resolutionMs
     // find number of chunks to be scanned. Ceil division needed here
     val numChunksPerTs = (queryDurationMs + chunkDurationMillis - 1) / chunkDurationMillis
-    val bytesPerSample = bytesPerSampleSwag(schemaId)
+    val bytesPerSample = colIds.map(c => bytesPerSampleSwag((schemaId, c))).sum
     val estDataSize = bytesPerSample * numTsPartitions * numSamplesPerChunk * numChunksPerTs
-    require(estDataSize < dataSizeLimit,
-      s"With match of $numTsPartitions time series, estimate of $estDataSize bytes exceeds limit of " +
-        s"$dataSizeLimit bytes queried per shard for ${_schemas(schemaId).name} schema. Try one or more of these: " +
-        s"(a) narrow your query filters to reduce to fewer than the current $numTsPartitions matches " +
-        s"(b) reduce query time range, currently at ${queryDurationMs / 1000 / 60 } minutes")
+    estDataSize
   }
 
   /**
@@ -322,14 +318,16 @@ final case class Schemas(part: PartitionSchema,
     * since it accepts the start/end times of each matching part key. It is able to handle estimation with
     * time series churn much better
     */
-  def ensureQueriedDataSizeWithinLimit(schemaId: Int,
-                                       pkRecs: Seq[PartKeyLuceneIndexRecord],
-                                       chunkDurationMillis: Long,
-                                       resolutionMs: Long,
-                                       chunkMethod: ChunkScanMethod,
-                                       dataSizeLimit: Long): Unit = {
+  def estimateByteScan(
+    schemaId: Int,
+    colIds: Seq[Types.ColumnId],
+    pkRecs: Seq[PartKeyLuceneIndexRecord],
+    chunkDurationMillis: Long,
+    resolutionMs: Long,
+    chunkMethod: ChunkScanMethod
+  ): Double = {
     val numSamplesPerChunk = chunkDurationMillis / resolutionMs
-    val bytesPerSample = bytesPerSampleSwag(schemaId)
+    val bytesPerSample = colIds.map(c => bytesPerSampleSwag((schemaId, c))).sum
     var estDataSize = 0d
     pkRecs.foreach { pkRec =>
       val intersection = Math.min(chunkMethod.endTime, pkRec.endTime) - Math.max(chunkMethod.startTime, pkRec.startTime)
@@ -337,12 +335,7 @@ final case class Schemas(part: PartitionSchema,
       val numChunks = (intersection + chunkDurationMillis - 1) / chunkDurationMillis
       estDataSize += bytesPerSample * numSamplesPerChunk * numChunks
     }
-    val quRange = chunkMethod.endTime - chunkMethod.startTime + 1
-    require(estDataSize < dataSizeLimit,
-      s"With match of ${pkRecs.length} time series, estimate of $estDataSize bytes exceeds limit of " +
-        s"$dataSizeLimit bytes queried per shard for ${_schemas(schemaId).name} schema. Try one or more of these: " +
-        s"(a) narrow your query filters to reduce to fewer than the current ${pkRecs.length} matches " +
-        s"(b) reduce query time range, currently at ${quRange / 1000 / 60 } minutes")
+    estDataSize
   }
 
   /**
@@ -466,6 +459,7 @@ object Schemas extends StrictLogging {
   val untyped = global.schemas("untyped")
   val promHistogram = global.schemas("prom-histogram")
   val deltaHistogram = global.schemas("delta-histogram")
+  val preaggDeltaHistogram = global.schemas("preagg-delta-histogram")
   val dsGauge = global.schemas("ds-gauge")
   val preaggGauge = global.schemas("preagg-gauge")
   val preaggDeltaCounter = global.schemas("preagg-delta-counter")

@@ -1,6 +1,7 @@
 package filodb.query.exec.aggregator
 
-import filodb.core.query.{MutableRowReader, RangeParams, RangeVector, RangeVectorKey, ResultSchema, TransientHistRow}
+import filodb.core.query.{MutableRowReader, QueryStats, RangeParams,
+                          RangeVector, RangeVectorKey, ResultSchema, TransientHistRow}
 import filodb.memory.format.RowReader
 
 object HistSumRowAggregator extends RowAggregator {
@@ -27,7 +28,8 @@ object HistSumRowAggregator extends RowAggregator {
     }
     acc
   }
-  def present(aggRangeVector: RangeVector, limit: Int, rangeParams: RangeParams): Seq[RangeVector] = Seq(aggRangeVector)
+  def present(aggRangeVector: RangeVector, limit: Int,
+              rangeParams: RangeParams, queryStats: QueryStats): Seq[RangeVector] = Seq(aggRangeVector)
   def reductionSchema(source: ResultSchema): ResultSchema = source
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = reductionSchema
 }

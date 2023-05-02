@@ -127,6 +127,11 @@ class SingleClusterPlanner(val dataset: Dataset,
   override val dsOptions: DatasetOptions = schemas.part.options
   private val shardColumns = dsOptions.shardKeyColumns.sorted
   private val dsRef = dataset.ref
+
+  val numPlansMaterialized = Kamon.counter("single-cluster-plans-materialized")
+    .withTag("cluster", clusterName)
+    .withTag("dataset", dataset.ref.dataset)
+
   private def targetSchemaProvider(qContext: QueryContext): TargetSchemaProvider = {
    qContext.plannerParams.targetSchemaProviderOverride.getOrElse(_targetSchemaProvider)
   }
@@ -205,6 +210,7 @@ class SingleClusterPlanner(val dataset: Dataset,
       }
       logger.debug(s"Materialized logical plan for dataset=$dsRef :" +
         s" $logicalPlan to \n${materialized.printTree()}")
+      numPlansMaterialized.increment()
       materialized
     }
   }
@@ -471,7 +477,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                             val targetSchemaLabels =
                               getUniversalTargetSchemaLabels(bj, targetSchemaProvider(qContext))
                             targetSchemaLabels.isDefined &&
-                              targetSchemaLabels.get.toSet.subsetOf(bj.on.toSet)
+                              targetSchemaLabels.get.toSet.diff(shardColumns.toSet).subsetOf(bj.on.toSet)
                           }
         // union lhs/rhs shards, since one might be empty (if it's a scalar)
         if (canPushdown) Some(lhsShards.get.union(rhsShards.get)) else None
@@ -487,7 +493,7 @@ class SingleClusterPlanner(val dataset: Dataset,
                             targetSchemaLabels.isDefined &&
                             {
                               val byLabels = agg.clauseOpt.get.labels
-                              targetSchemaLabels.get.toSet.subsetOf(byLabels.toSet)
+                              targetSchemaLabels.get.toSet.diff(shardColumns.toSet).subsetOf(byLabels.toSet)
                             }
                           }
         if (canPushdown) shards else None
@@ -658,12 +664,16 @@ class SingleClusterPlanner(val dataset: Dataset,
   override def materializeBinaryJoin(qContext: QueryContext,
                                      lp: BinaryJoin,
                                      forceInProcess: Boolean): PlanResult = {
-    // see materializeWithPushdown for details about the pushdown optimization.
-    val pushdownShards = getPushdownShards(qContext, lp)
-    if (pushdownShards.isDefined) {
-      materializeWithPushdown(qContext, lp, pushdownShards.get, forceInProcess)
-    } else {
-      materializeBinaryJoinNoPushdown(qContext, lp, forceInProcess, None)
+
+    optimizeOrVectorDouble(qContext, lp).getOrElse {
+
+      // see materializeWithPushdown for details about the pushdown optimization.
+      val pushdownShards = getPushdownShards(qContext, lp)
+      if (pushdownShards.isDefined) {
+        materializeWithPushdown(qContext, lp, pushdownShards.get, forceInProcess)
+      } else {
+        materializeBinaryJoinNoPushdown(qContext, lp, forceInProcess, None)
+      }
     }
   }
 

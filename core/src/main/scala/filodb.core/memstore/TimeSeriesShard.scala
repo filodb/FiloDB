@@ -43,7 +43,6 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
 
   val shardTotalRecoveryTime = Kamon.gauge("memstore-total-shard-recovery-time",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
-  val tsCountBySchema = Kamon.gauge("memstore-timeseries-by-schema").withTags(TagSet.from(tags))
   val rowsIngested = Kamon.counter("memstore-rows-ingested").withTags(TagSet.from(tags))
   val partitionsCreated = Kamon.counter("memstore-partitions-created").withTags(TagSet.from(tags))
   val dataDropped = Kamon.counter("memstore-data-dropped").withTags(TagSet.from(tags))
@@ -59,7 +58,6 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val encodedHistBytes = Kamon.counter("memstore-hist-encoded-bytes", MeasurementUnit.information.bytes)
     .withTags(TagSet.from(tags))
   val flushesSuccessful = Kamon.counter("memstore-flushes-success").withTags(TagSet.from(tags))
-  val flushesFailedPartWrite = Kamon.counter("memstore-flushes-failed-partition").withTags(TagSet.from(tags))
   val flushesFailedChunkWrite = Kamon.counter("memstore-flushes-failed-chunk").withTags(TagSet.from(tags))
   val flushesFailedOther = Kamon.counter("memstore-flushes-failed-other").withTags(TagSet.from(tags))
 
@@ -98,6 +96,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val chunkIdsEvicted = Kamon.counter("memstore-chunkids-evicted").withTags(TagSet.from(tags))
   val partitionsEvicted = Kamon.counter("memstore-partitions-evicted").withTags(TagSet.from(tags))
   val queryTimeRangeMins = Kamon.histogram("query-time-range-minutes").withTags(TagSet.from(tags))
+  val queriesBySchema = Kamon.counter("leaf-queries-by-schema").withTags(TagSet.from(tags))
   val memoryStats = new MemoryStats(tags)
 
   val bufferPoolSize = Kamon.gauge("memstore-writebuffer-pool-size").withTags(TagSet.from(tags))
@@ -118,6 +117,13 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
     */
   val ingestionClockDelay = Kamon.gauge("ingestion-clock-delay",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+
+  /**
+   *  This measures the time from Message Queue to when the data is stored.
+   */
+  val ingestionPipelineLatency = Kamon.histogram("ingestion-pipeline-latency",
+    MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+
   val chunkFlushTaskLatency = Kamon.histogram("chunk-flush-task-latency-after-retries",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
 
@@ -679,7 +685,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   /////// START SHARD RECOVERY METHODS ///////////////////
 
   def recoverIndex(): Future[Long] = {
-    val indexBootstrapper = new IndexBootstrapper(colStore)
+    val indexBootstrapper = new RawIndexBootstrapper(colStore)
     indexBootstrapper.bootstrapIndexRaw(partKeyIndex, shardNum, ref)(bootstrapPartKey)
       .executeOn(ingestSched) // to make sure bootstrapIndex task is run on ingestion thread
       .map { count =>
@@ -903,12 +909,19 @@ class TimeSeriesShard(val ref: DatasetRef,
         if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
         updatePartEndTimeInIndex(p, endTime)
         dirtyParts += p.partID
+        val oldActivelyIngestingSize = activelyIngesting.size
         activelyIngesting -= p.partID
+
         markPartAsNotIngesting(p, odp = false)
-        val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
-          p.schema.options.shardKeyColumns)
         if (storeConfig.meteringEnabled) {
-          cardTracker.modifyCount(shardKey, 0, -1)
+          val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
+            p.schema.options.shardKeyColumns)
+          val newCard = cardTracker.modifyCount(shardKey, 0, -1)
+          // temporary debugging since we are seeing some negative counts
+          if (newCard.exists(_.activeTsCount < 0))
+            logger.error(s"For some reason, activeTs count negative when updating card for " +
+              s"partKey: ${p.stringPartition} newCard: $newCard oldActivelyIngestingSize=$oldActivelyIngestingSize " +
+              s"newActivelyIngestingSize=${activelyIngesting.size}")
         }
       }
     }
@@ -1125,9 +1138,9 @@ class TimeSeriesShard(val ref: DatasetRef,
       .foreach(_.switchBuffers(blockFactoryPool.checkoutForOverflow(groupNum)))
 
     val dirtyPartKeys = if (groupNum == dirtyPartKeysFlushGroup) {
-      logger.debug(s"Switching dirty part keys in dataset=$ref shard=$shardNum out for flush. ")
       purgeExpiredPartitions()
       ensureCapOnEvictablePartIds()
+      logger.debug(s"Switching dirty part keys in dataset=$ref shard=$shardNum out for flush. ")
       val old = dirtyPartitionsForIndexFlush
       dirtyPartitionsForIndexFlush = debox.Buffer.empty[Int]
       old
@@ -1229,11 +1242,13 @@ class TimeSeriesShard(val ref: DatasetRef,
       }
     }
 
+    val currentTime = System.currentTimeMillis()
+    shardStats.ingestionPipelineLatency.record(currentTime - container.timestamp)
     // Only update stuff if no exception was thrown.
 
     if (ingestionTime != lastIngestionTime) {
       lastIngestionTime = ingestionTime
-      shardStats.ingestionClockDelay.update(System.currentTimeMillis() - ingestionTime)
+      shardStats.ingestionClockDelay.update(currentTime - ingestionTime)
     }
 
     tasks
@@ -1891,6 +1906,9 @@ class TimeSeriesShard(val ref: DatasetRef,
         // first find out which partitions are being queried for data not in memory
         val firstPartId = if (matches.isEmpty) None else Some(matches(0))
         val _schema = firstPartId.map(schemaIDFromPartID)
+        _schema.foreach { s =>
+          shardStats.queriesBySchema.withTag("schema", schemas(s).name).increment()
+        }
         val it1 = InMemPartitionIterator2(matches)
         val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
         val partIdsNotInMem = it1.skippedPartIDs

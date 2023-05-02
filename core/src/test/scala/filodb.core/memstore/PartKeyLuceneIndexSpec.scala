@@ -786,6 +786,101 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     keyIndex.singlePartKeyFromFilters(Seq(filter2), 4, 10) shouldBe None
   }
 
+  it("should match the regex after anchors stripped") {
+    for ((regex, regexNoAnchors) <- Map(
+      """^.*$""" -> """.*""", // both anchor are stripped.
+      """\$""" -> """\$""", // \$ is not removed.
+      """\\\$""" -> """\\\$""", // \$ is not removed.
+      """\\$""" -> """\\""", // $ is removed.
+      """$""" -> """""", // $ is removed.
+      """\^.*$""" -> """\^.*""", // do not remove \^.
+      """^ ^.*$""" -> """ ^.*""", // only remove the first ^.
+      """^.*\$""" -> """.*\$""",  // do not remove \$
+      """^ $foo""" -> """ $foo""",  // the $ is not at the end, keep it.
+      """.* $ \ $$""" -> """.* $ \ $""",  // only remove the last $
+      """foo.*\\\ $""" -> """foo.*\\\ """, // remove $ for it at the end and not escaped.
+      """foo.*\\\$""" -> """foo.*\\\$""", // keep \$.
+      """foo.*\\$""" -> """foo.*\\""",  // remove $ for it at the end and not escaped.
+      """foo.*$\\\\$""" -> """foo.*$\\\\""",  // keep the first $ since it not at the end.
+    )) {
+      PartKeyLuceneIndex.removeRegexAnchors(regex) shouldEqual regexNoAnchors
+    }
+  }
+
+  it("should get a single match for part keys through a field with empty value") {
+    val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.slice(95, 96)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val pk = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
+      keyIndex.addPartKey(pk, -1, i, i + 10)(
+        pk.length, PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pk, 0, pk.length))
+      PartKeyLuceneIndexRecord(pk, i, i + 10)
+    }
+    keyIndex.refreshReadersBlocking()
+
+    val filter1_found = ColumnFilter("Actor2Code", Equals(""))
+    val partKeyOpt = keyIndex.singlePartKeyFromFilters(Seq(filter1_found), 4, 10)
+    partKeyOpt.isDefined shouldBe true
+    partKeyOpt.get shouldEqual pkrs.head.partKey
+
+    val filter2_found = ColumnFilter("Actor2Code", EqualsRegex(""))
+    val partKeyOpt2 = keyIndex.singlePartKeyFromFilters(Seq(filter2_found), 4, 10)
+    partKeyOpt2.isDefined shouldBe true
+    partKeyOpt2.get shouldEqual pkrs.head.partKey
+
+    val filter3_found = ColumnFilter("Actor2Code", EqualsRegex("^$"))
+    val partKeyOpt3 = keyIndex.singlePartKeyFromFilters(Seq(filter3_found), 4, 10)
+    partKeyOpt3.isDefined shouldBe true
+    partKeyOpt3.get shouldEqual pkrs.head.partKey
+  }
+
+  it("should get a single match for part keys through a non-existing field") {
+    val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val pk = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
+      keyIndex.addPartKey(pk, -1, i, i + 10)(
+        pk.length, PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pk, 0, pk.length))
+      PartKeyLuceneIndexRecord(pk, i, i + 10)
+    }
+    keyIndex.refreshReadersBlocking()
+
+    val filter1_found = ColumnFilter("NonExistingField", Equals(""))
+    val partKeyOpt = keyIndex.singlePartKeyFromFilters(Seq(filter1_found), 4, 10)
+    partKeyOpt.isDefined shouldBe true
+    partKeyOpt.get shouldEqual pkrs.head.partKey
+
+    val filter2_found = ColumnFilter("NonExistingField", EqualsRegex(""))
+    val partKeyOpt2 = keyIndex.singlePartKeyFromFilters(Seq(filter2_found), 4, 10)
+    partKeyOpt2.isDefined shouldBe true
+    partKeyOpt2.get shouldEqual pkrs.head.partKey
+
+    val filter3_found = ColumnFilter("NonExistingField", EqualsRegex("^$"))
+    val partKeyOpt3 = keyIndex.singlePartKeyFromFilters(Seq(filter3_found), 4, 10)
+    partKeyOpt3.isDefined shouldBe true
+    partKeyOpt3.get shouldEqual pkrs.head.partKey
+  }
+
+  it("should get a single match for part keys by a regex filter") {
+    val pkrs = partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.map { case (addr, i) =>
+      val pk = partKeyOnHeap(dataset6.partKeySchema, ZeroPointer, addr)
+      keyIndex.addPartKey(pk, -1, i, i + 10)(
+        pk.length, PartKeyLuceneIndex.partKeyByteRefToSHA256Digest(pk, 0, pk.length))
+      PartKeyLuceneIndexRecord(pk, i, i + 10)
+    }
+    keyIndex.refreshReadersBlocking()
+
+    val filter1_found = ColumnFilter("Actor2Code", EqualsRegex("""^GO.*$"""))
+    val partKeyOpt = keyIndex.singlePartKeyFromFilters(Seq(filter1_found), 4, 10)
+    partKeyOpt.isDefined shouldBe true
+    partKeyOpt.get shouldEqual pkrs(7).partKey
+
+    val filter1_not_found = ColumnFilter("Actor2Code", EqualsRegex("""^GO.*$\$"""))
+    keyIndex.singlePartKeyFromFilters(Seq(filter1_not_found), 4, 10) shouldBe None
+
+    val filter2 = ColumnFilter("Actor2Code", NotEqualsRegex("^.*".utf8))
+    keyIndex.singlePartKeyFromFilters(Seq(filter2), 4, 10) shouldBe None
+  }
+
   it("Should update the state as TriggerRebuild and throw an exception for any error other than CorruptIndexException")
   {
     val events = ArrayBuffer.empty[(IndexState.Value, Long)]
