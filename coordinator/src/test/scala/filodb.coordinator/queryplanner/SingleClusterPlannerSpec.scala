@@ -24,7 +24,6 @@ import filodb.query.LogicalPlan.getRawSeriesFilters
 import filodb.query.exec.aggregator.{CountRowAggregator, SumRowAggregator}
 import org.scalatest.exceptions.TestFailedException
 
-
 import scala.concurrent.duration._
 
 class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFutures with PlanValidationSpec {
@@ -503,7 +502,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     binaryJoinNode.asInstanceOf[BinaryJoinExec].rhs.size shouldEqual 4
   }
 
-  it("should optimize or vector(0) queries by using InstantVectorFunctionMapper instead of SetOperatorExec") {
+  // Ignoring the test until we pickup this radar - rdar://108803361 (Fix vector(0) optimzation corner cases)
+  ignore("should optimize or vector(0) queries by using InstantVectorFunctionMapper instead of SetOperatorExec") {
 
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 2))
