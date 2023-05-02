@@ -464,6 +464,7 @@ object Schemas extends StrictLogging {
   val untyped = global.schemas("untyped")
   val promHistogram = global.schemas("prom-histogram")
   val deltaHistogram = global.schemas("delta-histogram")
+  val preaggDeltaHistogram = global.schemas("preagg-delta-histogram")
   val dsGauge = global.schemas("ds-gauge")
   val preaggGauge = global.schemas("preagg-gauge")
   val preaggDeltaCounter = global.schemas("preagg-delta-counter")
