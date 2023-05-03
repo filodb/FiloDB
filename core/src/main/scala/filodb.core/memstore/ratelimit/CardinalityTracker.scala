@@ -67,7 +67,7 @@ class CardinalityTracker(ref: DatasetRef,
             totalDelta == 0 && activeDelta == -1, // existing active ts that became inactive
             "invalid values for totalDelta / activeDelta")
 
-    val toStore = ArrayBuffer[(Seq[String], CardinalityRecord)]()
+    val toStore = ArrayBuffer[CardinalityRecord]()
     // first make sure there is no breach for any prefix
     (0 to shardKey.length).foreach { i =>
       val prefix = shardKey.take(i)
@@ -79,19 +79,21 @@ class CardinalityTracker(ref: DatasetRef,
         quotaExceededProtocol.quotaExceeded(ref, shard, prefix, neu.childrenQuota)
         throw QuotaReachedException(shardKey, prefix, neu.childrenQuota)
       }
+
+      // Updating children count of the parent prefix, when a new child is added
       if (i > 0 && neu.tsCount == 1 && totalDelta == 1) { // parent's new child
         val parent = toStore(i - 1)
-        val neuParent = parent._2.copy(childrenCount = parent._2.childrenCount + 1)
-        toStore(i - 1) = (parent._1, neuParent)
+        val neuParent = parent.copy(childrenCount = parent.childrenCount + 1)
+        toStore(i - 1) = neuParent
         if (neuParent.childrenCount > neuParent.childrenQuota) {
-          quotaExceededProtocol.quotaExceeded(ref, shard, parent._1, neuParent.childrenQuota)
-          throw QuotaReachedException(shardKey, parent._1, neuParent.childrenQuota)
+          quotaExceededProtocol.quotaExceeded(ref, shard, parent.prefix, neuParent.childrenQuota)
+          throw QuotaReachedException(shardKey, parent.prefix, neuParent.childrenQuota)
         }
       }
       toStore += (prefix -> neu)
     }
 
-    toStore.map { case (prefix, neu) =>
+    toStore.map { case neu =>
       store.store(neu)
       neu
     }
