@@ -90,7 +90,7 @@ class CardinalityTracker(ref: DatasetRef,
           throw QuotaReachedException(shardKey, parent.prefix, neuParent.childrenQuota)
         }
       }
-      toStore += (prefix -> neu)
+      toStore += neu
     }
 
     toStore.map { case neu =>
