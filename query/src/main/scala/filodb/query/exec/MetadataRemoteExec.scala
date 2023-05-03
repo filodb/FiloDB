@@ -35,6 +35,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
 
   private val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize)
 
+  private val dummyQueryStats = QueryStats()
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)
                               (implicit sched: Scheduler): Future[QueryResponse] = {
     import PromCirceSupport._
@@ -86,7 +87,8 @@ case class MetadataRemoteExec(queryEndpoint: String,
         CardRowReader(prefixToGroup(prefix), counts)
       }
     val rv = IteratorBackedRangeVector(CustomRangeVectorKey.empty, NoCloseCursor(rows.iterator), None)
-    val srv = SerializedRangeVector(rv, builder, RECORD_SCHEMA, queryWithPlanName(queryContext))
+    // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
+    val srv = SerializedRangeVector(rv, builder, RECORD_SCHEMA, queryWithPlanName(queryContext), dummyQueryStats)
     QueryResult(id, RESULT_SCHEMA, Seq(srv))
   }
 
@@ -99,7 +101,8 @@ case class MetadataRemoteExec(queryEndpoint: String,
           val data = Seq(lc.cardinality.map(k => (k.getOrElse(lcLabelNameField, "").utf8,
                                                   k.getOrElse(lcLabelCountField, "").utf8)).toMap)
           val rv = IteratorBackedRangeVector(key, UTF8MapIteratorRowReader(data.toIterator), None)
-          SerializedRangeVector(rv, builder, recordSchema, queryWithPlanName(queryContext))
+          // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
+          SerializedRangeVector(rv, builder, recordSchema, queryWithPlanName(queryContext), dummyQueryStats)
         }
       )
     QueryResult(id, resultSchema, data)
@@ -116,8 +119,9 @@ case class MetadataRemoteExec(queryEndpoint: String,
       val rangeVector = IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
         NoCloseCursor(StringArrayRowReader(iteratorMap)), None)
 
+      // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
       val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, labelsRecordSchema,
-        queryWithPlanName(queryContext)))
+        queryWithPlanName(queryContext), dummyQueryStats))
 
       QueryResult(id, labelsResultSchema, srvSeq, QueryStats(),
         if (response.partial.isDefined) response.partial.get else false, response.message)
@@ -128,8 +132,9 @@ case class MetadataRemoteExec(queryEndpoint: String,
       val rangeVector = IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
         UTF8MapIteratorRowReader(iteratorMap.toIterator), None)
 
+      // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
       val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, recordSchema,
-        queryWithPlanName(queryContext)))
+        queryWithPlanName(queryContext), dummyQueryStats))
 
       val schema = if (data.isEmpty) ResultSchema.empty else resultSchema
       // FIXME need to send and parse query stats in remote calls
@@ -147,8 +152,9 @@ case class MetadataRemoteExec(queryEndpoint: String,
     val rangeVector = IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
       NoCloseCursor(StringArrayRowReader(iteratorMap)), None)
 
+    // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
     val srvSeq = Seq(SerializedRangeVector(rangeVector, builder, labelsRecordSchema,
-      queryWithPlanName(queryContext)))
+      queryWithPlanName(queryContext), dummyQueryStats))
 
     val schema = if (data.isEmpty) ResultSchema.empty else labelsResultSchema
     // FIXME need to send and parse query stats in remote calls

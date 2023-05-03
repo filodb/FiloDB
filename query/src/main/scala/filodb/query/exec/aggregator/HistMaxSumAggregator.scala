@@ -1,6 +1,7 @@
 package filodb.query.exec.aggregator
 
-import filodb.core.query.{MutableRowReader, RangeParams, RangeVector, RangeVectorKey, ResultSchema, TransientHistMaxRow}
+import filodb.core.query.{MutableRowReader, QueryStats, RangeParams,
+                          RangeVector, RangeVectorKey, ResultSchema, TransientHistMaxRow}
 import filodb.memory.format.RowReader
 
 object HistMaxSumAggregator extends RowAggregator {
@@ -29,7 +30,8 @@ object HistMaxSumAggregator extends RowAggregator {
     acc.m = if (acc.m.isNaN) aggRes.getDouble(2) else Math.max(acc.m, aggRes.getDouble(2))
     acc
   }
-  def present(aggRangeVector: RangeVector, limit: Int, rangeParams: RangeParams): Seq[RangeVector] = Seq(aggRangeVector)
+  def present(aggRangeVector: RangeVector, limit: Int,
+              rangeParams: RangeParams, queryStats: QueryStats): Seq[RangeVector] = Seq(aggRangeVector)
   def reductionSchema(source: ResultSchema): ResultSchema = source
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = reductionSchema
 }

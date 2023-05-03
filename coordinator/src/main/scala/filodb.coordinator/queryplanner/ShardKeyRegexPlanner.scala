@@ -135,30 +135,39 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
    * LHS and RHS could be across multiple partitions
    */
   private def materializeBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): PlanResult = {
-    val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
-      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
-    val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
-      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
 
-    // FIXME, Optimize and push the lhs and rhs to wrapped planner if they belong to same partition
+    optimizeOrVectorDouble(qContext, logicalPlan).getOrElse {
+      val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+        copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
+      val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+        copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
 
-    val lhsExec = materialize(logicalPlan.lhs, lhsQueryContext)
-    val rhsExec = materialize(logicalPlan.rhs, rhsQueryContext)
+      // FIXME, Optimize and push the lhs and rhs to wrapped planner if they belong to same partition
 
-    val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
-      SetOperatorExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-        LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
-        LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn,
-        rvRangeFromPlan(logicalPlan))
-    else
-      BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
-        logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
-        LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
-        LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn,
-        rvRangeFromPlan(logicalPlan))
+      val lhsExec = materialize(logicalPlan.lhs, lhsQueryContext)
+      val rhsExec = materialize(logicalPlan.rhs, rhsQueryContext)
 
-    PlanResult(Seq(execPlan))
+      val execPlan = if (logicalPlan.operator.isInstanceOf[SetOperator])
+        SetOperatorExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+          LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn), datasetMetricColumn,
+          rvRangeFromPlan(logicalPlan))
+      else
+        BinaryJoinExec(qContext, inProcessPlanDispatcher, Seq(lhsExec), Seq(rhsExec), logicalPlan.operator,
+          logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, datasetMetricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, datasetMetricColumn),
+          LogicalPlanUtils.renameLabels(logicalPlan.include, datasetMetricColumn), datasetMetricColumn,
+          rvRangeFromPlan(logicalPlan))
+
+      PlanResult(Seq(execPlan))
+    }
   }
+
+  private def canSupportMultiPartitionCalls(execPlans: Seq[ExecPlan]): Boolean =
+    execPlans.forall{
+      case _: PromQlRemoteExec  => false
+      case _                    => true
+    }
 
   /***
    * For aggregate queries like sum(test{_ws_ = "demo", _ns_ =~ "App.*"})
@@ -185,9 +194,10 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
         LogicalPlan.getNonMetricShardKeyFilters(aggregate, dataset.options.nonMetricShardColumns).head, queryContext)
       val exec = if (execPlans.size == 1) execPlans.head
       else {
-        if (aggregate.operator.equals(AggregationOperator.TopK)
+        if ((aggregate.operator.equals(AggregationOperator.TopK)
           || aggregate.operator.equals(AggregationOperator.BottomK)
-          || aggregate.operator.equals(AggregationOperator.CountValues))
+          || aggregate.operator.equals(AggregationOperator.CountValues)
+          ) && !canSupportMultiPartitionCalls(execPlans))
           throw new UnsupportedOperationException(s"Shard Key regex not supported for ${aggregate.operator}")
         else {
           val reducer = MultiPartitionReduceAggregateExec(queryContext, inProcessPlanDispatcher,

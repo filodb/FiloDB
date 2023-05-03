@@ -3,6 +3,7 @@ import sbt.Keys._
 
 publishTo := Some(Resolver.file("Unused repo", file("target/unusedrepo")))
 
+
 // Global setting across all subprojects
 ThisBuild / organization := "org.filodb"
 ThisBuild / organizationName := "FiloDB"
@@ -12,6 +13,8 @@ ThisBuild / Test / publishArtifact := false
 ThisBuild / IntegrationTest / publishArtifact := false
 ThisBuild / licenses += ("Apache-2.0", url("http://choosealicense.com/licenses/apache/"))
 ThisBuild / pomIncludeRepository := { x => false }
+
+enablePlugins(ProtobufPlugin)
 
 lazy val memory = Submodules.memory
 lazy val core = Submodules.core
@@ -28,5 +31,7 @@ lazy val bootstrapper = Submodules.bootstrapper
 lazy val sparkJobs = Submodules.sparkJobs
 lazy val jmh = Submodules.jmh
 lazy val gatling = Submodules.gatling
+lazy val grpc = Submodules.grpc
+
 
 

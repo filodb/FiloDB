@@ -408,46 +408,76 @@ trait  DefaultPlanner {
     PlanResult(Seq(scalarBinaryExec))
   }
 
+  /**
+   * Function to optimize and convert `foo or vector(0)` like queries which would normally
+   * result in an expensive SetOperatorExec plan into a simple InstantFunctionMapper
+   * which is far more efficient.
+   *
+   * Note that vector(0) on left side of operator, example `vector(0) or foo` is not
+   * optimized yet since it is uncommon and almost unseen, and not worth the additional
+   * complexity at the moment.
+   *
+   * 05/01/2023: We are disabling this optimization until we handle the corner cases like:
+   * 1. when the given metrics is not present or is not actively ingesting
+   * rdar://108803361 (Fix vector(0) optimzation corner cases)
+   */
+  def optimizeOrVectorDouble(qContext: QueryContext, logicalPlan: BinaryJoin): Option[PlanResult] = {
+    None
+//    if (logicalPlan.operator == BinaryOperator.LOR) {
+//      logicalPlan.rhs match {
+//        case VectorPlan(ScalarFixedDoublePlan(value, rangeParams)) =>
+//          val planRes = materializeApplyInstantFunction(
+//                              qContext, ApplyInstantFunction(logicalPlan.lhs,
+//                                                             InstantFunctionId.OrVectorDouble,
+//                                                             Seq(ScalarFixedDoublePlan(value, rangeParams))))
+//          Some(planRes)
+//        case _ => None // TODO add more matchers to cover cases where rhs is a fully scalar plan
+//      }
+//    } else None
+  }
+
   def materializeBinaryJoin(qContext: QueryContext,
                             logicalPlan: BinaryJoin,
                             forceInProcess: Boolean = false): PlanResult = {
 
-    val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
-      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
-    val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
-      copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
+    optimizeOrVectorDouble(qContext, logicalPlan).getOrElse {
+      val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+        copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.lhs)))
+      val rhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
+        copy(promQl = LogicalPlanParser.convertToQuery(logicalPlan.rhs)))
 
-    val lhs = walkLogicalPlanTree(logicalPlan.lhs, lhsQueryContext, forceInProcess)
-    val rhs = walkLogicalPlanTree(logicalPlan.rhs, rhsQueryContext, forceInProcess)
+      val lhs = walkLogicalPlanTree(logicalPlan.lhs, lhsQueryContext, forceInProcess)
+      val rhs = walkLogicalPlanTree(logicalPlan.rhs, rhsQueryContext, forceInProcess)
 
-    val dispatcher = if (!lhs.plans.head.dispatcher.isLocalCall && !rhs.plans.head.dispatcher.isLocalCall) {
-      val lhsCluster = lhs.plans.head.dispatcher.clusterName
-      val rhsCluster = rhs.plans.head.dispatcher.clusterName
-      if (rhsCluster.equals(lhsCluster)) PlannerUtil.pickDispatcher(lhs.plans ++ rhs.plans)
-      else inProcessPlanDispatcher
-    } else inProcessPlanDispatcher
+      val dispatcher = if (!lhs.plans.head.dispatcher.isLocalCall && !rhs.plans.head.dispatcher.isLocalCall) {
+        val lhsCluster = lhs.plans.head.dispatcher.clusterName
+        val rhsCluster = rhs.plans.head.dispatcher.clusterName
+        if (rhsCluster.equals(lhsCluster)) PlannerUtil.pickDispatcher(lhs.plans ++ rhs.plans)
+        else inProcessPlanDispatcher
+      } else inProcessPlanDispatcher
 
-    val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext,
-      dispatcher, rvRangeFromPlan(logicalPlan), lhs.plans))
-    else lhs.plans
+      val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext,
+        dispatcher, rvRangeFromPlan(logicalPlan), lhs.plans))
+      else lhs.plans
 
-    val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext,
-      dispatcher, rvRangeFromPlan(logicalPlan), rhs.plans))
-    else rhs.plans
+      val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(qContext,
+        dispatcher, rvRangeFromPlan(logicalPlan), rhs.plans))
+      else rhs.plans
 
-    val execPlan =
-      if (logicalPlan.operator.isInstanceOf[SetOperator])
-        SetOperatorExec(qContext, dispatcher, stitchedLhs, stitchedRhs, logicalPlan.operator,
-          LogicalPlanUtils.renameLabels(logicalPlan.on, dsOptions.metricColumn),
-          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, dsOptions.metricColumn), dsOptions.metricColumn,
-          rvRangeFromPlan(logicalPlan))
-      else
-        BinaryJoinExec(qContext, dispatcher, stitchedLhs, stitchedRhs, logicalPlan.operator,
-          logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, dsOptions.metricColumn),
-          LogicalPlanUtils.renameLabels(logicalPlan.ignoring, dsOptions.metricColumn), logicalPlan.include,
-          dsOptions.metricColumn, rvRangeFromPlan(logicalPlan))
+      val execPlan =
+        if (logicalPlan.operator.isInstanceOf[SetOperator])
+          SetOperatorExec(qContext, dispatcher, stitchedLhs, stitchedRhs, logicalPlan.operator,
+            LogicalPlanUtils.renameLabels(logicalPlan.on, dsOptions.metricColumn),
+            LogicalPlanUtils.renameLabels(logicalPlan.ignoring, dsOptions.metricColumn), dsOptions.metricColumn,
+            rvRangeFromPlan(logicalPlan))
+        else
+          BinaryJoinExec(qContext, dispatcher, stitchedLhs, stitchedRhs, logicalPlan.operator,
+            logicalPlan.cardinality, LogicalPlanUtils.renameLabels(logicalPlan.on, dsOptions.metricColumn),
+            LogicalPlanUtils.renameLabels(logicalPlan.ignoring, dsOptions.metricColumn), logicalPlan.include,
+            dsOptions.metricColumn, rvRangeFromPlan(logicalPlan))
 
-    PlanResult(Seq(execPlan))
+      PlanResult(Seq(execPlan))
+    }
   }
 
 }

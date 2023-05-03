@@ -3,11 +3,10 @@ package filodb.core.query
 import java.time.{LocalDateTime, YearMonth, ZoneOffset}
 import java.util.concurrent.atomic.AtomicLong
 
-import scala.collection.Iterator
-
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import org.joda.time.DateTime
 
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
@@ -143,7 +142,7 @@ trait RangeVector {
   *  A marker trait to identify range vector that can be serialized for write into wire. If Range Vector does not
   *  implement this marker trait, then query engine will convert it to one that does.
   */
-trait SerializableRangeVector extends RangeVector {
+sealed trait SerializableRangeVector extends RangeVector {
   /**
    * Used to calculate number of samples sent over the wire for limiting resources used by query
    */
@@ -153,6 +152,8 @@ trait SerializableRangeVector extends RangeVector {
    * Estimates the total size (in bytes) of all rows after serialization.
    */
   def estimateSerializedRowBytes: Long
+
+  def estimatedSerializedBytes: Long = estimateSerializedRowBytes + key.keySize
 }
 
 object SerializableRangeVector {
@@ -169,7 +170,7 @@ object SerializableRangeVector {
 /**
   * Range Vector that represents a scalar result. Scalar results result in only one range vector.
   */
-trait ScalarRangeVector extends SerializableRangeVector {
+sealed trait ScalarRangeVector extends SerializableRangeVector {
   def key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
   def getValue(time: Long): Double
 }
@@ -177,7 +178,7 @@ trait ScalarRangeVector extends SerializableRangeVector {
 /**
   * ScalarRangeVector which has time specific value
   */
-final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double],
+final case class ScalarVaryingDouble(val timeValueMap: Map[Long, Double],
                                      override val outputRange: Option[RvRange]) extends ScalarRangeVector {
   import NoCloseCursor._
   override def rows: RangeVectorCursor = timeValueMap.toList.sortWith(_._1 < _._1).
@@ -194,7 +195,7 @@ final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]
 
 final case class RangeParams(startSecs: Long, stepSecs: Long, endSecs: Long)
 
-trait ScalarSingleValue extends ScalarRangeVector {
+sealed trait ScalarSingleValue extends ScalarRangeVector {
   def rangeParams: RangeParams
   override def outputRange: Option[RvRange] = Some(RvRange(rangeParams.startSecs * 1000,
                                              rangeParams.stepSecs * 1000, rangeParams.endSecs * 1000))
@@ -349,7 +350,7 @@ final class SerializedRangeVector(val key: RangeVectorKey,
                                   val numRowsSerialized: Int,
                                   containers: Seq[RecordContainer],
                                   val schema: RecordSchema,
-                                  startRecordNo: Int,
+                                  val startRecordNo: Int,
                                   override val outputRange: Option[RvRange]) extends RangeVector with
                                           SerializableRangeVector with java.io.Serializable {
 
@@ -394,6 +395,8 @@ final class SerializedRangeVector(val key: RangeVectorKey,
 
   override def estimateSerializedRowBytes: Long = containers.map(_.numBytes).sum
 
+  def containersIterator : Iterator[RecordContainer] = containers.toIterator
+
   /**
     * Pretty prints all the elements into strings using record schema
     */
@@ -419,6 +422,7 @@ object SerializedRangeVector extends StrictLogging {
   import filodb.core._
 
   val queryResultBytes = Kamon.histogram("query-engine-result-bytes").withoutTags
+  val queryCpuTime = Kamon.counter("query-engine-cpu-time", MeasurementUnit.time.nanoseconds).withoutTags
 
   def canRemoveEmptyRows(outputRange: Option[RvRange], sch: RecordSchema) : Boolean = {
     outputRange.isDefined && // metadata queries
@@ -438,36 +442,46 @@ object SerializedRangeVector extends StrictLogging {
   def apply(rv: RangeVector,
             builder: RecordBuilder,
             schema: RecordSchema,
-            execPlan: String): SerializedRangeVector = {
+            execPlan: String,
+            queryStats: QueryStats): SerializedRangeVector = {
+    val startNs = Utils.currentThreadCpuTimeNanos
     var numRows = 0
-    val oldContainerOpt = builder.currentContainer
-    val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
     try {
-      ChunkMap.validateNoSharedLocks(execPlan)
-      val rows = rv.rows
-      while (rows.hasNext) {
-        val nextRow = rows.next()
-        // Don't encode empty / NaN data over the wire
-        if (!canRemoveEmptyRows(rv.outputRange, schema) ||
+      val oldContainerOpt = builder.currentContainer
+      val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
+      try {
+        ChunkMap.validateNoSharedLocks(execPlan)
+        val rows = rv.rows
+        while (rows.hasNext) {
+          val nextRow = rows.next()
+          // Don't encode empty / NaN data over the wire
+          if (!canRemoveEmptyRows(rv.outputRange, schema) ||
             schema.columns(1).colType == DoubleColumn && !nextRow.getDouble(1).isNaN ||
             schema.columns(1).colType == HistogramColumn && !nextRow.getHistogram(1).isEmpty) {
-          numRows += 1
-          builder.addFromReader(nextRow, schema, 0)
+            numRows += 1
+            builder.addFromReader(nextRow, schema, 0)
+          }
         }
+      } finally {
+        rv.rows().close()
+        // clear exec plan
+        // When the query is done, clean up lingering shared locks caused by iterator limit.
+        ChunkMap.releaseAllSharedLocks()
       }
+      // If there weren't containers before, then take all of them.  If there were, discard earlier ones, just
+      // start with the most recent one we started adding to
+      val containers = oldContainerOpt match {
+        case None => builder.allContainers
+        case Some(firstContainer) => builder.allContainers.dropWhile(_ != firstContainer)
+      }
+      val srv = new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo, rv.outputRange)
+      val resultSize = srv.estimatedSerializedBytes
+      SerializedRangeVector.queryResultBytes.record(resultSize)
+      queryStats.getResultBytesCounter(Nil).addAndGet(resultSize)
+      srv
     } finally {
-      rv.rows().close()
-      // clear exec plan
-      // When the query is done, clean up lingering shared locks caused by iterator limit.
-      ChunkMap.releaseAllSharedLocks()
+      queryStats.getCpuNanosCounter(Nil).addAndGet(Utils.currentThreadCpuTimeNanos - startNs)
     }
-    // If there weren't containers before, then take all of them.  If there were, discard earlier ones, just
-    // start with the most recent one we started adding to
-    val containers = oldContainerOpt match {
-      case None                 => builder.allContainers
-      case Some(firstContainer) => builder.allContainers.dropWhile(_ != firstContainer)
-    }
-    new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo, rv.outputRange)
   }
   // scalastyle:on null
 
@@ -475,9 +489,9 @@ object SerializedRangeVector extends StrictLogging {
     * Creates a SerializedRangeVector out of another RV and ColumnInfo schema.  Convenient but no sharing.
     * Since it wastes space when working with multiple RVs, should be used mostly for testing.
     */
-  def apply(rv: RangeVector, cols: Seq[ColumnInfo]): SerializedRangeVector = {
+  def apply(rv: RangeVector, cols: Seq[ColumnInfo], queryStats: QueryStats): SerializedRangeVector = {
     val schema = toSchema(cols)
-    apply(rv, newBuilder(), schema, "Test-Only-Plan")
+    apply(rv, newBuilder(), schema, "Test-Only-Plan", queryStats)
   }
 
   // TODO: make this configurable....

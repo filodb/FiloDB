@@ -233,6 +233,69 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
     } should have message "requirement failed: Bucket/le required for histogram bucket"
   }
 
+  it ("should return timeseries of static values for orVectorDouble function when source is empty") {
+    val staticVal = 1.0D
+    val fixedDoublePlan = ScalarFixedDoublePlan(staticVal, rangeParams)
+    val staticFuncArgs = Seq(StaticFuncArgs(fixedDoublePlan.scalar,fixedDoublePlan.timeStepParams))
+    val instantVectorFnMapper = exec.InstantVectorFunctionMapper(
+      InstantFunctionId.OrVectorDouble, staticFuncArgs)
+    val resultObs = instantVectorFnMapper(
+      Observable.fromIterable(new Array[RangeVector](0)),
+      querySession,
+      1000,
+      resultSchema,
+      Nil)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.flatMap(_.rows())
+
+    // st timestamp = 100s, end timestamp = 200s, step = 20s
+    // so we are expecting 6 TS (100,120,140,160,180,200), with static value of 1
+    resultRows.size should equal(6)
+    var st = rangeParams.startSecs
+    for(row <- resultRows){
+      val castTS = row.asInstanceOf[TransientRow]
+      castTS.timestamp shouldEqual (st*1000)
+      castTS.value shouldEqual staticVal
+      st = st + rangeParams.stepSecs
+    }
+  }
+
+  it("should return empty when source is empty for any other function other than vector(static_val)") {
+    val staticVal = 1.0D
+    val fixedDoublePlan = ScalarFixedDoublePlan(staticVal, rangeParams)
+    val staticFuncArgs = Seq(StaticFuncArgs(fixedDoublePlan.scalar, fixedDoublePlan.timeStepParams))
+    val instantVectorFnMapper = exec.InstantVectorFunctionMapper(
+      InstantFunctionId.Ceil, staticFuncArgs)
+    val resultObs = instantVectorFnMapper(
+      Observable.fromIterable(new Array[RangeVector](0)),
+      querySession,
+      1000,
+      resultSchema,
+      Nil)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.flatMap(_.rows())
+
+    // we are using a ceil function and the input source is empty. result returned should be empty
+    resultRows.size should equal(0)
+  }
+
+  it("should return transformed TS from source is not empty even when function is vector(static_val)") {
+    val staticVal = 1.0D
+    val fixedDoublePlan = ScalarFixedDoublePlan(staticVal, rangeParams)
+    val staticFuncArgs = Seq(StaticFuncArgs(fixedDoublePlan.scalar, fixedDoublePlan.timeStepParams))
+    val instantVectorFnMapper = exec.InstantVectorFunctionMapper(
+      InstantFunctionId.OrVectorDouble, staticFuncArgs)
+
+    val resultObs = instantVectorFnMapper(
+      Observable.fromIterable(sampleBase),
+      querySession,
+      1000,
+      resultSchema,
+      Nil)
+    val resultRows = resultObs.toListL.runToFuture.futureValue.flatMap(_.rows())
+
+    // result should return 4 TS with required transformation as sampleBase (source) had 4 TS
+    resultRows.size should equal(4)
+  }
+
   it ("should fail with wrong calculation") {
     // ceil
     val expectedVal = sampleBase.map(_.rows.map(v => scala.math.floor(v.getDouble(1))))

@@ -1,7 +1,7 @@
 package filodb.core.metadata
 
 import com.typesafe.config.ConfigFactory
-
+import filodb.core.query.ColumnInfo
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -15,6 +15,8 @@ class ColumnSpec extends AnyFunSpec with Matchers {
                                   ConfigFactory.parseString("counter = true"))
   val histColumn2 = DataColumn(4, "h2", ColumnType.HistogramColumn,
                                ConfigFactory.parseString("counter = true\nsize=20000"))
+  val deltaCountColumn = DataColumn(5, "dc", ColumnType.HistogramColumn,
+    ConfigFactory.parseString("{counter = false, delta = true}"))
 
   describe("Column validations") {
     it("should check that regular column names don't have : in front") {
@@ -42,6 +44,14 @@ class ColumnSpec extends AnyFunSpec with Matchers {
       DataColumn.fromString(ageColumn.toString) should equal (ageColumn)
       DataColumn.fromString(histColumnOpts.toString) should equal (histColumnOpts)
       DataColumn.fromString(histColumn2.toString) should equal (histColumn2)
+      DataColumn.fromString(deltaCountColumn.toString) should equal (deltaCountColumn)
+    }
+    it("check delta param") {
+      ColumnInfo(firstColumn).isCumulative should equal (true)
+      ColumnInfo(ageColumn).isCumulative should equal (true)
+      ColumnInfo(histColumnOpts).isCumulative should equal (true)
+      ColumnInfo(histColumn2).isCumulative should equal (true)
+      ColumnInfo(deltaCountColumn).isCumulative should equal (false)
     }
   }
 }

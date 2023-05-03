@@ -7,6 +7,7 @@ import scala.collection.mutable.ListBuffer
 
 import com.typesafe.scalalogging.StrictLogging
 
+import filodb.core.Utils
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.FiloSchedulers
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
@@ -114,50 +115,59 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator wi
     builder
   }
 
-  def present(aggRangeVector: RangeVector, limit: Int, rangeParams: RangeParams): Seq[RangeVector] = {
-    val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
+  // scalastyle:off method.length
+  def present(aggRangeVector: RangeVector, limit: Int,
+              rangeParams: RangeParams, queryStats: QueryStats): Seq[RangeVector] = {
+    val startNs = Utils.currentThreadCpuTimeNanos
     try {
-      FiloSchedulers.assertThreadName(QuerySchedName)
-      ChunkMap.validateNoSharedLocks(s"TopkQuery-$k-$bottomK")
-      // We limit the results wherever it is materialized first. So it is done here.
-      val rows = aggRangeVector.rows.take(limit)
-      val it = Iterator.from(0, rangeParams.stepSecs.toInt)
-        .takeWhile(_ <= (rangeParams.endSecs - rangeParams.startSecs)).map { t =>
-        val timestamp = t + rangeParams.startSecs
-        val rvkSeen = new ListBuffer[RangeVectorKey]
-        val row = rows.next()
-        var i = 1
-        while (row.notNull(i)) {
-          if (row.filoUTF8String(i) != CustomRangeVectorKey.emptyAsZcUtf8) {
-            val key = row.filoUTF8String(i)
-            logger.debug(s"TopkPresent before decoding key=$key")
-            val rvk = CustomRangeVectorKey.fromZcUtf8(key)
-            logger.debug(s"TopkPresent after decoding key=${rvk.labelValues.mkString(",")}")
-            rvkSeen += rvk
-            val builder = resRvs.getOrElseUpdate(rvk, createBuilder(rangeParams, timestamp))
-            addRecordToBuilder(builder, TimeUnit.SECONDS.toMillis(timestamp), row.getDouble(i + 1))
+      val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
+      try {
+        FiloSchedulers.assertThreadName(QuerySchedName)
+        ChunkMap.validateNoSharedLocks(s"TopkQuery-$k-$bottomK")
+        // We limit the results wherever it is materialized first. So it is done here.
+        val rows = aggRangeVector.rows.take(limit)
+        val it = Iterator.from(0, rangeParams.stepSecs.toInt)
+          .takeWhile(_ <= (rangeParams.endSecs - rangeParams.startSecs)).map { t =>
+          val timestamp = t + rangeParams.startSecs
+          val rvkSeen = new ListBuffer[RangeVectorKey]
+          val row = rows.next()
+          var i = 1
+          while (row.notNull(i)) {
+            if (row.filoUTF8String(i) != CustomRangeVectorKey.emptyAsZcUtf8) {
+              val key = row.filoUTF8String(i)
+              logger.debug(s"TopkPresent before decoding key=$key")
+              val rvk = CustomRangeVectorKey.fromZcUtf8(key)
+              logger.debug(s"TopkPresent after decoding key=${rvk.labelValues.mkString(",")}")
+              rvkSeen += rvk
+              val builder = resRvs.getOrElseUpdate(rvk, createBuilder(rangeParams, timestamp))
+              addRecordToBuilder(builder, TimeUnit.SECONDS.toMillis(timestamp), row.getDouble(i + 1))
+            }
+            i += 2
           }
-          i += 2
+          resRvs.keySet.foreach { rvs =>
+            if (!rvkSeen.contains(rvs)) addRecordToBuilder(resRvs(rvs), timestamp * 1000, Double.NaN)
+          }
         }
-        resRvs.keySet.foreach { rvs =>
-          if (!rvkSeen.contains(rvs)) addRecordToBuilder(resRvs(rvs), timestamp * 1000, Double.NaN)
-        }
+        // address step == 0 case
+        if (rangeParams.startSecs == rangeParams.endSecs || rangeParams.stepSecs == 0) it.take(1).toList else it.toList
+      } finally {
+        aggRangeVector.rows().close()
+        ChunkMap.releaseAllSharedLocks()
       }
-      // address step == 0 case
-      if (rangeParams.startSecs == rangeParams.endSecs || rangeParams.stepSecs == 0) it.take(1).toList else it.toList
-    } finally {
-      aggRangeVector.rows().close()
-      ChunkMap.releaseAllSharedLocks()
-    }
 
-    resRvs.map { case (key, builder) =>
-      val numRows = builder.allContainers.map(_.countRecords()).sum
-      logger.debug(s"TopkPresent before creating SRV key = ${key.labelValues.mkString(",")}")
-      new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0,
-                                                    Some(RvRange(rangeParams.startSecs * 1000,
-                                                      rangeParams.stepSecs * 1000,
-                                                      rangeParams.endSecs * 1000)))
-    }.toSeq
+      resRvs.map { case (key, builder) =>
+        val numRows = builder.allContainers.map(_.countRecords()).sum
+        logger.debug(s"TopkPresent before creating SRV key = ${key.labelValues.mkString(",")}")
+        val srv = new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0,
+          Some(RvRange(rangeParams.startSecs * 1000,
+            rangeParams.stepSecs * 1000,
+            rangeParams.endSecs * 1000)))
+        queryStats.getResultBytesCounter(Nil).getAndAdd(srv.estimatedSerializedBytes)
+        srv
+      }.toSeq
+    } finally {
+      queryStats.getCpuNanosCounter(Nil).getAndAdd(Utils.currentThreadCpuTimeNanos - startNs)
+    }
   }
 
   def reductionSchema(source: ResultSchema): ResultSchema = {

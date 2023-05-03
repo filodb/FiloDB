@@ -1530,4 +1530,47 @@ class LongTimeRangePlannerSpec extends AnyFunSpec with Matchers with PlanValidat
     validatePlan(ep, expectedPlan)
 
   }
-}
+
+  it("Materializing Binary join with or vector(0) with long look back should not throw error") {
+      val now = 1634777330123L
+      val start = now / 1000 - 8.days.toSeconds
+      val step = 1.minute.toSeconds
+      val end = now / 1000 - 2.minutes.toSeconds
+
+      val rawRetention = 7.days // 7 days
+      val downsampleRetention = 183.days
+      val earliestRawTime = now - rawRetention.toMillis
+      val earliestDownSampleTime = now - downsampleRetention.toMillis
+      // making sure that the  latestDownsampleTime is not a multiple of 1000
+      val latestDownsampleTime = now - 6.hours.toMillis + 123
+
+      val query = """sum(rate(bar{job= "app"}[30d])) or vector(0)"""
+
+      val logicalPlan = Parser.queryRangeToLogicalPlan(query,
+        TimeStepParams(start, step, end))
+        .asInstanceOf[PeriodicSeriesPlan]
+
+      val rawPlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
+        earliestRetainedTimestampFn = earliestRawTime, queryConfig, "raw")
+      val downsamplePlanner = new SingleClusterPlanner(dataset, schemas, mapperRef,
+        earliestRetainedTimestampFn = earliestDownSampleTime, queryConfig, "downsample")
+      val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner,
+        earliestRawTime, latestDownsampleTime, disp, queryConfig, dataset)
+
+      val ep = longTermPlanner.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
+
+      val expected = """E~SetOperatorExec(binaryOp=LOR, on=List(), ignoring=List()) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,true,false,true,Set(),None))
+                       |-T~AggregatePresenter(aggrOp=Sum, aggrParams=List(), rangeParams=RangeParams(1634086130,60,1634755730))
+                       |--E~LocalPartitionReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1009481049],downsample)
+                       |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                       |----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634755730000, window=Some(2592000000), functionId=Some(Rate), rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=11, chunkMethod=TimeRangeChunkScan(1631494130000,1634755730000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1009481049],downsample)
+                       |---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List())
+                       |----T~PeriodicSamplesMapper(start=1634086130000, step=60000, end=1634755730000, window=Some(2592000000), functionId=Some(Rate), rawSource=true, offsetMs=None)
+                       |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=27, chunkMethod=TimeRangeChunkScan(1631494130000,1634755730000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(bar))), colName=None, schema=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1009481049],downsample)
+                       |-T~VectorFunctionMapper(funcParams=List())
+                       |--E~ScalarFixedDoubleExec(params = RangeParams(1634086130,60,1634755730), value = 0.0) on InProcessPlanDispatcher(QueryConfig(10 seconds,300000,1,50,antlr,true,true,None,None,None,None,true,false,true,Set(),None))""".stripMargin
+
+      validatePlan(ep, expected)
+    }
+  }

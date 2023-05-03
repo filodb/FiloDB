@@ -1,14 +1,13 @@
 package filodb.core.downsample
 
-import java.util
-import java.util.concurrent.atomic.AtomicLong
-
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
+import java.util
+import java.util.concurrent.atomic.AtomicLong
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import kamon.tag.TagSet
@@ -21,7 +20,7 @@ import filodb.core.{DatasetRef, Types}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, QuerySession}
+import filodb.core.query.{ColumnFilter, Filter, QueryContext, QuerySession}
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -34,6 +33,7 @@ class DownsampledTimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
   val partitionsQueried = Kamon.counter("downsample-partitions-queried").withTags(TagSet.from(tags))
   val queryTimeRangeMins = Kamon.histogram("query-time-range-minutes").withTags(TagSet.from(tags))
+  val queriesBySchema = Kamon.counter("leaf-queries-by-schema").withTags(TagSet.from(tags))
   val indexEntriesRefreshed = Kamon.counter("index-entries-refreshed").withTags(TagSet.from(tags))
   val indexEntriesPurged = Kamon.counter("index-entries-purged").withTags(TagSet.from(tags))
   val indexRefreshFailed = Kamon.counter("index-refresh-failed").withTags(TagSet.from(tags))
@@ -44,6 +44,19 @@ class DownsampledTimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
   val purgeIndexEntriesLatency = Kamon.histogram("downsample-store-purge-index-entries-latency",
     MeasurementUnit.time.milliseconds).withTags(TagSet.from(tags))
+
+  val dataShapeKeyLength = Kamon.histogram("data-shape")
+    .withTags(TagSet.from(tags)).withTag("dimension", "key-length")
+  val dataShapeValueLength = Kamon.histogram("data-shape")
+    .withTags(TagSet.from(tags)).withTag("dimension", "value-length")
+  val dataShapeLabelCount = Kamon.histogram("data-shape")
+    .withTags(TagSet.from(tags)).withTag("dimension", "label-count")
+  val dataShapeMetricLength = Kamon.histogram("data-shape")
+    .withTags(TagSet.from(tags)).withTag("dimension", "metric-length")
+  val dataShapeTotalLength = Kamon.histogram("data-shape")
+    .withTags(TagSet.from(tags)).withTag("dimension", "total-length")
+  val dataShapeBucketCount = Kamon.histogram("data-shape")
+    .withTags(TagSet.from(tags)).withTag("dimension", "bucket-count")
 }
 
 class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
@@ -93,14 +106,20 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
 
   private val indexUpdatedHour = new AtomicLong(0)
 
-  private val indexBootstrapper = new IndexBootstrapper(store) // used for initial index loading
+  // used for initial index loading
+  private val indexBootstrapper =
+    new DownsampleIndexBootstrapper(store, schemas, stats, indexDataset, downsampleConfig)
 
+  val houseKeepingSchedParallelism = Math.round(Runtime.getRuntime.availableProcessors() *
+                                        downsampleConfig.housekeepingParallelismMultiplier).toInt
   private val housekeepingSched = Scheduler.computation(
+    parallelism = houseKeepingSchedParallelism,
     name = "housekeeping",
     reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in Housekeeping Scheduler", _)))
 
   // used for periodic refresh of index, happens from raw tables
-  private val indexRefresher = new IndexBootstrapper(rawColStore)
+  private val indexRefresher =
+    new DownsampleIndexBootstrapper(rawColStore, schemas, stats, rawDatasetRef, downsampleConfig)
 
   private var houseKeepingFuture: CancelableFuture[Unit] = _
   private var gaugeUpdateFuture: CancelableFuture[Unit] = _
@@ -185,9 +204,12 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
                                 // do not notify listener as the map operation will be updating the state
                                 indexRefresh(endHour, startHour, periodicRefresh = false)
       case None             => // No checkpoint time found, start refresh from scratch
+                                val parallelism = Math.round(downsampleConfig.indexRebuildParallelismMultiplier *
+                                                    Runtime.getRuntime.availableProcessors()).toInt
+                                logger.info("Rebuilding index with parallelism {}", parallelism)
                                 indexBootstrapper
                                   .bootstrapIndexDownsample(
-                                    partKeyIndex, shardNum, indexDataset, indexTtlMs)
+                                    partKeyIndex, shardNum, indexDataset, indexTtlMs, parallelism)
     }).map { count =>
         logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
         indexUpdatedHour.set(endHour)
@@ -313,6 +335,9 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
           val _schema = recs.headOption.map { pkRec =>
             RecordSchema.schemaID(pkRec.partKey, UnsafeUtils.arayOffset)
           }
+          _schema.foreach { s =>
+            stats.queriesBySchema.withTag("schema", schemas(s).name).increment()
+          }
           stats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
           val metricShardKeys = schemas.part.options.shardKeyColumns
           val metricGroupBy = deploymentPartitionName +: clusterType +: metricShardKeys.map { col =>
@@ -347,7 +372,7 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
     // Step 1: Choose the downsample level depending on the range requested
     val (resolutionMs, downsampledDataset) = chooseDownsampleResolution(lookup.chunkMethod)
     logger.debug(s"Chose resolution $downsampledDataset for chunk method ${lookup.chunkMethod}")
-    capDataScannedPerShardCheck(lookup, resolutionMs)
+    capDataScannedPerShardCheck(lookup, colIds, resolutionMs, querySession.qContext)
     // Step 2: Query Cassandra table for that downsample level using downsampleColStore
     // Create a ReadablePartition objects that contain the time series data. This can be either a
     // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
@@ -391,11 +416,68 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
       }
   }
 
-  private def capDataScannedPerShardCheck(lookup: PartLookupResult, resolution: Long) = {
+  private def capDataScannedPerShardCheck(lookup: PartLookupResult,
+                                          colIds: Seq[Types.ColumnId],
+                                          resolution: Long,
+                                          qContext: QueryContext) = {
     lookup.firstSchemaId.foreach { schId =>
-      schemas.ensureQueriedDataSizeWithinLimit(schId, lookup.pkRecords,
+      ensureQueriedDataSizeWithinLimit(schId, colIds, lookup.pkRecords,
         downsampleStoreConfig.flushInterval.toMillis,
-        resolution, lookup.chunkMethod, downsampleStoreConfig.maxDataPerShardQuery)
+        resolution, lookup.chunkMethod, qContext)
+    }
+  }
+
+  /**
+   * This method estimates data size with much better accuracy than ensureQueriedDataSizeWithinLimitApprox
+   * since it accepts the start/end times of each matching part key. It is able to handle estimation with
+   * time series churn much better
+   */
+  def ensureQueriedDataSizeWithinLimit(schemaId: Int,
+                                       colIds: Seq[Types.ColumnId],
+                                       pkRecs: Seq[PartKeyLuceneIndexRecord],
+                                       chunkDurationMillis: Long,
+                                       resolutionMs: Long,
+                                       chunkMethod: ChunkScanMethod,
+                                       qContext: QueryContext): Unit = {
+    val estDataSize = schemas.estimateByteScan(
+      schemaId,
+      colIds,
+      pkRecs,
+      chunkDurationMillis,
+      resolutionMs,
+      chunkMethod)
+    val quRange = chunkMethod.endTime - chunkMethod.startTime + 1
+    val enforcedLimits = qContext.plannerParams.enforcedLimits
+    val timeSeries = pkRecs.length
+    val warnLimits = qContext.plannerParams.warnLimits
+    // TODO the below does not return a particular kind of error code. Most likely this would translate to
+    // an internal error of FiloDB which is not appropriate for the case
+    require(
+      estDataSize < enforcedLimits.timeSeriesSamplesScannedBytes,
+      s"With match of ${pkRecs.length} time series, estimate of $estDataSize bytes exceeds limit of " +
+        s"${enforcedLimits.timeSeriesSamplesScannedBytes} bytes queried " +
+        s"per shard for ${schemas.apply(schemaId).name} schema. " +
+        s"Try one or more of these: " +
+        s"(a) narrow your query filters to reduce to fewer than the current ${pkRecs.length} matches " +
+        s"(b) reduce query time range, currently at ${quRange / 1000 / 60} minutes")
+    require(timeSeries < enforcedLimits.timeSeriesScanned,
+      s"Query matched ${timeSeries} time series, which exceeds a max enforced limit of " +
+        s"${enforcedLimits.timeSeriesScanned} time series allowed to be queried per shard. " +
+        s"Try one or more of these: " +
+        s"(a) narrow your query filters to reduce to fewer than the current ${timeSeries} matches " +
+        s"(b) reduce query time range, currently at ${quRange / 1000 / 60} minutes")
+    if (timeSeries > warnLimits.timeSeriesScanned) {
+      val msg =
+        s"Query matched $timeSeries time series, which exceeds a max warn limit of " +
+          s"${warnLimits.timeSeriesScanned} time series allowed to be queried per shard. "
+      logger.info(qContext.getQueryLogLine(msg))
+    }
+    if (estDataSize > warnLimits.timeSeriesSamplesScannedBytes) {
+      val msg =
+        s"With match of $timeSeries time series, estimate of $estDataSize bytes exceeds " +
+          s"limit of ${warnLimits.timeSeriesSamplesScannedBytes} bytes queried per shard " +
+          s"for ${schemas.apply(schemaId).name} schema. "
+      logger.info(qContext.getQueryLogLine(msg))
     }
   }
 
