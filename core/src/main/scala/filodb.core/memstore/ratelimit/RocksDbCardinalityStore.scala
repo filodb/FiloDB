@@ -27,13 +27,12 @@ import filodb.memory.format.UnsafeUtils
  *   (1) only the least-significant prefix name is stored.
  *   (2) no shard ID is store
  */
-case class CardinalityValue(name: String, tsCount: Int, activeTsCount: Int,
+case class CardinalityValue(tsCount: Int, activeTsCount: Int,
                             childrenCount: Int, childrenQuota: Int)
 
 case object CardinalityValue {
   def fromCardinalityRecord(card: CardinalityRecord): CardinalityValue = {
-    CardinalityValue(if (card.prefix.nonEmpty) card.prefix.last else "",
-                    card.tsCount, card.activeTsCount,
+    CardinalityValue(card.tsCount, card.activeTsCount,
                     card.childrenCount, card.childrenQuota)
   }
 
@@ -47,7 +46,6 @@ case object CardinalityValue {
 
 class CardinalityNodeSerializer extends Serializer[CardinalityValue] {
   def write(kryo: Kryo, output: Output, card: CardinalityValue): Unit = {
-    output.writeString(card.name)
     output.writeInt(card.tsCount, true)
     output.writeInt(card.activeTsCount, true)
     output.writeInt(card.childrenCount, true)
@@ -55,7 +53,7 @@ class CardinalityNodeSerializer extends Serializer[CardinalityValue] {
   }
 
   def read(kryo: Kryo, input: Input, t: Class[CardinalityValue]): CardinalityValue = {
-    CardinalityValue(input.readString(), input.readInt(true), input.readInt(true),
+    CardinalityValue(input.readInt(true), input.readInt(true),
                     input.readInt(true), input.readInt(true))
   }
 }
