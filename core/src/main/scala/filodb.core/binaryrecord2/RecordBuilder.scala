@@ -9,7 +9,7 @@ import spire.syntax.cfor._
 import filodb.core.binaryrecord2.RecordSchema.schemaID
 import filodb.core.metadata.{Column, DatasetOptions, PartitionSchema, Schema, Schemas}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, LongColumn, MapColumn, StringColumn}
-import filodb.core.query.ColumnInfo
+import filodb.core.query.{ColumnInfo, RecordOutOfContainerCapacityException}
 import filodb.memory._
 import filodb.memory.format.{RowReader, SeqRowReader, UnsafeUtils, ZeroCopyUTF8String => ZCUTF8}
 import filodb.memory.format.vectors.Histogram
@@ -540,7 +540,8 @@ class RecordBuilder(memFactory: MemFactory,
       val oldOffset = curRecordOffset
       if (reuseOneContainer) resetContainerPointers() else newContainer()
       logger.trace(s"Moving $recordNumBytes bytes from end of old container to new container")
-      require((containerSize - ContainerHeaderLen) > (recordNumBytes + numBytes), "Record too big for container")
+      if((containerSize - ContainerHeaderLen) <= (recordNumBytes + numBytes))
+        throw new RecordOutOfContainerCapacityException();
       unsafe.copyMemory(oldBase, oldOffset, curBase, curRecordOffset, recordNumBytes)
       if (mapOffset != -1L) mapOffset = curRecordOffset + (mapOffset - oldOffset)
       curRecEndOffset = curRecordOffset + recordNumBytes

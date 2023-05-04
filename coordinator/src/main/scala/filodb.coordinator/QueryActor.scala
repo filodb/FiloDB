@@ -2,12 +2,10 @@ package filodb.coordinator
 
 import java.lang.Thread.UncaughtExceptionHandler
 import java.util.concurrent.{ForkJoinPool, ForkJoinWorkerThread}
-
 import scala.collection.mutable
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.{Failure, Success}
 import scala.util.control.NonFatal
-
 import akka.actor.{ActorRef, Props}
 import akka.pattern.AskTimeoutException
 import kamon.Kamon
@@ -31,6 +29,7 @@ import filodb.core.query.QueryContext
 import filodb.core.query.QueryLimitException
 import filodb.core.query.QuerySession
 import filodb.core.query.QueryStats
+import filodb.core.query.RecordOutOfContainerCapacityException
 import filodb.core.query.SerializedRangeVector
 import filodb.core.store.CorruptVectorException
 import filodb.memory.data.Shutdown
@@ -247,6 +246,9 @@ final class QueryActor(memStore: TimeSeriesStore,
             s"${q.queryContext.origQueryParams} ${t.getMessage}")
         case _: QueryLimitException =>
           logger.warn(s"Query Limit Breached " +
+            s"${q.queryContext.origQueryParams} ${t.getMessage}")
+        case _: RecordOutOfContainerCapacityException =>
+          logger.warn(s"Query is greater than container capacity" +
             s"${q.queryContext.origQueryParams} ${t.getMessage}")
         case e: Throwable =>
           logger.error(s"Query Error queryId=${q.queryContext.queryId} " +

@@ -177,3 +177,9 @@ class QueryLimitException(message: String, queryId: String) extends RuntimeExcep
     s"${super.getMessage}, queryId=${queryId}"
   }
 }
+
+/**
+ * Thrown when number of bytes is greater than container.
+ */
+class RecordOutOfContainerCapacityException() extends RuntimeException(
+  "The intermediate or final result for the query is too big. Please try to add more query filters or time range.") {}
