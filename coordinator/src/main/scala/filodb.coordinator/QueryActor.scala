@@ -248,7 +248,7 @@ final class QueryActor(memStore: TimeSeriesStore,
           logger.warn(s"Query Limit Breached " +
             s"${q.queryContext.origQueryParams} ${t.getMessage}")
         case _: RecordOutOfContainerCapacityException =>
-          logger.warn(s"Query is greater than container capacity" +
+          logger.warn(s"The intermediate or final result of the Query is greater than container capacity" +
             s"${q.queryContext.origQueryParams} ${t.getMessage}")
         case e: Throwable =>
           logger.error(s"Query Error queryId=${q.queryContext.queryId} " +

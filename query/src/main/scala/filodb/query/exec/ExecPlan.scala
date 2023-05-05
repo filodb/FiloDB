@@ -286,6 +286,13 @@ trait ExecPlan extends QueryCommand {
     }
   }
 
+  private def transformThrowable(t: Throwable) : Throwable = {
+    if (t.isInstanceOf[RecordOutOfContainerCapacityException]) {
+      new QueryRecordOutOfContainerCapacityException()
+    } else {
+      t
+    }
+  }
 
   /**
   * Facade for the execution orchestration of the plan sub-tree
@@ -395,7 +402,7 @@ trait ExecPlan extends QueryCommand {
         }
       }
       resultTask.onErrorHandle { case ex: Throwable =>
-        QueryError(queryContext.queryId, querySession.queryStats, ex)
+        QueryError(queryContext.queryId, querySession.queryStats, transformThrowable(ex))
       }
     }
 
@@ -451,7 +458,7 @@ trait ExecPlan extends QueryCommand {
                     qResult <- step2(res) }
               yield { qResult }
     val ret = qresp.onErrorRecover { case NonFatal(ex) =>
-      QueryError(queryContext.queryId, querySession.queryStats, ex)
+      QueryError(queryContext.queryId, querySession.queryStats, transformThrowable(ex))
     }
     qLogger.debug(s"Constructed monix query execution pipeline for $this")
     ret

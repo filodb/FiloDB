@@ -541,7 +541,7 @@ class RecordBuilder(memFactory: MemFactory,
       if (reuseOneContainer) resetContainerPointers() else newContainer()
       logger.trace(s"Moving $recordNumBytes bytes from end of old container to new container")
       if((containerSize - ContainerHeaderLen) <= (recordNumBytes + numBytes))
-        throw new RecordOutOfContainerCapacityException();
+        throw new RecordOutOfContainerCapacityException("record too big for container");
       unsafe.copyMemory(oldBase, oldOffset, curBase, curRecordOffset, recordNumBytes)
       if (mapOffset != -1L) mapOffset = curRecordOffset + (mapOffset - oldOffset)
       curRecEndOffset = curRecordOffset + recordNumBytes
