@@ -137,7 +137,7 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
             promQl = LogicalPlanParser.convertToQuery(newLogicalPlan),
             startSecs = psp.startMs / 1000,
             endSecs = psp.endMs / 1000,
-            stepSecs =  psp.stepMs / 1000
+            stepSecs = psp.stepMs / 1000
           )
         }
         case _ => queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
