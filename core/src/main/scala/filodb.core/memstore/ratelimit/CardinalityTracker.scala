@@ -71,23 +71,26 @@ class CardinalityTracker(ref: DatasetRef,
     // first make sure there is no breach for any prefix
     (0 to shardKey.length).foreach { i =>
       val prefix = shardKey.take(i)
-      val old = store.getOrZero(prefix, CardinalityRecord(shard, prefix, 0, 0, 0, defaultChildrenQuota(i)))
-      val neu = old.copy(tsCount = old.tsCount + totalDelta,
-                         activeTsCount = old.activeTsCount + activeDelta,
-        childrenCount = if (i == shardKeyLen) old.childrenCount + totalDelta else old.childrenCount)
-      if (i == shardKeyLen && neu.tsCount > neu.childrenQuota) {
-        quotaExceededProtocol.quotaExceeded(ref, shard, prefix, neu.childrenQuota)
-        throw QuotaReachedException(shardKey, prefix, neu.childrenQuota)
+      val old = store.getOrZero(prefix,
+        CardinalityRecord(shard, prefix, CardinalityValue(0, 0, 0, defaultChildrenQuota(i))))
+
+      val neu = old.copy(value = old.value.copy(tsCount = old.value.tsCount + totalDelta,
+                         activeTsCount = old.value.activeTsCount + activeDelta,
+        childrenCount = if (i == shardKeyLen) old.value.childrenCount + totalDelta else old.value.childrenCount))
+
+      if (i == shardKeyLen && neu.value.tsCount > neu.value.childrenQuota) {
+        quotaExceededProtocol.quotaExceeded(ref, shard, prefix, neu.value.childrenQuota)
+        throw QuotaReachedException(shardKey, prefix, neu.value.childrenQuota)
       }
 
       // Updating children count of the parent prefix, when a new child is added
-      if (i > 0 && neu.tsCount == 1 && totalDelta == 1) { // parent's new child
+      if (i > 0 && neu.value.tsCount == 1 && totalDelta == 1) { // parent's new child
         val parent = toStore(i - 1)
-        val neuParent = parent.copy(childrenCount = parent.childrenCount + 1)
+        val neuParent = parent.copy(value = parent.value.copy(childrenCount = parent.value.childrenCount + 1))
         toStore(i - 1) = neuParent
-        if (neuParent.childrenCount > neuParent.childrenQuota) {
-          quotaExceededProtocol.quotaExceeded(ref, shard, parent.prefix, neuParent.childrenQuota)
-          throw QuotaReachedException(shardKey, parent.prefix, neuParent.childrenQuota)
+        if (neuParent.value.childrenCount > neuParent.value.childrenQuota) {
+          quotaExceededProtocol.quotaExceeded(ref, shard, parent.prefix, neuParent.value.childrenQuota)
+          throw QuotaReachedException(shardKey, parent.prefix, neuParent.value.childrenQuota)
         }
       }
       toStore += neu
@@ -110,7 +113,7 @@ class CardinalityTracker(ref: DatasetRef,
     require(shardKeyPrefix.length <= shardKeyLen, s"Too many shard keys in $shardKeyPrefix - max $shardKeyLen")
     store.getOrZero(
       shardKeyPrefix,
-      CardinalityRecord(shard, shardKeyPrefix, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
+      CardinalityRecord(shard, shardKeyPrefix, CardinalityValue(0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length))))
   }
 
   /**
@@ -127,8 +130,8 @@ class CardinalityTracker(ref: DatasetRef,
     logger.debug(s"Setting children quota for $shardKeyPrefix as $childrenQuota")
     val old = store.getOrZero(
       shardKeyPrefix,
-      CardinalityRecord(shard, shardKeyPrefix, 0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length)))
-    val neu = old.copy(childrenQuota = childrenQuota)
+      CardinalityRecord(shard, shardKeyPrefix, CardinalityValue(0, 0, 0, defaultChildrenQuota(shardKeyPrefix.length))))
+    val neu = old.copy(value = old.value.copy(childrenQuota = childrenQuota))
     store.store(neu)
     neu
   }
@@ -152,16 +155,17 @@ class CardinalityTracker(ref: DatasetRef,
       require(shardKey.length == shardKeyLen, "full shard key is needed")
       val toStore = (0 to shardKey.length).map { i =>
         val prefix = shardKey.take(i)
-        val old = store.getOrZero(prefix, CardinalityRecord(shard, Nil, 0, 0, 0, defaultChildrenQuota(i)))
-        if (old.tsCount == 0)
+        val old = store.getOrZero(prefix,
+          CardinalityRecord(shard, Nil, CardinalityValue(0, 0, 0, defaultChildrenQuota(i))))
+        if (old.value.tsCount == 0)
           throw new IllegalArgumentException(s"$prefix count is already zero - cannot reduce " +
             s"further. A double delete likely happened.")
-        val neu = old.copy(tsCount = old.tsCount - 1,
-                          childrenCount = if (i == shardKeyLen) old.childrenCount-1 else old.childrenCount)
+        val neu = old.copy(value = old.value.copy(tsCount = old.value.tsCount - 1,
+                          childrenCount = if (i == shardKeyLen) old.value.childrenCount-1 else old.value.childrenCount))
         (prefix, neu)
       }
       toStore.map { case (prefix, neu) =>
-        if (neu == CardinalityRecord(shard, prefix, 0, 0, 0, defaultChildrenQuota(prefix.length))) {
+        if (neu == CardinalityRecord(shard, prefix, CardinalityValue(0, 0, 0, defaultChildrenQuota(prefix.length)))) {
           // node can be removed
           store.remove(prefix)
         } else {

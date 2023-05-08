@@ -560,7 +560,7 @@ final case class TsCardExec(queryContext: QueryContext,
             dataset, Seq(shard), shardKeyPrefix, numGroupByFields)
           val it = cards.map{ card =>
             CardRowReader(prefixToGroup(card.prefix),
-                          CardCounts(card.activeTsCount, card.tsCount))
+                          CardCounts(card.value.activeTsCount, card.value.tsCount))
             }.iterator
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
         }

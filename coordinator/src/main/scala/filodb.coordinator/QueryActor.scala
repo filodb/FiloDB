@@ -315,8 +315,8 @@ final class QueryActor(memStore: TimeSeriesStore,
   private def execTopkCardinalityQuery(q: GetTopkCardinality, sender: ActorRef): Unit = {
     implicit val ord = new Ordering[CardinalityRecord]() {
       override def compare(x: CardinalityRecord, y: CardinalityRecord): Int = {
-        if (q.addInactive) x.tsCount - y.tsCount
-        else x.activeTsCount - y.activeTsCount
+        if (q.addInactive) x.value.tsCount - y.value.tsCount
+        else x.value.activeTsCount - y.value.activeTsCount
       }
     }.reverse
     try {
