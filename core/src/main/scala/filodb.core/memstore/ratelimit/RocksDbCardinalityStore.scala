@@ -31,16 +31,10 @@ case class CardinalityValue(tsCount: Int, activeTsCount: Int,
                             childrenCount: Int, childrenQuota: Int)
 
 case object CardinalityValue {
-  def fromCardinalityRecord(card: CardinalityRecord): CardinalityValue = {
-    CardinalityValue(card.tsCount, card.activeTsCount,
-                    card.childrenCount, card.childrenQuota)
-  }
-
   def toCardinalityRecord(card: CardinalityValue,
                           prefix: Seq[String],
                           shard: Int): CardinalityRecord = {
-    CardinalityRecord(shard, prefix, card.tsCount, card.activeTsCount,
-                      card.childrenCount, card.childrenQuota)
+    CardinalityRecord(shard, prefix, card)
   }
 }
 
@@ -247,7 +241,7 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
   override def store(card: CardinalityRecord): Unit = {
     val key = toCompleteStringKey(card.prefix).getBytes(StandardCharsets.UTF_8)
     logger.debug(s"Storing shard=$shard dataset=$ref ${new String(key)} with $card")
-    db.put(key, cardinalityValueToBytes(CardinalityValue.fromCardinalityRecord(card)))
+    db.put(key, cardinalityValueToBytes(card.value))
   }
 
   def getOrZero(shardKeyPrefix: Seq[String], zero: CardinalityRecord): CardinalityRecord = {
@@ -314,8 +308,8 @@ class RocksDbCardinalityStore(ref: DatasetRef, shard: Int) extends CardinalitySt
             it.next()
           } while (it.isValid())
         }
-        buf.append(CardinalityRecord(shard, OVERFLOW_PREFIX,
-          tsCount, activeTsCount, childrenCount, childrenQuota))
+        buf.append(CardinalityRecord(shard, OVERFLOW_PREFIX, CardinalityValue(
+          tsCount, activeTsCount, childrenCount, childrenQuota)))
       }
     } finally {
       it.close();

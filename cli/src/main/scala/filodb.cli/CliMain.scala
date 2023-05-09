@@ -197,10 +197,10 @@ object CliMain extends StrictLogging {
             printf("%40s %20s %20s %15s %15s\n", "Child", "TotalTimeSeries", "ActiveTimeSeries", "Children", "Children")
             printf("%40s %20s %20s %15s %15s\n", "Name", "Count", "Count", "Count", "Quota")
             println("==============================================================================================================================")
-            crs._2.sortBy(c => if (addInactive) c.tsCount else c.activeTsCount)(Ordering.Int.reverse)
+            crs._2.sortBy(c => if (addInactive) c.value.tsCount else c.value.activeTsCount)(Ordering.Int.reverse)
               .foreach { cr =>
-                printf("%40s %20d %20d %15d %15d\n", cr.prefix, cr.tsCount,
-                       cr.activeTsCount, cr.childrenCount, cr.childrenQuota)
+                printf("%40s %20d %20d %15d %15d\n", cr.prefix, cr.value.tsCount,
+                       cr.value.activeTsCount, cr.value.childrenCount, cr.value.childrenQuota)
               }
           }
 

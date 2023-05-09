@@ -918,7 +918,7 @@ class TimeSeriesShard(val ref: DatasetRef,
             p.schema.options.shardKeyColumns)
           val newCard = cardTracker.modifyCount(shardKey, 0, -1)
           // temporary debugging since we are seeing some negative counts
-          if (newCard.exists(_.activeTsCount < 0))
+          if (newCard.exists(_.value.activeTsCount < 0))
             logger.error(s"For some reason, activeTs count negative when updating card for " +
               s"partKey: ${p.stringPartition} newCard: $newCard oldActivelyIngestingSize=$oldActivelyIngestingSize " +
               s"newActivelyIngestingSize=${activelyIngesting.size}")
