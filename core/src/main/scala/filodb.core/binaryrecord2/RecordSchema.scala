@@ -289,6 +289,33 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
     result
   }
 
+  def toStringPairsMap(base: Any, offset: Long): mutable.Map[String, String] = {
+    import Column.ColumnType._
+    val result = mutable.Map[String, String]()
+    columnTypes.zipWithIndex.foreach {
+      case (IntColumn, i) => result(colNames(i)) = getInt(base, offset, i).toString
+      case (LongColumn, i) => result(colNames(i)) = getLong(base, offset, i).toString
+      case (DoubleColumn, i) => result(colNames(i)) = getDouble(base, offset, i).toString
+      case (StringColumn, i) => result(colNames(i)) = asJavaString(base, offset, i)
+      case (TimestampColumn, i) => result(colNames(i)) = getLong(base, offset, i).toString
+      case (MapColumn, i) => val consumer = new StringifyMapItemConsumer
+        consumeMapItems(base, offset, i, consumer)
+        result ++= consumer.stringPairs
+      case (BinaryRecordColumn, i) => result ++= brSchema(i).toStringPairs(blobBase(base, offset, i),
+        blobOffset(base, offset, i))
+        result += ("_type_" ->
+          Schemas.global.schemaName(
+            RecordSchema.schemaID(blobBase(base, offset, i),
+              blobOffset(base, offset, i))))
+      case (HistogramColumn, i) =>
+        result(colNames(i)) = bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i)).toString
+    }
+    result
+  }
+
+  def toStringPairsMap(bytes: Array[Byte]): mutable.Map[String, String] =
+    toStringPairsMap(bytes, UnsafeUtils.arayOffset)
+
   def colNames(base: Any, offset: Long): Seq[String] = {
     import Column.ColumnType._
     val result = new collection.mutable.ArrayBuffer[String]

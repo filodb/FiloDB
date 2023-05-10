@@ -19,6 +19,8 @@ import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
 import scala.util.Random
 
+import filodb.core.metadata.{Dataset, DatasetOptions}
+
 class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfter {
   import Filter._
   import GdeltTestData._
@@ -199,6 +201,23 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     }
     numHits shouldEqual 5
     partIdsIngesting shouldEqual Seq(1, 3, 5, 7, 9)
+
+  }
+
+  it("run ds cardinality") {
+    val ds_data_dir = """/Users/sandeep/test_dir"""
+    val columns = Seq("timestamp:ts", "min:double", "avg:double", "max:double", "count:long")
+    val options = DatasetOptions.DefaultOptions.copy(metricColumn = "series")
+    val dataset1 = Dataset("metrics1", Seq("series:string"), columns, options)
+    val schema1 = dataset1.schema.partition
+
+    val idx = new PartKeyLuceneIndex(dataset1.ref, schema1, false,
+      false, 10, 1000000,
+      Some(new java.io.File(ds_data_dir)),
+      None
+    )
+    val (docsCount, totalBytes) = idx.getAllDocsCount()
+    print(docsCount)
 
   }
 

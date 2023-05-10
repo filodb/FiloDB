@@ -6,7 +6,6 @@ import java.nio.charset.StandardCharsets
 import java.util
 import java.util.{Base64, PriorityQueue}
 import java.util.regex.Pattern
-
 import scala.collection.JavaConverters._
 import scala.collection.immutable.HashSet
 import scala.collection.mutable
@@ -14,7 +13,6 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.Failure
 import scala.util.Success
 import scala.util.Try
-
 import com.github.benmanes.caffeine.cache.{Caffeine, LoadingCache}
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
@@ -33,12 +31,11 @@ import org.apache.lucene.store.{MMapDirectory, NIOFSDirectory}
 import org.apache.lucene.util.{BytesRef, InfoStream}
 import org.apache.lucene.util.automaton.RegExp
 import spire.syntax.cfor._
-
-import filodb.core.{concurrentCache, DatasetRef}
+import filodb.core.{DatasetRef, GlobalConfig, concurrentCache}
 import filodb.core.Types.PartitionKey
 import filodb.core.binaryrecord2.MapItemConsumer
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
-import filodb.core.metadata.PartitionSchema
+import filodb.core.metadata.{PartitionSchema, Schemas}
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.query.Filter._
 import filodb.memory.{BinaryRegionLarge, UTF8StringMedium, UTF8StringShort}
@@ -158,28 +155,29 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   private val numPartColumns = schema.columns.length
 
+  val indexDiskLocation = diskLocation.get.toPath
 
-  val indexDiskLocation = diskLocation.map(new File(_, ref.dataset + File.separator + shardNum))
-    .getOrElse(createTempDir(ref, shardNum)).toPath
+//    .map(new File(_, ref.dataset + File.separator + shardNum))
+//    .getOrElse(createTempDir(ref, shardNum)).toPath
 
   // If index rebuild is triggered or the state is Building, simply clean up the index directory and start
   // index rebuild
-  if (
-    lifecycleManager.forall(_.shouldTriggerRebuild(ref, shardNum))
-  ) {
-    logger.info(s"Cleaning up indexDirectory=$indexDiskLocation for  dataset=$ref, shard=$shardNum")
-    deleteRecursively(indexDiskLocation.toFile) match {
-      case Success(_) => // Notify the handler that the directory is now empty
-        logger.info(s"Cleaned directory for dataset=$ref, shard=$shardNum and index directory=$indexDiskLocation")
-        notifyLifecycleListener(IndexState.Empty, System.currentTimeMillis)
-
-      case Failure(t) => // Update index state as TriggerRebuild again and rethrow the exception
-        logger.warn(s"Exception while deleting directory for dataset=$ref, shard=$shardNum " +
-          s"and index directory=$indexDiskLocation with stack trace", t)
-        notifyLifecycleListener(IndexState.TriggerRebuild, System.currentTimeMillis)
-        throw new IllegalStateException("Unable to clean up index directory", t)
-    }
-  }
+//  if (
+//    lifecycleManager.forall(_.shouldTriggerRebuild(ref, shardNum))
+//  ) {
+//    logger.info(s"Cleaning up indexDirectory=$indexDiskLocation for  dataset=$ref, shard=$shardNum")
+//    deleteRecursively(indexDiskLocation.toFile) match {
+//      case Success(_) => // Notify the handler that the directory is now empty
+//        logger.info(s"Cleaned directory for dataset=$ref, shard=$shardNum and index directory=$indexDiskLocation")
+//        notifyLifecycleListener(IndexState.Empty, System.currentTimeMillis)
+//
+//      case Failure(t) => // Update index state as TriggerRebuild again and rethrow the exception
+//        logger.warn(s"Exception while deleting directory for dataset=$ref, shard=$shardNum " +
+//          s"and index directory=$indexDiskLocation with stack trace", t)
+//        notifyLifecycleListener(IndexState.TriggerRebuild, System.currentTimeMillis)
+//        throw new IllegalStateException("Unable to clean up index directory", t)
+//    }
+//  }
   //else {
   // TODO here we assume there is non-empty index which we need to validate
   //}
@@ -770,6 +768,17 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     coll.topKPartIDsBitmap()
   }
 
+  /**
+   * Get All Doc count
+   */
+  def getAllDocsCount(): (Long, Long) = {
+    val coll = new AllPartKeyCollector()
+    withNewSearcher(s => s.search(new MatchAllDocsQuery(), coll))
+    val docsCount = coll.getDocsCount()
+    val totalBytes = coll.getTotalBytes()
+    (docsCount, totalBytes)
+  }
+
   def foreachPartKeyStillIngesting(func: (Int, BytesRef) => Unit): Int = {
     val coll = new ActionCollector(func)
     withNewSearcher(s => s.search(LongPoint.newExactQuery(END_TIME, Long.MaxValue), coll))
@@ -1026,6 +1035,48 @@ class SinglePartIdCollector extends SimpleCollector {
     } else {
       throw new IllegalStateException("This shouldn't happen since every document should have a partKeyDv")
     }
+  }
+
+  override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
+}
+
+class AllPartKeyCollector extends SimpleCollector {
+
+  var partKeyDv: BinaryDocValues = _
+  var singleResult: BytesRef = _
+  var docsCount = 0L
+  var totalBytes = 0L
+
+  val allConfig = GlobalConfig.configToDisableAkkaCluster.withFallback(GlobalConfig.systemConfig)
+  val config = allConfig.getConfig("filodb")
+  val partSchema = Schemas.fromConfig(config).get.part
+
+  // gets called for each segment
+  override def doSetNextReader(context: LeafReaderContext): Unit = {
+    partKeyDv = context.reader().getBinaryDocValues(PartKeyLuceneIndex.PART_KEY)
+  }
+
+  // gets called for each matching document in current segment
+  override def collect(doc: Int): Unit = {
+    if (partKeyDv.advanceExact(doc)) {
+      singleResult = partKeyDv.binaryValue()
+      val localBytes = singleResult.bytes
+      var localMap = partSchema.binSchema.toStringPairsMap(localBytes)
+      println("ws:"+ localMap.get("_ws_") + " | ns:"+ localMap.get("_ns_") + " | metric:"+ localMap.get("_metric_"))
+      // track metrics
+      totalBytes += localBytes.length
+      docsCount += 1
+    } else {
+      throw new IllegalStateException("This shouldn't happen since every document should have a partKeyDv")
+    }
+  }
+
+  def getDocsCount() : Long = {
+    docsCount
+  }
+
+  def getTotalBytes(): Long = {
+    totalBytes
   }
 
   override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
