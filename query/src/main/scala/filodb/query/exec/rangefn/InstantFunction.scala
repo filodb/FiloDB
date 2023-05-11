@@ -98,6 +98,7 @@ object InstantFunction {
       case DayOfWeek          => DayOfWeekImpl()
       case DaysInMonth        => DaysInMonthImpl()
       case DayOfMonth         => DayOfMonthImpl()
+      case OrVectorDouble           => OrVectorImpl()
       case _                  => throw new UnsupportedOperationException(s"$function not supported.")
     }
   }
@@ -139,6 +140,13 @@ final case class ClampMaxImpl() extends DoubleInstantFunction {
     require(scalarParams.size == 1,
       "Cannot use ClampMax without providing a upper limit of max.")
     scala.math.min(value, scalarParams.head)
+  }
+}
+
+final case class OrVectorImpl() extends DoubleInstantFunction {
+  override def apply(value: Double, scalarParams: Seq[Double]): Double = {
+    require(scalarParams.size == 1, "OrVector needs a single double param")
+    if (value.isNaN) scalarParams.head else value
   }
 }
 

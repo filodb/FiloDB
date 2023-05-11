@@ -18,7 +18,6 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.exceptions.ExecutionRejectedException
 import monix.execution.schedulers.SchedulerService
-import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
 
@@ -27,7 +26,12 @@ import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, TermInfo, TimeSeriesStore}
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.{Dataset, Schemas}
-import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryStats}
+import filodb.core.query.QueryConfig
+import filodb.core.query.QueryContext
+import filodb.core.query.QueryLimitException
+import filodb.core.query.QuerySession
+import filodb.core.query.QueryStats
+import filodb.core.query.SerializedRangeVector
 import filodb.core.store.CorruptVectorException
 import filodb.memory.data.Shutdown
 import filodb.query._
@@ -186,6 +190,7 @@ final class QueryActor(memStore: TimeSeriesStore,
                 case _ =>
               }
             }.guarantee(Task.eval {
+              SerializedRangeVector.queryCpuTime.increment(querySession.queryStats.totalCpuNanos)
               querySession.close()
               queryExecuteSpan.finish()
             }).completedL
@@ -210,6 +215,7 @@ final class QueryActor(memStore: TimeSeriesStore,
                 case _ =>
               }
             }.guarantee(Task.eval {
+              SerializedRangeVector.queryCpuTime.increment(querySession.queryStats.totalCpuNanos)
               queryExecuteSpan.finish()
               querySession.close()
             })
@@ -239,6 +245,9 @@ final class QueryActor(memStore: TimeSeriesStore,
         case _: QueryTimeoutException | _: ExecutionRejectedException => // log just message, no need for stacktrace
           logger.error(s"Query Error ${t.getClass.getSimpleName} queryId=${q.queryContext.queryId} " +
             s"${q.queryContext.origQueryParams} ${t.getMessage}")
+        case _: QueryLimitException =>
+          logger.warn(s"Query Limit Breached " +
+            s"${q.queryContext.origQueryParams} ${t.getMessage}")
         case e: Throwable =>
           logger.error(s"Query Error queryId=${q.queryContext.queryId} " +
             s"${q.queryContext.origQueryParams}", e)
@@ -259,7 +268,7 @@ final class QueryActor(memStore: TimeSeriesStore,
         val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
         if (PlanDispatcher.streamingResultsEnabled) {
           val res = queryPlanner.dispatchStreamingExecPlan(execPlan, Kamon.currentSpan())(queryScheduler, 30.seconds)
-          streamToFatQueryResponse(q.qContext, res).runToFuture(queryScheduler).onComplete {
+          queryengine.Utils.streamToFatQueryResponse(q.qContext, res).runToFuture(queryScheduler).onComplete {
             case Success(resp) => replyTo ! resp
             case Failure(e) => replyTo ! QueryError(q.qContext.queryId, QueryStats(), e)
           }(queryScheduler)
@@ -275,27 +284,7 @@ final class QueryActor(memStore: TimeSeriesStore,
     }
   }
 
-  def streamToFatQueryResponse(queryContext: QueryContext,
-                               resp: Observable[StreamQueryResponse]): Task[QueryResponse] = {
-    resp.takeWhileInclusive(!_.isLast).toListL.map { r =>
-      r.collectFirst {
-        case StreamQueryError(id, stats, t) => QueryError(id, stats, t)
-      }
-      .getOrElse {
-        val header = r.collectFirst {
-          case h: StreamQueryResultHeader => h
-        }.getOrElse(throw new IllegalStateException(s"Did not get a header for query id ${queryContext.queryId}"))
-        val rvs = r.collect {
-          case StreamQueryResult(id, rv) => rv
-        }
-        val footer = r.lastOption.collect {
-          case f: StreamQueryResultFooter => f
-        }.getOrElse(StreamQueryResultFooter(queryContext.queryId))
-        QueryResult(queryContext.queryId, header.resultSchema, rvs,
-                  footer.queryStats, footer.mayBePartial, footer.partialResultReason)
-      }
-    }
-  }
+
 
   private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef): Unit = {
     if (checkTimeoutBeforeQueryExec(q.qContext, replyTo)) {
@@ -327,9 +316,9 @@ final class QueryActor(memStore: TimeSeriesStore,
     implicit val ord = new Ordering[CardinalityRecord]() {
       override def compare(x: CardinalityRecord, y: CardinalityRecord): Int = {
         if (q.addInactive) x.tsCount - y.tsCount
-          else x.activeTsCount - y.activeTsCount
-        }
-      }.reverse
+        else x.activeTsCount - y.activeTsCount
+      }
+    }.reverse
     try {
       val cards = memStore.scanTsCardinalities(q.dataset, q.shards, q.shardKeyPrefix, q.depth)
       val heap = mutable.PriorityQueue[CardinalityRecord]()
@@ -337,7 +326,7 @@ final class QueryActor(memStore: TimeSeriesStore,
           heap.enqueue(card)
           if (heap.size > q.k) heap.dequeue()
         }
-      sender ! heap.toSeq
+      sender ! TopkCardinalityResult(heap.toSeq)
     } catch { case e: Exception =>
       sender ! QueryError(s"Error Occurred", QueryStats(), e)
     }

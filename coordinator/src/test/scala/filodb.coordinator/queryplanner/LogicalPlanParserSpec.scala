@@ -127,15 +127,22 @@ class LogicalPlanParserSpec extends AnyFunSpec with Matchers {
   it("should convert metadata series match query1") {
     val query = """http_requests_total{job="app"}"""
     val lp = Parser.metadataQueryToLogicalPlan(query, TimeStepParams(1000, 10, 2000))
-    val res = LogicalPlanParser.metatadataMatchToQuery(lp.asInstanceOf[SeriesKeysByFilters])
-    res shouldEqual "http_requests_total{job=\"app\"}"
+    val res = LogicalPlanParser.metadataMatchToQuery(lp.asInstanceOf[SeriesKeysByFilters])
+    res shouldEqual "{job=\"app\",__name__=\"http_requests_total\"}"
   }
 
   it("should convert metadata series match query2") {
     val query = """{__name__="http_requests_total", job=~"app|job"}"""
     val lp = Parser.metadataQueryToLogicalPlan(query, TimeStepParams(1000, 10, 2000))
-    val res = LogicalPlanParser.metatadataMatchToQuery(lp.asInstanceOf[SeriesKeysByFilters])
-    res shouldEqual "http_requests_total{job=~\"app|job\"}"
+    val res = LogicalPlanParser.metadataMatchToQuery(lp.asInstanceOf[SeriesKeysByFilters])
+    res shouldEqual "{__name__=\"http_requests_total\",job=~\"app|job\"}"
+  }
+
+  it("should convert metadata match query with __name__ regEx") {
+    val query = """{__name__=~".*http_requests.*",job="app"}"""
+    val lp = Parser.metadataQueryToLogicalPlan(query, TimeStepParams(1000, 10, 2000))
+    val res = LogicalPlanParser.metadataMatchToQuery(lp.asInstanceOf[SeriesKeysByFilters])
+    res shouldEqual "{__name__=~\".*http_requests.*\",job=\"app\"}"
   }
 
   it("should convert scalar vector operation query") {

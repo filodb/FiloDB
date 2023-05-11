@@ -102,8 +102,13 @@ import filodb.query.exec._
         // the queestion is only from which cluster: raw or downsample to pull potentially partial data
         // how does copyLogicalPlan with updated end changes the meanings of these queries entirely
         // Why not get rid of this else all together and just send original logical plan to downsample cluster?
+
+        // latestDownsampleTimestampFn + offsetMillis.min gives time in milliseconds and some of our plans like
+        // ScalarFixedDoublePlan accept times in seconds. Thus cases like sum(rate(foo{}[longtime])) or vector(0)
+        // this mismatch in end time for LHS and RHS causes the Binary join object creation to fail and even plan
+        // materialize to fail.
         copyLogicalPlanWithUpdatedTimeRange(periodicSeriesPlan,
-          TimeRange(periodicSeriesPlan.startMs, latestDownsampleTimestampFn + offsetMillis.min))
+          TimeRange(periodicSeriesPlan.startMs, (latestDownsampleTimestampFn + offsetMillis.min) / 1000 * 1000))
       }
       logger.debug("materializing against downsample cluster:: {}", qContext.origQueryParams)
       downsampleClusterPlanner.materialize(downsampleLp, qContext)

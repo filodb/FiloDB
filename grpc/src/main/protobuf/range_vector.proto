@@ -1,0 +1,130 @@
+syntax="proto3";
+
+package filodb.grpc;
+
+//import "google/protobuf/timestamp.proto";
+option java_outer_classname = "ProtoRangeVector";
+option java_generate_equals_and_hash = true;
+
+message SerializedRangeVector {
+  RangeVectorKey key                = 1;
+  uint32 numRowsSerialized          = 2;
+  repeated bytes recordContainers   = 3;
+  RecordSchema recordSchema         = 4;
+  optional RvRange rvRange          = 5;
+  uint32 startRecordNo              = 6;
+}
+
+// Similar to RvRange
+message RangeParams {
+  int64 startSecs = 1;
+  int64 endSecs   = 2;
+  int64 step      = 3;
+}
+
+
+
+// These are all ScalarSingleValue and duplicate, alternate option is to create one Message and an enum
+// to differentiate. Having 1-1 mapping between the classes and message is simpler and easy to understand
+
+message ScalarFixedDouble {
+  RangeParams rangeParams = 1;
+  double value           = 2;
+}
+
+message TimeScalar {
+  RangeParams rangeParams = 1;
+}
+
+message HourScalar {
+  RangeParams rangeParams = 1;
+}
+
+message MinuteScalar {
+  RangeParams rangeParams = 1;
+}
+
+message MonthScalar {
+  RangeParams rangeParams = 1;
+}
+
+message YearScalar {
+  RangeParams rangeParams = 1;
+}
+
+message DayOfMonthScalar {
+  RangeParams rangeParams = 1;
+}
+
+message DayOfWeekScalar {
+  RangeParams rangeParams = 1;
+}
+
+message DaysInMonthScalar {
+  RangeParams rangeParams = 1;
+}
+
+message ScalarVaryingDouble {
+  map<int64, double> timeValueMap   = 1;
+  optional RvRange rvRange          = 2;
+}
+
+message SerializableRangeVector {
+  oneof rangeVector {
+    SerializedRangeVector serializedRangeVector = 1;
+    ScalarFixedDouble  scalarFixedDouble        = 2;
+    TimeScalar  timeScalar                      = 3;
+    HourScalar  hourScalar                      = 4;
+    MinuteScalar minuteScalar                   = 5;
+    MonthScalar monthScalar                     = 6;
+    YearScalar yearScalar                       = 7;
+    DayOfMonthScalar dayOfMonthScalar           = 8;
+    DayOfWeekScalar  dayOfWeekScalar            = 9;
+    DaysInMonthScalar daysInMonthScalar         = 10;
+    ScalarVaryingDouble scalarVaryingDouble     = 11;
+  }
+}
+
+message RangeVectorKey {
+  map<string, string> labels = 1;
+}
+
+message RecordSchema {
+  repeated ColumnInfo  columns        = 1;
+  optional uint32 partitionFieldStart = 2;
+  repeated string predefinedKeys      = 3;
+  map<uint32, RecordSchema> brSchema  = 4;
+  uint32 schemaVersion                = 5;
+}
+
+
+message ColumnInfo {
+  string  name                       = 1;
+  ColumnType columnType              = 2;
+}
+
+enum ColumnType {
+    IntColumn                        = 0;
+    LongColumn                       = 1;
+    DoubleColumn                     = 2;
+    StringColumn                     = 3;
+    TimestampColumn                  = 4;
+    MapColumn                        = 5;
+    BinaryRecordColumn               = 6;
+    HistogramColumn                  = 7;
+}
+
+message ResultSchema {
+  uint32  numRowKeys                      = 1;
+  map<uint32, RecordSchema> brSchemas     = 2;
+  repeated ColumnInfo columns             = 3;
+  repeated int32 colIds                   = 4;
+  optional uint32 fixedVectorLen          = 5;
+}
+
+
+message RvRange {
+  int64 startMs = 1;
+  int64 endMs = 2;
+  int64 step = 3;
+}

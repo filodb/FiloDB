@@ -22,6 +22,7 @@ import filodb.core.query.{PromQlQueryParams, QuerySession, QueryStats}
 import filodb.core.store.ChunkSource
 import filodb.query._
 
+
 trait RemoteExec extends LeafExecPlan with StrictLogging {
 
   def queryEndpoint: String
@@ -78,10 +79,31 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
         "histogramMap" -> "true",
         "skipAggregatePresent" -> queryContext.plannerParams.skipAggregatePresent.toString,
         "verbose" -> promQlQueryParams.verbose.toString)
+    finalUrlParams = finalUrlParams ++ getLimitsMap()
     if (queryContext.plannerParams.spread.isDefined)
       finalUrlParams = finalUrlParams + ("spread" -> queryContext.plannerParams.spread.get.toString)
     logger.debug("URLParams for RemoteExec:" + finalUrlParams)
     finalUrlParams
+  }
+
+  def getLimitsMap(): Map[String, String] = {
+    var w = queryContext.plannerParams.warnLimits;
+    var e = queryContext.plannerParams.enforcedLimits;
+    var limitParams = Map(
+      "warnExecPlanSamples" -> w.execPlanSamples.toString,
+      "warnResultByteLimit" -> w.execPlanResultBytes.toString,
+      "warnGroupByCardinality" -> w.groupByCardinality.toString,
+      "warnJoinQueryCardinality" -> w.joinQueryCardinality.toString,
+      "warnTimeSeriesSamplesScannedBytes" -> w.timeSeriesSamplesScannedBytes.toString,
+      "warnTimeSeriesScanned" -> w.timeSeriesScanned.toString,
+      "execPlanSamples" -> e.execPlanSamples.toString,
+      "resultByteLimit" -> e.execPlanResultBytes.toString,
+      "groupByCardinality" -> e.groupByCardinality.toString,
+      "joinQueryCardinality" -> e.joinQueryCardinality.toString,
+      "timeSeriesSamplesScannedBytes" -> e.timeSeriesSamplesScannedBytes.toString,
+      "timeSeriesScanned" -> e.timeSeriesScanned.toString
+    )
+    limitParams
   }
 
   def readQueryStats(queryStatsResponse: Option[Seq[QueryStatistics]]): QueryStats = {
@@ -90,6 +112,7 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
       queryStats.getTimeSeriesScannedCounter(stat.group).addAndGet(stat.timeSeriesScanned)
       queryStats.getDataBytesScannedCounter(stat.group).addAndGet(stat.dataBytesScanned)
       queryStats.getResultBytesCounter(stat.group).addAndGet(stat.resultBytes)
+      queryStats.getCpuNanosCounter(stat.group).addAndGet(stat.cpuNanos)
     }
     queryStats
   }

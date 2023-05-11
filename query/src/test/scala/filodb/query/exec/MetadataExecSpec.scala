@@ -211,8 +211,10 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val filters = Seq(ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     // Reducing limit results in truncated metadata response
-    val execPlan = PartKeysExec(QueryContext(plannerParams = PlannerParams(sampleLimit = limit - 1)), executeDispatcher,
-                                timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now)
+    val execPlan = PartKeysExec(
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanSamples = limit -1))),
+      executeDispatcher,
+      timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now)
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
@@ -233,7 +235,9 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val filters = Seq(ColumnFilter("job", Filter.Equals("myUniqueService".utf8)))
 
     // Reducing limit results in truncated metadata response
-    val execPlan = PartKeysExec(QueryContext(plannerParams = PlannerParams(sampleLimit = limit - 1)), executeDispatcher,
+    val execPlan = PartKeysExec(
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanSamples = limit -1))),
+      executeDispatcher,
       timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now, maxRecordContainerSize = 8 * 1024)
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
@@ -247,7 +251,9 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
 
     // Default one with 64K Record container
-    val execPlan1 = PartKeysExec(QueryContext(plannerParams = PlannerParams(sampleLimit = limit - 1)), executeDispatcher,
+    val execPlan1 = PartKeysExec(
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanSamples = limit -1))),
+      executeDispatcher,
       timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now)
 
     val resp1 = execPlan1.execute(memStore, querySession).runToFuture.futureValue
