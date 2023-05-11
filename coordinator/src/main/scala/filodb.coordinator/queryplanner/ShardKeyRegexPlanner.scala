@@ -123,7 +123,25 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       // Querycontext should just have the part of query which has regex
       // For example for exp(sum(test{_ws_ = "demo", _ns_ =~ "App.*"})), sub queries should be
       // sum(test{_ws_ = "demo", _ns_ = "App-1"}), sum(test{_ws_ = "demo", _ns_ = "App-2"}) etc
-      val newQueryParams = queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
+      val newQueryParams = logicalPlan match {
+        case tls: TopLevelSubquery => {
+          val instantTime = queryParams.startSecs
+          queryParams.copy(
+            promQl = LogicalPlanParser.convertToQuery(newLogicalPlan),
+            startSecs = instantTime,
+            endSecs = instantTime
+          )
+        }
+        case psp: PeriodicSeriesPlan => {
+          queryParams.copy(
+            promQl = LogicalPlanParser.convertToQuery(newLogicalPlan),
+            startSecs = psp.startMs / 1000,
+            endSecs = psp.endMs / 1000,
+            stepSecs = psp.stepMs / 1000
+          )
+        }
+        case _ => queryParams.copy(promQl = LogicalPlanParser.convertToQuery(newLogicalPlan))
+      }
       val newQueryContext = qContext.copy(origQueryParams = newQueryParams, plannerParams = qContext.plannerParams.
         copy(skipAggregatePresent = skipAggregatePresentValue))
       queryPlanner.materialize(newLogicalPlan, newQueryContext)

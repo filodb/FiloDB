@@ -128,6 +128,10 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
             localPartitionPlanner.materialize(logicalPlan, qContext)
         } else {
           val remoteContext = logicalPlan match {
+            case tls: TopLevelSubquery =>
+              val instantTime = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].startSecs
+              val stepSecs = tls.stepMs / 1000
+              generateRemoteExecParamsWithStep(qContext, instantTime, stepSecs, instantTime)
             case psp: PeriodicSeriesPlan =>
               val startSecs = psp.startMs / 1000
               val stepSecs = psp.stepMs / 1000
