@@ -33,6 +33,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
   val schema = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
   val tvSchemaTask = Task.eval(tvSchema)
+  val queryStats = QueryStats()
 
   val rand = new Random()
 
@@ -143,8 +144,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       Seq("instance"), Nil, Seq("role"), "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
       .toListL.runToFuture.futureValue
@@ -178,8 +179,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       Nil, Seq("role", "mode"), Seq("role"), "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
       .toListL.runToFuture.futureValue
@@ -219,8 +220,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       Seq("instance"), Nil, Nil, "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializedRangeVector(rv, schema, queryStats)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
       .toListL.runToFuture.futureValue
@@ -264,8 +265,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       Seq("role"), "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeRole.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, sampleNodeRole.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
       .toListL.runToFuture.futureValue
@@ -299,8 +300,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       Seq("mode"), Seq("dummy"), "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializedRangeVector(rv, schema, queryStats)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
       .toListL.runToFuture.futureValue
@@ -385,8 +386,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       Seq("instance"), Nil, Seq("role"), "metric", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleLhs.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhs.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, sampleLhs.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val rhs = QueryResult("someId", null, sampleRhs.map(rv => SerializedRangeVector(rv, schema, queryStats)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, querySession)
       .toListL.runToFuture.futureValue
@@ -409,7 +410,9 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
   }
 
   it("should throw BadQueryException - many-to-one with on - cardinality limit 1") {
-    val queryContext = QueryContext(plannerParams= PlannerParams(joinQueryCardLimit = 1)) // set join card limit to 1
+    // set join card limit to 1
+    val queryContext =
+      QueryContext(plannerParams= PlannerParams(enforcedLimits = PerQueryLimits(joinQueryCardinality = 1)))
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
@@ -420,8 +423,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       Seq("instance"), Nil, Seq("role"), "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)))
     // scalastyle:on
 
     // actual query results into 2 rows. since limit is 1, this results in BadQueryException
@@ -436,7 +439,9 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
   }
 
   it("should throw BadQueryException - many-to-one with ignoring - cardinality limit 1") {
-    val queryContext = QueryContext(plannerParams= PlannerParams(joinQueryCardLimit = 1)) // set join card limit to 1
+    // set join card limit to 1
+    val queryContext =
+      QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(joinQueryCardinality = 1)))
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
@@ -447,8 +452,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       Nil, Seq("role", "mode"), Seq("role"), "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema, queryStats)))
     // scalastyle:on
 
     // actual query results into 2 rows. since limit is 1, this results in BadQueryException
@@ -463,7 +468,9 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
   }
 
   it("should throw BadQueryException - many-to-one with by and grouping without arguments - cardinality limit 1") {
-    val queryContext = QueryContext(plannerParams= PlannerParams(joinQueryCardLimit = 3)) // set join card limit to 3
+    // set join card limit to 3
+    val queryContext =
+    QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(joinQueryCardinality = 3)))
     val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
     val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil,
                                    AggregateClause.byOpt(Seq("instance", "job")))
@@ -480,8 +487,8 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
       Seq("instance"), Nil, Nil, "__name__", None)
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializedRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema, queryStats)))
+    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializedRangeVector(rv, schema, queryStats)))
     // scalastyle:on
 
     // actual query results into 4 rows. since limit is 3, this results in BadQueryException

@@ -29,6 +29,9 @@ class QueryRangeSimulation extends Simulation {
 //    val queryName = "SumOfSumOverTime"
 //    val query = """sum(sum_over_time(heap_usage0{_ns_="App-$appNum",_ws_="demo"}[5m]))"""
 
+//    val queryName = "GetAllTimeseriesQuery"
+//    val query = """heap_usage0{_ns_="App-$appNum",_ws_="demo"}"""
+
   }
 
   import Configuration._

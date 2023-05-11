@@ -330,6 +330,7 @@ class ElementChunkInfoIterator(elIt: ElementIterator) extends ChunkInfoIterator 
 
 object CountingChunkInfoIterator {
   val dataBytesScannedCtr = Kamon.counter("data-scanned-by-queries", MeasurementUnit.information.bytes).withoutTags()
+  val numSamplesScannedCtr = Kamon.counter("num-samples-scanned-by-queries").withoutTags()
 }
 
 class CountingChunkInfoIterator(base: ChunkInfoIterator,
@@ -350,10 +351,10 @@ class CountingChunkInfoIterator(base: ChunkInfoIterator,
 
     // 2. kamon counter to track per instance. It is not broken down by shard/dataset. Doing that needs more memory
     CountingChunkInfoIterator.dataBytesScannedCtr.increment(bytesRead)
+    CountingChunkInfoIterator.numSamplesScannedCtr.increment(reader.numRows)
     reader
   }
   override def nextInfo: ChunkSetInfo = {
-    dataBytesScannedCtr.incrementAndGet()
     base.nextInfo
   }
   override def lock(): Unit = base.lock()

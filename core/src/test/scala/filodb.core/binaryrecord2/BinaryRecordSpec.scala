@@ -620,7 +620,6 @@ class BinaryRecordSpec extends AnyFunSpec with Matchers with BeforeAndAfter with
     it("should compute partitionKey hash correctly when target schema is provided") {
       val jobHash = BinaryRegion.hash32(labels("job").getBytes(StandardCharsets.UTF_8))
       val instanceHash = BinaryRegion.hash32(labels("instance").getBytes(StandardCharsets.UTF_8))
-      val metricHash = BinaryRegion.hash32(labels("__name__").getBytes(StandardCharsets.UTF_8))
       val nonShardKeyPairs = labels.filter(f => f._1 != "job" && f._1 != "__name__")
       val shardKeyPairs = labels.filter(f => f._1 == "job" || f._1 == "__name__")
       val targetSchema = Seq("job","instance") // job, __name__, instance

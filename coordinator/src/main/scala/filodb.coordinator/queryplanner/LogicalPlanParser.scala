@@ -198,16 +198,10 @@ object LogicalPlanParser {
     s"${periodicSeriesQuery}${sqClause}${offset}"
   }
 
-  def metatadataMatchToQuery(lp: MetadataQueryPlan): String = {
-    lp match {
-      case lp: SeriesKeysByFilters    => filtersToQuery(
-        getFiltersFromColumnFilters(lp.filters), Seq.empty, Option.empty, Option.empty, false)
-      case lp: LabelNames             => filtersToQuery(
-        getFiltersFromColumnFilters(lp.filters), Seq.empty, Option.empty, Option.empty, false)
-      case lp: LabelCardinality       => filtersToQuery(
-        getFiltersFromColumnFilters(lp.filters), Seq.empty, Option.empty, Option.empty, false)
-      case _                          => throw new UnsupportedOperationException(s"$lp can't be converted to Query")
-    }
+  def metadataMatchToQuery(lp: MetadataQueryPlan): String = {
+    s"$OpeningCurlyBraces${
+      getFiltersFromColumnFilters(lp.filters).map(f => f._1 + f._2 + f._3).mkString(Comma)
+    }$ClosingCurlyBraces"
   }
 
   def convertToQuery(logicalPlan: LogicalPlan): String = {

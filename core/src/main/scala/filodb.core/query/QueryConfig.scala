@@ -20,10 +20,15 @@ object QueryConfig {
     val enforceResultByteLimit = queryConfig.as[Boolean]("enforce-result-byte-limit")
     val allowPartialResultsMetadataQuery = queryConfig.getBoolean("allow-partial-results-metadataquery")
     val allowPartialResultsRangeQuery = queryConfig.getBoolean("allow-partial-results-rangequery")
+    val grpcDenyList = queryConfig.getString("grpc.partitions-deny-list")
     QueryConfig(askTimeout, staleSampleAfterMs, minStepMs, fastReduceMaxWindows, parser, translatePromToFilodbHistogram,
-      fasterRateEnabled, routingConfig.as[Option[Long]]("remote.http.timeout"),
-      routingConfig.as[Option[String]]("remote.http.endpoint"), enforceResultByteLimit,
-      allowPartialResultsRangeQuery, allowPartialResultsMetadataQuery)
+      fasterRateEnabled, routingConfig.as[Option[String]]("partition_name"),
+      routingConfig.as[Option[Long]]("remote.http.timeout"),
+      routingConfig.as[Option[String]]("remote.http.endpoint"),
+      routingConfig.as[Option[String]]("remote.grpc.endpoint"),
+      enforceResultByteLimit,
+      allowPartialResultsRangeQuery, allowPartialResultsMetadataQuery,
+      grpcDenyList.split(",").map(_.trim.toLowerCase).toSet)
   }
 
   import scala.concurrent.duration._
@@ -37,8 +42,10 @@ object QueryConfig {
                                            parser = "antlr",
                                            translatePromToFilodbHistogram = true,
                                            fasterRateEnabled = true,
+                                           partitionName = None,
                                            remoteHttpTimeoutMs = None,
                                            remoteHttpEndpoint = None,
+                                           remoteGrpcEndpoint = None,
                                            enforceResultByteLimit = false,
                                            allowPartialResultsRangeQuery = false,
                                            allowPartialResultsMetadataQuery = true)
@@ -51,8 +58,12 @@ case class QueryConfig(askTimeout: FiniteDuration,
                        parser: String,
                        translatePromToFilodbHistogram: Boolean,
                        fasterRateEnabled: Boolean,
+                       partitionName: Option[String],
                        remoteHttpTimeoutMs: Option[Long],
                        remoteHttpEndpoint: Option[String],
+                       remoteGrpcEndpoint: Option[String],
                        enforceResultByteLimit: Boolean = false,
                        allowPartialResultsRangeQuery: Boolean = false,
-                       allowPartialResultsMetadataQuery: Boolean = true)
+                       allowPartialResultsMetadataQuery: Boolean = true,
+                       grpcPartitionsDenyList: Set[String] = Set.empty,
+                       plannerSelector: Option[String] = None)

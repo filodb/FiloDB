@@ -3,6 +3,7 @@ package filodb.query
 import enumeratum.{Enum, EnumEntry}
 
 import filodb.core.{DatasetRef, NodeCommand, NodeResponse}
+import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.query.{QueryStats, RangeVector, ResultSchema}
 
 trait QueryCommand extends NodeCommand with java.io.Serializable {
@@ -65,28 +66,44 @@ final case class QueryResult(id: String,
   }
 }
 
+final case class TopkCardinalityResult(card: Seq[CardinalityRecord])
+
+object QueryResponseConverter {
+
+  implicit class QueryResponseToStreamingResponse(qr: QueryResponse) {
+      def toStreamingResponse: Seq[StreamQueryResponse] = qr match {
+        case QueryError(id, queryStats, t) => StreamQueryError(id, queryStats, t) :: Nil
+        case QueryResult(id, resultSchema, result, queryStats, mayBePartial, partialResultReason) =>
+          (StreamQueryResultHeader(id, resultSchema) :: result.map(StreamQueryResult(id, _)).toList) :::
+            List(StreamQueryResultFooter(id, queryStats, mayBePartial, partialResultReason))
+      }
+
+  }
+}
+
+
 sealed trait StreamQueryResponse extends NodeResponse with java.io.Serializable {
-  def id: String
+  def queryId: String
   def isLast: Boolean = false
 }
 
-final case class StreamQueryResultHeader(id: String,
+final case class StreamQueryResultHeader(queryId: String,
                                          resultSchema: ResultSchema) extends StreamQueryResponse
 
-final case class StreamQueryResult(id: String,
+final case class StreamQueryResult(queryId: String,
                                    result: RangeVector) extends StreamQueryResponse
 
-final case class StreamQueryResultFooter(id: String,
+final case class StreamQueryResultFooter(queryId: String,
                                          queryStats: QueryStats = QueryStats(),
                                          mayBePartial: Boolean = false,
                                          partialResultReason: Option[String] = None) extends StreamQueryResponse {
   override def isLast: Boolean = true
 }
 
-final case class StreamQueryError(id: String,
+final case class StreamQueryError(queryId: String,
                                   queryStats: QueryStats,
                                   t: Throwable) extends StreamQueryResponse with filodb.core.ErrorResponse {
   override def isLast: Boolean = true
-  override def toString: String = s"StreamQueryError id=$id ${t.getClass.getName} ${t.getMessage}\n" +
+  override def toString: String = s"StreamQueryError id=$queryId ${t.getClass.getName} ${t.getMessage}\n" +
     t.getStackTrace.map(_.toString).mkString("\n")
 }

@@ -167,3 +167,13 @@ object ResultMaker extends StrictLogging {
 }
 
 class ServiceUnavailableException(message: String) extends RuntimeException(message)
+
+/**
+ * This error means that the user exceeded the limit on the query size (for example
+ * number of scanned bytes)
+ */
+class QueryLimitException(message: String, queryId: String) extends RuntimeException(message) {
+  override def getMessage: String = {
+    s"${super.getMessage}, queryId=${queryId}"
+  }
+}

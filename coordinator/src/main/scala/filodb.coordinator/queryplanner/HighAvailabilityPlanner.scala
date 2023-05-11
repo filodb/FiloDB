@@ -1,11 +1,21 @@
 package filodb.coordinator.queryplanner
 
+import java.util.concurrent.ConcurrentHashMap
+
+import scala.collection.concurrent.{Map => ConcurrentMap}
+import scala.jdk.CollectionConverters._
+
 import com.typesafe.scalalogging.StrictLogging
+import io.grpc.ManagedChannel
 
 import filodb.core.DatasetRef
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.grpc.GrpcCommonUtils
 import filodb.query.{LabelNames, LabelValues, LogicalPlan, SeriesKeysByFilters}
 import filodb.query.exec._
+
+
+
 
 /**
   * HighAvailabilityPlanner responsible for using underlying local planner and FailureProvider
@@ -22,15 +32,31 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
                               localPlanner: QueryPlanner,
                               failureProvider: FailureProvider,
                               queryConfig: QueryConfig,
-                              remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient)
+                              remoteExecHttpClient: RemoteExecHttpClient = RemoteHttpClient.defaultClient,
+                              channels: ConcurrentMap[String, ManagedChannel] =
+                              new ConcurrentHashMap[String, ManagedChannel]().asScala)
   extends QueryPlanner with StrictLogging {
 
   import LogicalPlanUtils._
   import QueryFailureRoutingStrategy._
   import LogicalPlan._
 
+  // HTTP endpoint is still mandatory as metadata queries still use it.
   val remoteHttpEndpoint: String = queryConfig.remoteHttpEndpoint
     .getOrElse(throw new IllegalArgumentException("remoteHttpEndpoint config needed"))
+
+  val partitionName = queryConfig.partitionName
+    .getOrElse(throw new IllegalArgumentException("partitionName config needed"))
+
+  val plannerSelector: String = queryConfig.plannerSelector
+    .getOrElse(throw new IllegalArgumentException("plannerSelector is mandatory"))
+
+  val remoteGrpcEndpoint: Option[String] = queryConfig.remoteGrpcEndpoint
+
+  if(remoteGrpcEndpoint.isDefined)
+    logger.info("Remote gRPC endpoint for HA configured to {}", remoteGrpcEndpoint.get)
+  else
+    logger.info("No remote gRPC endpoint for HA Planner configured")
 
   val remoteHttpTimeoutMs: Long = queryConfig.remoteHttpTimeoutMs.getOrElse(60000)
 
@@ -95,7 +121,15 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
                                             MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                               urlParams, newQueryContext, inProcessPlanDispatcher,
                                               dsRef, remoteExecHttpClient)
-            case _                       => PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
+            case _                       =>
+              if (remoteGrpcEndpoint.isDefined && !(queryConfig.grpcPartitionsDenyList.contains("*") ||
+                queryConfig.grpcPartitionsDenyList.contains(partitionName.toLowerCase))) {
+                val endpoint = remoteGrpcEndpoint.get
+                val channel = channels.getOrElseUpdate(endpoint, GrpcCommonUtils.buildChannelFromEndpoint(endpoint))
+                PromQLGrpcRemoteExec(channel, remoteHttpTimeoutMs, newQueryContext, inProcessPlanDispatcher,
+                  dsRef, plannerSelector)
+              } else
+                PromQlRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
                                             newQueryContext, inProcessPlanDispatcher, dsRef, remoteExecHttpClient)
           }
 
