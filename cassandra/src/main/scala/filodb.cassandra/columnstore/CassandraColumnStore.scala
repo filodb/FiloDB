@@ -692,7 +692,8 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   def getOrCreatePartitionKeysV2Table(dataset: DatasetRef): PartitionKeysV2Table = {
     require(partKeysV2TableEnabled) // to make sure we don't trigger table creation unintentionally
     partKeysV2TableCache.getOrElseUpdate(dataset, { dataset: DatasetRef =>
-      new PartitionKeysV2Table(dataset, clusterConnector, ingestionConsistencyLevel)(readEc)
+      new PartitionKeysV2Table(dataset, clusterConnector, ingestionConsistencyLevel,
+        readConsistencyLevel)(readEc)
     })
   }
 

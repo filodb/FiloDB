@@ -15,7 +15,8 @@ import filodb.core.store.PartKeyRecord
 
 sealed class PartitionKeysV2Table(val dataset: DatasetRef,
                                 val connector: FiloCassandraConnector,
-                                writeConsistencyLevel: ConsistencyLevel)
+                                writeConsistencyLevel: ConsistencyLevel,
+                                readConsistencyLevel: ConsistencyLevel)
                                (implicit ec: ExecutionContext) extends BaseDatasetTable {
 
   import filodb.cassandra.Util._
@@ -42,15 +43,10 @@ sealed class PartitionKeysV2Table(val dataset: DatasetRef,
         s"VALUES (?, ?, ?, ?, ?)")
       .setConsistencyLevel(writeConsistencyLevel)
 
-  private lazy val selectPkCql = session.prepare(
-    s"SELECT partKey, startTime, endTime, shard FROM $tableString " +
-      s"WHERE shard = ? and bucket = ? and partKey = ?"
-  )
-
   private lazy val scanCql = session.prepare(
     s"SELECT partKey, startTime, endTime, shard FROM $tableString " +
       s"WHERE shard = ? and bucket = ?"
-  )
+  ).setConsistencyLevel(readConsistencyLevel)
 
   private lazy val scanCqlForStartEndTime = session.prepare(
     s"SELECT partKey, startTime, endTime, shard FROM $tableString " +
@@ -58,29 +54,29 @@ sealed class PartitionKeysV2Table(val dataset: DatasetRef,
       s"startTime >= ? AND startTime <= ? AND " +
       s"endTime >= ? AND endTime <= ? " +
       s"ALLOW FILTERING")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
   private lazy val scanCqlForStartTime = session.prepare(
     s"SELECT partKey, startTime, endTime, shard FROM $tableString " +
       s"WHERE TOKEN(shard, bucket) >= ? AND TOKEN(shard, bucket) < ? AND startTime >= ? AND startTime <= ? " +
       s"ALLOW FILTERING")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
   private lazy val scanCqlForEndTime = session.prepare(
     s"SELECT partKey, startTime, endTime, shard FROM $tableString " +
       s"WHERE TOKEN(shard, bucket) >= ? AND TOKEN(shard, bucket) < ? AND endTime >= ? AND endTime <= ? " +
       s"ALLOW FILTERING")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
   private lazy val readCql = session.prepare(
     s"SELECT partKey, startTime, endTime, shard FROM $tableString " +
       s"WHERE shard = ? and bucket = ? and partKey = ?")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
+    .setConsistencyLevel(readConsistencyLevel)
 
   private lazy val deleteCql = session.prepare(
     s"DELETE FROM $tableString " +
     s"WHERE shard = ? and bucket = ? and partKey = ?"
-  )
+  ).setConsistencyLevel(writeConsistencyLevel)
 
   def writePartKey(bucket: Int, pk: PartKeyRecord, diskTimeToLiveSeconds: Long): Future[Response] = {
     if (diskTimeToLiveSeconds <= 0) {

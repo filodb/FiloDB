@@ -75,7 +75,7 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
   private lazy val deleteCql = session.prepare(
     s"DELETE FROM $tableString " +
     s"WHERE partKey = ?"
-  )
+  ).setConsistencyLevel(writeConsistencyLevel)
 
   def writePartKey(pk: PartKeyRecord, diskTimeToLiveSeconds: Long): Future[Response] = {
     if (diskTimeToLiveSeconds <= 0) {
