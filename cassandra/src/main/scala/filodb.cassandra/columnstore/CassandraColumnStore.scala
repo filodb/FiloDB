@@ -82,12 +82,10 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                             MeasurementUnit.time.milliseconds).withoutTags()
 
   def initialize(dataset: DatasetRef, numShards: Int): Future[Response] = {
+    // Note the next two lines of code do not create the tables, just trigger the creation of proxy class
+    val chunkTable = getOrCreateChunkTable(dataset)
+    val partitionKeysByUpdateTimeTable = getOrCreatePartitionKeysByUpdateTimeTable(dataset)
     if (createTablesEnabled) {
-      val chunkTable = getOrCreateChunkTable(dataset)
-      val partitionKeysByUpdateTimeTable = getOrCreatePartitionKeysByUpdateTimeTable(dataset)
-      val partKeyTablesInit = Observable.fromIterable(0.until(numShards)).map { s =>
-        getOrCreatePartitionKeysTable(dataset, s)
-      }.mapEval(t => Task.fromFuture(t.initialize())).toListL
       clusterConnector.createKeyspace(chunkTable.keyspace)
       val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
       // Important: make sure nodes are in agreement before any schema changes
@@ -100,15 +98,29 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
         } else Future.successful(Success)
       }
 
+      def partitionKeysV1TableInit(): Future[Response] = {
+        if (!partKeysV2TableEnabled) {
+          Observable.fromIterable(0.until(numShards)).map { s =>
+            getOrCreatePartitionKeysTable(dataset, s)
+          }.mapEval(t => Task.fromFuture(t.initialize())).toListL.runToFuture
+            .map(_.find(_ != Success).getOrElse(Success))
+        } else Future.successful(Success)
+      }
+
       for {ctResp <- chunkTable.initialize() if ctResp == Success
            pkv2Resp <- partitionKeysV2TableInit() if pkv2Resp == Success
            ixResp <- indexTable.initialize() if ixResp == Success
            pkutResp <- partitionKeysByUpdateTimeTable.initialize() if pkutResp == Success
-           partKeyTablesResp <- partKeyTablesInit.runToFuture if partKeyTablesResp.forall(_ == Success)
+           partKeyTablesResp <- partitionKeysV1TableInit() if partKeyTablesResp == Success
       } yield Success
     } else {
       // ensure the table handles are eagerly created
-      0.until(numShards).foreach(getOrCreatePartitionKeysTable(dataset, _))
+      // Note tables are not being created here, just the handle(proxy class)
+      if (partKeysV2TableEnabled) {
+        getOrCreatePartitionKeysV2Table(dataset)
+      } else {
+        0.until(numShards).foreach(getOrCreatePartitionKeysTable(dataset, _))
+      }
       Future.successful(Success)
     }
   }
@@ -117,9 +129,6 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     logger.info(s"Clearing all data for dataset ${dataset}")
     val chunkTable = getOrCreateChunkTable(dataset)
     val partitionKeysByUpdateTimeTable = getOrCreatePartitionKeysByUpdateTimeTable(dataset)
-    val partKeyTablesTrunc = Observable.fromIterable(0.until(numShards)).map { s =>
-      getOrCreatePartitionKeysTable(dataset, s)
-    }.mapEval(t => Task.fromFuture(t.clearAll())).toListL
     val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
     clusterMeta.checkSchemaAgreement()
 
@@ -130,11 +139,20 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       } else Future.successful(Success)
     }
 
+    def partitionKeysV1TableTruncate(): Future[Response] = {
+      if (!partKeysV2TableEnabled) {
+        Observable.fromIterable(0.until(numShards)).map { s =>
+          getOrCreatePartitionKeysTable(dataset, s)
+        }.mapEval(t => Task.fromFuture(t.clearAll())).toListL.runToFuture
+        .map(_.find(_ != Success).getOrElse(Success))
+      } else Future.successful(Success)
+    }
+
     for { ctResp    <- chunkTable.clearAll() if ctResp == Success
           pkv2Resp  <- partitionKeysV2TableTruncate() if pkv2Resp == Success
           ixResp    <- indexTable.clearAll() if ixResp == Success
           pkutResp  <- partitionKeysByUpdateTimeTable.clearAll() if pkutResp == Success
-          partKeyTablesResp <- partKeyTablesTrunc.runToFuture if partKeyTablesResp.forall( _ == Success)
+          partKeyTablesResp <- partitionKeysV1TableTruncate() if partKeyTablesResp == Success
     } yield Success
   }
 
@@ -142,10 +160,6 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val chunkTable = getOrCreateChunkTable(dataset)
     val partitionKeysByUpdateTimeTable = getOrCreatePartitionKeysByUpdateTimeTable(dataset)
     val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
-    val partitionKeysV2Table = getOrCreatePartitionKeysV2Table(dataset)
-    val partKeyTablesDrop = Observable.fromIterable(0.until(numShards)).map { s =>
-      getOrCreatePartitionKeysTable(dataset, s)
-    }.mapEval(t => Task.fromFuture(t.drop())).toListL
     clusterMeta.checkSchemaAgreement()
 
     def partitionKeysV2TableDrop(): Future[Response] = {
@@ -155,11 +169,20 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       } else Future.successful(Success)
     }
 
+    def partitionKeysV1TableDrop(): Future[Response] = {
+      if (!partKeysV2TableEnabled) {
+        Observable.fromIterable(0.until(numShards)).map { s =>
+          getOrCreatePartitionKeysTable(dataset, s)
+        }.mapEval(t => Task.fromFuture(t.drop())).toListL.runToFuture
+          .map(_.find(_ != Success).getOrElse(Success))
+      } else Future.successful(Success)
+    }
+
     for {ctResp <- chunkTable.drop() if ctResp == Success
          ixResp <- indexTable.drop() if ixResp == Success
          pkv2Resp  <- partitionKeysV2TableDrop() if pkv2Resp == Success
          pkutResp  <- partitionKeysByUpdateTimeTable.drop() if pkutResp == Success
-         partKeyTablesResp <- partKeyTablesDrop.runToFuture if partKeyTablesResp.forall(_ == Success)
+         partKeyTablesResp <- partitionKeysV1TableDrop() if partKeyTablesResp == Success
     } yield {
       chunkTableCache.remove(dataset)
       indexTableCache.remove(dataset)
@@ -522,7 +545,6 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                     partKeys: Observable[PartKeyRecord],
                     diskTTLSeconds: Long, updateHour: Long,
                     writeToPkUTTable: Boolean = true): Future[Response] = {
-    val pkTable = getOrCreatePartitionKeysTable(ref, shard)
     val pkByUTTable = getOrCreatePartitionKeysByUpdateTimeTable(ref)
     val start = System.currentTimeMillis()
     val ret = partKeys.mapParallelUnordered(writeParallelism) { pk =>
@@ -530,11 +552,12 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       // caller needs to supply hash for partKey - cannot be None
       // Logical & MaxValue needed to make split positive by zeroing sign bit
       val split = PartKeyRecord.getBucket(pk.partKey, schemas, pkByUTNumSplits)
-      val bucket = PartKeyRecord.getBucket(pk.partKey, schemas, pkv2NumBuckets)
       def writePk() = if (partKeysV2TableEnabled) {
+        val bucket = PartKeyRecord.getBucket(pk.partKey, schemas, pkv2NumBuckets)
         val pkv2Table = getOrCreatePartitionKeysV2Table(ref)
         pkv2Table.writePartKey(bucket, pk, ttl)
       } else {
+        val pkTable = getOrCreatePartitionKeysTable(ref, shard)
         pkTable.writePartKey(pk, ttl)
       }
       val writePkFut = writePk().flatMap {
@@ -705,6 +728,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   }
 
   def getOrCreatePartitionKeysTable(dataset: DatasetRef, shard: Int): PartitionKeysTable = {
+    require(!partKeysV2TableEnabled) // to make sure we don't trigger table creation unintentionally
     val map = partitionKeysTableCache.getOrElseUpdate(dataset, { _ =>
       concurrentCache[Int, PartitionKeysTable](tableCacheSize)
     })
