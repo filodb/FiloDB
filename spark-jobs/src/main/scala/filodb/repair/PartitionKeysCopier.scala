@@ -117,8 +117,7 @@ class PartitionKeysCopier(conf: SparkConf) {
       copyStartTime.toEpochMilli(),
       copyEndTime.toEpochMilli(),
       targetCassandraColStore,
-      partKeyHashFn,
-      diskTimeToLiveSeconds.toInt)
+      diskTimeToLiveSeconds)
   }
 
   def shutdown(): Unit = {

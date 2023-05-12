@@ -107,7 +107,7 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
           if (!isSimulation) {
             val startNs = System.nanoTime()
             try {
-              colStore.deletePartKeyNoAsync(dataset, shard, pk.partKey)
+              colStore.deletePartKeyNoAsync(dataset, pk.shard, pk.partKey)
             } finally {
               cassDeleteLatency.record(System.nanoTime() - startNs)
             }
@@ -125,7 +125,7 @@ class PerShardCardinalityBuster(dsSettings: DownsamplerSettings,
     }.completedL.runToFuture(BusterSchedulers.computeSched)
     import scala.concurrent.duration._
     Await.result(fut, 1.day)
-    BusterContext.log.info(s"Finished deleting keys from a shard split in shard=$shard " +
+    BusterContext.log.info(s"Finished deleting keys from a shard split=$split in shard=$shard " +
       s"numCandidateKeys=${numCandidateKeys.get()} numDeleted=${numDeleted.get()} " +
       s"numCouldNotDelete=${numCouldNotDelete.get()} isSimulation=$isSimulation")
     numDeleted.get()
