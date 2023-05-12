@@ -1286,7 +1286,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       val et = p.timestampOfLatestSample  // -1 can be returned if no sample after reboot
       if (et == -1) System.currentTimeMillis() else et
     }
-    PartKeyRecord(p.partKeyBytes, startTime, endTime, Some(p.partKeyHash))
+    PartKeyRecord(p.partKeyBytes, startTime, endTime, shardNum)
   }
 
   // scalastyle:off method.length
