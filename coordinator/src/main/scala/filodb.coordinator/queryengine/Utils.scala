@@ -1,5 +1,6 @@
 package filodb.coordinator.queryengine
 
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try
 
@@ -15,10 +16,10 @@ import filodb.coordinator.ShardMapper
 import filodb.core.{ErrorResponse, SpreadProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
-import filodb.core.query.{ColumnFilter, Filter, QueryContext}
+import filodb.core.query.{ColumnFilter, Filter, QueryContext, QueryStats, QueryWarnings, RangeVector, ResultSchema}
 import filodb.core.store._
-import filodb.query.{QueryError, QueryResponse, QueryResult, StreamQueryError,
-  StreamQueryResponse, StreamQueryResult, StreamQueryResultFooter, StreamQueryResultHeader}
+import filodb.query.{QueryError, QueryResponse, QueryResult, StreamQueryError, StreamQueryResponse,
+                     StreamQueryResult, StreamQueryResultFooter, StreamQueryResultHeader}
 
 final case class ChildErrorResponse(source: ActorRef, resp: ErrorResponse) extends
     Exception(s"From [$source] - $resp")
@@ -138,23 +139,33 @@ object Utils extends StrictLogging {
 
   def streamToFatQueryResponse(queryContext: QueryContext,
                                resp: Observable[StreamQueryResponse]): Task[QueryResponse] = {
-    resp.takeWhileInclusive(!_.isLast).toListL.map { r =>
-      r.collectFirst {
-        case StreamQueryError(id, stats, t) => QueryError(id, stats, t)
-      }
-        .getOrElse {
-          val header = r.collectFirst {
-            case h: StreamQueryResultHeader => h
-          }.getOrElse(throw new IllegalStateException(s"Did not get a header for query id ${queryContext.queryId}"))
-          val rvs = r.collect {
-            case StreamQueryResult(id, rv) => rv
-          }
-          val footer = r.lastOption.collect {
-            case f: StreamQueryResultFooter => f
-          }.getOrElse(StreamQueryResultFooter(queryContext.queryId))
-          QueryResult(queryContext.queryId, header.resultSchema, rvs,
-            footer.queryStats, footer.warnings, footer.mayBePartial, footer.partialResultReason)
-        }
+    val rvs = new ArrayBuffer[RangeVector]()
+    var stats: Option[QueryStats] = None
+    var warnings: Option[QueryWarnings] = None
+    var ex: Option[Throwable] = None
+    var mayBePartial = false
+    var partialResultReason: Option[String] = None
+    var rs: Option[ResultSchema] = None
+
+    resp.takeWhileInclusive(!_.isLast).map {
+      case h: StreamQueryResultHeader =>
+        rs = Some(h.resultSchema)
+      case e: StreamQueryError =>
+        stats = Some(e.queryStats)
+        ex = Some(e.t)
+      case r: StreamQueryResult =>
+        rvs ++= r.result
+      case f: StreamQueryResultFooter =>
+        stats = Some(f.queryStats)
+        mayBePartial = f.mayBePartial
+        partialResultReason = f.partialResultReason
+        warnings = Some(f.warnings)
+    }.completedL.map { _ =>
+      if (rs.isEmpty)
+          QueryError(queryContext.queryId, stats.get, new IllegalStateException("Result didnt carry a header"))
+      else if (ex.isDefined) QueryError(queryContext.queryId, stats.get, ex.get)
+      else QueryResult(queryContext.queryId, rs.get, rvs,
+                       stats.get, warnings.get, mayBePartial, partialResultReason)
     }
   }
 }

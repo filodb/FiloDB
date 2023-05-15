@@ -15,7 +15,7 @@ import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.FilodbSettings
 import filodb.coordinator.queryplanner.QueryPlanner
-import filodb.core.query.{IteratorBackedRangeVector, QueryContext, QueryStats, SerializedRangeVector}
+import filodb.core.query.{IteratorBackedRangeVector, QueryConfig, QueryContext, QueryStats, SerializedRangeVector}
 import filodb.grpc.GrpcMultiPartitionQueryService
 import filodb.grpc.RemoteExecGrpc.RemoteExecImplBase
 import filodb.prometheus.ast.TimeStepParams
@@ -37,6 +37,7 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
   extends StrictLogging {
 
   val port  = filoSettings.allConfig.getInt("filodb.grpc.bind-grpc-port")
+  val queryConfig = QueryConfig(filoSettings.allConfig.getConfig("filodb.query"))
   val server = ServerBuilder.forPort(this.port)
     //.executor(scheduler).asInstanceOf[ServerBuilder[NettyServerBuilder]]
     .addService(new PromQLGrpcService()).asInstanceOf[ServerBuilder[NettyServerBuilder]].build()
@@ -79,7 +80,7 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
             qr: QueryResponse =>
               Try {
                 lazy val rb = SerializedRangeVector.newBuilder()
-                qr.toStreamingResponse.foreach {
+                qr.toStreamingResponse(queryConfig).foreach {
                   case footer: StreamQueryResultFooter =>
                     responseObserver.onNext(footer.toProto)
                     responseObserver.onCompleted()
@@ -91,19 +92,13 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
                   case result: StreamQueryResult =>
                     // Not the cleanest way, but we need to convert these IteratorBackedRangeVectors to a
                     // serializable one If we have a result, its definitely is a QueryResult
-                    val strQueryResult = (result.result, qr) match {
-                      case (
-                        irv: IteratorBackedRangeVector,
-                        QueryResult(_, resultSchema, _, queryStats, _, _, _)
-                      ) => result.copy(
-                        result = SerializedRangeVector.apply(
-                          irv, rb,
-                          SerializedRangeVector.toSchema(resultSchema.columns, resultSchema.brSchemas),
-                          "GrpcServer", queryStats
-                        )
-                      )
-                      case _ => result
-                    }
+                    val qres = qr.asInstanceOf[QueryResult]
+                    val strQueryResult = result.copy(result = result.result.map {
+                      case irv: IteratorBackedRangeVector =>
+                        SerializedRangeVector.apply(irv, rb,
+                          SerializedRangeVector.toSchema(qres.resultSchema.columns, qres.resultSchema.brSchemas),
+                          "GrpcServer", qres.queryStats)
+                    })
                     responseObserver.onNext(strQueryResult.toProto)
                 }
               } match {

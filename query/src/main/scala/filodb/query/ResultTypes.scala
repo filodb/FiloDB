@@ -4,7 +4,7 @@ import enumeratum.{Enum, EnumEntry}
 
 import filodb.core.{DatasetRef, NodeCommand, NodeResponse}
 import filodb.core.memstore.ratelimit.CardinalityRecord
-import filodb.core.query.{QueryStats, QueryWarnings, RangeVector, ResultSchema}
+import filodb.core.query.{QueryConfig, QueryStats, QueryWarnings, RangeVector, ResultSchema}
 
 trait QueryCommand extends NodeCommand with java.io.Serializable {
   def submitTime: Long
@@ -71,12 +71,14 @@ final case class TopkCardinalityResult(card: Seq[CardinalityRecord])
 
 object QueryResponseConverter {
 
+  private val unknown = "unknownPlanId"
   implicit class QueryResponseToStreamingResponse(qr: QueryResponse) {
-      def toStreamingResponse: Seq[StreamQueryResponse] = qr match {
-        case QueryError(id, queryStats, t) => StreamQueryError(id, queryStats, t) :: Nil
+      def toStreamingResponse(qConfig: QueryConfig): Seq[StreamQueryResponse] = qr match {
+        case QueryError(id, queryStats, t) => StreamQueryError(id, unknown, queryStats, t) :: Nil
         case QueryResult(id, resultSchema, result, queryStats, warnings, mayBePartial, partialResultReason) =>
-          (StreamQueryResultHeader(id, resultSchema) :: result.map(StreamQueryResult(id, _)).toList) :::
-            List(StreamQueryResultFooter(id, queryStats, warnings, mayBePartial, partialResultReason))
+          (StreamQueryResultHeader(id, unknown, resultSchema) ::
+            result.grouped(qConfig.numRvsPerResultMessage).map(StreamQueryResult(id, unknown, _)).toList) :::
+            List(StreamQueryResultFooter(id, unknown, queryStats, warnings, mayBePartial, partialResultReason))
       }
 
   }
@@ -84,17 +86,30 @@ object QueryResponseConverter {
 
 
 sealed trait StreamQueryResponse extends NodeResponse with java.io.Serializable {
+
+  /**
+   * The queryId for which this is an intermediate result
+   */
   def queryId: String
+
+  /**
+   * The execPlan Id for which this is an immediate result
+   * @return
+   */
+  def planId: String
   def isLast: Boolean = false
 }
 
 final case class StreamQueryResultHeader(queryId: String,
+                                         planId: String,
                                          resultSchema: ResultSchema) extends StreamQueryResponse
 
 final case class StreamQueryResult(queryId: String,
-                                   result: RangeVector) extends StreamQueryResponse
+                                   planId: String,
+                                   result: Seq[RangeVector]) extends StreamQueryResponse
 
 final case class StreamQueryResultFooter(queryId: String,
+                                         planId: String,
                                          queryStats: QueryStats = QueryStats(),
                                          warnings: QueryWarnings = QueryWarnings(),
                                          mayBePartial: Boolean = false,
@@ -103,6 +118,7 @@ final case class StreamQueryResultFooter(queryId: String,
 }
 
 final case class StreamQueryError(queryId: String,
+                                  planId: String,
                                   queryStats: QueryStats,
                                   t: Throwable) extends StreamQueryResponse with filodb.core.ErrorResponse {
   override def isLast: Boolean = true
