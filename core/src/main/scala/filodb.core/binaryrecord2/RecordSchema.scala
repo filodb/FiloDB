@@ -263,7 +263,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   }
 
   /**
-    * EXPENSIVE to do at server side. Creates a stringified map with contents of this BinaryRecord.
+    * EXPENSIVE to do at server side. Creates a stringified array with contents of this BinaryRecord.
     */
   def toStringPairs(base: Any, offset: Long): Seq[(String, String)] = {
     import Column.ColumnType._
@@ -288,6 +288,47 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
     }
     result
   }
+
+
+  /**
+   * Reads all the label key-value pairs from the BinaryRecord and creates a map.
+   * If multiple labels with same key --> then the last writer wins.
+   * @param base data source
+   * @param offset offset to read from
+   * @return Map of all the tags/labels. key is label-name, value is label-value
+   */
+  def toStringPairsMap(base: Any, offset: Long): mutable.Map[String, String] = {
+    import Column.ColumnType._
+    val result = mutable.Map[String, String]()
+    columnTypes.zipWithIndex.foreach {
+      case (IntColumn, i) => result(colNames(i)) = getInt(base, offset, i).toString
+      case (LongColumn, i) => result(colNames(i)) = getLong(base, offset, i).toString
+      case (DoubleColumn, i) => result(colNames(i)) = getDouble(base, offset, i).toString
+      case (StringColumn, i) => result(colNames(i)) = asJavaString(base, offset, i)
+      case (TimestampColumn, i) => result(colNames(i)) = getLong(base, offset, i).toString
+      case (MapColumn, i) => val consumer = new StringifyMapItemConsumer
+        consumeMapItems(base, offset, i, consumer)
+        result ++= consumer.stringPairs
+      case (BinaryRecordColumn, i) => result ++= brSchema(i).toStringPairs(blobBase(base, offset, i),
+        blobOffset(base, offset, i))
+        result += ("_type_" ->
+          Schemas.global.schemaName(
+            RecordSchema.schemaID(blobBase(base, offset, i),
+              blobOffset(base, offset, i))))
+      case (HistogramColumn, i) =>
+        result(colNames(i)) = bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i)).toString
+    }
+    result
+  }
+
+  /**
+   * Reads all the label key-value pairs from the BinaryRecord and creates a map.
+   * If multiple labels with same key --> then the last writer wins.
+   * @param bytes data source
+   * @return Map of all the tags/labels. key is label-name, value is label-value.
+   */
+  def toStringPairsMap(bytes: Array[Byte]): mutable.Map[String, String] =
+    toStringPairsMap(bytes, UnsafeUtils.arayOffset)
 
   def colNames(base: Any, offset: Long): Seq[String] = {
     import Column.ColumnType._
