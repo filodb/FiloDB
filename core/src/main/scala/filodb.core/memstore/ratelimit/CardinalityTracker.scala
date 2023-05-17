@@ -1,6 +1,7 @@
 package filodb.core.memstore.ratelimit
 
 import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.Map
 
 import com.typesafe.scalalogging.StrictLogging
 
@@ -45,6 +46,16 @@ class CardinalityTracker(ref: DatasetRef,
 
   // separates ws, ns, metric, etc. names
   val NAME_DELIMITER = ","
+
+  /**
+   * Map used to track cardinality count in downsample cluster.
+   * WHY this is used for Downsample cardinality count only ?
+   * This is because, in downsample cluster, we read through the entire index periodically and re-calculate
+   * the cardinality count from scratch. Without an in-memory aggregation data-structure, we would be modifying
+   * the records in RocksDB too frequently, causing a slowdown because of heavy disk writes.
+   * Hence we are using this map to help us aggregate in memory and then flush to RocksDB periodically
+   */
+  var cardinalityCountMapDS : Map[Seq[String], (Int, Int)] = Map()
 
   /**
    * Call when a new time series with the given shard key has been added to the system.
@@ -102,7 +113,89 @@ class CardinalityTracker(ref: DatasetRef,
     }
   }
 
+  /**
+   * Updates the DOWNSAMPLE CLUSTER's cardinality count in the cardinalityCountMap. Flushes the data to RocksDB
+   * periodically
+   * Cardinality count at each level of shardKey needs to be updated
+   * For example: if shardKey = (my_ws, my_ns, my_metric), then we have to update
+   * the cardinality count of 4 prefixes. They are -
+   * 1. (total across all ws)
+   * 2. (my_ws)
+   * 3. (my_ws, my_ns)
+   * 4. (my_ws, my_ns, my_metric)
+   *
+   * @param shardKey
+   */
+  def updateCardinalityCountsDS(shardKey: Seq[String]): Unit = {
 
+    (0 to shardKey.length).foreach { i =>
+      val prefix = shardKey.take(i)
+
+      val cardCountRecord = cardinalityCountMapDS.get(prefix)
+        .map(x => (x._1 + 1, x._2))
+        .getOrElse((1, 0)) // child prefix update parent's childrenCount
+
+      cardinalityCountMapDS.put(prefix, cardCountRecord)
+
+      if (i > 0) {
+        // update children count of parent
+        val parentPrefix = shardKey.take(i - 1)
+
+        // we always add parent before the child, hence it is okay to get the parent prefix's record directly
+        // without the None check
+        val updatedCountRecord = cardinalityCountMapDS.get(parentPrefix)
+          .map(x => (x._1, x._2 + 1)).get
+
+        // check if number of children is higher than the given quota. This allows us guard our physical resources
+        // and avoid failures because of runaway cardinality
+        val childrenQuota = defaultChildrenQuota(parentPrefix.length)
+        if (updatedCountRecord._2 > childrenQuota) {
+          quotaExceededProtocol.quotaExceeded(ref, shard, prefix, childrenQuota)
+          throw QuotaReachedException(prefix, prefix, childrenQuota)
+        }
+
+        // store the updated parent's childrenCount
+        cardinalityCountMapDS.put(parentPrefix, updatedCountRecord)
+      }
+    }
+
+    if (cardinalityCountMapDS.size > 5000) {
+      flushCardinalityDataToRocksDB()
+    }
+  }
+
+  def flushCardinalityDataToRocksDB(): Unit = {
+    if (cardinalityCountMapDS.size > 0) {
+      // iterate through map and store each prefix and count to the rocksDB
+      cardinalityCountMapDS.foreach(kv => {
+        modifyCountDS(kv._1, kv._2._1, kv._2._1, kv._2._2)
+      })
+      // clear the map
+      cardinalityCountMapDS.clear()
+    }
+  }
+
+  /**
+   * Used to store the cardinality count for the given prefix in the downsample cluster.
+   * NOTE: In downsample cluster, tsCount == activeTsCount. So totalDelta and activeDelta is same
+   * @param prefix usually contains labels _ws_, _ns_, _metric_ and different combinations of it
+   * @param totalDelta Increase in total timeseries
+   * @param activeDelta Increase in active timeseries
+   * @param childrenDelta Increase in children count
+   */
+  def modifyCountDS(prefix: Seq[String], totalDelta: Int, activeDelta: Int, childrenDelta: Int): Unit = synchronized {
+
+    // get the current cardinality count from RocksDB for the given prefix. Also add a default if not present
+    val old = store.getOrZero(prefix,
+      CardinalityRecord(shard, prefix, CardinalityValue(0, 0, 0, defaultChildrenQuota(prefix.length))))
+
+    // update the count with the provided delta values
+    val neu = old.copy(value = old.value.copy(tsCount = old.value.tsCount + totalDelta,
+      activeTsCount = old.value.activeTsCount + activeDelta,
+      childrenCount = old.value.childrenCount + childrenDelta))
+
+    store.store(neu)
+  }
 
   /**
    * Fetch cardinality for given shard key or shard key prefix

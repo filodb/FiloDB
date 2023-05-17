@@ -13,6 +13,10 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
     new RocksDbCardinalityStore(DatasetRef("test"), 0)
   }
 
+  private def dsCardStore = {
+    new RocksDbCardinalityStore(DatasetRef("ds_test"), 1)
+  }
+
   it("should enforce quota when set explicitly for all levels") {
     val t = new CardinalityTracker(ref, 0, 3, Seq(4, 4, 4, 4), newCardStore)
     t.setQuota(Seq("a", "aa", "aaa"), 1) shouldEqual
@@ -294,5 +298,16 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
     )
 
     t.close()
+  }
+
+  it ("modifyCountDS should update count correctly") {
+    val t = new CardinalityTracker(ref, 0, 3, Seq(100, 100, 100, 100), newCardStore)
+    (1 to 10).foreach(_ => t.modifyCount(Seq("a", "ac", "aca"), 1, 0))
+    (1 to 20).foreach(_ => t.modifyCount(Seq("a", "ac", "acb"), 1, 0))
+    (1 to 11).foreach(_ => t.modifyCount(Seq("a", "ac", "acc"), 1, 0))
+    (1 to 6).foreach(_ => t.modifyCount(Seq("a", "ac", "acd"), 1, 0))
+    (1 to 1).foreach(_ => t.modifyCount(Seq("a", "ac", "ace"), 1, 0))
+    (1 to 9).foreach(_ => t.modifyCount(Seq("a", "ac", "acf"), 1, 0))
+    (1 to 15).foreach(_ => t.modifyCount(Seq("a", "ac", "acg"), 1, 0))
   }
 }
