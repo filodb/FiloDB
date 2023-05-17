@@ -2,8 +2,9 @@ package filodb.core.memstore.ratelimit
 
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-
 import filodb.core.{DatasetRef, MachineMetricsData}
+
+import scala.collection.Seq
 
 class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
 
@@ -50,9 +51,9 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
     ex.prefix shouldEqual (Seq("a", "aa"))
 
     // increment should not have been applied for any prefix
-    t.getCardinality(Seq("a")) shouldEqual CardinalityRecord(0, Seq("a"), CardinalityValue(2, 1, 1, 1))
-    t.getCardinality(Seq("a", "aa")) shouldEqual CardinalityRecord(0, Seq("a", "aa"), CardinalityValue(2, 1, 2, 2))
-    t.getCardinality(Seq("a", "aa", "aac")) shouldEqual
+    t.scan(Seq("a"), 1)(0) shouldEqual CardinalityRecord(0, Seq("a"), CardinalityValue(2, 1, 1, 1))
+    t.scan(Seq("a", "aa"), 2)(0) shouldEqual CardinalityRecord(0, Seq("a", "aa"), CardinalityValue(2, 1, 2, 2))
+    t.scan(Seq("a", "aa", "aac"), 3)(0) shouldEqual
       CardinalityRecord(0, Seq("a", "aa", "aac"), CardinalityValue(0, 0, 0, 4))
 
     // aab was purged
@@ -219,11 +220,11 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
         CardinalityRecord(0, Seq("a", "aa"), CardinalityValue(4, 0, 1, 10)),
         CardinalityRecord(0, Seq("a", "aa", "aab"), CardinalityValue(4, 0, 4, 20)))
 
-    t.getCardinality(Seq("a", "aa", "aab")) shouldEqual
+    t.scan(Seq("a", "aa", "aab"), 3)(0) shouldEqual
       CardinalityRecord(0, Seq("a", "aa", "aab"), CardinalityValue(4, 0, 4, 20))
 
     t.setQuota(Seq("a", "aa", "aab"), 3)
-    t.getCardinality(Seq("a", "aa", "aab")) shouldEqual
+    t.scan(Seq("a", "aa", "aab"), 3)(0) shouldEqual
       CardinalityRecord(0, Seq("a", "aa", "aab"), CardinalityValue(4, 0, 4, 3))
     val ex2 = intercept[QuotaReachedException] {
       t.modifyCount(Seq("a", "aa", "aab"), 1, 0)
@@ -236,13 +237,13 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
     val t = new CardinalityTracker(ref, 0, 3, Seq(50000, 50000, 50000, 50000), newCardStore)
 
     (1 to 30000).foreach(_ => t.modifyCount(Seq("a", "b", "c"), 1, 1))
-    t.getCardinality(Seq("a", "b", "c")) shouldEqual
+    t.scan(Seq("a", "b", "c"), 3)(0) shouldEqual
       CardinalityRecord(0, Seq("a", "b", "c"), CardinalityValue(30000, 30000, 30000, 50000))
     (1 to 30000).foreach(_ => t.modifyCount(Seq("a", "b", "c"), 0, -1))
-    t.getCardinality(Seq("a", "b", "c")) shouldEqual
+    t.scan(Seq("a", "b", "c"), 3)(0) shouldEqual
       CardinalityRecord(0, Seq("a", "b", "c"), CardinalityValue(30000, 0, 30000, 50000))
     (1 to 30000).foreach(_ => t.decrementCount(Seq("a", "b", "c")))
-    t.getCardinality(Seq("a", "b", "c")) shouldEqual
+    t.scan(Seq("a", "b", "c"), 3)(0) shouldEqual
       CardinalityRecord(0, Seq("a", "b", "c"), CardinalityValue(0, 0, 0, 50000))
   }
 
@@ -300,14 +301,109 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
     t.close()
   }
 
-  it ("modifyCountDS should update count correctly") {
-    val t = new CardinalityTracker(ref, 0, 3, Seq(100, 100, 100, 100), newCardStore)
-    (1 to 10).foreach(_ => t.modifyCount(Seq("a", "ac", "aca"), 1, 0))
-    (1 to 20).foreach(_ => t.modifyCount(Seq("a", "ac", "acb"), 1, 0))
-    (1 to 11).foreach(_ => t.modifyCount(Seq("a", "ac", "acc"), 1, 0))
-    (1 to 6).foreach(_ => t.modifyCount(Seq("a", "ac", "acd"), 1, 0))
-    (1 to 1).foreach(_ => t.modifyCount(Seq("a", "ac", "ace"), 1, 0))
-    (1 to 9).foreach(_ => t.modifyCount(Seq("a", "ac", "acf"), 1, 0))
-    (1 to 15).foreach(_ => t.modifyCount(Seq("a", "ac", "acg"), 1, 0))
+  it ("updateCardinalityCountsDS should update count correctly") {
+    val t = new CardinalityTracker(ref, 1, 3, Seq(50000, 50000, 50000, 50000), dsCardStore)
+    (1 to 1000).foreach(_ => t.updateCardinalityCountsDS(Seq("a", "b", "c")))
+    (1 to 1000).foreach(_ => t.updateCardinalityCountsDS(Seq("a", "b", "d")))
+    (1 to 1000).foreach(_ => t.updateCardinalityCountsDS(Seq("a", "c", "d")))
+    (1 to 1000).foreach(_ => t.updateCardinalityCountsDS(Seq("b", "c", "d")))
+
+    t.scan(Seq("a", "b", "c"), 3)(0) shouldEqual
+      CardinalityRecord(1, Seq("a", "b", "c"), CardinalityValue(1000, 1000, 0, 50000))
+    t.scan(Seq("a", "b"), 2)(0) shouldEqual
+      CardinalityRecord(1, Seq("a", "b"), CardinalityValue(2000, 2000, 2000, 50000))
+    t.scan(Seq("a", "b", "d"), 3)(0) shouldEqual
+      CardinalityRecord(1, Seq("a", "b", "d"), CardinalityValue(1000, 1000, 0, 50000))
+    t.scan(Seq("b", "c"), 2)(0) shouldEqual
+      CardinalityRecord(1, Seq("b", "c"), CardinalityValue(1000, 1000, 1000, 50000))
+    t.scan(Seq("b", "c", "d"), 3)(0) shouldEqual
+      CardinalityRecord(1, Seq("b", "c", "d"), CardinalityValue(1000, 1000, 0, 50000))
+    t.scan(Seq("a"), 1)(0) shouldEqual
+      CardinalityRecord(1, Seq("a"), CardinalityValue(3000, 3000, 3000, 50000))
+    t.scan(Seq("b"), 1)(0) shouldEqual
+      CardinalityRecord(1, Seq("b"), CardinalityValue(1000, 1000, 1000, 50000))
+    t.scan(Seq(), 0)(0) shouldEqual
+      CardinalityRecord(1, Seq(), CardinalityValue(4000, 4000, 4000, 50000))
+
+    t.close()
+  }
+
+  it ("updateCardinalityCountsDS should throw QuotaReachedException when childrenCount breached") {
+    val t = new CardinalityTracker(ref, 1, 3, Seq(2, 2, 2, 2), dsCardStore)
+    t.updateCardinalityCountsDS(Seq("a", "b", "c"))
+    t.updateCardinalityCountsDS(Seq("a", "b", "d"))
+    val ex = intercept[QuotaReachedException] {
+      t.updateCardinalityCountsDS(Seq("a", "b", "e"))
+    }
+    ex.prefix shouldEqual Seq("a")
+    t.close()
+  }
+
+  it("updateCardinalityCountsDS should flush counts to RocksDB if threshold reached") {
+    val t = new CardinalityTracker(ref, 1, 3, Seq(5, 5, 5, 5),
+      dsCardStore, dsCardinalityMapFlushCount = 5)
+    t.updateCardinalityCountsDS(Seq("a", "b", "c"))
+    t.updateCardinalityCountsDS(Seq("a", "b", "d"))
+
+    // check not flushed until now since threshold not crossed
+    t.getCardinalityCountMapDSClone().size shouldEqual 5
+
+    t.updateCardinalityCountsDS(Seq("a", "b", "e"))
+
+    // check if map is cleared after flush
+    t.getCardinalityCountMapDSClone().size shouldEqual 0
+
+    // check data integrity in RocksDB
+    t.scan(Seq(), 0)(0) shouldEqual
+      CardinalityRecord(1, Seq(), CardinalityValue(3, 3, 3, 5))
+    t.scan(Seq("a"), 1)(0) shouldEqual
+      CardinalityRecord(1, Seq("a"), CardinalityValue(3, 3, 3, 5))
+    t.scan(Seq("a", "b"), 2)(0) shouldEqual
+      CardinalityRecord(1, Seq("a", "b"), CardinalityValue(3, 3, 3, 5))
+    t.scan(Seq("a", "b", "c"), 3)(0) shouldEqual
+      CardinalityRecord(1, Seq("a", "b", "c"), CardinalityValue(1, 1, 0, 5))
+
+    t.close()
+  }
+
+  it("updateCardinalityCountsDS and modifyCount should give same tsCount and activeCount values") {
+    val s = new CardinalityTracker(ref, 0, 3, Seq(5000, 5000, 5000, 5000), newCardStore)
+    val t = new CardinalityTracker(ref, 1, 3, Seq(5000, 5000, 5000, 5000), dsCardStore)
+
+    // update raw card count
+    (1 to 1000).foreach(_ => s.modifyCount(Seq("a", "b", "c"), 1, 1))
+    (1 to 1000).foreach(_ => s.modifyCount(Seq("a", "b", "d"), 1, 1))
+    (1 to 1000).foreach(_ => s.modifyCount(Seq("a", "c", "d"), 1, 1))
+    (1 to 1000).foreach(_ => s.modifyCount(Seq("b", "c", "d"), 1, 1))
+
+    // update ds card count
+    (1 to 1000).foreach(_ => t.updateCardinalityCountsDS(Seq("a", "b", "c")))
+    (1 to 1000).foreach(_ => t.updateCardinalityCountsDS(Seq("a", "b", "d")))
+    (1 to 1000).foreach(_ => t.updateCardinalityCountsDS(Seq("a", "c", "d")))
+    (1 to 1000).foreach(_ => t.updateCardinalityCountsDS(Seq("b", "c", "d")))
+
+    t.scan(Seq("a", "b", "c"), 3)(0).value.tsCount shouldEqual
+      s.scan(Seq("a", "b", "c"), 3)(0).value.tsCount
+
+    t.scan(Seq("a", "b"), 2)(0).value.tsCount shouldEqual
+      s.scan(Seq("a", "b"), 2)(0).value.tsCount
+
+    t.scan(Seq("a", "b", "d"), 3)(0).value.tsCount shouldEqual
+      s.scan(Seq("a", "b", "d"), 3)(0).value.tsCount
+
+    t.scan(Seq("b", "c"), 2)(0).value.tsCount shouldEqual
+      s.scan(Seq("b", "c"), 2)(0).value.tsCount
+
+    t.scan(Seq("b", "c", "d"), 3)(0).value.tsCount shouldEqual
+      s.scan(Seq("b", "c", "d"), 3)(0).value.tsCount
+
+    t.scan(Seq("a"), 1)(0).value.tsCount shouldEqual
+      s.scan(Seq("a"), 1)(0).value.tsCount
+
+    t.scan(Seq("b"), 1)(0).value.tsCount shouldEqual
+      s.scan(Seq("b"), 1)(0).value.tsCount
+
+    s.close()
+    t.close()
   }
 }

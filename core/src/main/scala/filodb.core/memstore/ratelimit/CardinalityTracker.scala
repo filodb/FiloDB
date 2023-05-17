@@ -38,7 +38,8 @@ class CardinalityTracker(ref: DatasetRef,
                          shardKeyLen: Int,
                          defaultChildrenQuota: Seq[Int],
                          val store: CardinalityStore,
-                         quotaExceededProtocol: QuotaExceededProtocol = NoActionQuotaProtocol) extends StrictLogging {
+                         quotaExceededProtocol: QuotaExceededProtocol = NoActionQuotaProtocol,
+                         dsCardinalityMapFlushCount: Int = 5000) extends StrictLogging {
 
   require(defaultChildrenQuota.length == shardKeyLen + 1)
   require(defaultChildrenQuota.forall(q => q > 0))
@@ -55,7 +56,7 @@ class CardinalityTracker(ref: DatasetRef,
    * the records in RocksDB too frequently, causing a slowdown because of heavy disk writes.
    * Hence we are using this map to help us aggregate in memory and then flush to RocksDB periodically
    */
-  var cardinalityCountMapDS : Map[Seq[String], (Int, Int)] = Map()
+  private val cardinalityCountMapDS : Map[Seq[String], (Int, Int)] = Map()
 
   /**
    * Call when a new time series with the given shard key has been added to the system.
@@ -115,7 +116,10 @@ class CardinalityTracker(ref: DatasetRef,
 
   /**
    * Updates the DOWNSAMPLE CLUSTER's cardinality count in the cardinalityCountMap. Flushes the data to RocksDB
-   * periodically
+   * when `dsCardinalityMapFlushCount` threshold reached
+   *
+   *  NOTE: The cardinality count increment happens by `1`.
+   *
    * Cardinality count at each level of shardKey needs to be updated
    * For example: if shardKey = (my_ws, my_ns, my_metric), then we have to update
    * the cardinality count of 4 prefixes. They are -
@@ -127,18 +131,17 @@ class CardinalityTracker(ref: DatasetRef,
    * @param shardKey
    */
   def updateCardinalityCountsDS(shardKey: Seq[String]): Unit = {
-
     (0 to shardKey.length).foreach { i =>
-      val prefix = shardKey.take(i)
 
+      // update current prefix's cardinality count
+      val prefix = shardKey.take(i)
       val cardCountRecord = cardinalityCountMapDS.get(prefix)
         .map(x => (x._1 + 1, x._2))
         .getOrElse((1, 0)) // child prefix update parent's childrenCount
-
       cardinalityCountMapDS.put(prefix, cardCountRecord)
 
+      // update children count of parent and throw exception if quota reached
       if (i > 0) {
-        // update children count of parent
         val parentPrefix = shardKey.take(i - 1)
 
         // we always add parent before the child, hence it is okay to get the parent prefix's record directly
@@ -159,11 +162,16 @@ class CardinalityTracker(ref: DatasetRef,
       }
     }
 
-    if (cardinalityCountMapDS.size > 5000) {
+    if (cardinalityCountMapDS.size > dsCardinalityMapFlushCount) {
       flushCardinalityDataToRocksDB()
     }
   }
 
+  /*
+  * Flush the cardinality data to RocksDB before reading the counts. The downsample cardinality count is built from
+  * scratch at a periodic interval and the caller of CardinalityTracker can also call this method to ensure all data
+  * is flushed to RocksDB
+  * */
   def flushCardinalityDataToRocksDB(): Unit = {
     if (cardinalityCountMapDS.size > 0) {
       // iterate through map and store each prefix and count to the rocksDB
@@ -183,7 +191,8 @@ class CardinalityTracker(ref: DatasetRef,
    * @param activeDelta Increase in active timeseries
    * @param childrenDelta Increase in children count
    */
-  def modifyCountDS(prefix: Seq[String], totalDelta: Int, activeDelta: Int, childrenDelta: Int): Unit = synchronized {
+  private def modifyCountDS(prefix: Seq[String],
+                            totalDelta: Int, activeDelta: Int, childrenDelta: Int): Unit = synchronized {
 
     // get the current cardinality count from RocksDB for the given prefix. Also add a default if not present
     val old = store.getOrZero(prefix,
@@ -202,7 +211,7 @@ class CardinalityTracker(ref: DatasetRef,
    *
    * @param shardKeyPrefix zero or more elements that form a valid shard key prefix
    */
-  def getCardinality(shardKeyPrefix: Seq[String]): CardinalityRecord = {
+  private def getCardinality(shardKeyPrefix: Seq[String]): CardinalityRecord = {
     require(shardKeyPrefix.length <= shardKeyLen, s"Too many shard keys in $shardKeyPrefix - max $shardKeyLen")
     store.getOrZero(
       shardKeyPrefix,
@@ -274,6 +283,7 @@ class CardinalityTracker(ref: DatasetRef,
 
   /**
    * Use this method to query cardinalities under a provided shard key prefix.
+   * NOTE: All read calls must pass through this method
    *
    * @param depth cardinalities are returned for all prefixes of this size
    * @param shardKeyPrefix zero or more elements that form a valid shard key prefix
@@ -282,6 +292,9 @@ class CardinalityTracker(ref: DatasetRef,
     require(shardKeyPrefix.length <= shardKeyLen, s"Too many shard keys in $shardKeyPrefix - max $shardKeyLen")
     require(depth >= shardKeyPrefix.size,
       s"depth $depth must be at least the size of the prefix ${shardKeyPrefix.size}")
+
+    // flush any pending key value pairs to rocksDB ( useful in down-sample cardinality )
+    flushCardinalityDataToRocksDB()
 
     if (shardKeyPrefix.size == depth) {
       // directly fetch the single cardinality
@@ -293,5 +306,13 @@ class CardinalityTracker(ref: DatasetRef,
 
   def close(): Unit = {
     store.close()
+    cardinalityCountMapDS.clear()
+  }
+
+  /**
+   * returns a clone of cardinalityCountMapDS map for testing purposes
+   */
+  def getCardinalityCountMapDSClone(): Map[Seq[String], (Int, Int)] = {
+    cardinalityCountMapDS.clone()
   }
 }
