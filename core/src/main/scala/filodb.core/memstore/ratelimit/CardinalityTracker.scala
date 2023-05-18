@@ -172,7 +172,7 @@ class CardinalityTracker(ref: DatasetRef,
   * scratch at a periodic interval and the caller of CardinalityTracker can also call this method to ensure all data
   * is flushed to RocksDB
   */
-  def flushCardinalityDataToRocksDB(): Unit = synchronized {
+  def flushCardinalityDataToRocksDB(): Unit = {
     if (cardinalityCountMapDS.size > 0) {
       // iterate through map and store each prefix and count to the rocksDB
       cardinalityCountMapDS.foreach(kv => {
@@ -185,14 +185,16 @@ class CardinalityTracker(ref: DatasetRef,
 
   /**
    * Used to store the cardinality count for the given prefix in the downsample cluster.
-   * NOTE: In downsample cluster, tsCount == activeTsCount. So totalDelta and activeDelta is same
+   * NOTE:
+   * 1. In downsample cluster, tsCount == activeTsCount. So totalDelta and activeDelta is same.
+   * 2. The following function should only be called from `updateCardinalityCountsDS` and hence it is marked private.
    * @param prefix usually contains labels _ws_, _ns_, _metric_ and different combinations of it
    * @param totalDelta Increase in total timeseries
    * @param activeDelta Increase in active timeseries
    * @param childrenDelta Increase in children count
    */
   private def modifyCountDS(prefix: Seq[String],
-                            totalDelta: Int, activeDelta: Int, childrenDelta: Int): Unit = synchronized {
+                            totalDelta: Int, activeDelta: Int, childrenDelta: Int): Unit = {
 
     // get the current cardinality count from RocksDB for the given prefix. Also add a default if not present
     val old = store.getOrZero(prefix,
@@ -305,8 +307,8 @@ class CardinalityTracker(ref: DatasetRef,
   }
 
   def close(): Unit = {
-    flushCardinalityDataToRocksDB()
     store.close()
+    cardinalityCountMapDS.clear()
   }
 
   /**
