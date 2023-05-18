@@ -130,7 +130,7 @@ class CardinalityTracker(ref: DatasetRef,
    *
    * @param shardKey
    */
-  def updateCardinalityCountsDS(shardKey: Seq[String]): Unit = {
+  def updateCardinalityCountsDS(shardKey: Seq[String]): Unit = synchronized {
     (0 to shardKey.length).foreach { i =>
 
       // update current prefix's cardinality count
@@ -167,12 +167,12 @@ class CardinalityTracker(ref: DatasetRef,
     }
   }
 
-  /*
+  /**
   * Flush the cardinality data to RocksDB before reading the counts. The downsample cardinality count is built from
   * scratch at a periodic interval and the caller of CardinalityTracker can also call this method to ensure all data
   * is flushed to RocksDB
-  * */
-  def flushCardinalityDataToRocksDB(): Unit = {
+  */
+  def flushCardinalityDataToRocksDB(): Unit = synchronized {
     if (cardinalityCountMapDS.size > 0) {
       // iterate through map and store each prefix and count to the rocksDB
       cardinalityCountMapDS.foreach(kv => {
@@ -305,8 +305,8 @@ class CardinalityTracker(ref: DatasetRef,
   }
 
   def close(): Unit = {
+    flushCardinalityDataToRocksDB()
     store.close()
-    cardinalityCountMapDS.clear()
   }
 
   /**
