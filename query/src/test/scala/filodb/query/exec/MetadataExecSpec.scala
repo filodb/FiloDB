@@ -243,7 +243,9 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     resp match {
       case QueryError(_, _, ex: IllegalArgumentException)  =>
-                                          ex.getMessage shouldEqual "requirement failed: Record too big for container"
+                                          ex.getMessage shouldEqual "requirement failed:" +
+                                            " The intermediate or final result is too big. For queries, please try to" +
+                                            " add more query filters or time range."
       case _                                                   =>
                                             fail(s"Expected to see an exception for exceeding the default " +
                                               s"container limit of ${execPlan.maxRecordContainerSize}")
