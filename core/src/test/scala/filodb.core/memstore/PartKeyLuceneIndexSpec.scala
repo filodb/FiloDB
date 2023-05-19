@@ -813,7 +813,7 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     containers.head.consumeRecords(binConsumer)
 
     for (elem <- binRecords) {
-      val labelKV = partSchema.binSchema.toStringPairsMap(elem._1, elem._2)
+      val labelKV = partSchema.binSchema.toStringPairs(elem._1, elem._2).toMap
       for(tag <- extraTags){
         labelKV(tag._1.toString) shouldEqual tag._2.toString
       }
