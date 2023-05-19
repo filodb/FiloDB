@@ -4,8 +4,6 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import filodb.core.{DatasetRef, MachineMetricsData}
 
-import scala.collection.Seq
-
 class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
 
   val ref = MachineMetricsData.dataset2.ref
@@ -301,13 +299,22 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
     t.close()
   }
 
-  it ("updateCardinalityCountsDS should update count correctly") {
-    val t = new CardinalityTracker(ref, 1, 3, Seq(50000, 50000, 50000, 50000), dsCardStore)
-    (1 to 1000).foreach(_ => t.updateCardinalityCountsDS(Seq("a", "b", "c")))
-    (1 to 1000).foreach(_ => t.updateCardinalityCountsDS(Seq("a", "b", "d")))
-    (1 to 1000).foreach(_ => t.updateCardinalityCountsDS(Seq("a", "c", "d")))
-    (1 to 1000).foreach(_ => t.updateCardinalityCountsDS(Seq("b", "c", "d")))
+  it ("modifyCount with aggregation should update count correctly") {
+    val t = new CardinalityTracker(ref, 1, 3, Seq(50000, 50000, 50000, 50000), dsCardStore,
+      flushCount = Some(5000))
+    (1 to 1000).foreach(_ => t.modifyCount(Seq("a", "b", "c"), 1, 1))
+    (1 to 1000).foreach(_ => t.modifyCount(Seq("a", "b", "d"), 1, 1))
+    (1 to 1000).foreach(_ => t.modifyCount(Seq("a", "c", "d"), 1, 1))
+    (1 to 1000).foreach(_ => t.modifyCount(Seq("b", "c", "d"), 1, 1))
 
+    // check no flush until flush is called
+    // it should return the default value returned by cardinalityTracker.getCardinality
+    t.scan(Seq("a", "b", "c"), 3)(0) shouldEqual
+      CardinalityRecord(1, Seq("a", "b", "c"), CardinalityValue(0, 0, 0, 50000))
+
+    t.flushCardinalityCount()
+
+    // validate expected records after flush is called
     t.scan(Seq("a", "b", "c"), 3)(0) shouldEqual
       CardinalityRecord(1, Seq("a", "b", "c"), CardinalityValue(1000, 1000, 0, 50000))
     t.scan(Seq("a", "b"), 2)(0) shouldEqual
@@ -328,27 +335,29 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
     t.close()
   }
 
-  it ("updateCardinalityCountsDS should throw QuotaReachedException when childrenCount breached") {
-    val t = new CardinalityTracker(ref, 1, 3, Seq(2, 2, 2, 2), dsCardStore)
-    t.updateCardinalityCountsDS(Seq("a", "b", "c"))
-    t.updateCardinalityCountsDS(Seq("a", "b", "d"))
+  it ("modifyCount with aggregation should throw QuotaReachedException when childrenCount breached") {
+    val t = new CardinalityTracker(ref, 1, 3, Seq(2, 2, 2, 2), dsCardStore, flushCount = Some(5000))
+    t.modifyCount(Seq("a", "b", "c"), 1, 1)
+    t.modifyCount(Seq("a", "b", "d"), 1, 1)
     val ex = intercept[QuotaReachedException] {
-      t.updateCardinalityCountsDS(Seq("a", "b", "e"))
+      t.modifyCount(Seq("a", "b", "e"), 1, 1)
     }
     ex.prefix shouldEqual Seq("a")
     t.close()
   }
 
-  it("updateCardinalityCountsDS should flush counts to RocksDB if threshold reached") {
+  it("modifyCount with aggregation should flush counts to RocksDB if threshold reached") {
     val t = new CardinalityTracker(ref, 1, 3, Seq(5, 5, 5, 5),
-      dsCardStore, dsCardinalityMapFlushCount = 5)
-    t.updateCardinalityCountsDS(Seq("a", "b", "c"))
-    t.updateCardinalityCountsDS(Seq("a", "b", "d"))
+      dsCardStore, flushCount = Some(5))
+    t.modifyCount(Seq("a", "b", "c"), 1, 1)
+    t.modifyCount(Seq("a", "b", "d"), 1, 1)
 
     // check not flushed until now since threshold not crossed
     t.getCardinalityCountMapDSClone().size shouldEqual 5
 
-    t.updateCardinalityCountsDS(Seq("a", "b", "e"))
+    // adding another child which triggers flush based on flushCount parameter
+    t.modifyCount(Seq("a", "b", "e"), 1, 1)
+    t.flushCardinalityCount()
 
     // check if map is cleared after flush
     t.getCardinalityCountMapDSClone().size shouldEqual 0
@@ -366,9 +375,10 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
     t.close()
   }
 
-  it("updateCardinalityCountsDS and modifyCount should give same tsCount and activeCount values") {
+  it("modifyCount with aggregation and without aggregation should give same tsCount and activeCount values") {
     val s = new CardinalityTracker(ref, 0, 3, Seq(5000, 5000, 5000, 5000), newCardStore)
-    val t = new CardinalityTracker(ref, 1, 3, Seq(5000, 5000, 5000, 5000), dsCardStore)
+    val t = new CardinalityTracker(ref, 1, 3, Seq(5000, 5000, 5000, 5000), dsCardStore,
+      flushCount = Some(5000))
 
     // update raw card count
     (1 to 1000).foreach(_ => s.modifyCount(Seq("a", "b", "c"), 1, 1))
@@ -377,10 +387,12 @@ class CardinalityTrackerSpec extends AnyFunSpec with Matchers {
     (1 to 1000).foreach(_ => s.modifyCount(Seq("b", "c", "d"), 1, 1))
 
     // update ds card count
-    (1 to 1000).foreach(_ => t.updateCardinalityCountsDS(Seq("a", "b", "c")))
-    (1 to 1000).foreach(_ => t.updateCardinalityCountsDS(Seq("a", "b", "d")))
-    (1 to 1000).foreach(_ => t.updateCardinalityCountsDS(Seq("a", "c", "d")))
-    (1 to 1000).foreach(_ => t.updateCardinalityCountsDS(Seq("b", "c", "d")))
+    (1 to 1000).foreach(_ => t.modifyCount(Seq("a", "b", "c"), 1, 1))
+    (1 to 1000).foreach(_ => t.modifyCount(Seq("a", "b", "d"), 1, 1))
+    (1 to 1000).foreach(_ => t.modifyCount(Seq("a", "c", "d"), 1, 1))
+    (1 to 1000).foreach(_ => t.modifyCount(Seq("b", "c", "d"), 1, 1))
+
+    t.flushCardinalityCount()
 
     t.scan(Seq("a", "b", "c"), 3)(0).value.tsCount shouldEqual
       s.scan(Seq("a", "b", "c"), 3)(0).value.tsCount

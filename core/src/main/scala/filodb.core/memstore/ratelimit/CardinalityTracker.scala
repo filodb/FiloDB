@@ -32,6 +32,9 @@ case class QuotaReachedException(cannotSetShardKey: Seq[String], prefix: Seq[Str
   * @param defaultChildrenQuota the default quota at each level if no explicit quota is set
   * @param store fast memory or disk based store where cardinality and quota can be read and written
   * @param quotaExceededProtocol action to be taken when quota is breached
+  * @param flushCount threshold to flush the cardinality count records to rocksDB. This is also used to toggle between
+  *    the aggregated (agg using in-memory map. caller has to call function `flushCardinalityCount` to ensure write) vs.
+  *    non-aggregated way (calling rocksDB.store() after update) of storing cardinality count
   */
 class CardinalityTracker(ref: DatasetRef,
                          shard: Int,
@@ -39,7 +42,7 @@ class CardinalityTracker(ref: DatasetRef,
                          defaultChildrenQuota: Seq[Int],
                          val store: CardinalityStore,
                          quotaExceededProtocol: QuotaExceededProtocol = NoActionQuotaProtocol,
-                         dsCardinalityMapFlushCount: Int = 5000) extends StrictLogging {
+                         flushCount: Option[Int] = None) extends StrictLogging {
 
   require(defaultChildrenQuota.length == shardKeyLen + 1)
   require(defaultChildrenQuota.forall(q => q > 0))
@@ -56,7 +59,7 @@ class CardinalityTracker(ref: DatasetRef,
    * the records in RocksDB too frequently, causing a slowdown because of heavy disk writes.
    * Hence we are using this map to help us aggregate in memory and then flush to RocksDB periodically
    */
-  private val cardinalityCountMapDS : Map[Seq[String], (Int, Int)] = Map()
+  private val cardinalityCountMap : Map[Seq[String], (Int, Int)] = Map()
 
   /**
    * Call when a new time series with the given shard key has been added to the system.
@@ -79,46 +82,53 @@ class CardinalityTracker(ref: DatasetRef,
             totalDelta == 0 && activeDelta == -1, // existing active ts that became inactive
             "invalid values for totalDelta / activeDelta")
 
-    val toStore = ArrayBuffer[CardinalityRecord]()
-    // first make sure there is no breach for any prefix
-    (0 to shardKey.length).foreach { i =>
-      val prefix = shardKey.take(i)
-      val old = store.getOrZero(prefix,
-        CardinalityRecord(shard, prefix, CardinalityValue(0, 0, 0, defaultChildrenQuota(i))))
+    val cardinalityRecords = flushCount match {
+      case Some(threshold) => modifyCountWithAggregation(shardKey, threshold, totalDelta)
+      case None => {
+        val toStore = ArrayBuffer[CardinalityRecord]()
+        // first make sure there is no breach for any prefix
+        (0 to shardKey.length).foreach { i =>
+          val prefix = shardKey.take(i)
+          val old = store.getOrZero(prefix,
+            CardinalityRecord(shard, prefix, CardinalityValue(0, 0, 0, defaultChildrenQuota(i))))
 
-      val neu = old.copy(value = old.value.copy(tsCount = old.value.tsCount + totalDelta,
-                         activeTsCount = old.value.activeTsCount + activeDelta,
-        childrenCount = if (i == shardKeyLen) old.value.childrenCount + totalDelta else old.value.childrenCount))
+          val neu = old.copy(value = old.value.copy(tsCount = old.value.tsCount + totalDelta,
+            activeTsCount = old.value.activeTsCount + activeDelta,
+            childrenCount = if (i == shardKeyLen) old.value.childrenCount + totalDelta else old.value.childrenCount))
 
-      if (i == shardKeyLen && neu.value.tsCount > neu.value.childrenQuota) {
-        quotaExceededProtocol.quotaExceeded(ref, shard, prefix, neu.value.childrenQuota)
-        throw QuotaReachedException(shardKey, prefix, neu.value.childrenQuota)
-      }
+          if (i == shardKeyLen && neu.value.tsCount > neu.value.childrenQuota) {
+            quotaExceededProtocol.quotaExceeded(ref, shard, prefix, neu.value.childrenQuota)
+            throw QuotaReachedException(shardKey, prefix, neu.value.childrenQuota)
+          }
 
-      // Updating children count of the parent prefix, when a new child is added
-      if (i > 0 && neu.value.tsCount == 1 && totalDelta == 1) { // parent's new child
-        val parent = toStore(i - 1)
-        val neuParent = parent.copy(value = parent.value.copy(childrenCount = parent.value.childrenCount + 1))
-        toStore(i - 1) = neuParent
-        if (neuParent.value.childrenCount > neuParent.value.childrenQuota) {
-          quotaExceededProtocol.quotaExceeded(ref, shard, parent.prefix, neuParent.value.childrenQuota)
-          throw QuotaReachedException(shardKey, parent.prefix, neuParent.value.childrenQuota)
+          // Updating children count of the parent prefix, when a new child is added
+          if (i > 0 && neu.value.tsCount == 1 && totalDelta == 1) { // parent's new child
+            val parent = toStore(i - 1)
+            val neuParent = parent.copy(value = parent.value.copy(childrenCount = parent.value.childrenCount + 1))
+            toStore(i - 1) = neuParent
+            if (neuParent.value.childrenCount > neuParent.value.childrenQuota) {
+              quotaExceededProtocol.quotaExceeded(ref, shard, parent.prefix, neuParent.value.childrenQuota)
+              throw QuotaReachedException(shardKey, parent.prefix, neuParent.value.childrenQuota)
+            }
+          }
+          toStore += neu
+        }
+
+        toStore.map { case neu =>
+          store.store(neu)
+          neu
         }
       }
-      toStore += neu
     }
-
-    toStore.map { case neu =>
-      store.store(neu)
-      neu
-    }
+    cardinalityRecords
   }
 
   /**
    * Updates the DOWNSAMPLE CLUSTER's cardinality count in the cardinalityCountMap. Flushes the data to RocksDB
    * when `dsCardinalityMapFlushCount` threshold reached
    *
-   *  NOTE: The cardinality count increment happens by `1`.
+   *  NOTE: We are only cardinality count for total TS in aggregated fashion. We will add support for active TS if
+   *  needed
    *
    * Cardinality count at each level of shardKey needs to be updated
    * For example: if shardKey = (my_ws, my_ns, my_metric), then we have to update
@@ -130,23 +140,22 @@ class CardinalityTracker(ref: DatasetRef,
    *
    * @param shardKey
    */
-  def updateCardinalityCountsDS(shardKey: Seq[String]): Unit = synchronized {
+  private def modifyCountWithAggregation(shardKey: Seq[String], threshold: Int,
+                                         totalDelta: Int): Seq[CardinalityRecord] = synchronized {
     (0 to shardKey.length).foreach { i =>
-
       // update current prefix's cardinality count
       val prefix = shardKey.take(i)
-      val cardCountRecord = cardinalityCountMapDS.get(prefix)
-        .map(x => (x._1 + 1, x._2))
+      val cardCountRecord = cardinalityCountMap.get(prefix)
+        .map(x => (x._1 + totalDelta, x._2))
         .getOrElse((1, 0)) // child prefix update parent's childrenCount
-      cardinalityCountMapDS.put(prefix, cardCountRecord)
-
+      cardinalityCountMap.put(prefix, cardCountRecord)
       // update children count of parent and throw exception if quota reached
       if (i > 0) {
         val parentPrefix = shardKey.take(i - 1)
 
         // we always add parent before the child, hence it is okay to get the parent prefix's record directly
         // without the None check
-        val updatedCountRecord = cardinalityCountMapDS.get(parentPrefix)
+        val updatedCountRecord = cardinalityCountMap.get(parentPrefix)
           .map(x => (x._1, x._2 + 1)).get
 
         // check if number of children is higher than the given quota. This allows us guard our physical resources
@@ -158,13 +167,15 @@ class CardinalityTracker(ref: DatasetRef,
         }
 
         // store the updated parent's childrenCount
-        cardinalityCountMapDS.put(parentPrefix, updatedCountRecord)
+        cardinalityCountMap.put(parentPrefix, updatedCountRecord)
       }
     }
-
-    if (cardinalityCountMapDS.size > dsCardinalityMapFlushCount) {
-      flushCardinalityDataToRocksDB()
+    if (cardinalityCountMap.size > threshold) {
+      flushCardinalityCount()
     }
+    // NOTE: We are not using the returned CardinalityRecord records when modifying count
+    // using an aggregation map. We will update it when it is required but keeping things simple for now
+    Seq()
   }
 
   /**
@@ -172,14 +183,14 @@ class CardinalityTracker(ref: DatasetRef,
   * scratch at a periodic interval and the caller of CardinalityTracker can also call this method to ensure all data
   * is flushed to RocksDB
   */
-  def flushCardinalityDataToRocksDB(): Unit = {
-    if (cardinalityCountMapDS.size > 0) {
+  def flushCardinalityCount(): Unit = {
+    if (cardinalityCountMap.size > 0) {
       // iterate through map and store each prefix and count to the rocksDB
-      cardinalityCountMapDS.foreach(kv => {
-        modifyCountDS(kv._1, kv._2._1, kv._2._1, kv._2._2)
+      cardinalityCountMap.foreach(kv => {
+        storeCardinalityCountInRocksDB(kv._1, kv._2._1, kv._2._1, kv._2._2)
       })
       // clear the map
-      cardinalityCountMapDS.clear()
+      cardinalityCountMap.clear()
     }
   }
 
@@ -193,7 +204,7 @@ class CardinalityTracker(ref: DatasetRef,
    * @param activeDelta Increase in active timeseries
    * @param childrenDelta Increase in children count
    */
-  private def modifyCountDS(prefix: Seq[String],
+  private def storeCardinalityCountInRocksDB(prefix: Seq[String],
                             totalDelta: Int, activeDelta: Int, childrenDelta: Int): Unit = {
 
     // get the current cardinality count from RocksDB for the given prefix. Also add a default if not present
@@ -295,9 +306,6 @@ class CardinalityTracker(ref: DatasetRef,
     require(depth >= shardKeyPrefix.size,
       s"depth $depth must be at least the size of the prefix ${shardKeyPrefix.size}")
 
-    // flush any pending key value pairs to rocksDB ( useful in down-sample cardinality )
-    flushCardinalityDataToRocksDB()
-
     if (shardKeyPrefix.size == depth) {
       // directly fetch the single cardinality
       Seq(getCardinality(shardKeyPrefix))
@@ -308,13 +316,17 @@ class CardinalityTracker(ref: DatasetRef,
 
   def close(): Unit = {
     store.close()
-    cardinalityCountMapDS.clear()
+
+    // WHY are we not flushing before the close? This is because in our current implementation of
+    // RocksDbCardinalityStore.close(), we delete the RocksDB itself. so to avoid any additional writes, we are just
+    // clearing the map to clean the state
+    cardinalityCountMap.clear()
   }
 
   /**
    * returns a clone of cardinalityCountMapDS map for testing purposes
    */
   def getCardinalityCountMapDSClone(): Map[Seq[String], (Int, Int)] = {
-    cardinalityCountMapDS.clone()
+    cardinalityCountMap.clone()
   }
 }
