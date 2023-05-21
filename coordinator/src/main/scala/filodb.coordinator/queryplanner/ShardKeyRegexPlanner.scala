@@ -1,5 +1,8 @@
 package filodb.coordinator.queryplanner
 
+import scala.collection.Seq
+
+import filodb.core.{StaticTargetSchemaProvider, TargetSchemaProvider}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
 import filodb.query._
@@ -28,13 +31,131 @@ case class ShardKeyMatcher(columnFilters: Seq[ColumnFilter], query: String)
 class ShardKeyRegexPlanner(val dataset: Dataset,
                            queryPlanner: QueryPlanner,
                            shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]],
-                           config: QueryConfig)
+                           config: QueryConfig,
+                           _targetSchemaProvider: TargetSchemaProvider = StaticTargetSchemaProvider())
   extends QueryPlanner with DefaultPlanner {
 
   override def queryConfig: QueryConfig = config
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options
   private val datasetMetricColumn = dataset.options.metricColumn
+
+  private def targetSchemaProvider(qContext: QueryContext): TargetSchemaProvider = {
+    qContext.plannerParams.targetSchemaProviderOverride.getOrElse(_targetSchemaProvider)
+  }
+
+  private def getShardKeys(plan: LogicalPlan): Seq[Seq[ColumnFilter]] = {
+    LogicalPlan.getNonMetricShardKeyFilters(plan, dataset.options.shardKeyColumns)
+      .flatMap(shardKeyMatcher(_))
+  }
+
+  /**
+   * Returns true iff all of:
+   *   - all plan RawSeries share the same target-schema columns.
+   *   - no target-schema definition changes during the query.
+   */
+  private def sameRawSeriesTargetSchemaColumns(plan: LogicalPlan,
+                                               queryContext: QueryContext): Option[Seq[String]] = {
+    // compose a stream of Options for each RawSeries--
+    //   the options contain a target-schema iff it is defined and unchanging.
+    val rsTschemaOpts = LogicalPlan.findLeafLogicalPlans(plan)
+      .filter(_.isInstanceOf[RawSeries])
+      .map(_.asInstanceOf[RawSeries]).flatMap{ rs =>
+        val shardKeys = getShardKeys(rs)
+        val interval = LogicalPlanUtils.getSpanningIntervalSelector(rs)
+        shardKeys.map{ shardKey =>
+          val filters = LogicalPlanUtils.upsertFilters(rs.filters, shardKey)
+          LogicalPlanUtils.getTargetSchemaIfUnchanging(targetSchemaProvider(queryContext), filters, interval)
+        }
+      }
+    // make sure all tschemas are defined, and they all match
+    val referenceSchema = rsTschemaOpts.head
+    if (referenceSchema.isDefined
+        && rsTschemaOpts.forall(tschema => tschema.isDefined && tschema == referenceSchema)) {
+      Some(referenceSchema.get)
+    } else {
+      None
+    }
+  }
+
+  /**
+   * Returns true iff an Aggregate can be pushdown-optimized.
+   * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
+   */
+  private def canPushdown(agg: Aggregate, queryContext: QueryContext): Boolean = {
+    if (agg.clauseOpt.isEmpty || agg.clauseOpt.get.clauseType != AggregateClause.ClauseType.By) {
+      return false
+    }
+
+    val nonMetricShardKeyCols = dataset.options.nonMetricShardColumns
+
+    // FIXME: we can pushdown even when a target-schema isn't defined as long as
+    //  all shard keys are given on the "by" clause. This change will touch quite a few files / tests,
+    //  so we'll save it for a separate PR.
+    // val clauseCols = agg.clauseOpt.get.labels
+    // if (nonMetricShardKeyCols.forall(clauseCols.contains(_))) {
+    //   return true
+    // }
+
+    val tschema = sameRawSeriesTargetSchemaColumns(agg, queryContext)
+    if (tschema.isEmpty) {
+      return false
+    }
+    // make sure non-shard-key (i.e. non-implicit) target-schema columns are included in the "by" clause.
+    val tschemaNoImplicit = tschema.get.filter(!nonMetricShardKeyCols.contains(_))
+    tschemaNoImplicit.forall(agg.clauseOpt.get.labels.contains(_))
+  }
+
+  /**
+   * Returns true iff a BinaryJoin can be pushdown-optimized.
+   * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
+   */
+  private def canPushdown(bj: BinaryJoin, queryContext: QueryContext): Boolean = {
+    if (bj.on.isEmpty || bj.ignoring.nonEmpty) {
+      return false
+    }
+
+    val nonMetricShardKeyCols = dataset.options.nonMetricShardColumns
+
+    // FIXME: we can pushdown even when a target-schema isn't defined as long as
+    //  all shard keys are given on the "on" clause. This change will touch quite a few files / tests,
+    //  so we'll save it for a separate PR.
+    // val clauseCols = bj.on
+    // if (nonMetricShardKeyCols.forall(clauseCols.contains(_))) {
+    //   return true
+    // }
+
+    val tschema = sameRawSeriesTargetSchemaColumns(bj, queryContext)
+    if (tschema.isEmpty) {
+      return false
+    }
+    // make sure non-shard-key (i.e. non-implicit) target-schema columns are included in the "on" clause.
+    val tschemaNoImplicit = tschema.get.filter(!nonMetricShardKeyCols.contains(_))
+    tschemaNoImplicit.forall(bj.on.contains(_))
+  }
+
+  /**
+   * Returns a set of shard-key sets iff a plan can be pushed-down to each.
+   * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
+   */
+  private def getPushdownKeys(qContext: QueryContext,
+                              plan: LogicalPlan): Option[Set[Set[ColumnFilter]]] = {
+    val getRawShardKeys = (rs: RawSeries) => getShardKeys(rs).map(_.toSet).toSet
+    LogicalPlanUtils.getPushdownKeys(qContext, plan, canPushdown, canPushdown, getRawShardKeys)
+  }
+
+  /**
+   * Attempts a pushdown optimization.
+   * Returns an occupied Optional iff the optimization was successful.
+   */
+  private def attemptPushdown(logicalPlan: LogicalPlan, qContext: QueryContext): Option[PlanResult] = {
+    val pushdownKeys = getPushdownKeys(qContext, logicalPlan)
+    if (pushdownKeys.isDefined) {
+      val plans = generateExecForEachKey(logicalPlan, pushdownKeys.get.map(_.toSeq).toSeq, qContext)
+        .sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
+      Some(PlanResult(plans))
+    } else None
+  }
 
   /**
    * Returns true when regex has single matching value
@@ -65,7 +186,13 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     } else if (hasSingleShardKeyMatch(nonMetricShardKeyFilters)) {
       // For queries like topk(2, test{_ws_ = "demo", _ns_ =~ "App-1"}) which have just one matching value
       generateExecWithoutRegex(logicalPlan, nonMetricShardKeyFilters.head, qContext).head
-    } else walkLogicalPlanTree(logicalPlan, qContext).plans.head
+    } else {
+      val result = walkLogicalPlanTree(logicalPlan, qContext)
+      if (result.plans.size > 1) {
+        val dispatcher = PlannerUtil.pickDispatcher(result.plans)
+        MultiPartitionDistConcatExec(qContext, dispatcher, result.plans)
+      } else result.plans.head
+    }
   }
 
 
@@ -83,7 +210,6 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       filterGroup.isEmpty || nonMetricShardColumnsSet.subsetOf(filterGroup.map(_.column).toSet)
     }
   }
-
 
   def isMetadataQuery(logicalPlan: LogicalPlan): Boolean = {
     logicalPlan match {
@@ -115,10 +241,16 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
 
   private def generateExecWithoutRegex(logicalPlan: LogicalPlan, nonMetricShardKeyFilters: Seq[ColumnFilter],
                                        qContext: QueryContext): Seq[ExecPlan] = {
-    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val shardKeyMatches = shardKeyMatcher(nonMetricShardKeyFilters)
-    val skipAggregatePresentValue = if (shardKeyMatches.length == 1) false else true
-    shardKeyMatches.map { result =>
+    generateExecForEachKey(logicalPlan, shardKeyMatches, qContext)
+  }
+
+  private def generateExecForEachKey(logicalPlan: LogicalPlan,
+                                     keys: Seq[Seq[ColumnFilter]],
+                                     qContext: QueryContext): Seq[ExecPlan] = {
+    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val skipAggregatePresentValue = keys.length > 1
+    keys.map { result =>
       val newLogicalPlan = logicalPlan.replaceFilters(result)
       // Querycontext should just have the part of query which has regex
       // For example for exp(sum(test{_ws_ = "demo", _ns_ =~ "App.*"})), sub queries should be
@@ -153,6 +285,10 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
    * LHS and RHS could be across multiple partitions
    */
   private def materializeBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): PlanResult = {
+    val pushdownKeys = attemptPushdown(logicalPlan, qContext)
+    if (pushdownKeys.isDefined) {
+      return pushdownKeys.get
+    }
 
     optimizeOrVectorDouble(qContext, logicalPlan).getOrElse {
       val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
@@ -193,6 +329,11 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
    * Sub query could be across multiple partitions so aggregate using MultiPartitionReduceAggregateExec
    * */
   private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext): PlanResult = {
+    val pushdownKeys = attemptPushdown(aggregate, queryContext)
+    if (pushdownKeys.isDefined) {
+      return pushdownKeys.get
+    }
+
     // Pushing down aggregates to run on individual partitions is most efficient, however, if we have multiple
     // nested aggregation we should be pushing down the lowest aggregate for correctness. Consider the following query
     // count(sum by(foo)(test1{_ws_ = "demo", _ns_ =~ "App-.*"})), doing a count of the counts received from individual

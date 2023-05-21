@@ -232,7 +232,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val leafFilters = LogicalPlan.getColumnFilterGroup(logicalPlan)
     val nonMetricColumnSet = dataset.options.nonMetricShardColumns.toSet
     //2. Filter from each leaf node filters to keep only nonShardKeyColumns and convert them to key value map
-    val routingKeyMap = leafFilters.map(cf => {
+    val routingKeyMap = leafFilters.filter(_.nonEmpty).map(cf => {
       cf.filter(col => nonMetricColumnSet.contains(col.column)).map(
         x => (x.column, x.filter.valuesStrings.head.toString)).toMap
     })
