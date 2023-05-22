@@ -1,7 +1,6 @@
 package filodb.core.memstore.ratelimit
 
 import scala.collection.mutable.ArrayBuffer
-import scala.collection.mutable.Map
 
 import com.typesafe.scalalogging.StrictLogging
 
@@ -59,7 +58,7 @@ class CardinalityTracker(ref: DatasetRef,
    * the records in RocksDB too frequently, causing a slowdown because of heavy disk writes.
    * Hence we are using this map to help us aggregate in memory and then flush to RocksDB periodically
    */
-  private val cardinalityCountMap : Map[Seq[String], (Int, Int)] = Map()
+  private val cardinalityCountMap : collection.mutable.Map[Seq[String], (Int, Int)] = collection.mutable.Map()
 
   /**
    * Call when a new time series with the given shard key has been added to the system.
@@ -84,43 +83,55 @@ class CardinalityTracker(ref: DatasetRef,
 
     val cardinalityRecords = flushCount match {
       case Some(threshold) => modifyCountWithAggregation(shardKey, threshold, totalDelta)
-      case None => {
-        val toStore = ArrayBuffer[CardinalityRecord]()
-        // first make sure there is no breach for any prefix
-        (0 to shardKey.length).foreach { i =>
-          val prefix = shardKey.take(i)
-          val old = store.getOrZero(prefix,
-            CardinalityRecord(shard, prefix, CardinalityValue(0, 0, 0, defaultChildrenQuota(i))))
-
-          val neu = old.copy(value = old.value.copy(tsCount = old.value.tsCount + totalDelta,
-            activeTsCount = old.value.activeTsCount + activeDelta,
-            childrenCount = if (i == shardKeyLen) old.value.childrenCount + totalDelta else old.value.childrenCount))
-
-          if (i == shardKeyLen && neu.value.tsCount > neu.value.childrenQuota) {
-            quotaExceededProtocol.quotaExceeded(ref, shard, prefix, neu.value.childrenQuota)
-            throw QuotaReachedException(shardKey, prefix, neu.value.childrenQuota)
-          }
-
-          // Updating children count of the parent prefix, when a new child is added
-          if (i > 0 && neu.value.tsCount == 1 && totalDelta == 1) { // parent's new child
-            val parent = toStore(i - 1)
-            val neuParent = parent.copy(value = parent.value.copy(childrenCount = parent.value.childrenCount + 1))
-            toStore(i - 1) = neuParent
-            if (neuParent.value.childrenCount > neuParent.value.childrenQuota) {
-              quotaExceededProtocol.quotaExceeded(ref, shard, parent.prefix, neuParent.value.childrenQuota)
-              throw QuotaReachedException(shardKey, parent.prefix, neuParent.value.childrenQuota)
-            }
-          }
-          toStore += neu
-        }
-
-        toStore.map { case neu =>
-          store.store(neu)
-          neu
-        }
-      }
+      case None => modifyCountWithoutAggregation(shardKey, totalDelta, activeDelta)
     }
     cardinalityRecords
+  }
+
+  /**
+   * Updates/Adds cardinality count and corresponding records and invokes the RocksDB.store method after update/add.
+   *
+   * @param shardKey elements in the shard key of time series. For example: (ws, ns, name). Full shard key needed
+   * @param totalDelta delta in total timeseries
+   * @param activeDelta delta in active timeseries
+   * @return current cardinality for each shard key prefix. There
+   *         will be shardKeyLen + 1 items in the return value
+   */
+  private def modifyCountWithoutAggregation(shardKey: Seq[String], totalDelta: Int,
+                                            activeDelta: Int): Seq[CardinalityRecord] = {
+    val toStore = ArrayBuffer[CardinalityRecord]()
+    // first make sure there is no breach for any prefix
+    (0 to shardKey.length).foreach { i =>
+      val prefix = shardKey.take(i)
+      val old = store.getOrZero(prefix,
+        CardinalityRecord(shard, prefix, CardinalityValue(0, 0, 0, defaultChildrenQuota(i))))
+
+      val neu = old.copy(value = old.value.copy(tsCount = old.value.tsCount + totalDelta,
+        activeTsCount = old.value.activeTsCount + activeDelta,
+        childrenCount = if (i == shardKeyLen) old.value.childrenCount + totalDelta else old.value.childrenCount))
+
+      if (i == shardKeyLen && neu.value.tsCount > neu.value.childrenQuota) {
+        quotaExceededProtocol.quotaExceeded(ref, shard, prefix, neu.value.childrenQuota)
+        throw QuotaReachedException(shardKey, prefix, neu.value.childrenQuota)
+      }
+
+      // Updating children count of the parent prefix, when a new child is added
+      if (i > 0 && neu.value.tsCount == 1 && totalDelta == 1) { // parent's new child
+        val parent = toStore(i - 1)
+        val neuParent = parent.copy(value = parent.value.copy(childrenCount = parent.value.childrenCount + 1))
+        toStore(i - 1) = neuParent
+        if (neuParent.value.childrenCount > neuParent.value.childrenQuota) {
+          quotaExceededProtocol.quotaExceeded(ref, shard, parent.prefix, neuParent.value.childrenQuota)
+          throw QuotaReachedException(shardKey, parent.prefix, neuParent.value.childrenQuota)
+        }
+      }
+      toStore += neu
+    }
+
+    toStore.map { case neu =>
+      store.store(neu)
+      neu
+    }
   }
 
   /**
@@ -138,7 +149,7 @@ class CardinalityTracker(ref: DatasetRef,
    * 3. (my_ws, my_ns)
    * 4. (my_ws, my_ns, my_metric)
    *
-   * @param shardKey
+   * @param shardKey elements in the shard key of time series. For example: (ws, ns, name). Full shard key needed
    */
   private def modifyCountWithAggregation(shardKey: Seq[String], threshold: Int,
                                          totalDelta: Int): Seq[CardinalityRecord] = synchronized {
@@ -326,7 +337,7 @@ class CardinalityTracker(ref: DatasetRef,
   /**
    * returns a clone of cardinalityCountMapDS map for testing purposes
    */
-  def getCardinalityCountMapDSClone(): Map[Seq[String], (Int, Int)] = {
+  def getCardinalityCountMapDSClone(): collection.mutable.Map[Seq[String], (Int, Int)] = {
     cardinalityCountMap.clone()
   }
 }
