@@ -154,7 +154,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _) => {
+      case QueryResult(id, _, response, _,  _, _, _) => {
         val rv = response(0)
         rv.rows.size shouldEqual 1
         val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
@@ -178,7 +178,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     (resp: @unchecked) match {
-      case QueryResult(_, _, results, _, _, _) => results.size shouldEqual 0
+      case QueryResult(_, _, results, _, _, _, _) => results.size shouldEqual 0
     }
   }
 
@@ -195,7 +195,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _) =>
+      case QueryResult(id, _, response, _, _, _, _) =>
         response.size shouldEqual 1
         response(0).rows.map { row =>
           val r = row.asInstanceOf[BinaryRecordRowReader]
@@ -218,7 +218,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _) => {
+      case QueryResult(id, _, response, _, _, _, _) => {
         response.size shouldEqual 1
         response(0).rows.map { row =>
           val r = row.asInstanceOf[BinaryRecordRowReader]
@@ -258,7 +258,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val resp1 = execPlan1.execute(memStore, querySession).runToFuture.futureValue
     val result = resp1 match {
-      case QueryResult(id, _, response, _, _, _) => {
+      case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
         rv.rows.size shouldEqual 1
         val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
@@ -285,7 +285,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _) => {
+      case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
         rv.rows.size shouldEqual expectedLabels.size
         rv.rows.map(row => {
@@ -309,7 +309,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _) => {
+      case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
         rv.rows.size shouldEqual 1
         val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
@@ -339,7 +339,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _) =>
+      case QueryResult(id, _, response, _, _, _, _) =>
         response.size shouldEqual 1
         val rv1 = response(0)
         rv1.rows.size shouldEqual 1
@@ -406,7 +406,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
 
       val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
       val result = (resp: @unchecked) match {
-        case QueryResult(id, _, response, _, _, _) =>
+        case QueryResult(id, _, response, _, _, _, _) =>
           // should only have a single RangeVector
           response.size shouldEqual 1
 

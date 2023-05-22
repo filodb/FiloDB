@@ -2,18 +2,19 @@ package filodb.query.exec
 
 import java.net.InetAddress
 
+import scala.concurrent.TimeoutException
+import scala.concurrent.duration.DurationLong
+
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
-import scala.concurrent.TimeoutException
-import scala.concurrent.duration.DurationLong
 
 import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.PartLookupResult
 import filodb.core.memstore.ratelimit.CardinalityRecord
 import filodb.core.metadata.Schemas
-import filodb.core.query.{QueryConfig, QuerySession, QueryStats, ResultSchema}
+import filodb.core.query.{QueryConfig, QuerySession, QueryStats, QueryWarnings, ResultSchema}
 import filodb.core.store._
 import filodb.query.{QueryResponse, QueryResult, StreamQueryResponse}
 import filodb.query.Query.qLogger
@@ -28,7 +29,7 @@ import filodb.query.Query.qLogger
   override def dispatch(plan: ExecPlanWithClientParams,
                         source: ChunkSource)(implicit sched: Scheduler): Task[QueryResponse] = {
     lazy val emptyPartialResult = QueryResult(plan.execPlan.queryContext.queryId, ResultSchema.empty, Nil,
-      QueryStats(), true, Some("Result may be partial since query on some shards timed out"))
+      QueryStats(), QueryWarnings(), true, Some("Result may be partial since query on some shards timed out"))
 
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since

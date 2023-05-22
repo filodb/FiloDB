@@ -175,9 +175,15 @@ trait ExecPlan extends QueryCommand {
           // recording and adding step1 to queryStats at the end of execution since the grouping
           // for stats is not formed yet at the beginning
           querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(step1CpuTime)
-          Observable.fromIterable(Seq(StreamQueryResultHeader(queryContext.queryId, finalRes._2),
-            StreamQueryResultFooter(queryContext.queryId, querySession.queryStats,
-              querySession.resultCouldBePartial, querySession.partialResultsReason)))
+          Observable.fromIterable(
+            Seq(
+              StreamQueryResultHeader(queryContext.queryId, finalRes._2),
+              StreamQueryResultFooter(
+                queryContext.queryId, querySession.queryStats, querySession.warnings,
+                querySession.resultCouldBePartial, querySession.partialResultsReason
+              )
+            )
+          )
         } else {
           val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
           Kamon
@@ -213,9 +219,9 @@ trait ExecPlan extends QueryCommand {
         .map { srv =>
           // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
           numResultSamples += srv.numRowsSerialized
-          checkSamplesLimit(numResultSamples)
+          checkSamplesLimit(numResultSamples, querySession.warnings)
           resultSize += srv.estimatedSerializedBytes
-          checkResultBytes(resultSize, querySession.queryConfig)
+          checkResultBytes(resultSize, querySession.queryConfig, querySession.warnings)
           srv
         }
         .filter(_.numRowsSerialized > 0)
@@ -236,7 +242,7 @@ trait ExecPlan extends QueryCommand {
 
       Observable.eval(StreamQueryResultHeader(queryContext.queryId, resultSchema)) ++
         queryResults ++
-        Observable.eval(StreamQueryResultFooter(queryContext.queryId, querySession.queryStats,
+        Observable.eval(StreamQueryResultFooter(queryContext.queryId, querySession.queryStats, querySession.warnings,
           querySession.resultCouldBePartial, querySession.partialResultsReason))
     }
 
@@ -246,7 +252,7 @@ trait ExecPlan extends QueryCommand {
     ret
   }
 
-  def checkSamplesLimit(numResultSamples: Int): Unit = {
+  def checkSamplesLimit(numResultSamples: Int, queryWarnings: QueryWarnings): Unit = {
     // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
     if (enforceSampleLimit && numResultSamples > queryContext.plannerParams.enforcedLimits.execPlanSamples) {
       val msg = s"Exceeded enforced limit of samples produced on a single shard or processing node. " +
@@ -260,10 +266,11 @@ trait ExecPlan extends QueryCommand {
       val msg = s"Exceeded warning limit of samples produced on a single shard or processing node. " +
         s"Max number of samples is ${queryContext.plannerParams.warnLimits.execPlanSamples}"
       qLogger.info(queryContext.getQueryLogLine(msg))
+      queryWarnings.updateExecPlanSamples(numResultSamples)
     }
   }
 
-  def checkResultBytes(resultSize: Long, queryConfig: QueryConfig): Unit = {
+  def checkResultBytes(resultSize: Long, queryConfig: QueryConfig, queryWarnings: QueryWarnings): Unit = {
     if (resultSize > queryContext.plannerParams.enforcedLimits.execPlanResultBytes) {
       val size_mib = queryContext.plannerParams.enforcedLimits.execPlanResultBytes / math.pow(1024, 2)
       val msg = s"Reached ${resultSize} bytes of result size (final or intermediate) " +
@@ -283,6 +290,7 @@ trait ExecPlan extends QueryCommand {
         s"for data serialized out of a host or shard " +
         s"(${math.round(size_mib)} MiB)."
       qLogger.info(queryContext.getQueryLogLine(msg))
+      queryWarnings.updateExecPlanResultBytes(resultSize)
     }
   }
 
@@ -378,7 +386,7 @@ trait ExecPlan extends QueryCommand {
             // recording and adding step1 to queryStats at the end of execution since the grouping
             // for stats is not formed yet at the beginning
             querySession.queryStats.getCpuNanosCounter(Nil).getAndAdd(step1CpuTime)
-            QueryResult(queryContext.queryId, resSchema, Nil, querySession.queryStats,
+            QueryResult(queryContext.queryId, resSchema, Nil, querySession.queryStats, querySession.warnings,
               querySession.resultCouldBePartial, querySession.partialResultsReason
             )
           })
@@ -421,9 +429,9 @@ trait ExecPlan extends QueryCommand {
           .map { srv =>
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
               numResultSamples += srv.numRowsSerialized
-              checkSamplesLimit(numResultSamples)
+              checkSamplesLimit(numResultSamples, querySession.warnings)
               resultSize += srv.estimatedSerializedBytes
-              checkResultBytes(resultSize, querySession.queryConfig)
+              checkResultBytes(resultSize, querySession.queryConfig, querySession.warnings)
               srv
           }
           .filter(_.numRowsSerialized > 0)
@@ -442,7 +450,7 @@ trait ExecPlan extends QueryCommand {
             span.mark(s"numSrv=${r.size}")
             span.mark(s"execute-step2-end-${this.getClass.getSimpleName}")
             qLogger.debug(s"Finished query execution pipeline with ${r.size} RVs for $this")
-            QueryResult(queryContext.queryId, resultSchema, r, querySession.queryStats,
+            QueryResult(queryContext.queryId, resultSchema, r, querySession.queryStats, querySession.warnings,
               querySession.resultCouldBePartial, querySession.partialResultsReason)
           }
     }
@@ -567,8 +575,10 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
           .onErrorHandle { ex: Throwable =>
             QueryError(execPlan.queryContext.queryId, querySession.queryStats, ex)
           }.map {
-            case QueryResult(_, _, result, qStats, isPartialResult, partialResultReason)  =>
+            case QueryResult(_, _, result, qStats, warnings, isPartialResult, partialResultReason)  =>
                           querySession.queryStats.add(qStats)
+                          querySession.warnings.merge(warnings)
+
                           // Result is empty because of NaN so create ScalarFixedDouble with NaN
                           if (isPartialResult) {
                             querySession.resultCouldBePartial = true
@@ -691,12 +701,13 @@ abstract class NonLeafExecPlan extends ExecPlan {
               header
             case res @ StreamQueryResult(_, _) =>
               res
-            case footer @ StreamQueryResultFooter(_, qStats, isPartialResult, partialResultReason) =>
+            case footer @ StreamQueryResultFooter(_, qStats, warnings, isPartialResult, partialResultReason) =>
               if (isPartialResult) {
                 querySession.resultCouldBePartial = true
                 querySession.partialResultsReason = partialResultReason
               }
               querySession.queryStats.add(qStats)
+              querySession.warnings.merge(warnings)
               footer
             case StreamQueryError(_, queryStats, t) =>
               querySession.queryStats.add(queryStats)
@@ -737,13 +748,14 @@ abstract class NonLeafExecPlan extends ExecPlan {
         .doOnStart(_ => Task.eval(span.mark("first-child-result-received")))
         .guarantee(Task.eval(span.mark("last-child-result-received")))
         .map {
-          case (res@QueryResult(_, _, _, qStats, isPartialResult, partialResultReason), i) =>
+          case (res@QueryResult(_, _, _, qStats, warnings, isPartialResult, partialResultReason), i) =>
             qLogger.debug(s"Child query result received for $this")
             if (isPartialResult) {
               querySession.resultCouldBePartial = true
               querySession.partialResultsReason = partialResultReason
             }
             querySession.queryStats.add(qStats)
+            querySession.warnings.merge(warnings)
           if (res.resultSchema != ResultSchema.empty) sch = reduceSchemas(sch, res.resultSchema)
             (res, i)
           case (e: QueryError, _) =>
@@ -755,7 +767,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
         //.pipeThrough(Pipe.publish[(QueryResult, Int)]) // pipeThrough helps with multiple subscribers
 
       val outputSchema = processedTasks.collect { // collect schema of first result that is nonEmpty
-        case (QueryResult(_, schema, _, _, _, _), _) if schema.columns.nonEmpty => schema
+        case (QueryResult(_, schema, _, _, _, _, _), _) if schema.columns.nonEmpty => schema
       }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
       // Dont finish span since this code didnt create it
       Kamon.runWithSpan(span, false) {

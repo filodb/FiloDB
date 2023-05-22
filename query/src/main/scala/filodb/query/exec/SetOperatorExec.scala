@@ -60,7 +60,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
                               querySession: QuerySession): Observable[RangeVector] = {
     val span = Kamon.currentSpan()
     val taskOfResults = childResponses.map {
-      case (QueryResult(_, schema, result, _, _, _), i) => (schema, result, i)
+      case (QueryResult(_, schema, result, _, _, _, _), i) => (schema, result, i)
     }.toListL.map { resp =>
       val startNs = Utils.currentThreadCpuTimeNanos
       try {

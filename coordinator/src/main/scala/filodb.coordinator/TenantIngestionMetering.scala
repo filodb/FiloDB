@@ -67,7 +67,7 @@ case class TenantIngestionMetering(settings: FilodbSettings,
         LogicalPlan2Query(dsRef, TsCardinalities(prefix, numGroupByFields)),
         ASK_TIMEOUT)
       fut.onComplete {
-        case Success(QueryResult(_, _, rv, _, _, _)) =>
+        case Success(QueryResult(_, _, rv, _, _, _, _)) =>
           rv.foreach(_.rows().foreach{ rr =>
             // publish a cardinality metric for each namespace
             val data = RowData.fromRowReader(rr)

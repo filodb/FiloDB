@@ -92,8 +92,13 @@ object PrometheusModel {
                     qr.result.map(toHistResult(_, verbose, qr.resultType))
                   else
                     qr.result.map(toPromResult(_, verbose, qr.resultType))
-    SuccessResponse(Data(toPromResultType(qr.resultType), results.filter(r => r.values.nonEmpty || r.value.isDefined)),
-                    "success", Some(qr.mayBePartial), qr.partialResultReason, Some(toQueryStatistics(qr.queryStats)))
+    SuccessResponse(
+      Data(toPromResultType(qr.resultType), results.filter(r => r.values.nonEmpty || r.value.isDefined)),
+      "success",
+      Some(qr.mayBePartial), qr.partialResultReason,
+      Some(toQueryStatistics(qr.queryStats)),
+      Some(toQueryWarningsResponse(qr.warnings))
+    )
   }
 
   def toPromExplainPlanResponse(ex: ExecPlan): ExplainPlanResponse = {
@@ -223,5 +228,16 @@ object PrometheusModel {
     QueryStatistics(stat._1, stat._2.timeSeriesScanned.get(),
       stat._2.dataBytesScanned.get(), stat._2.resultBytes.get(), stat._2.cpuNanos.get())
   ).toSeq
+
+  def toQueryWarningsResponse(qw: QueryWarnings): QueryWarningsResponse = {
+    QueryWarningsResponse(
+      execPlanSamples = qw.execPlanSamples.get(),
+      execPlanResultBytes = qw.execPlanResultBytes.get(),
+      groupByCardinality = qw.groupByCardinality.get(),
+      joinQueryCardinality = qw.joinQueryCardinality.get(),
+      timeSeriesSamplesScannedBytes = qw.timeSeriesSamplesScannedBytes.get(),
+      timeSeriesScanned = qw.timeSeriesScanned.get()
+    )
+  }
 
 }

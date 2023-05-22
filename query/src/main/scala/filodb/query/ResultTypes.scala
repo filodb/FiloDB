@@ -4,7 +4,7 @@ import enumeratum.{Enum, EnumEntry}
 
 import filodb.core.{DatasetRef, NodeCommand, NodeResponse}
 import filodb.core.memstore.ratelimit.CardinalityRecord
-import filodb.core.query.{QueryStats, RangeVector, ResultSchema}
+import filodb.core.query.{QueryStats, QueryWarnings, RangeVector, ResultSchema}
 
 trait QueryCommand extends NodeCommand with java.io.Serializable {
   def submitTime: Long
@@ -54,6 +54,7 @@ final case class QueryResult(id: String,
                              resultSchema: ResultSchema,
                              result: Seq[RangeVector],
                              queryStats: QueryStats = QueryStats(),
+                             warnings: QueryWarnings = QueryWarnings(),
                              mayBePartial: Boolean = false,
                              partialResultReason: Option[String] = None) extends QueryResponse {
   def resultType: QueryResultType = {
@@ -73,9 +74,9 @@ object QueryResponseConverter {
   implicit class QueryResponseToStreamingResponse(qr: QueryResponse) {
       def toStreamingResponse: Seq[StreamQueryResponse] = qr match {
         case QueryError(id, queryStats, t) => StreamQueryError(id, queryStats, t) :: Nil
-        case QueryResult(id, resultSchema, result, queryStats, mayBePartial, partialResultReason) =>
+        case QueryResult(id, resultSchema, result, queryStats, warnings, mayBePartial, partialResultReason) =>
           (StreamQueryResultHeader(id, resultSchema) :: result.map(StreamQueryResult(id, _)).toList) :::
-            List(StreamQueryResultFooter(id, queryStats, mayBePartial, partialResultReason))
+            List(StreamQueryResultFooter(id, queryStats, warnings, mayBePartial, partialResultReason))
       }
 
   }
@@ -95,6 +96,7 @@ final case class StreamQueryResult(queryId: String,
 
 final case class StreamQueryResultFooter(queryId: String,
                                          queryStats: QueryStats = QueryStats(),
+                                         warnings: QueryWarnings = QueryWarnings(),
                                          mayBePartial: Boolean = false,
                                          partialResultReason: Option[String] = None) extends StreamQueryResponse {
   override def isLast: Boolean = true
