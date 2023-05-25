@@ -104,13 +104,16 @@ case class QueryWarnings(
   }
 
   override def equals(w2Compare: Any): Boolean = {
-    val w2 = w2Compare.asInstanceOf[QueryWarnings]
-    execPlanSamples.get().equals(w2.execPlanSamples.get()) &&
-    execPlanResultBytes.get().equals(w2.execPlanResultBytes.get()) &&
-    groupByCardinality.get().equals(w2.groupByCardinality.get()) &&
-    joinQueryCardinality.get().equals(w2.joinQueryCardinality.get()) &&
-    timeSeriesSamplesScannedBytes.get().equals(w2.timeSeriesSamplesScannedBytes.get()) &&
-    timeSeriesScanned.get().equals(w2.timeSeriesScanned.get())
+    w2Compare match {
+      case w2: QueryWarnings =>
+        execPlanSamples.get().equals(w2.execPlanSamples.get()) &&
+          execPlanResultBytes.get().equals(w2.execPlanResultBytes.get()) &&
+          groupByCardinality.get().equals(w2.groupByCardinality.get()) &&
+          joinQueryCardinality.get().equals(w2.joinQueryCardinality.get()) &&
+          timeSeriesSamplesScannedBytes.get().equals(w2.timeSeriesSamplesScannedBytes.get()) &&
+          timeSeriesScanned.get().equals(w2.timeSeriesScanned.get())
+      case _ => false
+    }
   }
 
   override def hashCode(): Int = {
