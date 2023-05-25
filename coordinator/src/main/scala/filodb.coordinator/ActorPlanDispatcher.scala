@@ -14,7 +14,7 @@ import monix.reactive.subjects.ConcurrentSubject
 
 import filodb.coordinator.ActorSystemHolder.system
 import filodb.core.QueryTimeoutException
-import filodb.core.query.{QueryStats, ResultSchema}
+import filodb.core.query.{QueryStats, QueryWarnings, ResultSchema}
 import filodb.core.store.ChunkSource
 import filodb.query.{QueryResponse, QueryResult, StreamQueryError, StreamQueryResponse, StreamQueryResultFooter}
 import filodb.query.Query.qLogger
@@ -31,7 +31,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
     val queryTimeElapsed = System.currentTimeMillis() - plan.execPlan.queryContext.submitTime
     val remainingTime = plan.clientParams.deadline - queryTimeElapsed
     lazy val emptyPartialResult: QueryResult = QueryResult(plan.execPlan.queryContext.queryId, ResultSchema.empty, Nil,
-      QueryStats(), true, Some("Result may be partial since query on some shards timed out"))
+      QueryStats(), QueryWarnings(), true, Some("Result may be partial since query on some shards timed out"))
 
     // Don't send if time left is very small
     if (remainingTime < 1) {
@@ -70,7 +70,7 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
     val queryTimeElapsed = System.currentTimeMillis() - plan.execPlan.queryContext.submitTime
     val remainingTime = plan.clientParams.deadline - queryTimeElapsed
     lazy val emptyPartialResult = StreamQueryResultFooter(plan.execPlan.queryContext.queryId,
-      QueryStats(), true, Some("Result may be partial since query on some shards timed out"))
+      QueryStats(), QueryWarnings(), true, Some("Result may be partial since query on some shards timed out"))
 
     // Don't send if time left is very small
     if (remainingTime < 1) {

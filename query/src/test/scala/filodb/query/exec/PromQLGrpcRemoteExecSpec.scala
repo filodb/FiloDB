@@ -124,7 +124,9 @@ class PromQLGrpcRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFuture
     val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", stats)
     val streamingQueryBody = StreamQueryResult("someId", srv)
 
-    val footer = StreamQueryResultFooter("someId", stats, true, Some("Reason"))
+    val warnings = QueryWarnings()
+
+    val footer = StreamQueryResultFooter("someId", stats, warnings, true, Some("Reason"))
     Seq(header, streamingQueryBody, footer)
   }
 

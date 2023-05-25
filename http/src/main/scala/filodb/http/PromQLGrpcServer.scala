@@ -92,10 +92,16 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
                     // Not the cleanest way, but we need to convert these IteratorBackedRangeVectors to a
                     // serializable one If we have a result, its definitely is a QueryResult
                     val strQueryResult = (result.result, qr) match {
-                      case (irv: IteratorBackedRangeVector, QueryResult(_, resultSchema, _, queryStats, _, _)) =>
-                        result.copy(result = SerializedRangeVector.apply(irv, rb,
+                      case (
+                        irv: IteratorBackedRangeVector,
+                        QueryResult(_, resultSchema, _, queryStats, _, _, _)
+                      ) => result.copy(
+                        result = SerializedRangeVector.apply(
+                          irv, rb,
                           SerializedRangeVector.toSchema(resultSchema.columns, resultSchema.brSchemas),
-                          "GrpcServer", queryStats))
+                          "GrpcServer", queryStats
+                        )
+                      )
                       case _ => result
                     }
                     responseObserver.onNext(strQueryResult.toProto)

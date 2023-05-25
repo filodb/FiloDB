@@ -1,7 +1,7 @@
 package filodb.core.query
 
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
 import scala.collection.Seq
 import scala.collection.concurrent.TrieMap
@@ -48,6 +48,85 @@ object PerQueryLimits {
   }
 
 }
+
+object QueryWarnings {
+
+}
+case class QueryWarnings(
+  execPlanSamples: AtomicInteger = new AtomicInteger(0),
+  execPlanResultBytes: AtomicLong = new AtomicLong(0),
+  groupByCardinality: AtomicInteger = new AtomicInteger(0),
+  joinQueryCardinality: AtomicInteger = new AtomicInteger(0),
+  timeSeriesSamplesScannedBytes: AtomicLong = new AtomicLong(0),
+  timeSeriesScanned: AtomicInteger = new AtomicInteger(0)
+) {
+
+  def hasWarnings() : Boolean = {
+    execPlanSamples.get() > 0 ||
+    execPlanResultBytes.get() > 0 ||
+    groupByCardinality.get() > 0 ||
+    joinQueryCardinality.get() > 0 ||
+    timeSeriesSamplesScannedBytes.get() > 0 ||
+    timeSeriesScanned.get() > 0
+  }
+
+  def merge(warnings: QueryWarnings) : Unit = {
+    updateExecPlanSamples(warnings.execPlanSamples.get())
+    updateExecPlanResultBytes(warnings.execPlanResultBytes.get())
+    updateGroupByCardinality(warnings.groupByCardinality.get())
+    updateJoinQueryCardinality(warnings.joinQueryCardinality.get())
+    updateTimeSeriesSampleScannedBytes(warnings.timeSeriesSamplesScannedBytes.get())
+    updateTimeSeriesScanned(warnings.timeSeriesScanned.get())
+  }
+
+  def updateExecPlanSamples(samples: Int): Unit = {
+    execPlanSamples.updateAndGet(s => if (s < samples) samples else s)
+  }
+
+  def updateExecPlanResultBytes(bytes: Long): Unit = {
+    execPlanResultBytes.updateAndGet(b => if (b < bytes) bytes else b)
+  }
+
+  def updateGroupByCardinality(cardinality: Int): Unit = {
+    groupByCardinality.updateAndGet(c => if (c < cardinality) cardinality else c)
+  }
+
+  def updateJoinQueryCardinality(cardinality: Int): Unit = {
+    joinQueryCardinality.updateAndGet(c => if (c < cardinality) cardinality else c)
+  }
+
+  def updateTimeSeriesScanned(series: Int): Unit = {
+    timeSeriesScanned.updateAndGet(s => if (s<series) series else s)
+  }
+
+  def updateTimeSeriesSampleScannedBytes(bytes: Long): Unit = {
+    timeSeriesSamplesScannedBytes.updateAndGet(b => if (b<bytes) bytes else b)
+  }
+
+  override def equals(w2Compare: Any): Boolean = {
+    w2Compare match {
+      case w2: QueryWarnings =>
+        execPlanSamples.get().equals(w2.execPlanSamples.get()) &&
+          execPlanResultBytes.get().equals(w2.execPlanResultBytes.get()) &&
+          groupByCardinality.get().equals(w2.groupByCardinality.get()) &&
+          joinQueryCardinality.get().equals(w2.joinQueryCardinality.get()) &&
+          timeSeriesSamplesScannedBytes.get().equals(w2.timeSeriesSamplesScannedBytes.get()) &&
+          timeSeriesScanned.get().equals(w2.timeSeriesScanned.get())
+      case _ => false
+    }
+  }
+
+  override def hashCode(): Int = {
+    var c = execPlanSamples.get().hashCode()
+    c = 31 * c + execPlanResultBytes.get().hashCode()
+    c = 31 * c + groupByCardinality.get().hashCode()
+    c = 31 * c + joinQueryCardinality.get().hashCode()
+    c = 31 * c + timeSeriesSamplesScannedBytes.get().hashCode()
+    c = 31 * c + timeSeriesScanned.get().hashCode()
+    c
+  }
+}
+
 case class PlannerParams(applicationId: String = "filodb",
                          spread: Option[Int] = None,
                          spreadOverride: Option[SpreadProvider] = None,
@@ -209,6 +288,7 @@ case class QuerySession(qContext: QueryContext,
                         catchMultipleLockSetErrors: Boolean = false) {
 
   val queryStats: QueryStats = QueryStats()
+  val warnings: QueryWarnings = QueryWarnings()
   private var lock: Option[EvictionLock] = None
   var resultCouldBePartial: Boolean = false
   var partialResultsReason: Option[String] = None

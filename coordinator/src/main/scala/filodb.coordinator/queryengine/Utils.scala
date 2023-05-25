@@ -153,7 +153,7 @@ object Utils extends StrictLogging {
             case f: StreamQueryResultFooter => f
           }.getOrElse(StreamQueryResultFooter(queryContext.queryId))
           QueryResult(queryContext.queryId, header.resultSchema, rvs,
-            footer.queryStats, footer.mayBePartial, footer.partialResultReason)
+            footer.queryStats, footer.warnings, footer.mayBePartial, footer.partialResultReason)
         }
     }
   }

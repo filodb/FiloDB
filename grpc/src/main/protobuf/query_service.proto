@@ -73,6 +73,7 @@ message StreamingFooterResponse {
   bool mayBePartial                              = 3;
   optional string partialResultReason            = 4;
   string planId                                  = 5;
+  optional QueryWarnings warnings                = 6;
 }
 
 
@@ -117,6 +118,7 @@ message Response {
   repeated SerializableRangeVector result        = 5;
   optional bool mayBePartial                     = 6;
   optional string partialResultReason            = 7;
+  optional QueryWarnings warnings                = 8;
 }
 
 // Objects for Query stats
@@ -134,6 +136,14 @@ message QueryResultStats {
   map<string, Stat> stats     = 1;
 }
 
+message QueryWarnings {
+  uint32 execPlanSamples               = 1;
+  uint64 execPlanResultBytes           = 2;
+  uint32 groupByCardinality            = 3;
+  uint32 joinQueryCardinality          = 4;
+  uint64 timeSeriesSamplesScannedBytes = 5;
+  uint32 timeSeriesScanned             = 6;
+}
 
 
 service RemoteExec {

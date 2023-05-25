@@ -131,7 +131,7 @@ final case class LabelValuesDistConcatExec(queryContext: QueryContext,
                         querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
-      case (QueryResult(_, schema, result, _, _, _), _) => (schema, result)
+      case (QueryResult(_, schema, result, _, _, _, _), _) => (schema, result)
     }.toListL.map { resp =>
       val colType = resp.head._1.columns.head.colType
       if (colType == MapColumn) {

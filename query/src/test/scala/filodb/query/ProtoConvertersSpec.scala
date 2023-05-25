@@ -209,9 +209,18 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val qStats = QueryStats()
     qStats.stat.put(List(), stat)
 
+    val warnings = QueryWarnings()
+    warnings.updateTimeSeriesScanned(1)
+    warnings.updateExecPlanResultBytes(2)
+    warnings.updateGroupByCardinality(3)
+    warnings.updateExecPlanSamples(4)
+    warnings.updateJoinQueryCardinality(5)
+
     val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", qStats)
 
-    val origQueryResult = QueryResult("someId", resultSchema, List(srv), qStats, true, Some("Some shards timed out"))
+    val origQueryResult = QueryResult(
+      "someId", resultSchema, List(srv), qStats, warnings, true, Some("Some shards timed out")
+    )
     val successResp = origQueryResult.toProto.fromProto.asInstanceOf[QueryResult]
     successResp.id shouldEqual origQueryResult.id
     successResp.resultSchema shouldEqual origQueryResult.resultSchema
@@ -251,11 +260,41 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val qStats = QueryStats()
     qStats.stat.put(List(), stat)
 
-    val footer1 = StreamQueryResultFooter("id", qStats, true, Some("Reason"))
+    val warnings = QueryWarnings()
+    warnings.updateJoinQueryCardinality(1)
+    warnings.updateTimeSeriesScanned(1)
+    warnings.updateExecPlanResultBytes(2)
+    warnings.updateGroupByCardinality(3)
+    warnings.updateExecPlanSamples(4)
+    warnings.updateJoinQueryCardinality(5)
+
+    val footer1 = StreamQueryResultFooter("id", qStats, warnings, true, Some("Reason"))
     footer1.toProto.fromProto shouldEqual footer1
 
-    val footer2 = StreamQueryResultFooter("id", qStats, false, None)
+    val footer2 = StreamQueryResultFooter("id", qStats, warnings, false, None)
     footer2.toProto.fromProto shouldEqual footer2
+  }
+
+  it("QueryWarnings should have proper hashes and equals methods") {
+
+    val warnings = QueryWarnings()
+    warnings.updateJoinQueryCardinality(1)
+    warnings.updateTimeSeriesScanned(1)
+    warnings.updateExecPlanResultBytes(2)
+    warnings.updateGroupByCardinality(3)
+    warnings.updateExecPlanSamples(4)
+    warnings.updateJoinQueryCardinality(5)
+
+    val warnings2 = QueryWarnings()
+    warnings2.updateJoinQueryCardinality(1)
+    warnings2.updateTimeSeriesScanned(1)
+    warnings2.updateExecPlanResultBytes(2)
+    warnings2.updateGroupByCardinality(3)
+    warnings2.updateExecPlanSamples(4)
+    warnings2.updateJoinQueryCardinality(5)
+
+    warnings shouldEqual warnings2
+    warnings.hashCode() shouldEqual warnings2.hashCode()
   }
 
   it ("should convert StreamingQueryResultBody to and back from proto") {
@@ -342,8 +381,15 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val qStats = QueryStats()
     qStats.stat.put(List(), stat)
 
-    val footer = StreamQueryResultFooter("someId", qStats, true, Some("Reason"))
+    val warnings = QueryWarnings()
+    warnings.updateTimeSeriesScanned(1)
+    warnings.updateExecPlanResultBytes(2)
+    warnings.updateGroupByCardinality(3)
+    warnings.updateExecPlanSamples(4)
+    warnings.updateJoinQueryCardinality(5)
+    warnings.updateTimeSeriesSampleScannedBytes(6)
 
+    val footer = StreamQueryResultFooter("someId", qStats, warnings, true, Some("Reason"))
 
     val response = Seq(header.toProto, streamingQueryBody.toProto, footer.toProto)
       .toIterator.toQueryResponse.asInstanceOf[QueryResult]
@@ -366,7 +412,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     // Case 2 Iter[StreamingResponse] to QueryResp Happy response w/o partial reason
 
 
-    val footer1 = StreamQueryResultFooter("someId", qStats, false, None)
+    val footer1 = StreamQueryResultFooter("someId", qStats, warnings, false, None)
 
 
     val response1 = Seq(header.toProto, streamingQueryBody.toProto, footer1.toProto)

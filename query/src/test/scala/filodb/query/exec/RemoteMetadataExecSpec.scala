@@ -150,7 +150,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
 
     val resp = exec.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _) => {
+      case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
         rv.rows.size shouldEqual 1
         val record = rv.rows.next.asInstanceOf[BinaryRecordRowReader]
@@ -167,7 +167,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
 
     val resp = exec.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _) => {
+      case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
         rv.rows.size shouldEqual 0
         rv.rows.map { row =>
@@ -191,7 +191,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val rootDistConcatExec: LabelValuesDistConcatExec = LabelValuesDistConcatExec(QueryContext(), InProcessPlanDispatcher(queryConfig) , Seq(distConcatExec, exec))
     val resp = rootDistConcatExec.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _) => {
+      case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
         rv.rows.size shouldEqual 2
         rv.rows.map(row => {
@@ -215,7 +215,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
     val rootDistConcatExec: LabelValuesDistConcatExec = LabelValuesDistConcatExec(QueryContext(), InProcessPlanDispatcher(queryConfig) , Seq(distConcatExec, exec))
     val resp = rootDistConcatExec.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _) => {
+      case QueryResult(id, _, response, _, _, _, _) => {
         response.flatMap(rv => {
           rv.rows.size shouldEqual 0
           rv.rows.map(row => {
@@ -235,7 +235,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
 
     val resp = exec.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _) => {
+      case QueryResult(id, _, response, _, _, _, _) => {
         val rv = response(0)
         rv.rows.size shouldEqual 4
         rv.rows.map(row => {
@@ -271,7 +271,7 @@ class RemoteMetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures 
 
     val resp = exec.execute(memStore, querySession).runToFuture.futureValue
     val result = (resp: @unchecked) match {
-      case QueryResult(id, _, response, _, _, _) =>
+      case QueryResult(id, _, response, _, _, _, _) =>
         // should only contain a single RV where each row describes a single group's cardinalities
         response.size shouldEqual 1
         val rows = response.head.rows().map{ rr =>

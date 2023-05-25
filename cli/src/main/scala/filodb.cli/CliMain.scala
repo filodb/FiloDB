@@ -487,9 +487,10 @@ object CliMain extends StrictLogging {
       case Some(intervalSecs) =>
         val fut = Observable.intervalAtFixedRate(intervalSecs.seconds).foreach { n =>
           client.logicalPlan2Query(ref, plan, qOpts) match {
-            case QueryResult(_, _, result, stats, _, _) =>
+            case QueryResult(_, _, result, stats, warnings, _, _) =>
               result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
               println(s"QueryStats: $stats")
+              println(s"QueryWarnings: $warnings")
             case err: QueryError                => throw new ClientException(err)
           }
         }.recover {
@@ -500,11 +501,12 @@ object CliMain extends StrictLogging {
       case None =>
         try {
           client.logicalPlan2Query(ref, plan, qOpts) match {
-            case QueryResult(_, schema, result, stats, _, _) =>
+            case QueryResult(_, schema, result, stats, warnings, _, _) =>
                                                    println(s"Output schema: $schema")
                                                    println(s"Number of Range Vectors: ${result.size}")
                                                    result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
                                                    println(s"QueryStats: $stats")
+                                                   println(s"QueryWarnings: $warnings")
             case QueryError(_, stats, ex)  =>
                                                    println(s"QueryError: ${ex.getClass.getSimpleName} ${ex.getMessage}")
                                                    println(s"QueryStats: $stats")
