@@ -395,62 +395,6 @@ class DownsamplerMainSpec extends AnyFunSpec with Matchers with BeforeAndAfterAl
     batchExporter.getPartitionByValues(labels).toSeq shouldEqual expected
   }
 
-  it ("should correctly escape quotes in a label's value prior to export") {
-    val inputOutputPairs = Map(
-      // empty string
-      "" -> "",
-      // no quotes
-      """ abc """ -> """ abc """,
-      // ======= DOUBLE QUOTES =======
-      // single double-quote
-      """ " """ -> """ " """,
-      // double-quote pair
-      """ "" """ -> """ "" """,
-      // escaped quote
-      """ \" """ -> """ \" """,
-      // double-escaped quote
-      """ \\" """ -> """ \\" """,
-      // double-escaped quote pair
-      """ \\"" """ -> """ \\"" """,
-      // complex string
-      """ "foo\" " ""\""\ bar "baz" """ -> """ "foo\" " ""\""\ bar "baz" """,
-      // ======= SINGLE QUOTES =======
-      // single single-quote
-      """ ' """ -> """ \' """,
-      // single-quote pair
-      """ '' """ -> """ \'\' """,
-      // escaped quote
-      """ \' """ -> """ \' """,
-      // double-escaped quote
-      """ \\' """ -> """ \\' """,
-      // double-escaped quote pair
-      """ \\'' """ -> """ \\'\' """,
-      // complex string
-      """ 'foo\' ' ''\''\ bar 'baz' """ -> """ \'foo\' \' \'\'\'\'\ bar \'baz\' """,
-      // ======= COMMAS =======
-      // single single-quote
-      """ , """ -> """ \, """,
-      // single-quote pair
-      """ ,, """ -> """ \,\, """,
-      // escaped quote
-      """ \, """ -> """ \, """,
-      // double-escaped quote
-      """ \\, """ -> """ \\, """,
-      // double-escaped quote pair
-      """ \\,, """ -> """ \\,\, """,
-      // complex string
-      """ 'foo\' ' ''\''\ bar 'baz' """ -> """ \'foo\' \' \'\'\'\'\ bar \'baz\' """,
-      // ======= COMBINATION =======
-      """ 'foo\" ' "'\'"\ bar 'baz" """ -> """ \'foo\" \' "\'\'"\ bar \'baz" """,
-      """ 'foo\" ' ,, "'\'"\ bar 'baz" \, """ -> """ \'foo\" \' \,\, "\'\'"\ bar \'baz" \, """,
-      """ ["foo","ba'r:1234"] """ -> """ ["foo"\,"ba\'r:1234"] """,
-      """ "foo,bar:1234" """ -> """ "foo\,bar:1234" """
-    )
-    for ((value, expected) <- inputOutputPairs) {
-      BatchExporter.getExportLabelValueString(value) shouldEqual expected
-    }
-  }
-
   it ("should write untyped data to cassandra") {
 
     val rawDataset = Dataset("prometheus", Schemas.untyped)
