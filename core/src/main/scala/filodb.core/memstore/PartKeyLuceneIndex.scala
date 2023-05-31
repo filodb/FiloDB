@@ -37,6 +37,7 @@ import spire.syntax.cfor._
 import filodb.core.{concurrentCache, DatasetRef}
 import filodb.core.Types.PartitionKey
 import filodb.core.binaryrecord2.MapItemConsumer
+import filodb.core.memstore.ratelimit.CardinalityTracker
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query.{ColumnFilter, Filter}
@@ -959,6 +960,51 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     partIdFromPartKeyLookupLatency.record(System.nanoTime - startExecute)
     chosenPartId
   }
+
+  /**
+   * Iterate through the LuceneIndex and calculate cardinality
+   */
+  def calculateCardinality(partSchema: PartitionSchema, cardTracker: CardinalityTracker): Unit = {
+    val coll = new CardinalityCountBuilder(partSchema, cardTracker)
+    withNewSearcher(s => s.search(new MatchAllDocsQuery(), coll))
+  }
+}
+
+/**
+ * In this lucene index collector, we read through the entire lucene index periodically and re-calculate
+ * the cardinality count from scratch. This class iterates through each document in lucene, extracts a shard-key
+ * and updates the cardinality count using the given CardinalityTracker.
+ * */
+class CardinalityCountBuilder(partSchema: PartitionSchema, cardTracker: CardinalityTracker) extends SimpleCollector {
+
+  private var partKeyDv: BinaryDocValues = _
+  private var singleResult: BytesRef = _
+
+  // gets called for each segment
+  override def doSetNextReader(context: LeafReaderContext): Unit = {
+    partKeyDv = context.reader().getBinaryDocValues(PartKeyLuceneIndex.PART_KEY)
+  }
+
+  // gets called for each matching document in current segment
+  override def collect(doc: Int): Unit = {
+    if (partKeyDv.advanceExact(doc)) {
+      singleResult = partKeyDv.binaryValue()
+      val localBytes = singleResult.bytes
+      val localMap = partSchema.binSchema.toStringPairs(localBytes, UnsafeUtils.arayOffset).toMap
+
+      val shardKey = Seq(
+        localMap.getOrElse("_ws_", ""),
+        localMap.getOrElse("_ns_", ""),
+        localMap.getOrElse("_metric_", ""))
+
+      // update the cardinality count by 1, since the shardKey for each document in index is unique
+      cardTracker.modifyCount(shardKey, 1, 1)
+    } else {
+      throw new IllegalStateException("This shouldn't happen since every document should have a partKeyDv")
+    }
+  }
+
+  override def scoreMode(): ScoreMode = ScoreMode.COMPLETE_NO_SCORES
 }
 
 class NumericDocValueCollector(docValueName: String) extends SimpleCollector {
