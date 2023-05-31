@@ -962,11 +962,13 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   }
 
   /**
-   * Iterate through the LuceneIndex and calculate cardinality
+   * Iterate through the LuceneIndex and calculate cardinality count
    */
   def calculateCardinality(partSchema: PartitionSchema, cardTracker: CardinalityTracker): Unit = {
     val coll = new CardinalityCountBuilder(partSchema, cardTracker)
     withNewSearcher(s => s.search(new MatchAllDocsQuery(), coll))
+    // IMPORTANT: making sure to flush all the data in rocksDB
+    cardTracker.flushCardinalityCount()
   }
 }
 
@@ -992,10 +994,11 @@ class CardinalityCountBuilder(partSchema: PartitionSchema, cardTracker: Cardinal
       val localBytes = singleResult.bytes
       val localMap = partSchema.binSchema.toStringPairs(localBytes, UnsafeUtils.arayOffset).toMap
 
+      // TODO: quick sync with team on correct way to get key names from config or from any other constants ??
       val shardKey = Seq(
         localMap.getOrElse("_ws_", ""),
         localMap.getOrElse("_ns_", ""),
-        localMap.getOrElse("_metric_", ""))
+        localMap.getOrElse(partSchema.options.metricColumn, ""))
 
       // update the cardinality count by 1, since the shardKey for each document in index is unique
       cardTracker.modifyCount(shardKey, 1, 1)
