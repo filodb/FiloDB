@@ -3,8 +3,9 @@ package filodb.core.memstore
 import com.googlecode.javaewah.IntIterator
 import filodb.core._
 import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
-import filodb.core.metadata.Schemas
+import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, Filter}
+import filodb.memory.{BinaryRegionConsumer, MemFactory}
 import filodb.memory.format.UnsafeUtils.ZeroPointer
 import filodb.memory.format.UTF8Wrapper
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -784,6 +785,39 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     val filter2 = ColumnFilter("Actor2Code", Equals("NonExist".utf8))
     keyIndex.singlePartKeyFromFilters(Seq(filter2), 4, 10) shouldBe None
+  }
+
+  it("toStringPairsMap should return a map of label key value pairs") {
+    val columns = Seq("timestamp:ts", "min:double", "avg:double", "max:double", "count:long", "tags:map")
+    val options = DatasetOptions.DefaultOptions.copy(metricColumn = "_metric_")
+    val dataset1 = Dataset("metrics1",
+      Seq("timestamp:ts", "min:double", "avg:double", "max:double", "count:long", "_metric_:string", "tags:map"),
+      columns, options)
+    val partSchema = dataset1.schema.partition
+    val builder = new RecordBuilder(MemFactory.onHeapFactory)
+
+    val extraTags = Map(
+      "_ws_".utf8 -> "my_ws".utf8,
+      "_ns_".utf8 -> "my_ns".utf8,
+      "job".utf8 -> "test_job".utf8
+    )
+    val binRecords = new collection.mutable.ArrayBuffer[(Any, Long)]
+    val binConsumer = new BinaryRegionConsumer {
+      def onNext(base: Any, offset: Long): Unit = binRecords += ((base, offset))
+    }
+    val data = MachineMetricsData.withMap(
+      MachineMetricsData.linearMultiSeries(numSeries = 1),
+      extraTags = extraTags).take(1)
+    MachineMetricsData.addToBuilder(builder, data, dataset1.schema)
+    val containers = builder.allContainers
+    containers.head.consumeRecords(binConsumer)
+
+    for (elem <- binRecords) {
+      val labelKV = partSchema.binSchema.toStringPairs(elem._1, elem._2).toMap
+      for(tag <- extraTags){
+        labelKV(tag._1.toString) shouldEqual tag._2.toString
+      }
+    }
   }
 
   it("should match the regex after anchors stripped") {
