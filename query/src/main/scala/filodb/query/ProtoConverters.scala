@@ -1,9 +1,11 @@
 package filodb.query
 
+
 import java.util.concurrent.TimeoutException
 
 import scala.collection.JavaConverters._
 
+import akka.pattern.AskTimeoutException
 import com.google.protobuf.ByteString
 import com.typesafe.scalalogging.StrictLogging
 
@@ -428,6 +430,8 @@ object ProtoConverters {
           val errorType = metaMap.getOrDefault("errorType", "")
           val errorMessage = metaMap.getOrDefault("errorMessage", "")
           RemoteQueryFailureException(statusCode, requestStatus, errorType, errorMessage)
+        case "akka.pattern.AskTimeoutException"               =>
+          cause.map(new AskTimeoutException(message, _)).getOrElse(new AskTimeoutException(message))
         case _          =>
             cause.map(new Throwable(message, _)).getOrElse(new Throwable(message))
       }

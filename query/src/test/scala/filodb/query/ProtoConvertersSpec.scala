@@ -4,6 +4,7 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import filodb.core.query._
 import ProtoConverters._
+import akka.pattern.AskTimeoutException
 import filodb.core.QueryTimeoutException
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.SchemaMismatch
@@ -658,7 +659,20 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val rqfe = RemoteQueryFailureException(200, "OK", "none", "no error")
     rqfe.toProto.fromProto shouldEqual rqfe
 
-    // Case 10: Anything else should throw Throwable
+    // case 10: Should deserialize AskTimeoutException
+    val ate = new AskTimeoutException("message")
+    val deserAte = ate.toProto.fromProto
+    deserAte.isInstanceOf[AskTimeoutException] shouldBe true
+    deserAte.getMessage shouldBe ate.getMessage
+
+    val ate1 = new AskTimeoutException("message", new IllegalArgumentException("root"))
+    val deserAte1 = ate1.toProto.fromProto
+    deserAte1.isInstanceOf[AskTimeoutException] shouldBe true
+    deserAte1.getMessage shouldBe ate.getMessage
+    deserAte1.getCause.isInstanceOf[IllegalArgumentException] shouldBe true
+    deserAte1.getCause.getMessage shouldBe "root"
+
+    // Case 11: Anything else should throw Throwable
     val isecause = SchemaMismatch(expected = "expectedSchema", found = "foundSchema", clazz = "SomeClass")
     val ise = new IllegalStateException("Illegal state", isecause)
     val deserializedise = ise.toProto.fromProto
