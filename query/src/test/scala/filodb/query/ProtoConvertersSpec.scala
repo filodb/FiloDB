@@ -718,7 +718,12 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     deserAte1.getCause.isInstanceOf[IllegalArgumentException] shouldBe true
     deserAte1.getCause.getMessage shouldBe "root"
 
-    // Case 11: Anything else should throw Throwable
+    // case 11: Should deserialize QueryLimitException
+
+    val qle = QueryLimitException("message", "queryId")
+    qle.toProto.fromProto shouldEqual qle
+
+    // Case 12: Anything else should throw Throwable
     val isecause = SchemaMismatch(expected = "expectedSchema", found = "foundSchema", clazz = "SomeClass")
     val ise = new IllegalStateException("Illegal state", isecause)
     val deserializedise = ise.toProto.fromProto

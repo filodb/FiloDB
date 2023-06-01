@@ -65,7 +65,9 @@ final case class LocalPartitionReduceAggregateExec(queryContext: QueryContext,
                                                    dispatcher: PlanDispatcher,
                                                    childAggregates: Seq[ExecPlan],
                                                    aggrOp: AggregationOperator,
-                                                   aggrParams: Seq[Any]) extends ReduceAggregateExec {
+                                                   aggrParams: Seq[Any],
+                                                   override val maxRecordContainerSize: Int =
+                                                   SerializedRangeVector.MaxContainerSize) extends ReduceAggregateExec {
   /**
    * Requiring strict result schema match for Aggregation within filodb cluster
    * since fixedVectorLen presence will enable fast-reduce when possible
@@ -217,7 +219,7 @@ object RangeVectorAggregator extends StrictLogging {
         logger.warn(queryContext.getQueryLogLine(
           s"Exceeded enforced group-by cardinality limit ${groupByEnforcedLimit}. "
         ))
-        throw new QueryLimitException(
+        throw QueryLimitException(
           s"Query exceeded group-by cardinality limit ${groupByEnforcedLimit}. " +
           "Try applying more filters or reduce query range. ", queryContext.queryId
         )
