@@ -3,6 +3,7 @@ package filodb.core.memstore
 import com.googlecode.javaewah.IntIterator
 import filodb.core._
 import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
+import filodb.core.memstore.ratelimit.{CardinalityTracker, RocksDbCardinalityStore}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.memory.{BinaryRegionConsumer, MemFactory}
@@ -965,5 +966,46 @@ class PartKeyLuceneIndexSpec extends AnyFunSpec with Matchers with BeforeAndAfte
           shardDirectory.setWritable(true)
         }
     }
+  }
+
+  it("should correctly build cardinality count") {
+    // build card tracker
+    val rocksDBStore = new RocksDbCardinalityStore(MachineMetricsData.dataset2.ref, 10)
+    val cardTracker = new CardinalityTracker(MachineMetricsData.dataset2.ref, 10, 3,
+      Seq(5000, 5000, 5000, 5000), rocksDBStore, flushCount = Some(100))
+
+    // build lucene index and add records
+    val idx = new PartKeyLuceneIndex(
+      MachineMetricsData.dataset2.ref,
+      MachineMetricsData.dataset2.schema.partition, true, true,
+      10, 1.hour.toMillis,
+      Some(new java.io.File(System.getProperty("java.io.tmpdir"), "part-key-lucene-index")))
+    // create 1000 time series with different metric names
+    for {i <- 1 until 1001} {
+      val counterNum = i % 10
+      val tags = Map("_ws_".utf8 -> s"my_ws$counterNum".utf8,
+        "_ns_".utf8 -> s"my_ns$counterNum".utf8,
+        "instance".utf8 -> s"instance$counterNum".utf8,
+        "_metric_".utf8 -> s"counter$i".utf8)
+      val partKey = partBuilder.partKeyFromObjects(MachineMetricsData.dataset2.schema, s"counter$i", tags)
+      idx.addPartKey(
+        partKeyOnHeap(MachineMetricsData.dataset2.schema.partition.binSchema, ZeroPointer, partKey), i, 5)()
+    }
+    idx.refreshReadersBlocking()
+
+    // trigger cardinality count calculation
+    idx.calculateCardinality(MachineMetricsData.dataset2.schema.partition, cardTracker)
+
+    cardTracker.scan(Seq(), 0)(0).value.tsCount shouldEqual 1000
+    for {i <- 1 until 1001} {
+      val counterNum = i % 10
+      cardTracker.scan(Seq(s"my_ws$counterNum"), 1)(0).value.tsCount shouldEqual 100
+      cardTracker.scan(Seq(s"my_ws$counterNum", s"my_ns$counterNum"), 2)(0).value.tsCount shouldEqual 100
+      cardTracker.scan(Seq(s"my_ws$counterNum", s"my_ns$counterNum", s"counter$i"), 3)(0)
+        .value.tsCount shouldEqual 1
+    }
+
+    // close CardinalityTracker to avoid leaking of resources
+    cardTracker.close()
   }
 }

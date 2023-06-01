@@ -51,12 +51,8 @@ class CardinalityTracker(ref: DatasetRef,
   val NAME_DELIMITER = ","
 
   /**
-   * Map used to track cardinality count in downsample cluster.
-   * WHY this is used for Downsample cardinality count only ?
-   * This is because, in downsample cluster, we read through the entire index periodically and re-calculate
-   * the cardinality count from scratch. Without an in-memory aggregation data-structure, we would be modifying
-   * the records in RocksDB too frequently, causing a slowdown because of heavy disk writes.
-   * Hence we are using this map to help us aggregate in memory and then flush to RocksDB periodically
+   * Map used to track cardinality count in aggregated manner. This helps us to avoid frequent reads and writes to
+   * RocksDB and increase the throughput when storing/measuring cardinality counts in burst scenarios.
    */
   private val cardinalityCountMap : collection.mutable.Map[Seq[String], (Int, Int)] = collection.mutable.Map()
 
@@ -81,11 +77,10 @@ class CardinalityTracker(ref: DatasetRef,
             totalDelta == 0 && activeDelta == -1, // existing active ts that became inactive
             "invalid values for totalDelta / activeDelta")
 
-    val cardinalityRecords = flushCount match {
+    flushCount match {
       case Some(threshold) => modifyCountWithAggregation(shardKey, threshold, totalDelta)
       case None => modifyCountWithoutAggregation(shardKey, totalDelta, activeDelta)
     }
-    cardinalityRecords
   }
 
   /**
@@ -135,7 +130,7 @@ class CardinalityTracker(ref: DatasetRef,
   }
 
   /**
-   * Updates the DOWNSAMPLE CLUSTER's cardinality count in the cardinalityCountMap. Flushes the data to RocksDB
+   * Updates the cardinality count in the cardinalityCountMap. Flushes the data to RocksDB
    * when `dsCardinalityMapFlushCount` threshold reached
    *
    *  NOTE: We are only cardinality count for total TS in aggregated fashion. We will add support for active TS if
@@ -190,7 +185,7 @@ class CardinalityTracker(ref: DatasetRef,
   }
 
   /**
-  * Flush the cardinality data to RocksDB before reading the counts. The downsample cardinality count is built from
+  * Flush the cardinality data to RocksDB before reading the counts. The cardinality count is built from
   * scratch at a periodic interval and the caller of CardinalityTracker can also call this method to ensure all data
   * is flushed to RocksDB
   */
@@ -206,10 +201,8 @@ class CardinalityTracker(ref: DatasetRef,
   }
 
   /**
-   * Used to store the cardinality count for the given prefix in the downsample cluster.
-   * NOTE:
-   * 1. In downsample cluster, tsCount == activeTsCount. So totalDelta and activeDelta is same.
-   * 2. The following function should only be called from `updateCardinalityCountsDS` and hence it is marked private.
+   * Used to store the cardinality count for the given prefix in RocksDB.
+   * NOTE: The following function should only be called from inside CardinalityTracker and hence it is marked private.
    * @param prefix usually contains labels _ws_, _ns_, _metric_ and different combinations of it
    * @param totalDelta Increase in total timeseries
    * @param activeDelta Increase in active timeseries
