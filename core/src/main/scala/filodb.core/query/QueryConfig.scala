@@ -21,6 +21,7 @@ object QueryConfig {
     val allowPartialResultsMetadataQuery = queryConfig.getBoolean("allow-partial-results-metadataquery")
     val allowPartialResultsRangeQuery = queryConfig.getBoolean("allow-partial-results-rangequery")
     val grpcDenyList = queryConfig.getString("grpc.partitions-deny-list")
+    val containerOverrides = queryConfig.as[Map[String, Int]]("container-size-overrides")
     QueryConfig(askTimeout, staleSampleAfterMs, minStepMs, fastReduceMaxWindows, parser, translatePromToFilodbHistogram,
       fasterRateEnabled, routingConfig.as[Option[String]]("partition_name"),
       routingConfig.as[Option[Long]]("remote.http.timeout"),
@@ -28,7 +29,9 @@ object QueryConfig {
       routingConfig.as[Option[String]]("remote.grpc.endpoint"),
       enforceResultByteLimit,
       allowPartialResultsRangeQuery, allowPartialResultsMetadataQuery,
-      grpcDenyList.split(",").map(_.trim.toLowerCase).toSet)
+      grpcDenyList.split(",").map(_.trim.toLowerCase).toSet,
+      None,
+      containerOverrides)
   }
 
   import scala.concurrent.duration._
@@ -66,4 +69,5 @@ case class QueryConfig(askTimeout: FiniteDuration,
                        allowPartialResultsRangeQuery: Boolean = false,
                        allowPartialResultsMetadataQuery: Boolean = true,
                        grpcPartitionsDenyList: Set[String] = Set.empty,
-                       plannerSelector: Option[String] = None)
+                       plannerSelector: Option[String] = None,
+                       recordContainerOverrides: Map[String, Int] = Map.empty)

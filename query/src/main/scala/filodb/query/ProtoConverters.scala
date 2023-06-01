@@ -362,6 +362,9 @@ object ProtoConverters {
     def toProto: GrpcMultiPartitionQueryService.Throwable = {
       val builder = GrpcMultiPartitionQueryService.Throwable.newBuilder()
       t match {
+        case filodb.core.query.QueryLimitException(message, queryId)                          =>
+                                                      builder.putMetadata("queryId", queryId)
+                                                      builder.putMetadata("message", message)
         case filodb.core.QueryTimeoutException(elapsedQueryTime, timedOutAt)                  =>
                                                       builder.putMetadata("timedOutAt", timedOutAt)
                                                       builder.putMetadata("elapsedQueryTime", s"$elapsedQueryTime")
@@ -397,6 +400,11 @@ object ProtoConverters {
       // to avoid multiple combinations, we will treat null message as an empty string
       val message  = if (throwableProto.hasMessage) throwableProto.getMessage else ""
       val t = throwableProto.getExceptionClass match {
+        case "filodb.core.query.QueryLimitException" =>
+                val metaMap = throwableProto.getMetadataMap
+                val queryId = metaMap.getOrDefault("queryId", "")
+                val message = metaMap.getOrDefault("message", "")
+                QueryLimitException(message, queryId)
         case "filodb.core.QueryTimeoutException"     =>
                   val metaMap = throwableProto.getMetadataMap
                   val eqt = metaMap.getOrDefault("elapsedQueryTime", "0").toLong

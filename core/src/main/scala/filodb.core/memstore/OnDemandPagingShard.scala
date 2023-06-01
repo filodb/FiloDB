@@ -101,7 +101,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
         s"Try one or more of these: " +
         s"(a) narrow your query filters to reduce to fewer than the current $numTsPartitions matches " +
         s"(b) reduce query time range, currently at ${queryDurationMs / 1000 / 60} minutes"
-      throw new QueryLimitException(exMessage, qContext.queryId)
+      throw QueryLimitException(exMessage, qContext.queryId)
     }
     if (numTsPartitions > enforcedLimits.timeSeriesScanned) {
       val exMessage =
@@ -110,7 +110,7 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
           s"Try one or more of these: " +
           s"(a) narrow your query filters to reduce to fewer than the current $numTsPartitions matches " +
           s"(b) reduce query time range, currently at ${queryDurationMs / 1000 / 60} minutes"
-      throw new QueryLimitException(exMessage, qContext.queryId)
+      throw QueryLimitException(exMessage, qContext.queryId)
     }
     if (numTsPartitions > warnLimits.timeSeriesScanned) {
       val msg =

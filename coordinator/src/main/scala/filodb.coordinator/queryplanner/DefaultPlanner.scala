@@ -7,6 +7,7 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query._
 import filodb.query._
+import filodb.query.AggregationOperator.{BottomK, CountValues, TopK}
 import filodb.query.LogicalPlan._
 import filodb.query.exec._
 
@@ -207,19 +208,26 @@ trait  DefaultPlanner {
         AggregateMapReduce(lp.operator, lp.params, renamedLabelsClauseOpt)
       )
     }
-
+    val recordContainerSize = lp.operator match {
+      case TopK | BottomK | CountValues =>
+          queryConfig.recordContainerOverrides("filodb-query-exec-localpartitionreduceaggregateexec-topbottomk")
+      case _ => SerializedRangeVector.MaxContainerSize
+    }
     val toReduceLevel2 =
       if (toReduceLevel.plans.size >= 16) {
         // If number of children is above a threshold, parallelize aggregation
         val groupSize = Math.sqrt(toReduceLevel.plans.size).ceil.toInt
         toReduceLevel.plans.grouped(groupSize).map { nodePlans =>
           val reduceDispatcher = nodePlans.head.dispatcher
-          LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, nodePlans, lp.operator, lp.params)
+          LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, nodePlans, lp.operator,
+            lp.params, recordContainerSize)
         }.toList
       } else toReduceLevel.plans
 
     val reduceDispatcher = forceRootDispatcher.getOrElse(PlannerUtil.pickDispatcher(toReduceLevel2))
-    val reducer = LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
+     val reducer =
+         LocalPartitionReduceAggregateExec(qContext, reduceDispatcher, toReduceLevel2, lp.operator, lp.params,
+           recordContainerSize)
 
     if (!qContext.plannerParams.skipAggregatePresent)
       reducer.addRangeVectorTransformer(AggregatePresenter(lp.operator, lp.params, RangeParams(
