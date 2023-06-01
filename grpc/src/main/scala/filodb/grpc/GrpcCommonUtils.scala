@@ -16,11 +16,13 @@ object GrpcCommonUtils {
     val keepAliveTime = grpcConfig.getInt("keep-alive-time-seconds")
     val keepAliveTimeOut = grpcConfig.getInt("keep-alive-timeout-seconds")
     val lbPolicy = grpcConfig.getString("load-balancing-policy")
+    val maxInboundMessageSize = grpcConfig.getInt("max-inbound-message-size")
     val builder = NettyChannelBuilder
       .forTarget(endpointUrl)
       .defaultLoadBalancingPolicy(lbPolicy)
       // TODO: Configure this to SSL/Plain text later based on config, currently only Plaintext supported
       .negotiationType(NegotiationType.PLAINTEXT)
+      .maxInboundMessageSize(maxInboundMessageSize)
 
     if (idleTimeout > 0) {
       builder.idleTimeout(idleTimeout, TimeUnit.SECONDS)
