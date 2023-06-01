@@ -980,7 +980,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 class CardinalityCountBuilder(partSchema: PartitionSchema, cardTracker: CardinalityTracker) extends SimpleCollector {
 
   private var partKeyDv: BinaryDocValues = _
-  private var singleResult: BytesRef = _
 
   // gets called for each segment
   override def doSetNextReader(context: LeafReaderContext): Unit = {
@@ -990,15 +989,10 @@ class CardinalityCountBuilder(partSchema: PartitionSchema, cardTracker: Cardinal
   // gets called for each matching document in current segment
   override def collect(doc: Int): Unit = {
     if (partKeyDv.advanceExact(doc)) {
-      singleResult = partKeyDv.binaryValue()
-      val localBytes = singleResult.bytes
-      val localMap = partSchema.binSchema.toStringPairs(localBytes, UnsafeUtils.arayOffset).toMap
-
-      // TODO: quick sync with team on correct way to get key names from config or from any other constants ??
-      val shardKey = Seq(
-        localMap.getOrElse("_ws_", ""),
-        localMap.getOrElse("_ns_", ""),
-        localMap.getOrElse(partSchema.options.metricColumn, ""))
+      val binaryValue = partKeyDv.binaryValue()
+      val unsafePkOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(binaryValue.offset)
+      val shardKey = partSchema.binSchema.colValues(
+        binaryValue.bytes, unsafePkOffset, partSchema.options.shardKeyColumns)
 
       // update the cardinality count by 1, since the shardKey for each document in index is unique
       cardTracker.modifyCount(shardKey, 1, 1)
