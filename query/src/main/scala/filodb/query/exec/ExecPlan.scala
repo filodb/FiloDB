@@ -81,7 +81,8 @@ trait ExecPlan extends QueryCommand {
       case _: MetadataRemoteExec |
            _: PartKeysExec |
            _: MetadataDistConcatExec |
-           _: LabelValuesExec                                         =>  64 * 1024
+           _: LabelValuesExec                                         =>
+        cfg.recordContainerOverrides("filodb-query-exec-metadataexec")
       case _                                                          =>  SerializedRangeVector.MaxContainerSize
     }
 
