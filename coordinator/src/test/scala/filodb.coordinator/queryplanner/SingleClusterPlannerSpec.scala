@@ -2125,7 +2125,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     ep.isInstanceOf[LocalPartitionReduceAggregateExec] shouldEqual(true)
     val presenterTime = ep.asInstanceOf[LocalPartitionReduceAggregateExec].rangeVectorTransformers.head.asInstanceOf[AggregatePresenter].rangeParams
     val periodicSamplesMapper = ep.children.head.rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
-    ep.asInstanceOf[LocalPartitionReduceAggregateExec].maxRecordContainerSize shouldEqual 40960
+    ep.asInstanceOf[LocalPartitionReduceAggregateExec].maxRecordContainerSize(queryConfig) shouldEqual 40960
     presenterTime.startSecs shouldEqual(periodicSamplesMapper.startMs/1000)
     presenterTime.endSecs shouldEqual(periodicSamplesMapper.endMs/1000)
   }
@@ -2150,7 +2150,7 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     execPlan.rangeVectorTransformers.head.isInstanceOf[AbsentFunctionMapper] shouldEqual true
     execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
     val multiSchemaExec = execPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
-    execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].maxRecordContainerSize shouldEqual 4096
+    execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].maxRecordContainerSize(queryConfig) shouldEqual 4096
 
     multiSchemaExec.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual(true)
     val rvt = multiSchemaExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
@@ -2286,9 +2286,9 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       if (op == AggregationOperator.TopK
         || op == AggregationOperator.BottomK
         || op == AggregationOperator.CountValues) {
-        execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].maxRecordContainerSize shouldEqual 40960
+        execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].maxRecordContainerSize(queryConfig) shouldEqual 40960
       } else {
-        execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].maxRecordContainerSize shouldEqual 4096
+        execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].maxRecordContainerSize(queryConfig) shouldEqual 4096
       }
       for (child <- execPlan.children) {
         child.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true

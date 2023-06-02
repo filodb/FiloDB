@@ -7,9 +7,8 @@ import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-
 import filodb.core.metadata.{Dataset, DatasetOptions}
-import filodb.core.query.{PromQlQueryParams, QueryContext}
+import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.core.store.ChunkSource
 import filodb.memory.format.vectors.MutableHistogram
 import filodb.query
@@ -70,7 +69,7 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
   it ("should convert vector Data to QueryResponse for MetadataQuery") {
     val exec = MetadataRemoteExec("", 60000, Map.empty,
-      queryContext, dummyDispatcher, timeseriesDataset.ref, RemoteHttpClient.defaultClient)
+      queryContext, dummyDispatcher, timeseriesDataset.ref, RemoteHttpClient.defaultClient, QueryConfig.unitTestingQueryConfig)
     val map1 = Map("instance" -> "inst-1", "last-sample" -> "6377838" )
     val map2 = Map("instance" -> "inst-2", "last-sample" -> "6377834" )
     val res = exec.toQueryResponse(MetadataSuccessResponse(Seq(MetadataMapSampl(map1), MetadataMapSampl(map2))), "id", Kamon.currentSpan())
@@ -83,7 +82,7 @@ class PromQlRemoteExecSpec extends AnyFunSpec with Matchers with ScalaFutures {
 
   it ("should convert vector Data to QueryResponse for Metadata series query") {
     val exec = MetadataRemoteExec("", 60000, Map.empty, queryContext,
-      dummyDispatcher, timeseriesDataset.ref, RemoteHttpClient.defaultClient)
+      dummyDispatcher, timeseriesDataset.ref, RemoteHttpClient.defaultClient, QueryConfig.unitTestingQueryConfig)
     val map1 = Map("instance" -> "inst-1", "last-sample" -> "6377838" )
     val map2 = Map("instance" -> "inst-2", "last-sample" -> "6377834" )
     val res = exec.toQueryResponse(MetadataSuccessResponse(Seq(MetadataMapSampl(map1), MetadataMapSampl(map2))), "id", Kamon.currentSpan())
