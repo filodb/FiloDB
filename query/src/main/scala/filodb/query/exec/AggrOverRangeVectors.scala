@@ -65,9 +65,7 @@ final case class LocalPartitionReduceAggregateExec(queryContext: QueryContext,
                                                    dispatcher: PlanDispatcher,
                                                    childAggregates: Seq[ExecPlan],
                                                    aggrOp: AggregationOperator,
-                                                   aggrParams: Seq[Any],
-                                                   override val maxRecordContainerSize: Int =
-                                                   SerializedRangeVector.MaxContainerSize) extends ReduceAggregateExec {
+                                                   aggrParams: Seq[Any]) extends ReduceAggregateExec {
   /**
    * Requiring strict result schema match for Aggregation within filodb cluster
    * since fixedVectorLen presence will enable fast-reduce when possible

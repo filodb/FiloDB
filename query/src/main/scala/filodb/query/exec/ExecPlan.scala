@@ -60,7 +60,32 @@ trait ExecPlan extends QueryCommand {
    *
    * @return
    */
-  def maxRecordContainerSize: Int = SerializedRangeVector.MaxContainerSize
+  def maxRecordContainerSize(cfg: QueryConfig): Int = {
+    this match {
+      // If there is a ReduceAggregateExec and aggregation is one of TopK, BottomK or CountValues,
+      // use large record container
+      case ra: ReduceAggregateExec
+                    if ra.aggrOp == AggregationOperator.TopK  ||
+                       ra.aggrOp == AggregationOperator.BottomK ||
+                       ra.aggrOp == AggregationOperator.CountValues   =>
+                        cfg.recordContainerOverrides("filodb-query-exec-localpartitionreduceaggregateexec-topbottomk")
+      // OR, If there is an AggregateMapReduce in RangeVectorTransfermers and aggregation is one of TopK,
+      // BottomK or CountValues, use large record container
+      case ep: ExecPlan if ep.rangeVectorTransformers.exists {
+        case mr: AggregateMapReduce => mr.aggrOp == AggregationOperator.TopK ||
+                                       mr.aggrOp == AggregationOperator.BottomK ||
+                                       mr.aggrOp == AggregationOperator.CountValues
+        case _                      => false
+      }                                                               =>
+        cfg.recordContainerOverrides("filodb-query-exec-localpartitionreduceaggregateexec-topbottomk")
+      case _: MetadataRemoteExec |
+           _: PartKeysExec |
+           _: MetadataDistConcatExec |
+           _: LabelValuesExec                                         =>  64 * 1024
+      case _                                                          =>  SerializedRangeVector.MaxContainerSize
+    }
+
+  }
 
   /**
     * Child execution plans representing sub-queries
@@ -413,7 +438,7 @@ trait ExecPlan extends QueryCommand {
     ): Task[QueryResult] = {
         @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
         @volatile var resultSize = 0L
-        val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize)
+        val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize(querySession.queryConfig))
         rv.doOnStart(_ => Task.eval(span.mark("before-first-materialized-result-rv")))
           .map {
             case srvable: SerializableRangeVector => srvable

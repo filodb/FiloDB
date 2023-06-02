@@ -238,7 +238,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val execPlan = PartKeysExec(
       QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanSamples = limit -1))),
       executeDispatcher,
-      timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now, maxRecordContainerSize = 8 * 1024)
+      timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now)
 
     val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
     resp match {
@@ -246,7 +246,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
                                           ex.getMessage shouldEqual "requirement failed: Record too big for container"
       case _                                                   =>
                                             fail(s"Expected to see an exception for exceeding the default " +
-                                              s"container limit of ${execPlan.maxRecordContainerSize}")
+                                              s"container limit of ${execPlan.maxRecordContainerSize(queryConfig)}")
     }
 
 
