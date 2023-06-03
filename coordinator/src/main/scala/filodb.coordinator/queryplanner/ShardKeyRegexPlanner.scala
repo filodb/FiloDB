@@ -50,98 +50,18 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
   }
 
   /**
-   * Returns true iff all of:
-   *   - all plan RawSeries share the same target-schema columns.
-   *   - no target-schema definition changes during the query.
-   */
-  private def sameRawSeriesTargetSchemaColumns(plan: LogicalPlan,
-                                               queryContext: QueryContext): Option[Seq[String]] = {
-    // compose a stream of Options for each RawSeries--
-    //   the options contain a target-schema iff it is defined and unchanging.
-    val rsTschemaOpts = LogicalPlan.findLeafLogicalPlans(plan)
-      .filter(_.isInstanceOf[RawSeries])
-      .map(_.asInstanceOf[RawSeries]).flatMap{ rs =>
-        val shardKeys = getShardKeys(rs)
-        val interval = LogicalPlanUtils.getSpanningIntervalSelector(rs)
-        shardKeys.map{ shardKey =>
-          val filters = LogicalPlanUtils.upsertFilters(rs.filters, shardKey)
-          LogicalPlanUtils.getTargetSchemaIfUnchanging(targetSchemaProvider(queryContext), filters, interval)
-        }
-      }
-    // make sure all tschemas are defined, and they all match
-    val referenceSchema = rsTschemaOpts.head
-    if (referenceSchema.isDefined
-        && rsTschemaOpts.forall(tschema => tschema.isDefined && tschema == referenceSchema)) {
-      Some(referenceSchema.get)
-    } else {
-      None
-    }
-  }
-
-  /**
-   * Returns true iff an Aggregate can be pushdown-optimized.
-   * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
-   */
-  private def canPushdown(agg: Aggregate, queryContext: QueryContext): Boolean = {
-    if (agg.clauseOpt.isEmpty || agg.clauseOpt.get.clauseType != AggregateClause.ClauseType.By) {
-      return false
-    }
-
-    val nonMetricShardKeyCols = dataset.options.nonMetricShardColumns
-
-    // FIXME: we can pushdown even when a target-schema isn't defined as long as
-    //  all shard keys are given on the "by" clause. This change will touch quite a few files / tests,
-    //  so we'll save it for a separate PR.
-    // val clauseCols = agg.clauseOpt.get.labels
-    // if (nonMetricShardKeyCols.forall(clauseCols.contains(_))) {
-    //   return true
-    // }
-
-    val tschema = sameRawSeriesTargetSchemaColumns(agg, queryContext)
-    if (tschema.isEmpty) {
-      return false
-    }
-    // make sure non-shard-key (i.e. non-implicit) target-schema columns are included in the "by" clause.
-    val tschemaNoImplicit = tschema.get.filter(!nonMetricShardKeyCols.contains(_))
-    tschemaNoImplicit.forall(agg.clauseOpt.get.labels.contains(_))
-  }
-
-  /**
-   * Returns true iff a BinaryJoin can be pushdown-optimized.
-   * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
-   */
-  private def canPushdown(bj: BinaryJoin, queryContext: QueryContext): Boolean = {
-    if (bj.on.isEmpty || bj.ignoring.nonEmpty) {
-      return false
-    }
-
-    val nonMetricShardKeyCols = dataset.options.nonMetricShardColumns
-
-    // FIXME: we can pushdown even when a target-schema isn't defined as long as
-    //  all shard keys are given on the "on" clause. This change will touch quite a few files / tests,
-    //  so we'll save it for a separate PR.
-    // val clauseCols = bj.on
-    // if (nonMetricShardKeyCols.forall(clauseCols.contains(_))) {
-    //   return true
-    // }
-
-    val tschema = sameRawSeriesTargetSchemaColumns(bj, queryContext)
-    if (tschema.isEmpty) {
-      return false
-    }
-    // make sure non-shard-key (i.e. non-implicit) target-schema columns are included in the "on" clause.
-    val tschemaNoImplicit = tschema.get.filter(!nonMetricShardKeyCols.contains(_))
-    tschemaNoImplicit.forall(bj.on.contains(_))
-  }
-
-  /**
    * Returns a set of shard-key sets iff a plan can be pushed-down to each.
    * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
    */
   private def getPushdownKeys(qContext: QueryContext,
                               plan: LogicalPlan): Option[Set[Set[ColumnFilter]]] = {
     val getRawShardKeys = (rs: RawSeries) => getShardKeys(rs).map(_.toSet).toSet
-    LogicalPlanUtils.getPushdownKeys(qContext, plan, canPushdown, canPushdown, getRawShardKeys)
+    LogicalPlanUtils.getPushdownKeys(
+      plan,
+      targetSchemaProvider(qContext),
+      dataset.options.nonMetricShardColumns,
+      getRawShardKeys,
+      rs => getShardKeys(rs))
   }
 
   /**

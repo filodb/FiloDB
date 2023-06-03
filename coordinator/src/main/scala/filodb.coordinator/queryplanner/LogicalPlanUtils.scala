@@ -402,6 +402,95 @@ object LogicalPlanUtils extends StrictLogging {
     columnMap.values.toSeq
   }
 
+  /**
+   * Returns a set of target-schema columns iff all of:
+   *   - all plan RawSeries share the same target-schema columns.
+   *   - no target-schema definition changes during the query.
+   */
+  private def sameRawSeriesTargetSchemaColumns(plan: LogicalPlan,
+                                               targetSchemaProvider: TargetSchemaProvider,
+                                               getShardKeyFilters: RawSeries => Seq[Seq[ColumnFilter]])
+  : Option[Seq[String]] = {
+    // compose a stream of Options for each RawSeries--
+    //   the options contain a target-schema iff it is defined and unchanging.
+    val rsTschemaOpts = LogicalPlan.findLeafLogicalPlans(plan)
+      .filter(_.isInstanceOf[RawSeries])
+      .map(_.asInstanceOf[RawSeries]).flatMap{ rs =>
+      val shardKeyFilters = getShardKeyFilters(rs)
+      val interval = LogicalPlanUtils.getSpanningIntervalSelector(rs)
+      shardKeyFilters.map{ shardKey =>
+        val filters = LogicalPlanUtils.upsertFilters(rs.filters, shardKey)
+        LogicalPlanUtils.getTargetSchemaIfUnchanging(targetSchemaProvider, filters, interval)
+      }
+    }
+    // make sure all tschemas are defined, and they all match
+    val referenceSchema = rsTschemaOpts.head
+    if (referenceSchema.isDefined
+      && rsTschemaOpts.forall(tschema => tschema.isDefined && tschema == referenceSchema)) {
+      Some(referenceSchema.get)
+    } else {
+      None
+    }
+  }
+
+  /**
+   * Returns true iff an Aggregate can be pushdown-optimized.
+   * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
+   */
+  private def canPushdown(agg: Aggregate,
+                          targetSchemaProvider: TargetSchemaProvider,
+                          nonMetricShardKeyCols: Seq[String],
+                          getShardKeyFilters: RawSeries => Seq[Seq[ColumnFilter]]): Boolean = {
+    if (agg.clauseOpt.isEmpty || agg.clauseOpt.get.clauseType != AggregateClause.ClauseType.By) {
+      return false
+    }
+
+    // FIXME: in the ShardKeyRegexPlanner/MultiPartitionPlanner, we can pushdown even when a target-schema
+    //  isn't defined as long as all shard keys are given on the "by" clause. This change will touch quite
+    //  a few files / tests, so we'll save it for a separate PR.
+    // val clauseCols = agg.clauseOpt.get.labels
+    // if (nonMetricShardKeyCols.forall(clauseCols.contains(_))) {
+    //   return true
+    // }
+
+    val tschema = sameRawSeriesTargetSchemaColumns(agg, targetSchemaProvider, getShardKeyFilters)
+    if (tschema.isEmpty) {
+      return false
+    }
+    // make sure non-shard-key (i.e. non-implicit) target-schema columns are included in the "by" clause.
+    val tschemaNoImplicit = tschema.get.filter(!nonMetricShardKeyCols.contains(_))
+    tschemaNoImplicit.forall(agg.clauseOpt.get.labels.contains(_))
+  }
+
+  /**
+   * Returns true iff a BinaryJoin can be pushdown-optimized.
+   * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
+   */
+  private def canPushdown(bj: BinaryJoin,
+                          targetSchemaProvider: TargetSchemaProvider,
+                          nonMetricShardKeyCols: Seq[String],
+                          getShardKeyFilters: RawSeries => Seq[Seq[ColumnFilter]]): Boolean = {
+      if (bj.on.isEmpty || bj.ignoring.nonEmpty) {
+      return false
+    }
+
+    // FIXME: in the ShardKeyRegexPlanner/MultiPartitionPlanner, we can pushdown even when a target-schema
+    //  isn't defined as long as all shard keys are given on the "by" clause. This change will touch quite
+    //  a few files / tests, so we'll save it for a separate PR.
+    // val clauseCols = bj.on
+    // if (nonMetricShardKeyCols.forall(clauseCols.contains(_))) {
+    //   return true
+    // }
+
+    val tschema = sameRawSeriesTargetSchemaColumns(bj, targetSchemaProvider, getShardKeyFilters)
+    if (tschema.isEmpty) {
+      return false
+    }
+    // make sure non-shard-key (i.e. non-implicit) target-schema columns are included in the "on" clause.
+    val tschemaNoImplicit = tschema.get.filter(!nonMetricShardKeyCols.contains(_))
+    tschemaNoImplicit.forall(bj.on.contains(_))
+  }
+
   // scalastyle:off method.length
   // scalastyle:off cyclomatic.complexity
   /**
@@ -413,11 +502,11 @@ object LogicalPlanUtils extends StrictLogging {
    *   same RangeVectors as the non-pushed-down plan.
    * @return an occupied Option iff it is valid to perform the a pushdown optimization on the argument plan.
    */
-  def getPushdownKeys[T](qContext: QueryContext,
-                         lp: LogicalPlan,
-                         canPushdownBj: (BinaryJoin, QueryContext) => Boolean,
-                         canPushdownAgg: (Aggregate, QueryContext) => Boolean,
-                         getRawPushdownKeys: RawSeries => Set[T]): Option[Set[T]] = {
+  def getPushdownKeys[T](lp: LogicalPlan,
+                         targetSchemaProvider: TargetSchemaProvider,
+                         nonMetricShardKeyCols: Seq[String],
+                         getRawPushdownKeys: RawSeries => Set[T],
+                         getShardKeyFilters: RawSeries => Seq[Seq[ColumnFilter]]): Option[Set[T]] = {
     def helper(lp: LogicalPlan): Option[Set[T]] = lp match {
       case vec: VectorPlan =>
         val keys = helper(vec.scalars)
@@ -442,16 +531,17 @@ object LogicalPlanUtils extends StrictLogging {
       case bj: BinaryJoin =>
         val lhsKeys = helper(bj.lhs)
         val rhsKeys = helper(bj.rhs)
-        val canPushdown =
+        val canPushdownBj =
           lhsKeys.isDefined && rhsKeys.isDefined &&
             // either the lhs/rhs keys are equal, or at least one of lhs/rhs includes only scalars.
             (lhsKeys.get.isEmpty || rhsKeys.get.isEmpty || lhsKeys == rhsKeys) &&
-            canPushdownBj(bj, qContext)
+            canPushdown(bj, targetSchemaProvider, nonMetricShardKeyCols, getShardKeyFilters)
         // union lhs/rhs keys, since one might be empty (if it's a scalar)
-        if (canPushdown) Some(lhsKeys.get.union(rhsKeys.get)) else None
+        if (canPushdownBj) Some(lhsKeys.get.union(rhsKeys.get)) else None
       case agg: Aggregate =>
         val keys = helper(agg.vectors)
-        if (keys.isDefined && canPushdownAgg(agg, qContext)) keys else None
+        val canPushdownAgg = canPushdown(agg, targetSchemaProvider, nonMetricShardKeyCols, getShardKeyFilters)
+        if (keys.isDefined && canPushdownAgg) keys else None
       case nl: NonLeafLogicalPlan =>
         // return the set of all child keys iff all child plans can be pushdown-optimized
         val keys = nl.children.map(helper)

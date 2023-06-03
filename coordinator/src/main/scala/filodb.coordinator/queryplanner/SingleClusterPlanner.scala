@@ -56,50 +56,6 @@ object SingleClusterPlanner {
         .forall(s => filters.exists(cf => cf.column == s && cf.filter.isInstanceOf[Filter.Equals]))
       case _ => false
     }
-
-  /**
-   * Returns an occupied option with target schema labels iff they are defined and identical
-   *   for every leaf LogicalPlan that draws data from a shard (i.e. isn't a leaf-level scalar).
-   * Plans that do not draw data from any shards do not affect the result *unless* no plan draws
-   *   data from a shard. In this case, Some(Seq.empty) is returned.
-   */
-  private def getUniversalTargetSchemaLabels(lp: LogicalPlan,
-                                             tsp: TargetSchemaProvider): Option[Seq[String]] = {
-    lp match {
-      case nl: NonLeafLogicalPlan =>
-        val tsLabelOpts = nl.children.map(getUniversalTargetSchemaLabels(_, tsp))
-        if (tsLabelOpts.forall(_.isDefined)) {
-          // Filter out empty lists, since these arise only from scalar plans, and we don't
-          //   want those to force a None return.
-          val nonEmpty = tsLabelOpts.filter(_.get.nonEmpty)
-          // Check if all non-head elements equal the head (i.e. all are the same).
-          if (nonEmpty.drop(1).forall(_ == tsLabelOpts.head)) {
-            return nonEmpty.headOption.getOrElse(Some(Seq.empty))
-          }
-        }
-        None
-      case rs: RawSeries =>
-        val rangeSelectorOpt: Option[(Long, Long)] = rs.rangeSelector match {
-          case IntervalSelector(fromMs, toMs) => Some((fromMs, toMs))
-          case _ => None
-        }
-        val targetSchemaOpt = if (rangeSelectorOpt.isDefined) {
-          val (fromMs, toMs) = rangeSelectorOpt.get
-          val tsChanges = tsp.targetSchemaFunc(rs.filters)
-          findTargetSchema(tsChanges, fromMs, toMs).map(_.schema)
-        } else None
-
-        if (targetSchemaOpt.isDefined) {
-          // make this assertion since the non-leaf case's logic requires it
-          assert(targetSchemaOpt.get.size > 0, "expected target schema labels, but none exist")
-          targetSchemaOpt
-        } else None
-      // Non-leaf plans are processed above; no non-leaf scalar will reach here.
-      // Return empty Seq to indicate this is a leaf-level scalar.
-      case sc: ScalarPlan => Some(Seq.empty)
-      case _ => None
-    }
-  }
 }
 
 /**
@@ -430,35 +386,6 @@ class SingleClusterPlanner(val dataset: Dataset,
   // scalastyle:on method.length
 
   /**
-   * Returns true iff a BinaryJoin can be pushdown-optimized.
-   * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
-   */
-  private def canPushdown(bj: BinaryJoin, qContext: QueryContext): Boolean = {
-    val targetSchemaLabels =
-      getUniversalTargetSchemaLabels(bj, targetSchemaProvider(qContext))
-    // non-shard-key target-schema labels are a subset of the "on" clause
-    targetSchemaLabels.isDefined &&
-      targetSchemaLabels.get.toSet.diff(shardColumns.toSet).subsetOf(bj.on.toSet)
-  }
-
-  /**
-   * Returns true iff an Aggregate can be pushdown-optimized.
-   * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
-   */
-  private def canPushdown(agg: Aggregate, qContext: QueryContext): Boolean = {
-    agg.clauseOpt.isDefined &&
-      agg.clauseOpt.get.clauseType == AggregateClause.ClauseType.By && {
-        val targetSchemaLabels =
-          getUniversalTargetSchemaLabels(agg, targetSchemaProvider(qContext))
-        targetSchemaLabels.isDefined && {
-          // non-shard-key target-schema labels are a subset of the "by" clause
-          val byLabels = agg.clauseOpt.get.labels
-          targetSchemaLabels.get.toSet.diff(shardColumns.toSet).subsetOf(byLabels.toSet)
-        }
-      }
-  }
-
-  /**
    * Returns a set of shards iff a plan can be pushed-down to each.
    * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
    */
@@ -469,7 +396,12 @@ class SingleClusterPlanner(val dataset: Dataset,
         getShardSpanFromLp(rs, qContext).get
       } else qContext.plannerParams.shardOverrides.get.toSet
     }
-    LogicalPlanUtils.getPushdownKeys(qContext, plan, canPushdown, canPushdown, getRawPushdownShards)
+    LogicalPlanUtils.getPushdownKeys(
+      plan,
+      targetSchemaProvider(qContext),
+      dataset.options.nonMetricShardColumns,
+      getRawPushdownShards,
+      rs => LogicalPlan.getRawSeriesFilters(rs))
   }
 
   /**

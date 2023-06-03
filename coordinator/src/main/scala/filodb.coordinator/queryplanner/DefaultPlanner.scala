@@ -479,7 +479,6 @@ trait  DefaultPlanner {
       PlanResult(Seq(execPlan))
     }
   }
-
 }
 
 object PlannerUtil extends StrictLogging {
