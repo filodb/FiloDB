@@ -53,9 +53,8 @@ object QueryConfig {
                                            allowPartialResultsRangeQuery = false,
                                            allowPartialResultsMetadataQuery = true,
                                            recordContainerOverrides =
-                                             Map("filodb-query-exec-localpartitionreduceaggregateexec-topbottomk"
-                                                     -> 40960,
-                                                  "filodb-query-exec-metadataexec" -> 8192))
+                                             Map("filodb-query-exec-aggregate-large-container" -> 65536,
+                                                  "filodb-query-exec-metadataexec"             -> 8192))
 }
 
 case class QueryConfig(askTimeout: FiniteDuration,

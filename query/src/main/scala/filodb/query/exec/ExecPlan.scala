@@ -62,22 +62,23 @@ trait ExecPlan extends QueryCommand {
    */
   def maxRecordContainerSize(cfg: QueryConfig): Int = {
     this match {
-      // If there is a ReduceAggregateExec and aggregation is one of TopK, BottomK or CountValues,
+      // If there is a ReduceAggregateExec and aggregation is one of TopK, BottomK, CountValues or Quantile,
       // use large record container
       case ra: ReduceAggregateExec
                     if ra.aggrOp == AggregationOperator.TopK  ||
                        ra.aggrOp == AggregationOperator.BottomK ||
-                       ra.aggrOp == AggregationOperator.CountValues   =>
-                        cfg.recordContainerOverrides("filodb-query-exec-localpartitionreduceaggregateexec-topbottomk")
+                       ra.aggrOp == AggregationOperator.CountValues ||
+                       ra.aggrOp == AggregationOperator.Quantile       =>
+        cfg.recordContainerOverrides("filodb-query-exec-aggregate-large-container")
       // OR, If there is an AggregateMapReduce in RangeVectorTransfermers and aggregation is one of TopK,
       // BottomK or CountValues, use large record container
       case ep: ExecPlan if ep.rangeVectorTransformers.exists {
         case mr: AggregateMapReduce => mr.aggrOp == AggregationOperator.TopK ||
                                        mr.aggrOp == AggregationOperator.BottomK ||
                                        mr.aggrOp == AggregationOperator.CountValues
-        case _                      => false
+        case _                                                        => false
       }                                                               =>
-        cfg.recordContainerOverrides("filodb-query-exec-localpartitionreduceaggregateexec-topbottomk")
+        cfg.recordContainerOverrides("filodb-query-exec-aggregate-large-container")
       case _: MetadataRemoteExec |
            _: PartKeysExec |
            _: MetadataDistConcatExec |
