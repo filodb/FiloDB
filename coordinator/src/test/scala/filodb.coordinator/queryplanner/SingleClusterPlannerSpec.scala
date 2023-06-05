@@ -2285,7 +2285,8 @@ class SingleClusterPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       val op = execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].aggrOp
       if (op == AggregationOperator.TopK
         || op == AggregationOperator.BottomK
-        || op == AggregationOperator.CountValues) {
+        || op == AggregationOperator.CountValues
+        || op == AggregationOperator.Quantile) {
         execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].maxRecordContainerSize(queryConfig) shouldEqual 65536
       } else {
         execPlan.asInstanceOf[LocalPartitionReduceAggregateExec].maxRecordContainerSize(queryConfig) shouldEqual 4096
