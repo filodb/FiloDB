@@ -18,7 +18,8 @@ case class MetadataRemoteExec(queryEndpoint: String,
                               queryContext: QueryContext,
                               dispatcher: PlanDispatcher,
                               dataset: DatasetRef,
-                              remoteExecHttpClient: RemoteExecHttpClient) extends RemoteExec {
+                              remoteExecHttpClient: RemoteExecHttpClient,
+                              config: QueryConfig) extends RemoteExec {
 
   private val lvColumns = Seq(ColumnInfo("metadataMap", ColumnType.MapColumn))
   private val resultSchema = ResultSchema(lvColumns, 1)
@@ -31,9 +32,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
   private val lcLabelNameField  = "label"
   private val lcLabelCountField = "count"
 
-  override val maxRecordContainerSize: Int = 64 * 1024
-
-  private val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize)
+  private val builder = SerializedRangeVector.newBuilder(maxRecordContainerSize(config))
 
   private val dummyQueryStats = QueryStats()
   override def sendHttpRequest(execPlan2Span: Span, httpTimeoutMs: Long)

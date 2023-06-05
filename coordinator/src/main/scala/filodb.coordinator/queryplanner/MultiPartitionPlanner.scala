@@ -651,6 +651,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val httpEndpoint = partitionAssignment.httpEndPoint +
       finalQueryContext.origQueryParams.asInstanceOf[PromQlQueryParams].remoteQueryPath.getOrElse("")
     MetadataRemoteExec(httpEndpoint, remoteHttpTimeoutMs,
-      urlParams, finalQueryContext, inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient)
+      urlParams, finalQueryContext, inProcessPlanDispatcher, dataset.ref, remoteExecHttpClient, queryConfig)
   }
 }

@@ -2,8 +2,7 @@ package filodb.query.exec
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
-
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{ConfigFactory, ConfigValueFactory}
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
@@ -11,7 +10,6 @@ import monix.reactive.Observable
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.core.MetricsTestData._
 import filodb.core.TestData
 import filodb.core.binaryrecord2.BinaryRecordRowReader
@@ -21,11 +19,8 @@ import filodb.core.query._
 import filodb.core.store.{ChunkSource, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
-import filodb.query.exec.TsCardExec.CardCounts
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-
-import scala.collection.Seq
 
 class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
 
@@ -238,15 +233,20 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
     val execPlan = PartKeysExec(
       QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanSamples = limit -1))),
       executeDispatcher,
-      timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now, maxRecordContainerSize = 8 * 1024)
+      timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now)
 
-    val resp = execPlan.execute(memStore, querySession).runToFuture.futureValue
+    val queryConfigOverridden = QueryConfig(config.getConfig("query"
+    ).withValue("container-size-overrides.filodb-query-exec-metadataexec",
+      ConfigValueFactory.fromAnyRef(8 * 1024)))
+    val querySessionOverridden = QuerySession(QueryContext(), queryConfigOverridden)
+    execPlan.maxRecordContainerSize(queryConfigOverridden) shouldEqual 8192
+    val resp = execPlan.execute(memStore, querySessionOverridden).runToFuture.futureValue
     resp match {
       case QueryError(_, _, ex: IllegalArgumentException)  =>
                                           ex.getMessage shouldEqual "requirement failed: Record too big for container"
       case _                                                   =>
                                             fail(s"Expected to see an exception for exceeding the default " +
-                                              s"container limit of ${execPlan.maxRecordContainerSize}")
+                                              s"container limit of ${execPlan.maxRecordContainerSize(queryConfig)}")
     }
 
 
@@ -255,7 +255,7 @@ class MetadataExecSpec extends AnyFunSpec with Matchers with ScalaFutures with B
       QueryContext(plannerParams = PlannerParams(enforcedLimits = PerQueryLimits(execPlanSamples = limit -1))),
       executeDispatcher,
       timeseriesDatasetMultipleShardKeys.ref, 0, filters, false, now - 5000, now)
-
+    execPlan1.maxRecordContainerSize(querySession.queryConfig) shouldEqual 65536
     val resp1 = execPlan1.execute(memStore, querySession).runToFuture.futureValue
     val result = resp1 match {
       case QueryResult(id, _, response, _, _, _, _) => {

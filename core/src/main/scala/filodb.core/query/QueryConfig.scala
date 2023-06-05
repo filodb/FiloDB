@@ -51,7 +51,10 @@ object QueryConfig {
                                            remoteGrpcEndpoint = None,
                                            enforceResultByteLimit = false,
                                            allowPartialResultsRangeQuery = false,
-                                           allowPartialResultsMetadataQuery = true)
+                                           allowPartialResultsMetadataQuery = true,
+                                           recordContainerOverrides =
+                                             Map("filodb-query-exec-aggregate-large-container" -> 65536,
+                                                  "filodb-query-exec-metadataexec"             -> 8192))
 }
 
 case class QueryConfig(askTimeout: FiniteDuration,
