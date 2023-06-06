@@ -3,9 +3,9 @@ package filodb.core.downsample
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
-
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
+
 import java.util
 import java.util.concurrent.atomic.AtomicLong
 import kamon.Kamon
@@ -15,10 +15,10 @@ import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
 import monix.reactive.Observable
 import org.apache.lucene.search.CollectionTerminatedException
-
-import filodb.core.{DatasetRef, Types}
+import filodb.core.{DatasetRef, GlobalConfig, Types}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore._
+import filodb.core.memstore.ratelimit.{CardinalityTracker, QuotaSource, RocksDbCardinalityStore}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, QueryContext, QuerySession}
 import filodb.core.store._
@@ -66,7 +66,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                  rawColStore: ColumnStore,
                                  shardNum: Int,
                                  filodbConfig: Config,
-                                 downsampleConfig: DownsampleConfig)
+                                 downsampleConfig: DownsampleConfig,
+                                 quotaSource: QuotaSource)
                                 (implicit val ioPool: ExecutionContext) extends StrictLogging {
 
   val creationTime = System.currentTimeMillis()
@@ -123,6 +124,9 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
 
   private var houseKeepingFuture: CancelableFuture[Unit] = _
   private var gaugeUpdateFuture: CancelableFuture[Unit] = _
+  private var cardCountTriggerFuture: CancelableFuture[Unit] = _
+
+  private val cardTracker: CardinalityTracker = initCardTracker()
 
   def indexNames(limit: Int): Seq[String] = Seq.empty
 
@@ -239,6 +243,7 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
       indexRefresh()
     }.map { _ =>
       partKeyIndex.refreshReadersBlocking()
+      // Add staggering logic here
     }.onErrorRestartUnlimited.completedL.runToFuture(housekeepingSched)
   }
 
@@ -291,6 +296,17 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
           indexUpdatedHour.set(toHour)
           partKeyIndex.notifyLifecycleListener(IndexState.Synced, toHour * 3600 * 1000L)
         }
+
+        // TODO: check if this can be triggered multiple times, since it is under `map` clause
+
+        // trigger cardinality calculation
+        if (downsampleStoreConfig.meteringEnabled) {
+
+          // TODO: get staggered duration calculation
+          cardCountTriggerFuture = Observable.intervalWithFixedDelay(1.minute).map { _ =>
+
+          }.onErrorHandle(_ => 0).completedL.runToFuture(housekeepingSched)
+        }
         count
       }
       .onErrorHandle { e =>
@@ -313,6 +329,25 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
     stats.indexRamBytes.update(partKeyIndex.indexRamBytes)
   }
 
+  private def triggerCardinalityCount(): Unit = {
+    if (downsampleStoreConfig.meteringEnabled) {
+
+    }
+  }
+
+  private def initCardTracker() = {
+    if (downsampleStoreConfig.meteringEnabled) {
+      // TODO: check if it should be rawDatasetRef or indexDataset
+      val cardStore = new RocksDbCardinalityStore(rawDatasetRef, shardNum)
+      val defaultQuota = quotaSource.getDefaults(rawDatasetRef)
+      val tracker = new CardinalityTracker(rawDatasetRef, shardNum, schemas.part.options.shardKeyColumns.length,
+        defaultQuota, cardStore)
+      quotaSource.getQuotas(rawDatasetRef).foreach { q =>
+        tracker.setQuota(q.shardKeyPrefix, q.quota)
+      }
+      tracker
+    } else UnsafeUtils.ZeroPointer.asInstanceOf[CardinalityTracker]
+  }
 
   def refreshPartKeyIndexBlocking(): Unit = {}
 
