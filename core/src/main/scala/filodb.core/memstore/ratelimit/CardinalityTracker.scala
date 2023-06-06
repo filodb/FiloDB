@@ -71,11 +71,11 @@ class CardinalityTracker(ref: DatasetRef,
     // modifyCount and decrementCount methods are protected this way
 
     require(shardKey.length == shardKeyLen, "full shard key is needed")
-    require(totalDelta == 1 && activeDelta == 0 || // new ts but inactive
-            totalDelta == 1 && activeDelta == 1 || // new ts and active
-            totalDelta == 0 && activeDelta == 1 ||   // // existing inactive ts that became active
-            totalDelta == 0 && activeDelta == -1, // existing active ts that became inactive
-            "invalid values for totalDelta / activeDelta")
+    require(totalDelta == 1 && activeDelta == 0 || // new ts but inactive (at bootstrap time)
+            totalDelta == 1 && activeDelta == 1 || // new ts and active (at ingestion time)
+            totalDelta == 0 && activeDelta == 1 || // existing inactive ts that became active
+            totalDelta == 0 && activeDelta == -1,  // existing active ts that became inactive
+            "invalid values for totalDelta / activeDelta") // Note: totalDelta = -1 is done via decrementCount method
 
     flushCount match {
       case Some(threshold) => modifyCountWithAggregation(shardKey, threshold, totalDelta)
