@@ -917,8 +917,9 @@ class TimeSeriesShard(val ref: DatasetRef,
           val shardKey = p.schema.partKeySchema.colValues(p.partKeyBase, p.partKeyOffset,
             p.schema.options.shardKeyColumns)
           val newCard = cardTracker.modifyCount(shardKey, 0, -1)
-          // temporary debugging since we are seeing some negative counts
-          if (newCard.exists(_.value.activeTsCount < 0))
+          // TODO remove temporary debugging since we are seeing some negative counts
+          if (newCard.exists(_.value.activeTsCount < 0) && p.partID % 100 < 5)
+            // log for 5% of the cases to reduce log volume
             logger.error(s"For some reason, activeTs count negative when updating card for " +
               s"partKey: ${p.stringPartition} newCard: $newCard oldActivelyIngestingSize=$oldActivelyIngestingSize " +
               s"newActivelyIngestingSize=${activelyIngesting.size}")
@@ -1002,6 +1003,13 @@ class TimeSeriesShard(val ref: DatasetRef,
       } else {
         // newly created partition is re-ingesting now, so update endTime
         updatePartEndTimeInIndex(newPart, Long.MaxValue)
+        if (storeConfig.meteringEnabled) {
+          cardTracker.modifyCount(shardKey, 0, 1)
+          // TODO remove temporary debugging since we were seeing some negative counts when this increment was absent
+          if (partId % 100 < 5) { // log for 5% of the cases
+            logger.info(s"Increment activeDelta for ${newPart.stringPartition}")
+          }
+        }
       }
       dirtyPartitionsForIndexFlush += partId // marks this part as dirty so startTime is flushed
       activelyIngesting.synchronized {
