@@ -995,7 +995,7 @@ class CardinalityCountBuilder(partSchema: PartitionSchema, cardTracker: Cardinal
         binaryValue.bytes, unsafePkOffset, partSchema.options.shardKeyColumns)
 
       // update the cardinality count by 1, since the shardKey for each document in index is unique
-      cardTracker.modifyCount(shardKey, 1, 1)
+      cardTracker.modifyCount(shardKey, 1, 0)
     } else {
       throw new IllegalStateException("This shouldn't happen since every document should have a partKeyDv")
     }
