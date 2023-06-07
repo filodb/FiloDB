@@ -281,15 +281,18 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
       case Some(conf) =>
         val minNumNodes = conf.getInt("min-num-nodes")
         val numShards = conf.getInt("num-shards")
-        logger.info(s"Found the config to estimate the shards per node. minNumNodes=$minNumNodes numShards=$numShards")
-        numShards / minNumNodes
+        val result = numShards / minNumNodes
+        logger.info(s"Found the config to estimate the shards per node. minNumNodes=$minNumNodes numShards=$numShards" +
+          s" numShardsPerNode=$result")
+        result
       case None =>
+        // WHY 8? This is the current configuration of our production downsample cluster as of 06/02/2023
+        val defaultNumShardsPerNode = 8
         // NOTE: This is an Extremely UNLIKELY case, because some of the dataset configs are required for startup
         logger.error(s"Could not find config for dataset=${rawDatasetRef.dataset} in configs " +
-          s"`dataset-configs` and `inline-dataset-configs`. Please check filodb config = ${filodbConfig.toString}")
-
-        // WHY 8? This is the current configuration of our production downsample cluster as of 06/02/2023
-        8
+          s"`dataset-configs` and `inline-dataset-configs`. Please check filodb config = ${filodbConfig.toString}" +
+          s" default-value=$defaultNumShardsPerNode")
+        defaultNumShardsPerNode
     }
   }
 
@@ -331,6 +334,7 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
           // close the cardinality store and release/delete the physical resources of the current cardinality store
           cardTracker.close()
           cardTracker = newCardTracker
+          logger.info(s"Triggered cardinality count successfully for shardNum=$shardNum and hour=$currentHour")
         }
       }
       catch {
