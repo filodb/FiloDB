@@ -1,9 +1,9 @@
 package filodb.core.downsample
 
-import org.scalatest.{BeforeAndAfterAll}
+import com.typesafe.config.ConfigFactory
+import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-
 import filodb.core.{GlobalConfig, MachineMetricsData, MetricsTestData}
 import filodb.core.memstore.PartKeyLuceneIndex
 import filodb.core.memstore.ratelimit.ConfigQuotaSource
@@ -55,5 +55,107 @@ class DownsampleCardinalityManagerSpec extends AnyFunSpec with Matchers with Bef
         cardManager.shouldTriggerCardinalityCount(shardNum, 8, currentHour) shouldEqual assertValue
       }
     }
+  }
+
+  it("getNumShardsPerNodeFromConfig should work with fallback and default value") {
+    val testShardNum = 10
+    val idx = getTestLuceneIndex(testShardNum)
+    val cardManager = new DownsampleCardinalityManager(
+      MetricsTestData.timeseriesDatasetMultipleShardKeys.ref, testShardNum, shardKeyLen, idx, partSchema,
+      filodbConfig, downsampleStoreConfig, quotaSource)
+
+    // `dataset-config` has required config
+    val confWithDatasetConfigs = """
+      |  filodb {
+      |    dataset-configs = [
+      |      {
+      |        dataset = "prometheus"
+      |        min-num-nodes = 8
+      |        num-shards = 16
+      |      }
+      |    ]
+      |  }
+      |""".stripMargin
+
+    var conf = ConfigFactory.parseString(confWithDatasetConfigs).getConfig("filodb")
+    cardManager.getNumShardsPerNodeFromConfig("prometheus", conf) shouldEqual 2
+
+    // no `dataset-configs` - but should fallback to `inline-dataset-configs`
+    val confWithInlineDatasetConfigs =
+      """
+        |  filodb {
+        |    inline-dataset-configs = [
+        |      {
+        |        dataset = "prometheus"
+        |        min-num-nodes = 8
+        |        num-shards = 16
+        |      }
+        |    ]
+        |  }
+        |""".stripMargin
+    conf = ConfigFactory.parseString(confWithInlineDatasetConfigs).getConfig("filodb")
+    cardManager.getNumShardsPerNodeFromConfig("prometheus", conf) shouldEqual 2
+
+    // `dataset-configs` present, but doesn't have config for `prometheus` dataset. should use `inline-dataset-config`
+    val confWithDatasetConfigMissingDataset =
+      """
+        |  filodb {
+        |
+        |    dataset-configs = [
+        |      {
+        |        dataset = "not-prometheus"
+        |        min-num-nodes = 8
+        |        num-shards = 16
+        |      }
+        |    ]
+        |
+        |    inline-dataset-configs = [
+        |      {
+        |        dataset = "prometheus"
+        |        min-num-nodes = 8
+        |        num-shards = 32
+        |      }
+        |    ]
+        |  }
+        |""".stripMargin
+    conf = ConfigFactory.parseString(confWithDatasetConfigMissingDataset).getConfig("filodb")
+    cardManager.getNumShardsPerNodeFromConfig("prometheus", conf) shouldEqual 4
+
+    // both `dataset-configs` and `inline-dataset-configs` don't have the required dataset, hence fallback used
+    val confWithBothConfigsMissingDataset =
+      """
+        |  filodb {
+        |
+        |    dataset-configs = [
+        |      {
+        |        dataset = "not-prometheus"
+        |        min-num-nodes = 8
+        |        num-shards = 16
+        |      }
+        |    ]
+        |
+        |    inline-dataset-configs = [
+        |      {
+        |        dataset = "not-prometheus"
+        |        min-num-nodes = 8
+        |        num-shards = 16
+        |      }
+        |    ]
+        |  }
+        |""".stripMargin
+
+    conf = ConfigFactory.parseString(confWithBothConfigsMissingDataset).getConfig("filodb")
+    cardManager.getNumShardsPerNodeFromConfig("prometheus", conf) shouldEqual 8
+
+    // both `dataset-configs` and `inline-dataset-configs` are missing, hence fallback used
+    val confWithBothConfigsMissing =
+      """
+        |  filodb {
+        |
+        |  }
+        |""".stripMargin
+
+    conf = ConfigFactory.parseString(confWithBothConfigsMissing).getConfig("filodb")
+    cardManager.getNumShardsPerNodeFromConfig("prometheus", conf) shouldEqual 8
   }
 }

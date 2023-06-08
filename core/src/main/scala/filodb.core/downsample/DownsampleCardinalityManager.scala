@@ -26,7 +26,7 @@ class DownsampleCardinalityManager(rawDatasetRef: DatasetRef,
 
   // number of shards per node - used to stagger/distribute the cardinality count calculation of different shards
   // to different times of day
-  private val numShardsPerNode: Int = getNumShardsPerNodeFromConfig()
+  private val numShardsPerNode: Int = getNumShardsPerNodeFromConfig(rawDatasetRef.dataset, filodbConfig)
 
   /**
    * Helper method to get the shards per node in the downsample filodb cluster. We look for the two specific
@@ -38,13 +38,17 @@ class DownsampleCardinalityManager(rawDatasetRef: DatasetRef,
    *
    * @return shards present per node
    */
-  def getNumShardsPerNodeFromConfig(): Int = {
-    val datasetToSearch = rawDatasetRef.dataset
-    val datasetConfig = filodbConfig.getConfigList("dataset-configs")
-      .toArray().toList
-      .asInstanceOf[List[Config]]
-      .filter(x => x.getString("dataset") == datasetToSearch)
-      .headOption
+  def getNumShardsPerNodeFromConfig(datasetToSearch: String, filoConfig: Config): Int = {
+    // init
+    var datasetConfig: Option[Config] = None
+
+    if (filoConfig.hasPath("dataset-configs")) {
+      datasetConfig = filoConfig.getConfigList("dataset-configs")
+        .toArray().toList
+        .asInstanceOf[List[Config]]
+        .filter(x => x.getString("dataset") == datasetToSearch)
+        .headOption
+    }
 
     val configToUse = datasetConfig match {
       case Some(datasetConf) => Some(datasetConf)
@@ -52,10 +56,16 @@ class DownsampleCardinalityManager(rawDatasetRef: DatasetRef,
         // use fallback to inline dataset config
         logger.info(s"Didn't find required config for dataset=${rawDatasetRef.dataset} in config `dataset-configs`." +
           s"Checking in config `inline-dataset-configs`")
-        filodbConfig.getConfigList("inline-dataset-configs")
-          .toArray().toList
-          .asInstanceOf[List[Config]]
-          .filter(x => x.getString("dataset") == datasetToSearch).headOption
+
+        if (filoConfig.hasPath("inline-dataset-configs")) {
+          filoConfig.getConfigList("inline-dataset-configs")
+            .toArray().toList
+            .asInstanceOf[List[Config]]
+            .filter(x => x.getString("dataset") == datasetToSearch).headOption
+        }
+        else {
+          None
+        }
     }
 
     configToUse match {
@@ -67,9 +77,9 @@ class DownsampleCardinalityManager(rawDatasetRef: DatasetRef,
           s" numShardsPerNode=$result")
         result
       case None =>
+        // NOTE: This is an Extremely UNLIKELY case, because the configs we rely on, are required for startup
         // WHY 8? This is the current configuration of our production downsample cluster as of 06/02/2023
         val defaultNumShardsPerNode = 8
-        // NOTE: This is an Extremely UNLIKELY case, because some of the dataset configs are required for startup
         logger.error(s"Could not find config for dataset=${rawDatasetRef.dataset} in configs " +
           s"`dataset-configs` and `inline-dataset-configs`. Please check filodb config = ${filodbConfig.toString}" +
           s" default-value=$defaultNumShardsPerNode")
@@ -130,6 +140,7 @@ class DownsampleCardinalityManager(rawDatasetRef: DatasetRef,
    * @return instance of CardinalityTracker or a ZeroPointer (if metering not enabled)
    */
   private def initCardTracker() = {
+    logger.info(s"Downsample Cardinality enabled flag=${downsampleStoreConfig.meteringEnabled.toString}")
     if (downsampleStoreConfig.meteringEnabled) {
       getNewCardTracker()
     } else UnsafeUtils.ZeroPointer.asInstanceOf[CardinalityTracker]
