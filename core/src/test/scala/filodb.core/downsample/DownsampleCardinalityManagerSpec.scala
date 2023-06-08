@@ -1,7 +1,7 @@
 package filodb.core.downsample
 
 import com.typesafe.config.ConfigFactory
-import org.scalatest.BeforeAndAfterAll
+import org.scalatest.BeforeAndAfter
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import filodb.core.{GlobalConfig, MachineMetricsData, MetricsTestData}
@@ -12,7 +12,7 @@ import filodb.core.store.StoreConfig
 
 import scala.concurrent.duration.DurationInt
 
-class DownsampleCardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
+class DownsampleCardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfter {
 
   val filodbConfig = GlobalConfig.defaultFiloConfig
   val downsampleStoreConfig = StoreConfig(
@@ -55,6 +55,8 @@ class DownsampleCardinalityManagerSpec extends AnyFunSpec with Matchers with Bef
         cardManager.shouldTriggerCardinalityCount(shardNum, 8, currentHour) shouldEqual assertValue
       }
     }
+
+    idx.closeIndex()
   }
 
   it("getNumShardsPerNodeFromConfig should work with fallback and default value") {
@@ -157,5 +159,7 @@ class DownsampleCardinalityManagerSpec extends AnyFunSpec with Matchers with Bef
 
     conf = ConfigFactory.parseString(confWithBothConfigsMissing).getConfig("filodb")
     cardManager.getNumShardsPerNodeFromConfig("prometheus", conf) shouldEqual 8
+
+    idx.closeIndex()
   }
 }
