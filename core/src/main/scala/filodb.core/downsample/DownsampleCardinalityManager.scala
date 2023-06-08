@@ -78,7 +78,6 @@ class DownsampleCardinalityManager(rawDatasetRef: DatasetRef,
         result
       case None =>
         // NOTE: This is an Extremely UNLIKELY case, because the configs we rely on, are required for startup
-        // WHY 8? This is the current configuration of our production downsample cluster as of 06/02/2023
         val defaultNumShardsPerNode = 8
         logger.error(s"Could not find config for dataset=${rawDatasetRef.dataset} in configs " +
           s"`dataset-configs` and `inline-dataset-configs`. Please check filodb config = ${filodbConfig.toString}" +
