@@ -66,7 +66,7 @@ labelMatcherList: labelMatcher (',' labelMatcher)*;
 function: IDENTIFIER parameterList;
 
 parameter:     literal | vectorExpression;
-parameterList: '(' (parameter (',' parameter)*)? ')';
+parameterList: '(' (parameter (',' parameter)*)? (')' | ',)');
 
 aggregation
     : AGGREGATION_OP parameterList
