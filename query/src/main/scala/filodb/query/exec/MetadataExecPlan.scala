@@ -553,19 +553,14 @@ final case class TsCardExec(queryContext: QueryContext,
     source.checkReadyForQuery(dataset, shard, querySession)
     source.acquireSharedLock(dataset, shard, querySession)
 
-    val rvs = source match {
-      case tsMemStore: TimeSeriesMemStore =>
-        Observable.eval {
-          val cards = tsMemStore.scanTsCardinalities(
-            dataset, Seq(shard), shardKeyPrefix, numGroupByFields)
-          val it = cards.map{ card =>
-            CardRowReader(prefixToGroup(card.prefix),
-                          CardCounts(card.value.activeTsCount, card.value.tsCount))
-            }.iterator
-          IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
-        }
-      case other =>
-        Observable.empty
+    val rvs = Observable.eval {
+      val cards = source.scanTsCardinalities(
+        dataset, Seq(shard), shardKeyPrefix, numGroupByFields)
+      val it = cards.map { card =>
+        CardRowReader(prefixToGroup(card.prefix),
+          CardCounts(card.value.activeTsCount, card.value.tsCount))
+      }.iterator
+      IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
     }
     ExecResult(rvs, Task.eval(RESULT_SCHEMA))
   }

@@ -19,7 +19,7 @@ import org.apache.lucene.search.CollectionTerminatedException
 import filodb.core.{DatasetRef, Types}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore._
-import filodb.core.memstore.ratelimit.QuotaSource
+import filodb.core.memstore.ratelimit.{CardinalityRecord, QuotaSource}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, QueryContext, QuerySession}
 import filodb.core.store._
@@ -64,7 +64,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                  val schemas: Schemas,
                                  store: ColumnStore, // downsample colStore
                                  rawColStore: ColumnStore,
-                                 shardNum: Int,
+                                 val shardNum: Int,
                                  filodbConfig: Config,
                                  downsampleConfig: DownsampleConfig,
                                  quotaSource: QuotaSource)
@@ -369,6 +369,14 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       cardManager.close()
     } catch { case e: Exception =>
       logger.error("Exception when shutting down downsample shard", e)
+    }
+  }
+
+  def scanTsCardinalities(shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord] = {
+    if (downsampleStoreConfig.meteringEnabled) {
+      cardManager.cardTracker.scan(shardKeyPrefix, depth)
+    } else {
+      throw new IllegalArgumentException("Metering is not enabled")
     }
   }
 

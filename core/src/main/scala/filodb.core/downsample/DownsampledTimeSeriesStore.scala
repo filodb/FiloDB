@@ -73,6 +73,17 @@ extends TimeSeriesStore with StrictLogging {
     }
   }
 
+  def scanTsCardinalities(ref: DatasetRef, shards: Seq[Int],
+                          shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord] = {
+    // TODO: Discuss offline, if we can remove the duplicate code and somehow merge with raw in a simple manner
+    datasets.get(ref).toSeq
+      .flatMap { ts =>
+        ts.values().asScala
+          .filter(s => shards.isEmpty || shards.contains(s.shardNum))
+          .flatMap(_.scanTsCardinalities(shardKeyPrefix, depth))
+      }
+  }
+
   def refreshIndexForTesting(dataset: DatasetRef): Unit =
     datasets.get(dataset).foreach(_.values().asScala.foreach { s =>
       s.refreshPartKeyIndexBlocking()
@@ -156,6 +167,7 @@ extends TimeSeriesStore with StrictLogging {
                         shardNum: Int,
                         querySession: QuerySession): Unit = {
     // no op
+    // WHY THIS is the case ??
   }
 
   def scanPartitions(ref: DatasetRef,
@@ -232,8 +244,4 @@ extends TimeSeriesStore with StrictLogging {
   override def readRawPartitions(ref: DatasetRef, maxChunkTime: Long,
                                  partMethod: PartitionScanMethod,
                                  chunkMethod: ChunkScanMethod): Observable[RawPartData] = ???
-
-  // TODO we need breakdown for downsample store too, but in a less memory intensive way
-  override def scanTsCardinalities(ref: DatasetRef, shards: Seq[Int],
-                                   shardKeyPrefix: Seq[String], depth: Int): scala.Seq[CardinalityRecord] = ???
 }
