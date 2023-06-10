@@ -365,7 +365,18 @@ class TimeSeriesShard(val ref: DatasetRef,
   val ingestSched = Scheduler.singleThread(s"$IngestSchedName-$ref-$shardNum",
     reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in TimeSeriesShard.ingestSched", _)))
 
-  private val blockMemorySize = storeConfig.shardMemSize
+  private val blockMemorySize = {
+    if (filodbConfig.getBoolean("memstore.memory-alloc.automatic-alloc-enabled")) {
+      val availableMemoryBytes: Long = Utils.calculateAvailableOffHeapMemory(filodbConfig)
+      val blockMemoryManagerPercent = filodbConfig.getDouble("memstore.memory-alloc.block-memory-manager-percent")
+      val blockMemShardPercent = storeConfig.shardMemPercent
+      val numShardsPerNode = storeConfig
+      (availableMemoryBytes * blockMemoryManagerPercent *  / 100).toLong
+    } else filodbConfig.getMemorySize("memstore.memstore.ingestion-buffer-mem-size").toBytes
+    storeConfig.shardMemSize
+  }
+
+
   protected val numGroups = storeConfig.groupsPerShard
   private val chunkRetentionHours = (storeConfig.diskTTLSeconds / 3600).toInt
   private[memstore] val pagingEnabled = storeConfig.demandPagingEnabled

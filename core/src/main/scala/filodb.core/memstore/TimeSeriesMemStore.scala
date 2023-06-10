@@ -1,5 +1,7 @@
 package filodb.core.memstore
 
+import java.lang.management.ManagementFactory
+
 import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
@@ -11,7 +13,7 @@ import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
-import filodb.core.{DatasetRef, QueryTimeoutException, Response, Types}
+import filodb.core.{DatasetRef, QueryTimeoutException, Response, Types, Utils}
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore.ratelimit.{CardinalityRecord, ConfigQuotaSource}
 import filodb.core.metadata.Schemas
@@ -30,6 +32,7 @@ class TimeSeriesMemStore(filodbConfig: Config,
                         (implicit val ioPool: ExecutionContext)
 extends TimeSeriesStore with StrictLogging {
   import collection.JavaConverters._
+  import net.ceedubs.ficus.Ficus._
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
@@ -44,7 +47,15 @@ extends TimeSeriesStore with StrictLogging {
   private val partEvictionPolicy = evictionPolicy.getOrElse(
     new CompositeEvictionPolicy(ensureTspHeadroomPercent, ensureNmmHeadroomPercent))
 
-  private lazy val ingestionMemory = filodbConfig.getMemorySize("memstore.ingestion-buffer-mem-size").toBytes
+
+  private lazy val ingestionMemory = {
+    if (filodbConfig.getBoolean("memstore.memory-alloc.automatic-alloc-enabled")) {
+      val availableMemoryBytes: Long = Utils.calculateAvailableOffHeapMemory(filodbConfig)
+      val nativeMemoryManagerPercent = filodbConfig.getDouble("memstore.memory-alloc.native-memory-manager-percent")
+      (availableMemoryBytes * nativeMemoryManagerPercent / 100).toLong
+    } else filodbConfig.getMemorySize("memstore.memstore.ingestion-buffer-mem-size").toBytes
+  }
+
 
   private[this] lazy val ingestionMemFactory: NativeMemoryManager = {
     logger.info(s"Allocating $ingestionMemory bytes for WriteBufferPool/PartitionKeys")
