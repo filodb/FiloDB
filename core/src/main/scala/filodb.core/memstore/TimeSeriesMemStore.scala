@@ -1,7 +1,5 @@
 package filodb.core.memstore
 
-import java.lang.management.ManagementFactory
-
 import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
@@ -32,11 +30,9 @@ class TimeSeriesMemStore(filodbConfig: Config,
                         (implicit val ioPool: ExecutionContext)
 extends TimeSeriesStore with StrictLogging {
   import collection.JavaConverters._
-  import net.ceedubs.ficus.Ficus._
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
-  private val datasetMemFactories = new HashMap[DatasetRef, NativeMemoryManager]
   private val quotaSources = new HashMap[DatasetRef, ConfigQuotaSource]
 
   val stats = new ChunkSourceStats
@@ -47,7 +43,6 @@ extends TimeSeriesStore with StrictLogging {
   private val partEvictionPolicy = evictionPolicy.getOrElse(
     new CompositeEvictionPolicy(ensureTspHeadroomPercent, ensureNmmHeadroomPercent))
 
-
   private lazy val ingestionMemory = {
     if (filodbConfig.getBoolean("memstore.memory-alloc.automatic-alloc-enabled")) {
       val availableMemoryBytes: Long = Utils.calculateAvailableOffHeapMemory(filodbConfig)
@@ -55,7 +50,6 @@ extends TimeSeriesStore with StrictLogging {
       (availableMemoryBytes * nativeMemoryManagerPercent / 100).toLong
     } else filodbConfig.getMemorySize("memstore.memstore.ingestion-buffer-mem-size").toBytes
   }
-
 
   private[this] lazy val ingestionMemFactory: NativeMemoryManager = {
     logger.info(s"Allocating $ingestionMemory bytes for WriteBufferPool/PartitionKeys")
@@ -78,7 +72,7 @@ extends TimeSeriesStore with StrictLogging {
   }
 
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
-  def setup(ref: DatasetRef, schemas: Schemas, shard: Int, storeConf: StoreConfig,
+  def setup(ref: DatasetRef, schemas: Schemas, shard: Int, storeConf: StoreConfig, numShards: Int,
             downsample: DownsampleConfig = DownsampleConfig.disabled): Unit = synchronized {
     val shards = datasets.getOrElseUpdate(ref, new NonBlockingHashMapLong[TimeSeriesShard](32, false))
     val quotaSource = quotaSources.getOrElseUpdate(ref,
@@ -86,8 +80,8 @@ extends TimeSeriesStore with StrictLogging {
     if (shards.containsKey(shard)) {
       throw ShardAlreadySetup(ref, shard)
     } else {
-      val tsdb = new OnDemandPagingShard(ref, schemas, storeConf, quotaSource, shard, ingestionMemFactory, store,
-        metastore, partEvictionPolicy, filodbConfig)
+      val tsdb = new OnDemandPagingShard(ref, schemas, storeConf, numShards, quotaSource, shard,
+        ingestionMemFactory, store, metastore, partEvictionPolicy, filodbConfig)
       shards.put(shard, tsdb)
     }
   }

@@ -34,7 +34,7 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
   }
 
   it("should flush MemStore data to C*, and be able to read back data from C* directly") {
-    memStore.setup(dataset1.ref, Schemas(dataset1.schema), 0, TestData.storeConf)
+    memStore.setup(dataset1.ref, Schemas(dataset1.schema), 0, TestData.storeConf, 1)
     memStore.store.sinkStats.chunksetsWritten.get shouldEqual 0
 
     // Flush every ~50 records

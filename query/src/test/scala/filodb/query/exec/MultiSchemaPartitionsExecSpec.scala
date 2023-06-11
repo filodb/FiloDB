@@ -88,16 +88,16 @@ class MultiSchemaPartitionsExecSpec extends AnyFunSpec with Matchers with ScalaF
   implicit val execTimeout = 5.seconds
 
   override def beforeAll(): Unit = {
-    memStore.setup(dsRef, schemas, 0, TestData.storeConf)
+    memStore.setup(dsRef, schemas, 0, TestData.storeConf, 2)
     memStore.ingest(dsRef, 0, SomeData(container, 0))
     memStore.ingest(dsRef, 0, MMD.records(MMD.histDataset, histData))
 
     // set up shard, but do not ingest data to simulate an empty shard
-    memStore.setup(dsRef, schemas, 1, TestData.storeConf)
+    memStore.setup(dsRef, schemas, 1, TestData.storeConf, 2)
 
-    memStore.setup(MMD.dataset1.ref, Schemas(MMD.schema1), 0, TestData.storeConf)
+    memStore.setup(MMD.dataset1.ref, Schemas(MMD.schema1), 0, TestData.storeConf, 1)
     memStore.ingest(MMD.dataset1.ref, 0, mmdSomeData)
-    memStore.setup(MMD.histMaxDS.ref, Schemas(MMD.histMaxDS.schema), 0, TestData.storeConf)
+    memStore.setup(MMD.histMaxDS.ref, Schemas(MMD.histMaxDS.schema), 0, TestData.storeConf, 1)
     memStore.ingest(MMD.histMaxDS.ref, 0, MMD.records(MMD.histMaxDS, histMaxData))
 
     memStore.refreshIndexForTesting(dsRef)

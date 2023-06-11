@@ -126,7 +126,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   // TODO: FilteredPartitionScan() for ColumnStores does not work without an index right now
   ignore should "filter rows written with single partition key" in {
     import GdeltTestData._
-    memStore.setup(dataset2.ref, schemas, 0, TestData.storeConf)
+    memStore.setup(dataset2.ref, schemas, 0, TestData.storeConf, 1)
     val stream = Observable.now(records(dataset2))
     // Force flush of all groups at end
     memStore.startIngestion(dataset2.ref, 0, stream, s, Task {}).futureValue
@@ -143,7 +143,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   // "rangeVectors api" should "return Range Vectors for given filter and read all rows" in {
   ignore should "return Range Vectors for given filter and read all rows" in {
     import GdeltTestData._
-    memStore.setup(dataset2.ref, schemas, 0, TestData.storeConf)
+    memStore.setup(dataset2.ref, schemas, 0, TestData.storeConf, 1)
     val stream = Observable.now(records(dataset2))
     // Force flush of all groups at end
     memStore.startIngestion(dataset2.ref, 0, stream, s, Task {}).futureValue

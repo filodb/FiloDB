@@ -115,6 +115,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
     setupDataset( dataset,
                   ingestConfig.storeConfig,
+                  ingestConfig.numShards,
                   IngestionSource(ingestConfig.streamFactoryClass, ingestConfig.sourceConfig),
                   ingestConfig.downsampleConfig)
   }
@@ -141,6 +142,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     */
   private def setupDataset(dataset: Dataset,
                            storeConf: StoreConfig,
+                           numShards: Int,
                            source: IngestionSource,
                            downsample: DownsampleConfig,
                            schemaOverride: Boolean = false): Unit = {
@@ -154,7 +156,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
         val schemas = if (schemaOverride) Schemas(dataset.schema) else settings.schemas
         if (schemaOverride) logger.info(s"Overriding schemas from settings: this better be a test!")
         val props = IngestionActor.props(dataset.ref, schemas, memStore,
-                                         source, downsample, storeConf, statusActor.get)
+                                         source, downsample, storeConf, numShards, statusActor.get)
         val ingester = context.actorOf(props, s"$Ingestion-${dataset.name}")
         context.watch(ingester)
         ingesters(ref) = ingester
@@ -187,7 +189,9 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   def ingestHandlers: Receive = LoggingReceive {
     case SetupDataset(dataset, resources, source, storeConf, downsample) =>
       // used only in unit tests
-      if (!(ingesters contains dataset.ref)) { setupDataset(dataset, storeConf, source, downsample, true) }
+      if (!(ingesters contains dataset.ref)) {
+        setupDataset(dataset, storeConf, resources.numShards, source, downsample, true)
+      }
 
     case IngestRows(dataset, shard, rows) =>
       withIngester(sender(), dataset) { _ ! IngestionActor.IngestRows(sender(), shard, rows) }

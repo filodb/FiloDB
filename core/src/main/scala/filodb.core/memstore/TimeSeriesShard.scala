@@ -258,6 +258,7 @@ case class TimeSeriesShardInfo(shardNum: Int,
 class TimeSeriesShard(val ref: DatasetRef,
                       val schemas: Schemas,
                       val storeConfig: StoreConfig,
+                      numShards: Int,
                       quotaSource: QuotaSource,
                       val shardNum: Int,
                       val bufferMemoryManager: NativeMemoryManager,
@@ -367,15 +368,16 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private val blockMemorySize = {
     if (filodbConfig.getBoolean("memstore.memory-alloc.automatic-alloc-enabled")) {
+      val numNodes = filodbConfig.getInt("num-nodes-in-cluster")
       val availableMemoryBytes: Long = Utils.calculateAvailableOffHeapMemory(filodbConfig)
       val blockMemoryManagerPercent = filodbConfig.getDouble("memstore.memory-alloc.block-memory-manager-percent")
-      val blockMemShardPercent = storeConfig.shardMemPercent
-      val numShardsPerNode = storeConfig
-      (availableMemoryBytes * blockMemoryManagerPercent *  / 100).toLong
-    } else filodbConfig.getMemorySize("memstore.memstore.ingestion-buffer-mem-size").toBytes
-    storeConfig.shardMemSize
+      val blockMemForShardPercent = storeConfig.shardMemPercent
+      val numShardsPerNode = Math.ceil(numNodes.toDouble / numShards)
+      (availableMemoryBytes * blockMemoryManagerPercent * blockMemForShardPercent / 100 / 100 / numShardsPerNode).toLong
+    } else {
+      storeConfig.shardMemSize
+    }
   }
-
 
   protected val numGroups = storeConfig.groupsPerShard
   private val chunkRetentionHours = (storeConfig.diskTTLSeconds / 3600).toInt
