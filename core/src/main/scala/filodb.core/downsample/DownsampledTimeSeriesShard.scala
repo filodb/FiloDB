@@ -19,7 +19,7 @@ import org.apache.lucene.search.CollectionTerminatedException
 import filodb.core.{DatasetRef, Types}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore._
-import filodb.core.memstore.ratelimit.{CardinalityRecord, QuotaSource}
+import filodb.core.memstore.ratelimit.{CardinalityManager, CardinalityRecord, QuotaSource}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, QueryContext, QuerySession}
 import filodb.core.store._
@@ -124,10 +124,13 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   private var houseKeepingFuture: CancelableFuture[Unit] = _
   private var gaugeUpdateFuture: CancelableFuture[Unit] = _
 
-  // DownsampleCardinalityManager object helps with measuring and storing the cardinality count for the shard
-  private val cardManager: DownsampleCardinalityManager =
-    new DownsampleCardinalityManager(rawDatasetRef, shardNum, schemas.part.options.shardKeyColumns.length,
-      partKeyIndex, schemas.part, filodbConfig, downsampleStoreConfig, quotaSource)
+  // CardinalityManager object helps with measuring and storing the cardinality count for the shard
+  private val cardManager: CardinalityManager =
+    new CardinalityManager(rawDatasetRef, shardNum, schemas.part.options.shardKeyColumns.length,
+      partKeyIndex, schemas.part, filodbConfig, downsampleStoreConfig.meteringEnabled, quotaSource)
+
+  // indexRefreshCount tracks the number of times the indexRefresh jobs have successfully ran
+  private var indexRefreshCount = 0
 
   def indexNames(limit: Int): Seq[String] = Seq.empty
 
@@ -220,6 +223,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         indexUpdatedHour.set(endHour)
         partKeyIndex.notifyLifecycleListener(IndexState.Synced, endHour * 3600 * 1000L)
         stats.shardTotalRecoveryTime.update(System.currentTimeMillis() - creationTime)
+        cardManager.triggerCardinalityCount(indexRefreshCount)
         startHousekeepingTask()
         startStatsUpdateTask()
         logger.info(s"Shard now ready for query dataset=$indexDataset shard=$shardNum")
@@ -244,7 +248,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       indexRefresh()
     }.map { _ =>
       partKeyIndex.refreshReadersBlocking()
-      cardManager.triggerCardinalityCount()
+      indexRefreshCount += 1
+      cardManager.triggerCardinalityCount(indexRefreshCount)
     }.onErrorRestartUnlimited.completedL.runToFuture(housekeepingSched)
   }
 
@@ -373,11 +378,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   }
 
   def scanTsCardinalities(shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord] = {
-    if (downsampleStoreConfig.meteringEnabled) {
-      cardManager.cardTracker.scan(shardKeyPrefix, depth)
-    } else {
-      throw new IllegalArgumentException("Metering is not enabled")
-    }
+    cardManager.scan(shardKeyPrefix, depth)
   }
 
   def scanPartitions(lookup: PartLookupResult,

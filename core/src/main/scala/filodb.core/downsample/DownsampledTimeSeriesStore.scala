@@ -75,7 +75,6 @@ extends TimeSeriesStore with StrictLogging {
 
   def scanTsCardinalities(ref: DatasetRef, shards: Seq[Int],
                           shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord] = {
-    // TODO: Discuss offline, if we can remove the duplicate code and somehow merge with raw in a simple manner
     datasets.get(ref).toSeq
       .flatMap { ts =>
         ts.values().asScala

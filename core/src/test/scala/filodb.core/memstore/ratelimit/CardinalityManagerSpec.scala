@@ -1,18 +1,17 @@
-package filodb.core.downsample
+package filodb.core.memstore.ratelimit
 
 import com.typesafe.config.ConfigFactory
 import org.scalatest.BeforeAndAfter
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
-import filodb.core.{GlobalConfig, MachineMetricsData, MetricsTestData}
+import filodb.core.{DatasetRef, GlobalConfig, MachineMetricsData, MetricsTestData}
 import filodb.core.memstore.PartKeyLuceneIndex
-import filodb.core.memstore.ratelimit.ConfigQuotaSource
 import filodb.core.metadata._
 import filodb.core.store.StoreConfig
 
 import scala.concurrent.duration.DurationInt
 
-class DownsampleCardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfter {
+class CardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfter {
 
   val filodbConfig = GlobalConfig.defaultFiloConfig
   val downsampleStoreConfig = StoreConfig(
@@ -32,52 +31,68 @@ class DownsampleCardinalityManagerSpec extends AnyFunSpec with Matchers with Bef
   it("shouldTriggerCardinalityCount should return expected values") {
     val testShardNum = 10
     val idx = getTestLuceneIndex(testShardNum)
-    val cardManager = new DownsampleCardinalityManager(
+    val cardManager = new CardinalityManager(
       MetricsTestData.timeseriesDatasetMultipleShardKeys.ref, testShardNum, shardKeyLen, idx, partSchema,
-      filodbConfig, downsampleStoreConfig, quotaSource)
+      filodbConfig, true, quotaSource)
 
-    var resultMap:Map[Int,Set[Int]] = Map()
-    resultMap += (0 -> Set(0,8,16))
-    resultMap += (1 -> Set(1,9,17))
-    resultMap += (2 -> Set(2,10,18))
-    resultMap += (3 -> Set(3,11,19))
-    resultMap += (4 -> Set(4,12,20))
-    resultMap += (5 -> Set(5,13,21))
-    resultMap += (6 -> Set(6,14,22))
-    resultMap += (7 -> Set(7,15,23))
+    var resultMap: Map[Int, Set[Int]] = Map()
+    resultMap += (0 -> Set(0, 8, 16))
+    resultMap += (1 -> Set(1, 9, 17))
+    resultMap += (2 -> Set(2, 10, 18))
+    resultMap += (3 -> Set(3, 11, 19))
+    resultMap += (4 -> Set(4, 12, 20))
+    resultMap += (5 -> Set(5, 13, 21))
+    resultMap += (6 -> Set(6, 14, 22))
+    resultMap += (7 -> Set(7, 15, 23))
+
+    // card manager is set to None by default, shouldTriggerCardinalityCount should always evaluate to true
+    for {shardNum <- 0 until 256} {
+      // for each shard
+      for {indexRefreshCount <- 0 until 24} {
+        cardManager.shouldTriggerCardinalityCount(shardNum, 8, indexRefreshCount) shouldEqual true
+      }
+    }
+
+    // setting cardTracker to test the shouldTriggerCardinalityCount logic for non cardTracker=None cases
+    val testCardTracker = new CardinalityTracker(
+      MetricsTestData.timeseriesDatasetMultipleShardKeys.ref, 10, 3, Seq(2, 2, 2, 2),
+      new RocksDbCardinalityStore(DatasetRef("ds_test"), 10), flushCount = Some(5000))
+    cardManager.cardTracker = Some(testCardTracker)
 
     // testing for shardsPerNode = 8
     for {shardNum <- 0 until 256} {
       // for each shard
-      for {currentHour <- 0 until 24} {
+      for {indexRefreshCount <- 0 until 24} {
         val shardAfterMod = shardNum % 8
-        val assertValue = resultMap(shardAfterMod).contains(currentHour)
-        cardManager.shouldTriggerCardinalityCount(shardNum, 8, currentHour) shouldEqual assertValue
+        val assertValue = resultMap(shardAfterMod).contains(indexRefreshCount)
+        cardManager.shouldTriggerCardinalityCount(shardNum, 8, indexRefreshCount) shouldEqual assertValue
       }
     }
 
     idx.closeIndex()
+    cardManager.close()
   }
 
   it("getNumShardsPerNodeFromConfig should work with fallback and default value") {
     val testShardNum = 10
     val idx = getTestLuceneIndex(testShardNum)
-    val cardManager = new DownsampleCardinalityManager(
+    val cardManager = new CardinalityManager(
       MetricsTestData.timeseriesDatasetMultipleShardKeys.ref, testShardNum, shardKeyLen, idx, partSchema,
-      filodbConfig, downsampleStoreConfig, quotaSource)
+      filodbConfig, true, quotaSource)
 
     // `dataset-config` has required config
-    val confWithDatasetConfigs = """
-      |  filodb {
-      |    dataset-configs = [
-      |      {
-      |        dataset = "prometheus"
-      |        min-num-nodes = 8
-      |        num-shards = 16
-      |      }
-      |    ]
-      |  }
-      |""".stripMargin
+    val confWithDatasetConfigs =
+      """
+        |  filodb {
+        |    dataset-configs = [
+        |      {
+        |        dataset = "prometheus"
+        |        min-num-nodes = 8
+        |        num-shards = 16
+        |      }
+        |    ]
+        |  }
+        |""".stripMargin
 
     var conf = ConfigFactory.parseString(confWithDatasetConfigs).getConfig("filodb")
     cardManager.getNumShardsPerNodeFromConfig("prometheus", conf) shouldEqual 2
@@ -161,5 +176,6 @@ class DownsampleCardinalityManagerSpec extends AnyFunSpec with Matchers with Bef
     cardManager.getNumShardsPerNodeFromConfig("prometheus", conf) shouldEqual 8
 
     idx.closeIndex()
+    cardManager.close()
   }
 }
