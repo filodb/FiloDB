@@ -4,19 +4,17 @@ import java.util.concurrent.TimeUnit
 
 import scala.concurrent.duration.FiniteDuration
 
-import akka.actor.{ActorRef, Props}
+import akka.actor.ActorRef
 import akka.pattern.{ask, AskTimeoutException}
 import akka.util.Timeout
 import monix.eval.Task
 import monix.execution.Scheduler
-import monix.reactive.{MulticastStrategy, Observable}
-import monix.reactive.subjects.ConcurrentSubject
+import monix.reactive.Observable
 
-import filodb.coordinator.ActorSystemHolder.system
 import filodb.core.QueryTimeoutException
 import filodb.core.query.{QueryStats, QueryWarnings, ResultSchema}
 import filodb.core.store.ChunkSource
-import filodb.query.{QueryResponse, QueryResult, StreamQueryError, StreamQueryResponse, StreamQueryResultFooter}
+import filodb.query.{QueryResponse, QueryResult, StreamQueryResponse, StreamQueryResultFooter}
 import filodb.query.Query.qLogger
 import filodb.query.exec.{ExecPlanWithClientParams, PlanDispatcher}
 
@@ -69,15 +67,13 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
     // "source" is unused (the param exists to support InProcessDispatcher).
     val queryTimeElapsed = System.currentTimeMillis() - plan.execPlan.queryContext.submitTime
     val remainingTime = plan.clientParams.deadline - queryTimeElapsed
-    lazy val emptyPartialResult = StreamQueryResultFooter(plan.execPlan.queryContext.queryId,
+    lazy val emptyPartialResult = StreamQueryResultFooter(plan.execPlan.queryContext.queryId, plan.execPlan.planId,
       QueryStats(), QueryWarnings(), true, Some("Result may be partial since query on some shards timed out"))
 
     // Don't send if time left is very small
     if (remainingTime < 1) {
       Observable.raiseError(QueryTimeoutException(queryTimeElapsed, this.getClass.getName))
     } else {
-      // TODO timeout query if response stream not completed in time
-
       // Query Planner sets target as null when shard is down
       if (target == ActorRef.noSender) {
         Observable.now({
@@ -85,33 +81,14 @@ case class ActorPlanDispatcher(target: ActorRef, clusterName: String) extends Pl
           emptyPartialResult
         })
       } else {
-        val subject = ConcurrentSubject[StreamQueryResponse](MulticastStrategy.Publish)
-        class ResultActor extends BaseActor {
-          def receive: Receive = {
-            case q: StreamQueryResponse =>
-              try {
-                subject.onNext(q)
-                qLogger.debug(s"Got ${q.getClass} as response from ${sender()}")
-              } catch { case e: Throwable =>
-                qLogger.error(s"Exception when processing $q", e)
-              }
-            case msg =>
-              qLogger.error(s"Unexpected message $msg in ResultActor")
-                subject.onNext(StreamQueryError(plan.execPlan.queryContext.queryId, QueryStats(),
-                  new IllegalStateException(s"Unexpected result type $msg")))
-          }
-        }
-        val resultActor = system.actorOf(Props(new ResultActor))
-        subject
-           .doOnSubscribe(Task.eval {
-             target.tell(plan.execPlan, resultActor)
-             qLogger.debug(s"Sent to $target the plan ${plan.execPlan}")
-           })
+        ResultActor.subject
+            .doOnSubscribe(Task.eval {
+              target.tell(plan.execPlan, ResultActor.resultActor)
+              qLogger.debug(s"Sent to $target the plan ${plan.execPlan}")
+            })
+           .filter(_.planId == plan.execPlan.planId)
            .takeWhileInclusive(!_.isLast)
-           .guarantee(Task.eval {
-             qLogger.debug(s"Stopping $resultActor")
-             system.stop(resultActor)
-           })
+        // TODO timeout query if response stream not completed in time
       }
     }
   }

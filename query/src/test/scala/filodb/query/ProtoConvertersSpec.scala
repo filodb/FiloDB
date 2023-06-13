@@ -247,7 +247,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val resultSchema = ResultSchema(List(ColumnInfo("ts", ColumnType.DoubleColumn),
       ColumnInfo("val", ColumnType.DoubleColumn)), 1, Map.empty)
 
-    val header = StreamQueryResultHeader("someId", resultSchema)
+    val header = StreamQueryResultHeader("someId", "planId", resultSchema)
     header.toProto.fromProto shouldEqual header
   }
 
@@ -269,10 +269,10 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     warnings.updateExecPlanSamples(4)
     warnings.updateJoinQueryCardinality(5)
 
-    val footer1 = StreamQueryResultFooter("id", qStats, warnings, true, Some("Reason"))
+    val footer1 = StreamQueryResultFooter("id", "planId", qStats, warnings, true, Some("Reason"))
     footer1.toProto.fromProto shouldEqual footer1
 
-    val footer2 = StreamQueryResultFooter("id", qStats, warnings, false, None)
+    val footer2 = StreamQueryResultFooter("id", "planId", qStats, warnings, false, None)
     footer2.toProto.fromProto shouldEqual footer2
   }
 
@@ -313,16 +313,15 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
       (900, Double.NaN), (1000, Double.NaN)), key,
       RvRange(0, 100, 1000))
 
-
     val qStats = QueryStats()
 
     val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", qStats)
-    val origQueryResult = StreamQueryResult("id", srv)
+    val origQueryResult = StreamQueryResult("id", "planId", Seq(srv))
 
     val successResp = origQueryResult.toProto.fromProto.asInstanceOf[StreamQueryResult]
     successResp.queryId shouldEqual origQueryResult.queryId
-    successResp.result.isInstanceOf[SerializedRangeVector] shouldEqual true
-    val deserializedSrv = successResp.result.asInstanceOf[SerializedRangeVector]
+    successResp.result.head.isInstanceOf[SerializedRangeVector] shouldEqual true
+    val deserializedSrv = successResp.result.head.asInstanceOf[SerializedRangeVector]
     deserializedSrv.numRows shouldEqual Some(11)
     deserializedSrv.numRowsSerialized shouldEqual 4
     val res = deserializedSrv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
@@ -340,7 +339,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val qStats = QueryStats()
     qStats.stat.put(List(), stat)
 
-    val err = StreamQueryError("id", qStats, new IllegalArgumentException("Args"))
+    val err = StreamQueryError("id", "planId", qStats, new IllegalArgumentException("Args"))
     val deser = err.toProto.fromProto.asInstanceOf[StreamQueryError]
     deser.queryId shouldEqual err.queryId
     deser.queryStats shouldEqual err.queryStats
@@ -354,7 +353,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val resultSchema = ResultSchema(List(ColumnInfo("ts", ColumnType.DoubleColumn),
       ColumnInfo("val", ColumnType.DoubleColumn)), 1, Map.empty)
 
-    val header = StreamQueryResultHeader("someId", resultSchema)
+    val header = StreamQueryResultHeader("someId", "planId", resultSchema)
 
     val builder = SerializedRangeVector.newBuilder()
     val recSchema = new RecordSchema(Seq(ColumnInfo("time", ColumnType.TimestampColumn),
@@ -371,7 +370,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
       RvRange(0, 100, 1000))
     val stats = QueryStats()
     val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", stats)
-    val streamingQueryBody = StreamQueryResult("someId", srv)
+    val streamingQueryBody = StreamQueryResult("someId", "planId", Seq(srv))
 
 
     val stat = Stat()
@@ -390,7 +389,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     warnings.updateJoinQueryCardinality(5)
     warnings.updateTimeSeriesSampleScannedBytes(6)
 
-    val footer = StreamQueryResultFooter("someId", qStats, warnings, true, Some("Reason"))
+    val footer = StreamQueryResultFooter("someId", "planId", qStats, warnings, true, Some("Reason"))
 
     val response = Seq(header.toProto, streamingQueryBody.toProto, footer.toProto)
       .toIterator.toQueryResponse.asInstanceOf[QueryResult]
@@ -413,7 +412,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     // Case 2 Iter[StreamingResponse] to QueryResp Happy response w/o partial reason
 
 
-    val footer1 = StreamQueryResultFooter("someId", qStats, warnings, false, None)
+    val footer1 = StreamQueryResultFooter("someId", "planId", qStats, warnings, false, None)
 
 
     val response1 = Seq(header.toProto, streamingQueryBody.toProto, footer1.toProto)
@@ -460,7 +459,8 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
 
     // Case 5 Iter[StreamingResponse] Error with throwable
 
-    val errorResponse = Seq(StreamQueryError("errorId", qStats, new IllegalArgumentException("Exception")).toProto)
+    val errorResponse = Seq(StreamQueryError("errorId", "planId", qStats,
+                   new IllegalArgumentException("Exception")).toProto)
       .toIterator.toQueryResponse.asInstanceOf[QueryError]
 
     errorResponse.id shouldEqual "errorId"
