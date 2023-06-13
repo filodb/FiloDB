@@ -173,6 +173,7 @@ class CardinalityManager(datasetRef: DatasetRef,
             }
             case None => logger.info(s"[CardinalityManager] CardTracker is None. shardNum=$shardNum")
           }
+          isCardTriggered = false
         }
         else {
           logger.info(s"[CardinalityManager] shouldTriggerCardinalityCount returned false for shardNum=$shardNum" +
@@ -184,8 +185,9 @@ class CardinalityManager(datasetRef: DatasetRef,
         case e: Exception =>
           logger.error(s"[CardinalityManager]Error while triggering cardinality count! shardNum=$shardNum " +
             s" indexRefreshCount=$indexRefreshCount", e)
+          // making sure we are able to trigger the cardinality calculation for the next time
+          isCardTriggered = false
       }
-      isCardTriggered = false
     }
   }
   // scalastyle:on method.length
