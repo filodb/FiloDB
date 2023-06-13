@@ -497,8 +497,11 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
         .toListL.runToFuture.futureValue
     }
 
-    thrown.getCause.getClass shouldEqual classOf[BadQueryException]
-    thrown.getCause.getMessage shouldEqual "The result of this join query has cardinality 3 and " +
-      "has reached the limit of 3. Try applying more filters."
+    thrown.getCause.getClass shouldEqual classOf[QueryLimitException]
+    thrown.getCause.getMessage.contains(
+      "The result of this join query has cardinality 3 and " +
+        "has reached the limit of 3. Try applying more filters."
+    ) shouldBe true
+
   }
 }
