@@ -20,17 +20,17 @@ class CardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   val quotaSource = new ConfigQuotaSource(filodbConfig, shardKeyLen)
   val partSchema = Schemas(MetricsTestData.timeseriesDatasetMultipleShardKeys.schema).part
 
-  def getTestLuceneIndex(shardNum: Int): PartKeyLuceneIndex = {
+  def getTestLuceneIndex(shardNum: Int, childPath: String): PartKeyLuceneIndex = {
     new PartKeyLuceneIndex(
       MachineMetricsData.dataset2.ref,
       MachineMetricsData.dataset2.schema.partition, true, true,
       shardNum, 1.hour.toMillis,
-      Some(new java.io.File(System.getProperty("java.io.tmpdir"), "part-key-lucene-index")))
+      Some(new java.io.File(System.getProperty("java.io.tmpdir"), childPath)))
   }
 
   it("shouldTriggerCardinalityCount should return expected values") {
-    val testShardNum = 10
-    val idx = getTestLuceneIndex(testShardNum)
+    val testShardNum = 5
+    val idx = getTestLuceneIndex(testShardNum, "shouldTriggerCardinalityCountPath")
     val cardManager = new CardinalityManager(
       MetricsTestData.timeseriesDatasetMultipleShardKeys.ref, testShardNum, shardKeyLen, idx, partSchema,
       filodbConfig, true, quotaSource)
@@ -55,8 +55,8 @@ class CardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     // setting cardTracker to test the shouldTriggerCardinalityCount logic for non cardTracker=None cases
     val testCardTracker = new CardinalityTracker(
-      MetricsTestData.timeseriesDatasetMultipleShardKeys.ref, 10, 3, Seq(2, 2, 2, 2),
-      new RocksDbCardinalityStore(DatasetRef("ds_test"), 10), flushCount = Some(5000))
+      MetricsTestData.timeseriesDatasetMultipleShardKeys.ref, 5, 3, Seq(2, 2, 2, 2),
+      new RocksDbCardinalityStore(DatasetRef("ds_test"), 5), flushCount = Some(5000))
     cardManager.cardTracker = Some(testCardTracker)
 
     // testing for shardsPerNode = 8
@@ -74,8 +74,8 @@ class CardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   }
 
   it("getNumShardsPerNodeFromConfig should work with fallback and default value") {
-    val testShardNum = 10
-    val idx = getTestLuceneIndex(testShardNum)
+    val testShardNum = 5
+    val idx = getTestLuceneIndex(testShardNum, "getNumShardsPerNodeFromConfigPath")
     val cardManager = new CardinalityManager(
       MetricsTestData.timeseriesDatasetMultipleShardKeys.ref, testShardNum, shardKeyLen, idx, partSchema,
       filodbConfig, true, quotaSource)
