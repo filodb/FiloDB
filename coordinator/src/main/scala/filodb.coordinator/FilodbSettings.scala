@@ -55,6 +55,7 @@ final class FilodbSettings(val conf: Config) {
   lazy val hostList = config.as[Option[Seq[String]]]("cluster-discovery.host-list")
   lazy val localhostOrdinal = config.as[Option[Int]]("cluster-discovery.localhost-ordinal")
 
+  lazy val minNumNodes = config.as[Option[Int]]("min-num-nodes-in-cluster")
 
   /**
    * Returns IngestionConfig/dataset configuration from parsing dataset-configs file paths.
