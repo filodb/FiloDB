@@ -10,7 +10,7 @@ import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
 
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
-import filodb.core.memstore.{TimeSeriesMemStore, TimeSeriesStore}
+import filodb.core.memstore.TimeSeriesStore
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
 import filodb.core.query._

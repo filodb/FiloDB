@@ -27,6 +27,10 @@ class CardinalityManager(datasetRef: DatasetRef,
   // to different times of day
   private val numShardsPerNode: Int = getNumShardsPerNodeFromConfig(datasetRef.dataset, filodbConfig)
 
+  // This flag is used to avoid concurrent calculation of cardinality calculation. This is useful to avoid using of
+  // physical resources for duplicate calculation
+  private var isCardTriggered: Boolean = false
+
   /**
    * Helper method to get the shards per node in the filodb cluster. We look for the two specific
    * config that is `min-num-nodes` ( the minimum number of nodes/pods which has to be in a cluster ) and
@@ -99,11 +103,19 @@ class CardinalityManager(datasetRef: DatasetRef,
    */
   def shouldTriggerCardinalityCount(currentShardNum: Int, shardsPerNode: Int, indexRefreshCount: Int): Boolean = {
     if (meteringEnabled) {
-      require(shardsPerNode > 0)
-      cardTracker match {
-        case Some(tracker) => (indexRefreshCount % shardsPerNode) == (currentShardNum % shardsPerNode)
-        // if the tracker is not initialized, we should trigger the build of card store and card tracker
-        case None => true
+      if (isCardTriggered) {
+        // Already calculating cardinality, avoid triggering of another one now
+        logger.info(s"[CardinalityManager] isCardTriggered already set to true. Skipping run! " +
+          s"shardNum=$shardNum indexRefreshCount=$indexRefreshCount")
+        false
+      }
+      else {
+        require(shardsPerNode > 0)
+        cardTracker match {
+          case Some(tracker) => (indexRefreshCount % shardsPerNode) == (currentShardNum % shardsPerNode)
+          // if the tracker is not initialized, we should trigger the build of card store and card tracker
+          case None => true
+        }
       }
     }
     else {
@@ -112,6 +124,7 @@ class CardinalityManager(datasetRef: DatasetRef,
     }
   }
 
+  // scalastyle:off method.length
   /**
    * Triggers cardinalityCount if metering is enabled and the required criteria matches.
    * It creates a new instance of CardinalityTracker and uses the PartKeyLuceneIndex to calculate cardinality count
@@ -124,13 +137,14 @@ class CardinalityManager(datasetRef: DatasetRef,
     if (meteringEnabled) {
       try {
         if (shouldTriggerCardinalityCount(shardNum, numShardsPerNode, indexRefreshCount)) {
+          isCardTriggered = true
           val newCardTracker = getNewCardTracker()
           newCardTracker match {
             case Some(tracker) => {
-              var cardCalcFlag = false
+              var cardCalculationComplete = false
               try {
                 partKeyIndex.calculateCardinality(partSchema, tracker)
-                cardCalcFlag = true
+                cardCalculationComplete = true
               } catch {
                 case ex: Exception => {
                   logger.error(s"[CardinalityManager]Error while calculating cardinality using" +
@@ -139,13 +153,13 @@ class CardinalityManager(datasetRef: DatasetRef,
                   tracker.close()
                 }
               }
-              if (cardCalcFlag) {
+              if (cardCalculationComplete) {
                 try {
                   // close the cardinality store and release the physical resources of the current cardinality store
                   close()
                   cardTracker = Some(tracker)
                   logger.info(s"[CardinalityManager] Triggered cardinality count successfully for" +
-                    s"shardNum=$shardNum and indexRefreshCount=$indexRefreshCount")
+                    s"shardNum=$shardNum indexRefreshCount=$indexRefreshCount")
                 } catch {
                   case ex: Exception => {
                     // Very unlikely scenario, but can happen if the disk call fails.
@@ -162,7 +176,8 @@ class CardinalityManager(datasetRef: DatasetRef,
         }
         else {
           logger.info(s"[CardinalityManager] shouldTriggerCardinalityCount returned false for shardNum=$shardNum" +
-            s" numShardsPerNode=$numShardsPerNode indexRefreshCount=$indexRefreshCount")
+            s" numShardsPerNode=$numShardsPerNode indexRefreshCount=$indexRefreshCount " +
+            s"isCardTriggered=$isCardTriggered")
         }
       }
       catch {
@@ -170,8 +185,10 @@ class CardinalityManager(datasetRef: DatasetRef,
           logger.error(s"[CardinalityManager]Error while triggering cardinality count! shardNum=$shardNum " +
             s" indexRefreshCount=$indexRefreshCount", e)
       }
+      isCardTriggered = false
     }
   }
+  // scalastyle:on method.length
 
   /**
    * Helper method to create a CardinalityTracker instance
