@@ -140,21 +140,21 @@ object Utils extends StrictLogging {
                                resp: Observable[StreamQueryResponse]): Task[QueryResponse] = {
     resp.takeWhileInclusive(!_.isLast).toListL.map { r =>
       r.collectFirst {
-        case StreamQueryError(id, stats, t) => QueryError(id, stats, t)
-      }
-        .getOrElse {
-          val header = r.collectFirst {
-            case h: StreamQueryResultHeader => h
-          }.getOrElse(throw new IllegalStateException(s"Did not get a header for query id ${queryContext.queryId}"))
-          val rvs = r.collect {
-            case StreamQueryResult(id, rv) => rv
-          }
-          val footer = r.lastOption.collect {
-            case f: StreamQueryResultFooter => f
-          }.getOrElse(StreamQueryResultFooter(queryContext.queryId))
-          QueryResult(queryContext.queryId, header.resultSchema, rvs,
-            footer.queryStats, footer.warnings, footer.mayBePartial, footer.partialResultReason)
+        case StreamQueryError(id, _, stats, t) => QueryError(id, stats, t)
+      }.getOrElse {
+        val header = r.collectFirst {
+          case h: StreamQueryResultHeader => h
+        }.getOrElse(throw new IllegalStateException(s"Did not get a header for query id ${queryContext.queryId}"))
+        val rvs = r.flatMap {
+          case StreamQueryResult(_, _, rv) => rv
+          case _ => Nil
         }
+        val footer = r.lastOption.collect {
+          case f: StreamQueryResultFooter => f
+        }.getOrElse(StreamQueryResultFooter(queryContext.queryId, header.planId))
+        QueryResult(queryContext.queryId, header.resultSchema, rvs,
+          footer.queryStats, footer.warnings, footer.mayBePartial, footer.partialResultReason)
+      }
     }
   }
 }

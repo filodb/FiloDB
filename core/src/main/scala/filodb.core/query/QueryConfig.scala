@@ -22,12 +22,13 @@ object QueryConfig {
     val allowPartialResultsRangeQuery = queryConfig.getBoolean("allow-partial-results-rangequery")
     val grpcDenyList = queryConfig.getString("grpc.partitions-deny-list")
     val containerOverrides = queryConfig.as[Map[String, Int]]("container-size-overrides")
+    val numRvsPerResultMessage = queryConfig.getInt("num-rvs-per-result-message")
     QueryConfig(askTimeout, staleSampleAfterMs, minStepMs, fastReduceMaxWindows, parser, translatePromToFilodbHistogram,
       fasterRateEnabled, routingConfig.as[Option[String]]("partition_name"),
       routingConfig.as[Option[Long]]("remote.http.timeout"),
       routingConfig.as[Option[String]]("remote.http.endpoint"),
       routingConfig.as[Option[String]]("remote.grpc.endpoint"),
-      enforceResultByteLimit,
+      numRvsPerResultMessage, enforceResultByteLimit,
       allowPartialResultsRangeQuery, allowPartialResultsMetadataQuery,
       grpcDenyList.split(",").map(_.trim.toLowerCase).toSet,
       None,
@@ -68,6 +69,7 @@ case class QueryConfig(askTimeout: FiniteDuration,
                        remoteHttpTimeoutMs: Option[Long],
                        remoteHttpEndpoint: Option[String],
                        remoteGrpcEndpoint: Option[String],
+                       numRvsPerResultMessage: Int = 100,
                        enforceResultByteLimit: Boolean = false,
                        allowPartialResultsRangeQuery: Boolean = false,
                        allowPartialResultsMetadataQuery: Boolean = true,

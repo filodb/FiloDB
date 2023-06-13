@@ -19,7 +19,8 @@ import filodb.grpc.GrpcMultiPartitionQueryService.QueryParams
 
 // scalastyle:off number.of.methods
 // scalastyle:off number.of.types
-// scalastyle:off
+// scalastyle:off file.size.limit
+// scalastyle:off method.length
 object ProtoConverters {
 
   implicit class RangeVectorToProtoConversion(rv: SerializedRangeVector) {
@@ -555,30 +556,31 @@ object ProtoConverters {
     def toProto: GrpcMultiPartitionQueryService.StreamingResponse = {
       val builder = GrpcMultiPartitionQueryService.StreamingResponse.newBuilder()
       response match {
-        case StreamQueryResultHeader(queryId, resultSchema) =>
+        case StreamQueryResultHeader(id, planId, resultSchema) =>
                                     builder.setHeader(
                                     builder
                                       .getHeaderBuilder
-                                      .setQueryId(queryId)
+                                      .setQueryId(id)
+                                      .setPlanId(planId)
                                       .setResultSchema(resultSchema.toProto))
-        case StreamQueryResult(queryId, result) =>
-                                    builder.setBody(builder.getBodyBuilder.setQueryId(queryId)
-                                      .addResult(result match {
-                                        case srv: SerializableRangeVector   => srv.toProto
-                                        case other: RangeVector             =>
-                                          throw new IllegalStateException(s"Expected a SerializableRangeVector," +
-                                            s"got ${other.getClass}")
-                                      }))
-        case StreamQueryResultFooter(queryId, queryStats, warnings, mayBePartial, partialResultReason) =>
-                                  val footerBuilder = builder.getFooterBuilder.setQueryId(queryId)
+        case StreamQueryResult(id, planId, result) =>
+                                    val bodyBuilder = builder.getBodyBuilder.setQueryId(id).setPlanId(planId)
+                                    result.foreach {
+                                      case srv: SerializableRangeVector   => bodyBuilder.addResult(srv.toProto)
+                                      case other: RangeVector             =>
+                                        throw new IllegalStateException(s"Expected a SerializableRangeVector," +
+                                          s"got ${other.getClass}")
+                                    }
+        case StreamQueryResultFooter(id, planId, queryStats, warnings, mayBePartial, partialResultReason) =>
+                                  val footerBuilder = builder.getFooterBuilder.setQueryId(id).setPlanId(planId)
                                     .setStats(queryStats.toProto)
                                     .setWarnings(warnings.toProto)
                                     .setMayBePartial(mayBePartial)
                                   partialResultReason.foreach(footerBuilder.setPartialResultReason)
                                   builder.setFooter(footerBuilder)
-        case StreamQueryError(queryId, queryStats, t) =>
+        case StreamQueryError(id, planId, queryStats, t) =>
                                   builder.setError(
-                                    builder.getErrorBuilder.setQueryId(queryId)
+                                    builder.getErrorBuilder.setQueryId(id).setPlanId(planId)
                                       .setStats(queryStats.toProto).setThrowable(t.toProto)
                                   )
       }
@@ -592,21 +594,22 @@ object ProtoConverters {
       // Not checking optional type's existence
       if (responseProto.hasBody) {
         val body = responseProto.getBody
-        StreamQueryResult(body.getQueryId, body.getResult(0).fromProto)
+        StreamQueryResult(body.getQueryId, body.getPlanId, body.getResultList.fromProto)
       } else if (responseProto.hasFooter) {
         val footer = responseProto.getFooter
         StreamQueryResultFooter(
           footer.getQueryId,
+          footer.getPlanId,
           footer.getStats.fromProto,
           if (footer.hasWarnings) footer.getWarnings.fromProto else new QueryWarnings(),
           footer.getMayBePartial,
           if (footer.hasPartialResultReason) Some(footer.getPartialResultReason) else None)
       } else if (responseProto.hasHeader) {
         val header = responseProto.getHeader
-        StreamQueryResultHeader(header.getQueryId, header.getResultSchema.fromProto)
+        StreamQueryResultHeader(header.getQueryId, header.getPlanId, header.getResultSchema.fromProto)
       } else {
         val error = responseProto.getError
-        StreamQueryError(error.getQueryId, error.getStats.fromProto, error.getThrowable.fromProto)
+        StreamQueryError(error.getQueryId, error.getPlanId, error.getStats.fromProto, error.getThrowable.fromProto)
       }
     }
   }
@@ -827,6 +830,13 @@ object ProtoConverters {
       }
   }
 
+
+  implicit class SerializableRangeVectorListFromProtoConverter(
+                                            rvList: java.util.List[ProtoRangeVector.SerializableRangeVector]) {
+    import collection.JavaConverters._
+    def fromProto: Seq[SerializableRangeVector] = rvList.asScala.map(_.fromProto)
+  }
+
   implicit class SerializableRangeVectorToProtoConverter(rv: SerializableRangeVector) {
     def toProto: ProtoRangeVector.SerializableRangeVector = {
       val builder = ProtoRangeVector.SerializableRangeVector.newBuilder()
@@ -846,7 +856,13 @@ object ProtoConverters {
     }
   }
 
+  implicit class SerializableRangeVectorListToProtoConverter(rvSeq: Seq[SerializableRangeVector]) {
+    import collection.JavaConverters._
+    def toProto: java.util.List[ProtoRangeVector.SerializableRangeVector] = rvSeq.map(_.toProto).asJava
+  }
+
+
 }
 // scalastyle:on number.of.methods
 // scalastyle:on number.of.types
-// scalastyle:on
+// scalastyle:on file.size.limit

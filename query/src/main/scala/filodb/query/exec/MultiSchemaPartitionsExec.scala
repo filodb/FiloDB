@@ -107,7 +107,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
 
             val newPlan = SelectRawPartitionsExec(queryContext, dispatcher, dataset,
                                                   Some(sch), Some(lookupRes),
-                                                  schema.isDefined, colIDs)
+                                                  schema.isDefined, colIDs, planId)
             qLogger.debug(s"Discovered schema ${sch.name} and created inner plan $newPlan")
             newxformers.foreach { xf => newPlan.addRangeVectorTransformer(xf) }
             newPlan
@@ -115,7 +115,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
             qLogger.debug(s"No time series found for filters $filters... employing empty plan")
             SelectRawPartitionsExec(queryContext, dispatcher, dataset,
                                     None, Some(lookupRes),
-                                    schema.isDefined, Nil)
+                                    schema.isDefined, Nil, planId)
           }
   }
   // scalastyle:on method.length
