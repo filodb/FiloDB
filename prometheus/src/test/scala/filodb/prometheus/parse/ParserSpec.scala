@@ -465,6 +465,11 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("timestamp(some_metric)")
     parseError("timestamp(some_metric[5m])") // reason : Expected instant vector, got range vector
     parseError("timestamp(some_metric, hello)") // reason : Expected only 1 arg, got 2
+
+    // Trailing Commas
+    parseSuccessfully("sum without(and, by, avg, count, alert, annotations,)(some_metric)")
+    parseSuccessfully("sum without(and, by, avg, count, alert, annotations, )(some_metric)")
+    parseSuccessfully("sum by(and, by, avg, count, alert, annotations, )(some_metric)")
   }
 
   it("parse long identifiers") {

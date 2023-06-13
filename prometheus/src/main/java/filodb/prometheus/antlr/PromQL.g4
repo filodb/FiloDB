@@ -66,7 +66,7 @@ labelMatcherList: labelMatcher (',' labelMatcher)*;
 function: IDENTIFIER parameterList;
 
 parameter:     literal | vectorExpression;
-parameterList: '(' (parameter (',' parameter)*)? (')' | ',)');
+parameterList: '(' (parameter (',' parameter)*)? ')';
 
 aggregation
     : AGGREGATION_OP parameterList
@@ -97,7 +97,7 @@ metricKeyword
     ;
 
 labelName:     labelKeyword | IDENTIFIER;
-labelNameList: '(' (labelName (',' labelName)*)? ')';
+labelNameList: '(' (labelName (',' labelName)*)? ','? ')';
 
 // Keywords which are also accepted as label names.
 labelKeyword
