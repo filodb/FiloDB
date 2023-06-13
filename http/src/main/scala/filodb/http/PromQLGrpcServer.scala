@@ -131,6 +131,7 @@ class PromQLGrpcServer(queryPlannerSelector: String => QueryPlanner,
                         SerializedRangeVector.apply(irv, rb,
                           SerializedRangeVector.toSchema(qres.resultSchema.columns, qres.resultSchema.brSchemas),
                           "GrpcServer", qres.queryStats)
+                      case result => result
                     })
                     span.mark("onNext of the streaming result called")
                     responseObserver.onNext(strQueryResult.toProto)
