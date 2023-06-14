@@ -112,7 +112,7 @@ class CardinalityManager(datasetRef: DatasetRef,
       else {
         require(shardsPerNode > 0)
         cardTracker match {
-          case Some(tracker) => (indexRefreshCount % shardsPerNode) == (currentShardNum % shardsPerNode)
+          case Some(_) => (indexRefreshCount % shardsPerNode) == (currentShardNum % shardsPerNode)
           // if the tracker is not initialized, we should trigger the build of card store and card tracker
           case None => true
         }
@@ -124,7 +124,6 @@ class CardinalityManager(datasetRef: DatasetRef,
     }
   }
 
-  // scalastyle:off method.length
   /**
    * Triggers cardinalityCount if metering is enabled and the required criteria matches.
    * It creates a new instance of CardinalityTracker and uses the PartKeyLuceneIndex to calculate cardinality count
@@ -139,39 +138,32 @@ class CardinalityManager(datasetRef: DatasetRef,
         if (shouldTriggerCardinalityCount(shardNum, numShardsPerNode, indexRefreshCount)) {
           isCardTriggered = true
           val newCardTracker = getNewCardTracker()
-          newCardTracker match {
-            case Some(tracker) => {
-              var cardCalculationComplete = false
-              try {
-                partKeyIndex.calculateCardinality(partSchema, tracker)
-                cardCalculationComplete = true
-              } catch {
-                case ex: Exception => {
-                  logger.error(s"[CardinalityManager]Error while calculating cardinality using" +
-                    s"PartKeyLuceneIndex! shardNum=$shardNum indexRefreshCount=$indexRefreshCount", ex)
-                  // cleanup resources used by the newCardTracker tracker to avoid leaking of resources
-                  tracker.close()
-                }
-              }
-              if (cardCalculationComplete) {
-                try {
-                  // close the cardinality store and release the physical resources of the current cardinality store
-                  close()
-                  cardTracker = Some(tracker)
-                  logger.info(s"[CardinalityManager] Triggered cardinality count successfully for" +
-                    s"shardNum=$shardNum indexRefreshCount=$indexRefreshCount")
-                } catch {
-                  case ex: Exception => {
-                    // Very unlikely scenario, but can happen if the disk call fails.
-                    logger.error(s"[CardinalityManager]Error closing card tracker! shardNum=$shardNum", ex)
-                    // setting cardTracker to None in this case, since the exception happened on the close. We
-                    // can't rely on the card store. The next trigger should re-build the card store and card tracker
-                    cardTracker = None
-                  }
-                }
-              }
+          var cardCalculationComplete = false
+          try {
+            partKeyIndex.calculateCardinality(partSchema, newCardTracker)
+            cardCalculationComplete = true
+          } catch {
+            case ex: Exception =>
+              logger.error(s"[CardinalityManager]Error while calculating cardinality using" +
+                s"PartKeyLuceneIndex! shardNum=$shardNum indexRefreshCount=$indexRefreshCount", ex)
+              // cleanup resources used by the newCardTracker tracker to avoid leaking of resources
+              newCardTracker.close()
+          }
+          if (cardCalculationComplete) {
+            try {
+              // close the cardinality store and release the physical resources of the current cardinality store
+              close()
+              cardTracker = Some(newCardTracker)
+              logger.info(s"[CardinalityManager] Triggered cardinality count successfully for" +
+                s"shardNum=$shardNum indexRefreshCount=$indexRefreshCount")
+            } catch {
+              case ex: Exception =>
+                // Very unlikely scenario, but can happen if the disk call fails.
+                logger.error(s"[CardinalityManager]Error closing card tracker! shardNum=$shardNum", ex)
+                // setting cardTracker to None in this case, since the exception happened on the close. We
+                // can't rely on the card store. The next trigger should re-build the card store and card tracker
+                cardTracker = None
             }
-            case None => logger.info(s"[CardinalityManager] CardTracker is None. shardNum=$shardNum")
           }
           isCardTriggered = false
         }
@@ -190,21 +182,20 @@ class CardinalityManager(datasetRef: DatasetRef,
       }
     }
   }
-  // scalastyle:on method.length
 
   /**
    * Helper method to create a CardinalityTracker instance
    *
    * @return instance of CardinalityTracker
    */
-  private def getNewCardTracker(): Option[CardinalityTracker] = {
+  private def getNewCardTracker(): CardinalityTracker = {
     val cardStore = new RocksDbCardinalityStore(datasetRef, shardNum)
     val defaultQuota = quotaSource.getDefaults(datasetRef)
     val tracker = new CardinalityTracker(datasetRef, shardNum, shardKeyLen, defaultQuota, cardStore)
     quotaSource.getQuotas(datasetRef).foreach { q =>
       tracker.setQuota(q.shardKeyPrefix, q.quota)
     }
-    Some(tracker)
+    tracker
   }
 
   def scan(shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord] = {
@@ -214,8 +205,8 @@ class CardinalityManager(datasetRef: DatasetRef,
         case None =>
           // Very unlikely scenario. This can happen, if we are not able to init a card tracker or if there was an
           // exception while closing the existing card tracker object while triggering cardinality count
-          logger.error(s"[CardinalityManager] CardTracker is set to None. Scan query for shardNum=$shardNum")
-          // TODO: Quickly ask team if we should throw exception or empty record here
+          logger.error(s"[CardinalityManager] CardTracker is set to None." +
+            s"Scan query returning empty result for shardNum=$shardNum")
           Seq()
       }
     } else {
