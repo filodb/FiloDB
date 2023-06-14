@@ -19,12 +19,12 @@ import org.apache.lucene.search.CollectionTerminatedException
 import filodb.core.{DatasetRef, Types}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore._
+import filodb.core.memstore.ratelimit.{CardinalityManager, CardinalityRecord, QuotaSource}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, QueryContext, QuerySession}
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
-
 
 class DownsampledTimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
@@ -64,9 +64,10 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                  val schemas: Schemas,
                                  store: ColumnStore, // downsample colStore
                                  rawColStore: ColumnStore,
-                                 shardNum: Int,
+                                 val shardNum: Int,
                                  filodbConfig: Config,
-                                 downsampleConfig: DownsampleConfig)
+                                 downsampleConfig: DownsampleConfig,
+                                 quotaSource: QuotaSource)
                                 (implicit val ioPool: ExecutionContext) extends StrictLogging {
 
   val creationTime = System.currentTimeMillis()
@@ -97,8 +98,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     }
   }
 
-
-private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, false,
+  private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, false,
     false, shardNum, indexTtlMs,
     downsampleConfig.indexLocation.map(new java.io.File(_)),
     indexMetadataStore
@@ -123,6 +123,14 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
 
   private var houseKeepingFuture: CancelableFuture[Unit] = _
   private var gaugeUpdateFuture: CancelableFuture[Unit] = _
+
+  // CardinalityManager object helps with measuring and storing the cardinality count for the shard
+  private val cardManager: CardinalityManager =
+    new CardinalityManager(rawDatasetRef, shardNum, schemas.part.options.shardKeyColumns.length,
+      partKeyIndex, schemas.part, filodbConfig, downsampleStoreConfig.meteringEnabled, quotaSource)
+
+  // indexRefreshCount tracks the number of times the indexRefresh jobs have successfully ran
+  private var indexRefreshCount = 0
 
   def indexNames(limit: Int): Seq[String] = Seq.empty
 
@@ -215,6 +223,7 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
         indexUpdatedHour.set(endHour)
         partKeyIndex.notifyLifecycleListener(IndexState.Synced, endHour * 3600 * 1000L)
         stats.shardTotalRecoveryTime.update(System.currentTimeMillis() - creationTime)
+        cardManager.triggerCardinalityCount(indexRefreshCount)
         startHousekeepingTask()
         startStatsUpdateTask()
         logger.info(s"Shard now ready for query dataset=$indexDataset shard=$shardNum")
@@ -239,6 +248,8 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
       indexRefresh()
     }.map { _ =>
       partKeyIndex.refreshReadersBlocking()
+      indexRefreshCount += 1
+      cardManager.triggerCardinalityCount(indexRefreshCount)
     }.onErrorRestartUnlimited.completedL.runToFuture(housekeepingSched)
   }
 
@@ -313,7 +324,6 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
     stats.indexRamBytes.update(partKeyIndex.indexRamBytes)
   }
 
-
   def refreshPartKeyIndexBlocking(): Unit = {}
 
   def lookupPartitions(partMethod: PartitionScanMethod,
@@ -358,12 +368,17 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
 
   def shutdown(): Unit = {
     try {
-      partKeyIndex.closeIndex();
-      houseKeepingFuture.cancel();
-      gaugeUpdateFuture.cancel();
+      partKeyIndex.closeIndex()
+      houseKeepingFuture.cancel()
+      gaugeUpdateFuture.cancel()
+      cardManager.close()
     } catch { case e: Exception =>
       logger.error("Exception when shutting down downsample shard", e)
     }
+  }
+
+  def scanTsCardinalities(shardKeyPrefix: Seq[String], depth: Int): Seq[CardinalityRecord] = {
+    cardManager.scan(shardKeyPrefix, depth)
   }
 
   def scanPartitions(lookup: PartLookupResult,
@@ -621,6 +636,7 @@ private val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, fa
   def cleanup(): Unit = {
     Option(houseKeepingFuture).foreach(_.cancel())
     Option(gaugeUpdateFuture).foreach(_.cancel())
+    cardManager.close()
   }
 
   override protected def finalize(): Unit = {

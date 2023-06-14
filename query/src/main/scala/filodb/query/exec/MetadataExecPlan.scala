@@ -10,7 +10,7 @@ import org.apache.datasketches.cpc.{CpcSketch, CpcUnion}
 
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, MapItemConsumer}
-import filodb.core.memstore.{TimeSeriesMemStore, TimeSeriesStore}
+import filodb.core.memstore.TimeSeriesStore
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
 import filodb.core.query._
@@ -549,14 +549,14 @@ final case class TsCardExec(queryContext: QueryContext,
     source.acquireSharedLock(dataset, shard, querySession)
 
     val rvs = source match {
-      case tsMemStore: TimeSeriesMemStore =>
+      case tsMemStore: TimeSeriesStore =>
         Observable.eval {
           val cards = tsMemStore.scanTsCardinalities(
             dataset, Seq(shard), shardKeyPrefix, numGroupByFields)
-          val it = cards.map{ card =>
+          val it = cards.map { card =>
             CardRowReader(prefixToGroup(card.prefix),
-                          CardCounts(card.value.activeTsCount, card.value.tsCount))
-            }.iterator
+              CardCounts(card.value.activeTsCount, card.value.tsCount))
+          }.iterator
           IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), NoCloseCursor(it), None)
         }
       case other =>

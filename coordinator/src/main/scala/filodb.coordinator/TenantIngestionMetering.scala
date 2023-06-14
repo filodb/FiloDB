@@ -41,6 +41,7 @@ case class TenantIngestionMetering(settings: FilodbSettings,
 
   private val METRIC_ACTIVE = "tsdb_metering_active_timeseries"
   private val METRIC_TOTAL = "tsdb_metering_total_timeseries"
+  private val METRIC_LONGTERM = "tsdb_metering_longterm_timeseries"
 
   def schedulePeriodicPublishJob() : Unit = {
     // NOTE: the FiniteDuration overload of scheduleWithFixedDelay
@@ -76,8 +77,14 @@ case class TenantIngestionMetering(settings: FilodbSettings,
                            "metric_ns" -> prefix(1),
                            "dataset" -> dsRef.dataset,
                            "cluster_type" -> CLUSTER_TYPE)
-            Kamon.gauge(METRIC_ACTIVE).withTags(TagSet.from(tags)).update(data.counts.active.toDouble)
-            Kamon.gauge(METRIC_TOTAL).withTags(TagSet.from(tags)).update(data.counts.total.toDouble)
+
+            if (CLUSTER_TYPE == "downsample") {
+              Kamon.gauge(METRIC_LONGTERM).withTags(TagSet.from(tags)).update(data.counts.total.toDouble)
+            }
+            else {
+              Kamon.gauge(METRIC_ACTIVE).withTags(TagSet.from(tags)).update(data.counts.active.toDouble)
+              Kamon.gauge(METRIC_TOTAL).withTags(TagSet.from(tags)).update(data.counts.total.toDouble)
+            }
           })
         case Success(QueryError(_, _, t)) => logger.warn("QueryError: " + t.getMessage)
         case Failure(t) => logger.warn("Failure: " + t.getMessage)
