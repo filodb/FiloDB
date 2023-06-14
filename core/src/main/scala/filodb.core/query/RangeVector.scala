@@ -471,7 +471,7 @@ object SerializedRangeVector extends StrictLogging {
       // If there weren't containers before, then take all of them.  If there were, discard earlier ones, just
       // start with the most recent one we started adding to
       val containers = oldContainerOpt match {
-        case None => builder.allContainers
+        case None => builder.allContainers.toList
         case Some(firstContainer) => builder.allContainers.dropWhile(_ != firstContainer)
       }
       val srv = new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo, rv.outputRange)
