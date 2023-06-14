@@ -367,16 +367,22 @@ class TimeSeriesShard(val ref: DatasetRef,
     reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in TimeSeriesShard.ingestSched", _)))
 
   private val blockMemorySize = {
-    if (filodbConfig.getBoolean("memstore.memory-alloc.automatic-alloc-enabled")) {
-      val numNodes = filodbConfig.getInt("num-nodes-in-cluster")
+    val size = if (filodbConfig.getBoolean("memstore.memory-alloc.automatic-alloc-enabled")) {
+      val numNodes = filodbConfig.getInt("min-num-nodes-in-cluster")
       val availableMemoryBytes: Long = Utils.calculateAvailableOffHeapMemory(filodbConfig)
       val blockMemoryManagerPercent = filodbConfig.getDouble("memstore.memory-alloc.block-memory-manager-percent")
-      val blockMemForShardPercent = storeConfig.shardMemPercent
-      val numShardsPerNode = Math.ceil(numNodes.toDouble / numShards)
-      (availableMemoryBytes * blockMemoryManagerPercent * blockMemForShardPercent / 100 / 100 / numShardsPerNode).toLong
+      val blockMemForDatasetPercent = storeConfig.shardMemPercent // fraction of block memory for this dataset
+      val numShardsPerNode = Math.ceil(numShards / numNodes.toDouble)
+      logger.info(s"Calculating Block memory size with automatic allocation strategy. " +
+        s"Dataset dataset=$ref has blockMemForDatasetPercent=$blockMemForDatasetPercent " +
+        s"numShardsPerNode=$numShardsPerNode")
+      (availableMemoryBytes * blockMemoryManagerPercent *
+        blockMemForDatasetPercent / 100 / 100 / numShardsPerNode).toLong
     } else {
       storeConfig.shardMemSize
     }
+    logger.info(s"Block Memory for dataset=$ref shard=$shardNum bytesAllocated=$size")
+    size
   }
 
   protected val numGroups = storeConfig.groupsPerShard
