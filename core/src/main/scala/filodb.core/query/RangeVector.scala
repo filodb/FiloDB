@@ -471,7 +471,14 @@ object SerializedRangeVector extends StrictLogging {
       // If there weren't containers before, then take all of them.  If there were, discard earlier ones, just
       // start with the most recent one we started adding to
       val containers = oldContainerOpt match {
-        case None => builder.allContainers
+        // The toList ensures we have an immutable representation of containers those are required just for this
+        // SerializedRangeVector. By not having a toList we end up pointing to a mutable ArrayBuffer which gets multiple
+        // record containers, including all others where this builder was used. While Kryo is smart enough to not
+        // serialize the same RecordContainer twice and just send the reference, we end up double counting the result
+        // bytes and in serialization with gRPC where we dont maintain the graph of pointers to serialize the record
+        // just once, we end up serializing almost twice the amount of data and also exceed our 4MB recommended limit
+        // or a gRPC message
+        case None => builder.allContainers.toList
         case Some(firstContainer) => builder.allContainers.dropWhile(_ != firstContainer)
       }
       val srv = new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo, rv.outputRange)
