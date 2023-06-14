@@ -42,47 +42,54 @@ class CardinalityManager(datasetRef: DatasetRef,
    * @return shards present per node
    */
   def getNumShardsPerNodeFromConfig(datasetToSearch: String, filoConfig: Config): Int = {
-    val datasetConfig: Option[Config] = if (filoConfig.hasPath("dataset-configs")) {
-      filoConfig.getConfigList("dataset-configs")
-        .toArray().toList
-        .asInstanceOf[List[Config]]
-        .filter(x => x.getString("dataset") == datasetToSearch)
-        .headOption
+    val defaultNumShardsPerNode = 8
+    try {
+      val datasetConfig: Option[Config] = if (filoConfig.hasPath("dataset-configs")) {
+        filoConfig.getConfigList("dataset-configs")
+          .toArray().toList
+          .asInstanceOf[List[Config]]
+          .filter(x => x.getString("dataset") == datasetToSearch)
+          .headOption
+      }
+      else None
+
+      val configToUse = datasetConfig match {
+        case Some(datasetConf) => Some(datasetConf)
+        case None =>
+          // use fallback to inline dataset config
+          logger.info(s"Didn't find required config for dataset=${datasetToSearch} in config `dataset-configs`." +
+            s"Checking in config `inline-dataset-configs`")
+
+          if (filoConfig.hasPath("inline-dataset-configs")) {
+            filoConfig.getConfigList("inline-dataset-configs")
+              .toArray().toList
+              .asInstanceOf[List[Config]]
+              .filter(x => x.getString("dataset") == datasetToSearch).headOption
+          }
+          else {
+            None
+          }
+      }
+      configToUse match {
+        case Some(conf) =>
+          val minNumNodes = conf.getInt("min-num-nodes")
+          val numShards = conf.getInt("num-shards")
+          val result = numShards / minNumNodes
+          logger.info(s"Found config to estimate the shards per node. minNumNodes=$minNumNodes numShards=$numShards" +
+            s" numShardsPerNode=$result")
+          result
+        case None =>
+          // NOTE: This is an Extremely UNLIKELY case, because the configs we rely on, are required for startup
+          logger.error(s"Could not find config for dataset=${datasetToSearch} in configs " +
+            s"`dataset-configs` and `inline-dataset-configs`. Please check filodb config = ${filodbConfig.toString}" +
+            s" default-value=$defaultNumShardsPerNode")
+          defaultNumShardsPerNode
+      }
     }
-    else None
-
-    val configToUse = datasetConfig match {
-      case Some(datasetConf) => Some(datasetConf)
-      case None =>
-        // use fallback to inline dataset config
-        logger.info(s"Didn't find required config for dataset=${datasetToSearch} in config `dataset-configs`." +
-          s"Checking in config `inline-dataset-configs`")
-
-        if (filoConfig.hasPath("inline-dataset-configs")) {
-          filoConfig.getConfigList("inline-dataset-configs")
-            .toArray().toList
-            .asInstanceOf[List[Config]]
-            .filter(x => x.getString("dataset") == datasetToSearch).headOption
-        }
-        else {
-          None
-        }
-    }
-
-    configToUse match {
-      case Some(conf) =>
-        val minNumNodes = conf.getInt("min-num-nodes")
-        val numShards = conf.getInt("num-shards")
-        val result = numShards / minNumNodes
-        logger.info(s"Found the config to estimate the shards per node. minNumNodes=$minNumNodes numShards=$numShards" +
-          s" numShardsPerNode=$result")
-        result
-      case None =>
-        // NOTE: This is an Extremely UNLIKELY case, because the configs we rely on, are required for startup
-        val defaultNumShardsPerNode = 8
-        logger.error(s"Could not find config for dataset=${datasetToSearch} in configs " +
-          s"`dataset-configs` and `inline-dataset-configs`. Please check filodb config = ${filodbConfig.toString}" +
-          s" default-value=$defaultNumShardsPerNode")
+    catch {
+      case e: Exception =>
+        logger.error(s"[CardinalityManager] Unable to parse for config: ${filoConfig.toString} and for " +
+          s"dataset: $datasetToSearch", e)
         defaultNumShardsPerNode
     }
   }
