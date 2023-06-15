@@ -50,9 +50,7 @@ class CardinalityManager(datasetRef: DatasetRef,
           .asInstanceOf[List[Config]]
           .filter(x => x.getString("dataset") == datasetToSearch)
           .headOption
-      }
-      else None
-
+      } else None
       val configToUse = datasetConfig match {
         case Some(datasetConf) => Some(datasetConf)
         case None =>
