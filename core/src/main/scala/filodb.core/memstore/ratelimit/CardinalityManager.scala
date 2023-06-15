@@ -1,7 +1,8 @@
 package filodb.core.memstore.ratelimit
 
-import com.typesafe.config.Config
+import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
+import net.ceedubs.ficus.Ficus._
 
 import filodb.core.DatasetRef
 import filodb.core.memstore.PartKeyLuceneIndex
@@ -31,6 +32,22 @@ class CardinalityManager(datasetRef: DatasetRef,
   // physical resources for duplicate calculation
   private var isCardTriggered: Boolean = false
 
+
+  /**
+   * `dataset-configs` is an string array where each string is a file path for a dataset config. This function reads
+   * those file paths and parses it to Config object
+   * @param filoConfig
+   * @return
+   */
+  private def getDataSetConfigs(filoConfig: Config): Seq[Config] = {
+    val datasetConfPaths = filoConfig.as[Seq[String]]("dataset-configs")
+    if (datasetConfPaths.nonEmpty) {
+      datasetConfPaths.map { d => ConfigFactory.parseFile(new java.io.File(d)) }
+    } else {
+      Seq()
+    }
+  }
+
   /**
    * Helper method to get the shards per node in the filodb cluster. We look for the two specific
    * config that is `min-num-nodes` ( the minimum number of nodes/pods which has to be in a cluster ) and
@@ -42,52 +59,40 @@ class CardinalityManager(datasetRef: DatasetRef,
    * @return shards present per node
    */
   def getNumShardsPerNodeFromConfig(datasetToSearch: String, filoConfig: Config): Int = {
-    val defaultNumShardsPerNode = 8
-    try {
-      val datasetConfig: Option[Config] = if (filoConfig.hasPath("dataset-configs")) {
-        filoConfig.getConfigList("dataset-configs")
-          .toArray().toList
-          .asInstanceOf[List[Config]]
-          .filter(x => x.getString("dataset") == datasetToSearch)
-          .headOption
-      } else None
-      val configToUse = datasetConfig match {
-        case Some(datasetConf) => Some(datasetConf)
-        case None =>
-          // use fallback to inline dataset config
-          logger.info(s"Didn't find required config for dataset=${datasetToSearch} in config `dataset-configs`." +
-            s"Checking in config `inline-dataset-configs`")
+    val datasetConfig: Option[Config] = if (filoConfig.hasPath("dataset-configs")) {
+      getDataSetConfigs(filoConfig).find(x => x.getString("dataset") == datasetToSearch)
+    } else None
 
-          if (filoConfig.hasPath("inline-dataset-configs")) {
-            filoConfig.getConfigList("inline-dataset-configs")
-              .toArray().toList
-              .asInstanceOf[List[Config]]
-              .filter(x => x.getString("dataset") == datasetToSearch).headOption
-          }
-          else {
-            None
-          }
-      }
-      configToUse match {
-        case Some(conf) =>
-          val minNumNodes = conf.getInt("min-num-nodes")
-          val numShards = conf.getInt("num-shards")
-          val result = numShards / minNumNodes
-          logger.info(s"Found config to estimate the shards per node. minNumNodes=$minNumNodes numShards=$numShards" +
-            s" numShardsPerNode=$result")
-          result
-        case None =>
-          // NOTE: This is an Extremely UNLIKELY case, because the configs we rely on, are required for startup
-          logger.error(s"Could not find config for dataset=${datasetToSearch} in configs " +
-            s"`dataset-configs` and `inline-dataset-configs`. Please check filodb config = ${filodbConfig.toString}" +
-            s" default-value=$defaultNumShardsPerNode")
-          defaultNumShardsPerNode
-      }
+    val configToUse = datasetConfig match {
+      case Some(datasetConf) => Some(datasetConf)
+      case None =>
+        // use fallback to inline dataset config
+        logger.info(s"Didn't find required config for dataset=${datasetToSearch} in config `dataset-configs`." +
+          s"Checking in config `inline-dataset-configs`")
+
+        if (filoConfig.hasPath("inline-dataset-configs")) {
+          filoConfig.as[Seq[Config]]("inline-dataset-configs")
+            .find(x => x.getString("dataset") == datasetToSearch)
+        }
+        else {
+          None
+        }
     }
-    catch {
-      case e: Exception =>
-        logger.error(s"[CardinalityManager] Unable to parse for config: ${filoConfig.toString} and for " +
-          s"dataset: $datasetToSearch", e)
+
+    configToUse match {
+      case Some(conf) =>
+        val minNumNodes = conf.getInt("min-num-nodes")
+        val numShards = conf.getInt("num-shards")
+        val result = numShards / minNumNodes
+        logger.info(s"Found config to estimate the shards per node. minNumNodes=$minNumNodes numShards=$numShards" +
+          s" numShardsPerNode=$result")
+        result
+      case None =>
+        // NOTE: This is an Extremely UNLIKELY case, because the configs we rely on, are required for startup
+        val defaultNumShardsPerNode = 8
+        logger.error(s"Could not find config for dataset=${datasetToSearch} in configs " +
+          s"`dataset-configs` and `inline-dataset-configs`. Please check filodb config = ${filodbConfig.toString}" +
+          s" default-value=$defaultNumShardsPerNode")
         defaultNumShardsPerNode
     }
   }

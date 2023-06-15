@@ -9,6 +9,7 @@ import filodb.core.memstore.PartKeyLuceneIndex
 import filodb.core.metadata._
 import filodb.core.store.StoreConfig
 
+import java.io.File
 import scala.concurrent.duration.DurationInt
 
 class CardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfter {
@@ -19,6 +20,9 @@ class CardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   val shardKeyLen = MetricsTestData.timeseriesDatasetMultipleShardKeys.options.shardKeyColumns.length
   val quotaSource = new ConfigQuotaSource(filodbConfig, shardKeyLen)
   val partSchema = Schemas(MetricsTestData.timeseriesDatasetMultipleShardKeys.schema).part
+  val prometheusDatasetConfPath = new File("core/src/test/resources/test_dataset.conf").getAbsolutePath()
+  val notPrometheusDatasetConfPath = new File("core/src/test/resources/test_dataset_not_prometheus.conf")
+    .getAbsolutePath()
 
   def getTestLuceneIndex(shardNum: Int, childPath: String): PartKeyLuceneIndex = {
     new PartKeyLuceneIndex(
@@ -82,14 +86,10 @@ class CardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     // `dataset-config` has required config
     val confWithDatasetConfigs =
-      """
+      s"""
         |  filodb {
         |    dataset-configs = [
-        |      {
-        |        dataset = "prometheus"
-        |        min-num-nodes = 8
-        |        num-shards = 16
-        |      }
+        |      $prometheusDatasetConfPath
         |    ]
         |  }
         |""".stripMargin
@@ -115,15 +115,11 @@ class CardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     // `dataset-configs` present, but doesn't have config for `prometheus` dataset. should use `inline-dataset-config`
     val confWithDatasetConfigMissingDataset =
-      """
+      s"""
         |  filodb {
         |
         |    dataset-configs = [
-        |      {
-        |        dataset = "not-prometheus"
-        |        min-num-nodes = 8
-        |        num-shards = 16
-        |      }
+        |      $notPrometheusDatasetConfPath
         |    ]
         |
         |    inline-dataset-configs = [
@@ -140,15 +136,11 @@ class CardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     // both `dataset-configs` and `inline-dataset-configs` don't have the required dataset, hence fallback used
     val confWithBothConfigsMissingDataset =
-      """
+      s"""
         |  filodb {
         |
         |    dataset-configs = [
-        |      {
-        |        dataset = "not-prometheus"
-        |        min-num-nodes = 8
-        |        num-shards = 16
-        |      }
+        |      $notPrometheusDatasetConfPath
         |    ]
         |
         |    inline-dataset-configs = [
