@@ -9,7 +9,6 @@ import filodb.core.memstore.PartKeyLuceneIndex
 import filodb.core.metadata._
 import filodb.core.store.StoreConfig
 
-import java.io.File
 import scala.concurrent.duration.DurationInt
 
 class CardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfter {
@@ -20,9 +19,8 @@ class CardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   val shardKeyLen = MetricsTestData.timeseriesDatasetMultipleShardKeys.options.shardKeyColumns.length
   val quotaSource = new ConfigQuotaSource(filodbConfig, shardKeyLen)
   val partSchema = Schemas(MetricsTestData.timeseriesDatasetMultipleShardKeys.schema).part
-  val prometheusDatasetConfPath = new File("core/src/test/resources/test_dataset.conf").getAbsolutePath()
-  val notPrometheusDatasetConfPath = new File("core/src/test/resources/test_dataset_not_prometheus.conf")
-    .getAbsolutePath()
+  val prometheusDatasetConfPath = getClass.getResource("/test_dataset.conf").getPath
+  val notPrometheusDatasetConfPath = getClass.getResource("/test_dataset_not_prometheus.conf").getPath
 
   def getTestLuceneIndex(shardNum: Int, childPath: String): PartKeyLuceneIndex = {
     new PartKeyLuceneIndex(
