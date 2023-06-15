@@ -41,11 +41,7 @@ class CardinalityManager(datasetRef: DatasetRef,
    */
   private def getDataSetConfigs(filoConfig: Config): Seq[Config] = {
     val datasetConfPaths = filoConfig.as[Seq[String]]("dataset-configs")
-    if (datasetConfPaths.nonEmpty) {
-      datasetConfPaths.map { d => ConfigFactory.parseFile(new java.io.File(d)) }
-    } else {
-      Seq()
-    }
+    datasetConfPaths.map { d => ConfigFactory.parseFile(new java.io.File(d)) }
   }
 
   /**

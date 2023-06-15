@@ -111,6 +111,23 @@ class CardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     conf = ConfigFactory.parseString(confWithInlineDatasetConfigs).getConfig("filodb")
     cardManager.getNumShardsPerNodeFromConfig("prometheus", conf) shouldEqual 2
 
+    val confWithEmptyDatasetConfigs =
+      """
+        |  filodb {
+        |    dataset-configs = [ ]
+        |
+        |    inline-dataset-configs = [
+        |      {
+        |        dataset = "prometheus"
+        |        min-num-nodes = 8
+        |        num-shards = 16
+        |      }
+        |    ]
+        |  }
+        |""".stripMargin
+    conf = ConfigFactory.parseString(confWithEmptyDatasetConfigs).getConfig("filodb")
+    cardManager.getNumShardsPerNodeFromConfig("prometheus", conf) shouldEqual 2
+
     // `dataset-configs` present, but doesn't have config for `prometheus` dataset. should use `inline-dataset-config`
     val confWithDatasetConfigMissingDataset =
       s"""
