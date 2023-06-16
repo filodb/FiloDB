@@ -470,6 +470,16 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("sum without(and, by, avg, count, alert, annotations,)(some_metric)")
     parseSuccessfully("sum without(and, by, avg, count, alert, annotations, )(some_metric)")
     parseSuccessfully("sum by(and, by, avg, count, alert, annotations, )(some_metric)")
+
+    // Trailing Commas in Binary Joins
+    parseSuccessfully("foo and ignoring(test,blub,) bar")
+    parseSuccessfully("foo and ignoring(test,blub, ) bar")
+
+    parseSuccessfully("foo / on(test,blub, ) group_left(bar) bar")
+    parseSuccessfully("foo / ignoring(test,blub,) group_left(blub) bar")
+
+    parseSuccessfully("foo - on(test,blub,) group_right(bar,foo,) bar")
+    parseSuccessfully("foo - ignoring(test,blub,) group_right(bar,foo, ) bar")
   }
 
   it("parse long identifiers") {
