@@ -43,7 +43,7 @@ extends TimeSeriesStore with StrictLogging {
   private val partEvictionPolicy = evictionPolicy.getOrElse(
     new CompositeEvictionPolicy(ensureTspHeadroomPercent, ensureNmmHeadroomPercent))
 
-  private lazy val ingestionMemory = {
+  private[memstore] lazy val ingestionMemory = {
     if (filodbConfig.getBoolean("memstore.memory-alloc.automatic-alloc-enabled")) {
       val availableMemoryBytes: Long = Utils.calculateAvailableOffHeapMemory(filodbConfig)
       val nativeMemoryManagerPercent = filodbConfig.getDouble("memstore.memory-alloc.native-memory-manager-percent")

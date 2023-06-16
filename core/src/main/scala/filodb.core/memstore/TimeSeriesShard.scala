@@ -366,7 +366,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   val ingestSched = Scheduler.singleThread(s"$IngestSchedName-$ref-$shardNum",
     reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in TimeSeriesShard.ingestSched", _)))
 
-  private val blockMemorySize = {
+  private[memstore] val blockMemorySize = {
     val size = if (filodbConfig.getBoolean("memstore.memory-alloc.automatic-alloc-enabled")) {
       val numNodes = filodbConfig.getInt("min-num-nodes-in-cluster")
       val availableMemoryBytes: Long = Utils.calculateAvailableOffHeapMemory(filodbConfig)
