@@ -1,7 +1,8 @@
 package filodb.core.memstore.ratelimit
 
-import com.typesafe.config.Config
+import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
+import net.ceedubs.ficus.Ficus._
 
 import filodb.core.DatasetRef
 import filodb.core.memstore.PartKeyLuceneIndex
@@ -31,6 +32,18 @@ class CardinalityManager(datasetRef: DatasetRef,
   // physical resources for duplicate calculation
   private var isCardTriggered: Boolean = false
 
+
+  /**
+   * `dataset-configs` is an string array where each string is a file path for a dataset config. This function reads
+   * those file paths and parses it to Config object
+   * @param filoConfig
+   * @return
+   */
+  private def getDataSetConfigs(filoConfig: Config): Seq[Config] = {
+    val datasetConfPaths = filoConfig.as[Seq[String]]("dataset-configs")
+    datasetConfPaths.map { d => ConfigFactory.parseFile(new java.io.File(d)) }
+  }
+
   /**
    * Helper method to get the shards per node in the filodb cluster. We look for the two specific
    * config that is `min-num-nodes` ( the minimum number of nodes/pods which has to be in a cluster ) and
@@ -43,13 +56,8 @@ class CardinalityManager(datasetRef: DatasetRef,
    */
   def getNumShardsPerNodeFromConfig(datasetToSearch: String, filoConfig: Config): Int = {
     val datasetConfig: Option[Config] = if (filoConfig.hasPath("dataset-configs")) {
-      filoConfig.getConfigList("dataset-configs")
-        .toArray().toList
-        .asInstanceOf[List[Config]]
-        .filter(x => x.getString("dataset") == datasetToSearch)
-        .headOption
-    }
-    else None
+      getDataSetConfigs(filoConfig).find(x => x.getString("dataset") == datasetToSearch)
+    } else None
 
     val configToUse = datasetConfig match {
       case Some(datasetConf) => Some(datasetConf)
@@ -59,10 +67,8 @@ class CardinalityManager(datasetRef: DatasetRef,
           s"Checking in config `inline-dataset-configs`")
 
         if (filoConfig.hasPath("inline-dataset-configs")) {
-          filoConfig.getConfigList("inline-dataset-configs")
-            .toArray().toList
-            .asInstanceOf[List[Config]]
-            .filter(x => x.getString("dataset") == datasetToSearch).headOption
+          filoConfig.as[Seq[Config]]("inline-dataset-configs")
+            .find(x => x.getString("dataset") == datasetToSearch)
         }
         else {
           None
@@ -74,7 +80,7 @@ class CardinalityManager(datasetRef: DatasetRef,
         val minNumNodes = conf.getInt("min-num-nodes")
         val numShards = conf.getInt("num-shards")
         val result = numShards / minNumNodes
-        logger.info(s"Found the config to estimate the shards per node. minNumNodes=$minNumNodes numShards=$numShards" +
+        logger.info(s"Found config to estimate the shards per node. minNumNodes=$minNumNodes numShards=$numShards" +
           s" numShardsPerNode=$result")
         result
       case None =>

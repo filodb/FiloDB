@@ -19,6 +19,8 @@ class CardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   val shardKeyLen = MetricsTestData.timeseriesDatasetMultipleShardKeys.options.shardKeyColumns.length
   val quotaSource = new ConfigQuotaSource(filodbConfig, shardKeyLen)
   val partSchema = Schemas(MetricsTestData.timeseriesDatasetMultipleShardKeys.schema).part
+  val prometheusDatasetConfPath = getClass.getResource("/test_dataset.conf").getPath
+  val notPrometheusDatasetConfPath = getClass.getResource("/test_dataset_not_prometheus.conf").getPath
 
   def getTestLuceneIndex(shardNum: Int, childPath: String): PartKeyLuceneIndex = {
     new PartKeyLuceneIndex(
@@ -82,14 +84,10 @@ class CardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     // `dataset-config` has required config
     val confWithDatasetConfigs =
-      """
+      s"""
         |  filodb {
         |    dataset-configs = [
-        |      {
-        |        dataset = "prometheus"
-        |        min-num-nodes = 8
-        |        num-shards = 16
-        |      }
+        |      $prometheusDatasetConfPath
         |    ]
         |  }
         |""".stripMargin
@@ -113,17 +111,30 @@ class CardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     conf = ConfigFactory.parseString(confWithInlineDatasetConfigs).getConfig("filodb")
     cardManager.getNumShardsPerNodeFromConfig("prometheus", conf) shouldEqual 2
 
-    // `dataset-configs` present, but doesn't have config for `prometheus` dataset. should use `inline-dataset-config`
-    val confWithDatasetConfigMissingDataset =
+    val confWithEmptyDatasetConfigs =
       """
         |  filodb {
+        |    dataset-configs = [ ]
         |
-        |    dataset-configs = [
+        |    inline-dataset-configs = [
         |      {
-        |        dataset = "not-prometheus"
+        |        dataset = "prometheus"
         |        min-num-nodes = 8
         |        num-shards = 16
         |      }
+        |    ]
+        |  }
+        |""".stripMargin
+    conf = ConfigFactory.parseString(confWithEmptyDatasetConfigs).getConfig("filodb")
+    cardManager.getNumShardsPerNodeFromConfig("prometheus", conf) shouldEqual 2
+
+    // `dataset-configs` present, but doesn't have config for `prometheus` dataset. should use `inline-dataset-config`
+    val confWithDatasetConfigMissingDataset =
+      s"""
+        |  filodb {
+        |
+        |    dataset-configs = [
+        |      $notPrometheusDatasetConfPath
         |    ]
         |
         |    inline-dataset-configs = [
@@ -140,15 +151,11 @@ class CardinalityManagerSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
     // both `dataset-configs` and `inline-dataset-configs` don't have the required dataset, hence fallback used
     val confWithBothConfigsMissingDataset =
-      """
+      s"""
         |  filodb {
         |
         |    dataset-configs = [
-        |      {
-        |        dataset = "not-prometheus"
-        |        min-num-nodes = 8
-        |        num-shards = 16
-        |      }
+        |      $notPrometheusDatasetConfPath
         |    ]
         |
         |    inline-dataset-configs = [
