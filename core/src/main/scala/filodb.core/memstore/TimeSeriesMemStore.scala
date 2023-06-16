@@ -48,7 +48,7 @@ extends TimeSeriesStore with StrictLogging {
       val availableMemoryBytes: Long = Utils.calculateAvailableOffHeapMemory(filodbConfig)
       val nativeMemoryManagerPercent = filodbConfig.getDouble("memstore.memory-alloc.native-memory-manager-percent")
       (availableMemoryBytes * nativeMemoryManagerPercent / 100).toLong
-    } else filodbConfig.getMemorySize("memstore.memstore.ingestion-buffer-mem-size").toBytes
+    } else filodbConfig.getMemorySize("memstore.ingestion-buffer-mem-size").toBytes
   }
 
   private[this] lazy val ingestionMemFactory: NativeMemoryManager = {
