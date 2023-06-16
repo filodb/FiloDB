@@ -305,7 +305,7 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   it("should configure memory automatically when enabled") {
     val colStore = new NullColumnStore()
 
-    val config2 = ConfigFactory.parseString(
+    val config1 = ConfigFactory.parseString(
       """
         |min-num-nodes-in-cluster = 32
         |memstore {
@@ -319,16 +319,35 @@ class TimeSeriesMemStoreSpec extends AnyFunSpec with Matchers with BeforeAndAfte
         |}
         |""".stripMargin).withFallback(config)
 
-    val memStore = new TimeSeriesMemStore(config2, colStore, new InMemoryMetaStore())
-    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf.copy(groupsPerShard = 2,
+    val memStore1 = new TimeSeriesMemStore(config1, colStore, new InMemoryMetaStore())
+    memStore1.setup(dataset1.ref, schemas1, 0, TestData.storeConf.copy(groupsPerShard = 2,
       diskTTLSeconds = 1.hour.toSeconds.toInt,
       flushInterval = 10.minutes, shardMemPercent = 40), 256)
 
-    memStore.ingestionMemory shouldEqual 300000000 // 1GB * 30%
-    val tsShard = memStore.getShard(dataset1.ref, 0).get
-    tsShard.blockMemorySize shouldEqual 30000000 // 1GB * 60% (for block memory) * 40% (for dataset memory) / (256/32)
+    memStore1.ingestionMemory shouldEqual 300000000 // 1GB * 30%
+    val tsShard = memStore1.getShard(dataset1.ref, 0).get
+    tsShard.blockMemorySize shouldEqual 30000000 // 1GB * 60% (for block memory) * 40% (for dataset memory) / ceil(256/32)
 
-    memStore.shutdown()
+    memStore1.shutdown()
+
+    // Expand cluster by only changing min-num-nodes-in-cluster
+    // now each shard should get more memory since fewer shards per node
+
+    val config2 = ConfigFactory.parseString(
+      """
+        |min-num-nodes-in-cluster = 45
+        |""".stripMargin).withFallback(config1)
+
+    val memStore2 = new TimeSeriesMemStore(config2, colStore, new InMemoryMetaStore())
+    memStore2.setup(dataset1.ref, schemas1, 0, TestData.storeConf.copy(groupsPerShard = 2,
+      diskTTLSeconds = 1.hour.toSeconds.toInt,
+      flushInterval = 10.minutes, shardMemPercent = 40), 256)
+
+    memStore2.ingestionMemory shouldEqual 300000000 // 1GB * 30%
+    val tsShard2 = memStore2.getShard(dataset1.ref, 0).get
+    tsShard2.blockMemorySize shouldEqual 40000000 // 1GB * 60% (for block memory) * 40% (for dataset memory) / ceil(256/45)
+
+    memStore2.shutdown()
   }
 
   it("should recover index data from col store correctly") {
