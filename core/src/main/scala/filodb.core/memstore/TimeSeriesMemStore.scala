@@ -47,6 +47,11 @@ extends TimeSeriesStore with StrictLogging {
     if (filodbConfig.getBoolean("memstore.memory-alloc.automatic-alloc-enabled")) {
       val availableMemoryBytes: Long = Utils.calculateAvailableOffHeapMemory(filodbConfig)
       val nativeMemoryManagerPercent = filodbConfig.getDouble("memstore.memory-alloc.native-memory-manager-percent")
+      val blockMemoryManagerPercent = filodbConfig.getDouble("memstore.memory-alloc.block-memory-manager-percent")
+      val lucenePercent = filodbConfig.getDouble("memstore.memory-alloc.lucene-memory-percent")
+      require(nativeMemoryManagerPercent + blockMemoryManagerPercent + lucenePercent == 100.0,
+        s"Configured Block($nativeMemoryManagerPercent), Native($nativeMemoryManagerPercent) " +
+        s"and Lucene($lucenePercent) memory percents don't sum to 100.0")
       (availableMemoryBytes * nativeMemoryManagerPercent / 100).toLong
     } else filodbConfig.getMemorySize("memstore.ingestion-buffer-mem-size").toBytes
   }
