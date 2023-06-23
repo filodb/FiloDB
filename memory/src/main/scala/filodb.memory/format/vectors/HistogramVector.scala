@@ -556,6 +556,7 @@ final case class HistogramCorrection(lastValue: LongHistogram, correction: LongH
 trait CounterHistogramReader extends HistogramReader with CounterVectorReader {
   def correctedValue(n: Int, meta: CorrectionMeta): HistogramWithBuckets
 }
+case class EmptyHistogramException(message: String) extends IllegalArgumentException(message)
 
 /**
  * A reader for SectDelta encoded histograms, including correction/drop functionality
@@ -578,6 +579,11 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
   }
 
   override def apply(index: Int): HistogramWithBuckets = {
+    if (length <= 0) {
+      UnsafeUtils.getLong(histVect.addr)
+      throw EmptyHistogramException(s"""length = $length memory=${toHexString(acc, histVect.addr)}""")
+    }
+
     require(length > 0)
     val histPtr = locate(index)
 
