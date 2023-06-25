@@ -756,7 +756,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       if (storeConfig.meteringEnabled) {
         val shardKey = schema.partKeySchema.colValues(pk.partKey, UnsafeUtils.arayOffset,
           schema.options.shardKeyColumns)
-        cardTracker.modifyCount(shardKey, 1, if (pk.endTime == Long.MaxValue) 1 else 0)
+        modifyCardinalityCountNoThrow(shardKey, 1, if (pk.endTime == Long.MaxValue) 1 else 0)
       }
     }
     partId
@@ -998,13 +998,13 @@ class TimeSeriesShard(val ref: DatasetRef,
         // causes endTime to be set to Long.MaxValue
         partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
         if (storeConfig.meteringEnabled) {
-          cardTracker.modifyCount(shardKey, 1, 1)
+          modifyCardinalityCountNoThrow(shardKey, 1, 1)
         }
       } else {
         // newly created partition is re-ingesting now, so update endTime
         updatePartEndTimeInIndex(newPart, Long.MaxValue)
         if (storeConfig.meteringEnabled) {
-          cardTracker.modifyCount(shardKey, 0, 1)
+          modifyCardinalityCountNoThrow(shardKey, 0, 1)
           // TODO remove temporary debugging since we were seeing some negative counts when this increment was absent
           if (partId % 100 < 5) { // log for 5% of the cases
             logger.info(s"Increment activeDelta for ${newPart.stringPartition}")
@@ -1067,7 +1067,7 @@ class TimeSeriesShard(val ref: DatasetRef,
               val shardKey = tsp.schema.partKeySchema.colValues(tsp.partKeyBase, tsp.partKeyOffset,
                 tsp.schema.options.shardKeyColumns)
               if (storeConfig.meteringEnabled) {
-                cardTracker.modifyCount(shardKey, 0, 1)
+                modifyCardinalityCountNoThrow(shardKey, 0, 1)
               }
             }
           }
@@ -1124,6 +1124,21 @@ class TimeSeriesShard(val ref: DatasetRef,
       shardStats.partitionsCreated.increment()
       partitionGroups(group).set(partId)
       newPart
+    }
+  }
+
+  /**
+   * Modifies a cardinality count and catches/logs any exceptions.
+   * Should only be used where an exception would otherwise cause ingestion/boostrap to fail.
+   */
+  private def modifyCardinalityCountNoThrow(shardKey: Seq[String],
+                                            totalDelta: Int,
+                                            activeDelta: Int): Unit = {
+    try {
+      cardTracker.modifyCount(shardKey, totalDelta, activeDelta)
+    } catch {
+      case t: Throwable =>
+          logger.error("exception while modifying cardinality tracker count; shardKey=" + shardKey, t)
     }
   }
 
