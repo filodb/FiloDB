@@ -151,7 +151,7 @@ class CardinalityManager(datasetRef: DatasetRef,
           } catch {
             case ex: Exception =>
               logger.error(s"[CardinalityManager]Error while calculating cardinality using" +
-                s"PartKeyLuceneIndex! shardNum=$shardNum indexRefreshCount=$indexRefreshCount", ex)
+                s" PartKeyLuceneIndex! shardNum=$shardNum indexRefreshCount=$indexRefreshCount", ex)
               // cleanup resources used by the newCardTracker tracker to avoid leaking of resources
               newCardTracker.close()
           }
@@ -161,7 +161,7 @@ class CardinalityManager(datasetRef: DatasetRef,
               close()
               cardTracker = Some(newCardTracker)
               logger.info(s"[CardinalityManager] Triggered cardinality count successfully for" +
-                s"shardNum=$shardNum indexRefreshCount=$indexRefreshCount")
+                s" shardNum=$shardNum indexRefreshCount=$indexRefreshCount")
             } catch {
               case ex: Exception =>
                 // Very unlikely scenario, but can happen if the disk call fails.
@@ -216,7 +216,8 @@ class CardinalityManager(datasetRef: DatasetRef,
           Seq()
       }
     } else {
-      throw new IllegalArgumentException("Metering is not enabled")
+      logger.info(s"[CardinalityManager]Cardinality Metering is not enabled for shardNum=$shardNum")
+      Seq()
     }
   }
 
