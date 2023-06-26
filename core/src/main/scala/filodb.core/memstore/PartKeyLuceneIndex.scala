@@ -977,7 +977,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
  * the cardinality count from scratch. This class iterates through each document in lucene, extracts a shard-key
  * and updates the cardinality count using the given CardinalityTracker.
  * */
-class CardinalityCountBuilder(partSchema: PartitionSchema, cardTracker: CardinalityTracker) extends SimpleCollector {
+class CardinalityCountBuilder(partSchema: PartitionSchema, cardTracker: CardinalityTracker)
+  extends SimpleCollector with StrictLogging {
 
   private var partKeyDv: BinaryDocValues = _
 
@@ -994,8 +995,13 @@ class CardinalityCountBuilder(partSchema: PartitionSchema, cardTracker: Cardinal
       val shardKey = partSchema.binSchema.colValues(
         binaryValue.bytes, unsafePkOffset, partSchema.options.shardKeyColumns)
 
-      // update the cardinality count by 1, since the shardKey for each document in index is unique
-      cardTracker.modifyCount(shardKey, 1, 0)
+      try {
+        // update the cardinality count by 1, since the shardKey for each document in index is unique
+        cardTracker.modifyCount(shardKey, 1, 0)
+      } catch {
+        case t: Throwable =>
+          logger.error("exception while modifying cardinality tracker count; shardKey=" + shardKey, t)
+      }
     } else {
       throw new IllegalStateException("This shouldn't happen since every document should have a partKeyDv")
     }
