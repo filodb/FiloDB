@@ -1,5 +1,8 @@
 package filodb.coordinator.queryplanner
 
+import scala.collection.Seq
+
+import filodb.core.{StaticTargetSchemaProvider, TargetSchemaProvider}
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{ColumnFilter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
 import filodb.query._
@@ -28,13 +31,51 @@ case class ShardKeyMatcher(columnFilters: Seq[ColumnFilter], query: String)
 class ShardKeyRegexPlanner(val dataset: Dataset,
                            queryPlanner: QueryPlanner,
                            shardKeyMatcher: Seq[ColumnFilter] => Seq[Seq[ColumnFilter]],
-                           config: QueryConfig)
+                           config: QueryConfig,
+                           _targetSchemaProvider: TargetSchemaProvider = StaticTargetSchemaProvider())
   extends QueryPlanner with DefaultPlanner {
 
   override def queryConfig: QueryConfig = config
   override val schemas: Schemas = Schemas(dataset.schema)
   override val dsOptions: DatasetOptions = schemas.part.options
   private val datasetMetricColumn = dataset.options.metricColumn
+
+  private def targetSchemaProvider(qContext: QueryContext): TargetSchemaProvider = {
+    qContext.plannerParams.targetSchemaProviderOverride.getOrElse(_targetSchemaProvider)
+  }
+
+  private def getShardKeys(plan: LogicalPlan): Seq[Seq[ColumnFilter]] = {
+    LogicalPlan.getNonMetricShardKeyFilters(plan, dataset.options.shardKeyColumns)
+      .flatMap(shardKeyMatcher(_))
+  }
+
+  /**
+   * Returns a set of shard-key sets iff a plan can be pushed-down to each.
+   * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
+   */
+  private def getPushdownKeys(qContext: QueryContext,
+                              plan: LogicalPlan): Option[Set[Set[ColumnFilter]]] = {
+    val getRawShardKeys = (rs: RawSeries) => getShardKeys(rs).map(_.toSet).toSet
+    LogicalPlanUtils.getPushdownKeys(
+      plan,
+      targetSchemaProvider(qContext),
+      dataset.options.nonMetricShardColumns,
+      getRawShardKeys,
+      rs => getShardKeys(rs))
+  }
+
+  /**
+   * Attempts a pushdown optimization.
+   * Returns an occupied Optional iff the optimization was successful.
+   */
+  private def attemptPushdown(logicalPlan: LogicalPlan, qContext: QueryContext): Option[PlanResult] = {
+    val pushdownKeys = getPushdownKeys(qContext, logicalPlan)
+    if (pushdownKeys.isDefined) {
+      val plans = generateExecForEachKey(logicalPlan, pushdownKeys.get.map(_.toSeq).toSeq, qContext)
+        .sortWith((x, _) => !x.isInstanceOf[PromQlRemoteExec])
+      Some(PlanResult(plans))
+    } else None
+  }
 
   /**
    * Returns true when regex has single matching value
@@ -65,7 +106,13 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
     } else if (hasSingleShardKeyMatch(nonMetricShardKeyFilters)) {
       // For queries like topk(2, test{_ws_ = "demo", _ns_ =~ "App-1"}) which have just one matching value
       generateExecWithoutRegex(logicalPlan, nonMetricShardKeyFilters.head, qContext).head
-    } else walkLogicalPlanTree(logicalPlan, qContext).plans.head
+    } else {
+      val result = walkLogicalPlanTree(logicalPlan, qContext)
+      if (result.plans.size > 1) {
+        val dispatcher = PlannerUtil.pickDispatcher(result.plans)
+        MultiPartitionDistConcatExec(qContext, dispatcher, result.plans)
+      } else result.plans.head
+    }
   }
 
 
@@ -83,7 +130,6 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
       filterGroup.isEmpty || nonMetricShardColumnsSet.subsetOf(filterGroup.map(_.column).toSet)
     }
   }
-
 
   def isMetadataQuery(logicalPlan: LogicalPlan): Boolean = {
     logicalPlan match {
@@ -115,10 +161,16 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
 
   private def generateExecWithoutRegex(logicalPlan: LogicalPlan, nonMetricShardKeyFilters: Seq[ColumnFilter],
                                        qContext: QueryContext): Seq[ExecPlan] = {
-    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val shardKeyMatches = shardKeyMatcher(nonMetricShardKeyFilters)
-    val skipAggregatePresentValue = if (shardKeyMatches.length == 1) false else true
-    shardKeyMatches.map { result =>
+    generateExecForEachKey(logicalPlan, shardKeyMatches, qContext)
+  }
+
+  private def generateExecForEachKey(logicalPlan: LogicalPlan,
+                                     keys: Seq[Seq[ColumnFilter]],
+                                     qContext: QueryContext): Seq[ExecPlan] = {
+    val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val skipAggregatePresentValue = keys.length > 1
+    keys.map { result =>
       val newLogicalPlan = logicalPlan.replaceFilters(result)
       // Querycontext should just have the part of query which has regex
       // For example for exp(sum(test{_ws_ = "demo", _ns_ =~ "App.*"})), sub queries should be
@@ -153,6 +205,10 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
    * LHS and RHS could be across multiple partitions
    */
   private def materializeBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): PlanResult = {
+    val pushdownKeys = attemptPushdown(logicalPlan, qContext)
+    if (pushdownKeys.isDefined) {
+      return pushdownKeys.get
+    }
 
     optimizeOrVectorDouble(qContext, logicalPlan).getOrElse {
       val lhsQueryContext = qContext.copy(origQueryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams].
@@ -193,6 +249,11 @@ class ShardKeyRegexPlanner(val dataset: Dataset,
    * Sub query could be across multiple partitions so aggregate using MultiPartitionReduceAggregateExec
    * */
   private def materializeAggregate(aggregate: Aggregate, queryContext: QueryContext): PlanResult = {
+    val pushdownKeys = attemptPushdown(aggregate, queryContext)
+    if (pushdownKeys.isDefined) {
+      return pushdownKeys.get
+    }
+
     // Pushing down aggregates to run on individual partitions is most efficient, however, if we have multiple
     // nested aggregation we should be pushing down the lowest aggregate for correctness. Consider the following query
     // count(sum by(foo)(test1{_ws_ = "demo", _ns_ =~ "App-.*"})), doing a count of the counts received from individual
