@@ -580,7 +580,6 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
 
   override def apply(index: Int): HistogramWithBuckets = {
     if (length <= 0) {
-      UnsafeUtils.getLong(histVect.addr)
       throw EmptyHistogramException(s"""length = $length memory=${toHexString(acc, histVect.addr)}""")
     }
 
