@@ -434,44 +434,26 @@ object LogicalPlanUtils extends StrictLogging {
   }
 
   /**
-   * Returns true iff an Aggregate can be pushdown-optimized.
+   * Returns true iff a plan can be pushdown-optimized.
    * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
    */
-  private def canPushdown(agg: Aggregate,
+  private def canPushdown(plan: CandidatePushdownPlan,
                           targetSchemaProvider: TargetSchemaProvider,
                           nonMetricShardKeyCols: Seq[String],
                           getShardKeyFilters: RawSeries => Seq[Seq[ColumnFilter]]): Boolean = {
-    if (agg.clauseOpt.isEmpty || agg.clauseOpt.get.clauseType != AggregateClause.ClauseType.By) {
+    val hasPushdownableClause = plan match {
+      case Aggregate(_, _, _, clauseOpt) =>
+        clauseOpt.nonEmpty && clauseOpt.get.clauseType == AggregateClause.ClauseType.By
+      case BinaryJoin(_, _, _, _, on, ignoring, _) =>
+        on.nonEmpty && ignoring.isEmpty
+    }
+    if (!hasPushdownableClause) {
       return false
     }
 
-    // FIXME: in the ShardKeyRegexPlanner/MultiPartitionPlanner, we can pushdown even when a target-schema
-    //  isn't defined as long as all shard keys are given on the "by" clause. This change will touch quite
-    //  a few files / tests, so we'll save it for a separate PR.
-    // val clauseCols = agg.clauseOpt.get.labels
-    // if (nonMetricShardKeyCols.forall(clauseCols.contains(_))) {
-    //   return true
-    // }
-
-    val tschema = sameRawSeriesTargetSchemaColumns(agg, targetSchemaProvider, getShardKeyFilters)
-    if (tschema.isEmpty) {
-      return false
-    }
-    // make sure non-shard-key (i.e. non-implicit) target-schema columns are included in the "by" clause.
-    val tschemaNoImplicit = tschema.get.filter(!nonMetricShardKeyCols.contains(_))
-    tschemaNoImplicit.forall(agg.clauseOpt.get.labels.contains(_))
-  }
-
-  /**
-   * Returns true iff a BinaryJoin can be pushdown-optimized.
-   * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
-   */
-  private def canPushdown(bj: BinaryJoin,
-                          targetSchemaProvider: TargetSchemaProvider,
-                          nonMetricShardKeyCols: Seq[String],
-                          getShardKeyFilters: RawSeries => Seq[Seq[ColumnFilter]]): Boolean = {
-      if (bj.on.isEmpty || bj.ignoring.nonEmpty) {
-      return false
+    val clauseLabels = plan match {
+      case Aggregate(_, _, _, clauseOpt) => clauseOpt.get.labels
+      case BinaryJoin(_, _, _, _, on, _, _) => on
     }
 
     // FIXME: in the ShardKeyRegexPlanner/MultiPartitionPlanner, we can pushdown even when a target-schema
@@ -482,13 +464,13 @@ object LogicalPlanUtils extends StrictLogging {
     //   return true
     // }
 
-    val tschema = sameRawSeriesTargetSchemaColumns(bj, targetSchemaProvider, getShardKeyFilters)
+    val tschema = sameRawSeriesTargetSchemaColumns(plan, targetSchemaProvider, getShardKeyFilters)
     if (tschema.isEmpty) {
       return false
     }
     // make sure non-shard-key (i.e. non-implicit) target-schema columns are included in the "on" clause.
     val tschemaNoImplicit = tschema.get.filter(!nonMetricShardKeyCols.contains(_))
-    tschemaNoImplicit.forall(bj.on.contains(_))
+    tschemaNoImplicit.forall(clauseLabels.contains(_))
   }
 
   // scalastyle:off method.length
