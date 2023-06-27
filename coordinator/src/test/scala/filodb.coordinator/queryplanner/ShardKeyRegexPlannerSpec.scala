@@ -603,7 +603,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
       case _ => fail("Expected AggregateMapReduce for the sum operation")
     }
     mpExec.children match {
-      case plan1::plan2::Nil =>
+      case children: Seq[ExecPlan] if children.size == 2 =>
+        val plan1 = children(0)
+        val plan2 = children(1)
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
           Set("""count(test1{_ws_="demo",_ns_="App2"}) by (foo)""",
@@ -902,7 +904,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
 
     })
     execPlan.children match {
-      case plan1::plan2::Nil =>
+      case children: Seq[ExecPlan] if children.size == 2 =>
+        val plan1 = children(0)
+        val plan2 = children(1)
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
           Set("""sum(absent(foo{_ws_="demo",_ns_="App-2"}))""",
@@ -1027,7 +1031,9 @@ class ShardKeyRegexPlannerSpec extends AnyFunSpec with Matchers with ScalaFuture
     }
 
     execPlan.children match {
-      case plan1::plan2::Nil =>
+      case children: Seq[ExecPlan] if children.size == 2 =>
+        val plan1 = children(0)
+        val plan2 = children(1)
         (plan2.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl ::
           plan1.queryContext.origQueryParams.asInstanceOf[PromQlQueryParams].promQl :: Nil toSet) shouldEqual
           Set("""sum(foo{_ws_="demo",_ns_="App-1"})""",
