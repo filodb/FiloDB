@@ -7,7 +7,7 @@ import monix.reactive.Observable
 import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.{Column, Schema, Schemas}
-import filodb.core.query.{QueryContext, QuerySession, ResultSchema}
+import filodb.core.query.{QueryConfig, QueryContext, QuerySession, QueryWarnings, ResultSchema}
 import filodb.core.store._
 import filodb.query.Query
 import filodb.query.Query.qLogger
@@ -133,6 +133,15 @@ final case class SelectRawPartitionsExec(queryContext: QueryContext,
       source.rangeVectors(datasetRef, lookupRes.get, colIds, sch, filterSchemas, querySession)
     }.getOrElse(Observable.empty)
     ExecResult(rvs, Task.eval(schemaOfDoExecute()))
+  }
+
+  override def checkResultBytes(resultSize: Long, queryConfig: QueryConfig, queryWarnings: QueryWarnings): Unit = {
+    super.checkResultBytes(resultSize, queryConfig, queryWarnings)
+    lookupRes.foreach(plr =>
+      if (plr.dataBytesScannedCtr.get() > queryContext.plannerParams.warnLimits.rawScannedBytes) {
+        queryWarnings.updateRawScannedBytes(plr.dataBytesScannedCtr.get())
+      }
+    )
   }
 
   protected def args: String = s"dataset=$dataset, shard=${lookupRes.map(_.shard).getOrElse(-1)}, " +

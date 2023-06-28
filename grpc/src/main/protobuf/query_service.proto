@@ -25,8 +25,9 @@ message PerQueryLimits {
   optional uint64 execPlanResultBytes           = 2; // Limit on ExecPlan results in bytes
   optional uint32 groupByCardinality            = 3; // Limit on "group by" clause results
   optional uint32 joinQueryCardinality          = 4; // Limit on binary join results
-  optional uint64 timeSeriesSamplesScannedBytes = 5; // Limit on max data scanned per shard
+  optional uint64 timeSeriesSamplesScannedBytes = 5; // Limit on max estimated data scanned per shard
   optional uint32 timeSeriesScanned             = 6; // Limit on max time series scanned
+  optional uint64 rawScannedBytes               = 7; // Limit on max actual scanned bytes per shard
 }
 
 message PlannerParams {
@@ -143,6 +144,7 @@ message QueryWarnings {
   uint32 joinQueryCardinality          = 4;
   uint64 timeSeriesSamplesScannedBytes = 5;
   uint32 timeSeriesScanned             = 6;
+  uint64 rawScannedBytes               = 7;
 }
 
 

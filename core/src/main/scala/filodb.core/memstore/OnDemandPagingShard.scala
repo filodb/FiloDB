@@ -94,8 +94,6 @@ TimeSeriesShard(ref, schemas, storeConfig, quotaSource, shardNum, bufferMemoryMa
     val estDataSize = schemas.estimateBytesScan(
       schemaId, colIds, numTsPartitions, chunkDurationMillis, resolutionMs, queryDurationMs
     )
-    // TODO the below does not return a particular kind of error code. Most likely this would translate to
-    // an internal error of FiloDB which is not appropriate for the case
     if (estDataSize > enforcedLimits.timeSeriesSamplesScannedBytes) {
       val exMessage = s"With match of $numTsPartitions time series, estimate of $estDataSize bytes exceeds limit of " +
         s"${enforcedLimits.timeSeriesSamplesScannedBytes} bytes queried per shard " +

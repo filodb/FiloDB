@@ -236,7 +236,8 @@ object PrometheusModel {
       groupByCardinality = qw.groupByCardinality.get(),
       joinQueryCardinality = qw.joinQueryCardinality.get(),
       timeSeriesSamplesScannedBytes = qw.timeSeriesSamplesScannedBytes.get(),
-      timeSeriesScanned = qw.timeSeriesScanned.get()
+      timeSeriesScanned = qw.timeSeriesScanned.get(),
+      rawScannedBytes = qw.rawScannedBytes.get()
     )
   }
 

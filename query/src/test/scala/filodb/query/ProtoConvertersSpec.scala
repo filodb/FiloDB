@@ -90,13 +90,15 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
                               execPlanResultBytes = 125,
                               execPlanSamples = 126,
                               timeSeriesSamplesScannedBytes = 127,
-                              timeSeriesScanned = 200),
+                              timeSeriesScanned = 200,
+                              rawScannedBytes = 201),
                             warnLimits = PerQueryLimits(
                               groupByCardinality = 128,
                               joinQueryCardinality = 129,
                               execPlanResultBytes = 130,
                               execPlanSamples = 131,
-                              timeSeriesSamplesScannedBytes = 132),
+                              timeSeriesSamplesScannedBytes = 132,
+                              rawScannedBytes = 201),
                             queryOrigin = Option("rr"),
                             queryOriginId = Option("rr_id"),
                             timeSplitEnabled = true,
@@ -125,7 +127,6 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     stat.resultBytes.addAndGet(100)
     stat.dataBytesScanned.addAndGet(1000)
     stat.timeSeriesScanned.addAndGet(5)
-
 
     val stat1 = Stat()
     stat1.resultBytes.addAndGet(10)
