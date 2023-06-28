@@ -181,7 +181,8 @@ object TsCardinalities {
  *     [ws, ns]           { 2, 3 }
  *     [ws, ns, metric]   { 3 }
  */
-case class TsCardinalities(shardKeyPrefix: Seq[String], numGroupByFields: Int) extends LogicalPlan {
+case class TsCardinalities(shardKeyPrefix: Seq[String], numGroupByFields: Int, version: Int = 1,
+                           datasets: Seq[String] = Seq(), params: Map[String, String] = Map()) extends LogicalPlan {
   import TsCardinalities._
 
   require(numGroupByFields >= 1 && numGroupByFields <= 3,
@@ -192,6 +193,7 @@ case class TsCardinalities(shardKeyPrefix: Seq[String], numGroupByFields: Int) e
     "cannot group at the metric level when prefix does not contain ws and ns")
 
   // TODO: this should eventually be "true" to enable HAP/LTRP routing
+  // TODO: ask if we should enable it
   override def isRoutable: Boolean = false
 
   def filters(): Seq[ColumnFilter] = SHARD_KEY_LABELS.zip(shardKeyPrefix).map{ case (label, value) =>

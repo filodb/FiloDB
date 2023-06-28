@@ -621,12 +621,12 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         if (p.partitionName.equals(localPartitionName))
           localPartitionPlanner.materialize(lp, qContext)
         else {
-          val params = Map(
-            "match[]" -> ("{" + SHARD_KEY_LABELS.zip(lp.shardKeyPrefix)
-                           .map{ case (label, value) => s"""$label="$value""""}
-                           .mkString(",") + "}"),
-            "numGroupByFields" -> lp.numGroupByFields.toString)
-          createMetadataRemoteExec(qContext, p, params)
+//          val params = Map(
+//            "match[]" -> ("{" + SHARD_KEY_LABELS.zip(lp.shardKeyPrefix)
+//                           .map{ case (label, value) => s"""$label="$value""""}
+//                           .mkString(",") + "}"),
+//            "numGroupByFields" -> lp.numGroupByFields.toString)
+          createMetadataRemoteExec(qContext, p, lp.params)
         }
       }
       if (execPlans.size == 1) {

@@ -2,7 +2,7 @@ package filodb.coordinator.queryplanner
 
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{QueryConfig, QueryContext}
-import filodb.query._
+import filodb.query.{exec, _}
 import filodb.query.exec._
 
 
@@ -74,9 +74,12 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner],
   }
 
   private def materializeTsCardinalities(logicalPlan: TsCardinalities, qContext: QueryContext): PlanResult = {
-    // Delegate to defaultPlanner
-    planners.get(defaultPlanner).map(p => PlanResult(Seq(p.materialize(logicalPlan, qContext))))
-    .getOrElse(PlanResult(Seq()))
+    // TODO: Add handling for all the edge cases
+    val execPlans = logicalPlan.datasets.map(d => planners.get(d))
+      .map(x => x.get.materialize(logicalPlan, qContext))
+    PlanResult(Seq(TsCardReduceExec(qContext, inProcessPlanDispatcher, execPlans)))
+//    planners.get(defaultPlanner).map(p => PlanResult(Seq(p.materialize(logicalPlan, qContext))))
+//    .getOrElse(PlanResult(Seq()))
   }
 
 
