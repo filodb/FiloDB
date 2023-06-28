@@ -351,7 +351,7 @@ class CountingChunkInfoIterator(base: ChunkInfoIterator,
     // 1. query stats counter to meter usage by ws/ns. This will eventually be sent as part of query result.
     dataBytesScannedCtr.addAndGet(bytesRead)
     if (dataBytesScannedCtr.get() > maxBytesScanned) {
-      val exMessage = s"Actual raw data bytes scan of $dataBytesScannedCtr.get() bytes exceeds limit of " +
+      val exMessage = s"Actual raw data bytes scan of ${dataBytesScannedCtr.get()} bytes exceeds limit of " +
         s"${maxBytesScanned} bytes queried per shard. " +
         s"Try one or more of these: " +
         s"(a) narrow your query filters to reduce to fewer time series matches " +
