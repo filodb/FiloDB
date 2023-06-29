@@ -152,7 +152,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
                  100L, 1000L, 100L, window = 1000L, function = RangeFunctionId.CountOverTime), qOpt)
     coordinatorActor ! q2
     expectMsgPF(10.seconds.dilated) {
-      case QueryResult(_, schema, vectors, _, _, _) =>
+      case QueryResult(_, schema, vectors, _, _, _, _) =>
         schema.columns shouldEqual Seq(ColumnInfo("GLOBALEVENTID", ColumnType.LongColumn, false),
                                        ColumnInfo("value", ColumnType.DoubleColumn, true))
         // query is counting each partition....

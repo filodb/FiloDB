@@ -162,7 +162,7 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(ingestBlockHolder, encode = true)
     // part.encodeAndReleaseBuffers(ingestBlockHolder)
-    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicLong())
+    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1), new AtomicLong(), Long.MaxValue, "query-id")
   }
 
   def timeValueRvDownsample(tuples: Seq[(Long, Double, Double, Double, Double, Double)],
@@ -176,7 +176,7 @@ trait RawDataWindowingSpec extends AnyFunSpec with Matchers with BeforeAndAfter 
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(ingestBlockHolder2, encode = true)
     // part.encodeAndReleaseBuffers(ingestBlockHolder)
-    RawDataRangeVector(null, part, AllChunkScan, colIds, new AtomicLong())
+    RawDataRangeVector(null, part, AllChunkScan, colIds, new AtomicLong(), Long.MaxValue, "query-id")
   }
 
   def timeValueRV(data: Seq[Double], startTS: Long = defaultStartTS): RawDataRangeVector = {

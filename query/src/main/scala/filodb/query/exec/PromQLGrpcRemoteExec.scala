@@ -4,8 +4,8 @@ import java.util.concurrent.TimeUnit
 
 import scala.concurrent.Future
 
-import io.grpc.Channel
-import io.grpc.stub.StreamObserver
+import io.grpc.{Channel, Metadata}
+import io.grpc.stub.{MetadataUtils, StreamObserver}
 import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
@@ -89,7 +89,12 @@ case class PromQLGrpcRemoteExec(channel: Channel,
         subject
           .doOnSubscribe(Task.eval {
               val nonBlockingStub = RemoteExecGrpc.newStub(channel)
-              nonBlockingStub.withDeadlineAfter(requestTimeoutMs, TimeUnit.MILLISECONDS)
+              val md = new Metadata();
+              queryContext.traceInfo.foreach {
+                  case (key, value)   => md.put(Metadata.Key.of(key, Metadata.ASCII_STRING_MARSHALLER), value)
+              }
+              nonBlockingStub.withInterceptors(MetadataUtils.newAttachHeadersInterceptor(md))
+              .withDeadlineAfter(requestTimeoutMs, TimeUnit.MILLISECONDS)
                 .execStreaming(getGrpcRequest(plannerSelector),
                     new StreamObserver[GrpcMultiPartitionQueryService.StreamingResponse] {
                         override def onNext(value: StreamingResponse): Unit = subject.onNext(value)

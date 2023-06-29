@@ -12,8 +12,17 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core._
+import filodb.core.metadata.Schemas
+import filodb.memory.format.UnsafeUtils
 
-case class PartKeyRecord(partKey: Array[Byte], startTime: Long, endTime: Long, hash: Option[Int])
+case class PartKeyRecord(partKey: Array[Byte], startTime: Long, endTime: Long, shard: Int)
+
+object PartKeyRecord {
+  def getBucket(partKey: Array[Byte], schemas: Schemas, numBuckets: Int): Int = {
+    val hash = schemas.part.binSchema.partitionHash(partKey, UnsafeUtils.arayOffset)
+    (hash & Int.MaxValue) % numBuckets
+  }
+}
 
 /**
  * ChunkSink is the base trait for a sink, or writer to a persistent store, of chunks

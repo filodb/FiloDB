@@ -81,12 +81,13 @@ final case class BinaryJoinExec(queryContext: QueryContext,
             s" encountered input cardinality ${result.size}"
           val logline = queryContext.getQueryLogLine(msg)
           qLogger.warn(logline)
-          throw new QueryLimitException(s"The join in this query has input cardinality of ${result.size} which" +
+          throw QueryLimitException(s"The join in this query has input cardinality of ${result.size} which" +
             s" is more than limit of ${queryContext.plannerParams.enforcedLimits.joinQueryCardinality}." +
             s" Try applying more filters or reduce time range.", queryContext.queryId)
         }
         val joinQueryWarnCardinalityLimit = queryContext.plannerParams.warnLimits.joinQueryCardinality
         if (result.size > joinQueryWarnCardinalityLimit && cardinality == Cardinality.OneToOne) {
+          querySession.warnings.updateJoinQueryCardinality(result.size)
           qLogger.info(queryContext.getQueryLogLine(
             s"Exceeded warning binary join input cardinality limit=${joinQueryWarnCardinalityLimit}, " +
               s" encountered input cardinality ${result.size}"
@@ -153,9 +154,9 @@ final case class BinaryJoinExec(queryContext: QueryContext,
 
             // OneToOne cardinality case is already handled. this condition handles OneToMany case
             if (results.size >= queryContext.plannerParams.enforcedLimits.joinQueryCardinality)
-              throw new BadQueryException(s"The result of this join query has cardinality ${results.size} and has " +
+              throw new QueryLimitException(s"The result of this join query has cardinality ${results.size} and has " +
                 s"reached the limit of ${queryContext.plannerParams.enforcedLimits.joinQueryCardinality}. " +
-                s"Try applying more filters.")
+                s"Try applying more filters.", queryContext.queryId)
 
             val res = if (lhsIsOneSide) binOp(rvOne.rows, rvOtherCorrect.rows)
             else binOp(rvOtherCorrect.rows, rvOne.rows)

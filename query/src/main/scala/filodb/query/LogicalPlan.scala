@@ -4,6 +4,7 @@ import filodb.core.query.{ColumnFilter, RangeParams, RvRange}
 import filodb.core.query.Filter.Equals
 
 //scalastyle:off number.of.types
+//scalastyle:off file.size.limit
 sealed trait LogicalPlan {
   /**
     * Execute failure routing
@@ -82,6 +83,12 @@ sealed trait MetadataQueryPlan extends LogicalPlan {
   val endMs: Long
 
 }
+
+/**
+ * Plans with this trait can be pushdown-optimized.
+ * See LogicalPlanUtils::getPushdownKeys for more info.
+ */
+sealed trait CandidatePushdownPlan extends LogicalPlan
 
 /**
   * A selector is needed in the RawSeries logical plan to specify
@@ -399,7 +406,8 @@ case object AggregateClause {
 case class Aggregate(operator: AggregationOperator,
                      vectors: PeriodicSeriesPlan,
                      params: Seq[Any] = Nil,
-                     clauseOpt: Option[AggregateClause] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                     clauseOpt: Option[AggregateClause] = None)
+      extends PeriodicSeriesPlan with NonLeafLogicalPlan with CandidatePushdownPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
   override def startMs: Long = vectors.startMs
   override def stepMs: Long = vectors.stepMs
@@ -424,7 +432,8 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
                       rhs: PeriodicSeriesPlan,
                       on: Seq[String] = Nil,
                       ignoring: Seq[String] = Nil,
-                      include: Seq[String] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                      include: Seq[String] = Nil)
+      extends PeriodicSeriesPlan with NonLeafLogicalPlan with CandidatePushdownPlan {
   require(lhs.startMs == rhs.startMs)
   require(lhs.endMs == rhs.endMs)
   require(lhs.stepMs == rhs.stepMs)
@@ -793,3 +802,4 @@ object LogicalPlan {
 }
 
 //scalastyle:on number.of.types
+//scalastyle:on file.size.limit

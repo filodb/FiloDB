@@ -105,6 +105,8 @@ class PartitionKeysCopierValidator(sparkConf: SparkConf) extends StrictLogging {
     var allRecords = new ListBuffer[ExpandedPartKeyRecord]()
     for (split <- splits; shard <- 0 until numOfShards) {
       val tokens = split.asInstanceOf[CassandraTokenRangeSplit].tokens
+      // TODO PartKeys V2 Table handling is not done yet. Needs to be tasked.
+      //  Skipping for now since this does not have a unit test, and is not used in prod yet.
       val srcPartKeysTable = cassandraColumnStore.getOrCreatePartitionKeysTable(datasetRef, shard)
       // CQL does not support OR operator. So we need to query separately to get the timeSeries partitionKeys
       // which were born or died during the data loss period (aka repair window).

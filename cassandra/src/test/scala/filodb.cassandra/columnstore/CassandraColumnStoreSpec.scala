@@ -2,11 +2,14 @@ package filodb.cassandra.columnstore
 
 import java.lang.ref.Reference
 import java.nio.ByteBuffer
+
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
+
 import com.datastax.driver.core.Row
 import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
+
 import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.core._
@@ -16,8 +19,8 @@ import filodb.core.store.{ChunkSet, ChunkSetInfo, ColumnStoreSpec, PartKeyRecord
 import filodb.memory.{BinaryRegionLarge, NativeMemoryManager}
 import filodb.memory.format.{TupleRowReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
-
 import java.nio.charset.StandardCharsets
+import java.util.UUID
 
 class CassandraColumnStoreSpec extends ColumnStoreSpec {
   import NamesTestData._
@@ -66,20 +69,22 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     colStore.initialize(dataset, 1).futureValue
     colStore.truncate(dataset, 1).futureValue
 
-    val pks = (10000 to 30000).map(_.toString.getBytes(StandardCharsets.UTF_8))
-                              .zipWithIndex.map { case (pk, i) => PartKeyRecord(pk, 5, 10, Some(i))}.toSet
+    // GOTCHA: these synthetic pks are not well-formed. We just use the bytes for Schemas to read some hash
+    val pks = (1 to 10000)
+          .map(_ => UUID.randomUUID().toString.getBytes(StandardCharsets.UTF_8))
+          .zipWithIndex.map { case (pk, i) => PartKeyRecord(pk, 5, 10, shard = 0)}.toSet
 
     val updateHour = 10
     colStore.writePartKeys(dataset, 0, Observable.fromIterable(pks), 1.hour.toSeconds.toInt, 10, true )
       .futureValue shouldEqual Success
 
-    val expectedKeys = pks.map(pk => new String(pk.partKey, StandardCharsets.UTF_8).toInt)
+    val expectedKeys = pks.map(pk => new String(pk.partKey, StandardCharsets.UTF_8))
 
     val readData = colStore.getPartKeysByUpdateHour(dataset, 0, updateHour).toListL.runToFuture.futureValue.toSet
-    readData.map(pk => new String(pk.partKey, StandardCharsets.UTF_8).toInt) shouldEqual expectedKeys
+    readData.map(pk => new String(pk.partKey, StandardCharsets.UTF_8)) shouldEqual expectedKeys
 
     val readData2 = colStore.scanPartKeys(dataset, 0).toListL.runToFuture.futureValue.toSet
-    readData2.map(pk => new String(pk.partKey, StandardCharsets.UTF_8).toInt) shouldEqual expectedKeys
+    readData2.map(pk => new String(pk.partKey, StandardCharsets.UTF_8)) shouldEqual expectedKeys
 
     readData2.map(_.partKey).foreach(pk => colStore.deletePartKeyNoAsync(dataset, 0, pk))
 

@@ -20,6 +20,7 @@ import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
+import filodb.core.metadata.Schemas
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge
 
@@ -60,10 +61,13 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   logger.info(s"Starting CassandraColumnStore with config ${cassandraConfig.withoutPath("password")}")
 
+  val schemas = Schemas.fromConfig(config).get
+
   private val writeParallelism = cassandraConfig.getInt("write-parallelism")
   private val indexScanParallelismPerShard =
     Math.min(cassandraConfig.getInt("index-scan-parallelism-per-shard"), Runtime.getRuntime.availableProcessors())
   private val pkByUTNumSplits = cassandraConfig.getInt("pk-by-updated-time-table-num-splits")
+  private val pkv2NumBuckets = cassandraConfig.getInt("pk-v2-table-num-buckets")
   private val writeTimeIndexTtlSeconds = cassandraConfig.getDuration("write-time-index-ttl", TimeUnit.SECONDS).toInt
   private val createTablesEnabled = cassandraConfig.getBoolean("create-tables-enabled")
   private val numTokenRangeSplitsForScans = cassandraConfig.getInt("num-token-range-splits-for-scans")
@@ -78,24 +82,45 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                             MeasurementUnit.time.milliseconds).withoutTags()
 
   def initialize(dataset: DatasetRef, numShards: Int): Future[Response] = {
-      val chunkTable = getOrCreateChunkTable(dataset)
-      val partitionKeysByUpdateTimeTable = getOrCreatePartitionKeysByUpdateTimeTable(dataset)
+    // Note the next two lines of code do not create the tables, just trigger the creation of proxy class
+    val chunkTable = getOrCreateChunkTable(dataset)
+    val partitionKeysByUpdateTimeTable = getOrCreatePartitionKeysByUpdateTimeTable(dataset)
     if (createTablesEnabled) {
-      val partKeyTablesInit = Observable.fromIterable(0.until(numShards)).map { s =>
-        getOrCreatePartitionKeysTable(dataset, s)
-      }.mapEval(t => Task.fromFuture(t.initialize())).toListL
       clusterConnector.createKeyspace(chunkTable.keyspace)
       val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
       // Important: make sure nodes are in agreement before any schema changes
       clusterMeta.checkSchemaAgreement()
+
+      def partitionKeysV2TableInit(): Future[Response] = {
+        if (partKeysV2TableEnabled) {
+          val partitionKeysV2Table = getOrCreatePartitionKeysV2Table(dataset)
+          partitionKeysV2Table.initialize()
+        } else Future.successful(Success)
+      }
+
+      def partitionKeysV1TableInit(): Future[Response] = {
+        if (!partKeysV2TableEnabled) {
+          Observable.fromIterable(0.until(numShards)).map { s =>
+            getOrCreatePartitionKeysTable(dataset, s)
+          }.mapEval(t => Task.fromFuture(t.initialize())).toListL.runToFuture
+            .map(_.find(_ != Success).getOrElse(Success))
+        } else Future.successful(Success)
+      }
+
       for {ctResp <- chunkTable.initialize() if ctResp == Success
+           pkv2Resp <- partitionKeysV2TableInit() if pkv2Resp == Success
            ixResp <- indexTable.initialize() if ixResp == Success
            pkutResp <- partitionKeysByUpdateTimeTable.initialize() if pkutResp == Success
-           partKeyTablesResp <- partKeyTablesInit.runToFuture if partKeyTablesResp.forall(_ == Success)
+           partKeyTablesResp <- partitionKeysV1TableInit() if partKeyTablesResp == Success
       } yield Success
     } else {
       // ensure the table handles are eagerly created
-      0.until(numShards).foreach(getOrCreatePartitionKeysTable(dataset, _))
+      // Note tables are not being created here, just the handle(proxy class)
+      if (partKeysV2TableEnabled) {
+        getOrCreatePartitionKeysV2Table(dataset)
+      } else {
+        0.until(numShards).foreach(getOrCreatePartitionKeysTable(dataset, _))
+      }
       Future.successful(Success)
     }
   }
@@ -104,15 +129,30 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     logger.info(s"Clearing all data for dataset ${dataset}")
     val chunkTable = getOrCreateChunkTable(dataset)
     val partitionKeysByUpdateTimeTable = getOrCreatePartitionKeysByUpdateTimeTable(dataset)
-    val partKeyTablesTrunc = Observable.fromIterable(0.until(numShards)).map { s =>
-      getOrCreatePartitionKeysTable(dataset, s)
-    }.mapEval(t => Task.fromFuture(t.clearAll())).toListL
     val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
     clusterMeta.checkSchemaAgreement()
+
+    def partitionKeysV2TableTruncate(): Future[Response] = {
+      if (partKeysV2TableEnabled) {
+        val partitionKeysV2Table = getOrCreatePartitionKeysV2Table(dataset)
+        partitionKeysV2Table.clearAll()
+      } else Future.successful(Success)
+    }
+
+    def partitionKeysV1TableTruncate(): Future[Response] = {
+      if (!partKeysV2TableEnabled) {
+        Observable.fromIterable(0.until(numShards)).map { s =>
+          getOrCreatePartitionKeysTable(dataset, s)
+        }.mapEval(t => Task.fromFuture(t.clearAll())).toListL.runToFuture
+        .map(_.find(_ != Success).getOrElse(Success))
+      } else Future.successful(Success)
+    }
+
     for { ctResp    <- chunkTable.clearAll() if ctResp == Success
+          pkv2Resp  <- partitionKeysV2TableTruncate() if pkv2Resp == Success
           ixResp    <- indexTable.clearAll() if ixResp == Success
           pkutResp  <- partitionKeysByUpdateTimeTable.clearAll() if pkutResp == Success
-          partKeyTablesResp <- partKeyTablesTrunc.runToFuture if partKeyTablesResp.forall( _ == Success)
+          partKeyTablesResp <- partitionKeysV1TableTruncate() if partKeyTablesResp == Success
     } yield Success
   }
 
@@ -120,17 +160,33 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val chunkTable = getOrCreateChunkTable(dataset)
     val partitionKeysByUpdateTimeTable = getOrCreatePartitionKeysByUpdateTimeTable(dataset)
     val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
-    val partKeyTablesDrop = Observable.fromIterable(0.until(numShards)).map { s =>
-      getOrCreatePartitionKeysTable(dataset, s)
-    }.mapEval(t => Task.fromFuture(t.drop())).toListL
     clusterMeta.checkSchemaAgreement()
+
+    def partitionKeysV2TableDrop(): Future[Response] = {
+      if (partKeysV2TableEnabled) {
+        val partitionKeysV2Table = getOrCreatePartitionKeysV2Table(dataset)
+        partitionKeysV2Table.drop()
+      } else Future.successful(Success)
+    }
+
+    def partitionKeysV1TableDrop(): Future[Response] = {
+      if (!partKeysV2TableEnabled) {
+        Observable.fromIterable(0.until(numShards)).map { s =>
+          getOrCreatePartitionKeysTable(dataset, s)
+        }.mapEval(t => Task.fromFuture(t.drop())).toListL.runToFuture
+          .map(_.find(_ != Success).getOrElse(Success))
+      } else Future.successful(Success)
+    }
+
     for {ctResp <- chunkTable.drop() if ctResp == Success
          ixResp <- indexTable.drop() if ixResp == Success
+         pkv2Resp  <- partitionKeysV2TableDrop() if pkv2Resp == Success
          pkutResp  <- partitionKeysByUpdateTimeTable.drop() if pkutResp == Success
-         partKeyTablesResp <- partKeyTablesDrop.runToFuture if partKeyTablesResp.forall(_ == Success)
+         partKeyTablesResp <- partitionKeysV1TableDrop() if partKeyTablesResp == Success
     } yield {
       chunkTableCache.remove(dataset)
       indexTableCache.remove(dataset)
+      partKeysV2TableCache.remove(dataset)
       partitionKeysTableCache.remove(dataset)
       Success
     }
@@ -232,23 +288,21 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
    *
    * @param diskTimeToLiveSeconds ttl
    */
+  // scalastyle:off method.length
   def copyPartitionKeysByTimeRange(datasetRef: DatasetRef,
                                    numOfShards: Int,
                                    splits: Iterator[ScanSplit],
                                    repairStartTime: Long,
                                    repairEndTime: Long,
                                    target: CassandraColumnStore,
-                                   partKeyHashFn: PartKeyRecord => Option[Int],
                                    diskTimeToLiveSeconds: Int): Unit = {
-    def pkRecordWithHash(pkRecord: PartKeyRecord) = {
-      PartKeyRecord(pkRecord.partKey, pkRecord.startTime, pkRecord.endTime, partKeyHashFn(pkRecord))
-    }
 
-    def copyRows(targetPartitionKeysTable: PartitionKeysTable, records: Set[PartKeyRecord], shard: Int) = {
+    def copyRows(targetPartitionKeysTable: PartitionKeysTable, records: Set[PartKeyRecord],
+                 shard: Int) = {
       val partKeys = records.map(partKeyRecord =>
         targetPartitionKeysTable.readPartKey(partKeyRecord.partKey) match {
-          case Some(targetPkr) => pkRecordWithHash(compareAndGet(partKeyRecord, targetPkr))
-          case None => pkRecordWithHash(partKeyRecord)
+          case Some(targetPkr) => compareAndGet(partKeyRecord, targetPkr)
+          case None => partKeyRecord
         }
       )
       val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
@@ -259,28 +313,64 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       )
     }
 
-    // for every split, scan PartitionKeysTable for all the shards.
-    for (split <- splits; shard <- 0 until numOfShards) {
-      val tokens = split.asInstanceOf[CassandraTokenRangeSplit].tokens
-      val srcPartKeysTable = getOrCreatePartitionKeysTable(datasetRef, shard)
-      val targetPartKeysTable = target.getOrCreatePartitionKeysTable(datasetRef, shard)
-      // CQL does not support OR operator. So we need to query separately to get the timeSeries partitionKeys
-      // which were born or died during the data loss period (aka repair window).
-      val rowsByStartTime = srcPartKeysTable.scanRowsByStartTimeRangeNoAsync(tokens, repairStartTime, repairEndTime)
-      val rowsByEndTime = srcPartKeysTable.scanRowsByEndTimeRangeNoAsync(tokens, repairStartTime, repairEndTime)
-      // add to a Set to eliminate duplicate entries.
-      val records = rowsByStartTime.++(rowsByEndTime).map(PartitionKeysTable.rowToPartKeyRecord)
-      if (records.nonEmpty)
-        copyRows(targetPartKeysTable, records, shard)
+    def copyRowsV2(targetPartitionKeysTable: PartitionKeysV2Table, records: Set[PartKeyRecord]) = {
+      val partKeys = records.map(pkr =>
+        targetPartitionKeysTable.readPartKey(pkr.shard,
+                                             PartKeyRecord.getBucket(pkr.partKey, schemas, pkv2NumBuckets),
+                                             pkr.partKey) match {
+          case Some(targetPkr) => compareAndGet(pkr, targetPkr)
+          case None => pkr
+        }
+      )
+      val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
+      Await.result(
+        target.writePartKeys(datasetRef, shard = 0 /* not used */,
+          Observable.fromIterable(partKeys), diskTimeToLiveSeconds, updateHour, !downsampledData),
+        5.minutes // TODO leaving per old code. Need to configure this.
+      )
+    }
+
+    if (partKeysV2TableEnabled) {
+      // for every split, scan PartitionKeysV2Table
+      for (split <- splits) {
+        val tokens = split.asInstanceOf[CassandraTokenRangeSplit].tokens
+        val srcPartKeysTable = getOrCreatePartitionKeysV2Table(datasetRef)
+        val targetPartKeysTable = target.getOrCreatePartitionKeysV2Table(datasetRef)
+        // CQL does not support OR operator. So we need to query separately to get the timeSeries partitionKeys
+        // which were born or died during the data loss period (aka repair window).
+        val rowsByStartTime = srcPartKeysTable.scanRowsByStartTimeRangeNoAsync(tokens, repairStartTime, repairEndTime)
+        val rowsByEndTime = srcPartKeysTable.scanRowsByEndTimeRangeNoAsync(tokens, repairStartTime, repairEndTime)
+        // add to a Set to eliminate duplicate entries.
+        val records = rowsByStartTime.++(rowsByEndTime).map(PartitionKeysV2Table.rowToPartKeyRecord)
+        if (records.nonEmpty)
+          copyRowsV2(targetPartKeysTable, records)
+      }
+    } else {
+      // for every split, scan PartitionKeysTable for all the shards.
+      for (split <- splits; shard <- 0 until numOfShards) {
+        val tokens = split.asInstanceOf[CassandraTokenRangeSplit].tokens
+        val srcPartKeysTable = getOrCreatePartitionKeysTable(datasetRef, shard)
+        val targetPartKeysTable = target.getOrCreatePartitionKeysTable(datasetRef, shard)
+        // CQL does not support OR operator. So we need to query separately to get the timeSeries partitionKeys
+        // which were born or died during the data loss period (aka repair window).
+        val rowsByStartTime = srcPartKeysTable.scanRowsByStartTimeRangeNoAsync(tokens, repairStartTime, repairEndTime)
+        val rowsByEndTime = srcPartKeysTable.scanRowsByEndTimeRangeNoAsync(tokens, repairStartTime, repairEndTime)
+        // add to a Set to eliminate duplicate entries.
+        val records = rowsByStartTime.++(rowsByEndTime).map(r => PartitionKeysTable.rowToPartKeyRecord(r, shard))
+        if (records.nonEmpty)
+          copyRows(targetPartKeysTable, records, shard)
+      }
     }
   }
+  // scalastyle:on method.length
 
   private def compareAndGet(sourceRec: PartKeyRecord, targetRec: PartKeyRecord): PartKeyRecord = {
+
     val startTime = // compare and get the oldest start time
       if (sourceRec.startTime < targetRec.startTime) sourceRec.startTime else targetRec.startTime
     val endTime = // compare and get the latest end time
       if (sourceRec.endTime > targetRec.endTime) sourceRec.endTime else targetRec.endTime
-    PartKeyRecord(sourceRec.partKey, startTime, endTime, None)
+    PartKeyRecord(sourceRec.partKey, startTime, endTime, sourceRec.shard)
   }
 
   /**
@@ -424,42 +514,59 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     wrappedRanges.flatMap(_.unwrap().asScala.toSeq)
 
   def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord] = {
-    val table = getOrCreatePartitionKeysTable(ref, shard)
-    Observable.fromIterable(getScanSplits(ref)).flatMap { tokenRange =>
-      table.scanPartKeys(tokenRange.asInstanceOf[CassandraTokenRangeSplit].tokens, indexScanParallelismPerShard)
+
+    if (partKeysV2TableEnabled) {
+      val table = getOrCreatePartitionKeysV2Table(ref)
+      table.scanPartKeys(shard, indexScanParallelismPerShard, pkv2NumBuckets)
+    } else {
+      val table = getOrCreatePartitionKeysTable(ref, shard)
+      Observable.fromIterable(getScanSplits(ref)).flatMap { tokenRange =>
+        table.scanPartKeys(tokenRange.asInstanceOf[CassandraTokenRangeSplit].tokens, indexScanParallelismPerShard)
+      }
     }
   }
 
   // returns the persisted partKey record, or default partKey record (argument) if there is no persisted value.
   def getPartKeyRecordOrDefault(ref: DatasetRef,
                                 shard: Int,
-                                partKeyRecord: PartKeyRecord): PartKeyRecord = {
-    getOrCreatePartitionKeysTable(ref, shard).readPartKey(partKeyRecord.partKey) match {
-      case Some(targetPkr) => targetPkr
-      case None => partKeyRecord // this case is never executed since raw cluster is the source of truth.
+                                pkr: PartKeyRecord): PartKeyRecord = {
+
+    val opt = if (partKeysV2TableEnabled) {
+      val bucket = PartKeyRecord.getBucket(pkr.partKey, schemas, pkv2NumBuckets)
+      getOrCreatePartitionKeysV2Table(ref).readPartKey(shard, bucket, pkr.partKey)
+    } else {
+      getOrCreatePartitionKeysTable(ref, shard).readPartKey(pkr.partKey)
     }
+    opt.getOrElse(pkr)
   }
 
   def writePartKeys(ref: DatasetRef,
-                    shard: Int,
+                    shard: Int, // TODO not used if v2. Remove after migration to v2 tables
                     partKeys: Observable[PartKeyRecord],
                     diskTTLSeconds: Long, updateHour: Long,
                     writeToPkUTTable: Boolean = true): Future[Response] = {
-    val pkTable = getOrCreatePartitionKeysTable(ref, shard)
     val pkByUTTable = getOrCreatePartitionKeysByUpdateTimeTable(ref)
     val start = System.currentTimeMillis()
     val ret = partKeys.mapParallelUnordered(writeParallelism) { pk =>
       val ttl = if (pk.endTime == Long.MaxValue) -1 else diskTTLSeconds
       // caller needs to supply hash for partKey - cannot be None
       // Logical & MaxValue needed to make split positive by zeroing sign bit
-      val split = (pk.hash.get & Int.MaxValue) % pkByUTNumSplits
-      val writePkFut = pkTable.writePartKey(pk, ttl).flatMap {
+      val split = PartKeyRecord.getBucket(pk.partKey, schemas, pkByUTNumSplits)
+      def writePk() = if (partKeysV2TableEnabled) {
+        val bucket = PartKeyRecord.getBucket(pk.partKey, schemas, pkv2NumBuckets)
+        val pkv2Table = getOrCreatePartitionKeysV2Table(ref)
+        pkv2Table.writePartKey(bucket, pk, ttl)
+      } else {
+        val pkTable = getOrCreatePartitionKeysTable(ref, shard)
+        pkTable.writePartKey(pk, ttl)
+      }
+      val writePkFut = writePk().flatMap {
         case resp if resp == Success && writeToPkUTTable =>
-          pkByUTTable.writePartKey(shard, updateHour, split, pk, writeTimeIndexTtlSeconds)
+          pkByUTTable.writePartKey(pk.shard, updateHour, split, pk, writeTimeIndexTtlSeconds)
         case resp =>
           Future.successful(resp)
       }
-      Task.fromFuture(writePkFut).map{ resp =>
+      Task.fromFuture(writePkFut).map { resp =>
         sinkStats.partKeysWrite(1)
         resp
       }
@@ -471,21 +578,32 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   }
 
   def scanPartKeysByStartEndTimeRangeNoAsync(ref: DatasetRef,
-                                             shard: Int,
+                                             shard: Int, // TODO not used for v2; Remove after migration to v2 tables
                                              split: (String, String),
                                              startTimeGTE: Long,
                                              startTimeLTE: Long,
                                              endTimeGTE: Long,
                                              endTimeLTE: Long): Iterator[PartKeyRecord] = {
-    val pkTable = getOrCreatePartitionKeysTable(ref, shard)
-    pkTable.scanPksByStartEndTimeRangeNoAsync(split, startTimeGTE, startTimeLTE, endTimeGTE, endTimeLTE)
+    if (partKeysV2TableEnabled) {
+      val pkTable = getOrCreatePartitionKeysV2Table(ref)
+      pkTable.scanPksByStartEndTimeRangeNoAsync(split, startTimeGTE, startTimeLTE, endTimeGTE, endTimeLTE)
+    } else {
+      val pkTable = getOrCreatePartitionKeysTable(ref, shard)
+      pkTable.scanPksByStartEndTimeRangeNoAsync(split, startTimeGTE, startTimeLTE, endTimeGTE, endTimeLTE)
+    }
   }
 
   def deletePartKeyNoAsync(ref: DatasetRef,
                            shard: Int,
                            pk: Array[Byte]): Response = {
-    val pkTable = getOrCreatePartitionKeysTable(ref, shard)
-    pkTable.deletePartKeyNoAsync(pk)
+    if (partKeysV2TableEnabled) {
+      val pkTable = getOrCreatePartitionKeysV2Table(ref)
+      val bucket = PartKeyRecord.getBucket(pk, schemas, pkv2NumBuckets)
+      pkTable.deletePartKeyNoAsync(shard, bucket, pk)
+    } else {
+      val pkTable = getOrCreatePartitionKeysTable(ref, shard)
+      pkTable.deletePartKeyNoAsync(pk)
+    }
   }
 
   def getPartKeysByUpdateHour(ref: DatasetRef,
@@ -523,9 +641,11 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   val cassandraConfig = config.getConfig("cassandra")
   val ingestionConsistencyLevel = ConsistencyLevel.valueOf(cassandraConfig.getString("ingestion-consistency-level"))
   val readConsistencyLevel = ConsistencyLevel.valueOf(cassandraConfig.getString("default-read-consistency-level"))
+  val partKeysV2TableEnabled = cassandraConfig.getBoolean("part-keys-v2-table-enabled")
   val tableCacheSize = config.getInt("columnstore.tablecache-size")
 
   val chunkTableCache = concurrentCache[DatasetRef, TimeSeriesChunksTable](tableCacheSize)
+  val partKeysV2TableCache = concurrentCache[DatasetRef, PartitionKeysV2Table](tableCacheSize)
   val indexTableCache = concurrentCache[DatasetRef, IngestionTimeIndexTable](tableCacheSize)
   val partKeysByUTTableCache = concurrentCache[DatasetRef, PartitionKeysByUpdateTimeTable](tableCacheSize)
   val partitionKeysTableCache = concurrentCache[DatasetRef,
@@ -539,8 +659,6 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
     val keyspace: String = if (!downsampledData) config.getString("keyspace")
                            else config.getString("downsample-keyspace")
 }
-
-  val partParallelism = 4
 
   /**
     * Read chunks from persistent store. Note the following constraints under which query is optimized:
@@ -594,6 +712,14 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
                             readConsistencyLevel)(readEc) })
 }
 
+  def getOrCreatePartitionKeysV2Table(dataset: DatasetRef): PartitionKeysV2Table = {
+    require(partKeysV2TableEnabled) // to make sure we don't trigger table creation unintentionally
+    partKeysV2TableCache.getOrElseUpdate(dataset, { dataset: DatasetRef =>
+      new PartitionKeysV2Table(dataset, clusterConnector, ingestionConsistencyLevel,
+        readConsistencyLevel)(readEc)
+    })
+  }
+
   def getOrCreatePartitionKeysByUpdateTimeTable(dataset: DatasetRef): PartitionKeysByUpdateTimeTable = {
     partKeysByUTTableCache.getOrElseUpdate(dataset,
       { dataset: DatasetRef =>
@@ -602,6 +728,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   }
 
   def getOrCreatePartitionKeysTable(dataset: DatasetRef, shard: Int): PartitionKeysTable = {
+    require(!partKeysV2TableEnabled) // to make sure we don't trigger table creation unintentionally
     val map = partitionKeysTableCache.getOrElseUpdate(dataset, { _ =>
       concurrentCache[Int, PartitionKeysTable](tableCacheSize)
     })

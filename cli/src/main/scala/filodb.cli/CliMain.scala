@@ -197,10 +197,10 @@ object CliMain extends StrictLogging {
             printf("%40s %20s %20s %15s %15s\n", "Child", "TotalTimeSeries", "ActiveTimeSeries", "Children", "Children")
             printf("%40s %20s %20s %15s %15s\n", "Name", "Count", "Count", "Count", "Quota")
             println("==============================================================================================================================")
-            crs._2.sortBy(c => if (addInactive) c.tsCount else c.activeTsCount)(Ordering.Int.reverse)
+            crs._2.sortBy(c => if (addInactive) c.value.tsCount else c.value.activeTsCount)(Ordering.Int.reverse)
               .foreach { cr =>
-                printf("%40s %20d %20d %15d %15d\n", cr.prefix, cr.tsCount,
-                       cr.activeTsCount, cr.childrenCount, cr.childrenQuota)
+                printf("%40s %20d %20d %15d %15d\n", cr.prefix, cr.value.tsCount,
+                       cr.value.activeTsCount, cr.value.childrenCount, cr.value.childrenQuota)
               }
           }
 
@@ -487,9 +487,10 @@ object CliMain extends StrictLogging {
       case Some(intervalSecs) =>
         val fut = Observable.intervalAtFixedRate(intervalSecs.seconds).foreach { n =>
           client.logicalPlan2Query(ref, plan, qOpts) match {
-            case QueryResult(_, _, result, stats, _, _) =>
+            case QueryResult(_, _, result, stats, warnings, _, _) =>
               result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
               println(s"QueryStats: $stats")
+              println(s"QueryWarnings: $warnings")
             case err: QueryError                => throw new ClientException(err)
           }
         }.recover {
@@ -500,11 +501,12 @@ object CliMain extends StrictLogging {
       case None =>
         try {
           client.logicalPlan2Query(ref, plan, qOpts) match {
-            case QueryResult(_, schema, result, stats, _, _) =>
+            case QueryResult(_, schema, result, stats, warnings, _, _) =>
                                                    println(s"Output schema: $schema")
                                                    println(s"Number of Range Vectors: ${result.size}")
                                                    result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
                                                    println(s"QueryStats: $stats")
+                                                   println(s"QueryWarnings: $warnings")
             case QueryError(_, stats, ex)  =>
                                                    println(s"QueryError: ${ex.getClass.getSimpleName} ${ex.getMessage}")
                                                    println(s"QueryStats: $stats")

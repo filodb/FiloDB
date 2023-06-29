@@ -50,7 +50,8 @@ trait ReduceAggregateExec extends NonLeafExecPlan {
           val aggregator = RowAggregator(aggrOp, aggrParams, schema)
           RangeVectorAggregator.mapReduce(
             aggregator, skipMapPhase = true, results, rv => rv.key,
-            queryContext)
+            queryContext, querySession.warnings
+          )
         }
       }
     Observable.fromTask(task).flatten
@@ -140,10 +141,14 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
       sourceSchema.fixedVectorLen.filter(_ <= querySession.queryConfig.fastReduceMaxWindows).map { numWindows =>
         RangeVectorAggregator.fastReduce(aggregator, false, source, numWindows)
       }.getOrElse {
-        RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping, querySession.qContext)
+        RangeVectorAggregator.mapReduce(
+          aggregator, skipMapPhase = false, source, grouping, querySession.qContext, querySession.warnings
+        )
       }
     } else {
-      RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping, querySession.qContext)
+      RangeVectorAggregator.mapReduce(
+        aggregator, skipMapPhase = false, source, grouping, querySession.qContext, querySession.warnings
+      )
     }
   }
 
@@ -198,7 +203,8 @@ object RangeVectorAggregator extends StrictLogging {
                 skipMapPhase: Boolean,
                 source: Observable[RangeVector],
                 grouping: RangeVector => RangeVectorKey,
-                queryContext: QueryContext): Observable[RangeVector] = {
+                queryContext: QueryContext,
+                queryWarnings: QueryWarnings): Observable[RangeVector] = {
     // reduce the range vectors using the foldLeft construct. This results in one aggregate per group.
     val task = source.toListL.map { rvs =>
       val period = rvs.headOption.flatMap(_.outputRange)
@@ -211,7 +217,7 @@ object RangeVectorAggregator extends StrictLogging {
         logger.warn(queryContext.getQueryLogLine(
           s"Exceeded enforced group-by cardinality limit ${groupByEnforcedLimit}. "
         ))
-        throw new QueryLimitException(
+        throw QueryLimitException(
           s"Query exceeded group-by cardinality limit ${groupByEnforcedLimit}. " +
           "Try applying more filters or reduce query range. ", queryContext.queryId
         )
@@ -221,6 +227,7 @@ object RangeVectorAggregator extends StrictLogging {
         logger.info(queryContext.getQueryLogLine(
           s"Exceeded warning group-by cardinality limit ${groupByWarnLimit}. "
         ))
+        queryWarnings.updateGroupByCardinality(groupedResult.size)
       }
       groupedResult.map { case (rvk, aggHolder) =>
         val rowIterator = new CustomCloseCursor(aggHolder.map(_.toRowReader))(aggHolder.close())

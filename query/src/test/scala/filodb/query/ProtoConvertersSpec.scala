@@ -4,6 +4,7 @@ import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import filodb.core.query._
 import ProtoConverters._
+import akka.pattern.AskTimeoutException
 import filodb.core.QueryTimeoutException
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.SchemaMismatch
@@ -89,13 +90,15 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
                               execPlanResultBytes = 125,
                               execPlanSamples = 126,
                               timeSeriesSamplesScannedBytes = 127,
-                              timeSeriesScanned = 200),
+                              timeSeriesScanned = 200,
+                              rawScannedBytes = 201),
                             warnLimits = PerQueryLimits(
                               groupByCardinality = 128,
                               joinQueryCardinality = 129,
                               execPlanResultBytes = 130,
                               execPlanSamples = 131,
-                              timeSeriesSamplesScannedBytes = 132),
+                              timeSeriesSamplesScannedBytes = 132,
+                              rawScannedBytes = 201),
                             queryOrigin = Option("rr"),
                             queryOriginId = Option("rr_id"),
                             timeSplitEnabled = true,
@@ -124,7 +127,6 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     stat.resultBytes.addAndGet(100)
     stat.dataBytesScanned.addAndGet(1000)
     stat.timeSeriesScanned.addAndGet(5)
-
 
     val stat1 = Stat()
     stat1.resultBytes.addAndGet(10)
@@ -209,9 +211,18 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val qStats = QueryStats()
     qStats.stat.put(List(), stat)
 
+    val warnings = QueryWarnings()
+    warnings.updateTimeSeriesScanned(1)
+    warnings.updateExecPlanResultBytes(2)
+    warnings.updateGroupByCardinality(3)
+    warnings.updateExecPlanSamples(4)
+    warnings.updateJoinQueryCardinality(5)
+
     val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", qStats)
 
-    val origQueryResult = QueryResult("someId", resultSchema, List(srv), qStats, true, Some("Some shards timed out"))
+    val origQueryResult = QueryResult(
+      "someId", resultSchema, List(srv), qStats, warnings, true, Some("Some shards timed out")
+    )
     val successResp = origQueryResult.toProto.fromProto.asInstanceOf[QueryResult]
     successResp.id shouldEqual origQueryResult.id
     successResp.resultSchema shouldEqual origQueryResult.resultSchema
@@ -237,7 +248,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val resultSchema = ResultSchema(List(ColumnInfo("ts", ColumnType.DoubleColumn),
       ColumnInfo("val", ColumnType.DoubleColumn)), 1, Map.empty)
 
-    val header = StreamQueryResultHeader("someId", resultSchema)
+    val header = StreamQueryResultHeader("someId", "planId", resultSchema)
     header.toProto.fromProto shouldEqual header
   }
 
@@ -251,11 +262,41 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val qStats = QueryStats()
     qStats.stat.put(List(), stat)
 
-    val footer1 = StreamQueryResultFooter("id", qStats, true, Some("Reason"))
+    val warnings = QueryWarnings()
+    warnings.updateJoinQueryCardinality(1)
+    warnings.updateTimeSeriesScanned(1)
+    warnings.updateExecPlanResultBytes(2)
+    warnings.updateGroupByCardinality(3)
+    warnings.updateExecPlanSamples(4)
+    warnings.updateJoinQueryCardinality(5)
+
+    val footer1 = StreamQueryResultFooter("id", "planId", qStats, warnings, true, Some("Reason"))
     footer1.toProto.fromProto shouldEqual footer1
 
-    val footer2 = StreamQueryResultFooter("id", qStats, false, None)
+    val footer2 = StreamQueryResultFooter("id", "planId", qStats, warnings, false, None)
     footer2.toProto.fromProto shouldEqual footer2
+  }
+
+  it("QueryWarnings should have proper hashes and equals methods") {
+
+    val warnings = QueryWarnings()
+    warnings.updateJoinQueryCardinality(1)
+    warnings.updateTimeSeriesScanned(1)
+    warnings.updateExecPlanResultBytes(2)
+    warnings.updateGroupByCardinality(3)
+    warnings.updateExecPlanSamples(4)
+    warnings.updateJoinQueryCardinality(5)
+
+    val warnings2 = QueryWarnings()
+    warnings2.updateJoinQueryCardinality(1)
+    warnings2.updateTimeSeriesScanned(1)
+    warnings2.updateExecPlanResultBytes(2)
+    warnings2.updateGroupByCardinality(3)
+    warnings2.updateExecPlanSamples(4)
+    warnings2.updateJoinQueryCardinality(5)
+
+    warnings shouldEqual warnings2
+    warnings.hashCode() shouldEqual warnings2.hashCode()
   }
 
   it ("should convert StreamingQueryResultBody to and back from proto") {
@@ -273,16 +314,15 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
       (900, Double.NaN), (1000, Double.NaN)), key,
       RvRange(0, 100, 1000))
 
-
     val qStats = QueryStats()
 
     val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", qStats)
-    val origQueryResult = StreamQueryResult("id", srv)
+    val origQueryResult = StreamQueryResult("id", "planId", Seq(srv))
 
     val successResp = origQueryResult.toProto.fromProto.asInstanceOf[StreamQueryResult]
     successResp.queryId shouldEqual origQueryResult.queryId
-    successResp.result.isInstanceOf[SerializedRangeVector] shouldEqual true
-    val deserializedSrv = successResp.result.asInstanceOf[SerializedRangeVector]
+    successResp.result.head.isInstanceOf[SerializedRangeVector] shouldEqual true
+    val deserializedSrv = successResp.result.head.asInstanceOf[SerializedRangeVector]
     deserializedSrv.numRows shouldEqual Some(11)
     deserializedSrv.numRowsSerialized shouldEqual 4
     val res = deserializedSrv.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
@@ -300,7 +340,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val qStats = QueryStats()
     qStats.stat.put(List(), stat)
 
-    val err = StreamQueryError("id", qStats, new IllegalArgumentException("Args"))
+    val err = StreamQueryError("id", "planId", qStats, new IllegalArgumentException("Args"))
     val deser = err.toProto.fromProto.asInstanceOf[StreamQueryError]
     deser.queryId shouldEqual err.queryId
     deser.queryStats shouldEqual err.queryStats
@@ -314,7 +354,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val resultSchema = ResultSchema(List(ColumnInfo("ts", ColumnType.DoubleColumn),
       ColumnInfo("val", ColumnType.DoubleColumn)), 1, Map.empty)
 
-    val header = StreamQueryResultHeader("someId", resultSchema)
+    val header = StreamQueryResultHeader("someId", "planId", resultSchema)
 
     val builder = SerializedRangeVector.newBuilder()
     val recSchema = new RecordSchema(Seq(ColumnInfo("time", ColumnType.TimestampColumn),
@@ -331,7 +371,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
       RvRange(0, 100, 1000))
     val stats = QueryStats()
     val srv = SerializedRangeVector.apply(rv, builder, recSchema, "someExecPlan", stats)
-    val streamingQueryBody = StreamQueryResult("someId", srv)
+    val streamingQueryBody = StreamQueryResult("someId", "planId", Seq(srv))
 
 
     val stat = Stat()
@@ -342,8 +382,15 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val qStats = QueryStats()
     qStats.stat.put(List(), stat)
 
-    val footer = StreamQueryResultFooter("someId", qStats, true, Some("Reason"))
+    val warnings = QueryWarnings()
+    warnings.updateTimeSeriesScanned(1)
+    warnings.updateExecPlanResultBytes(2)
+    warnings.updateGroupByCardinality(3)
+    warnings.updateExecPlanSamples(4)
+    warnings.updateJoinQueryCardinality(5)
+    warnings.updateTimeSeriesSampleScannedBytes(6)
 
+    val footer = StreamQueryResultFooter("someId", "planId", qStats, warnings, true, Some("Reason"))
 
     val response = Seq(header.toProto, streamingQueryBody.toProto, footer.toProto)
       .toIterator.toQueryResponse.asInstanceOf[QueryResult]
@@ -366,7 +413,7 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     // Case 2 Iter[StreamingResponse] to QueryResp Happy response w/o partial reason
 
 
-    val footer1 = StreamQueryResultFooter("someId", qStats, false, None)
+    val footer1 = StreamQueryResultFooter("someId", "planId", qStats, warnings, false, None)
 
 
     val response1 = Seq(header.toProto, streamingQueryBody.toProto, footer1.toProto)
@@ -413,7 +460,8 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
 
     // Case 5 Iter[StreamingResponse] Error with throwable
 
-    val errorResponse = Seq(StreamQueryError("errorId", qStats, new IllegalArgumentException("Exception")).toProto)
+    val errorResponse = Seq(StreamQueryError("errorId", "planId", qStats,
+                   new IllegalArgumentException("Exception")).toProto)
       .toIterator.toQueryResponse.asInstanceOf[QueryError]
 
     errorResponse.id shouldEqual "errorId"
@@ -658,7 +706,25 @@ class ProtoConvertersSpec extends AnyFunSpec with Matchers {
     val rqfe = RemoteQueryFailureException(200, "OK", "none", "no error")
     rqfe.toProto.fromProto shouldEqual rqfe
 
-    // Case 10: Anything else should throw Throwable
+    // case 10: Should deserialize AskTimeoutException
+    val ate = new AskTimeoutException("message")
+    val deserAte = ate.toProto.fromProto
+    deserAte.isInstanceOf[AskTimeoutException] shouldBe true
+    deserAte.getMessage shouldBe ate.getMessage
+
+    val ate1 = new AskTimeoutException("message", new IllegalArgumentException("root"))
+    val deserAte1 = ate1.toProto.fromProto
+    deserAte1.isInstanceOf[AskTimeoutException] shouldBe true
+    deserAte1.getMessage shouldBe ate.getMessage
+    deserAte1.getCause.isInstanceOf[IllegalArgumentException] shouldBe true
+    deserAte1.getCause.getMessage shouldBe "root"
+
+    // case 11: Should deserialize QueryLimitException
+
+    val qle = QueryLimitException("message", "queryId")
+    qle.toProto.fromProto shouldEqual qle
+
+    // Case 12: Anything else should throw Throwable
     val isecause = SchemaMismatch(expected = "expectedSchema", found = "foundSchema", clazz = "SomeClass")
     val ise = new IllegalStateException("Illegal state", isecause)
     val deserializedise = ise.toProto.fromProto

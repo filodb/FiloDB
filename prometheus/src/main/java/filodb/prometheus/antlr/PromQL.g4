@@ -97,7 +97,7 @@ metricKeyword
     ;
 
 labelName:     labelKeyword | IDENTIFIER;
-labelNameList: '(' (labelName (',' labelName)*)? ')';
+labelNameList: '(' (labelName (',' labelName)*)? ','? ')';
 
 // Keywords which are also accepted as label names.
 labelKeyword

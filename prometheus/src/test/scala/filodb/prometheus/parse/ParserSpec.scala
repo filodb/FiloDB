@@ -465,6 +465,21 @@ class ParserSpec extends AnyFunSpec with Matchers {
     parseSuccessfully("timestamp(some_metric)")
     parseError("timestamp(some_metric[5m])") // reason : Expected instant vector, got range vector
     parseError("timestamp(some_metric, hello)") // reason : Expected only 1 arg, got 2
+
+    // Trailing Commas
+    parseSuccessfully("sum without(and, by, avg, count, alert, annotations,)(some_metric)")
+    parseSuccessfully("sum without(and, by, avg, count, alert, annotations, )(some_metric)")
+    parseSuccessfully("sum by(and, by, avg, count, alert, annotations, )(some_metric)")
+
+    // Trailing Commas in Binary Joins
+    parseSuccessfully("foo and ignoring(test,blub,) bar")
+    parseSuccessfully("foo and ignoring(test,blub, ) bar")
+
+    parseSuccessfully("foo / on(test,blub, ) group_left(bar) bar")
+    parseSuccessfully("foo / ignoring(test,blub,) group_left(blub) bar")
+
+    parseSuccessfully("foo - on(test,blub,) group_right(bar,foo,) bar")
+    parseSuccessfully("foo - ignoring(test,blub,) group_right(bar,foo, ) bar")
   }
 
   it("parse long identifiers") {

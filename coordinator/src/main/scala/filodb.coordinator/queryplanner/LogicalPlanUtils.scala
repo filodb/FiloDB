@@ -1,10 +1,12 @@
 package filodb.coordinator.queryplanner
 
+import scala.collection.{mutable, Seq}
 import scala.collection.mutable.ArrayBuffer
 
 import com.typesafe.scalalogging.StrictLogging
 
-import filodb.core.query.{QueryContext, RangeParams}
+import filodb.core.TargetSchemaProvider
+import filodb.core.query.{ColumnFilter, QueryContext, RangeParams}
 import filodb.prometheus.ast.SubqueryUtils
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
@@ -357,4 +359,181 @@ object LogicalPlanUtils extends StrictLogging {
     val diffToNextStep = if (partialStep > 0) step - partialStep else 0
     timestamp + diffToNextStep
   }
+
+  /**
+   * Returns the target-schema for the argument filters and interval
+   *   as long as the schema does not change during the interval.
+   * @return an occupied Option iff a target-schema definition meets the above requirements.
+   */
+  def getTargetSchemaIfUnchanging(targetSchemaProvider: TargetSchemaProvider,
+                                  filters: Seq[ColumnFilter],
+                                  intervalSelector: IntervalSelector): Option[Seq[String]] = {
+    val tsChanges = targetSchemaProvider.targetSchemaFunc(filters)
+    val ichange = tsChanges.lastIndexWhere(change => change.time < intervalSelector.from)
+    if (ichange > -1) {
+      // Is this the final change?
+      // Does the next change occur beyond the end of the interval?
+      if (ichange == tsChanges.size - 1 || tsChanges(ichange + 1).time > intervalSelector.to) {
+        return Some(tsChanges(ichange).schema)
+      }
+    }
+    None
+  }
+
+  /**
+   * Returns an IntervalSelector with a from/to that spans all data read by a RawSeries.
+   *   This includes all lookbacks/offsets.
+   */
+  def getSpanningIntervalSelector(rs: RawSeries): IntervalSelector = {
+    val offsetMs = LogicalPlanUtils.getOffsetMillis(rs).headOption.getOrElse(0L)
+    val lookbackMs = LogicalPlanUtils.getLookBackMillis(rs).headOption.getOrElse(0L)
+    val oldSelector = rs.rangeSelector.asInstanceOf[IntervalSelector]
+    IntervalSelector(oldSelector.from - offsetMs - lookbackMs, oldSelector.to - offsetMs)
+  }
+
+  /**
+   * Returns a sequence that contains all filters of "dest" unless a filter for the same
+   *   label exists in "src"; in this case, the "src" filter is included.
+   */
+  def upsertFilters(dest: Seq[ColumnFilter], src: Seq[ColumnFilter]): Seq[ColumnFilter] = {
+    val columnMap = new mutable.HashMap[String, ColumnFilter]
+    dest.foreach(filter => columnMap(filter.column) = filter)
+    src.foreach(filter => columnMap(filter.column) = filter)
+    columnMap.values.toSeq
+  }
+
+  /**
+   * Returns a set of target-schema columns iff all of:
+   *   - all plan RawSeries share the same target-schema columns.
+   *   - no target-schema definition changes during the query.
+   */
+  private def sameRawSeriesTargetSchemaColumns(plan: LogicalPlan,
+                                               targetSchemaProvider: TargetSchemaProvider,
+                                               getShardKeyFilters: RawSeries => Seq[Seq[ColumnFilter]])
+  : Option[Seq[String]] = {
+    // compose a stream of Options for each RawSeries--
+    //   the options contain a target-schema iff it is defined and unchanging.
+    val rsTschemaOpts = LogicalPlan.findLeafLogicalPlans(plan)
+      .filter(_.isInstanceOf[RawSeries])
+      .map(_.asInstanceOf[RawSeries]).flatMap{ rs =>
+      val shardKeyFilters = getShardKeyFilters(rs)
+      val interval = LogicalPlanUtils.getSpanningIntervalSelector(rs)
+      shardKeyFilters.map{ shardKey =>
+        val filters = LogicalPlanUtils.upsertFilters(rs.filters, shardKey)
+        LogicalPlanUtils.getTargetSchemaIfUnchanging(targetSchemaProvider, filters, interval)
+      }
+    }
+    // make sure all tschemas are defined, and they all match
+    val referenceSchema = rsTschemaOpts.head
+    if (referenceSchema.isDefined
+      && rsTschemaOpts.forall(tschema => tschema.isDefined && tschema == referenceSchema)) {
+      Some(referenceSchema.get)
+    } else {
+      None
+    }
+  }
+
+  /**
+   * Returns true iff a plan can be pushdown-optimized.
+   * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
+   */
+  private def canPushdown(plan: CandidatePushdownPlan,
+                          targetSchemaProvider: TargetSchemaProvider,
+                          nonMetricShardKeyCols: Seq[String],
+                          getShardKeyFilters: RawSeries => Seq[Seq[ColumnFilter]]): Boolean = {
+    val hasPushdownableClause = plan match {
+      case Aggregate(_, _, _, clauseOpt) =>
+        clauseOpt.nonEmpty && clauseOpt.get.clauseType == AggregateClause.ClauseType.By
+      case BinaryJoin(_, _, _, _, on, ignoring, _) =>
+        on.nonEmpty && ignoring.isEmpty
+    }
+    if (!hasPushdownableClause) {
+      return false
+    }
+
+    val clauseLabels = plan match {
+      case Aggregate(_, _, _, clauseOpt) => clauseOpt.get.labels
+      case BinaryJoin(_, _, _, _, on, _, _) => on
+    }
+
+    // FIXME: in the ShardKeyRegexPlanner/MultiPartitionPlanner, we can pushdown even when a target-schema
+    //  isn't defined as long as all shard keys are given on the "by" clause. This change will touch quite
+    //  a few files / tests, so we'll save it for a separate PR.
+    // val clauseCols = bj.on
+    // if (nonMetricShardKeyCols.forall(clauseCols.contains(_))) {
+    //   return true
+    // }
+
+    val tschema = sameRawSeriesTargetSchemaColumns(plan, targetSchemaProvider, getShardKeyFilters)
+    if (tschema.isEmpty) {
+      return false
+    }
+    // make sure non-shard-key (i.e. non-implicit) target-schema columns are included in the "on" clause.
+    val tschemaNoImplicit = tschema.get.filter(!nonMetricShardKeyCols.contains(_))
+    tschemaNoImplicit.forall(clauseLabels.contains(_))
+  }
+
+  // scalastyle:off method.length
+  // scalastyle:off cyclomatic.complexity
+  /**
+   * Returns the set of "keys" to which the LogicalPlan can be pushed down.
+   * A "key" is generic-- it may mean "shards" (e.g. as in the [[SingleClusterPlanner]])
+   *   or "shard-keys" (as in the [[ShardKeyRegexPlanner]]).
+   * When this function returns a Some, the argument plan can be materialized for each key
+   *   in the result, and the concatenation of these "key-local" plans will, on execute(), yield the
+   *   same RangeVectors as the non-pushed-down plan.
+   * @return an occupied Option iff it is valid to perform the a pushdown optimization on the argument plan.
+   */
+  def getPushdownKeys[T](lp: LogicalPlan,
+                         targetSchemaProvider: TargetSchemaProvider,
+                         nonMetricShardKeyCols: Seq[String],
+                         getRawPushdownKeys: RawSeries => Set[T],
+                         getShardKeyFilters: RawSeries => Seq[Seq[ColumnFilter]]): Option[Set[T]] = {
+    def helper(lp: LogicalPlan): Option[Set[T]] = lp match {
+      case vec: VectorPlan =>
+        val keys = helper(vec.scalars)
+        // pushdown only to a single key
+        if (keys.isDefined && keys.get.size == 1) keys else None
+      case svdp: ScalarVaryingDoublePlan =>
+        val keys = helper(svdp.vectors)
+        // pushdown only to a single key"
+        if (keys.isDefined && keys.get.size == 1) keys else None
+      case svbo: ScalarVectorBinaryOperation =>
+        val lhsKeys = helper(svbo.scalarArg)
+        val rhsKeys = helper(svbo.vector)
+        val canPushdown =
+          lhsKeys.isDefined && rhsKeys.isDefined &&
+            // either the lhs/rhs keys are equal, or at least one of lhs/rhs includes only scalars.
+            (lhsKeys.get.isEmpty || rhsKeys.get.isEmpty || lhsKeys == rhsKeys)
+        // union lhs/rhs keys, since one might be empty (if it's a scalar)
+        if (canPushdown) Some(lhsKeys.get.union(rhsKeys.get)) else None
+      case ps: PeriodicSeries => helper(ps.rawSeries)
+      case psw: PeriodicSeriesWithWindowing => helper(psw.series)
+      case aif: ApplyInstantFunction => helper(aif.vectors)
+      case bj: BinaryJoin =>
+        val lhsKeys = helper(bj.lhs)
+        val rhsKeys = helper(bj.rhs)
+        val canPushdownBj =
+          lhsKeys.isDefined && rhsKeys.isDefined &&
+            // either the lhs/rhs keys are equal, or at least one of lhs/rhs includes only scalars.
+            (lhsKeys.get.isEmpty || rhsKeys.get.isEmpty || lhsKeys == rhsKeys) &&
+            canPushdown(bj, targetSchemaProvider, nonMetricShardKeyCols, getShardKeyFilters)
+        // union lhs/rhs keys, since one might be empty (if it's a scalar)
+        if (canPushdownBj) Some(lhsKeys.get.union(rhsKeys.get)) else None
+      case agg: Aggregate =>
+        val keys = helper(agg.vectors)
+        val canPushdownAgg = canPushdown(agg, targetSchemaProvider, nonMetricShardKeyCols, getShardKeyFilters)
+        if (keys.isDefined && canPushdownAgg) keys else None
+      case nl: NonLeafLogicalPlan =>
+        // return the set of all child keys iff all child plans can be pushdown-optimized
+        val keys = nl.children.map(helper)
+        if (keys.forall(_.isDefined)) Some(keys.flatMap(_.get).toSet) else None
+      case rs: RawSeries => Some(getRawPushdownKeys(rs))
+      case sc: ScalarPlan => Some(Set.empty)  // since "None" will prevent optimization for all parent plans
+      case _ => None
+    }
+    helper(lp)
+  }
+  // scalastyle:on method.length
+  // scalastyle:on cyclomatic.complexity
 }
