@@ -25,7 +25,8 @@ final case class QueryWarningsResponse(
   groupByCardinality: Int = 0,
   joinQueryCardinality: Int = 0,
   timeSeriesSamplesScannedBytes: Long = 0,
-  timeSeriesScanned: Int = 0
+  timeSeriesScanned: Int = 0,
+  rawScannedBytes: Long = 0
 )
 
 final case class Data(resultType: String, result: Seq[Result])

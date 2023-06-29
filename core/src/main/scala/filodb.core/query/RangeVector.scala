@@ -296,18 +296,24 @@ final case class RawDataRangeVector(key: RangeVectorKey,
                                     partition: ReadablePartition,
                                     chunkMethod: ChunkScanMethod,
                                     columnIDs: Array[Int],
-                                    dataBytesScannedCtr: AtomicLong) extends RangeVector {
+                                    dataBytesScannedCtr: AtomicLong,
+                                    maxBytesScanned: Long,
+                                    queryId: String) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
   // UPDATE: 10/31/2022: Using CountingChunkInfoIterator instead of default `ReadablePartition.infos` iterator.
   // This is done to count and track the dataBytesScanned info for raw queries
   def rows(): RangeVectorCursor = partition.timeRangeRows(
     chunkMethod,
     columnIDs,
-    new CountingChunkInfoIterator(partition.infos(chunkMethod), columnIDs, dataBytesScannedCtr))
+    new CountingChunkInfoIterator(
+      partition.infos(chunkMethod), columnIDs, dataBytesScannedCtr, maxBytesScanned, queryId)
+  )
 
   // Obtain ChunkSetInfos from specific window of time from partition
   def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = {
-    new CountingChunkInfoIterator(partition.infos(windowStart, windowEnd), columnIDs, dataBytesScannedCtr)
+    new CountingChunkInfoIterator(
+      partition.infos(windowStart, windowEnd), columnIDs, dataBytesScannedCtr, maxBytesScanned, queryId
+    )
   }
 
   // the query engine is based around one main data column to query, so it will always be the second column passed in

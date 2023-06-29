@@ -5,7 +5,7 @@ import monix.execution.Scheduler
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, QueryContext, QuerySession}
+import filodb.core.query.{ColumnFilter, QueryConfig, QueryContext, QuerySession, QueryWarnings}
 import filodb.core.query.Filter.Equals
 import filodb.core.store._
 import filodb.query.Query.qLogger
@@ -143,6 +143,15 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
        s"${"-" * (level + i)}T~${t.getClass.getSimpleName}(${t.args})" +
          printFunctionArgument(t, level + i + 1).mkString("\n")
     }
+  }
+
+  override def checkResultBytes(resultSize: Long, queryConfig: QueryConfig, queryWarnings: QueryWarnings): Unit = {
+    super.checkResultBytes(resultSize, queryConfig, queryWarnings)
+    finalPlan.lookupRes.foreach(plr =>
+      if (plr.dataBytesScannedCtr.get() > queryContext.plannerParams.warnLimits.rawScannedBytes) {
+        queryWarnings.updateRawScannedBytes(plr.dataBytesScannedCtr.get())
+      }
+    )
   }
 }
 
