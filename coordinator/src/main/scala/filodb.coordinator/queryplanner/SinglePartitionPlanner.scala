@@ -2,7 +2,7 @@ package filodb.coordinator.queryplanner
 
 import filodb.core.metadata.{Dataset, DatasetOptions, Schemas}
 import filodb.core.query.{QueryConfig, QueryContext}
-import filodb.query.{exec, _}
+import filodb.query._
 import filodb.query.exec._
 
 

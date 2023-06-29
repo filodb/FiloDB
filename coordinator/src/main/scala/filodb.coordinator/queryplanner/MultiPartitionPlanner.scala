@@ -601,8 +601,6 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
   def materializeTsCardinalities(lp: TsCardinalities, qContext: QueryContext): PlanResult = {
 
-    import TsCardinalities._
-
     val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
     val partitions = if (lp.shardKeyPrefix.size >= 2) {
       // At least a ws/ns pair is required to select specific partitions.
@@ -626,7 +624,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 //                           .map{ case (label, value) => s"""$label="$value""""}
 //                           .mkString(",") + "}"),
 //            "numGroupByFields" -> lp.numGroupByFields.toString)
-          createMetadataRemoteExec(qContext, p, lp.params)
+          createMetadataRemoteExec(qContext, p, lp.params.toMap)
         }
       }
       if (execPlans.size == 1) {

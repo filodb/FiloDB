@@ -181,8 +181,12 @@ object TsCardinalities {
  *     [ws, ns]           { 2, 3 }
  *     [ws, ns, metric]   { 3 }
  */
-case class TsCardinalities(shardKeyPrefix: Seq[String], numGroupByFields: Int, version: Int = 1,
-                           datasets: Seq[String] = Seq(), params: Map[String, String] = Map()) extends LogicalPlan {
+case class TsCardinalities(shardKeyPrefix: Seq[String],
+                           numGroupByFields: Int,
+                           version: Int = 1,
+                           datasets: Seq[String] = Seq(),
+                           params: collection.mutable.Map[String, String] = collection.mutable.Map()
+                          ) extends LogicalPlan {
   import TsCardinalities._
 
   require(numGroupByFields >= 1 && numGroupByFields <= 3,
