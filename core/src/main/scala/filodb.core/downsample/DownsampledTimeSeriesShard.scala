@@ -111,7 +111,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     new DownsampleIndexBootstrapper(store, schemas, stats, indexDataset, downsampleConfig)
 
   val houseKeepingSchedParallelism = Math.round(Runtime.getRuntime.availableProcessors() *
-                                        downsampleConfig.housekeepingParallelismMultiplier).toInt
+                                        downsampleConfig.housekeepingParallelismMultiplier).toInt.max(1)
   private val housekeepingSched = Scheduler.computation(
     parallelism = houseKeepingSchedParallelism,
     name = "housekeeping",
@@ -213,7 +213,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                 indexRefresh(endHour, startHour, periodicRefresh = false)
       case None             => // No checkpoint time found, start refresh from scratch
                                 val parallelism = Math.round(downsampleConfig.indexRebuildParallelismMultiplier *
-                                                    Runtime.getRuntime.availableProcessors()).toInt
+                                                    Runtime.getRuntime.availableProcessors()).toInt.max(1)
                                 logger.info("Rebuilding index with parallelism {}", parallelism)
                                 indexBootstrapper
                                   .bootstrapIndexDownsample(
