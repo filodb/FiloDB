@@ -37,6 +37,10 @@ TRUNCATE ${KEYSP}.${DSET}_partitionkeys_$SHARD;
 EOF
 done
 
+cat << EOF
+TRUNCATE ${KEYSP}.${DSET}_partitionkeysv2;
+EOF
+
 if [[ "${KEYSP}" != "${FILO_DOWNSAMPLE_KEYSPACE}" ]]; then
 cat << EOF
 TRUNCATE ${KEYSP}.${DSET}_pks_by_update_time;

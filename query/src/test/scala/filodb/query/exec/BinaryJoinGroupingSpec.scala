@@ -209,7 +209,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
                                    AggregateClause.byOpt(Seq("instance", "job")))
     val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), querySession, 1000, tvSchema)
 
-    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key, queryContext = QueryContext())
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key, queryContext = QueryContext(), QueryWarnings())
     val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
@@ -289,7 +289,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
                                    AggregateClause.byOpt(Seq("instance", "job")))
     val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), querySession, 1000, tvSchema)
 
-    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key, queryContext = QueryContext())
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key, queryContext = QueryContext(), QueryWarnings())
     val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
@@ -433,9 +433,9 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
         .toListL.runToFuture.futureValue
     }
 
-    thrown.getCause.getClass shouldEqual classOf[BadQueryException]
-    thrown.getCause.getMessage shouldEqual "The result of this join query has cardinality 1 and has reached the " +
-      "limit of 1. Try applying more filters."
+    thrown.getCause.getClass shouldEqual classOf[QueryLimitException]
+    thrown.getCause.getMessage.contains("The result of this join query has cardinality 1 and has reached the " +
+      "limit of 1. Try applying more filters.") shouldBe true
   }
 
   it("should throw BadQueryException - many-to-one with ignoring - cardinality limit 1") {
@@ -462,9 +462,9 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
         .toListL.runToFuture.futureValue
     }
 
-    thrown.getCause.getClass shouldEqual classOf[BadQueryException]
-    thrown.getCause.getMessage shouldEqual "The result of this join query has cardinality 1 and " +
-      "has reached the limit of 1. Try applying more filters."
+    thrown.getCause.getClass shouldEqual classOf[QueryLimitException]
+    thrown.getCause.getMessage.contains("The result of this join query has cardinality 1 and " +
+      "has reached the limit of 1. Try applying more filters.") shouldEqual true
   }
 
   it("should throw BadQueryException - many-to-one with by and grouping without arguments - cardinality limit 1") {
@@ -476,7 +476,7 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
                                    AggregateClause.byOpt(Seq("instance", "job")))
     val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), querySession, 1000, tvSchema)
 
-    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key, queryContext = QueryContext())
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key, queryContext = QueryContext(), QueryWarnings())
     val samplesRhs = resultObs4.toListL.runToFuture.futureValue
 
     val execPlan = BinaryJoinExec(queryContext, dummyDispatcher,
@@ -497,8 +497,11 @@ class BinaryJoinGroupingSpec extends AnyFunSpec with Matchers with ScalaFutures 
         .toListL.runToFuture.futureValue
     }
 
-    thrown.getCause.getClass shouldEqual classOf[BadQueryException]
-    thrown.getCause.getMessage shouldEqual "The result of this join query has cardinality 3 and " +
-      "has reached the limit of 3. Try applying more filters."
+    thrown.getCause.getClass shouldEqual classOf[QueryLimitException]
+    thrown.getCause.getMessage.contains(
+      "The result of this join query has cardinality 3 and " +
+        "has reached the limit of 3. Try applying more filters."
+    ) shouldBe true
+
   }
 }

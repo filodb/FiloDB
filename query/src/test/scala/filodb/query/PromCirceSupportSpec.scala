@@ -496,6 +496,65 @@ class PromCirceSupportSpec extends AnyFunSpec with Matchers with ScalaFutures {
     }
   }
 
+  it("should parse bucket with Nan value") {
+    val input = """[{
+                  |    "status": "success",
+                  |    "data": {
+                  |        "resultType": "vector",
+                  |        "result": [
+                  |            {
+                  |                "metric": {
+                  |                    "__name__": ",my_hist",
+                  |                    "environment": "dev",
+                  |                    "job": "job-1"
+                  |                },
+                  |                "value": [
+                  |                    1686633529,
+                  |                    {
+                  |                        "0.002": 2.1,
+                  |                        "0.008": 1.5,
+                  |                        "0.004": 0.9,
+                  |                        "0.008": 2.0,
+                  |                        "0.001": "NaN",
+                  |                        "0.016": 2.2,
+                  |                        "+Inf": 2.2
+                  |                    }
+                  |                ]
+                  |            }
+                  |        ]
+                  |    },
+                  |    "errorType": null,
+                  |    "error": null
+                  |}]""".stripMargin
+                  parser.decode[List[SuccessResponse]](input) match {
+                    case Left(ex)   =>
+                        fail("Not expecting an exception, got", ex)
+                    case Right(parsed::Nil)         =>
+
+                      val expectedHistBucket = Map("0.002" -> 2.1,
+                        "0.008" -> 1.5,
+                        "0.004" -> 0.9,
+                        "0.008" -> 2.0,
+                        "0.001" -> Double.NaN,
+                        "0.016" -> 2.2,
+                        "+Inf" -> 2.2)
+                      val expectedMetric = Map("__name__" -> ",my_hist",
+                        "environment" -> "dev",
+                        "job" -> "job-1")
+
+                      val parsedResult = parsed.data.result.head
+                      parsedResult.value.isDefined shouldBe true
+                      val histSampl = parsedResult.value.get.asInstanceOf[HistSampl]
+                      histSampl.timestamp shouldEqual 1686633529
+                      parsedResult.metric shouldEqual expectedMetric
+                      // TODO: Would this be flaky?
+                      histSampl.buckets.toString shouldEqual expectedHistBucket.toString
+
+
+                    case Right(_)  => fail("expecting one success response with a single parsed result")
+                  }
+  }
+
   it("should parse remote partial response") {
     val input = """[{
                   |  "status" : "partial",

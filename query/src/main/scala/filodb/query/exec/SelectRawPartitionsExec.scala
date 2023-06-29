@@ -111,7 +111,8 @@ final case class SelectRawPartitionsExec(queryContext: QueryContext,
                                          dataSchema: Option[Schema],
                                          lookupRes: Option[PartLookupResult],
                                          filterSchemas: Boolean,
-                                         colIds: Seq[Types.ColumnId]) extends LeafExecPlan {
+                                         colIds: Seq[Types.ColumnId],
+                                         override val planId: String) extends LeafExecPlan {
   def dataset: DatasetRef = datasetRef
 
   private def schemaOfDoExecute(): ResultSchema = {

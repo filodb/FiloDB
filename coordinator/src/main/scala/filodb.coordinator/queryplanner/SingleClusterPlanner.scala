@@ -56,50 +56,6 @@ object SingleClusterPlanner {
         .forall(s => filters.exists(cf => cf.column == s && cf.filter.isInstanceOf[Filter.Equals]))
       case _ => false
     }
-
-  /**
-   * Returns an occupied option with target schema labels iff they are defined and identical
-   *   for every leaf LogicalPlan that draws data from a shard (i.e. isn't a leaf-level scalar).
-   * Plans that do not draw data from any shards do not affect the result *unless* no plan draws
-   *   data from a shard. In this case, Some(Seq.empty) is returned.
-   */
-  private def getUniversalTargetSchemaLabels(lp: LogicalPlan,
-                                             tsp: TargetSchemaProvider): Option[Seq[String]] = {
-    lp match {
-      case nl: NonLeafLogicalPlan =>
-        val tsLabelOpts = nl.children.map(getUniversalTargetSchemaLabels(_, tsp))
-        if (tsLabelOpts.forall(_.isDefined)) {
-          // Filter out empty lists, since these arise only from scalar plans, and we don't
-          //   want those to force a None return.
-          val nonEmpty = tsLabelOpts.filter(_.get.nonEmpty)
-          // Check if all non-head elements equal the head (i.e. all are the same).
-          if (nonEmpty.drop(1).forall(_ == tsLabelOpts.head)) {
-            return nonEmpty.headOption.getOrElse(Some(Seq.empty))
-          }
-        }
-        None
-      case rs: RawSeries =>
-        val rangeSelectorOpt: Option[(Long, Long)] = rs.rangeSelector match {
-          case IntervalSelector(fromMs, toMs) => Some((fromMs, toMs))
-          case _ => None
-        }
-        val targetSchemaOpt = if (rangeSelectorOpt.isDefined) {
-          val (fromMs, toMs) = rangeSelectorOpt.get
-          val tsChanges = tsp.targetSchemaFunc(rs.filters)
-          findTargetSchema(tsChanges, fromMs, toMs).map(_.schema)
-        } else None
-
-        if (targetSchemaOpt.isDefined) {
-          // make this assertion since the non-leaf case's logic requires it
-          assert(targetSchemaOpt.get.size > 0, "expected target schema labels, but none exist")
-          targetSchemaOpt
-        } else None
-      // Non-leaf plans are processed above; no non-leaf scalar will reach here.
-      // Return empty Seq to indicate this is a leaf-level scalar.
-      case sc: ScalarPlan => Some(Seq.empty)
-      case _ => None
-    }
-  }
 }
 
 /**
@@ -429,90 +385,24 @@ class SingleClusterPlanner(val dataset: Dataset,
   }
   // scalastyle:on method.length
 
-  // scalastyle:off method.length
-  // scalastyle:off cyclomatic.complexity
   /**
-   * Returns the set of shards to which the LogicalPlan can be pushed down.
-   * When this function returns a Some, the argument plan can be materialized for each shard
-   *   in the result, and the concatenation of these shard-local joins will, on execute(), yield the
-   *   same RangeVectors as the non-pushed-down plan.
-   * See materializeWithPushdown for details about this pushdown optimization.
-   * @return an occupied Option iff it is valid to perform the a pushdown optimization on the argument plan.
+   * Returns a set of shards iff a plan can be pushed-down to each.
+   * See [[LogicalPlanUtils.getPushdownKeys]] for more info.
    */
   private def getPushdownShards(qContext: QueryContext,
-                                lp: LogicalPlan): Option[Set[Int]] = {
-    def helper(lp: LogicalPlan): Option[Set[Int]] = lp match {
-      // VectorPlans can't currently be pushed down. Consider:
-      //     foo{...} or vector(0)
-      //   If foo{...} is sharded with spread=1, but both shards contain no foo{...} data,
-      //   then both pushed-down plans will yield vector(0). These will be concatenated via a DistConcatExec.
-      // VectorPlans can technically be pushed down when the join operation isn't a SetOperator,
-      //   but the extra logic to support that unlikely use-case isn't worth the maintenance overhead.
-      case vec: VectorPlan => None
-      // SVDP's should not be pushed down. Consider:
-      //   foo{...} + scalar(bar{...})
-      // There are only three possible cases:
-      //   (1) The scalar's data lies on a single shard. If foo's data lies exclusively on the same shard,
-      //       then no pushdown is necessary. Otherwise, the scalar cannot be pushed down.
-      //   (2) The scalar's data lies on multiple shards. Even if they are the same as foo's, the scalar's
-      //       instant-vector needs to contain a single row; its data is aggregated under-the-hood.
-      //       A pushdown would break this aggregation step.
-      //   (3) The scalar's data lies on no shards. Then the scalar's selector is similar to:
-      //         scalar(vector(0))
-      //       which is not an intended use-case.
-      case svdp: ScalarVaryingDoublePlan => None
-      case svbo: ScalarVectorBinaryOperation => helper(svbo.vector)
-      case ps: PeriodicSeries => helper(ps.rawSeries)
-      case psw: PeriodicSeriesWithWindowing => helper(psw.series)
-      case aif: ApplyInstantFunction => helper(aif.vectors)
-      case bj: BinaryJoin =>
-        // lhs/rhs must reside on the same set of shards, and target schema labels for all leaves must be
-        //   discoverable, equal, and preserved by join keys
-        val lhsShards = helper(bj.lhs)
-        val rhsShards = helper(bj.rhs)
-        val canPushdown = lhsShards != None && rhsShards != None &&
-                          // either the shard groups are equal, or either of lhs/rhs includes only scalars.
-                          (lhsShards == rhsShards || lhsShards.get.isEmpty || rhsShards.get.isEmpty) &&
-                          {
-                            val targetSchemaLabels =
-                              getUniversalTargetSchemaLabels(bj, targetSchemaProvider(qContext))
-                            targetSchemaLabels.isDefined &&
-                              targetSchemaLabels.get.toSet.diff(shardColumns.toSet).subsetOf(bj.on.toSet)
-                          }
-        // union lhs/rhs shards, since one might be empty (if it's a scalar)
-        if (canPushdown) Some(lhsShards.get.union(rhsShards.get)) else None
-      case agg: Aggregate =>
-        // target schema labels for all leaves must be discoverable, equal, and preserved by join keys
-        val shards = helper(agg.vectors)
-        val canPushdown = shards != None &&
-                          agg.clauseOpt.isDefined &&
-                          agg.clauseOpt.get.clauseType == AggregateClause.ClauseType.By &&
-                          {
-                            val targetSchemaLabels =
-                              getUniversalTargetSchemaLabels(agg, targetSchemaProvider(qContext))
-                            targetSchemaLabels.isDefined &&
-                            {
-                              val byLabels = agg.clauseOpt.get.labels
-                              targetSchemaLabels.get.toSet.diff(shardColumns.toSet).subsetOf(byLabels.toSet)
-                            }
-                          }
-        if (canPushdown) shards else None
-      case nl: NonLeafLogicalPlan =>
-        // Pessimistically require that this entire subtree lies on one shard (or none, if all scalars).
-        val shardGroups = nl.children.map(helper(_))
-        if (shardGroups.forall(_.isDefined)) {
-          val shards = shardGroups.flatMap(_.get).toSet
-          // if zero elements, then all children are scalars
-          if (shards.size <= 1) Some(shards) else None
-        } else None
-      case rs: RawSeries => getShardSpanFromLp(rs, qContext)
-      case sc: ScalarPlan => Some(Set.empty)  // don't want a None to end shard-group propagation
-      case _ => None
+                                plan: LogicalPlan): Option[Set[Int]] = {
+    val getRawPushdownShards = (rs: RawSeries) => {
+      if (qContext.plannerParams.shardOverrides.isEmpty) {
+        getShardSpanFromLp(rs, qContext).get
+      } else qContext.plannerParams.shardOverrides.get.toSet
     }
-    helper(lp)
+    LogicalPlanUtils.getPushdownKeys(
+      plan,
+      targetSchemaProvider(qContext),
+      dataset.options.nonMetricShardColumns,
+      getRawPushdownShards,
+      rs => LogicalPlan.getRawSeriesFilters(rs))
   }
-  // scalastyle:on method.length
-  // scalastyle:on cyclomatic.complexity
 
   /**
    * Materialize a BinaryJoin without the pushdown optimization.

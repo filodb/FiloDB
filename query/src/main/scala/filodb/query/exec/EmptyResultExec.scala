@@ -5,7 +5,7 @@ import monix.execution.Scheduler
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.query.{ColumnInfo, QueryContext, QuerySession, QueryStats, ResultSchema}
+import filodb.core.query.{ColumnInfo, QueryContext, QuerySession, QueryStats, QueryWarnings, ResultSchema}
 import filodb.core.store.ChunkSource
 import filodb.query.{QueryResponse, QueryResult}
 
@@ -19,7 +19,7 @@ case class EmptyResultExec(queryContext: QueryContext,
     Task(QueryResult(queryContext.queryId,
       new ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
                            ColumnInfo("value", ColumnType.DoubleColumn)), 1),
-      Seq.empty, QueryStats(), false, None))
+      Seq.empty, QueryStats(), QueryWarnings(), false, None))
   }
 
   override def doExecute(source: ChunkSource,
