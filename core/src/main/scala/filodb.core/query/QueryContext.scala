@@ -27,9 +27,9 @@ case class PerQueryLimits(
         execPlanResultBytes: Long = 18000000, // Limit on ExecPlan results in bytes, default is 18MB
         groupByCardinality: Int = 100000,     // Limit on "group by" clause results, default is 100K
         joinQueryCardinality: Int = 100000,   // Limit on binary join input size, default is 100K
-        timeSeriesSamplesScannedBytes: Long = 300000000, // Limit on max data scanned per shard, default is 300 MB
-        timeSeriesScanned: Int = 1000000)    // Limit on max number of time series scanned, default is 1M
-
+        timeSeriesSamplesScannedBytes: Long = 300000000, // max estimated data scanned per shard, default is 300 MB
+        timeSeriesScanned: Int = 1000000,     // Limit on max number of time series scanned, default is 1M
+        rawScannedBytes: Long = 200000000)    // Limit on max actual data scanned per shard. default is 200 MB
 object PerQueryLimits {
 
   def defaultEnforcedLimits(): PerQueryLimits = {
@@ -42,8 +42,9 @@ object PerQueryLimits {
       execPlanResultBytes = 15000000,
       groupByCardinality = 50000,
       joinQueryCardinality = 50000,
-      timeSeriesSamplesScannedBytes = 150000,
-      timeSeriesScanned = 500000
+      timeSeriesSamplesScannedBytes = 150000000,
+      timeSeriesScanned = 500000,
+      rawScannedBytes = 100000000
     )
   }
 
@@ -58,7 +59,8 @@ case class QueryWarnings(
   groupByCardinality: AtomicInteger = new AtomicInteger(0),
   joinQueryCardinality: AtomicInteger = new AtomicInteger(0),
   timeSeriesSamplesScannedBytes: AtomicLong = new AtomicLong(0),
-  timeSeriesScanned: AtomicInteger = new AtomicInteger(0)
+  timeSeriesScanned: AtomicInteger = new AtomicInteger(0),
+  rawScannedBytes: AtomicLong = new AtomicLong(0)
 ) {
 
   def hasWarnings() : Boolean = {
@@ -67,7 +69,8 @@ case class QueryWarnings(
     groupByCardinality.get() > 0 ||
     joinQueryCardinality.get() > 0 ||
     timeSeriesSamplesScannedBytes.get() > 0 ||
-    timeSeriesScanned.get() > 0
+    timeSeriesScanned.get() > 0 ||
+    rawScannedBytes.get() > 0
   }
 
   def merge(warnings: QueryWarnings) : Unit = {
@@ -77,6 +80,7 @@ case class QueryWarnings(
     updateJoinQueryCardinality(warnings.joinQueryCardinality.get())
     updateTimeSeriesSampleScannedBytes(warnings.timeSeriesSamplesScannedBytes.get())
     updateTimeSeriesScanned(warnings.timeSeriesScanned.get())
+    updateRawScannedBytes(warnings.rawScannedBytes.get())
   }
 
   def updateExecPlanSamples(samples: Int): Unit = {
@@ -103,6 +107,10 @@ case class QueryWarnings(
     timeSeriesSamplesScannedBytes.updateAndGet(b => if (b<bytes) bytes else b)
   }
 
+  def updateRawScannedBytes(bytes: Long): Unit = {
+    rawScannedBytes.updateAndGet(b => if (b < bytes) bytes else b)
+  }
+
   override def equals(w2Compare: Any): Boolean = {
     w2Compare match {
       case w2: QueryWarnings =>
@@ -111,7 +119,8 @@ case class QueryWarnings(
           groupByCardinality.get().equals(w2.groupByCardinality.get()) &&
           joinQueryCardinality.get().equals(w2.joinQueryCardinality.get()) &&
           timeSeriesSamplesScannedBytes.get().equals(w2.timeSeriesSamplesScannedBytes.get()) &&
-          timeSeriesScanned.get().equals(w2.timeSeriesScanned.get())
+          timeSeriesScanned.get().equals(w2.timeSeriesScanned.get()) &&
+          rawScannedBytes.get().equals(w2.rawScannedBytes.get())
       case _ => false
     }
   }
@@ -123,6 +132,7 @@ case class QueryWarnings(
     c = 31 * c + joinQueryCardinality.get().hashCode()
     c = 31 * c + timeSeriesSamplesScannedBytes.get().hashCode()
     c = 31 * c + timeSeriesScanned.get().hashCode()
+    c = 31 * c + rawScannedBytes.get().hashCode()
     c
   }
 }

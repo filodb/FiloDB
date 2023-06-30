@@ -96,12 +96,14 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
       "warnJoinQueryCardinality" -> w.joinQueryCardinality.toString,
       "warnTimeSeriesSamplesScannedBytes" -> w.timeSeriesSamplesScannedBytes.toString,
       "warnTimeSeriesScanned" -> w.timeSeriesScanned.toString,
+      "warnRawScannedBytes" -> w.rawScannedBytes.toString,
       "execPlanSamples" -> e.execPlanSamples.toString,
       "resultByteLimit" -> e.execPlanResultBytes.toString,
       "groupByCardinality" -> e.groupByCardinality.toString,
       "joinQueryCardinality" -> e.joinQueryCardinality.toString,
       "timeSeriesSamplesScannedBytes" -> e.timeSeriesSamplesScannedBytes.toString,
-      "timeSeriesScanned" -> e.timeSeriesScanned.toString
+      "timeSeriesScanned" -> e.timeSeriesScanned.toString,
+      "rawScannedBytes" -> e.rawScannedBytes.toString
     )
     limitParams
   }
@@ -125,7 +127,8 @@ trait RemoteExec extends LeafExecPlan with StrictLogging {
       new AtomicInteger(qws.groupByCardinality),
       new AtomicInteger(qws.joinQueryCardinality),
       new AtomicLong(qws.timeSeriesSamplesScannedBytes),
-     new AtomicInteger(qws.timeSeriesScanned)
+      new AtomicInteger(qws.timeSeriesScanned),
+      new AtomicLong(qws.rawScannedBytes)
     )
     queryWarnings
   }

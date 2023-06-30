@@ -252,6 +252,7 @@ object ProtoConverters {
       quotaBuilder.setJoinQueryCardinality(sq.joinQueryCardinality)
       quotaBuilder.setTimeSeriesSamplesScannedBytes(sq.timeSeriesSamplesScannedBytes)
       quotaBuilder.setTimeSeriesScanned(sq.timeSeriesScanned)
+      quotaBuilder.setRawScannedBytes(sq.rawScannedBytes)
       quotaBuilder.build()
     }
   }
@@ -291,7 +292,12 @@ object ProtoConverters {
           if (giq.hasTimeSeriesScanned)
             giq.getTimeSeriesScanned
           else
-            defaultQ.timeSeriesScanned
+            defaultQ.timeSeriesScanned,
+        rawScannedBytes =
+          if (giq.hasRawScannedBytes)
+            giq.getRawScannedBytes
+          else
+            defaultQ.rawScannedBytes
       )
       limits
     }
@@ -348,6 +354,7 @@ object ProtoConverters {
       builder.setJoinQueryCardinality(w.joinQueryCardinality.get())
       builder.setTimeSeriesSamplesScannedBytes(w.timeSeriesSamplesScannedBytes.get())
       builder.setTimeSeriesScanned(w.timeSeriesScanned.get())
+      builder.setRawScannedBytes(w.rawScannedBytes.get())
       builder.build()
     }
   }
@@ -360,7 +367,8 @@ object ProtoConverters {
         new AtomicInteger(wGrpc.getGroupByCardinality()),
         new AtomicInteger(wGrpc.getJoinQueryCardinality()),
         new AtomicLong(wGrpc.getTimeSeriesSamplesScannedBytes()),
-        new AtomicInteger(wGrpc.getTimeSeriesScanned())
+        new AtomicInteger(wGrpc.getTimeSeriesScanned()),
+        new AtomicLong(wGrpc.getRawScannedBytes())
       )
       ws
     }

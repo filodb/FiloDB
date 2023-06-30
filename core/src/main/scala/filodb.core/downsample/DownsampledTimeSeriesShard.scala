@@ -21,7 +21,7 @@ import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore._
 import filodb.core.memstore.ratelimit.{CardinalityManager, CardinalityRecord, QuotaSource}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, QueryContext, QuerySession}
+import filodb.core.query.{ColumnFilter, Filter, QueryContext, QueryLimitException, QuerySession, QueryWarnings}
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -111,7 +111,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     new DownsampleIndexBootstrapper(store, schemas, stats, indexDataset, downsampleConfig)
 
   val houseKeepingSchedParallelism = Math.round(Runtime.getRuntime.availableProcessors() *
-                                        downsampleConfig.housekeepingParallelismMultiplier).toInt
+                                        downsampleConfig.housekeepingParallelismMultiplier).toInt.max(1)
   private val housekeepingSched = Scheduler.computation(
     parallelism = houseKeepingSchedParallelism,
     name = "housekeeping",
@@ -213,7 +213,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                 indexRefresh(endHour, startHour, periodicRefresh = false)
       case None             => // No checkpoint time found, start refresh from scratch
                                 val parallelism = Math.round(downsampleConfig.indexRebuildParallelismMultiplier *
-                                                    Runtime.getRuntime.availableProcessors()).toInt
+                                                    Runtime.getRuntime.availableProcessors()).toInt.max(1)
                                 logger.info("Rebuilding index with parallelism {}", parallelism)
                                 indexBootstrapper
                                   .bootstrapIndexDownsample(
@@ -387,7 +387,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     // Step 1: Choose the downsample level depending on the range requested
     val (resolutionMs, downsampledDataset) = chooseDownsampleResolution(lookup.chunkMethod)
     logger.debug(s"Chose resolution $downsampledDataset for chunk method ${lookup.chunkMethod}")
-    capDataScannedPerShardCheck(lookup, colIds, resolutionMs, querySession.qContext)
+    capDataScannedPerShardCheck(lookup, colIds, resolutionMs, querySession.qContext, querySession.warnings)
     // Step 2: Query Cassandra table for that downsample level using downsampleColStore
     // Create a ReadablePartition objects that contain the time series data. This can be either a
     // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
@@ -434,11 +434,12 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   private def capDataScannedPerShardCheck(lookup: PartLookupResult,
                                           colIds: Seq[Types.ColumnId],
                                           resolution: Long,
-                                          qContext: QueryContext) = {
+                                          qContext: QueryContext,
+                                          warnings: QueryWarnings) = {
     lookup.firstSchemaId.foreach { schId =>
       ensureQueriedDataSizeWithinLimit(schId, colIds, lookup.pkRecords,
         downsampleStoreConfig.flushInterval.toMillis,
-        resolution, lookup.chunkMethod, qContext)
+        resolution, lookup.chunkMethod, qContext, warnings)
     }
   }
 
@@ -453,39 +454,41 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                        chunkDurationMillis: Long,
                                        resolutionMs: Long,
                                        chunkMethod: ChunkScanMethod,
-                                       qContext: QueryContext): Unit = {
+                                       qContext: QueryContext,
+                                       warnings: QueryWarnings): Unit = {
     val estDataSize = schemas.estimateByteScan(
-      schemaId,
-      colIds,
-      pkRecs,
-      chunkDurationMillis,
-      resolutionMs,
-      chunkMethod)
+      schemaId, colIds, pkRecs, chunkDurationMillis, resolutionMs, chunkMethod
+    )
     val quRange = chunkMethod.endTime - chunkMethod.startTime + 1
     val enforcedLimits = qContext.plannerParams.enforcedLimits
     val timeSeries = pkRecs.length
     val warnLimits = qContext.plannerParams.warnLimits
     // TODO the below does not return a particular kind of error code. Most likely this would translate to
     // an internal error of FiloDB which is not appropriate for the case
-    require(
-      estDataSize < enforcedLimits.timeSeriesSamplesScannedBytes,
-      s"With match of ${pkRecs.length} time series, estimate of $estDataSize bytes exceeds limit of " +
-        s"${enforcedLimits.timeSeriesSamplesScannedBytes} bytes queried " +
-        s"per shard for ${schemas.apply(schemaId).name} schema. " +
-        s"Try one or more of these: " +
-        s"(a) narrow your query filters to reduce to fewer than the current ${pkRecs.length} matches " +
-        s"(b) reduce query time range, currently at ${quRange / 1000 / 60} minutes")
-    require(timeSeries < enforcedLimits.timeSeriesScanned,
-      s"Query matched ${timeSeries} time series, which exceeds a max enforced limit of " +
+    if (estDataSize > enforcedLimits.timeSeriesSamplesScannedBytes) {
+      val msg =
+        s"With match of ${pkRecs.length} time series, estimate of $estDataSize bytes exceeds limit of " +
+          s"${enforcedLimits.timeSeriesSamplesScannedBytes} bytes queried " +
+          s"per shard for ${schemas.apply(schemaId).name} schema. " +
+          s"Try one or more of these: " +
+          s"(a) narrow your query filters to reduce to fewer than the current ${pkRecs.length} matches " +
+          s"(b) reduce query time range, currently at ${quRange / 1000 / 60} minutes"
+      throw QueryLimitException(msg, qContext.queryId)
+    }
+    if(timeSeries > enforcedLimits.timeSeriesScanned) {
+      val msg = s"Query matched ${timeSeries} time series, which exceeds a max enforced limit of " +
         s"${enforcedLimits.timeSeriesScanned} time series allowed to be queried per shard. " +
         s"Try one or more of these: " +
         s"(a) narrow your query filters to reduce to fewer than the current ${timeSeries} matches " +
-        s"(b) reduce query time range, currently at ${quRange / 1000 / 60} minutes")
+        s"(b) reduce query time range, currently at ${quRange / 1000 / 60} minutes"
+      throw QueryLimitException(msg, qContext.queryId)
+    }
     if (timeSeries > warnLimits.timeSeriesScanned) {
       val msg =
         s"Query matched $timeSeries time series, which exceeds a max warn limit of " +
           s"${warnLimits.timeSeriesScanned} time series allowed to be queried per shard. "
       logger.info(qContext.getQueryLogLine(msg))
+      warnings.updateTimeSeriesScanned(timeSeries)
     }
     if (estDataSize > warnLimits.timeSeriesSamplesScannedBytes) {
       val msg =
@@ -493,6 +496,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           s"limit of ${warnLimits.timeSeriesSamplesScannedBytes} bytes queried per shard " +
           s"for ${schemas.apply(schemaId).name} schema. "
       logger.info(qContext.getQueryLogLine(msg))
+      warnings.updateTimeSeriesSampleScannedBytes(estDataSize.toLong)
     }
   }
 
