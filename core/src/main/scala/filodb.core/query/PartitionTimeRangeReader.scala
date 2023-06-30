@@ -40,14 +40,14 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
         vectorIts(columnNo).asHistIt.next
       } catch {
         case e : EmptyHistogramException => {
-          var message = s"${e.getMessage} infos=["
+          var message = s"EmptyHistogramException ${e.getMessage} infos=["
            while (infos.hasNext) {
              val info = infos.nextInfo
              message +=
                s"""${info.debugString} """
            }
           message += "]"
-          logger.error(s"EmptyHistogramException message ${message}")
+          logger.error(s"message ${message}")
           throw new IllegalArgumentException(message)
         }
       }
