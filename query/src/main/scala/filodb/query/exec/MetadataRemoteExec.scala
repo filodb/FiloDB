@@ -91,6 +91,25 @@ case class MetadataRemoteExec(queryEndpoint: String,
     QueryResult(id, RESULT_SCHEMA, Seq(srv))
   }
 
+  private def mapTsCardinalitiesResponseV2(response: MetadataSuccessResponse, id: String): QueryResponse = {
+    import NoCloseCursor._
+    import TsCardinalities._
+    import TsCardExec._
+
+    val RECORD_SCHEMA = SerializedRangeVector.toSchema(RESULT_SCHEMA.columns)
+
+    val rows = response.data.asInstanceOf[TsCardinalitiesSamplV2].result
+      .map { ts =>
+        val prefix = SHARD_KEY_LABELS.take(ts.group.size).map(l => ts.group(l))
+        val counts = CardCounts(ts.cardinality("active"), ts.cardinality("total"))
+        CardRowReader(prefixToGroup(prefix), counts)
+      }
+    val rv = IteratorBackedRangeVector(CustomRangeVectorKey.empty, NoCloseCursor(rows.iterator), None)
+    // dont add this size to queryStats since it was already added by callee use dummy QueryStats()
+    val srv = SerializedRangeVector(rv, builder, RECORD_SCHEMA, queryWithPlanName(queryContext), dummyQueryStats)
+    QueryResult(id, RESULT_SCHEMA, Seq(srv))
+  }
+
   private def mapLabelCardinalityResponse(response: MetadataSuccessResponse, id: String): QueryResponse = {
 
     import NoCloseCursor._
