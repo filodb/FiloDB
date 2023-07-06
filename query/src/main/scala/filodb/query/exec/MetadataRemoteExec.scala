@@ -68,6 +68,7 @@ case class MetadataRemoteExec(queryEndpoint: String,
         case _: MetadataMapSampl         => mapTypeQueryResponse(response, id)
         case _: LabelCardinalitySampl    => mapLabelCardinalityResponse(response, id)
         case _: TsCardinalitiesSampl     => mapTsCardinalitiesResponse(response, id)
+        case _: TsCardinalitiesSamplV2   => mapTsCardinalitiesResponseV2(response, id)
         case _                           => labelsQueryResponse(response, id)
       }
   }
@@ -98,10 +99,24 @@ case class MetadataRemoteExec(queryEndpoint: String,
 
     val RECORD_SCHEMA = SerializedRangeVector.toSchema(RESULT_SCHEMA.columns)
 
-    val rows = response.data.asInstanceOf[TsCardinalitiesSamplV2].result
+    val rows = response.data.asInstanceOf[TsCardinalitiesSamplV2].result.values.flatten
       .map { ts =>
-        val prefix = SHARD_KEY_LABELS.take(ts.group.size).map(l => ts.group(l))
-        val counts = CardCounts(ts.cardinality("active"), ts.cardinality("total"))
+        val groupSize = ts.group.size;
+        val shardKeyLabelsSize = groupSize - 2; // last 2 value is cluster and dataset
+        val prefix = new Array[String](groupSize);
+        for (i <- 0 until SHARD_KEY_LABELS.size) {
+          prefix(i) = ts.group(SHARD_KEY_LABELS(i))
+        }
+        for (i <- 0 until CARD_SUFFIX_INFO.size) {
+          prefix(i + shardKeyLabelsSize) = ts.group(CARD_SUFFIX_INFO(i))
+        }
+        var counts = CardCounts(0, 0)
+        if (prefix(shardKeyLabelsSize).contains("downsample")) {
+          counts = CardCounts(0, ts.cardinality("long-term"))
+        }
+        else {
+          counts = CardCounts(ts.cardinality("active"), ts.cardinality("short-term"))
+        }
         CardRowReader(prefixToGroup(prefix), counts)
       }
     val rv = IteratorBackedRangeVector(CustomRangeVectorKey.empty, NoCloseCursor(rows.iterator), None)

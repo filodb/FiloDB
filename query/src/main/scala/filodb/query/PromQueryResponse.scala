@@ -70,4 +70,7 @@ final case class LabelCardinalitySampl(metric: Map[String, String],
 final case class TsCardinalitiesSampl(group: Map[String, String],
                                       cardinality: Map[String, Int]) extends MetadataSampl
 
-final case class TsCardinalitiesSamplV2(result: Map[String, Seq[TsCardinalitiesSampl]]) extends MetadataSampl
+final case class TsCardinalitiesSamplV2(group: Map[String, String],
+                                        cardinality: Map[String, Int],
+                                        cluster: String,
+                                        dataset: String) extends MetadataSampl

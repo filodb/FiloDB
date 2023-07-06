@@ -144,6 +144,7 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
 object TsCardinalities {
   val LABEL_WORKSPACE = "_ws_"
   val SHARD_KEY_LABELS = Seq(LABEL_WORKSPACE, "_ns_", "__name__")
+  val CARD_SUFFIX_INFO = Seq("cluster", "dataset")
 }
 
 /**
